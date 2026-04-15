@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+@theme {
+  /* Brand colors */
+  --color-primary-purple: #513DE5;
+  --color-deep-plum: #341756;
+  --color-lavender: #CFC9F8;
+  --color-lavender-tint: #EDE9FC;
+  --color-cream: #F9F5F1;
+  --color-purple-mid: #6B5CE7;
+  --color-purple-gray: #6B6180;
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-serif: Georgia, serif;
+}
+
+/* Hero gradient utility used on login page and portal header */
+@utility bg-hero-gradient {
+  background: linear-gradient(135deg, #341756 0%, #513DE5 100%);
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    color: var(--color-deep-plum);
+    background-color: var(--color-cream);
+  }
+}
