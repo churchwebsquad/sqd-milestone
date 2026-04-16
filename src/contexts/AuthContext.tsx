@@ -44,20 +44,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        // After a Google OAuth redirect, Supabase fires INITIAL_SESSION with
-        // session=null before it finishes processing the URL hash, then fires
-        // SIGNED_IN with the real session. If we let the null INITIAL_SESSION
-        // set isLoading=false, ProtectedRoute redirects to /login before the
-        // user is established. Skip it when we can see the hash is still there.
-        if (
-          event === 'INITIAL_SESSION' &&
-          !session &&
-          window.location.hash.includes('access_token')
-        ) {
-          return
-        }
-
+      async (_event, session) => {
         if (session?.user) {
           const email = session.user.email ?? ''
 
