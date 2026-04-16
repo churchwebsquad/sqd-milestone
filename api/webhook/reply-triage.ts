@@ -8,9 +8,9 @@
  *   N8N_REPLY_TRIAGE_WEBHOOK_URL
  */
 
-import type { VercelRequest, VercelResponse } from '@vercel/node'
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
