@@ -127,16 +127,18 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
       const portalUrl = `${window.location.origin}/portal/${formData.partner!.portal_token ?? formData.partner!.member}`
 
       let recap: ProgressRecap | null = null
-      try {
-        recap = preloadedRecap
-          ?? await fetchProgressRecap(
-            formData.partner!.member,
-            formData.selectedMilestone!.squad,
-            formData.currentMilestoneId || null,
-            formData.nextMilestoneId,
-          )
-      } catch (recapErr) {
-        console.warn('[submitMilestone] Progress recap fetch failed, skipping:', recapErr)
+      if (formData.includeRecap !== false) {
+        try {
+          recap = preloadedRecap
+            ?? await fetchProgressRecap(
+              formData.partner!.member,
+              formData.selectedMilestone!.squad,
+              formData.currentMilestoneId || null,
+              formData.nextMilestoneId,
+            )
+        } catch (recapErr) {
+          console.warn('[submitMilestone] Progress recap fetch failed, skipping:', recapErr)
+        }
       }
 
       // ── Build combined comment array ─────────────────────────────────────

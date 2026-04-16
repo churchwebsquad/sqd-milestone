@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ExternalLink, ChevronRight, MessageSquare,
-  CheckCircle2, AlertTriangle, X, Clock,
+  CheckCircle2, AlertTriangle, X, Clock, Send,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -665,7 +665,15 @@ export default function MyDashboardPage() {
 
         {recentItems.length === 0 ? (
           <div className="rounded-xl border-2 border-dashed border-lavender bg-white px-6 py-10 text-center">
-            <p className="text-sm text-purple-gray">No milestone submissions yet.</p>
+            <Send size={28} className="text-lavender mx-auto mb-2" />
+            <p className="text-sm font-semibold text-deep-plum">No milestone submissions yet.</p>
+            <p className="text-xs text-purple-gray mt-1 mb-4">Your submitted milestones will appear here.</p>
+            <button
+              onClick={() => navigate('/submit')}
+              className="inline-flex items-center gap-2 rounded-full bg-deep-plum text-white text-sm font-medium px-5 py-2 hover:bg-primary-purple transition-colors"
+            >
+              Send your first milestone →
+            </button>
           </div>
         ) : (
           <>

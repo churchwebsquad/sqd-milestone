@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ChevronDown, ChevronRight, Info } from 'lucide-react'
+import { ChevronDown, ChevronRight, Info, ToggleLeft, ToggleRight } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { resolveMergeFields } from '../../lib/mergeFields'
@@ -8,6 +8,8 @@ import type { AppConfig } from '../../types/database'
 import type { StepProps } from './types'
 import type { StrategyMessageTemplate } from '../../types/database'
 import StepNav from './StepNav'
+
+const FOOTER_MARKER = 'If you have questions or additional feedback'
 
 const MERGE_FIELDS = [
   { field: '{{church_name}}', note: 'Partner church name' },
@@ -21,6 +23,42 @@ const MERGE_FIELDS = [
   { field: '{{asset_links}}', note: 'Asset links — resolves in Step 6' },
 ]
 
+
+function AppendToggle({
+  label,
+  description,
+  enabled,
+  onToggle,
+}: {
+  label: string
+  description: string
+  enabled: boolean
+  onToggle: (v: boolean) => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(!enabled)}
+      className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-lavender-tint/50 transition-colors"
+    >
+      {enabled
+        ? <ToggleRight size={20} className="text-primary-purple shrink-0" />
+        : <ToggleLeft size={20} className="text-purple-gray/40 shrink-0" />
+      }
+      <div className="flex-1 min-w-0">
+        <span className={`text-xs font-semibold ${enabled ? 'text-deep-plum' : 'text-purple-gray/60'}`}>
+          {label}
+        </span>
+        <span className="text-xs text-purple-gray/60 ml-2" dangerouslySetInnerHTML={{ __html: description }} />
+      </div>
+      <span className={`text-[10px] font-bold rounded-full px-2 py-0.5 shrink-0 ${
+        enabled ? 'bg-primary-purple/10 text-primary-purple' : 'bg-lavender/60 text-purple-gray/60'
+      }`}>
+        {enabled ? 'ON' : 'OFF'}
+      </span>
+    </button>
+  )
+}
 
 function MergeFieldsPanel({ footer }: { footer: string }) {
   const [open, setOpen] = useState(false)
@@ -92,15 +130,38 @@ export default function Step4Message({ formData, updateForm, onNext, onBack, all
     next_step_name: nextMilestone?.step_name,
   }
 
+  const resolvedFooter = () => resolveMergeFields(appConfig.standard_footer, mergeData)
+
   const applyTemplate = (template: StrategyMessageTemplate) => {
     setSelectedTemplateId(template.id)
     let body = resolveMergeFields(template.template_body, mergeData)
-    const footer = resolveMergeFields(appConfig.standard_footer, mergeData)
-    // Avoid double-appending if the template body already contains footer text
-    if (!body.includes(footer.slice(0, 30))) {
-      body = `${body}\n\n${footer}`
+    if (formData.includeFooter) {
+      const footer = resolvedFooter()
+      if (!body.includes(FOOTER_MARKER)) {
+        body = `${body}\n\n${footer}`
+      }
     }
     updateForm({ messageBody: body })
+  }
+
+  const handleFooterToggle = (include: boolean) => {
+    if (!include) {
+      // Strip footer from messageBody at the marker
+      const idx = formData.messageBody.lastIndexOf(FOOTER_MARKER)
+      const trimmed = idx !== -1 ? formData.messageBody.slice(0, idx).trimEnd() : formData.messageBody
+      updateForm({ includeFooter: false, messageBody: trimmed })
+    } else {
+      // Append footer if not already present
+      let body = formData.messageBody
+      if (!body.includes(FOOTER_MARKER)) {
+        body = `${body}\n\n${resolvedFooter()}`
+      }
+      updateForm({ includeFooter: true, messageBody: body })
+    }
+  }
+
+  const handleRecapToggle = (include: boolean) => {
+    updateForm({ includeRecap: include })
   }
 
   // Reload templates whenever the selected milestone changes
@@ -210,6 +271,22 @@ export default function Step4Message({ formData, updateForm, onNext, onBack, all
             <p className="text-xs text-purple-gray mt-1 text-right">
               {formData.messageBody.length} characters
             </p>
+          </div>
+
+          {/* Append toggles */}
+          <div className="mt-3 rounded-xl border border-lavender bg-lavender-tint/30 divide-y divide-lavender/60">
+            <AppendToggle
+              label="Standard Footer"
+              description="&ldquo;If you have questions or additional feedback…&rdquo;"
+              enabled={formData.includeFooter}
+              onToggle={handleFooterToggle}
+            />
+            <AppendToggle
+              label="All-In Updates Recap"
+              description="Cross-squad current &amp; next milestone summary"
+              enabled={formData.includeRecap}
+              onToggle={handleRecapToggle}
+            />
           </div>
         </>
       )}

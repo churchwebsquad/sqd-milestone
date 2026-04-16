@@ -47,7 +47,7 @@ export default function Step7Review({ formData, onBack, onReset, allMilestones }
 
   // Fetch the cross-squad progress recap for preview + reuse on submit
   useEffect(() => {
-    if (!formData.partner?.member || !formData.selectedMilestone) {
+    if (!formData.includeRecap || !formData.partner?.member || !formData.selectedMilestone) {
       setRecapLoading(false)
       return
     }
@@ -239,30 +239,40 @@ export default function Step7Review({ formData, onBack, onReset, allMilestones }
           </pre>
 
           {/* Cross-squad recap preview */}
-          <div className="mt-3 pt-3 border-t border-lavender/60">
-            <p className="text-[10px] font-semibold text-purple-gray uppercase tracking-wider mb-2">
-              All In Updates Recap <span className="font-normal normal-case tracking-normal">(auto-appended)</span>
-            </p>
-            {recapLoading ? (
-              <div className="flex items-center gap-2 py-2">
-                <div className="h-3.5 w-3.5 animate-spin rounded-full border border-lavender border-t-primary-purple" />
-                <span className="text-xs text-purple-gray">Loading cross-squad progress…</span>
-              </div>
-            ) : recapPreview ? (
-              <pre className="whitespace-pre-wrap text-sm text-deep-plum font-sans leading-relaxed bg-lavender-tint/40 rounded-lg px-3 py-2">
-                {recapPreview}
-              </pre>
-            ) : (
-              <p className="text-xs text-purple-gray/50 italic">Recap unavailable</p>
-            )}
-          </div>
+          {formData.includeRecap ? (
+            <div className="mt-3 pt-3 border-t border-lavender/60">
+              <p className="text-[10px] font-semibold text-purple-gray uppercase tracking-wider mb-2">
+                All-In Updates Recap <span className="font-normal normal-case tracking-normal">(auto-appended)</span>
+              </p>
+              {recapLoading ? (
+                <div className="flex items-center gap-2 py-2">
+                  <div className="h-3.5 w-3.5 animate-spin rounded-full border border-lavender border-t-primary-purple" />
+                  <span className="text-xs text-purple-gray">Loading cross-squad progress…</span>
+                </div>
+              ) : recapPreview ? (
+                <pre className="whitespace-pre-wrap text-sm text-deep-plum font-sans leading-relaxed bg-lavender-tint/40 rounded-lg px-3 py-2">
+                  {recapPreview}
+                </pre>
+              ) : (
+                <p className="text-xs text-purple-gray/50 italic">Recap unavailable</p>
+              )}
+            </div>
+          ) : (
+            <div className="mt-3 pt-3 border-t border-lavender/60">
+              <p className="text-[10px] text-purple-gray/50 italic">All-In Updates Recap — off</p>
+            </div>
+          )}
 
           {/* Questions footer */}
-          {footerPreview && (
+          {formData.includeFooter && footerPreview ? (
             <pre className="whitespace-pre-wrap text-sm text-deep-plum font-sans leading-relaxed mt-3 pt-3 border-t border-lavender/60">
               {footerPreview}
             </pre>
-          )}
+          ) : !formData.includeFooter ? (
+            <div className="mt-3 pt-3 border-t border-lavender/60">
+              <p className="text-[10px] text-purple-gray/50 italic">Standard footer — off</p>
+            </div>
+          ) : null}
         </ReviewCard>
       </div>
 

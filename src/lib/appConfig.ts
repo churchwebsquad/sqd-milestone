@@ -36,8 +36,7 @@ export async function saveAppConfig(
 ): Promise<AppConfig> {
   const { data, error } = await supabase
     .from('strategy_app_config')
-    .update({ ...updates, updated_by: updatedBy } as Record<string, unknown>)
-    .eq('id', 1)
+    .upsert({ id: 1, ...updates, updated_by: updatedBy } as Record<string, unknown>)
     .select()
     .maybeSingle()
 

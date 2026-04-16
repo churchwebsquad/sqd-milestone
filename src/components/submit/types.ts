@@ -36,6 +36,8 @@ export interface FormState {
   nextMilestoneId: string | null
   // Step 4
   messageBody: string
+  includeFooter: boolean
+  includeRecap: boolean
   // Step 5
   assets: AssetRow[]
   // Step 6
@@ -54,6 +56,8 @@ export const INITIAL_FORM_STATE: FormState = {
   currentMilestoneId: '',
   nextMilestoneId: null,
   messageBody: '',
+  includeFooter: true,
+  includeRecap: true,
   assets: [],
   partnerContactName: '',
   partnerContactClickupId: null,
