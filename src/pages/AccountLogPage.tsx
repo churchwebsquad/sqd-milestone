@@ -36,9 +36,10 @@ const MILESTONE_STATUS_CLASSES: Record<MilestoneStatus, string> = {
 }
 
 const TRIAGE_LABELS: Record<TriageCategory, string> = {
-  quick_fix:       'Quick Fix',
-  larger_revision: 'Larger Revision',
-  start_over:      'Start Over',
+  quick_fix:        'Quick Fix',
+  larger_revision:  'Larger Revision',
+  start_over:       'Start Over',
+  no_action_needed: 'No Action Needed',
 }
 
 const ALL_MILESTONE_STATUSES: MilestoneStatus[] = [
@@ -54,6 +55,7 @@ const ALL_TRIAGE_CATEGORIES: TriageCategory[] = [
   'quick_fix',
   'larger_revision',
   'start_over',
+  'no_action_needed',
 ]
 
 // ── Local types ───────────────────────────────────────────────────────────────
@@ -709,7 +711,7 @@ export default function AccountLogPage() {
     }))
 
     // ── 3. Fire n8n webhook (best-effort — never blocks the UI) ──────────
-    if (N8N_TRIAGE_WEBHOOK && category) {
+    if (N8N_TRIAGE_WEBHOOK && category && category !== 'no_action_needed') {
       const submissionEntry = enriched.find(e => e.submission.id === submissionId)
       const reply = submissionEntry?.replies.find(r => r.id === replyId)
 

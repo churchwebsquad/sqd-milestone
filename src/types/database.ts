@@ -32,7 +32,7 @@ export type MilestoneStatus =
   | 'escalated'         // flagged for manager attention
 
 /** Manual triage classification applied to partner replies. */
-export type TriageCategory = 'quick_fix' | 'larger_revision' | 'start_over'
+export type TriageCategory = 'quick_fix' | 'larger_revision' | 'start_over' | 'no_action_needed'
 
 export type Squad = 'brand' | 'web' | 'social'
 
