@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { AlertTriangle, CheckCircle, Link, Check } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { resolveMergeFields, formatAssetLinks } from '../../lib/mergeFields'
@@ -6,24 +6,26 @@ import { submitMilestone } from '../../lib/submitMilestone'
 import type { SubmitMilestoneResult } from '../../lib/submitMilestone'
 import { fetchProgressRecap, buildRecapText } from '../../lib/progressRecap'
 import type { ProgressRecap } from '../../lib/progressRecap'
+import { loadAppConfig, DEFAULT_APP_CONFIG } from '../../lib/appConfig'
+import type { AppConfig } from '../../types/database'
 import type { StepProps } from './types'
 import { PATHWAY_LABELS, SQUAD_LABELS, ASSET_TYPE_LABELS } from './types'
 import StepNav from './StepNav'
-
-// Marker used to split the resolved message into body + questions footer
-const FOOTER_MARKER = 'If you have questions or additional feedback'
-
-function splitAtQuestionsFooter(message: string): [string, string] {
-  const idx = message.lastIndexOf(FOOTER_MARKER)
-  if (idx === -1) return [message, '']
-  return [message.slice(0, idx).trimEnd(), message.slice(idx)]
-}
 
 export default function Step7Review({ formData, onBack, onReset, allMilestones }: StepProps) {
   const { user, staffProfile } = useAuth()
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<SubmitMilestoneResult | null>(null)
   const [dbError, setDbError] = useState<string | null>(null)
+
+  // App config — for footer preview
+  const [appConfig, setAppConfig] = useState<AppConfig>(DEFAULT_APP_CONFIG)
+  const configLoadedRef = useRef(false)
+  useEffect(() => {
+    if (configLoadedRef.current) return
+    configLoadedRef.current = true
+    loadAppConfig().then(setAppConfig)
+  }, [])
 
   // Progress recap — fetched once on mount for preview + reused on submit
   const [recap, setRecap] = useState<ProgressRecap | null>(null)
@@ -148,10 +150,12 @@ export default function Step7Review({ formData, onBack, onReset, allMilestones }
   }
 
   // ── Build the preview message ─────────────────────────────────────────────
-  // Split into body + footer so the recap can be inserted visually between them
-  const [bodyPreview, footerPreview] = splitAtQuestionsFooter(finalMessage)
   const portalUrl = `${window.location.origin}/portal/${formData.partner?.portal_token ?? formData.partner?.member ?? 0}`
   const recapPreview = recap ? buildRecapText(recap, portalUrl) : null
+  const footerPreview = resolveMergeFields(appConfig.standard_footer, {
+    submitter_name: staffProfile?.full_name ?? staffProfile?.name ?? undefined,
+    account_manager: formData.partner?.css_rep ?? undefined,
+  })
 
   // ── Review form ───────────────────────────────────────────────────────────
   return (
@@ -235,7 +239,7 @@ export default function Step7Review({ formData, onBack, onReset, allMilestones }
         <ReviewCard label="Final Message">
           {/* Main body */}
           <pre className="whitespace-pre-wrap text-sm text-deep-plum font-sans leading-relaxed">
-            {bodyPreview}
+            {finalMessage}
           </pre>
 
           {/* Cross-squad recap preview */}

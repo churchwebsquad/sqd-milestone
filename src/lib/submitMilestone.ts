@@ -4,6 +4,8 @@ import { buildCommentArray } from './clickupComment'
 import type { ClickUpMention } from './clickupComment'
 import { fetchProgressRecap, buildRecapSegments } from './progressRecap'
 import type { ProgressRecap } from './progressRecap'
+import { loadAppConfig } from './appConfig'
+import { resolveMergeFields } from './mergeFields'
 import type { FormState } from '../components/submit/types'
 import type { StrategyMilestoneSubmission } from '../types/database'
 
@@ -30,20 +32,6 @@ export interface SubmitMilestoneResult {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-/**
- * Splits the fully-resolved message at the "If you have questions…" footer
- * so the recap can be inserted between the message body and the footer.
- *
- * Returns [bodyText, footerText]. If the footer marker is not found the full
- * message is returned as the body and footerText is ''.
- */
-function splitAtQuestionsFooter(message: string): [string, string] {
-  const MARKER = 'If you have questions or additional feedback'
-  const idx = message.lastIndexOf(MARKER)
-  if (idx === -1) return [message, '']
-  return [message.slice(0, idx).trimEnd(), message.slice(idx)]
-}
 
 /**
  * Look up a staff member's ClickUp user ID by matching css_rep against
@@ -120,9 +108,6 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
           : null,
       ].filter((m): m is ClickUpMention => m !== null)
 
-      // ── Split finalMessage into body + questions footer ──────────────────
-      const [bodyText, footerText] = splitAtQuestionsFooter(finalMessage)
-
       // ── Fetch (or reuse) the cross-squad progress recap ──────────────────
       const portalUrl = `${window.location.origin}/portal/${formData.partner!.portal_token ?? formData.partner!.member}`
 
@@ -141,13 +126,27 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
         }
       }
 
+      // ── Build footer segments if enabled ─────────────────────────────────
+      let footerSegments: ReturnType<typeof buildCommentArray> = []
+      if (formData.includeFooter !== false) {
+        try {
+          const config = await loadAppConfig()
+          const footerText = resolveMergeFields(config.standard_footer, {
+            submitter_name: submittedByName ?? undefined,
+            account_manager: formData.partner?.css_rep ?? undefined,
+          })
+          footerSegments = buildCommentArray(footerText, mentions)
+        } catch (footerErr) {
+          console.warn('[submitMilestone] Footer build failed, skipping:', footerErr)
+        }
+      }
+
       // ── Build combined comment array ─────────────────────────────────────
       //   body segments (with bold + mention tags)
       // + recap section (structured ClickUp rich-text)
-      // + questions footer (with mention tags)
-      const bodySegments   = buildCommentArray(bodyText, mentions)
-      const recapSegments  = recap ? buildRecapSegments(recap, portalUrl) : []
-      const footerSegments = footerText ? buildCommentArray(footerText, mentions) : []
+      // + footer (with mention tags)
+      const bodySegments  = buildCommentArray(finalMessage, mentions)
+      const recapSegments = recap ? buildRecapSegments(recap, portalUrl) : []
 
       const commentArray = [
         ...bodySegments,

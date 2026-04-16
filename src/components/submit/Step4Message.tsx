@@ -9,8 +9,6 @@ import type { StepProps } from './types'
 import type { StrategyMessageTemplate } from '../../types/database'
 import StepNav from './StepNav'
 
-const FOOTER_MARKER = 'If you have questions or additional feedback'
-
 const MERGE_FIELDS = [
   { field: '{{church_name}}', note: 'Partner church name' },
   { field: '{{first_name_of_primary}}', note: 'Primary contact first name' },
@@ -130,34 +128,14 @@ export default function Step4Message({ formData, updateForm, onNext, onBack, all
     next_step_name: nextMilestone?.step_name,
   }
 
-  const resolvedFooter = () => resolveMergeFields(appConfig.standard_footer, mergeData)
-
   const applyTemplate = (template: StrategyMessageTemplate) => {
     setSelectedTemplateId(template.id)
-    let body = resolveMergeFields(template.template_body, mergeData)
-    if (formData.includeFooter) {
-      const footer = resolvedFooter()
-      if (!body.includes(FOOTER_MARKER)) {
-        body = `${body}\n\n${footer}`
-      }
-    }
+    const body = resolveMergeFields(template.template_body, mergeData)
     updateForm({ messageBody: body })
   }
 
   const handleFooterToggle = (include: boolean) => {
-    if (!include) {
-      // Strip footer from messageBody at the marker
-      const idx = formData.messageBody.lastIndexOf(FOOTER_MARKER)
-      const trimmed = idx !== -1 ? formData.messageBody.slice(0, idx).trimEnd() : formData.messageBody
-      updateForm({ includeFooter: false, messageBody: trimmed })
-    } else {
-      // Append footer if not already present
-      let body = formData.messageBody
-      if (!body.includes(FOOTER_MARKER)) {
-        body = `${body}\n\n${resolvedFooter()}`
-      }
-      updateForm({ includeFooter: true, messageBody: body })
-    }
+    updateForm({ includeFooter: include })
   }
 
   const handleRecapToggle = (include: boolean) => {
