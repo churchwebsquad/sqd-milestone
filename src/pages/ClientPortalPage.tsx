@@ -236,7 +236,7 @@ function PortalHeader({ churchName }: { churchName: string | null }) {
       <h1 className="text-white text-2xl sm:text-3xl font-bold leading-tight">
         {churchName ?? 'Your Project'}
       </h1>
-      <p className="text-white/50 text-sm mt-2">Project Progress</p>
+      <p className="text-white/50 text-sm mt-2">All-In Milestone Progress</p>
     </header>
   )
 }
@@ -244,7 +244,7 @@ function PortalHeader({ churchName }: { churchName: string | null }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ClientPortalPage() {
-  const { memberId } = useParams<{ memberId: string }>()
+  const { token } = useParams<{ token: string }>()
 
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
@@ -253,8 +253,7 @@ export default function ClientPortalPage() {
   const [pathways, setPathways] = useState<PathwayData[]>([])
 
   useEffect(() => {
-    const memberNum = Number(memberId)
-    if (!memberId || isNaN(memberNum) || memberNum <= 0) {
+    if (!token) {
       setNotFound(true)
       setLoading(false)
       return
@@ -262,19 +261,12 @@ export default function ClientPortalPage() {
 
     const load = async () => {
       try {
-        // ── 1. Partner info + submissions in parallel ───────────────────────
-        const [{ data: partnerData }, { data: submissionsData }] = await Promise.all([
-          supabase
-            .from('strategy_account_progress')
-            .select('member, church_name')
-            .eq('member', memberNum)
-            .maybeSingle(),
-          supabase
-            .from('strategy_milestone_submissions')
-            .select('*')
-            .eq('member', memberNum)
-            .order('submitted_at', { ascending: false }),
-        ])
+        // ── 1. Look up partner by opaque portal token ───────────────────────
+        const { data: partnerData } = await supabase
+          .from('strategy_account_progress')
+          .select('member, church_name')
+          .eq('portal_token', token)
+          .maybeSingle()
 
         if (!partnerData) {
           setNotFound(true)
@@ -282,6 +274,13 @@ export default function ClientPortalPage() {
         }
 
         setPartner(partnerData as PartnerInfo)
+
+        // ── 2. Load submissions for this member ────────────────────────────
+        const { data: submissionsData } = await supabase
+          .from('strategy_milestone_submissions')
+          .select('*')
+          .eq('member', partnerData.member)
+          .order('submitted_at', { ascending: false })
 
         const submissions = (submissionsData ?? []) as StrategyMilestoneSubmission[]
 
@@ -439,7 +438,7 @@ export default function ClientPortalPage() {
     }
 
     load()
-  }, [memberId])
+  }, [token])
 
   // ── Not found ─────────────────────────────────────────────────────────────
   if (!loading && notFound) {

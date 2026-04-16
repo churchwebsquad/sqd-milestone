@@ -25,7 +25,7 @@ export default function Step1Partner({ formData, updateForm, onNext }: StepProps
       const [partnerRes, channelRes, contactsRes] = await Promise.all([
         supabase
           .from('strategy_account_progress')
-          .select('member, church_name, first_name_of_primary, css_rep')
+          .select('member, church_name, first_name_of_primary, css_rep, portal_token')
           .eq('member', memberNum)
           .maybeSingle(),
         supabase

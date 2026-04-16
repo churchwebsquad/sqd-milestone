@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { Send, FileText, LayoutDashboard, LogOut, Menu, X } from 'lucide-react'
+import { Send, FileText, LayoutDashboard, User, LogOut, Menu, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
 const NAV_LINKS = [
   { to: '/', label: 'Submit Milestone', icon: Send, end: true },
+  { to: '/my-dashboard', label: 'My Dashboard', icon: User, end: false },
   { to: '/templates', label: 'Template Editor', icon: FileText, end: false },
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, end: false },
+  { to: '/dashboard', label: 'Partner Dashboard', icon: LayoutDashboard, end: false },
 ]
 
 export default function AppLayout() {

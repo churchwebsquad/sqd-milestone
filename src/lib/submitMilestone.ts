@@ -124,7 +124,7 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
       const [bodyText, footerText] = splitAtQuestionsFooter(finalMessage)
 
       // ── Fetch (or reuse) the cross-squad progress recap ──────────────────
-      const portalUrl = `${window.location.origin}/portal/${formData.partner!.member}`
+      const portalUrl = `${window.location.origin}/portal/${formData.partner!.portal_token ?? formData.partner!.member}`
 
       let recap: ProgressRecap | null = null
       try {

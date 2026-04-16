@@ -101,6 +101,7 @@ export default function Step7Review({ formData, onBack, onReset, allMilestones }
       <SuccessScreen
         churchName={formData.partner?.church_name ?? ''}
         memberId={formData.partner?.member ?? 0}
+        portalToken={formData.partner?.portal_token ?? null}
         submissionId={result.submission.id}
         onReset={onReset ?? (() => {})}
       />
@@ -149,7 +150,7 @@ export default function Step7Review({ formData, onBack, onReset, allMilestones }
   // ── Build the preview message ─────────────────────────────────────────────
   // Split into body + footer so the recap can be inserted visually between them
   const [bodyPreview, footerPreview] = splitAtQuestionsFooter(finalMessage)
-  const portalUrl = `${window.location.origin}/portal/${formData.partner?.member ?? 0}`
+  const portalUrl = `${window.location.origin}/portal/${formData.partner?.portal_token ?? formData.partner?.member ?? 0}`
   const recapPreview = recap ? buildRecapText(recap, portalUrl) : null
 
   // ── Review form ───────────────────────────────────────────────────────────
@@ -286,16 +287,18 @@ export default function Step7Review({ formData, onBack, onReset, allMilestones }
 function SuccessScreen({
   churchName,
   memberId,
+  portalToken,
   submissionId,
   onReset,
 }: {
   churchName: string
   memberId: number
+  portalToken: string | null
   submissionId: string
   onReset: () => void
 }) {
   const [copied, setCopied] = useState(false)
-  const portalUrl = `${window.location.origin}/portal/${memberId}`
+  const portalUrl = `${window.location.origin}/portal/${portalToken ?? memberId}`
   const handleCopy = () => {
     navigator.clipboard.writeText(portalUrl).then(() => {
       setCopied(true)

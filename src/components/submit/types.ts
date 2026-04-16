@@ -12,6 +12,7 @@ export interface PartnerRow {
   church_name: string | null
   first_name_of_primary: string | null
   css_rep: string | null
+  portal_token: string | null
 }
 
 export interface ContactRow {

@@ -65,6 +65,7 @@ interface PartnerInfo {
   church_name: string | null
   first_name_of_primary: string | null
   css_rep: string | null
+  portal_token: string | null
 }
 
 interface EnrichedSubmission {
@@ -674,6 +675,7 @@ export default function AccountLogPage() {
 
   const [partner, setPartner] = useState<PartnerInfo | null>(null)
   const [enriched, setEnriched] = useState<EnrichedSubmission[]>([])
+  const [squadFilter, setSquadFilter] = useState<string>('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -682,7 +684,7 @@ export default function AccountLogPage() {
   const dismissWarning = useCallback(() => setWebhookWarning(null), [])
 
   const [portalCopied, setPortalCopied] = useState(false)
-  const portalUrl = `${window.location.origin}/portal/${memberId}`
+  const portalUrl = `${window.location.origin}/portal/${partner?.portal_token ?? memberId}`
 
   const handleCopyPortal = () => {
     navigator.clipboard.writeText(portalUrl).then(() => {
@@ -799,7 +801,7 @@ export default function AccountLogPage() {
         const [partnerRes, subsRes] = await Promise.all([
           supabase
             .from('strategy_account_progress')
-            .select('member, church_name, first_name_of_primary, css_rep')
+            .select('member, church_name, first_name_of_primary, css_rep, portal_token')
             .eq('member', memberNum)
             .maybeSingle(),
           supabase
@@ -879,6 +881,15 @@ export default function AccountLogPage() {
 
     load()
   }, [memberId])
+
+  // Derive the unique squads present in this account's submissions
+  const presentSquads = [...new Set(
+    enriched.map(e => e.milestone?.squad).filter((s): s is string => Boolean(s))
+  )].sort()
+
+  const filteredEnriched = squadFilter === 'all'
+    ? enriched
+    : enriched.filter(e => e.milestone?.squad === squadFilter)
 
   return (
     <div className="min-h-full py-6 px-4 md:px-6">
@@ -963,18 +974,48 @@ export default function AccountLogPage() {
             </div>
           ) : (
             <div className="space-y-4">
+              {/* Squad filter pills — only shown when multiple squads present */}
+              {presentSquads.length > 1 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {(['all', ...presentSquads] as string[]).map(squad => (
+                    <button
+                      key={squad}
+                      type="button"
+                      onClick={() => setSquadFilter(squad)}
+                      className={`rounded-full text-xs font-semibold px-3.5 py-1.5 transition-colors border ${
+                        squadFilter === squad
+                          ? 'bg-deep-plum text-white border-deep-plum'
+                          : 'border-lavender text-deep-plum hover:border-primary-purple hover:text-primary-purple bg-white'
+                      }`}
+                    >
+                      {squad === 'all'
+                        ? `All (${enriched.length})`
+                        : `${SQUAD_LABELS[squad] ?? squad} (${enriched.filter(e => e.milestone?.squad === squad).length})`
+                      }
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <p className="text-xs text-purple-gray">
-                {enriched.length} submission{enriched.length !== 1 ? 's' : ''} · most recent first
+                {filteredEnriched.length}{enriched.length !== filteredEnriched.length ? ` of ${enriched.length}` : ''} submission{filteredEnriched.length !== 1 ? 's' : ''} · most recent first
               </p>
-              {enriched.map(e => (
-                <SubmissionCard
-                  key={e.submission.id}
-                  enriched={e}
-                  allSubmissions={enriched}
-                  onStatusChange={handleStatusChange}
-                  onTriageSave={handleTriageSave}
-                />
-              ))}
+
+              {filteredEnriched.length === 0 ? (
+                <div className="bg-white border border-lavender rounded-xl p-8 text-center">
+                  <p className="text-sm text-purple-gray">No {SQUAD_LABELS[squadFilter] ?? squadFilter} submissions for this partner.</p>
+                </div>
+              ) : (
+                filteredEnriched.map(e => (
+                  <SubmissionCard
+                    key={e.submission.id}
+                    enriched={e}
+                    allSubmissions={enriched}
+                    onStatusChange={handleStatusChange}
+                    onTriageSave={handleTriageSave}
+                  />
+                ))
+              )}
             </div>
           )
         )}

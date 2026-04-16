@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { ChevronDown, ChevronRight, Info } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
-import { resolveMergeFields, STANDARD_FOOTER } from '../../lib/mergeFields'
+import { resolveMergeFields } from '../../lib/mergeFields'
+import { loadAppConfig, DEFAULT_APP_CONFIG } from '../../lib/appConfig'
+import type { AppConfig } from '../../types/database'
 import type { StepProps } from './types'
 import type { StrategyMessageTemplate } from '../../types/database'
 import StepNav from './StepNav'
@@ -20,7 +22,7 @@ const MERGE_FIELDS = [
 ]
 
 
-function MergeFieldsPanel() {
+function MergeFieldsPanel({ footer }: { footer: string }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="rounded-xl border border-lavender overflow-hidden">
@@ -51,9 +53,9 @@ function MergeFieldsPanel() {
             ))}
           </div>
           <div className="pt-2 border-t border-lavender">
-            <p className="text-xs font-semibold text-purple-gray mb-1">Standard footer</p>
+            <p className="text-xs font-semibold text-purple-gray mb-1">Standard footer <span className="font-normal text-purple-gray/60">(appended to every message)</span></p>
             <p className="text-[11px] font-mono text-purple-gray/80 bg-lavender-tint/50 rounded px-2.5 py-2 leading-relaxed">
-              {'If you have questions or additional feedback, feel free to tag {{submitter_name}} or your account manager {{account_manager}}.'}
+              {footer}
             </p>
           </div>
         </div>
@@ -67,6 +69,14 @@ export default function Step4Message({ formData, updateForm, onNext, onBack, all
   const [templates, setTemplates] = useState<StrategyMessageTemplate[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [appConfig, setAppConfig] = useState<AppConfig>(DEFAULT_APP_CONFIG)
+  const configLoadedRef = useRef(false)
+
+  useEffect(() => {
+    if (configLoadedRef.current) return
+    configLoadedRef.current = true
+    loadAppConfig().then(setAppConfig)
+  }, [])
 
   const submitterName = staffProfile?.full_name ?? staffProfile?.name ?? ''
   const nextMilestone = allMilestones.find(m => m.id === formData.nextMilestoneId)
@@ -85,8 +95,9 @@ export default function Step4Message({ formData, updateForm, onNext, onBack, all
   const applyTemplate = (template: StrategyMessageTemplate) => {
     setSelectedTemplateId(template.id)
     let body = resolveMergeFields(template.template_body, mergeData)
-    const footer = resolveMergeFields(STANDARD_FOOTER, mergeData)
-    if (!body.toLowerCase().includes('feel free to tag')) {
+    const footer = resolveMergeFields(appConfig.standard_footer, mergeData)
+    // Avoid double-appending if the template body already contains footer text
+    if (!body.includes(footer.slice(0, 30))) {
       body = `${body}\n\n${footer}`
     }
     updateForm({ messageBody: body })
@@ -184,7 +195,7 @@ export default function Step4Message({ formData, updateForm, onNext, onBack, all
 
           {/* Merge field reference */}
           <div className="mb-4">
-            <MergeFieldsPanel />
+            <MergeFieldsPanel footer={appConfig.standard_footer} />
           </div>
 
           {/* Message textarea */}

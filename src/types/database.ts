@@ -47,6 +47,7 @@ export interface StrategyAccountProgress {
   css_rep: string | null
   web_designer: string | null
   web_strategist: string | null
+  portal_token: string | null
   [key: string]: unknown
 }
 
@@ -173,6 +174,24 @@ export interface StrategyMilestoneReply {
 }
 
 // ============================================================================
+// GLOBAL APP CONFIG (single-row editable settings)
+// ============================================================================
+
+export interface AppConfig {
+  id: number
+  standard_footer: string
+  recap_header: string
+  recap_brand_current_label: string
+  recap_brand_next_label: string
+  recap_web_current_label: string
+  recap_web_next_label: string
+  recap_portal_label: string
+  updated_at: string
+  updated_by: string | null
+  [key: string]: unknown
+}
+
+// ============================================================================
 // Supabase Database generic type (for typed client)
 // ============================================================================
 
@@ -239,6 +258,12 @@ export interface Database {
         Row: StrategyMilestoneReply
         Insert: Omit<StrategyMilestoneReply, 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Omit<StrategyMilestoneReply, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      strategy_app_config: {
+        Row: AppConfig
+        Insert: Partial<AppConfig>
+        Update: Partial<Omit<AppConfig, 'id'>>
         Relationships: []
       }
     }

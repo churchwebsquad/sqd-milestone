@@ -1,5 +1,17 @@
 import { supabase } from './supabase'
 import type { ClickUpCommentSegment } from './clickupComment'
+import { DEFAULT_APP_CONFIG } from './appConfig'
+import type { AppConfig } from '../types/database'
+
+type RecapConfig = Pick<
+  AppConfig,
+  | 'recap_header'
+  | 'recap_brand_current_label'
+  | 'recap_brand_next_label'
+  | 'recap_web_current_label'
+  | 'recap_web_next_label'
+  | 'recap_portal_label'
+>
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -116,15 +128,17 @@ export async function fetchProgressRecap(
 export function buildRecapSegments(
   recap: ProgressRecap,
   portalUrl: string,
+  config?: RecapConfig,
 ): ClickUpCommentSegment[] {
+  const c = config ?? DEFAULT_APP_CONFIG
   return [
     { text: '\n\n---\n' },
-    { text: 'All In Updates Recap:\n', attributes: { bold: true } },
-    { text: `🎨 Branding Current Milestone: ${recap.brand.currentStepName ?? 'Not started'}\n` },
-    { text: `🎨 Branding Next Up: ${recap.brand.nextStepName ?? '—'}\n` },
-    { text: `🌐 Website Current Milestone: ${recap.web.currentStepName ?? 'Not started'}\n` },
-    { text: `🌐 Website Next Up: ${recap.web.nextStepName ?? '—'}\n` },
-    { text: '\n📍 View Your Milestone History: ' },
+    { text: `${c.recap_header}\n`, attributes: { bold: true } },
+    { text: `${c.recap_brand_current_label} ${recap.brand.currentStepName ?? 'Not started'}\n` },
+    { text: `${c.recap_brand_next_label} ${recap.brand.nextStepName ?? '—'}\n` },
+    { text: `${c.recap_web_current_label} ${recap.web.currentStepName ?? 'Not started'}\n` },
+    { text: `${c.recap_web_next_label} ${recap.web.nextStepName ?? '—'}\n` },
+    { text: `\n${c.recap_portal_label} ` },
     { text: 'View Milestone History', attributes: { link: portalUrl } },
     { text: '\n---\n\n' },
   ]
@@ -136,16 +150,17 @@ export function buildRecapSegments(
  * Returns the recap as a plain text string for the Step 7 preview display.
  * Uses `**` markers so the preview visually mirrors the bold intent.
  */
-export function buildRecapText(recap: ProgressRecap, portalUrl: string): string {
+export function buildRecapText(recap: ProgressRecap, portalUrl: string, config?: RecapConfig): string {
+  const c = config ?? DEFAULT_APP_CONFIG
   return [
     '---',
-    '**All In Updates Recap:**',
-    `🎨 Branding Current Milestone: ${recap.brand.currentStepName ?? 'Not started'}`,
-    `🎨 Branding Next Up: ${recap.brand.nextStepName ?? '—'}`,
-    `🌐 Website Current Milestone: ${recap.web.currentStepName ?? 'Not started'}`,
-    `🌐 Website Next Up: ${recap.web.nextStepName ?? '—'}`,
+    `**${c.recap_header}**`,
+    `${c.recap_brand_current_label} ${recap.brand.currentStepName ?? 'Not started'}`,
+    `${c.recap_brand_next_label} ${recap.brand.nextStepName ?? '—'}`,
+    `${c.recap_web_current_label} ${recap.web.currentStepName ?? 'Not started'}`,
+    `${c.recap_web_next_label} ${recap.web.nextStepName ?? '—'}`,
     '',
-    `📍 View Your Milestone History: ${portalUrl}`,
+    `${c.recap_portal_label} ${portalUrl}`,
     '---',
   ].join('\n')
 }

@@ -20,6 +20,7 @@ type SortField =
 interface DashboardRow {
   member: number
   church_name: string | null
+  portal_token: string | null
   squad: string
   pathway: string
   current_milestone_name: string
@@ -92,11 +93,11 @@ function MilestoneStatusPill({ status }: { status: MilestoneStatus }) {
 
 // ── PortalCopyButton ──────────────────────────────────────────────────────────
 
-function PortalCopyButton({ memberId }: { memberId: number }) {
+function PortalCopyButton({ memberId, portalToken }: { memberId: number; portalToken: string | null }) {
   const [copied, setCopied] = useState(false)
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
-    const url = `${window.location.origin}/portal/${memberId}`
+    const url = `${window.location.origin}/portal/${portalToken ?? memberId}`
     navigator.clipboard.writeText(url).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
@@ -148,7 +149,7 @@ function PartnerCard({ row, onClick }: { row: DashboardRow; onClick: () => void 
           {row.church_name ?? `Member #${row.member}`}
         </p>
         <div className="flex items-center gap-1.5 shrink-0">
-          <PortalCopyButton memberId={row.member} />
+          <PortalCopyButton memberId={row.member} portalToken={row.portal_token} />
           <MilestoneStatusPill status={row.milestone_status} />
         </div>
       </div>
@@ -225,7 +226,7 @@ export default function DashboardPage() {
         const [progressRes, defsRes] = await Promise.all([
           supabase
             .from('strategy_account_progress')
-            .select('member, church_name')
+            .select('member, church_name, portal_token')
             .in('member', memberNums),
           supabase
             .from('strategy_milestone_definitions')
@@ -233,8 +234,8 @@ export default function DashboardPage() {
             .in('id', milestoneIds),
         ])
 
-        const partnerMap = new Map<number, { church_name: string | null }>()
-        for (const p of (progressRes.data ?? []) as { member: number; church_name: string | null }[]) {
+        const partnerMap = new Map<number, { church_name: string | null; portal_token: string | null }>()
+        for (const p of (progressRes.data ?? []) as { member: number; church_name: string | null; portal_token: string | null }[]) {
           partnerMap.set(p.member, p)
         }
 
@@ -256,6 +257,7 @@ export default function DashboardPage() {
           return {
             member: s.member,
             church_name: partner?.church_name ?? null,
+            portal_token: partner?.portal_token ?? null,
             squad: ms?.squad ?? '',
             pathway: ms?.pathway ?? '',
             current_milestone_name: ms?.step_name ?? '—',
@@ -660,7 +662,7 @@ export default function DashboardPage() {
                         <MilestoneStatusPill status={row.milestone_status} />
                       </td>
                       <td className="px-2 py-3">
-                        <PortalCopyButton memberId={row.member} />
+                        <PortalCopyButton memberId={row.member} portalToken={row.portal_token} />
                       </td>
                     </tr>
                   ))}

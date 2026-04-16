@@ -7,6 +7,7 @@ import SubmitFormPage from './pages/SubmitFormPage'
 import TemplateEditorPage from './pages/TemplateEditorPage'
 import AccountLogPage from './pages/AccountLogPage'
 import DashboardPage from './pages/DashboardPage'
+import MyDashboardPage from './pages/MyDashboardPage'
 import ClientPortalPage from './pages/ClientPortalPage'
 
 export default function App() {
@@ -16,7 +17,7 @@ export default function App() {
         <Routes>
           {/* Public routes */}
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/portal/:memberId" element={<ClientPortalPage />} />
+          <Route path="/portal/:token" element={<ClientPortalPage />} />
 
           {/* Protected routes — staff only, wrapped in AppLayout */}
           <Route
@@ -27,6 +28,7 @@ export default function App() {
             }
           >
             <Route path="/" element={<SubmitFormPage />} />
+            <Route path="/my-dashboard" element={<MyDashboardPage />} />
             <Route path="/templates" element={<TemplateEditorPage />} />
             <Route path="/account/:memberId" element={<AccountLogPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />

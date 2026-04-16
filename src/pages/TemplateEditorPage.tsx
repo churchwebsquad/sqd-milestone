@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import {
   ChevronDown, ChevronRight, Plus, Check, AlertCircle, X, Info,
-  ArrowUp, ArrowDown, Settings,
+  ArrowUp, ArrowDown, Settings, Globe,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import type { StrategyMilestoneDefinition, StrategyMessageTemplate } from '../types/database'
+import { loadAppConfig, saveAppConfig, DEFAULT_APP_CONFIG } from '../lib/appConfig'
+import type { StrategyMilestoneDefinition, StrategyMessageTemplate, AppConfig } from '../types/database'
 import { SQUAD_LABELS, PATHWAY_LABELS } from '../components/submit/types'
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -29,6 +30,292 @@ function formatDateTime(iso: string): string {
     month: 'short', day: 'numeric', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
+}
+
+// ── GlobalTextSettingsPanel ───────────────────────────────────────────────────
+
+function GlobalTextSettingsPanel({
+  config,
+  isAdmin,
+  onSaved,
+}: {
+  config: AppConfig
+  isAdmin: boolean
+  onSaved: (updated: AppConfig) => void
+}) {
+  const { staffProfile } = useAuth()
+  const [open, setOpen] = useState(false)
+
+  const [footer, setFooter] = useState(config.standard_footer)
+  const [recapHeader, setRecapHeader] = useState(config.recap_header)
+  const [brandCurrent, setBrandCurrent] = useState(config.recap_brand_current_label)
+  const [brandNext, setBrandNext] = useState(config.recap_brand_next_label)
+  const [webCurrent, setWebCurrent] = useState(config.recap_web_current_label)
+  const [webNext, setWebNext] = useState(config.recap_web_next_label)
+  const [portalLabel, setPortalLabel] = useState(config.recap_portal_label)
+
+  const [saved, setSaved] = useState({
+    footer: config.standard_footer,
+    recapHeader: config.recap_header,
+    brandCurrent: config.recap_brand_current_label,
+    brandNext: config.recap_brand_next_label,
+    webCurrent: config.recap_web_current_label,
+    webNext: config.recap_web_next_label,
+    portalLabel: config.recap_portal_label,
+  })
+
+  // Sync when parent config loads
+  useEffect(() => {
+    setFooter(config.standard_footer)
+    setRecapHeader(config.recap_header)
+    setBrandCurrent(config.recap_brand_current_label)
+    setBrandNext(config.recap_brand_next_label)
+    setWebCurrent(config.recap_web_current_label)
+    setWebNext(config.recap_web_next_label)
+    setPortalLabel(config.recap_portal_label)
+    setSaved({
+      footer: config.standard_footer,
+      recapHeader: config.recap_header,
+      brandCurrent: config.recap_brand_current_label,
+      brandNext: config.recap_brand_next_label,
+      webCurrent: config.recap_web_current_label,
+      webNext: config.recap_web_next_label,
+      portalLabel: config.recap_portal_label,
+    })
+  }, [config.updated_at]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isDirty =
+    footer !== saved.footer ||
+    recapHeader !== saved.recapHeader ||
+    brandCurrent !== saved.brandCurrent ||
+    brandNext !== saved.brandNext ||
+    webCurrent !== saved.webCurrent ||
+    webNext !== saved.webNext ||
+    portalLabel !== saved.portalLabel
+
+  const [saving, setSaving] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle')
+  const [error, setError] = useState<string | null>(null)
+
+  const submitterName = staffProfile?.full_name ?? staffProfile?.name ?? ''
+
+  const handleSave = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      const updated = await saveAppConfig(
+        {
+          standard_footer: footer.trim(),
+          recap_header: recapHeader.trim(),
+          recap_brand_current_label: brandCurrent.trim(),
+          recap_brand_next_label: brandNext.trim(),
+          recap_web_current_label: webCurrent.trim(),
+          recap_web_next_label: webNext.trim(),
+          recap_portal_label: portalLabel.trim(),
+        },
+        submitterName,
+      )
+      setSaved({
+        footer: updated.standard_footer,
+        recapHeader: updated.recap_header,
+        brandCurrent: updated.recap_brand_current_label,
+        brandNext: updated.recap_brand_next_label,
+        webCurrent: updated.recap_web_current_label,
+        webNext: updated.recap_web_next_label,
+        portalLabel: updated.recap_portal_label,
+      })
+      setSaveStatus('saved')
+      onSaved(updated)
+      setTimeout(() => setSaveStatus('idle'), 2500)
+    } catch (err) {
+      setError((err as { message?: string })?.message ?? 'Save failed')
+      setSaveStatus('error')
+      setTimeout(() => setSaveStatus('idle'), 4000)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="bg-white border border-lavender rounded-xl overflow-hidden shadow-sm mb-6">
+      {/* Header */}
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-lavender-tint transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <Globe size={14} className="text-primary-purple" />
+          <span className="text-sm font-bold text-deep-plum">Global Text Settings</span>
+          <span className="text-xs text-purple-gray/60 font-normal">
+            Standard Footer · All In Updates Recap Labels
+          </span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {isDirty && (
+            <span className="text-[10px] font-semibold bg-amber-100 text-amber-700 rounded-full px-2 py-0.5">
+              Unsaved
+            </span>
+          )}
+          {config.updated_by && !open && (
+            <span className="text-xs text-purple-gray/60 hidden sm:block">
+              Last saved by {config.updated_by}
+            </span>
+          )}
+          {open
+            ? <ChevronDown size={14} className="text-purple-gray" />
+            : <ChevronRight size={14} className="text-purple-gray" />
+          }
+        </div>
+      </button>
+
+      {open && (
+        <>
+          {error && (
+            <div className="flex items-center gap-1.5 px-4 py-2 bg-red-50 border-y border-red-100 text-xs text-red-700">
+              <AlertCircle size={12} />
+              {error}
+            </div>
+          )}
+
+          <div className="border-t border-lavender p-4 space-y-5">
+            {/* Standard Footer */}
+            <div>
+              <label className="block text-xs font-semibold text-purple-gray uppercase tracking-wide mb-1.5">
+                Standard Footer
+                <span className="ml-1.5 font-normal normal-case text-purple-gray/60">— appended to every sent message</span>
+              </label>
+              <textarea
+                value={footer}
+                onChange={e => setFooter(e.target.value)}
+                disabled={!isAdmin}
+                rows={3}
+                className="w-full rounded-lg border border-lavender px-3 py-2 text-sm text-deep-plum font-mono focus:outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20 resize-y disabled:opacity-60 disabled:bg-lavender-tint/50"
+              />
+              <p className="text-xs text-purple-gray/60 mt-1">
+                Supports merge fields: <code className="text-[11px] bg-lavender-tint text-primary-purple px-1 rounded">{'{{submitter_name}}'}</code>{' '}
+                <code className="text-[11px] bg-lavender-tint text-primary-purple px-1 rounded">{'{{account_manager}}'}</code>
+              </p>
+            </div>
+
+            {/* Recap Labels */}
+            <div>
+              <p className="text-xs font-semibold text-purple-gray uppercase tracking-wide mb-3">
+                All In Updates Recap Labels
+                <span className="ml-1.5 font-normal normal-case text-purple-gray/60">— used in cross-squad recap block</span>
+              </p>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-purple-gray uppercase tracking-wide mb-1">
+                    Section Header
+                  </label>
+                  <input
+                    value={recapHeader}
+                    onChange={e => setRecapHeader(e.target.value)}
+                    disabled={!isAdmin}
+                    className="w-full rounded-lg border border-lavender px-3 py-2 text-sm text-deep-plum focus:outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20 disabled:opacity-60 disabled:bg-lavender-tint/50"
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-purple-gray uppercase tracking-wide mb-1">
+                      Brand — Current
+                    </label>
+                    <input
+                      value={brandCurrent}
+                      onChange={e => setBrandCurrent(e.target.value)}
+                      disabled={!isAdmin}
+                      className="w-full rounded-lg border border-lavender px-3 py-2 text-sm text-deep-plum focus:outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20 disabled:opacity-60 disabled:bg-lavender-tint/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-purple-gray uppercase tracking-wide mb-1">
+                      Brand — Next Up
+                    </label>
+                    <input
+                      value={brandNext}
+                      onChange={e => setBrandNext(e.target.value)}
+                      disabled={!isAdmin}
+                      className="w-full rounded-lg border border-lavender px-3 py-2 text-sm text-deep-plum focus:outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20 disabled:opacity-60 disabled:bg-lavender-tint/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-purple-gray uppercase tracking-wide mb-1">
+                      Website — Current
+                    </label>
+                    <input
+                      value={webCurrent}
+                      onChange={e => setWebCurrent(e.target.value)}
+                      disabled={!isAdmin}
+                      className="w-full rounded-lg border border-lavender px-3 py-2 text-sm text-deep-plum focus:outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20 disabled:opacity-60 disabled:bg-lavender-tint/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-purple-gray uppercase tracking-wide mb-1">
+                      Website — Next Up
+                    </label>
+                    <input
+                      value={webNext}
+                      onChange={e => setWebNext(e.target.value)}
+                      disabled={!isAdmin}
+                      className="w-full rounded-lg border border-lavender px-3 py-2 text-sm text-deep-plum focus:outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20 disabled:opacity-60 disabled:bg-lavender-tint/50"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-purple-gray uppercase tracking-wide mb-1">
+                    Portal Link Label
+                  </label>
+                  <input
+                    value={portalLabel}
+                    onChange={e => setPortalLabel(e.target.value)}
+                    disabled={!isAdmin}
+                    className="w-full rounded-lg border border-lavender px-3 py-2 text-sm text-deep-plum focus:outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20 disabled:opacity-60 disabled:bg-lavender-tint/50"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Save row */}
+            {isAdmin && (
+              <div className="flex items-center justify-between pt-1 border-t border-lavender">
+                {config.updated_by ? (
+                  <span className="text-xs text-purple-gray/60">
+                    Last saved by {config.updated_by} · {formatDateTime(config.updated_at)}
+                  </span>
+                ) : (
+                  <span />
+                )}
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={!isDirty || saving}
+                  className={`flex items-center gap-1.5 rounded-full px-5 py-1.5 text-sm font-semibold transition-colors ${
+                    saveStatus === 'saved'
+                      ? 'bg-green-100 text-green-700'
+                      : saveStatus === 'error'
+                      ? 'bg-red-100 text-red-700'
+                      : isDirty
+                      ? 'bg-deep-plum text-white hover:bg-primary-purple'
+                      : 'bg-lavender/60 text-purple-gray cursor-not-allowed'
+                  }`}
+                >
+                  {saving ? (
+                    <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+                  ) : saveStatus === 'saved' ? (
+                    <Check size={13} />
+                  ) : saveStatus === 'error' ? (
+                    <AlertCircle size={13} />
+                  ) : null}
+                  {saving ? 'Saving…' : saveStatus === 'saved' ? 'Saved' : saveStatus === 'error' ? 'Error' : 'Save Changes'}
+                </button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
 }
 
 // ── Toggle ───────────────────────────────────────────────────────────────────
@@ -605,7 +892,7 @@ function NewTemplateForm({ milestoneId, existingVariants, submitterName, onCreat
 
 // ── MergeFieldsPanel ─────────────────────────────────────────────────────────
 
-function MergeFieldsPanel() {
+function MergeFieldsPanel({ footer }: { footer: string }) {
   const [open, setOpen] = useState(false)
 
   return (
@@ -633,9 +920,12 @@ function MergeFieldsPanel() {
             </div>
           ))}
           <div className="pt-3 mt-1 border-t border-lavender">
-            <p className="text-xs font-semibold text-purple-gray mb-1.5">Standard Footer (include in all templates)</p>
+            <p className="text-xs font-semibold text-purple-gray mb-1.5">
+              Standard Footer
+              <span className="ml-1.5 font-normal text-purple-gray/60">— appended to every sent message</span>
+            </p>
             <p className="text-xs text-purple-gray/80 font-mono leading-relaxed bg-lavender-tint/50 rounded-lg px-3 py-2">
-              {'If you have questions or additional feedback, feel free to tag {{submitter_name}} or your account manager {{account_manager}}.'}
+              {footer}
             </p>
           </div>
         </div>
@@ -768,13 +1058,14 @@ export default function TemplateEditorPage() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [reordering, setReordering] = useState(false)
   const [addingPathwayForSquad, setAddingPathwayForSquad] = useState<string | null>(null)
+  const [appConfig, setAppConfig] = useState<AppConfig>(DEFAULT_APP_CONFIG)
 
   const submitterName = staffProfile?.full_name ?? staffProfile?.name ?? ''
 
   // ── Load all milestones (no is_active filter — editor shows everything) ───
   useEffect(() => {
     const load = async () => {
-      const [{ data: mData }, { data: tData }] = await Promise.all([
+      const [{ data: mData }, { data: tData }, config] = await Promise.all([
         supabase
           .from('strategy_milestone_definitions')
           .select('*')
@@ -784,7 +1075,9 @@ export default function TemplateEditorPage() {
         supabase
           .from('strategy_message_templates')
           .select('milestone_id'),
+        loadAppConfig(),
       ])
+      setAppConfig(config)
 
       if (mData) {
         setMilestones(mData as StrategyMilestoneDefinition[])
@@ -1184,8 +1477,17 @@ export default function TemplateEditorPage() {
 
         {/* Main content */}
         <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-cream">
+          {/* Global Text Settings — always shown */}
+          <div className="max-w-3xl mb-2">
+            <GlobalTextSettingsPanel
+              config={appConfig}
+              isAdmin={isAdmin}
+              onSaved={setAppConfig}
+            />
+          </div>
+
           {!selectedId ? (
-            <div className="flex flex-col items-center justify-center h-64 rounded-xl border-2 border-dashed border-lavender text-center">
+            <div className="flex flex-col items-center justify-center h-48 rounded-xl border-2 border-dashed border-lavender text-center">
               <p className="text-sm font-medium text-purple-gray">Select a milestone from the sidebar</p>
               <p className="text-xs text-purple-gray/60 mt-1">Settings and templates will appear here</p>
             </div>
@@ -1267,7 +1569,7 @@ export default function TemplateEditorPage() {
                   )}
 
                   <div className="pt-2">
-                    <MergeFieldsPanel />
+                    <MergeFieldsPanel footer={appConfig.standard_footer} />
                   </div>
                 </div>
               )}
