@@ -884,7 +884,7 @@ export default function AccountLogPage() {
 
   // Derive the unique squads present in this account's submissions
   const presentSquads = [...new Set(
-    enriched.map(e => e.milestone?.squad).filter((s): s is string => Boolean(s))
+    enriched.flatMap(e => e.milestone?.squad ? [e.milestone.squad] : [])
   )].sort()
 
   const filteredEnriched = squadFilter === 'all'
