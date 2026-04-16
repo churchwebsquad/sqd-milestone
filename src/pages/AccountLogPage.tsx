@@ -169,7 +169,7 @@ function MilestoneStatusDropdown({
   )
 }
 
-// ── TriageBadge ───────────────────────────────────────────────────────────────
+// ── TriageDropdown ────────────────────────────────────────────────────────────
 
 function TriageDropdown({
   replyId,
@@ -180,16 +180,17 @@ function TriageDropdown({
   current: TriageCategory | null
   onSave: (replyId: string, category: TriageCategory | null) => Promise<void>
 }) {
+  const [pending, setPending] = useState<TriageCategory | null>(currentCategory)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  const handleChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const val = e.target.value
-    const next = val === '' ? null : (val as TriageCategory)
+  const isDirty = pending !== currentCategory
+
+  const handlePush = async () => {
     setSaving(true)
     setSaveError(null)
     try {
-      await onSave(replyId, next)
+      await onSave(replyId, pending)
     } catch (err) {
       setSaveError((err as { message?: string })?.message ?? 'Save failed')
     } finally {
@@ -198,18 +199,20 @@ function TriageDropdown({
   }
 
   return (
-    <div className="inline-flex flex-col items-end gap-0.5">
-      <div className="inline-flex items-center gap-1">
+    <div className="inline-flex flex-col items-end gap-1">
+      <div className="inline-flex items-center gap-1.5">
         {saving && (
           <span className="h-3 w-3 rounded-full border border-lavender border-t-primary-purple animate-spin" />
         )}
         <select
-          value={currentCategory ?? ''}
-          onChange={handleChange}
+          value={pending ?? ''}
+          onChange={e => setPending(e.target.value === '' ? null : e.target.value as TriageCategory)}
           disabled={saving}
           className={`rounded-full border bg-white text-[11px] text-deep-plum px-2.5 py-0.5 outline-none focus:ring-1 disabled:opacity-60 cursor-pointer ${
             saveError
               ? 'border-red-400 focus:border-red-400 focus:ring-red-200'
+              : isDirty
+              ? 'border-primary-purple focus:ring-primary-purple/30'
               : 'border-lavender focus:border-primary-purple focus:ring-primary-purple/30'
           }`}
         >
@@ -218,6 +221,15 @@ function TriageDropdown({
             <option key={c} value={c}>{TRIAGE_LABELS[c]}</option>
           ))}
         </select>
+        {isDirty && !saving && (
+          <button
+            type="button"
+            onClick={handlePush}
+            className="rounded-full bg-primary-purple text-white text-[11px] font-semibold px-2.5 py-0.5 hover:bg-deep-plum transition-colors whitespace-nowrap"
+          >
+            Push →
+          </button>
+        )}
       </div>
       {saveError && (
         <span className="text-[10px] text-red-600">{saveError}</span>
