@@ -945,7 +945,7 @@ export default function AccountLogPage() {
               </div>
               <button
                 type="button"
-                onClick={() => navigate(`/?member=${memberId}`)}
+                onClick={() => navigate(`/submit?member=${memberId}`)}
                 className="rounded-full bg-deep-plum text-white text-sm font-semibold px-5 py-2.5 hover:bg-primary-purple transition-colors"
               >
                 Submit New Milestone →
@@ -966,7 +966,7 @@ export default function AccountLogPage() {
               <p className="text-purple-gray text-sm">No milestone submissions yet for this partner.</p>
               <button
                 type="button"
-                onClick={() => navigate(`/?member=${memberId}`)}
+                onClick={() => navigate(`/submit?member=${memberId}`)}
                 className="mt-4 rounded-full bg-deep-plum text-white text-sm font-semibold px-5 py-2.5 hover:bg-primary-purple transition-colors"
               >
                 Submit First Milestone →

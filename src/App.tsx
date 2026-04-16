@@ -27,8 +27,8 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route path="/" element={<SubmitFormPage />} />
-            <Route path="/my-dashboard" element={<MyDashboardPage />} />
+            <Route path="/" element={<MyDashboardPage />} />
+            <Route path="/submit" element={<SubmitFormPage />} />
             <Route path="/templates" element={<TemplateEditorPage />} />
             <Route path="/account/:memberId" element={<AccountLogPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
