@@ -102,7 +102,7 @@ export default function Step7Review({ formData, onBack, onReset, allMilestones }
         churchName={formData.partner?.church_name ?? ''}
         memberId={formData.partner?.member ?? 0}
         submissionId={result.submission.id}
-        onReset={onReset}
+        onReset={onReset ?? (() => {})}
       />
     )
   }

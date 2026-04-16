@@ -342,8 +342,8 @@ export default function DashboardPage() {
         av = MILESTONE_STATUS_ORDER[a.milestone_status] ?? 99
         bv = MILESTONE_STATUS_ORDER[b.milestone_status] ?? 99
       } else {
-        av = (a as Record<string, unknown>)[sortField] as string ?? ''
-        bv = (b as Record<string, unknown>)[sortField] as string ?? ''
+        av = (a as unknown as Record<string, unknown>)[sortField] as string ?? ''
+        bv = (b as unknown as Record<string, unknown>)[sortField] as string ?? ''
       }
 
       const cmp =

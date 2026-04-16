@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { ChevronDown, ChevronRight, Info } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
@@ -19,97 +19,6 @@ const MERGE_FIELDS = [
   { field: '{{asset_links}}', note: 'Asset links — resolves in Step 6' },
 ]
 
-// ── HighlightedTextarea ───────────────────────────────────────────────────────
-// Renders {{token}} patterns in a distinct visual style while keeping the
-// underlying textarea fully editable. Technique: an absolute-positioned mirror
-// div renders colored spans for tokens; the textarea sits on top with
-// transparent text so the mirror shows through, leaving only the caret visible.
-
-const TOKEN_RE = /(\{\{[^}]+\}\})/g
-
-function buildHighlightedHtml(text: string): string {
-  const escaped = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-
-  const highlighted = escaped.replace(
-    // Re-escape any HTML entities in the match then wrap in styled span
-    /(\{\{[^}]+\}\})/g,
-    '<span style="background:#EDE9FC;color:#513DE5;border-radius:4px;padding:0 3px;font-weight:600;">$1</span>'
-  )
-
-  // Preserve newlines for the div, add trailing space to stop the last line collapsing
-  return highlighted.replace(/\n/g, '<br>') + '&nbsp;'
-}
-
-function HighlightedTextarea({
-  value,
-  onChange,
-  placeholder,
-  rows = 14,
-}: {
-  value: string
-  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
-  placeholder?: string
-  rows?: number
-}) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const mirrorRef = useRef<HTMLDivElement>(null)
-
-  const syncScroll = () => {
-    if (mirrorRef.current && textareaRef.current) {
-      mirrorRef.current.scrollTop = textareaRef.current.scrollTop
-    }
-  }
-
-  // Shared visual style applied to both layers
-  const sharedStyle: React.CSSProperties = {
-    fontFamily: 'Inter, "Segoe UI", Arial, sans-serif',
-    fontSize: '0.875rem',   // text-sm
-    lineHeight: '1.625',    // leading-relaxed
-    padding: '0.75rem 1rem', // px-4 py-3
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-    overflowWrap: 'break-word',
-  }
-
-  return (
-    <div className="relative rounded-xl border border-lavender focus-within:border-primary-purple focus-within:ring-2 focus-within:ring-primary-purple/20 transition bg-white overflow-hidden">
-      {/* Mirror layer — renders the colored token spans */}
-      <div
-        ref={mirrorRef}
-        aria-hidden
-        className="absolute inset-0 pointer-events-none select-none overflow-hidden text-deep-plum"
-        style={sharedStyle}
-        dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(value) }}
-      />
-
-      {/* Editable textarea — transparent text reveals mirror; caret stays visible */}
-      <textarea
-        ref={textareaRef}
-        value={value}
-        onChange={onChange}
-        onScroll={syncScroll}
-        placeholder={placeholder}
-        rows={rows}
-        style={{
-          ...sharedStyle,
-          color: 'transparent',
-          caretColor: '#341756', // deep-plum
-          background: 'transparent',
-          resize: 'vertical',
-          position: 'relative',
-          display: 'block',
-        }}
-        className="w-full outline-none placeholder-purple-gray/50"
-      />
-    </div>
-  )
-}
-
-// Keep TOKEN_RE available for potential future use (declared but linter-safe)
-void TOKEN_RE
 
 function MergeFieldsPanel() {
   const [open, setOpen] = useState(false)
