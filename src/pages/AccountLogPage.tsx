@@ -13,7 +13,7 @@ import type {
 } from '../types/database'
 import { SQUAD_LABELS, PATHWAY_LABELS, ASSET_TYPE_LABELS } from '../components/submit/types'
 
-const N8N_TRIAGE_WEBHOOK = import.meta.env.VITE_N8N_REPLY_TRIAGE_WEBHOOK_URL as string | undefined
+const N8N_TRIAGE_PROXY = '/api/webhook/reply-triage'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -711,7 +711,7 @@ export default function AccountLogPage() {
     }))
 
     // ── 3. Fire n8n webhook (best-effort — never blocks the UI) ──────────
-    if (N8N_TRIAGE_WEBHOOK && category && category !== 'no_action_needed') {
+    if (category && category !== 'no_action_needed') {
       const submissionEntry = enriched.find(e => e.submission.id === submissionId)
       const reply = submissionEntry?.replies.find(r => r.id === replyId)
 
@@ -728,7 +728,7 @@ export default function AccountLogPage() {
         triaged_by:       staffProfile?.full_name ?? staffProfile?.name ?? null,
       }
 
-      fetch(N8N_TRIAGE_WEBHOOK, {
+      fetch(N8N_TRIAGE_PROXY, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
