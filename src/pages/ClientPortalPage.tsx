@@ -86,15 +86,6 @@ function TimelineNode({ item, isLast }: { item: TimelineItem; isLast: boolean })
 
       {/* Right column: content */}
       <div className={['flex-1 pt-0.5', isLast ? 'pb-0' : 'pb-6'].join(' ')}>
-        {isCurrent && (
-          <div className="mb-1.5">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-purple text-white text-[11px] font-bold px-3 py-1 uppercase tracking-wide">
-              <span className="h-1.5 w-1.5 rounded-full bg-white/70 animate-pulse" />
-              You Are Here
-            </span>
-          </div>
-        )}
-
         <p
           className={[
             'font-semibold leading-snug',
