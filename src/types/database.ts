@@ -163,6 +163,7 @@ export interface StrategyMilestoneReply {
   reply_author_email: string | null
   is_partner_reply: boolean
   triage_category: TriageCategory | null
+  edit_task_url: string | null      // set by n8n after ClickUp task creation
   source: string                   // 'clickup_thread' | 'markup_review'
   detected_at: string              // timestamptz
   clickup_reply_id: string | null

@@ -335,9 +335,22 @@ function ReplyThread({
             </p>
 
             {reply.triage_category && (
-              <p className="mt-1.5 text-[10px] font-semibold text-purple-gray uppercase tracking-wide">
-                Triaged: {TRIAGE_LABELS[reply.triage_category]}
-              </p>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <p className="text-[10px] font-semibold text-purple-gray uppercase tracking-wide">
+                  Triaged: {TRIAGE_LABELS[reply.triage_category]}
+                </p>
+                {reply.edit_task_url && (
+                  <a
+                    href={reply.edit_task_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded-full border border-lavender bg-white text-[11px] font-semibold text-deep-plum px-2.5 py-0.5 hover:bg-lavender-tint hover:border-primary-purple transition-colors"
+                  >
+                    View Task
+                    <ExternalLink size={9} />
+                  </a>
+                )}
+              </div>
             )}
           </div>
         )
@@ -745,7 +758,26 @@ export default function AccountLogPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       }).then(res => {
-        if (!res.ok) setWebhookWarning('Triage saved but the webhook notification failed — notify your admin.')
+        if (!res.ok) {
+          setWebhookWarning('Triage saved but the webhook notification failed — notify your admin.')
+          return
+        }
+        // Poll for edit_task_url after n8n has had time to create the task
+        setTimeout(async () => {
+          const { data } = await supabase
+            .from('strategy_milestone_replies')
+            .select('id, edit_task_url')
+            .eq('id', replyId)
+            .maybeSingle()
+          if (data?.edit_task_url) {
+            setEnriched(prev => prev.map(e => ({
+              ...e,
+              replies: e.replies.map(r =>
+                r.id === replyId ? { ...r, edit_task_url: data.edit_task_url } : r,
+              ),
+            })))
+          }
+        }, 5000)
       }).catch(() => {
         setWebhookWarning('Triage saved but the webhook notification failed — notify your admin.')
       })
