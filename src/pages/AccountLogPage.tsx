@@ -13,7 +13,7 @@ import type {
 } from '../types/database'
 import { SQUAD_LABELS, PATHWAY_LABELS, ASSET_TYPE_LABELS } from '../components/submit/types'
 
-const N8N_TRIAGE_WEBHOOK = import.meta.env.VITE_N8N_TRIAGE_WEBHOOK_URL as string | undefined
+const N8N_TRIAGE_WEBHOOK = import.meta.env.VITE_N8N_REPLY_TRIAGE_WEBHOOK_URL as string | undefined
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
