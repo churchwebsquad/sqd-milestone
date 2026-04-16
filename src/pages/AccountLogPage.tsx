@@ -339,7 +339,7 @@ function ReplyThread({
                 <p className="text-[10px] font-semibold text-purple-gray uppercase tracking-wide">
                   Triaged: {TRIAGE_LABELS[reply.triage_category]}
                 </p>
-                {reply.edit_task_url && (
+                {reply.edit_task_url && reply.triage_category !== 'no_action_needed' && (
                   <a
                     href={reply.edit_task_url}
                     target="_blank"
