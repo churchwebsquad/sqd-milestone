@@ -1,14 +1,65 @@
 import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { Send, FileText, LayoutDashboard, User, LogOut, Menu, X } from 'lucide-react'
+import {
+  Send, FileText, LayoutDashboard, User, LogOut, Menu, X,
+  Building2, GitBranch, Sparkles, Search, Settings, CalendarDays,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
-const NAV_LINKS = [
+interface NavItem { to: string; label: string; icon: LucideIcon; end: boolean }
+interface NavGroup { heading: string; items: NavItem[] }
+type NavEntry = NavItem | NavGroup
+
+function isGroup(entry: NavEntry): entry is NavGroup {
+  return 'heading' in entry
+}
+
+const NAV_STRUCTURE: NavEntry[] = [
   { to: '/', label: 'My Dashboard', icon: User, end: true },
-  { to: '/submit', label: 'Submit Milestone', icon: Send, end: false },
-  { to: '/dashboard', label: 'Partner Dashboard', icon: LayoutDashboard, end: false },
-  { to: '/templates', label: 'Template Editor', icon: FileText, end: false },
+  { to: '/churches', label: 'Churches Dashboard', icon: Building2, end: false },
+  {
+    heading: 'All In Journey Milestones',
+    items: [
+      { to: '/pathway', label: 'Pathway Viewer', icon: GitBranch, end: false },
+      { to: '/submit', label: 'Submit Milestone', icon: Send, end: false },
+      { to: '/dashboard', label: 'Milestone Submissions', icon: LayoutDashboard, end: false },
+      { to: '/templates', label: 'Template Editor', icon: FileText, end: false },
+    ],
+  },
+  {
+    heading: 'Social Media',
+    items: [
+      { to: '/social/srp', label: 'SRP Generator', icon: Sparkles, end: false },
+      { to: '/social/intel', label: 'Intel Audit Tool', icon: Search, end: false },
+      { to: '/social/prompts', label: 'Prompt Settings', icon: Settings, end: false },
+      { to: '/social/planner', label: 'Planning Calendar', icon: CalendarDays, end: false },
+    ],
+  },
 ]
+
+function SidebarLink({ item, onNavigate }: { item: NavItem; onNavigate: () => void }) {
+  const { to, label, icon: Icon, end } = item
+  return (
+    <NavLink
+      to={to}
+      end={end}
+      onClick={onNavigate}
+      className={({ isActive }) =>
+        [
+          'flex items-center gap-3 py-2.5 text-sm font-medium transition-colors',
+          'border-l-[3px]',
+          isActive
+            ? 'bg-lavender-tint text-primary-purple border-primary-purple pl-[21px] pr-4'
+            : 'text-white/80 hover:bg-white/10 hover:text-white border-transparent pl-[21px] pr-4',
+        ].join(' ')
+      }
+    >
+      <Icon size={16} />
+      {label}
+    </NavLink>
+  )
+}
 
 export default function AppLayout() {
   const { staffProfile, signOut } = useAuth()
@@ -65,26 +116,20 @@ export default function AppLayout() {
 
         {/* Nav links */}
         <nav className="flex-1 overflow-y-auto py-4">
-          {NAV_LINKS.map(({ to, label, icon: Icon, end }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                [
-                  'flex items-center gap-3 py-2.5 text-sm font-medium transition-colors',
-                  'border-l-[3px]',
-                  isActive
-                    ? 'bg-lavender-tint text-primary-purple border-primary-purple pl-[21px] pr-4'
-                    : 'text-white/80 hover:bg-white/10 hover:text-white border-transparent pl-[21px] pr-4',
-                ].join(' ')
-              }
-            >
-              <Icon size={16} />
-              {label}
-            </NavLink>
-          ))}
+          {NAV_STRUCTURE.map((entry, idx) =>
+            isGroup(entry) ? (
+              <div key={entry.heading} className={idx > 0 ? 'mt-4' : ''}>
+                <p className="px-6 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-widest text-white/40">
+                  {entry.heading}
+                </p>
+                {entry.items.map(item => (
+                  <SidebarLink key={item.to} item={item} onNavigate={() => setSidebarOpen(false)} />
+                ))}
+              </div>
+            ) : (
+              <SidebarLink key={entry.to} item={entry} onNavigate={() => setSidebarOpen(false)} />
+            )
+          )}
         </nav>
 
         {/* User + sign out */}

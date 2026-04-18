@@ -99,6 +99,7 @@ export const ASSET_TYPE_LABELS: Record<AssetType, string> = {
   contentsnare: 'ContentSnare',
   website_link: 'Website Link',
   document: 'Document',
+  vista_social: 'Vista Social',
   other: 'Other',
 }
 
