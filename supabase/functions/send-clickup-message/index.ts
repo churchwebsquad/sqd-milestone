@@ -104,13 +104,32 @@ Deno.serve(async (req) => {
     const isReply = Boolean(parentMessageId && teamId)
 
     // ── Build payload ─────────────────────────────────────────────────────────
-    const payload: Record<string, unknown> = {
-      comment,
-      notify_all: true,
-    }
-    if (!isReply) {
-      // Top-level post needs type=post + subtype for announcement formatting
-      payload.type = 'post'
+    // v2 (top-level channel post): { comment: [...], type: 'post', subtype_id?, notify_all }
+    // v3 (thread reply):           { content: "plain text", comment_parts: [...], notify_all }
+    let payload: Record<string, unknown>
+
+    if (isReply) {
+      // Build plain-text `content` from the segments (v3 requires it as a string)
+      const plainContent = comment
+        .map(s => {
+          if ('type' in s && s.type === 'tag') return `@user`
+          if ('text' in s) return s.text ?? ''
+          return ''
+        })
+        .join('')
+        .slice(0, 40000)  // ClickUp enforces a 40k character max
+
+      payload = {
+        content: plainContent,
+        comment_parts: comment,
+        notify_all: true,
+      }
+    } else {
+      payload = {
+        comment,
+        notify_all: true,
+        type: 'post',
+      }
       if (subtypeId) payload.subtype_id = subtypeId
     }
 
@@ -118,6 +137,7 @@ Deno.serve(async (req) => {
     console.log('[send-clickup-message] parentMessageId:', parentMessageId ?? 'none (top-level)')
     console.log('[send-clickup-message] isReply:', isReply)
     console.log('[send-clickup-message] segments:', comment.length)
+    console.log('[send-clickup-message] payload keys:', Object.keys(payload).join(', '))
 
     // ── POST to ClickUp ───────────────────────────────────────────────────────
     // Top-level: v2 channel comment endpoint
