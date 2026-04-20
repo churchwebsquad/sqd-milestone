@@ -123,8 +123,25 @@ Deno.serve(async (req) => {
       comment_parts: comment,
       notify_all: true,
     }
-    if (!isReply && subtypeId) {
-      payload.subtype_id = subtypeId
+
+    if (!isReply) {
+      // Per ClickUp v3 spec: top-level messages need `type` ('message' or 'post').
+      // For announcement-styled posts, use type='post' with nested post_data
+      // containing a required title + subtype.id. See:
+      //   CommentCreateChatMessage + CommentChatPostDataCreate in the OpenAPI spec
+      if (subtypeId) {
+        // Derive a title from the first non-empty line of the content (max 255 chars)
+        const firstLine = plainContent.split('\n').map(l => l.trim()).find(l => l.length > 0)
+        const title = (firstLine ?? 'Milestone Update').slice(0, 255)
+
+        payload.type = 'post'
+        payload.post_data = {
+          title,
+          subtype: { id: subtypeId },
+        }
+      } else {
+        payload.type = 'message'
+      }
     }
 
     console.log('[send-clickup-message] channelId:', channelId)
