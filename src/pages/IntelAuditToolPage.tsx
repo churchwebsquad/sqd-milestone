@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import type { StrategyChurchIntel, ChurchIntelProfile } from '../types/database'
 import IntelProfileView from '../components/intel/IntelProfileView'
+import ProfileErrorBoundary from '../components/intel/ProfileErrorBoundary'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -431,7 +432,9 @@ export default function IntelAuditToolPage() {
           </span>
         </div>
 
-        <IntelProfileView profile={savedProfile} />
+        <ProfileErrorBoundary rawProfile={savedProfile}>
+          <IntelProfileView profile={savedProfile} />
+        </ProfileErrorBoundary>
 
         {/* Version history */}
         {intelHistory.length > 0 && (
@@ -486,7 +489,9 @@ export default function IntelAuditToolPage() {
           Not saved yet — review and save below
         </p>
 
-        <IntelProfileView profile={profile} isUpdate={isUpdate} />
+        <ProfileErrorBoundary rawProfile={profile}>
+          <IntelProfileView profile={profile} isUpdate={isUpdate} />
+        </ProfileErrorBoundary>
 
         {/* Actions */}
         <div className="flex flex-wrap items-center gap-3 mt-5">
@@ -916,7 +921,9 @@ function ExistingProfilePanel({ intel }: { intel: StrategyChurchIntel }) {
 
       {expanded && (
         <div className="border-t border-lavender px-2 pb-2">
-          <IntelProfileView profile={profile} />
+          <ProfileErrorBoundary rawProfile={profile}>
+            <IntelProfileView profile={profile} />
+          </ProfileErrorBoundary>
         </div>
       )}
     </div>
