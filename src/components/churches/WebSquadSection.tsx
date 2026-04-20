@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, ExternalLink, PartyPopper, Link, Check } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink, PartyPopper, Link, Check, Globe, Wrench, Server } from 'lucide-react'
 import type { StrategyAccountProgress, WebsiteSupportAudit, MilestoneStatus } from '../../types/database'
 import type { EnrichedSubmission } from '../../pages/ChurchDetailPage'
 import { extractWebPathway } from '../../types/churches'
 import { PATHWAY_LABELS, ASSET_TYPE_LABELS } from '../submit/types'
 import EditableField from './EditableField'
+import { SectionHeader, SubSectionLabel, ToolLink } from './ChurchUI'
 
 const STATUS_CLASSES: Record<MilestoneStatus, string> = {
   sent: 'bg-primary-purple/10 text-primary-purple',
@@ -133,7 +134,7 @@ export default function WebSquadSection({ church, submissions, websiteAudits, on
 
   return (
     <section id="website-squad" className="bg-white border border-lavender rounded-xl p-5 shadow-sm scroll-mt-6">
-      <h2 className="text-sm font-bold text-deep-plum uppercase tracking-wider mb-4">Website Squad</h2>
+      <SectionHeader icon={Globe} title="Website Squad" theme="web" />
 
       {/* Web Pathway */}
       <div className="mb-4">
@@ -157,7 +158,7 @@ export default function WebSquadSection({ church, submissions, websiteAudits, on
 
       {/* Tools */}
       <div className="mb-4">
-        <p className="text-[10px] font-bold text-purple-gray uppercase tracking-wide mb-2">Tools</p>
+        <SubSectionLabel label="Tools" icon={Wrench} variant="tools" />
         <div className="flex flex-wrap gap-2">
           <ToolLink label="Web Support Evaluation" url="https://website-support-audit-dashboard.lovable.app/" />
           <ToolLink label="Fix Website on Evaluation Tool" url="https://forms.thesqd.com/t/31cW5GUouJus?id=recbZlL98sB46bbER" />
@@ -168,7 +169,7 @@ export default function WebSquadSection({ church, submissions, websiteAudits, on
       {/* Hosting Details */}
       {Boolean(raw.hosting_submission || raw.hosting_details_form) && (
         <div className="mb-4 rounded-xl border border-lavender bg-lavender-tint/20 p-4">
-          <p className="text-[10px] font-bold text-purple-gray uppercase tracking-wide mb-2">Hosting Details</p>
+          <SubSectionLabel label="Hosting Details" icon={Server} />
           <div className="flex flex-wrap gap-2 mb-2">
             {Boolean(raw.hosting_submission) && typeof raw.hosting_submission === 'string' && raw.hosting_submission.startsWith('http') && (
               <ToolLink label="Hosting Submission" url={raw.hosting_submission as string} />
@@ -258,16 +259,3 @@ export default function WebSquadSection({ church, submissions, websiteAudits, on
   )
 }
 
-function ToolLink({ label, url }: { label: string; url: string }) {
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-1.5 rounded-full border border-lavender bg-white text-xs text-deep-plum px-3 py-1.5 hover:bg-lavender-tint transition-colors"
-    >
-      <ExternalLink size={10} className="shrink-0" />
-      {label}
-    </a>
-  )
-}

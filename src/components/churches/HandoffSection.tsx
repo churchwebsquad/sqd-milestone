@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { ExternalLink, ChevronDown, ChevronRight } from 'lucide-react'
+import { ExternalLink, ChevronDown, ChevronRight, HandHelping, Wrench } from 'lucide-react'
 import type { StrategyAccountProgress } from '../../types/database'
 import type { HandoffForm } from '../../types/churches'
+import { SectionHeader } from './ChurchUI'
 
 interface Props {
   church: StrategyAccountProgress
@@ -191,15 +192,17 @@ export default function HandoffSection({ church }: Props) {
 
   return (
     <section id="account-manager-handoff" className="bg-white border border-lavender rounded-xl p-5 shadow-sm scroll-mt-6">
-      <h2 className="text-sm font-bold text-deep-plum uppercase tracking-wider mb-4">Account Manager Handoff</h2>
+      <SectionHeader icon={HandHelping} title="Account Manager Handoff" />
 
       <a
         href="https://amhandoffnotes.lovable.app/"
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center gap-2 rounded-full bg-deep-plum text-white text-sm font-semibold px-5 py-2 hover:bg-primary-purple transition-colors mb-5"
+        className="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-amber-50 text-sm font-semibold text-amber-900 px-5 py-2 hover:bg-amber-100 hover:border-amber-400 transition-colors mb-5"
       >
-        Fill Out Account Handoff Form <ExternalLink size={13} />
+        <Wrench size={13} className="text-amber-700" />
+        Fill Out Account Handoff Form
+        <ExternalLink size={12} className="text-amber-600" />
       </a>
 
       <div className="space-y-4">

@@ -4,7 +4,7 @@ import { ChevronUp, ChevronDown, Search, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { StrategyMilestoneDefinition, StrategyMilestoneSubmission, MilestoneStatus } from '../types/database'
 import type { ChurchGridRow, ChurchSortField } from '../types/churches'
-import { accountStatusSortValue, extractWebPathway, extractBrandPathway, extractPlan } from '../types/churches'
+import { accountStatusSortValue, extractWebPathway, extractBrandPathway, extractPlan, firstAm } from '../types/churches'
 import SocialMediaIcons from '../components/churches/SocialMediaIcons'
 
 // ── Status display ───────────────────────────────────────────────────────────
@@ -90,21 +90,49 @@ export default function ChurchesDashboardPage() {
   const [sortField, setSortField] = useState<ChurchSortField>('account_status')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
+  // Include cancelled toggle — default off for faster loads
+  const [includeCancelled, setIncludeCancelled] = useState(false)
+
   // ── Load data ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const load = async () => {
+      setLoading(true)
       try {
-        // Parallel: accounts + strategy_account_progress + submissions + milestone defs
-        const [acctRes, progressRes, subRes, defsRes] = await Promise.all([
-          supabase
-            .from('accounts')
-            .select('account, status, facebook, instagram, acc_airtable_data'),
+        // Step 1: Fetch accounts table first (lightweight — no JSONB) so we know
+        // which members to include based on status
+        const { data: acctData, error: acctErr } = await supabase
+          .from('accounts')
+          .select('account, status, facebook, instagram, acc_airtable_data')
+
+        if (acctErr) throw acctErr
+
+        const accounts = (acctData ?? []) as {
+          account: number; status: string | null
+          facebook: string | null; instagram: string | null
+          acc_airtable_data: Record<string, unknown> | null
+        }[]
+
+        // Filter out cancelled unless user opted in
+        const visibleMembers = accounts
+          .filter(a => includeCancelled || a.status !== 'Cancelled')
+          .map(a => a.account)
+
+        if (visibleMembers.length === 0) {
+          setRows([])
+          setLoading(false)
+          return
+        }
+
+        // Step 2: Parallel fetch the expensive queries, scoped to visible members
+        const [progressRes, subRes, defsRes] = await Promise.all([
           supabase
             .from('strategy_account_progress')
-            .select('member, church_name, css_rep, cohort, handoff_brand_form, handoff_web_form'),
+            .select('member, church_name, css_rep, cohort, handoff_brand_form, handoff_web_form')
+            .in('member', visibleMembers),
           supabase
             .from('strategy_milestone_submissions')
             .select('member, current_milestone_id, submitted_at, milestone_status')
+            .in('member', visibleMembers)
             .order('submitted_at', { ascending: false }),
           supabase
             .from('strategy_milestone_definitions')
@@ -113,11 +141,6 @@ export default function ChurchesDashboardPage() {
 
         if (progressRes.error) throw progressRes.error
 
-        const accounts = (acctRes.data ?? []) as {
-          account: number; status: string | null
-          facebook: string | null; instagram: string | null
-          acc_airtable_data: Record<string, unknown> | null
-        }[]
         const progress = (progressRes.data ?? []) as {
           member: number; church_name: string | null; css_rep: string | null
           cohort: string | null
@@ -186,13 +209,13 @@ export default function ChurchesDashboardPage() {
     }
 
     load()
-  }, [])
+  }, [includeCancelled])
 
   // ── Derived filter options ─────────────────────────────────────────────────
   const statusOptions = useMemo(() => [...new Set(rows.map(r => r.account_status).filter(Boolean) as string[])].sort(), [rows])
   const planOptions = useMemo(() => [...new Set(rows.map(r => r.plan).filter(Boolean) as string[])].sort(), [rows])
   const cohortOptions = useMemo(() => [...new Set(rows.map(r => r.cohort).filter(Boolean) as string[])].sort(), [rows])
-  const amOptions = useMemo(() => [...new Set(rows.map(r => r.css_rep).filter(Boolean) as string[])].sort(), [rows])
+  const amOptions = useMemo(() => [...new Set(rows.map(r => firstAm(r.css_rep)).filter(Boolean) as string[])].sort(), [rows])
 
   // ── Filter + sort ─────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -205,7 +228,7 @@ export default function ChurchesDashboardPage() {
     if (statusFilter) result = result.filter(r => r.account_status === statusFilter)
     if (planFilter) result = result.filter(r => r.plan === planFilter)
     if (cohortFilter) result = result.filter(r => r.cohort === cohortFilter)
-    if (amFilter) result = result.filter(r => r.css_rep === amFilter)
+    if (amFilter) result = result.filter(r => firstAm(r.css_rep) === amFilter)
 
     result = [...result].sort((a, b) => {
       let av: string | number
@@ -325,11 +348,22 @@ export default function ChurchesDashboardPage() {
               </button>
             )}
           </div>
-          {hasFilters && (
-            <p className="text-xs text-purple-gray mt-2">
-              Showing {filtered.length} of {rows.length} churches
-            </p>
-          )}
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-lavender/50">
+            <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={includeCancelled}
+                onChange={e => setIncludeCancelled(e.target.checked)}
+                className="rounded border-lavender text-primary-purple focus:ring-primary-purple/20"
+              />
+              <span className="text-xs text-purple-gray">Include cancelled accounts</span>
+            </label>
+            {hasFilters && (
+              <p className="text-xs text-purple-gray">
+                Showing {filtered.length} of {rows.length} churches
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Loading */}

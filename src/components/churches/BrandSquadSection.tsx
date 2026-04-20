@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, ExternalLink, Link, Check } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink, Link, Check, Palette, BookOpen } from 'lucide-react'
 import type { StrategyAccountProgress, PrfBrandGuide, MilestoneStatus } from '../../types/database'
 import type { EnrichedSubmission } from '../../pages/ChurchDetailPage'
 import { extractBrandPathway } from '../../types/churches'
 import { ASSET_TYPE_LABELS, PATHWAY_LABELS } from '../submit/types'
+import { SectionHeader, SubSectionLabel, DocLink } from './ChurchUI'
 
 const STATUS_CLASSES: Record<MilestoneStatus, string> = {
   sent: 'bg-primary-purple/10 text-primary-purple',
@@ -126,7 +127,7 @@ export default function BrandSquadSection({ church, submissions, brandGuides, po
 
   return (
     <section id="brand-squad" className="bg-white border border-lavender rounded-xl p-5 shadow-sm scroll-mt-6">
-      <h2 className="text-sm font-bold text-deep-plum uppercase tracking-wider mb-4">Brand Squad</h2>
+      <SectionHeader icon={Palette} title="Brand Squad" theme="brand" />
 
       {/* Brand Pathway */}
       <div className="mb-4">
@@ -151,7 +152,7 @@ export default function BrandSquadSection({ church, submissions, brandGuides, po
       {/* Brand guide links */}
       {brandGuides.length > 0 && (
         <div>
-          <p className="text-[10px] font-bold text-purple-gray uppercase tracking-wide mb-2">Brand Guides</p>
+          <SubSectionLabel label="Brand Guides" icon={BookOpen} variant="docs" />
           <div className="flex flex-wrap gap-2">
             {brandGuides.map((g, i) => {
               const raw = g as Record<string, unknown>
@@ -159,23 +160,8 @@ export default function BrandSquadSection({ church, submissions, brandGuides, po
               const name = raw.brand_name as string | undefined
               const isActive = raw.is_active as boolean | undefined
               if (!url || !url.startsWith('https://live.standards.site')) return null
-              return (
-                <a
-                  key={i}
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`inline-flex items-center gap-1.5 rounded-full border text-xs px-3 py-1.5 transition-colors ${
-                    isActive === false
-                      ? 'border-lavender/50 bg-lavender-tint/30 text-purple-gray/50'
-                      : 'border-lavender bg-white text-deep-plum hover:bg-lavender-tint'
-                  }`}
-                >
-                  <ExternalLink size={10} />
-                  {name ?? 'Brand Guide'}
-                  {isActive === false && <span className="text-[9px] opacity-50">(inactive)</span>}
-                </a>
-              )
+              const label = isActive === false ? `${name ?? 'Brand Guide'} (inactive)` : (name ?? 'Brand Guide')
+              return <DocLink key={i} label={label} url={url} icon={BookOpen} />
             })}
           </div>
         </div>

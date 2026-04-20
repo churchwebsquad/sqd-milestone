@@ -1,6 +1,8 @@
+import { Building2 } from 'lucide-react'
 import type { StrategyAccountProgress, Account } from '../../types/database'
 import { extractPlan } from '../../types/churches'
 import EditableField from './EditableField'
+import { SectionHeader } from './ChurchUI'
 
 const STATUS_COLORS: Record<string, string> = {
   Trial: 'bg-primary-purple/10 text-primary-purple border-primary-purple/20',
@@ -25,7 +27,7 @@ export default function ChurchInfoSection({ church, account, onSave, editing }: 
 
   return (
     <section id="church-information" className="bg-white border border-lavender rounded-xl p-5 shadow-sm scroll-mt-6">
-      <h2 className="text-sm font-bold text-deep-plum uppercase tracking-wider mb-4">Church Information</h2>
+      <SectionHeader icon={Building2} title="Church Information" />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
         <EditableField label="Church Name" value={church.church_name} locked onSave={() => Promise.resolve()} />

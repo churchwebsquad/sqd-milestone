@@ -86,7 +86,11 @@ export function extractBrandPathway(form: Record<string, unknown> | null): strin
 }
 
 /** Extract plan from accounts.acc_airtable_data.fields.Plan + AddOns.
- *  Anything containing "All In" normalizes to "All In". */
+ *  Normalizes combined plan+addons text by precedence:
+ *    1. Contains "All In" → "All In"
+ *    2. Contains "Video"  → "Video"
+ *    3. Contains "Unlimited" → "Graphics"
+ *    else → raw plan string */
 export function extractPlan(airtableData: Record<string, unknown> | null): string | null {
   if (!airtableData) return null
   const fields = airtableData.fields as Record<string, unknown> | undefined
@@ -94,10 +98,21 @@ export function extractPlan(airtableData: Record<string, unknown> | null): strin
   const rawPlan = fields.Plan
   if (!rawPlan) return null
   const planStr = typeof rawPlan === 'string' ? rawPlan : String(rawPlan)
-  if (planStr.toLowerCase().includes('all in')) return 'All In'
   const addons = fields.AddOns
-  const addonsStr = addons ? (typeof addons === 'string' ? addons : String(addons)) : null
-  return addonsStr ? `${planStr} + ${addonsStr}` : planStr
+  const addonsStr = addons ? (typeof addons === 'string' ? addons : String(addons)) : ''
+  const combined = `${planStr} ${addonsStr}`.toLowerCase()
+
+  if (combined.includes('all in')) return 'All In'
+  if (combined.includes('video')) return 'Video'
+  if (combined.includes('unlimited')) return 'Graphics'
+  return planStr
+}
+
+/** Return just the first name listed in a multi-AM css_rep string
+ *  e.g. "Ariel Guptill, Lynsey L'Ecuyer" → "Ariel Guptill" */
+export function firstAm(cssRep: string | null): string | null {
+  if (!cssRep) return null
+  return cssRep.split(',')[0].trim() || null
 }
 
 // ── Detail page section IDs ──────────────────────────────────────────────────

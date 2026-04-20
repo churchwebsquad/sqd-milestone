@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, ListChecks } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import type { ClickupFolder, ClickupList } from '../../types/database'
+import { SectionHeader, ToolLink } from './ChurchUI'
 
 interface Props {
   memberId: number
@@ -176,19 +177,12 @@ export default function ClickUpTasksSection({ memberId, clickupLists, clickupFol
 
   return (
     <section id="clickup-tasks" className="bg-white border border-lavender rounded-xl p-5 shadow-sm scroll-mt-6">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-bold text-deep-plum uppercase tracking-wider">ClickUp Tasks</h2>
-        {folderUrl && (
-          <a
-            href={folderUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-full bg-deep-plum text-white text-xs font-semibold px-3 py-1.5 hover:bg-primary-purple transition-colors"
-          >
-            View in ClickUp <ExternalLink size={11} />
-          </a>
-        )}
-      </div>
+      <SectionHeader
+        icon={ListChecks}
+        title="ClickUp Tasks"
+        theme="tasks"
+        action={folderUrl ? <ToolLink label="View in ClickUp" url={folderUrl} /> : null}
+      />
 
       {/* Department tabs */}
       <div className="flex gap-2 mb-4">

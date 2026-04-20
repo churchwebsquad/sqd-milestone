@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Pencil, Check, X } from 'lucide-react'
+import { Pencil, Check, X, MessageCircle } from 'lucide-react'
 import type { StrategyAccountProgress } from '../../types/database'
+import { SectionHeader } from './ChurchUI'
 
 interface Props {
   church: StrategyAccountProgress
@@ -41,7 +42,7 @@ export default function BrandVoiceSection({ church, onSave, editing }: Props) {
 
   return (
     <section id="brand-voice" className="bg-white border border-lavender rounded-xl p-5 shadow-sm scroll-mt-6">
-      <h2 className="text-sm font-bold text-deep-plum uppercase tracking-wider mb-4">Brand Voice</h2>
+      <SectionHeader icon={MessageCircle} title="Brand Voice" theme="brand" />
 
       <div className="space-y-4">
         <div>
