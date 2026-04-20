@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ChevronDown, ChevronRight, Info, ToggleLeft, ToggleRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, Info, ToggleLeft, ToggleRight, Bold, Italic, Code, List, ListOrdered, Minus } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { resolveMergeFields } from '../../lib/mergeFields'
@@ -21,6 +21,20 @@ const MERGE_FIELDS = [
   { field: '{{asset_links}}', note: 'Asset links — resolves in Step 6' },
 ]
 
+
+function ToolbarButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onMouseDown={e => e.preventDefault()}  /* keep textarea focus/selection */
+      onClick={onClick}
+      title={label}
+      className="h-7 w-7 inline-flex items-center justify-center rounded-md text-purple-gray hover:bg-white hover:text-primary-purple transition-colors"
+    >
+      {children}
+    </button>
+  )
+}
 
 function AppendToggle({
   label,
@@ -107,6 +121,68 @@ export default function Step4Message({ formData, updateForm, onNext, onBack, all
   const [loading, setLoading] = useState(false)
   const [appConfig, setAppConfig] = useState<AppConfig>(DEFAULT_APP_CONFIG)
   const configLoadedRef = useRef(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // ── Rich-text toolbar helpers ──────────────────────────────────────────────
+
+  /** Wrap the currently selected text in the textarea with before/after markers. */
+  const wrapSelection = (before: string, after: string = before, placeholder = '') => {
+    const ta = textareaRef.current
+    if (!ta) return
+    const start = ta.selectionStart
+    const end = ta.selectionEnd
+    const value = ta.value
+    const selected = value.slice(start, end) || placeholder
+    const next = value.slice(0, start) + before + selected + after + value.slice(end)
+    updateForm({ messageBody: next })
+    // Restore selection inside the newly wrapped text on next tick
+    requestAnimationFrame(() => {
+      ta.focus()
+      const pos = start + before.length
+      ta.setSelectionRange(pos, pos + selected.length)
+    })
+  }
+
+  /** Prepend a marker to the start of each line in the selection (or current line). */
+  const prependLines = (marker: string) => {
+    const ta = textareaRef.current
+    if (!ta) return
+    const start = ta.selectionStart
+    const end = ta.selectionEnd
+    const value = ta.value
+    // Expand start to the beginning of its line
+    const lineStart = value.lastIndexOf('\n', start - 1) + 1
+    const block = value.slice(lineStart, end || start)
+    const lines = block.split('\n')
+    const hasSelection = end > start
+    const target = hasSelection ? lines : [lines[0] || '']
+    const transformed = target.map(l => l.startsWith(marker) ? l : `${marker}${l}`).join('\n')
+    const next = value.slice(0, lineStart) + transformed + value.slice(hasSelection ? end : start)
+    updateForm({ messageBody: next })
+    requestAnimationFrame(() => {
+      ta.focus()
+      const newEnd = lineStart + transformed.length
+      ta.setSelectionRange(newEnd, newEnd)
+    })
+  }
+
+  /** Insert a block of text at the current caret, surrounded by newlines. */
+  const insertBlock = (block: string) => {
+    const ta = textareaRef.current
+    if (!ta) return
+    const start = ta.selectionStart
+    const value = ta.value
+    const prefix = start > 0 && value[start - 1] !== '\n' ? '\n' : ''
+    const suffix = value[start] !== '\n' ? '\n' : ''
+    const insert = prefix + block + suffix
+    const next = value.slice(0, start) + insert + value.slice(start)
+    updateForm({ messageBody: next })
+    requestAnimationFrame(() => {
+      ta.focus()
+      const pos = start + insert.length
+      ta.setSelectionRange(pos, pos)
+    })
+  }
 
   useEffect(() => {
     if (configLoadedRef.current) return
@@ -237,19 +313,42 @@ export default function Step4Message({ formData, updateForm, onNext, onBack, all
             <MergeFieldsPanel footer={appConfig.standard_footer} />
           </div>
 
-          {/* Message textarea */}
-          <div className="relative">
+          {/* Message editor — toolbar + textarea */}
+          <div className="rounded-xl border border-lavender overflow-hidden focus-within:border-primary-purple focus-within:ring-2 focus-within:ring-primary-purple/20 transition-colors">
+            {/* Toolbar */}
+            <div className="flex items-center gap-0.5 px-2 py-1.5 bg-lavender-tint/40 border-b border-lavender">
+              <ToolbarButton label="Bold (**text**)" onClick={() => wrapSelection('**', '**', 'bold')}>
+                <Bold size={13} />
+              </ToolbarButton>
+              <ToolbarButton label="Italic (_text_)" onClick={() => wrapSelection('_', '_', 'italic')}>
+                <Italic size={13} />
+              </ToolbarButton>
+              <ToolbarButton label="Inline code (`text`)" onClick={() => wrapSelection('`', '`', 'code')}>
+                <Code size={13} />
+              </ToolbarButton>
+              <div className="w-px h-5 bg-lavender mx-1" />
+              <ToolbarButton label="Bulleted list" onClick={() => prependLines('- ')}>
+                <List size={13} />
+              </ToolbarButton>
+              <ToolbarButton label="Numbered list" onClick={() => prependLines('1. ')}>
+                <ListOrdered size={13} />
+              </ToolbarButton>
+              <ToolbarButton label="Divider (---)" onClick={() => insertBlock('---')}>
+                <Minus size={13} />
+              </ToolbarButton>
+            </div>
             <textarea
+              ref={textareaRef}
               value={formData.messageBody}
               onChange={e => updateForm({ messageBody: e.target.value })}
               rows={14}
               placeholder="Write the message here, or select a template above…"
-              className="w-full rounded-xl border border-lavender px-4 py-3 text-sm text-deep-plum placeholder-purple-gray/50 outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20 resize-y leading-relaxed font-sans"
+              className="w-full px-4 py-3 text-sm text-deep-plum placeholder-purple-gray/50 outline-none resize-y leading-relaxed font-sans border-0"
             />
-            <p className="text-xs text-purple-gray mt-1 text-right">
-              {formData.messageBody.length} characters
-            </p>
           </div>
+          <p className="text-xs text-purple-gray mt-1 text-right">
+            {formData.messageBody.length} characters · Markdown: **bold**, _italic_, `code`, - bullets, 1. numbered, --- divider
+          </p>
 
           {/* Append toggles */}
           <div className="mt-3 rounded-xl border border-lavender bg-lavender-tint/30 divide-y divide-lavender/60">

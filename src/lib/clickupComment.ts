@@ -15,6 +15,7 @@ export interface ClickUpTextSegment {
   attributes?: {
     bold?: true
     italic?: true
+    code?: true
     link?: string
   }
 }
@@ -36,26 +37,51 @@ export interface ClickUpMention {
   clickupId: number
 }
 
-// ── Bold expansion ────────────────────────────────────────────────────────────
+// ── Markdown preprocessing ───────────────────────────────────────────────────
 
 /**
- * Splits a single text segment on `**...**` markers, returning one or more
- * segments. Bold segments gain `attributes: { bold: true }`. Any existing
- * attributes on the input segment are preserved alongside bold.
+ * Pre-processes raw markdown text into ClickUp-chat-friendly plain text:
+ *   - Lines of just `---` (or more dashes) become a horizontal divider line
+ *   - `- item` bullet syntax becomes `• item` (bullet character renders as a list)
+ *   - `1. item` numbered lists are preserved as-is (already visually list-like)
  */
-function expandBold(seg: ClickUpTextSegment): ClickUpCommentSegment[] {
-  const { text, attributes: existing } = seg
-  const boldRe = /\*\*(.+?)\*\*/gs  // non-greedy; s flag lets . match \n
+export function preprocessMarkdown(text: string): string {
+  return text
+    .split('\n')
+    .map(line => {
+      const trimmed = line.trim()
+      if (/^-{3,}$/.test(trimmed)) return '─'.repeat(30)
+      const bullet = line.match(/^(\s*)-\s+(.+)$/)
+      if (bullet) return `${bullet[1]}•  ${bullet[2]}`
+      return line
+    })
+    .join('\n')
+}
 
+// ── Inline formatting expansion (bold + italic + code) ───────────────────────
+
+interface FormatRule {
+  name: 'bold' | 'italic' | 'code'
+  re: RegExp
+  attr: { bold?: true; italic?: true; code?: true }
+}
+
+/**
+ * Generic inline-formatting expander. Runs each rule in order on a single
+ * text segment, splitting on the match and applying the corresponding
+ * attribute to matched groups.
+ */
+function expandInline(seg: ClickUpTextSegment, rule: FormatRule): ClickUpCommentSegment[] {
+  const { text, attributes: existing } = seg
   const segments: ClickUpCommentSegment[] = []
   let last = 0
 
-  for (const match of text.matchAll(boldRe)) {
+  for (const match of text.matchAll(rule.re)) {
     const before = text.slice(last, match.index!)
     if (before) {
       segments.push(existing ? { text: before, attributes: existing } : { text: before })
     }
-    segments.push({ text: match[1], attributes: { ...existing, bold: true } })
+    segments.push({ text: match[1], attributes: { ...existing, ...rule.attr } })
     last = match.index! + match[0].length
   }
 
@@ -65,6 +91,36 @@ function expandBold(seg: ClickUpTextSegment): ClickUpCommentSegment[] {
   }
 
   return segments.length > 0 ? segments : [seg]
+}
+
+function expandBold(seg: ClickUpTextSegment): ClickUpCommentSegment[] {
+  return expandInline(seg, { name: 'bold', re: /\*\*(.+?)\*\*/gs, attr: { bold: true } })
+}
+
+function expandItalic(seg: ClickUpTextSegment): ClickUpCommentSegment[] {
+  // Matches `_italic_` — not adjacent to word characters (avoids matching in URLs)
+  return expandInline(seg, { name: 'italic', re: /(?<![A-Za-z0-9/])_([^_\n]+?)_(?![A-Za-z0-9/])/g, attr: { italic: true } })
+}
+
+function expandCode(seg: ClickUpTextSegment): ClickUpCommentSegment[] {
+  return expandInline(seg, { name: 'code', re: /`([^`\n]+?)`/g, attr: { code: true } })
+}
+
+/** Apply a list of expanders in sequence to a single segment. */
+function runExpanders(
+  seg: ClickUpTextSegment,
+  expanders: Array<(s: ClickUpTextSegment) => ClickUpCommentSegment[]>,
+): ClickUpCommentSegment[] {
+  let current: ClickUpCommentSegment[] = [seg]
+  for (const fn of expanders) {
+    const next: ClickUpCommentSegment[] = []
+    for (const s of current) {
+      if ('type' in s) next.push(s)
+      else next.push(...fn(s))
+    }
+    current = next
+  }
+  return current
 }
 
 // ── Main builder ──────────────────────────────────────────────────────────────
@@ -88,6 +144,9 @@ export function buildCommentArray(
   text: string,
   mentions: ClickUpMention[],
 ): ClickUpCommentSegment[] {
+  // ── Pass 0: markdown preprocessing (bullets, dividers) ───────────────────
+  const processed = preprocessMarkdown(text)
+
   // ── Pass 1: split by @mentions ────────────────────────────────────────────
   const valid = mentions.filter(
     m => m.text.trim() !== '' && Number.isInteger(m.clickupId) && m.clickupId > 0,
@@ -96,7 +155,7 @@ export function buildCommentArray(
   let pass1: ClickUpCommentSegment[]
 
   if (valid.length === 0) {
-    pass1 = text ? [{ text }] : []
+    pass1 = processed ? [{ text: processed }] : []
   } else {
     // Longest match first so "@john.smith.junior" beats "@john.smith"
     const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -108,8 +167,8 @@ export function buildCommentArray(
     pass1 = []
     let lastIndex = 0
 
-    for (const match of text.matchAll(re)) {
-      const before = text.slice(lastIndex, match.index!)
+    for (const match of processed.matchAll(re)) {
+      const before = processed.slice(lastIndex, match.index!)
       if (before) pass1.push({ text: before })
 
       const clickupId = idByText.get(match[0])!
@@ -118,17 +177,17 @@ export function buildCommentArray(
       lastIndex = match.index! + match[0].length
     }
 
-    const remaining = text.slice(lastIndex)
+    const remaining = processed.slice(lastIndex)
     if (remaining) pass1.push({ text: remaining })
   }
 
-  // ── Pass 2: expand **bold** within each text segment ─────────────────────
+  // ── Pass 2: expand inline formatting (bold → italic → code) ──────────────
   const result: ClickUpCommentSegment[] = []
   for (const seg of pass1) {
     if ('type' in seg) {
-      result.push(seg)   // tag segments pass through unchanged
+      result.push(seg)
     } else {
-      result.push(...expandBold(seg))
+      result.push(...runExpanders(seg, [expandBold, expandItalic, expandCode]))
     }
   }
 

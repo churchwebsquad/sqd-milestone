@@ -30,22 +30,41 @@ async function getTeamId(token: string): Promise<string | null> {
 }
 
 async function getAnnouncementSubtypeId(token: string, teamId: string): Promise<string | null> {
+  // Env override — set this once after checking the logs to bypass discovery
+  const envOverride = Deno.env.get('CLICKUP_ANNOUNCEMENT_SUBTYPE_ID')
+  if (envOverride) return envOverride
+
   if (cachedAnnouncementSubtypeId !== undefined) return cachedAnnouncementSubtypeId
   try {
-    const res = await fetch(
-      `https://api.clickup.com/api/v3/workspaces/${teamId}/comments/types/post/subtypes`,
-      { headers: { Authorization: token } },
-    )
-    if (res.ok) {
-      const body = await res.json() as Array<{ id: string; name: string }>
-      const hit = Array.isArray(body)
-        ? body.find(t => t.name?.toLowerCase() === 'announcement')
-        : null
-      cachedAnnouncementSubtypeId = hit?.id ?? null
-    } else {
+    const url = `https://api.clickup.com/api/v3/workspaces/${teamId}/comments/types/post/subtypes`
+    const res = await fetch(url, { headers: { Authorization: token } })
+    const bodyText = await res.text()
+    console.log('[getAnnouncementSubtypeId] status:', res.status)
+    console.log('[getAnnouncementSubtypeId] body:', bodyText.slice(0, 500))
+
+    if (!res.ok) {
       cachedAnnouncementSubtypeId = null
+      return null
     }
-  } catch {
+
+    let parsed: unknown = null
+    try { parsed = JSON.parse(bodyText) } catch { /* noop */ }
+
+    // Try multiple response shapes: root array, { data }, { subtypes }
+    const arr: Array<{ id: string; name: string }> = Array.isArray(parsed)
+      ? parsed as Array<{ id: string; name: string }>
+      : Array.isArray((parsed as { data?: unknown })?.data)
+        ? (parsed as { data: Array<{ id: string; name: string }> }).data
+        : Array.isArray((parsed as { subtypes?: unknown })?.subtypes)
+          ? (parsed as { subtypes: Array<{ id: string; name: string }> }).subtypes
+          : []
+
+    console.log('[getAnnouncementSubtypeId] candidates:', arr.map(t => t.name).join(', '))
+    const hit = arr.find(t => t.name?.toLowerCase() === 'announcement')
+    cachedAnnouncementSubtypeId = hit?.id ?? null
+    console.log('[getAnnouncementSubtypeId] resolved:', cachedAnnouncementSubtypeId)
+  } catch (err) {
+    console.error('[getAnnouncementSubtypeId] error:', err)
     cachedAnnouncementSubtypeId = null
   }
   return cachedAnnouncementSubtypeId
