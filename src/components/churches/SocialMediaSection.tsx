@@ -9,6 +9,14 @@ interface Props {
   churchIntel: StrategyChurchIntel | null
 }
 
+/** Strip Claude web_search <cite> tags from a string. */
+function stripCites(s: string | null | undefined): string | null {
+  if (!s) return s ?? null
+  return s
+    .replace(/<cite[^>]*>([\s\S]*?)<\/cite>/g, '$1')
+    .replace(/<\/?cite[^>]*>/g, '')
+}
+
 function freshnessBadge(updatedAt: string | null): { label: string; cls: string } {
   if (!updatedAt) return { label: 'No intel', cls: 'bg-purple-gray/10 text-purple-gray' }
   const days = Math.floor((Date.now() - new Date(updatedAt).getTime()) / 86400000)
@@ -67,26 +75,26 @@ export default function SocialMediaSection({ church, account, churchIntel }: Pro
         {intel ? (
           <>
             {intel.tagline_or_mission && (
-              <p className="text-xs text-primary-purple italic mb-2">{intel.tagline_or_mission}</p>
+              <p className="text-xs text-primary-purple italic mb-2">{stripCites(intel.tagline_or_mission)}</p>
             )}
 
             {intel.audience?.primary && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
                 <div className="bg-white/60 rounded-lg px-2.5 py-1.5">
                   <p className="text-[9px] font-semibold text-purple-gray uppercase">Primary Audience</p>
-                  <p className="text-xs text-deep-plum">{intel.audience.primary}</p>
+                  <p className="text-xs text-deep-plum">{stripCites(intel.audience.primary)}</p>
                 </div>
                 {intel.audience.secondary && (
                   <div className="bg-white/60 rounded-lg px-2.5 py-1.5">
                     <p className="text-[9px] font-semibold text-purple-gray uppercase">Secondary</p>
-                    <p className="text-xs text-deep-plum">{intel.audience.secondary}</p>
+                    <p className="text-xs text-deep-plum">{stripCites(intel.audience.secondary)}</p>
                   </div>
                 )}
               </div>
             )}
 
             {intel.brand_voice?.tone_summary && (
-              <p className="text-xs text-deep-plum leading-relaxed mb-2 line-clamp-3">{intel.brand_voice.tone_summary}</p>
+              <p className="text-xs text-deep-plum leading-relaxed mb-2 line-clamp-3">{stripCites(intel.brand_voice.tone_summary)}</p>
             )}
 
             {(intel.brand_voice?.vocabulary ?? []).length > 0 && (
@@ -99,8 +107,8 @@ export default function SocialMediaSection({ church, account, churchIntel }: Pro
 
             {(intel.denomination || intel.pastor_name) && (
               <div className="flex flex-wrap gap-1.5 mb-3">
-                {intel.denomination && <span className="text-[10px] bg-lavender/60 text-purple-gray rounded-full px-2 py-0.5">{intel.denomination}</span>}
-                {intel.pastor_name && <span className="text-[10px] bg-lavender/60 text-purple-gray rounded-full px-2 py-0.5">Pastor: {intel.pastor_name}</span>}
+                {intel.denomination && <span className="text-[10px] bg-lavender/60 text-purple-gray rounded-full px-2 py-0.5">{stripCites(intel.denomination)}</span>}
+                {intel.pastor_name && <span className="text-[10px] bg-lavender/60 text-purple-gray rounded-full px-2 py-0.5">Pastor: {stripCites(intel.pastor_name)}</span>}
               </div>
             )}
 

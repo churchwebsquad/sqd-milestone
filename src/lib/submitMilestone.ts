@@ -224,6 +224,7 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
       template_id: null,
       is_continuation: formData.isContinuation,
       continuation_of: formData.continuationOfId,
+      track_name: formData.trackName,
       current_milestone_id: formData.currentMilestoneId,
       next_milestone_id: formData.nextMilestoneId,
       rendered_message: finalMessage,

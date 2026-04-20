@@ -432,6 +432,11 @@ function SubmissionCard({
                 Continuation
               </span>
             )}
+            {submission.track_name && (
+              <span className="rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 uppercase tracking-wide">
+                {submission.track_name}
+              </span>
+            )}
           </div>
           <span className="text-xs text-purple-gray">{formatDateTime(submission.submitted_at)}</span>
         </div>

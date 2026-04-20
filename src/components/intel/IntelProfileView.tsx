@@ -5,13 +5,34 @@ interface Props {
   isUpdate?: boolean
 }
 
+/** Strip Claude web_search <cite> tags that leak through into returned strings. */
+function stripCites(s: string): string {
+  return s
+    .replace(/<cite[^>]*>([\s\S]*?)<\/cite>/g, '$1')
+    .replace(/<\/?cite[^>]*>/g, '')
+}
+
+/** Recursively clean citation tags from every string in a nested object. */
+function cleanProfile<T>(value: T): T {
+  if (typeof value === 'string') return stripCites(value) as unknown as T
+  if (Array.isArray(value)) return value.map(cleanProfile) as unknown as T
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = cleanProfile(v)
+    }
+    return out as T
+  }
+  return value
+}
+
 /** Coerce anything into a string for safe rendering / string methods. */
 function asStr(v: unknown): string {
   if (v == null) return ''
-  if (typeof v === 'string') return v
+  if (typeof v === 'string') return stripCites(v)
   if (Array.isArray(v)) return v.map(asStr).filter(Boolean).join(', ')
   if (typeof v === 'object') {
-    try { return JSON.stringify(v) } catch { return String(v) }
+    try { return stripCites(JSON.stringify(v)) } catch { return String(v) }
   }
   return String(v)
 }
@@ -80,7 +101,9 @@ function DeliverableCard({ emoji, title, bgClass, children }: { emoji: string; t
   )
 }
 
-export default function IntelProfileView({ profile, isUpdate }: Props) {
+export default function IntelProfileView({ profile: rawProfile, isUpdate }: Props) {
+  // Clean citation tags from every string in the profile before rendering
+  const profile = cleanProfile(rawProfile)
   return (
     <div className="bg-white border border-lavender rounded-xl overflow-hidden shadow-sm">
       {/* Header */}

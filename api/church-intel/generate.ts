@@ -143,6 +143,9 @@ export default async function handler(req: any, res: any) {
       return res.status(422).json({ error: 'Could not parse profile JSON from Claude response' })
     }
 
+    // Strip citation tags that web_search inserts into strings
+    profile = stripCitations(profile) as Record<string, unknown>
+
     console.log(`[church-intel] Successfully generated profile for ${churchName}`)
     return res.status(200).json({ profile })
   } catch (err: any) {
@@ -152,6 +155,26 @@ export default async function handler(req: any, res: any) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Recursively strip <cite>…</cite> tags from all string values in the profile. */
+function stripCitations(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return value
+      .replace(/<cite[^>]*>([\s\S]*?)<\/cite>/g, '$1')
+      .replace(/<\/?cite[^>]*>/g, '')
+  }
+  if (Array.isArray(value)) {
+    return value.map(stripCitations)
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = stripCitations(v)
+    }
+    return out
+  }
+  return value
+}
 
 function tryParseJson(text: string): Record<string, unknown> | null {
   const cleaned = text.replace(/```json|```/g, '').trim()

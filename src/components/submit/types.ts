@@ -34,6 +34,9 @@ export interface FormState {
   /** When true, continuation messages post as a reply inside the original thread
    *  instead of creating a new top-level message in the channel. */
   postAsThreadReply: boolean
+  /** Optional track label within a pathway. Required for ministry_subbrand
+   *  so multiple parallel subbrands per church stay distinct. Null otherwise. */
+  trackName: string | null
   // Step 3
   currentMilestoneId: string
   nextMilestoneId: string | null
@@ -57,6 +60,7 @@ export const INITIAL_FORM_STATE: FormState = {
   isContinuation: false,
   continuationOfId: null,
   postAsThreadReply: true,
+  trackName: null,
   currentMilestoneId: '',
   nextMilestoneId: null,
   messageBody: '',

@@ -43,8 +43,12 @@ interface TimelineItem {
 interface PathwayData {
   squad: Squad
   pathway: string
+  /** Optional track/subbrand label. Shown in the pathway header when present. */
+  trackName: string | null
   items: TimelineItem[]
 }
+
+const MULTI_TRACK_PATHWAYS = new Set(['ministry_subbrand'])
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -207,7 +211,7 @@ function RoundBlock({ round, label }: { round: Round; label: string | null }) {
 // ── PathwayTimeline ───────────────────────────────────────────────────────────
 
 function PathwayTimeline({ data }: { data: PathwayData }) {
-  const { squad, pathway, items } = data
+  const { squad, pathway, trackName, items } = data
 
   // Group consecutive items by section_group for visual dividers
   const sections: Array<{ group: string | null; items: TimelineItem[] }> = []
@@ -227,6 +231,7 @@ function PathwayTimeline({ data }: { data: PathwayData }) {
       <div className="px-5 py-4 border-b border-lavender bg-lavender-tint/40">
         <p className="text-xs font-bold text-primary-purple uppercase tracking-wider mb-0.5">
           {SQUAD_LABELS[squad] ?? squad}
+          {trackName && <span className="ml-1.5 text-primary-purple/70">· {trackName}</span>}
         </p>
         <h3 className="text-base font-semibold text-deep-plum">
           {PATHWAY_LABELS[pathway] ?? pathway}
@@ -377,22 +382,33 @@ export default function ClientPortalPage() {
         }
 
         // ── 4. Determine unique pathway combos (preserves most-recent-first order) ──
-        const pathwayMap = new Map<string, { squad: Squad; pathway: string }>()
+        // For multi-track pathways (ministry_subbrand), each track becomes its own
+        // timeline. For single-track pathways, trackName is null.
+        const pathwayMap = new Map<string, { squad: Squad; pathway: string; trackName: string | null }>()
         for (const sub of submissions) {
           const ref = milestoneRefsById[sub.milestone_id]
-          if (ref) {
-            const key = `${ref.squad}:${ref.pathway}`
-            if (!pathwayMap.has(key)) {
-              pathwayMap.set(key, { squad: ref.squad, pathway: ref.pathway })
-            }
+          if (!ref) continue
+          const isMulti = MULTI_TRACK_PATHWAYS.has(ref.pathway)
+          const trackName = isMulti ? (sub.track_name ?? null) : null
+          const key = `${ref.squad}:${ref.pathway}:${trackName ?? ''}`
+          if (!pathwayMap.has(key)) {
+            pathwayMap.set(key, { squad: ref.squad, pathway: ref.pathway, trackName })
           }
         }
         const pathwayCombos = [...pathwayMap.values()]
 
         // ── 5. Fetch partner-facing milestones for each pathway in parallel ──
+        // Dedupe by pathway so we don't re-query the same defs per track
+        const uniquePathways = new Map<string, { squad: Squad; pathway: string }>()
+        for (const c of pathwayCombos) {
+          const key = `${c.squad}:${c.pathway}`
+          if (!uniquePathways.has(key)) uniquePathways.set(key, { squad: c.squad, pathway: c.pathway })
+        }
+        const uniquePathwayKeys = [...uniquePathways.keys()]
         const pathwayMilestonesArr = await Promise.all(
-          pathwayCombos.map(({ squad, pathway }) =>
-            supabase
+          uniquePathwayKeys.map(key => {
+            const { squad, pathway } = uniquePathways.get(key)!
+            return supabase
               .from('strategy_milestone_definitions')
               .select('*')
               .eq('squad', squad)
@@ -400,94 +416,93 @@ export default function ClientPortalPage() {
               .eq('is_partner_facing', true)
               .eq('is_active', true)
               .order('step_number')
-          )
+          })
         )
+        const defsByPathwayKey = new Map<string, StrategyMilestoneDefinition[]>()
+        uniquePathwayKeys.forEach((key, i) => {
+          defsByPathwayKey.set(key, (pathwayMilestonesArr[i].data ?? []) as StrategyMilestoneDefinition[])
+        })
 
         // ── 6. Build lookup maps for status computation ─────────────────────
 
-        // milestone_id → most recent submission (submissions are already DESC)
-        const submissionByMilestoneId: Record<string, StrategyMilestoneSubmission> = {}
-        for (const sub of submissions) {
-          if (!submissionByMilestoneId[sub.milestone_id]) {
-            submissionByMilestoneId[sub.milestone_id] = sub
-          }
-        }
+        // Build track-scoped lookups: key = `${milestone_id}:${trackName||''}`
+        const trackKey = (milestoneId: string, trackName: string | null) =>
+          `${milestoneId}:${trackName ?? ''}`
 
-        // milestone_id → all submissions ordered OLDEST → NEWEST (for Round 1, Round 2, ...)
-        const submissionsByMilestoneId: Record<string, StrategyMilestoneSubmission[]> = {}
-        for (const sub of submissions) {
-          if (!submissionsByMilestoneId[sub.milestone_id]) {
-            submissionsByMilestoneId[sub.milestone_id] = []
-          }
-          submissionsByMilestoneId[sub.milestone_id].push(sub)
-        }
-        for (const key of Object.keys(submissionsByMilestoneId)) {
-          submissionsByMilestoneId[key].sort((a, b) => a.submitted_at.localeCompare(b.submitted_at))
-        }
-
-        // pathway key → most recent submission (for current_milestone_id)
-        const mostRecentByPathway: Record<string, StrategyMilestoneSubmission> = {}
+        // (milestone_id, track_name) → most recent submission
+        const submissionByTrackKey: Record<string, StrategyMilestoneSubmission> = {}
         for (const sub of submissions) {
           const ref = milestoneRefsById[sub.milestone_id]
-          if (ref) {
-            const key = `${ref.squad}:${ref.pathway}`
-            if (!mostRecentByPathway[key]) {
-              mostRecentByPathway[key] = sub
-            }
-          }
+          if (!ref) continue
+          const isMulti = MULTI_TRACK_PATHWAYS.has(ref.pathway)
+          const t = isMulti ? (sub.track_name ?? null) : null
+          const key = trackKey(sub.milestone_id, t)
+          if (!submissionByTrackKey[key]) submissionByTrackKey[key] = sub
         }
 
-        // ── 7. Build PathwayData ────────────────────────────────────────────
-        const pathwaysResult: PathwayData[] = pathwayCombos.map(({ squad, pathway }, i) => {
-          const defs = (pathwayMilestonesArr[i].data ?? []) as StrategyMilestoneDefinition[]
-          const mostRecent = mostRecentByPathway[`${squad}:${pathway}`]
+        // (milestone_id, track_name) → all submissions oldest → newest (for rounds)
+        const submissionsByTrackKey: Record<string, StrategyMilestoneSubmission[]> = {}
+        for (const sub of submissions) {
+          const ref = milestoneRefsById[sub.milestone_id]
+          if (!ref) continue
+          const isMulti = MULTI_TRACK_PATHWAYS.has(ref.pathway)
+          const t = isMulti ? (sub.track_name ?? null) : null
+          const key = trackKey(sub.milestone_id, t)
+          if (!submissionsByTrackKey[key]) submissionsByTrackKey[key] = []
+          submissionsByTrackKey[key].push(sub)
+        }
+        for (const key of Object.keys(submissionsByTrackKey)) {
+          submissionsByTrackKey[key].sort((a, b) => a.submitted_at.localeCompare(b.submitted_at))
+        }
 
-          // next_milestone_id = the step the partner is heading to next.
-          // That's the "You Are Here" marker on the portal — the submitted
-          // step itself is done, so it should render as completed.
+        // (squad, pathway, track_name) → most recent submission (for current step)
+        const mostRecentByPathwayTrack: Record<string, StrategyMilestoneSubmission> = {}
+        for (const sub of submissions) {
+          const ref = milestoneRefsById[sub.milestone_id]
+          if (!ref) continue
+          const isMulti = MULTI_TRACK_PATHWAYS.has(ref.pathway)
+          const t = isMulti ? (sub.track_name ?? null) : null
+          const key = `${ref.squad}:${ref.pathway}:${t ?? ''}`
+          if (!mostRecentByPathwayTrack[key]) mostRecentByPathwayTrack[key] = sub
+        }
+
+        // ── 7. Build PathwayData — one timeline per (squad, pathway, trackName) ──
+        const pathwaysResult: PathwayData[] = pathwayCombos.map(({ squad, pathway, trackName }) => {
+          const defs = defsByPathwayKey.get(`${squad}:${pathway}`) ?? []
+          const mostRecent = mostRecentByPathwayTrack[`${squad}:${pathway}:${trackName ?? ''}`]
+
           const youAreHereId = mostRecent?.next_milestone_id?.trim() || null
-
-          // step_number of the "you are here" milestone so we can mark
-          // everything before it as completed even without a direct submission
-          // (handles non-partner-facing steps that are skipped on the portal).
           const youAreHereStepNumber = youAreHereId
             ? (milestoneRefsById[youAreHereId]?.step_number ?? null)
             : null
 
           const items: TimelineItem[] = defs.map(def => {
-            const submission = submissionByMilestoneId[def.id] ?? null
+            const tKey = `${def.id}:${trackName ?? ''}`
+            const submission = submissionByTrackKey[tKey] ?? null
 
             let status: 'completed' | 'current' | 'upcoming'
             if (youAreHereId && def.id === youAreHereId) {
-              // This is the next step — show as "You Are Here"
               status = 'current'
             } else if (submission !== null) {
-              // Has a direct submission record → always completed
               status = 'completed'
             } else if (youAreHereStepNumber !== null && def.step_number < youAreHereStepNumber) {
-              // Precedes the next step — must be done even if partner-facing
-              // view doesn't have a direct submission for this step
               status = 'completed'
             } else {
               status = 'upcoming'
             }
 
-            const allForMilestone = submissionsByMilestoneId[def.id] ?? []
-            const rounds: Round[] = allForMilestone.map(s => ({
+            const allForTrack = submissionsByTrackKey[tKey] ?? []
+            const rounds: Round[] = allForTrack.map(s => ({
               submissionId: s.id,
               submittedAt: s.submitted_at,
               assets: assetsBySubmissionId[s.id] ?? [],
               threadUrl: s.clickup_thread_url ?? null,
             }))
 
-            return {
-              definition: def,
-              status,
-              rounds,
-            }
+            return { definition: def, status, rounds }
           })
 
-          return { squad, pathway, items }
+          return { squad, pathway, trackName, items }
         })
 
         setPathways(pathwaysResult)

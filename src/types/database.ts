@@ -331,6 +331,9 @@ export interface StrategyMilestoneSubmission {
   template_id: string | null
   is_continuation: boolean
   continuation_of: string | null
+  /** Optional track label within a pathway (e.g. "Kids Ministry" subbrand).
+   *  NULL for single-track pathways like Brand New, Web Redesign, etc. */
+  track_name: string | null
   current_milestone_id: string
   next_milestone_id: string | null
   rendered_message: string
