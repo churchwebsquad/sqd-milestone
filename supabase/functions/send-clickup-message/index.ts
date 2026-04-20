@@ -123,11 +123,8 @@ Deno.serve(async (req) => {
       comment_parts: comment,
       notify_all: true,
     }
-    if (!isReply) {
-      // Top-level messages need type=post so ClickUp treats them as Chat posts
-      // (which support subtypes like Announcement) rather than regular messages
-      payload.type = 'post'
-      if (subtypeId) payload.subtype_id = subtypeId
+    if (!isReply && subtypeId) {
+      payload.subtype_id = subtypeId
     }
 
     console.log('[send-clickup-message] channelId:', channelId)
@@ -136,25 +133,54 @@ Deno.serve(async (req) => {
     console.log('[send-clickup-message] segments:', comment.length)
     console.log('[send-clickup-message] payload keys:', Object.keys(payload).join(', '))
 
-    // ── POST to ClickUp (v3 chat API for both paths) ─────────────────────────
-    //   Top-level: POST /v3/workspaces/{teamId}/chat/channels/{channelId}/messages
+    // ── POST to ClickUp (v3 chat API) ────────────────────────────────────────
     //   Reply:     POST /v3/workspaces/{teamId}/chat/messages/{parentMessageId}/replies
-    const clickupUrl = isReply
-      ? `https://api.clickup.com/api/v3/workspaces/${teamId}/chat/messages/${parentMessageId}/replies`
-      : `https://api.clickup.com/api/v3/workspaces/${teamId}/chat/channels/${channelId}/messages`
+    //   Top-level: POST /v3/workspaces/{teamId}/chat/channels/{channelId}/messages
+    //
+    // Attempt 1: if subtype_id is set, try /posts first (announcement-capable).
+    // Fall back to /messages if /posts isn't supported on this workspace.
+    const replyUrl = `https://api.clickup.com/api/v3/workspaces/${teamId}/chat/messages/${parentMessageId}/replies`
+    const postsUrl = `https://api.clickup.com/api/v3/workspaces/${teamId}/chat/channels/${channelId}/posts`
+    const messagesUrl = `https://api.clickup.com/api/v3/workspaces/${teamId}/chat/channels/${channelId}/messages`
 
-    console.log('[send-clickup-message] POST →', clickupUrl)
+    let clickupRes: Response
+    let body: string
+    let finalUrl: string
 
-    const clickupRes = await fetch(clickupUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: token,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    })
+    if (isReply) {
+      finalUrl = replyUrl
+      console.log('[send-clickup-message] POST →', finalUrl)
+      clickupRes = await fetch(finalUrl, {
+        method: 'POST',
+        headers: { Authorization: token, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      body = await clickupRes.text()
+    } else {
+      // Try /posts endpoint first for announcement styling
+      finalUrl = postsUrl
+      console.log('[send-clickup-message] POST →', finalUrl)
+      clickupRes = await fetch(finalUrl, {
+        method: 'POST',
+        headers: { Authorization: token, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      body = await clickupRes.text()
 
-    const body = await clickupRes.text()
+      // If /posts returned 404/400 indicating endpoint doesn't exist, retry /messages
+      if (clickupRes.status === 404 || (clickupRes.status === 400 && /not found|invalid (url|endpoint|route)/i.test(body))) {
+        console.log('[send-clickup-message] /posts unsupported, retrying /messages:', body.slice(0, 200))
+        finalUrl = messagesUrl
+        console.log('[send-clickup-message] POST →', finalUrl)
+        clickupRes = await fetch(finalUrl, {
+          method: 'POST',
+          headers: { Authorization: token, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        body = await clickupRes.text()
+      }
+    }
+
     console.log('[send-clickup-message] ClickUp status:', clickupRes.status)
     console.log('[send-clickup-message] ClickUp body:', body)
 
