@@ -203,7 +203,14 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
         }
       }
 
-      const result = await sendClickUpMessage(formData.channelId, commentArray, parentMessageId)
+      // Announcement title = milestone step name (e.g. "Brand Guide", "Strategy Brief").
+      // For continuations with a track name, prefix it: "Kids Ministry — Brand Guide".
+      const stepName = formData.selectedMilestone?.step_name ?? 'Milestone Update'
+      const announcementTitle = formData.trackName
+        ? `${formData.trackName} — ${stepName}`
+        : stepName
+
+      const result = await sendClickUpMessage(formData.channelId, commentArray, parentMessageId, announcementTitle)
       clickupMessageId = result.id
       clickupThreadUrl = result.threadUrl
       status = 'sent'

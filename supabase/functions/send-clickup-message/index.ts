@@ -79,10 +79,11 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { channelId, comment, parentMessageId } = await req.json() as {
+    const { channelId, comment, parentMessageId, title } = await req.json() as {
       channelId: string
       comment: CommentSegment[]
       parentMessageId?: string | null
+      title?: string | null
     }
 
     if (!channelId || !Array.isArray(comment) || comment.length === 0) {
@@ -130,13 +131,14 @@ Deno.serve(async (req) => {
       // containing a required title + subtype.id. See:
       //   CommentCreateChatMessage + CommentChatPostDataCreate in the OpenAPI spec
       if (subtypeId) {
-        // Derive a title from the first non-empty line of the content (max 255 chars)
-        const firstLine = plainContent.split('\n').map(l => l.trim()).find(l => l.length > 0)
-        const title = (firstLine ?? 'Milestone Update').slice(0, 255)
+        // Prefer the explicit title passed from the app (milestone step name).
+        // Fall back to the first non-empty line of content if none provided.
+        const fallbackTitle = plainContent.split('\n').map(l => l.trim()).find(l => l.length > 0)
+        const finalTitle = (title?.trim() || fallbackTitle || 'Milestone Update').slice(0, 255)
 
         payload.type = 'post'
         payload.post_data = {
-          title,
+          title: finalTitle,
           subtype: { id: subtypeId },
         }
       } else {

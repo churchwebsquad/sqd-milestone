@@ -26,9 +26,12 @@ export async function sendClickUpMessage(
   /** If provided, posts as a reply inside the thread rooted at this message ID
    *  (ClickUp v3 reply endpoint) instead of a new top-level channel message. */
   parentMessageId?: string | null,
+  /** Title for top-level announcement posts (used as the ClickUp post title).
+   *  Ignored for thread replies. Clamped to 255 chars on the server. */
+  title?: string | null,
 ): Promise<ClickUpSendResult> {
   const { data, error } = await supabase.functions.invoke('send-clickup-message', {
-    body: { channelId, comment, parentMessageId: parentMessageId ?? null },
+    body: { channelId, comment, parentMessageId: parentMessageId ?? null, title: title ?? null },
   })
 
   if (error) {
