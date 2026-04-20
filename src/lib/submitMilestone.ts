@@ -153,11 +153,14 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
         ? await lookupStaffClickupId(formData.partner.css_rep)
         : null
 
-      // Build the mention registry
+      // Build the mention registry — one entry per selected partner contact
+      // (multi-contact support), plus the submitter + AM mentions in the footer.
+      const contactMentions: (ClickUpMention | null)[] = (formData.partnerContacts ?? []).map(c =>
+        c.clickupId && c.name ? { text: c.name, clickupId: c.clickupId } : null,
+      )
+
       const mentions: ClickUpMention[] = [
-        formData.partnerContactClickupId && formData.partnerContactName
-          ? { text: formData.partnerContactName, clickupId: formData.partnerContactClickupId }
-          : null,
+        ...contactMentions,
         submitterClickupId && submittedByName
           ? { text: submittedByName, clickupId: submitterClickupId }
           : null,

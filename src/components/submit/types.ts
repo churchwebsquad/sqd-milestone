@@ -21,6 +21,14 @@ export interface ContactRow {
   username: string | null
 }
 
+/** A single selected partner contact — can be an existing clickup_users row
+ *  or a hand-typed name. When clickupId is null the mention falls back to
+ *  plain text in the rendered ClickUp message. */
+export interface SelectedContact {
+  name: string
+  clickupId: number | null
+}
+
 export interface FormState {
   // Step 1
   memberNumber: string
@@ -46,9 +54,12 @@ export interface FormState {
   includeRecap: boolean
   // Step 5
   assets: AssetRow[]
-  // Step 6
+  // Step 6 — partnerContactName/partnerContactClickupId are derived from
+  // partnerContacts (joined mention text; first contact's id) for merge field
+  // resolution and DB storage. partnerContacts is the source of truth.
   partnerContactName: string
   partnerContactClickupId: number | null
+  partnerContacts: SelectedContact[]
 }
 
 export const INITIAL_FORM_STATE: FormState = {
@@ -69,6 +80,7 @@ export const INITIAL_FORM_STATE: FormState = {
   assets: [],
   partnerContactName: '',
   partnerContactClickupId: null,
+  partnerContacts: [],
 }
 
 export interface StepProps {
