@@ -106,34 +106,26 @@ Deno.serve(async (req) => {
 
     const isReply = Boolean(parentMessageId && teamId)
 
-    // ── Build payload ─────────────────────────────────────────────────────────
-    // v2 (top-level channel post): { comment: [...], type: 'post', subtype_id?, notify_all }
-    // v3 (thread reply):           { content: "plain text", comment_parts: [...], notify_all }
-    let payload: Record<string, unknown>
+    // ── Build payload (unified v3 shape for both top-level + replies) ────────
+    // v3 chat messages API expects: { content, comment_parts, subtype_id?, notify_all }
+    // where content = plain text fallback string, comment_parts = rich segments.
+    const plainContent = comment
+      .map(s => {
+        if ('type' in s && s.type === 'tag') return `@user`
+        if ('text' in s) return s.text ?? ''
+        return ''
+      })
+      .join('')
+      .slice(0, 40000)
 
-    if (isReply) {
-      // Build plain-text `content` from the segments (v3 requires it as a string)
-      const plainContent = comment
-        .map(s => {
-          if ('type' in s && s.type === 'tag') return `@user`
-          if ('text' in s) return s.text ?? ''
-          return ''
-        })
-        .join('')
-        .slice(0, 40000)  // ClickUp enforces a 40k character max
-
-      payload = {
-        content: plainContent,
-        comment_parts: comment,
-        notify_all: true,
-      }
-    } else {
-      payload = {
-        comment,
-        notify_all: true,
-        type: 'post',
-      }
-      if (subtypeId) payload.subtype_id = subtypeId
+    const payload: Record<string, unknown> = {
+      content: plainContent,
+      comment_parts: comment,
+      notify_all: true,
+    }
+    if (!isReply && subtypeId) {
+      // Announcement styling is a top-level-only concern
+      payload.subtype_id = subtypeId
     }
 
     console.log('[send-clickup-message] channelId:', channelId)
@@ -142,12 +134,12 @@ Deno.serve(async (req) => {
     console.log('[send-clickup-message] segments:', comment.length)
     console.log('[send-clickup-message] payload keys:', Object.keys(payload).join(', '))
 
-    // ── POST to ClickUp ───────────────────────────────────────────────────────
-    // Top-level: v2 channel comment endpoint
-    // Reply:     v3 workspaces/chat/messages/{id}/replies endpoint
+    // ── POST to ClickUp (v3 chat API for both paths) ─────────────────────────
+    //   Top-level: POST /v3/workspaces/{teamId}/chat/channels/{channelId}/messages
+    //   Reply:     POST /v3/workspaces/{teamId}/chat/messages/{parentMessageId}/replies
     const clickupUrl = isReply
       ? `https://api.clickup.com/api/v3/workspaces/${teamId}/chat/messages/${parentMessageId}/replies`
-      : `https://api.clickup.com/api/v2/view/${channelId}/comment`
+      : `https://api.clickup.com/api/v3/workspaces/${teamId}/chat/channels/${channelId}/messages`
 
     console.log('[send-clickup-message] POST →', clickupUrl)
 
