@@ -15,6 +15,7 @@ export type AssetType =
   | 'website_link'
   | 'document'
   | 'vista_social'
+  | 'form'
   | 'other'
 
 /** ClickUp message delivery status (did the message send successfully?) */

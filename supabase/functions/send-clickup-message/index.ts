@@ -50,14 +50,17 @@ async function getAnnouncementSubtypeId(token: string, teamId: string): Promise<
     let parsed: unknown = null
     try { parsed = JSON.parse(bodyText) } catch { /* noop */ }
 
-    // Try multiple response shapes: root array, { data }, { subtypes }
+    // Try multiple response shapes: root array, { data }, { subtypes }, { comment_subtypes }
+    const p = parsed as Record<string, unknown>
     const arr: Array<{ id: string; name: string }> = Array.isArray(parsed)
       ? parsed as Array<{ id: string; name: string }>
-      : Array.isArray((parsed as { data?: unknown })?.data)
-        ? (parsed as { data: Array<{ id: string; name: string }> }).data
-        : Array.isArray((parsed as { subtypes?: unknown })?.subtypes)
-          ? (parsed as { subtypes: Array<{ id: string; name: string }> }).subtypes
-          : []
+      : Array.isArray(p?.data)
+        ? p.data as Array<{ id: string; name: string }>
+        : Array.isArray(p?.subtypes)
+          ? p.subtypes as Array<{ id: string; name: string }>
+          : Array.isArray(p?.comment_subtypes)
+            ? p.comment_subtypes as Array<{ id: string; name: string }>
+            : []
 
     console.log('[getAnnouncementSubtypeId] candidates:', arr.map(t => t.name).join(', '))
     const hit = arr.find(t => t.name?.toLowerCase() === 'announcement')

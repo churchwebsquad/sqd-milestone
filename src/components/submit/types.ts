@@ -108,6 +108,7 @@ export const ASSET_TYPE_LABELS: Record<AssetType, string> = {
   website_link: 'Website Link',
   document: 'Document',
   vista_social: 'Vista Social',
+  form: 'Form',
   other: 'Other',
 }
 
