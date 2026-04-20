@@ -1,8 +1,10 @@
-[project]
-id = ""
+project_id = "sqd-milestone"
 
 [api]
 enabled = true
 
-[functions]
+[functions.send-clickup-message]
+verify_jwt = true
+
+[functions.church-intel-generate]
 verify_jwt = true

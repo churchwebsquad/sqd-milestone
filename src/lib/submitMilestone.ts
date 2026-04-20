@@ -34,6 +34,40 @@ export interface SubmitMilestoneResult {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
+ * Walk the continuation chain up to find the ROOT submission's clickup_message_id.
+ * A continuation may point at another continuation, so we follow continuation_of
+ * links until we hit a submission with is_continuation=false (or a dead end).
+ * Returns the root message ID, or null if no root message could be resolved.
+ */
+async function resolveRootMessageId(startSubmissionId: string): Promise<string | null> {
+  let currentId: string | null = startSubmissionId
+  const seen = new Set<string>()
+
+  while (currentId && !seen.has(currentId)) {
+    seen.add(currentId)
+    const { data } = await supabase
+      .from('strategy_milestone_submissions')
+      .select('id, is_continuation, continuation_of, clickup_message_id')
+      .eq('id', currentId)
+      .maybeSingle()
+
+    if (!data) return null
+    const row = data as { id: string; is_continuation: boolean; continuation_of: string | null; clickup_message_id: string | null }
+
+    if (!row.is_continuation) {
+      return row.clickup_message_id
+    }
+    if (!row.continuation_of) {
+      // Orphaned continuation — fall back to this submission's own message id
+      return row.clickup_message_id
+    }
+    currentId = row.continuation_of
+  }
+
+  return null
+}
+
+/**
  * Look up a staff member's ClickUp user ID by matching css_rep against
  * clickup_users.username (with or without leading @) or clickup_users.email.
  * Returns null if no match — callers fall back to plain text in that case.
@@ -156,7 +190,20 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
 
       console.log('[submitMilestone] final comment array:', JSON.stringify(commentArray, null, 2))
 
-      const result = await sendClickUpMessage(formData.channelId, commentArray)
+      // ── Resolve parent thread message ID for continuations ───────────────
+      // When the user chose to post a continuation inside the original thread,
+      // walk up the continuation chain to find the root message to reply to.
+      let parentMessageId: string | null = null
+      if (formData.isContinuation && formData.postAsThreadReply && formData.continuationOfId) {
+        parentMessageId = await resolveRootMessageId(formData.continuationOfId)
+        if (!parentMessageId) {
+          console.warn('[submitMilestone] No root message ID found for continuation; falling back to channel post')
+        } else {
+          console.log('[submitMilestone] Posting as reply to thread root:', parentMessageId)
+        }
+      }
+
+      const result = await sendClickUpMessage(formData.channelId, commentArray, parentMessageId)
       clickupMessageId = result.id
       clickupThreadUrl = result.threadUrl
       status = 'sent'

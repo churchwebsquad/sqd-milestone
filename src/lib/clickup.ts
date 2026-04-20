@@ -23,9 +23,12 @@ export interface ClickUpSendResult {
 export async function sendClickUpMessage(
   channelId: string,
   comment: ClickUpCommentSegment[],
+  /** If provided, posts as a reply inside the thread rooted at this message ID
+   *  (ClickUp v3 reply endpoint) instead of a new top-level channel message. */
+  parentMessageId?: string | null,
 ): Promise<ClickUpSendResult> {
   const { data, error } = await supabase.functions.invoke('send-clickup-message', {
-    body: { channelId, comment },
+    body: { channelId, comment, parentMessageId: parentMessageId ?? null },
   })
 
   if (error) {

@@ -57,9 +57,10 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { channelId, comment } = await req.json() as {
+    const { channelId, comment, parentMessageId } = await req.json() as {
       channelId: string
       comment: CommentSegment[]
+      parentMessageId?: string | null
     }
 
     if (!channelId || !Array.isArray(comment) || comment.length === 0) {
@@ -81,33 +82,41 @@ Deno.serve(async (req) => {
     const teamId = await getTeamId(token)
     const subtypeId = teamId ? await getAnnouncementSubtypeId(token, teamId) : null
 
+    const isReply = Boolean(parentMessageId && teamId)
+
     // ── Build payload ─────────────────────────────────────────────────────────
     const payload: Record<string, unknown> = {
       comment,
       notify_all: true,
-      type: 'post',
     }
-    if (subtypeId) {
-      payload.subtype_id = subtypeId
+    if (!isReply) {
+      // Top-level post needs type=post + subtype for announcement formatting
+      payload.type = 'post'
+      if (subtypeId) payload.subtype_id = subtypeId
     }
 
     console.log('[send-clickup-message] channelId:', channelId)
-    console.log('[send-clickup-message] subtypeId:', subtypeId ?? 'none')
+    console.log('[send-clickup-message] parentMessageId:', parentMessageId ?? 'none (top-level)')
+    console.log('[send-clickup-message] isReply:', isReply)
     console.log('[send-clickup-message] segments:', comment.length)
-    console.log('[send-clickup-message] comment:', JSON.stringify(comment, null, 2))
 
     // ── POST to ClickUp ───────────────────────────────────────────────────────
-    const clickupRes = await fetch(
-      `https://api.clickup.com/api/v2/view/${channelId}/comment`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: token,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
+    // Top-level: v2 channel comment endpoint
+    // Reply:     v3 workspaces/chat/messages/{id}/replies endpoint
+    const clickupUrl = isReply
+      ? `https://api.clickup.com/api/v3/workspaces/${teamId}/chat/messages/${parentMessageId}/replies`
+      : `https://api.clickup.com/api/v2/view/${channelId}/comment`
+
+    console.log('[send-clickup-message] POST →', clickupUrl)
+
+    const clickupRes = await fetch(clickupUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: token,
+        'Content-Type': 'application/json',
       },
-    )
+      body: JSON.stringify(payload),
+    })
 
     const body = await clickupRes.text()
     console.log('[send-clickup-message] ClickUp status:', clickupRes.status)
@@ -120,21 +129,26 @@ Deno.serve(async (req) => {
       )
     }
 
-    const data = JSON.parse(body) as { id?: string | number }
-    const messageId = data.id != null ? String(data.id) : null
+    const data = JSON.parse(body) as { id?: string | number; data?: { id?: string | number } }
+    // v2 returns { id }, v3 reply returns { data: { id } } — handle both
+    const raw = data.id ?? data.data?.id
+    const messageId = raw != null ? String(raw) : null
 
-    // ── Build thread URL (teamId already fetched above) ───────────────────────
+    // ── Build thread URL ──────────────────────────────────────────────────────
+    // For a reply, the thread URL should still point at the ROOT message (parentMessageId)
+    // so readers land in the same conversation. For a top-level post, it's the new messageId.
     let threadUrl: string | null = null
     if (teamId) {
-      threadUrl = messageId
-        ? `https://app.clickup.com/${teamId}/chat/r/${channelId}/t/${messageId}`
+      const threadId = isReply ? parentMessageId : messageId
+      threadUrl = threadId
+        ? `https://app.clickup.com/${teamId}/chat/r/${channelId}/t/${threadId}`
         : `https://app.clickup.com/${teamId}/chat/r/${channelId}`
     }
 
     console.log('[send-clickup-message] threadUrl:', threadUrl)
 
     return new Response(
-      JSON.stringify({ id: messageId, threadUrl }),
+      JSON.stringify({ id: messageId, threadUrl, isReply }),
       { headers: { ...CORS, 'Content-Type': 'application/json' } },
     )
   } catch (err) {

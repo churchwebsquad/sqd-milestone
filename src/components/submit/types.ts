@@ -31,6 +31,9 @@ export interface FormState {
   selectedMilestone: StrategyMilestoneDefinition | null
   isContinuation: boolean
   continuationOfId: string | null
+  /** When true, continuation messages post as a reply inside the original thread
+   *  instead of creating a new top-level message in the channel. */
+  postAsThreadReply: boolean
   // Step 3
   currentMilestoneId: string
   nextMilestoneId: string | null
@@ -53,6 +56,7 @@ export const INITIAL_FORM_STATE: FormState = {
   selectedMilestone: null,
   isContinuation: false,
   continuationOfId: null,
+  postAsThreadReply: true,
   currentMilestoneId: '',
   nextMilestoneId: null,
   messageBody: '',

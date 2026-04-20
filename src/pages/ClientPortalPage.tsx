@@ -25,12 +25,19 @@ interface MilestoneRef {
   step_number: number
 }
 
+/** One submission's rollup — each round (original + continuations) is a Round. */
+interface Round {
+  submissionId: string
+  submittedAt: string
+  assets: StrategySubmissionAsset[]
+  threadUrl: string | null
+}
+
 interface TimelineItem {
   definition: StrategyMilestoneDefinition
   status: 'completed' | 'current' | 'upcoming'
-  submittedAt: string | null
-  assets: StrategySubmissionAsset[]
-  threadUrl: string | null
+  /** Rounds ordered oldest → newest. First is Round 1, second is Round 2, etc. */
+  rounds: Round[]
 }
 
 interface PathwayData {
@@ -52,10 +59,13 @@ function formatDate(iso: string): string {
 // ── TimelineNode ──────────────────────────────────────────────────────────────
 
 function TimelineNode({ item, isLast }: { item: TimelineItem; isLast: boolean }) {
-  const { definition, status, submittedAt, assets, threadUrl } = item
+  const { definition, status, rounds } = item
   const isCompleted = status === 'completed'
   const isCurrent = status === 'current'
   const isUpcoming = status === 'upcoming'
+  const hasRounds = rounds.length > 0
+  const latestSubmittedAt = hasRounds ? rounds[rounds.length - 1].submittedAt : null
+  const showRoundLabels = rounds.length > 1
 
   return (
     <div className="flex gap-3 sm:gap-4">
@@ -86,76 +96,109 @@ function TimelineNode({ item, isLast }: { item: TimelineItem; isLast: boolean })
 
       {/* Right column: content */}
       <div className={['flex-1 pt-0.5', isLast ? 'pb-0' : 'pb-6'].join(' ')}>
-        <p
-          className={[
-            'font-semibold leading-snug',
-            isUpcoming
-              ? 'text-purple-gray/60'
-              : isCurrent
-              ? 'text-primary-purple text-[15px]'
-              : 'text-deep-plum',
-          ].join(' ')}
-        >
-          {definition.step_name}
-        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <p
+            className={[
+              'font-semibold leading-snug',
+              isUpcoming
+                ? 'text-purple-gray/60'
+                : isCurrent
+                ? 'text-primary-purple text-[15px]'
+                : 'text-deep-plum',
+            ].join(' ')}
+          >
+            {definition.step_name}
+          </p>
+          {rounds.length > 1 && (
+            <span className="text-[10px] font-bold text-primary-purple bg-primary-purple/10 rounded-full px-2 py-0.5">
+              {rounds.length} rounds
+            </span>
+          )}
+        </div>
 
-        {submittedAt && (isCompleted || isCurrent) && (
+        {latestSubmittedAt && (isCompleted || isCurrent) && (
           <p className="text-xs text-purple-gray mt-0.5">
             {isCompleted ? 'Completed ' : 'Last updated '}
-            {formatDate(submittedAt)}
+            {formatDate(latestSubmittedAt)}
           </p>
         )}
 
-        {/* Assets + ClickUp — always visible for any submitted milestone */}
-        {submittedAt && (
-          <div className="mt-3 space-y-2">
-            {/* Attached assets */}
-            <div>
-              <p className="text-[10px] font-semibold text-purple-gray/70 uppercase tracking-wide mb-1.5">
-                Attached Assets
-              </p>
-              {assets.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {assets.map(asset => (
-                    <a
-                      key={asset.id}
-                      href={asset.asset_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 rounded-full bg-lavender-tint border border-lavender text-primary-purple text-xs font-medium px-2.5 py-1 hover:bg-lavender/60 transition-colors"
-                    >
-                      <ExternalLink size={10} />
-                      {ASSET_TYPE_LABELS[asset.asset_type]}
-                      {asset.asset_label ? ` — ${asset.asset_label}` : ''}
-                    </a>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-purple-gray/50 italic">No assets attached</p>
-              )}
-            </div>
-
-            {/* ClickUp thread */}
-            <div>
-              <p className="text-[10px] font-semibold text-purple-gray/70 uppercase tracking-wide mb-1.5">
-                View in ClickUp
-              </p>
-              {threadUrl ? (
-                <a
-                  href={threadUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-full border border-lavender text-purple-gray text-xs font-medium px-2.5 py-1 hover:border-primary-purple hover:text-primary-purple transition-colors"
-                >
-                  <ExternalLink size={10} />
-                  Open message thread
-                </a>
-              ) : (
-                <p className="text-xs text-purple-gray/50 italic">Link not available</p>
-              )}
-            </div>
+        {/* Rounds — each submission gets its own block */}
+        {hasRounds && (
+          <div className="mt-3 space-y-3">
+            {rounds.map((round, i) => (
+              <RoundBlock
+                key={round.submissionId}
+                round={round}
+                label={showRoundLabels ? `Round ${i + 1}` : null}
+              />
+            ))}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ── RoundBlock ────────────────────────────────────────────────────────────────
+
+function RoundBlock({ round, label }: { round: Round; label: string | null }) {
+  const { assets, threadUrl, submittedAt } = round
+  return (
+    <div className={label ? 'rounded-lg bg-lavender-tint/30 border border-lavender/40 px-3 py-2.5' : ''}>
+      {label && (
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[10px] font-bold text-primary-purple uppercase tracking-widest">
+            {label}
+          </p>
+          <p className="text-[10px] text-purple-gray">{formatDate(submittedAt)}</p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <div>
+          <p className="text-[10px] font-semibold text-purple-gray/70 uppercase tracking-wide mb-1.5">
+            Attached Assets
+          </p>
+          {assets.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {assets.map(asset => (
+                <a
+                  key={asset.id}
+                  href={asset.asset_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded-full bg-lavender-tint border border-lavender text-primary-purple text-xs font-medium px-2.5 py-1 hover:bg-lavender/60 transition-colors"
+                >
+                  <ExternalLink size={10} />
+                  {ASSET_TYPE_LABELS[asset.asset_type]}
+                  {asset.asset_label ? ` — ${asset.asset_label}` : ''}
+                </a>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-purple-gray/50 italic">No assets attached</p>
+          )}
+        </div>
+
+        <div>
+          <p className="text-[10px] font-semibold text-purple-gray/70 uppercase tracking-wide mb-1.5">
+            View in ClickUp
+          </p>
+          {threadUrl ? (
+            <a
+              href={threadUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full border border-lavender text-purple-gray text-xs font-medium px-2.5 py-1 hover:border-primary-purple hover:text-primary-purple transition-colors"
+            >
+              <ExternalLink size={10} />
+              Open message thread
+            </a>
+          ) : (
+            <p className="text-xs text-purple-gray/50 italic">Link not available</p>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -370,6 +413,18 @@ export default function ClientPortalPage() {
           }
         }
 
+        // milestone_id → all submissions ordered OLDEST → NEWEST (for Round 1, Round 2, ...)
+        const submissionsByMilestoneId: Record<string, StrategyMilestoneSubmission[]> = {}
+        for (const sub of submissions) {
+          if (!submissionsByMilestoneId[sub.milestone_id]) {
+            submissionsByMilestoneId[sub.milestone_id] = []
+          }
+          submissionsByMilestoneId[sub.milestone_id].push(sub)
+        }
+        for (const key of Object.keys(submissionsByMilestoneId)) {
+          submissionsByMilestoneId[key].sort((a, b) => a.submitted_at.localeCompare(b.submitted_at))
+        }
+
         // pathway key → most recent submission (for current_milestone_id)
         const mostRecentByPathway: Record<string, StrategyMilestoneSubmission> = {}
         for (const sub of submissions) {
@@ -417,12 +472,18 @@ export default function ClientPortalPage() {
               status = 'upcoming'
             }
 
+            const allForMilestone = submissionsByMilestoneId[def.id] ?? []
+            const rounds: Round[] = allForMilestone.map(s => ({
+              submissionId: s.id,
+              submittedAt: s.submitted_at,
+              assets: assetsBySubmissionId[s.id] ?? [],
+              threadUrl: s.clickup_thread_url ?? null,
+            }))
+
             return {
               definition: def,
               status,
-              submittedAt: submission?.submitted_at ?? null,
-              assets: submission ? (assetsBySubmissionId[submission.id] ?? []) : [],
-              threadUrl: submission?.clickup_thread_url ?? null,
+              rounds,
             }
           })
 

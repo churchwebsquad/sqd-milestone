@@ -190,6 +190,33 @@ export default function Step2Milestone({ formData, updateForm, onNext, onBack, a
               </label>
             ))}
           </div>
+
+          {/* Thread-reply toggle — only when continuation is selected */}
+          {promptAnswered && formData.isContinuation && (
+            <div className="mt-4 pt-4 border-t border-amber-200/60">
+              <p className="text-xs font-bold text-amber-800 uppercase tracking-wide mb-2">Where to Post This Update</p>
+              <div className="space-y-2">
+                {[
+                  { value: true, label: 'Reply inside the original thread', desc: 'Keeps all rounds together in one ClickUp conversation (recommended)' },
+                  { value: false, label: 'Post as new channel message', desc: 'Starts a fresh top-level message in the channel' },
+                ].map(opt => (
+                  <label key={String(opt.value)} className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="post-location"
+                      checked={formData.postAsThreadReply === opt.value}
+                      onChange={() => updateForm({ postAsThreadReply: opt.value })}
+                      className="mt-0.5 accent-primary-purple"
+                    />
+                    <span className="flex-1">
+                      <span className="text-sm text-amber-800 block">{opt.label}</span>
+                      <span className="text-xs text-amber-700/70">{opt.desc}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
