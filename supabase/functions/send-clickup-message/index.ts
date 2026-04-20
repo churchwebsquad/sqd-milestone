@@ -123,9 +123,11 @@ Deno.serve(async (req) => {
       comment_parts: comment,
       notify_all: true,
     }
-    if (!isReply && subtypeId) {
-      // Announcement styling is a top-level-only concern
-      payload.subtype_id = subtypeId
+    if (!isReply) {
+      // Top-level messages need type=post so ClickUp treats them as Chat posts
+      // (which support subtypes like Announcement) rather than regular messages
+      payload.type = 'post'
+      if (subtypeId) payload.subtype_id = subtypeId
     }
 
     console.log('[send-clickup-message] channelId:', channelId)
