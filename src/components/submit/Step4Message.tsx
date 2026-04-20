@@ -207,7 +207,13 @@ export default function Step4Message({ formData, updateForm, onNext, onBack, all
   const applyTemplate = (template: StrategyMessageTemplate) => {
     setSelectedTemplateId(template.id)
     const body = resolveMergeFields(template.template_body, mergeData)
-    updateForm({ messageBody: body })
+    // Templates can set defaults for the footer + recap toggles. Default to
+    // true if the field is missing (pre-migration templates).
+    updateForm({
+      messageBody: body,
+      includeFooter: template.include_footer ?? true,
+      includeRecap: template.include_recap ?? true,
+    })
   }
 
   const handleFooterToggle = (include: boolean) => {

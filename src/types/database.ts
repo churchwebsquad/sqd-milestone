@@ -319,6 +319,10 @@ export interface StrategyMessageTemplate {
   subject_line: string | null
   template_body: string
   is_active: boolean
+  /** Default for the Standard Footer toggle when this template is applied. */
+  include_footer: boolean
+  /** Default for the All-In Updates Recap toggle when this template is applied. */
+  include_recap: boolean
   last_edited_by: string | null
   created_at: string
   updated_at: string

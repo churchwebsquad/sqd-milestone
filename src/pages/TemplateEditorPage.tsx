@@ -579,12 +579,16 @@ function TemplateCard({ template, submitterName, isAdmin, onSaved }: TemplateCar
   const [subject, setSubject] = useState(template.subject_line ?? '')
   const [body, setBody] = useState(template.template_body)
   const [isActive, setIsActive] = useState(template.is_active)
+  const [includeFooter, setIncludeFooter] = useState(template.include_footer ?? true)
+  const [includeRecap, setIncludeRecap] = useState(template.include_recap ?? true)
 
   const [saved, setSaved] = useState({
     variant: template.template_variant,
     subject: template.subject_line ?? '',
     body: template.template_body,
     isActive: template.is_active,
+    includeFooter: template.include_footer ?? true,
+    includeRecap: template.include_recap ?? true,
   })
 
   const [saving, setSaving] = useState(false)
@@ -595,7 +599,9 @@ function TemplateCard({ template, submitterName, isAdmin, onSaved }: TemplateCar
     variant !== saved.variant ||
     subject !== saved.subject ||
     body !== saved.body ||
-    isActive !== saved.isActive
+    isActive !== saved.isActive ||
+    includeFooter !== saved.includeFooter ||
+    includeRecap !== saved.includeRecap
 
   const handleSave = async () => {
     if (!variant.trim()) { setError('Variant key cannot be empty'); return }
@@ -607,6 +613,8 @@ function TemplateCard({ template, submitterName, isAdmin, onSaved }: TemplateCar
         subject_line: subject.trim() || null,
         template_body: body,
         is_active: isActive,
+        include_footer: includeFooter,
+        include_recap: includeRecap,
         last_edited_by: submitterName || null,
       }
       const { data, error: saveError } = await supabase
@@ -625,6 +633,8 @@ function TemplateCard({ template, submitterName, isAdmin, onSaved }: TemplateCar
         subject: updated.subject_line ?? '',
         body: updated.template_body,
         isActive: updated.is_active,
+        includeFooter: updated.include_footer ?? true,
+        includeRecap: updated.include_recap ?? true,
       })
       setSaveStatus('saved')
       onSaved(updated)
@@ -752,8 +762,69 @@ function TemplateCard({ template, submitterName, isAdmin, onSaved }: TemplateCar
           />
           <p className="text-xs text-purple-gray mt-1 text-right">{body.length} chars</p>
         </div>
+
+        {/* Default toggles — staff can override per-message in Step 5 */}
+        <div>
+          <label className="block text-xs font-semibold text-purple-gray uppercase tracking-wide mb-2">
+            Defaults when this template is applied
+          </label>
+          <div className="rounded-xl border border-lavender divide-y divide-lavender/60">
+            <TemplateDefaultToggle
+              label="Standard Footer"
+              description="Appends the editable footer text on send"
+              enabled={includeFooter}
+              onToggle={setIncludeFooter}
+              disabled={!isAdmin}
+            />
+            <TemplateDefaultToggle
+              label="All-In Updates Recap"
+              description="Includes cross-squad current + next milestone rollup"
+              enabled={includeRecap}
+              onToggle={setIncludeRecap}
+              disabled={!isAdmin}
+            />
+          </div>
+        </div>
       </div>
     </div>
+  )
+}
+
+// ── TemplateDefaultToggle — small inline row for footer/recap defaults ──────
+
+function TemplateDefaultToggle({
+  label, description, enabled, onToggle, disabled,
+}: {
+  label: string
+  description: string
+  enabled: boolean
+  onToggle: (v: boolean) => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => !disabled && onToggle(!enabled)}
+      disabled={disabled}
+      className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
+        disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-lavender-tint/50 cursor-pointer'
+      }`}
+    >
+      <div className={`h-4 w-7 rounded-full transition-colors shrink-0 ${enabled ? 'bg-primary-purple' : 'bg-lavender'}`}>
+        <div className={`h-3 w-3 rounded-full bg-white transition-transform mt-0.5 ${enabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <span className={`text-xs font-semibold ${enabled ? 'text-deep-plum' : 'text-purple-gray'}`}>
+          {label}
+        </span>
+        <span className="block text-[11px] text-purple-gray/70">{description}</span>
+      </div>
+      <span className={`text-[10px] font-bold rounded-full px-2 py-0.5 shrink-0 ${
+        enabled ? 'bg-primary-purple/10 text-primary-purple' : 'bg-lavender/60 text-purple-gray/60'
+      }`}>
+        {enabled ? 'ON' : 'OFF'}
+      </span>
+    </button>
   )
 }
 
