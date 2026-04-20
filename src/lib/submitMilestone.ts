@@ -34,37 +34,61 @@ export interface SubmitMilestoneResult {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * Walk the continuation chain up to find the ROOT submission's clickup_message_id.
- * A continuation may point at another continuation, so we follow continuation_of
- * links until we hit a submission with is_continuation=false (or a dead end).
- * Returns the root message ID, or null if no root message could be resolved.
+ * Walk the continuation chain up to find the ROOT submission's clickup_message_id,
+ * verifying every hop shares the same milestone_id and track_name as the submission
+ * we're about to send. This prevents a reply from accidentally landing in a
+ * different milestone's thread if the chain ever diverges.
+ *
+ * Returns the clickup_message_id of the earliest same-milestone+track submission
+ * in the chain (the root). Falls back to the most recent matching submission's
+ * message id if the chain breaks or the root itself has no message id.
  */
-async function resolveRootMessageId(startSubmissionId: string): Promise<string | null> {
+async function resolveRootMessageId(
+  startSubmissionId: string,
+  expectedMilestoneId: string,
+  expectedTrackName: string | null,
+): Promise<string | null> {
   let currentId: string | null = startSubmissionId
   const seen = new Set<string>()
+  let fallbackMessageId: string | null = null
 
   while (currentId && !seen.has(currentId)) {
     seen.add(currentId)
     const { data } = await supabase
       .from('strategy_milestone_submissions')
-      .select('id, is_continuation, continuation_of, clickup_message_id')
+      .select('id, is_continuation, continuation_of, clickup_message_id, milestone_id, track_name')
       .eq('id', currentId)
       .maybeSingle()
 
-    if (!data) return null
-    const row = data as { id: string; is_continuation: boolean; continuation_of: string | null; clickup_message_id: string | null }
+    if (!data) break
+    const row = data as {
+      id: string
+      is_continuation: boolean
+      continuation_of: string | null
+      clickup_message_id: string | null
+      milestone_id: string
+      track_name: string | null
+    }
 
-    if (!row.is_continuation) {
-      return row.clickup_message_id
+    // Safety: if this hop isn't the same milestone + track, stop walking.
+    // We don't want to reply in a thread that belongs to a different milestone.
+    if (row.milestone_id !== expectedMilestoneId || (row.track_name ?? null) !== (expectedTrackName ?? null)) {
+      console.warn('[submitMilestone] continuation chain diverged to a different milestone/track — stopping walk')
+      break
     }
-    if (!row.continuation_of) {
-      // Orphaned continuation — fall back to this submission's own message id
-      return row.clickup_message_id
+
+    // Remember the most recent matching message id as a fallback
+    if (row.clickup_message_id) fallbackMessageId = row.clickup_message_id
+
+    // Reached the root (or orphaned continuation with no parent)
+    if (!row.is_continuation || !row.continuation_of) {
+      return row.clickup_message_id ?? fallbackMessageId
     }
+
     currentId = row.continuation_of
   }
 
-  return null
+  return fallbackMessageId
 }
 
 /**
@@ -191,13 +215,18 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
       console.log('[submitMilestone] final comment array:', JSON.stringify(commentArray, null, 2))
 
       // ── Resolve parent thread message ID for continuations ───────────────
-      // When the user chose to post a continuation inside the original thread,
-      // walk up the continuation chain to find the root message to reply to.
+      // Walk up the continuation chain to find the root message, enforcing
+      // that every hop shares the same milestone + track. This guarantees we
+      // reply in the thread of the milestone with the matching name/track.
       let parentMessageId: string | null = null
       if (formData.isContinuation && formData.postAsThreadReply && formData.continuationOfId) {
-        parentMessageId = await resolveRootMessageId(formData.continuationOfId)
+        parentMessageId = await resolveRootMessageId(
+          formData.continuationOfId,
+          formData.selectedMilestone!.id,
+          formData.trackName ?? null,
+        )
         if (!parentMessageId) {
-          console.warn('[submitMilestone] No root message ID found for continuation; falling back to channel post')
+          console.warn('[submitMilestone] No matching root message ID for continuation; falling back to new channel post')
         } else {
           console.log('[submitMilestone] Posting as reply to thread root:', parentMessageId)
         }
