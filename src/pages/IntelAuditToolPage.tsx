@@ -169,17 +169,56 @@ export default function IntelAuditToolPage() {
   }
 
   // ── File handlers ──────────────────────────────────────────────────────────
-  const processFile = useCallback((file: File): Promise<UploadedFile | null> => {
-    const allowed = ['image/jpeg', 'image/png', 'application/pdf']
-    if (!allowed.includes(file.type)) return Promise.resolve(null)
-    return new Promise(resolve => {
-      const reader = new FileReader()
-      reader.onload = e => {
-        const base64 = (e.target!.result as string).split(',')[1]
-        resolve({ name: file.name, mediaType: file.type, base64, isPdf: file.type === 'application/pdf' })
+
+  /** Resize an image to fit within maxWidth × maxHeight, export as JPEG. */
+  const resizeImage = (file: File, maxDim = 1600, quality = 0.85): Promise<{ mediaType: string; base64: string }> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      const url = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(url)
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height))
+        const w = Math.round(img.width * scale)
+        const h = Math.round(img.height * scale)
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return reject(new Error('Canvas context unavailable'))
+        ctx.drawImage(img, 0, 0, w, h)
+        const dataUrl = canvas.toDataURL('image/jpeg', quality)
+        const base64 = dataUrl.split(',')[1]
+        resolve({ mediaType: 'image/jpeg', base64 })
       }
-      reader.readAsDataURL(file)
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image load failed')) }
+      img.src = url
     })
+  }
+
+  const processFile = useCallback(async (file: File): Promise<UploadedFile | null> => {
+    const allowed = ['image/jpeg', 'image/png', 'application/pdf']
+    if (!allowed.includes(file.type)) return null
+
+    // PDFs: read as-is (no resizing possible in browser)
+    if (file.type === 'application/pdf') {
+      return new Promise(resolve => {
+        const reader = new FileReader()
+        reader.onload = e => {
+          const base64 = (e.target!.result as string).split(',')[1]
+          resolve({ name: file.name, mediaType: file.type, base64, isPdf: true })
+        }
+        reader.readAsDataURL(file)
+      })
+    }
+
+    // Images: resize to stay under Vercel's 4.5MB body limit
+    try {
+      const { mediaType, base64 } = await resizeImage(file)
+      return { name: file.name, mediaType, base64, isPdf: false }
+    } catch (err) {
+      console.error('[processFile] resize failed:', err)
+      return null
+    }
   }, [])
 
   const handleHomepageUpload = async (fileList: FileList) => {
@@ -240,8 +279,14 @@ export default function IntelAuditToolPage() {
         }),
       })
 
-      const data = await res.json()
-      if (!res.ok || data.error) throw new Error(data.error || 'Generation failed')
+      // Read response as text first so we can surface non-JSON errors (413, HTML pages, etc.)
+      const rawText = await res.text()
+      let data: { profile?: ChurchIntelProfile; error?: string } = {}
+      try { data = JSON.parse(rawText) } catch {
+        if (res.status === 413) throw new Error('Upload too large. Try a smaller homepage screenshot or fewer additional files.')
+        throw new Error(`Server error ${res.status}: ${rawText.slice(0, 200)}`)
+      }
+      if (!res.ok || data.error) throw new Error(data.error || `Generation failed (${res.status})`)
 
       setProfile(data.profile as ChurchIntelProfile)
       setScreen('profile')
