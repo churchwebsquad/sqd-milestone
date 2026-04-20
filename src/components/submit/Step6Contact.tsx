@@ -1,11 +1,22 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { Check, AlertCircle, Search } from 'lucide-react'
+import { supabase } from '../../lib/supabase'
 import type { StepProps } from './types'
 import StepNav from './StepNav'
+
+type LookupState =
+  | { status: 'idle' }
+  | { status: 'searching' }
+  | { status: 'found'; clickupId: number; username: string | null }
+  | { status: 'not_found' }
 
 export default function Step6Contact({ formData, updateForm, onNext, onBack }: StepProps) {
   const [useCustom, setUseCustom] = useState(
     formData.partnerContactName !== '' && formData.partnerContactClickupId === null
   )
+  const [email, setEmail] = useState('')
+  const [lookup, setLookup] = useState<LookupState>({ status: 'idle' })
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleSelectContact = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value
@@ -37,6 +48,50 @@ export default function Step6Contact({ formData, updateForm, onNext, onBack }: S
     : formData.partnerContactClickupId
     ? String(formData.partnerContactClickupId)
     : ''
+
+  // Cross-workspace ClickUp user lookup by email (only when hand-typing).
+  // If a match is found, we attach the real clickup_id so the mention fires
+  // as a real @tag instead of plain text.
+  useEffect(() => {
+    if (!useCustom && formData.contacts.length > 0) return
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+
+    const trimmed = email.trim()
+    if (!trimmed || !trimmed.includes('@')) {
+      setLookup({ status: 'idle' })
+      return
+    }
+
+    debounceRef.current = setTimeout(async () => {
+      setLookup({ status: 'searching' })
+      const { data } = await supabase
+        .from('clickup_users')
+        .select('clickup_id, username, email')
+        .ilike('email', trimmed)
+        .limit(1)
+        .maybeSingle()
+
+      if (data && typeof (data as { clickup_id?: number }).clickup_id === 'number') {
+        const row = data as { clickup_id: number; username: string | null }
+        setLookup({ status: 'found', clickupId: row.clickup_id, username: row.username })
+        // Populate the mention — username @tag if available, otherwise the typed name
+        const username = row.username?.replace(/^@/, '')
+        const mention = username ? `@${username}` : formData.partnerContactName
+        updateForm({
+          partnerContactClickupId: row.clickup_id,
+          partnerContactName: mention,
+        })
+      } else {
+        setLookup({ status: 'not_found' })
+        updateForm({ partnerContactClickupId: null })
+      }
+    }, 400)
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [email, useCustom, formData.contacts.length])
 
   const canContinue = formData.partnerContactName.trim() !== ''
 
@@ -76,15 +131,53 @@ export default function Step6Contact({ formData, updateForm, onNext, onBack }: S
         </div>
 
         {(useCustom || formData.contacts.length === 0) && (
-          <div>
-            <label className="block text-sm font-medium text-deep-plum mb-1.5">Contact name</label>
-            <input
-              type="text"
-              value={formData.partnerContactName}
-              onChange={e => updateForm({ partnerContactName: e.target.value })}
-              placeholder="e.g. Pastor Mike"
-              className="w-full rounded-lg border border-lavender px-3 py-2.5 text-sm text-deep-plum placeholder-purple-gray/50 outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20"
-            />
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-deep-plum mb-1.5">Contact name</label>
+              <input
+                type="text"
+                value={formData.partnerContactName}
+                onChange={e => updateForm({ partnerContactName: e.target.value, partnerContactClickupId: null })}
+                placeholder="e.g. Pastor Mike"
+                className="w-full rounded-lg border border-lavender px-3 py-2.5 text-sm text-deep-plum placeholder-purple-gray/50 outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-deep-plum mb-1.5">
+                Contact email <span className="text-purple-gray/60 font-normal">(optional — enables real @tag)</span>
+              </label>
+              <div className="relative">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-purple-gray/50" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="contact@church.com"
+                  className="w-full rounded-lg border border-lavender pl-8 pr-3 py-2.5 text-sm text-deep-plum placeholder-purple-gray/50 outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20"
+                />
+              </div>
+
+              {/* Lookup status */}
+              {lookup.status === 'searching' && (
+                <p className="mt-1.5 flex items-center gap-1.5 text-xs text-purple-gray">
+                  <span className="h-3 w-3 animate-spin rounded-full border border-lavender border-t-primary-purple" />
+                  Searching ClickUp users…
+                </p>
+              )}
+              {lookup.status === 'found' && (
+                <p className="mt-1.5 flex items-center gap-1.5 text-xs text-green-700">
+                  <Check size={12} />
+                  Matched <span className="font-semibold">{lookup.username?.replace(/^@/, '') ?? `ID ${lookup.clickupId}`}</span> — will be tagged in ClickUp
+                </p>
+              )}
+              {lookup.status === 'not_found' && (
+                <p className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-700">
+                  <AlertCircle size={12} />
+                  No ClickUp user found with that email. Message will send with the name as plain text.
+                </p>
+              )}
+            </div>
           </div>
         )}
 
