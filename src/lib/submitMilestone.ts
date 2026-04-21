@@ -293,6 +293,48 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
       })
   }
 
+  // ── Auto-approve prior-step submissions ──────────────────────────────────
+  // When staff sends a milestone further down the pathway (e.g. Brand Guide
+  // after Mood Boards), any earlier-step submissions for this partner in the
+  // same pathway + track are implicitly approved. Skips continuations (those
+  // are the same step) and skips rows already in a terminal state.
+  if (!formData.isContinuation && formData.selectedMilestone) {
+    try {
+      const currentStep = formData.selectedMilestone.step_number
+      const { squad, pathway } = formData.selectedMilestone
+
+      // Find earlier-step milestone ids for this squad + pathway
+      const { data: priorDefs } = await supabase
+        .from('strategy_milestone_definitions')
+        .select('id')
+        .eq('squad', squad)
+        .eq('pathway', pathway)
+        .lt('step_number', currentStep)
+
+      const priorIds = (priorDefs ?? []).map((d: { id: string }) => d.id)
+      if (priorIds.length > 0) {
+        // Scope by track_name when present (Ministry Subbrand multi-track support)
+        let q = supabase
+          .from('strategy_milestone_submissions')
+          .update({ milestone_status: 'approved' } as Record<string, unknown>)
+          .eq('member', formData.partner!.member)
+          .in('milestone_id', priorIds)
+          .not('milestone_status', 'in', '("approved","escalated")')
+        if (formData.trackName) q = q.eq('track_name', formData.trackName)
+        else q = q.is('track_name', null)
+
+        const { error: approveErr, count } = await q
+        if (approveErr) {
+          console.warn('[submitMilestone] auto-approve prior steps skipped:', approveErr.message)
+        } else if (count) {
+          console.log(`[submitMilestone] auto-approved ${count} prior submission(s) for ${squad}/${pathway}`)
+        }
+      }
+    } catch (err) {
+      console.warn('[submitMilestone] auto-approve failed:', err instanceof Error ? err.message : err)
+    }
+  }
+
   // ── Step 3: Save assets (best-effort) ────────────────────────────────────
   if (formData.assets.length > 0) {
     const { error: assetError } = await supabase
