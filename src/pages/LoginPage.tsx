@@ -97,7 +97,7 @@ export default function LoginPage() {
       {/* Login card */}
       <div className="w-full max-w-sm bg-white border border-lavender rounded-2xl shadow-lg px-8 py-8">
         <h1 className="text-xl font-semibold text-deep-plum mb-1 text-center">
-          Milestone Communications Portal
+          StrategyOS
         </h1>
         <p className="text-sm text-purple-gray mb-6 text-center">Staff login</p>
 
