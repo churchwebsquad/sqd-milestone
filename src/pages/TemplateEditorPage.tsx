@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   ChevronDown, ChevronRight, Plus, Check, AlertCircle, X, Info,
-  ArrowUp, ArrowDown, Settings, Globe,
+  ArrowUp, ArrowDown, Settings, Globe, Link as LinkIcon,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { loadAppConfig, saveAppConfig, DEFAULT_APP_CONFIG } from '../lib/appConfig'
+import { insertMarkdownLink } from '../lib/markdownInsertLink'
 import type { StrategyMilestoneDefinition, StrategyMessageTemplate, AppConfig } from '../types/database'
 import { SQUAD_LABELS, PATHWAY_LABELS } from '../components/submit/types'
 
@@ -578,6 +579,7 @@ function TemplateCard({ template, submitterName, isAdmin, onSaved }: TemplateCar
   const [variant, setVariant] = useState(template.template_variant)
   const [subject, setSubject] = useState(template.subject_line ?? '')
   const [body, setBody] = useState(template.template_body)
+  const bodyRef = useRef<HTMLTextAreaElement | null>(null)
   const [isActive, setIsActive] = useState(template.is_active)
   const [includeFooter, setIncludeFooter] = useState(template.include_footer ?? true)
   const [includeRecap, setIncludeRecap] = useState(template.include_recap ?? true)
@@ -750,10 +752,23 @@ function TemplateCard({ template, submitterName, isAdmin, onSaved }: TemplateCar
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-purple-gray uppercase tracking-wide mb-1.5">
-            Message Body
-          </label>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="block text-xs font-semibold text-purple-gray uppercase tracking-wide">
+              Message Body
+            </label>
+            <button
+              type="button"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => { if (bodyRef.current) insertMarkdownLink(bodyRef.current, body, setBody) }}
+              disabled={!isAdmin}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold rounded-full border border-lavender bg-white text-deep-plum px-2.5 py-1 hover:bg-lavender-tint transition-colors disabled:opacity-50"
+              title="Insert link ([text](url))"
+            >
+              <LinkIcon size={11} /> Link
+            </button>
+          </div>
           <textarea
+            ref={bodyRef}
             value={body}
             onChange={e => setBody(e.target.value)}
             disabled={!isAdmin}
@@ -843,6 +858,7 @@ function NewTemplateForm({ milestoneId, existingVariants, submitterName, onCreat
   const [variant, setVariant] = useState(suggestedVariant)
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
+  const bodyRef = useRef<HTMLTextAreaElement | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -927,10 +943,22 @@ function NewTemplateForm({ milestoneId, existingVariants, submitterName, onCreat
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-purple-gray uppercase tracking-wide mb-1.5">
-            Message Body *
-          </label>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="block text-xs font-semibold text-purple-gray uppercase tracking-wide">
+              Message Body *
+            </label>
+            <button
+              type="button"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => { if (bodyRef.current) insertMarkdownLink(bodyRef.current, body, setBody) }}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold rounded-full border border-lavender bg-white text-deep-plum px-2.5 py-1 hover:bg-lavender-tint transition-colors"
+              title="Insert link ([text](url))"
+            >
+              <LinkIcon size={11} /> Link
+            </button>
+          </div>
           <textarea
+            ref={bodyRef}
             value={body}
             onChange={e => setBody(e.target.value)}
             rows={8}

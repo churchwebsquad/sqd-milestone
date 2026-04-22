@@ -106,6 +106,33 @@ function expandCode(seg: ClickUpTextSegment): ClickUpCommentSegment[] {
   return expandInline(seg, { name: 'code', re: /`([^`\n]+?)`/g, attr: { code: true } })
 }
 
+/**
+ * Expand markdown links `[text](url)` into text segments with a `link` attribute.
+ * Runs before bold/italic/code so inner formatting on the link text still applies.
+ * URL cannot contain whitespace or closing paren.
+ */
+function expandLink(seg: ClickUpTextSegment): ClickUpCommentSegment[] {
+  const re = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g
+  const { text, attributes: existing } = seg
+  const segments: ClickUpCommentSegment[] = []
+  let last = 0
+
+  for (const match of text.matchAll(re)) {
+    const before = text.slice(last, match.index!)
+    if (before) segments.push(existing ? { text: before, attributes: existing } : { text: before })
+    segments.push({
+      text: match[1],
+      attributes: { ...existing, link: match[2] },
+    })
+    last = match.index! + match[0].length
+  }
+
+  const remaining = text.slice(last)
+  if (remaining) segments.push(existing ? { text: remaining, attributes: existing } : { text: remaining })
+
+  return segments.length > 0 ? segments : [seg]
+}
+
 /** Apply a list of expanders in sequence to a single segment. */
 function runExpanders(
   seg: ClickUpTextSegment,
@@ -187,7 +214,7 @@ export function buildCommentArray(
     if ('type' in seg) {
       result.push(seg)
     } else {
-      result.push(...runExpanders(seg, [expandBold, expandItalic, expandCode]))
+      result.push(...runExpanders(seg, [expandLink, expandBold, expandItalic, expandCode]))
     }
   }
 

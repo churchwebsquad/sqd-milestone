@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { ChevronDown, ChevronRight, Info, ToggleLeft, ToggleRight, Bold, Italic, Code, List, ListOrdered, Minus } from 'lucide-react'
+import { ChevronDown, ChevronRight, Info, ToggleLeft, ToggleRight, Bold, Italic, Code, List, ListOrdered, Minus, Link as LinkIcon } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { resolveMergeFields } from '../../lib/mergeFields'
 import { loadAppConfig, DEFAULT_APP_CONFIG } from '../../lib/appConfig'
+import { insertMarkdownLink } from '../../lib/markdownInsertLink'
 import type { AppConfig } from '../../types/database'
 import type { StepProps } from './types'
 import type { StrategyMessageTemplate } from '../../types/database'
@@ -331,6 +332,16 @@ export default function Step4Message({ formData, updateForm, onNext, onBack, all
               </ToolbarButton>
               <ToolbarButton label="Inline code (`text`)" onClick={() => wrapSelection('`', '`', 'code')}>
                 <Code size={13} />
+              </ToolbarButton>
+              <ToolbarButton
+                label="Link ([text](url))"
+                onClick={() => {
+                  const ta = textareaRef.current
+                  if (!ta) return
+                  insertMarkdownLink(ta, formData.messageBody, next => updateForm({ messageBody: next }))
+                }}
+              >
+                <LinkIcon size={13} />
               </ToolbarButton>
               <div className="w-px h-5 bg-lavender mx-1" />
               <ToolbarButton label="Bulleted list" onClick={() => prependLines('- ')}>
