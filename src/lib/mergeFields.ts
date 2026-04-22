@@ -38,5 +38,12 @@ export function resolveMergeFields(template: string, data: MergeData): string {
 
 export function formatAssetLinks(assets: AssetRow[]): string {
   if (assets.length === 0) return ''
-  return assets.map(a => (a.label ? `${a.label}: ${a.url}` : a.url)).join('\n')
+  // Emit markdown link syntax when a label is present so the ClickUp
+  // rich-text pipeline renders the label as a clickable hyperlink instead
+  // of showing the raw URL. Labelless assets stay as bare URLs — ClickUp
+  // auto-linkifies those.
+  return assets
+    .filter(a => a.url.trim())
+    .map(a => (a.label ? `[${a.label}](${a.url})` : a.url))
+    .join('\n')
 }
