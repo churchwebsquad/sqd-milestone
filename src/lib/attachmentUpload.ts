@@ -1,8 +1,8 @@
 import { supabase } from './supabase'
 
 const BUCKET = 'submission-attachments'
-const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
-const MAX_BYTES_RAW = 10 * 1024 * 1024       // 10 MB hard cap (matches bucket policy)
+const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf']
+const MAX_BYTES_RAW = 20 * 1024 * 1024       // 20 MB hard cap (matches bucket policy, widened in v14)
 const MAX_DIM = 2000                         // resize larger images down to 2000px max
 const JPEG_QUALITY = 0.85
 
@@ -26,18 +26,19 @@ export class AttachmentError extends Error {
 /** Pre-upload validation — mime + size. */
 function validate(file: File) {
   if (!ALLOWED_MIME.includes(file.type)) {
-    throw new AttachmentError('mime', 'Only JPEG, PNG, WebP, and GIF images are supported.')
+    throw new AttachmentError('mime', 'Only JPEG, PNG, WebP, GIF, and PDF files are supported.')
   }
   if (file.size > MAX_BYTES_RAW) {
-    throw new AttachmentError('size', `Image is ${(file.size / 1024 / 1024).toFixed(1)} MB — the limit is 10 MB.`)
+    throw new AttachmentError('size', `File is ${(file.size / 1024 / 1024).toFixed(1)} MB — the limit is 20 MB.`)
   }
 }
 
 /** Resize an image to fit within maxDim × maxDim. Returns a Blob ready to upload.
- *  GIFs are passed through (resizing would strip animation). PNG/JPEG/WebP
- *  are redrawn through canvas and re-encoded. */
+ *  GIFs are passed through (resizing would strip animation). PDFs are passed
+ *  through as-is (not raster images). PNG/JPEG/WebP are redrawn through canvas
+ *  and re-encoded. */
 function resize(file: File): Promise<{ blob: Blob; mime: string }> {
-  if (file.type === 'image/gif') {
+  if (file.type === 'image/gif' || file.type === 'application/pdf') {
     return Promise.resolve({ blob: file, mime: file.type })
   }
   return new Promise((resolve, reject) => {
@@ -109,7 +110,7 @@ export async function uploadAttachment(
   onProgress?.(50)
 
   if (blob.size > MAX_BYTES_RAW) {
-    throw new AttachmentError('size', `Resized image is still ${(blob.size / 1024 / 1024).toFixed(1)} MB — larger than the 10 MB limit.`)
+    throw new AttachmentError('size', `File is ${(blob.size / 1024 / 1024).toFixed(1)} MB — larger than the 20 MB limit.`)
   }
 
   const path = `${memberId}/${Date.now()}-${slugifyFilename(file.name)}`

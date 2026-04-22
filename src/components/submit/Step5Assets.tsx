@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Plus, Trash2, Upload, Loader2, RefreshCw, AlertCircle } from 'lucide-react'
+import { Plus, Trash2, Upload, Loader2, RefreshCw, AlertCircle, FileText } from 'lucide-react'
 import type { StepProps, AssetRow } from './types'
 import { ASSET_TYPES, ASSET_TYPE_LABELS } from './types'
 import type { AssetType } from '../../types/database'
@@ -8,7 +8,22 @@ import {
   uploadAttachment, removeAttachment, pathFromPublicUrl, AttachmentError,
 } from '../../lib/attachmentUpload'
 
-const ACCEPT_IMAGE = 'image/jpeg,image/png,image/webp,image/gif'
+const ACCEPT_ATTACHMENT = 'image/jpeg,image/png,image/webp,image/gif,application/pdf'
+
+function isPdfUrl(url: string): boolean {
+  return /\.pdf(\?|$)/i.test(url)
+}
+
+function filenameFromUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    const last = u.pathname.split('/').pop() ?? ''
+    // Storage paths start with `{timestamp}-slug.ext` — strip the timestamp prefix for display.
+    return decodeURIComponent(last.replace(/^\d{10,}-/, ''))
+  } catch {
+    return 'file'
+  }
+}
 
 function isValidUrl(url: string): boolean {
   if (!url) return true // empty is valid (optional field)
@@ -277,25 +292,34 @@ function AttachmentField({ asset, state, memberNumber, onFile, onClear }: Attach
 
   return (
     <div>
-      <label className="block text-xs font-medium text-purple-gray mb-1">Image</label>
+      <label className="block text-xs font-medium text-purple-gray mb-1">Image or PDF</label>
 
       <input
         ref={inputRef}
         type="file"
-        accept={ACCEPT_IMAGE}
+        accept={ACCEPT_ATTACHMENT}
         onChange={onChoose}
         className="hidden"
       />
 
       {uploaded && !uploading && (
         <div className="flex items-center gap-3 rounded-lg border border-lavender p-2 bg-lavender-tint/20">
-          <img
-            src={asset.url}
-            alt={asset.label || 'Attachment'}
-            className="h-16 w-16 object-cover rounded-md border border-lavender shrink-0"
-          />
+          {isPdfUrl(asset.url) ? (
+            <div className="h-16 w-16 rounded-md border border-lavender bg-white flex flex-col items-center justify-center shrink-0">
+              <FileText size={22} className="text-primary-purple" />
+              <span className="text-[9px] font-bold text-primary-purple mt-0.5 tracking-wider">PDF</span>
+            </div>
+          ) : (
+            <img
+              src={asset.url}
+              alt={asset.label || 'Attachment'}
+              className="h-16 w-16 object-cover rounded-md border border-lavender shrink-0"
+            />
+          )}
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-deep-plum truncate">{asset.label || 'Uploaded image'}</p>
+            <p className="text-xs text-deep-plum truncate">
+              {asset.label || filenameFromUrl(asset.url)}
+            </p>
             <a
               href={asset.url}
               target="_blank"
@@ -343,9 +367,9 @@ function AttachmentField({ asset, state, memberNumber, onFile, onClear }: Attach
           onClick={pick}
           disabled={disabled}
           className="w-full rounded-lg border-2 border-dashed border-lavender py-3 text-sm text-purple-gray hover:border-primary-purple hover:text-primary-purple hover:bg-lavender-tint/30 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          title={disabled ? 'Pick a partner in Step 1 first' : 'Choose an image from your computer'}
+          title={disabled ? 'Pick a partner in Step 1 first' : 'Choose an image or PDF from your computer'}
         >
-          <Upload size={14} /> Choose image
+          <Upload size={14} /> Choose file
         </button>
       )}
 
@@ -360,7 +384,7 @@ function AttachmentField({ asset, state, memberNumber, onFile, onClear }: Attach
       )}
 
       <p className="text-[11px] text-purple-gray/70 mt-1">
-        JPEG, PNG, WebP, or GIF · up to 10 MB · resized to 2000px max.
+        JPEG, PNG, WebP, GIF, or PDF · up to 20 MB · images resized to 2000px max.
       </p>
     </div>
   )
