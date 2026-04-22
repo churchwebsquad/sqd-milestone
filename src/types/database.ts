@@ -385,6 +385,117 @@ export interface StrategyMilestoneReply {
 }
 
 // ============================================================================
+// COPY REVIEW — partner-facing website copy review surface
+// ============================================================================
+
+export type CopyReviewStatus = 'draft' | 'open' | 'submitted' | 'finalized'
+export type CopyReviewDecision = 'approved' | 'edit_requested'
+export type CopyReviewAuthorKind = 'partner' | 'staff'
+
+/** Parsed tree produced by src/lib/parseCopyReviewHtml.ts */
+export interface ParsedCopyReviewBlock {
+  id: string                      // Notion <p id="…"> uuid (stable)
+  kind: 'copy' | 'metadata'
+  label: string | null            // "H1", "Primary CTA Button", "Metadata Title", etc.
+  text: string
+}
+export interface ParsedCopyReviewSection {
+  id: string                      // H3 element uuid, or synthetic "intro"
+  label: string
+  blocks: ParsedCopyReviewBlock[]
+}
+export interface ParsedCopyReviewPage {
+  id: string                      // slug of label
+  label: string
+  url: string | null
+  emoji: string | null
+  sections: ParsedCopyReviewSection[]
+}
+export interface ParsedCopyReview {
+  title: string
+  pages: ParsedCopyReviewPage[]
+}
+
+export interface StrategyCopyReview {
+  id: string
+  member: number
+  title: string
+  status: CopyReviewStatus
+  source_html: string
+  parsed: ParsedCopyReview
+  submitted_at: string | null
+  finalized_at: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  [key: string]: unknown
+}
+
+export interface StrategyCopyReviewDecision {
+  id: string
+  review_id: string
+  block_id: string
+  decision: CopyReviewDecision
+  decided_at: string
+  [key: string]: unknown
+}
+
+export interface StrategyCopyReviewComment {
+  id: string
+  review_id: string
+  block_id: string
+  author_kind: CopyReviewAuthorKind
+  author_name: string | null
+  author_uid: string | null
+  body: string
+  resolved: boolean
+  client_id: string | null
+  created_at: string
+  updated_at: string
+  [key: string]: unknown
+}
+
+export interface StrategyCopyReviewEdit {
+  id: string
+  review_id: string
+  block_id: string
+  proposed_text: string
+  author_kind: CopyReviewAuthorKind
+  created_at: string
+  [key: string]: unknown
+}
+
+/** Shape returned by get_copy_review_by_token RPC */
+export interface CopyReviewPortalPayload {
+  review: {
+    id: string
+    member: number
+    title: string
+    status: CopyReviewStatus
+    parsed: ParsedCopyReview
+    submitted_at: string | null
+    finalized_at: string | null
+    created_at: string
+  }
+  decisions: Array<{
+    block_id: string
+    decision: CopyReviewDecision
+    decided_at: string
+  }>
+  comments: Array<{
+    id: string
+    block_id: string
+    author_kind: CopyReviewAuthorKind
+    author_name: string | null
+    body: string
+    resolved: boolean
+    client_id: string | null
+    created_at: string
+    updated_at: string
+  }>
+}
+
+// ============================================================================
 // GLOBAL APP CONFIG (single-row editable settings)
 // ============================================================================
 
@@ -537,9 +648,65 @@ export interface Database {
         Update: Partial<Omit<StrategyChurchIntelHistory, 'id' | 'created_at'>>
         Relationships: []
       }
+      strategy_copy_reviews: {
+        Row: StrategyCopyReview
+        Insert: Omit<StrategyCopyReview, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<StrategyCopyReview, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      strategy_copy_review_decisions: {
+        Row: StrategyCopyReviewDecision
+        Insert: Omit<StrategyCopyReviewDecision, 'id' | 'decided_at'>
+        Update: Partial<Omit<StrategyCopyReviewDecision, 'id'>>
+        Relationships: []
+      }
+      strategy_copy_review_comments: {
+        Row: StrategyCopyReviewComment
+        Insert: Omit<StrategyCopyReviewComment, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<StrategyCopyReviewComment, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      strategy_copy_review_edits: {
+        Row: StrategyCopyReviewEdit
+        Insert: Omit<StrategyCopyReviewEdit, 'id' | 'created_at'>
+        Update: Partial<Omit<StrategyCopyReviewEdit, 'id' | 'created_at'>>
+        Relationships: []
+      }
     }
     Views: { [_ in never]: never }
-    Functions: { [_ in never]: never }
+    Functions: {
+      get_copy_review_by_token: {
+        Args: { p_token: string }
+        Returns: CopyReviewPortalPayload | null
+      }
+      upsert_copy_review_decision: {
+        Args: { p_token: string; p_review_id: string; p_block_id: string; p_decision: CopyReviewDecision }
+        Returns: boolean
+      }
+      insert_copy_review_comment: {
+        Args: {
+          p_token: string
+          p_review_id: string
+          p_block_id: string
+          p_body: string
+          p_author_name: string | null
+          p_client_id: string
+        }
+        Returns: string | null
+      }
+      update_copy_review_comment: {
+        Args: { p_token: string; p_comment_id: string; p_client_id: string; p_body: string }
+        Returns: boolean
+      }
+      delete_copy_review_comment: {
+        Args: { p_token: string; p_comment_id: string; p_client_id: string }
+        Returns: boolean
+      }
+      submit_copy_review: {
+        Args: { p_token: string; p_review_id: string }
+        Returns: boolean
+      }
+    }
     Enums: { [_ in never]: never }
     CompositeTypes: { [_ in never]: never }
   }

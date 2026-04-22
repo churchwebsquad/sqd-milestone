@@ -17,6 +17,7 @@ import BrandVoiceSection from '../components/churches/BrandVoiceSection'
 import WebSquadSection from '../components/churches/WebSquadSection'
 import SocialMediaSection from '../components/churches/SocialMediaSection'
 import ClickUpTasksSection from '../components/churches/ClickUpTasksSection'
+import CopyReviewSection from '../components/churches/CopyReviewSection'
 
 // ── Enriched submission (same pattern as AccountLogPage) ─────────────────────
 export interface EnrichedSubmission {
@@ -243,6 +244,7 @@ export default function ChurchDetailPage() {
               portalToken={church.portal_token}
               memberId={memberNum}
             />
+            <CopyReviewSection memberId={memberNum} portalToken={church.portal_token} />
             <SocialMediaSection church={church} account={account} churchIntel={churchIntel} />
             <ClickUpTasksSection
               memberId={memberNum}

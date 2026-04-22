@@ -5,6 +5,7 @@ import AppLayout from './components/AppLayout'
 import ComingSoonPage from './components/ComingSoonPage'
 import ChurchesDashboardPage from './pages/ChurchesDashboardPage'
 import ChurchDetailPage from './pages/ChurchDetailPage'
+import CopyReviewAdminPage from './pages/CopyReviewAdminPage'
 import IntelAuditToolPage from './pages/IntelAuditToolPage'
 import LoginPage from './pages/LoginPage'
 import SubmitFormPage from './pages/SubmitFormPage'
@@ -13,6 +14,7 @@ import AccountLogPage from './pages/AccountLogPage'
 import DashboardPage from './pages/DashboardPage'
 import MyDashboardPage from './pages/MyDashboardPage'
 import ClientPortalPage from './pages/ClientPortalPage'
+import CopyReviewPortalPage from './pages/CopyReviewPortalPage'
 
 export default function App() {
   return (
@@ -22,6 +24,7 @@ export default function App() {
           {/* Public routes */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/portal/:token" element={<ClientPortalPage />} />
+          <Route path="/portal/:token/copy-review" element={<CopyReviewPortalPage />} />
 
           {/* Protected routes — staff only, wrapped in AppLayout */}
           <Route
@@ -34,6 +37,7 @@ export default function App() {
             <Route path="/" element={<MyDashboardPage />} />
             <Route path="/churches" element={<ChurchesDashboardPage />} />
             <Route path="/churches/:memberId" element={<ChurchDetailPage />} />
+            <Route path="/churches/:memberId/copy-review/:reviewId" element={<CopyReviewAdminPage />} />
 
             {/* All In Journey Milestones */}
             <Route path="/pathway" element={<ComingSoonPage title="Pathway Viewer" />} />
