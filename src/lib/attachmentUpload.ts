@@ -1,10 +1,22 @@
 import { supabase } from './supabase'
 
-const BUCKET = 'submission-attachments'
-const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf']
-const MAX_BYTES_RAW = 20 * 1024 * 1024       // 20 MB hard cap (matches bucket policy, widened in v14)
-const MAX_DIM = 2000                         // resize larger images down to 2000px max
+const DEFAULT_BUCKET = 'submission-attachments'
+const DEFAULT_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf']
+const DEFAULT_MAX_BYTES = 20 * 1024 * 1024    // 20 MB — matches submission-attachments bucket policy (widened in v14)
+const DEFAULT_MAX_DIM = 2000                  // resize larger images down to 2000px max
 const JPEG_QUALITY = 0.85
+
+/** MIME types that cannot be losslessly canvas-resized; uploaded as-is. */
+const NON_RESIZABLE_MIME = new Set<string>([
+  'image/gif',         // animation would be stripped
+  'image/svg+xml',     // vector, no benefit from raster resize
+  'video/mp4',
+  'application/pdf',   // not an image
+  'application/zip',
+  'application/x-zip-compressed',
+  'font/woff', 'font/woff2', 'font/ttf', 'font/otf',
+  'application/octet-stream',
+])
 
 export type UploadProgress = (pct: number) => void
 
@@ -15,6 +27,21 @@ export interface UploadResult {
   filename: string
 }
 
+export interface UploadOptions {
+  /** Destination Storage bucket. Defaults to 'submission-attachments'. */
+  bucket?: string
+  /** Folder path prefix inside the bucket. Appended with `{timestamp}-{slug(filename)}`.
+   *  If omitted, the legacy `{memberId}/` shape is used for backward compat with
+   *  submission attachments — callers passing a memberId without a prefix get that path. */
+  pathPrefix?: string
+  /** Allowed MIME types. Defaults to the four image types (JPEG/PNG/WebP/GIF). */
+  allowedMime?: readonly string[]
+  /** Maximum raw bytes. Defaults to 10 MB. */
+  maxBytes?: number
+  /** Longest-edge resize cap in pixels (raster images only). Defaults to 2000. */
+  maxDim?: number
+}
+
 export class AttachmentError extends Error {
   kind: 'mime' | 'size' | 'upload' | 'resize'
   constructor(kind: AttachmentError['kind'], message: string) {
@@ -23,22 +50,27 @@ export class AttachmentError extends Error {
   }
 }
 
-/** Pre-upload validation — mime + size. */
-function validate(file: File) {
-  if (!ALLOWED_MIME.includes(file.type)) {
-    throw new AttachmentError('mime', 'Only JPEG, PNG, WebP, GIF, and PDF files are supported.')
+function validate(file: File, opts: Required<Pick<UploadOptions, 'allowedMime' | 'maxBytes'>>) {
+  if (!opts.allowedMime.includes(file.type)) {
+    throw new AttachmentError(
+      'mime',
+      `File type ${file.type || 'unknown'} is not allowed. Accepted: ${opts.allowedMime.join(', ')}.`,
+    )
   }
-  if (file.size > MAX_BYTES_RAW) {
-    throw new AttachmentError('size', `File is ${(file.size / 1024 / 1024).toFixed(1)} MB — the limit is 20 MB.`)
+  if (file.size > opts.maxBytes) {
+    throw new AttachmentError(
+      'size',
+      `File is ${(file.size / 1024 / 1024).toFixed(1)} MB — the limit is ${(opts.maxBytes / 1024 / 1024).toFixed(0)} MB.`,
+    )
   }
 }
 
-/** Resize an image to fit within maxDim × maxDim. Returns a Blob ready to upload.
- *  GIFs are passed through (resizing would strip animation). PDFs are passed
- *  through as-is (not raster images). PNG/JPEG/WebP are redrawn through canvas
- *  and re-encoded. */
-function resize(file: File): Promise<{ blob: Blob; mime: string }> {
-  if (file.type === 'image/gif' || file.type === 'application/pdf') {
+/**
+ * Resize a raster image to fit within maxDim × maxDim. Returns a Blob ready
+ * to upload. Non-resizable types (GIF, SVG, MP4, fonts) are passed through.
+ */
+function resize(file: File, maxDim: number): Promise<{ blob: Blob; mime: string }> {
+  if (NON_RESIZABLE_MIME.has(file.type)) {
     return Promise.resolve({ blob: file, mime: file.type })
   }
   return new Promise((resolve, reject) => {
@@ -47,12 +79,11 @@ function resize(file: File): Promise<{ blob: Blob; mime: string }> {
     img.onload = () => {
       URL.revokeObjectURL(url)
       const longest = Math.max(img.width, img.height)
-      if (longest <= MAX_DIM && file.size < 2 * 1024 * 1024) {
-        // Small enough to skip the re-encode entirely.
+      if (longest <= maxDim && file.size < 2 * 1024 * 1024) {
         resolve({ blob: file, mime: file.type })
         return
       }
-      const scale = Math.min(1, MAX_DIM / longest)
+      const scale = Math.min(1, maxDim / longest)
       const w = Math.round(img.width * scale)
       const h = Math.round(img.height * scale)
       const canvas = document.createElement('canvas')
@@ -64,7 +95,6 @@ function resize(file: File): Promise<{ blob: Blob; mime: string }> {
         return
       }
       ctx.drawImage(img, 0, 0, w, h)
-      // Prefer original mime when possible; fall back to JPEG for uncompressable sources.
       const outMime = file.type === 'image/png' ? 'image/png' : 'image/jpeg'
       canvas.toBlob(
         (blob) => {
@@ -80,7 +110,6 @@ function resize(file: File): Promise<{ blob: Blob; mime: string }> {
   })
 }
 
-/** Turn "My File (1).PNG" into "my-file-1.png" for a clean storage path. */
 function slugifyFilename(name: string): string {
   const dot = name.lastIndexOf('.')
   const stem = dot > 0 ? name.slice(0, dot) : name
@@ -94,27 +123,54 @@ function slugifyFilename(name: string): string {
 
 /**
  * Validate → resize → upload → return the Supabase public URL.
+ *
+ * Two calling styles:
+ *   (A) Legacy submission-attachments path:
+ *       uploadAttachment(file, memberId, onProgress)
+ *       → uploads to 'submission-attachments/{memberId}/{ts}-{slug}.ext' with image MIME allowlist.
+ *
+ *   (B) Arbitrary bucket/prefix/MIME allowlist:
+ *       uploadAttachment(file, null, onProgress, {
+ *         bucket: 'brand-assets',
+ *         pathPrefix: `${brandGuideId}/logos`,
+ *         allowedMime: ['image/svg+xml', 'image/png', ...],
+ *         maxBytes: 20 * 1024 * 1024,
+ *       })
+ *
  * The onProgress callback fires at coarse milestones (validate/resize/upload/done).
- * The Supabase JS client doesn't expose real byte-level progress yet, so callers
- * should treat this as a staged indicator rather than a true progress bar.
+ * The Supabase JS client doesn't expose byte-level progress, so treat this as
+ * a staged indicator rather than a true progress bar.
  */
 export async function uploadAttachment(
   file: File,
-  memberId: number,
+  memberIdOrNull: number | null,
   onProgress?: UploadProgress,
+  options: UploadOptions = {},
 ): Promise<UploadResult> {
-  validate(file)
+  const bucket = options.bucket ?? DEFAULT_BUCKET
+  const allowedMime = options.allowedMime ?? DEFAULT_ALLOWED_MIME
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES
+  const maxDim = options.maxDim ?? DEFAULT_MAX_DIM
+  const pathPrefix = options.pathPrefix
+    ?? (memberIdOrNull != null ? `${memberIdOrNull}` : '')
+
+  validate(file, { allowedMime, maxBytes })
   onProgress?.(10)
 
-  const { blob, mime } = await resize(file)
+  const { blob, mime } = await resize(file, maxDim)
   onProgress?.(50)
 
-  if (blob.size > MAX_BYTES_RAW) {
-    throw new AttachmentError('size', `File is ${(blob.size / 1024 / 1024).toFixed(1)} MB — larger than the 20 MB limit.`)
+  if (blob.size > maxBytes) {
+    throw new AttachmentError(
+      'size',
+      `Resized file is still ${(blob.size / 1024 / 1024).toFixed(1)} MB — larger than the ${(maxBytes / 1024 / 1024).toFixed(0)} MB limit.`,
+    )
   }
 
-  const path = `${memberId}/${Date.now()}-${slugifyFilename(file.name)}`
-  const { error: uploadErr } = await supabase.storage.from(BUCKET).upload(path, blob, {
+  const stub = `${Date.now()}-${slugifyFilename(file.name)}`
+  const path = pathPrefix ? `${pathPrefix.replace(/\/$/, '')}/${stub}` : stub
+
+  const { error: uploadErr } = await supabase.storage.from(bucket).upload(path, blob, {
     contentType: mime,
     cacheControl: '3600',
     upsert: false,
@@ -124,27 +180,22 @@ export async function uploadAttachment(
   }
   onProgress?.(90)
 
-  const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path)
+  const { data: pub } = supabase.storage.from(bucket).getPublicUrl(path)
   onProgress?.(100)
 
-  return {
-    url: pub.publicUrl,
-    path,
-    size: blob.size,
-    filename: file.name,
-  }
+  return { url: pub.publicUrl, path, size: blob.size, filename: file.name }
 }
 
-/** Best-effort removal of a prior attachment when the user replaces it.
- *  Swallows errors — leaving an orphan is not worth failing the flow. */
-export async function removeAttachment(path: string): Promise<void> {
+/** Best-effort removal of a prior file when the user replaces it. Swallows
+ *  errors — leaving an orphan is not worth failing the flow. */
+export async function removeAttachment(path: string, bucket: string = DEFAULT_BUCKET): Promise<void> {
   if (!path) return
-  await supabase.storage.from(BUCKET).remove([path]).catch(() => { /* ignore */ })
+  await supabase.storage.from(bucket).remove([path]).catch(() => { /* ignore */ })
 }
 
 /** Derive the storage path from a public URL (for the Remove/Replace flow). */
-export function pathFromPublicUrl(url: string): string | null {
-  const marker = `/storage/v1/object/public/${BUCKET}/`
+export function pathFromPublicUrl(url: string, bucket: string = DEFAULT_BUCKET): string | null {
+  const marker = `/storage/v1/object/public/${bucket}/`
   const idx = url.indexOf(marker)
   if (idx === -1) return null
   return decodeURIComponent(url.slice(idx + marker.length))

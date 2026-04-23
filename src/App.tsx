@@ -6,6 +6,7 @@ import ComingSoonPage from './components/ComingSoonPage'
 import ChurchesDashboardPage from './pages/ChurchesDashboardPage'
 import ChurchDetailPage from './pages/ChurchDetailPage'
 import CopyReviewAdminPage from './pages/CopyReviewAdminPage'
+import BrandGuideEditorPage from './pages/BrandGuideEditorPage'
 import IntelAuditToolPage from './pages/IntelAuditToolPage'
 import LoginPage from './pages/LoginPage'
 import SubmitFormPage from './pages/SubmitFormPage'
@@ -15,6 +16,7 @@ import DashboardPage from './pages/DashboardPage'
 import MyDashboardPage from './pages/MyDashboardPage'
 import ClientPortalPage from './pages/ClientPortalPage'
 import CopyReviewPortalPage from './pages/CopyReviewPortalPage'
+import BrandGuidePortalPage from './pages/BrandGuidePortalPage'
 
 export default function App() {
   return (
@@ -25,6 +27,8 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/portal/:token" element={<ClientPortalPage />} />
           <Route path="/portal/:token/copy-review" element={<CopyReviewPortalPage />} />
+          <Route path="/brand/:churchSlug" element={<BrandGuidePortalPage />} />
+          <Route path="/brand/:churchSlug/:ministrySlug" element={<BrandGuidePortalPage />} />
 
           {/* Protected routes — staff only, wrapped in AppLayout */}
           <Route
@@ -38,6 +42,8 @@ export default function App() {
             <Route path="/churches" element={<ChurchesDashboardPage />} />
             <Route path="/churches/:memberId" element={<ChurchDetailPage />} />
             <Route path="/churches/:memberId/copy-review/:reviewId" element={<CopyReviewAdminPage />} />
+            <Route path="/churches/:memberId/brand" element={<BrandGuideEditorPage />} />
+            <Route path="/churches/:memberId/brand/:subSlug" element={<BrandGuideEditorPage />} />
 
             {/* All In Journey Milestones */}
             <Route path="/pathway" element={<ComingSoonPage title="Pathway Viewer" />} />

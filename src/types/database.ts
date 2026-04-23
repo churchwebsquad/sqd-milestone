@@ -497,6 +497,164 @@ export interface CopyReviewPortalPayload {
 }
 
 // ============================================================================
+// BRAND GUIDES — online brand portal + PDF export
+// ============================================================================
+
+export type BrandLogoKind = 'primary' | 'secondary' | 'badge' | 'icon'
+export type BrandColorTier = 'primary' | 'secondary' | 'accent' | 'background' | 'text' | 'light' | 'dark'
+export type BrandTypographyTier = 'primary' | 'secondary' | 'accent'
+export type BrandElementKind = 'pattern' | 'texture' | 'application'
+
+export interface StrategyBrandGuide {
+  id: string
+  member: number
+  parent_id: string | null
+  slug: string
+  display_name: string
+  contact_name: string | null
+  contact_email: string | null
+  voice_overview: string | null
+  brand_statement: string | null
+  assets_zip_url: string | null
+  is_published: boolean
+  last_updated_at: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  [key: string]: unknown
+}
+
+export interface StrategyBrandLogo {
+  id: string
+  brand_guide_id: string
+  kind: BrandLogoKind
+  label: string | null
+  preview_url: string
+  download_url: string | null
+  clear_space_note: string | null
+  sort_order: number
+  created_at: string
+  [key: string]: unknown
+}
+
+export interface StrategyBrandColor {
+  id: string
+  brand_guide_id: string
+  name: string | null
+  tier: BrandColorTier
+  hex: string
+  cmyk: string | null
+  rgb: string | null
+  pms: string | null
+  proportion_pct: number | null
+  on_color_logo_url: string | null
+  sort_order: number
+  created_at: string
+  [key: string]: unknown
+}
+
+export interface StrategyBrandColorCombination {
+  id: string
+  brand_guide_id: string
+  bg_color_id: string | null
+  fg_color_id: string | null
+  override_logo_url: string | null
+  sort_order: number
+  created_at: string
+  [key: string]: unknown
+}
+
+export interface StrategyBrandTypography {
+  id: string
+  brand_guide_id: string
+  tier: BrandTypographyTier
+  family_name: string
+  weight: string | null
+  suggested_use: string | null
+  web_font_family: string | null
+  font_url: string | null
+  sort_order: number
+  created_at: string
+  [key: string]: unknown
+}
+
+export interface StrategyBrandElement {
+  id: string
+  brand_guide_id: string
+  kind: BrandElementKind
+  label: string | null
+  preview_url: string | null
+  download_url: string | null
+  sort_order: number
+  created_at: string
+  [key: string]: unknown
+}
+
+export interface StrategyBrandVoiceAttribute {
+  id: string
+  brand_guide_id: string
+  title: string
+  description: string
+  sort_order: number
+  created_at: string
+  [key: string]: unknown
+}
+
+/** Same shape as StrategyBrandVoiceAttribute. Portal renders voice_attributes
+ *  as "Tone Characteristics" and voice_guidelines as "Voice Guidelines". */
+export interface StrategyBrandVoiceGuideline {
+  id: string
+  brand_guide_id: string
+  title: string
+  description: string
+  sort_order: number
+  created_at: string
+  [key: string]: unknown
+}
+
+export interface StrategyBrandAttribute {
+  id: string
+  brand_guide_id: string
+  label: string
+  description: string | null
+  sort_order: number
+  created_at: string
+  [key: string]: unknown
+}
+
+/** Shape returned by get_brand_guide_by_slug RPC */
+export interface BrandGuidePortalPayload {
+  guide: {
+    id: string
+    member: number
+    parent_id: string | null
+    slug: string
+    display_name: string
+    contact_name: string | null
+    contact_email: string | null
+    voice_overview: string | null
+    brand_statement: string | null
+    assets_zip_url: string | null
+    last_updated_at: string | null
+    updated_at: string
+  }
+  logos: StrategyBrandLogo[]
+  colors: StrategyBrandColor[]
+  color_combinations: StrategyBrandColorCombination[]
+  typography: StrategyBrandTypography[]
+  elements: StrategyBrandElement[]
+  voice_attributes: StrategyBrandVoiceAttribute[]
+  voice_guidelines: StrategyBrandVoiceGuideline[]
+  attributes: StrategyBrandAttribute[]
+  subbrands: Array<{ slug: string; display_name: string }>
+  /** Set when the loaded guide is a subbrand — null for main guides. */
+  parent: { slug: string; display_name: string } | null
+  /** Peer subbrands under the same parent, excluding the current guide. Empty
+   *  array for main guides. */
+  siblings: Array<{ slug: string; display_name: string }>
+}
+
+// ============================================================================
 // GLOBAL APP CONFIG (single-row editable settings)
 // ============================================================================
 
@@ -673,6 +831,60 @@ export interface Database {
         Update: Partial<Omit<StrategyCopyReviewEdit, 'id' | 'created_at'>>
         Relationships: []
       }
+      strategy_brand_guides: {
+        Row: StrategyBrandGuide
+        Insert: Omit<StrategyBrandGuide, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<StrategyBrandGuide, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      strategy_brand_logos: {
+        Row: StrategyBrandLogo
+        Insert: Omit<StrategyBrandLogo, 'id' | 'created_at'>
+        Update: Partial<Omit<StrategyBrandLogo, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      strategy_brand_colors: {
+        Row: StrategyBrandColor
+        Insert: Omit<StrategyBrandColor, 'id' | 'created_at'>
+        Update: Partial<Omit<StrategyBrandColor, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      strategy_brand_color_combinations: {
+        Row: StrategyBrandColorCombination
+        Insert: Omit<StrategyBrandColorCombination, 'id' | 'created_at'>
+        Update: Partial<Omit<StrategyBrandColorCombination, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      strategy_brand_typography: {
+        Row: StrategyBrandTypography
+        Insert: Omit<StrategyBrandTypography, 'id' | 'created_at'>
+        Update: Partial<Omit<StrategyBrandTypography, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      strategy_brand_elements: {
+        Row: StrategyBrandElement
+        Insert: Omit<StrategyBrandElement, 'id' | 'created_at'>
+        Update: Partial<Omit<StrategyBrandElement, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      strategy_brand_voice_attributes: {
+        Row: StrategyBrandVoiceAttribute
+        Insert: Omit<StrategyBrandVoiceAttribute, 'id' | 'created_at'>
+        Update: Partial<Omit<StrategyBrandVoiceAttribute, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      strategy_brand_voice_guidelines: {
+        Row: StrategyBrandVoiceGuideline
+        Insert: Omit<StrategyBrandVoiceGuideline, 'id' | 'created_at'>
+        Update: Partial<Omit<StrategyBrandVoiceGuideline, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      strategy_brand_attributes: {
+        Row: StrategyBrandAttribute
+        Insert: Omit<StrategyBrandAttribute, 'id' | 'created_at'>
+        Update: Partial<Omit<StrategyBrandAttribute, 'id' | 'created_at'>>
+        Relationships: []
+      }
     }
     Views: { [_ in never]: never }
     Functions: {
@@ -706,6 +918,10 @@ export interface Database {
       submit_copy_review: {
         Args: { p_token: string; p_review_id: string }
         Returns: boolean
+      }
+      get_brand_guide_by_slug: {
+        Args: { p_slug: string }
+        Returns: BrandGuidePortalPayload | null
       }
     }
     Enums: { [_ in never]: never }

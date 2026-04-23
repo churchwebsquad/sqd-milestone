@@ -1,10 +1,11 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ChevronDown, ChevronRight, ExternalLink, Link, Check, Palette, BookOpen } from 'lucide-react'
 import type { StrategyAccountProgress, PrfBrandGuide, MilestoneStatus } from '../../types/database'
 import type { EnrichedSubmission } from '../../pages/ChurchDetailPage'
 import { extractBrandPathway } from '../../types/churches'
 import { ASSET_TYPE_LABELS, PATHWAY_LABELS } from '../submit/types'
-import { SectionHeader, SubSectionLabel, DocLink } from './ChurchUI'
+import { SectionHeader, SubSectionLabel, DocLink, AppLink } from './ChurchUI'
 
 const STATUS_CLASSES: Record<MilestoneStatus, string> = {
   sent: 'bg-primary-purple/10 text-primary-purple',
@@ -123,11 +124,24 @@ function SubmissionCard({ entry, defaultOpen, portalToken, memberId }: { entry: 
 }
 
 export default function BrandSquadSection({ church, submissions, brandGuides, portalToken, memberId }: Props) {
+  const navigate = useNavigate()
   const brandPathway = extractBrandPathway(church.handoff_brand_form as Record<string, unknown> | null)
 
   return (
     <section id="brand-squad" className="bg-white border border-lavender rounded-xl p-5 shadow-sm scroll-mt-6">
-      <SectionHeader icon={Palette} title="Brand Squad" theme="brand" />
+      <SectionHeader
+        icon={Palette}
+        title="Brand Squad"
+        theme="brand"
+        action={
+          <AppLink
+            label="Brand Guide"
+            icon={BookOpen}
+            onClick={() => navigate(`/churches/${memberId}/brand`)}
+            variant="primary"
+          />
+        }
+      />
 
       {/* Brand Pathway */}
       <div className="mb-4">
