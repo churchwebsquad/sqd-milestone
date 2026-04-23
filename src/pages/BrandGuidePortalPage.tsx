@@ -11,6 +11,7 @@ import type {
   StrategyBrandLogo, StrategyBrandElement,
 } from '../types/database'
 import { isGoogleFont, buildGoogleFontsUrls } from '../lib/googleFonts'
+import { buildPortalPath } from '../lib/portalUrl'
 
 // ── Sections ────────────────────────────────────────────────────────────────
 
@@ -1187,7 +1188,7 @@ function MinistriesSection({ subbrands, theme }: {
         {subbrands.map(sb => (
           <a
             key={sb.slug}
-            href={`/brand/${sb.slug}`}
+            href={buildPortalPath(sb.slug)}
             className="group rounded-xl border border-gray-200 bg-white p-5 transition-colors flex items-center justify-between"
             style={{ borderColor: '#e5e7eb' }}
           >
@@ -1214,7 +1215,7 @@ function BrandFamilySection({ parent, siblings, theme }: {
         <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-2">Part of the family</p>
 
         <a
-          href={`/brand/${parent.slug}`}
+          href={buildPortalPath(parent.slug)}
           className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-4 mb-3 hover:bg-gray-50 transition-colors"
         >
           <div className="min-w-0">
@@ -1231,7 +1232,7 @@ function BrandFamilySection({ parent, siblings, theme }: {
               {siblings.map(s => (
                 <a
                   key={s.slug}
-                  href={`/brand/${s.slug}`}
+                  href={buildPortalPath(s.slug)}
                   className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 px-4 py-3 hover:bg-gray-50 transition-colors"
                 >
                   <span className="text-sm font-semibold truncate" style={{ fontFamily: theme.headingFont, color: theme.text }}>{s.display_name}</span>

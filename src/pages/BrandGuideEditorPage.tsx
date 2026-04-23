@@ -23,6 +23,7 @@ import {
 } from '../lib/brandGuide'
 import { uploadAttachment, AttachmentError } from '../lib/attachmentUpload'
 import { isGoogleFont } from '../lib/googleFonts'
+import { buildPortalUrl } from '../lib/portalUrl'
 
 const BRAND_BUCKET = 'brand-assets'
 const LOGO_MIME = ['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'video/mp4']
@@ -295,7 +296,7 @@ function MetaCard({ guide, churchName, onChange, onError }: {
   const [uploadingZip, setUploadingZip] = useState(false)
   const zipInputRef = useRef<HTMLInputElement | null>(null)
 
-  const portalUrl = `${window.location.origin}/brand/${guide.slug}`
+  const portalUrl = buildPortalUrl(guide.slug)
 
   const pickZip = () => zipInputRef.current?.click()
   const handleZip = async (e: React.ChangeEvent<HTMLInputElement>) => {
