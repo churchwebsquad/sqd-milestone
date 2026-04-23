@@ -35,7 +35,7 @@ export interface ResolvedGoogleFont {
   sources: Array<{ weight: number; src: string }>
 }
 
-/** Regex for the first woff2 `url(...)` in a Google Fonts CSS response. */
+/** Regex for any `url(...)` ending in woff2 inside a Google Fonts CSS block. */
 const WOFF2_URL_RE = /url\((https:\/\/fonts\.gstatic\.com\/[^)]+?)\)\s*format\(['"]woff2['"]\)/
 
 /** Extract the weight spec from a CSS2 URL we constructed. */
@@ -44,6 +44,63 @@ function weightFromUrl(url: string): number | null {
   if (!m) return null
   const n = Number(m[1])
   return Number.isFinite(n) ? n : null
+}
+
+/**
+ * Slice a Google Fonts CSS response into its individual `@font-face` blocks.
+ * The response contains one block per Unicode subset (latin, latin-ext,
+ * cyrillic, vietnamese, …) — we need to pick the right one rather than just
+ * grabbing the first woff2 URL we find.
+ */
+function splitFontFaceBlocks(css: string): string[] {
+  const blocks: string[] = []
+  let idx = css.indexOf('@font-face')
+  while (idx !== -1) {
+    const end = css.indexOf('}', idx)
+    if (end === -1) break
+    blocks.push(css.slice(idx, end + 1))
+    idx = css.indexOf('@font-face', end)
+  }
+  return blocks
+}
+
+/**
+ * From the CSS response, return the woff2 URL that covers the ASCII range.
+ *
+ * Google Fonts CSS2 returns one `@font-face` per Unicode subset, ordered
+ * roughly cyrillic → greek → vietnamese → latin-ext → latin. A naive "first
+ * woff2" pick lands on a subset that covers accented glyphs (Ā Ă Ą) but
+ * NOT plain ASCII (A B C). When that font is registered with react-pdf,
+ * PDFKit resolves U+0041 through the registered table and emits nothing
+ * because the glyph isn't there — which is exactly the "every A gone"
+ * symptom on the PDF.
+ *
+ * The robust fix: parse the `unicode-range` on each block and pick the one
+ * that explicitly starts at U+0000. That block is always the "latin"
+ * subset — it covers A–Z, a–z, digits, Latin-1 punctuation (including the
+ * middle dot U+00B7), the em-dash (U+2014), currency symbols, etc.
+ *
+ * Falls back to the last block's URL if no `U+0000` is found (extremely
+ * unusual — only happens for fonts that ship no latin coverage at all).
+ */
+function extractLatinWoff2(css: string): string | null {
+  const blocks = splitFontFaceBlocks(css)
+  // First pass: block whose unicode-range explicitly starts at U+0000.
+  for (const block of blocks) {
+    const ur = block.match(/unicode-range\s*:\s*([^;}]+)/i)
+    if (ur && /\bU\+0{0,3}0\b(?!\w)/i.test(ur[1])) {
+      const m = block.match(WOFF2_URL_RE)
+      if (m) return m[1]
+    }
+  }
+  // Second pass: last block (Google's CSS ordering puts the broadest
+  // subset last, so this is almost always the latin subset for fonts
+  // that don't advertise unicode-range for some reason).
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const m = blocks[i].match(WOFF2_URL_RE)
+    if (m) return m[1]
+  }
+  return null
 }
 
 export async function resolveGoogleFontsForPdf(
@@ -80,9 +137,9 @@ export async function resolveGoogleFontsForPdf(
       if (!r) continue
       const weight = weightFromUrl(r.url)
       if (weight == null) continue
-      const match = r.css.match(WOFF2_URL_RE)
-      if (!match) continue
-      sources.push({ weight, src: match[1] })
+      const src = extractLatinWoff2(r.css)
+      if (!src) continue
+      sources.push({ weight, src })
     }
     if (sources.length > 0) out.push({ family, sources })
   }
