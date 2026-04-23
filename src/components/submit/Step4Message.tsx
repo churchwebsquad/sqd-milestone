@@ -78,13 +78,11 @@ function AppendToggle({
 /** Warns when critical merge fields are missing from what will be sent.
  *  The footer is included in the scan because the default standard footer
  *  already contains `{{submitter_name}}` — so the warning only fires when
- *  it's genuinely absent from the final message. Non-blocking: staff can
- *  still proceed, but the amber card makes it obvious those pieces of data
- *  won't appear even though they were "set" elsewhere. */
-const REQUIRED_FIELDS: Array<{ field: string; label: string; hint: string }> = [
-  { field: '{{submitter_name}}',        label: 'Your name',            hint: 'staff name set at login' },
-  { field: '{{partner_contact_name}}',  label: 'Partner @mention',     hint: 'contact you select on this step' },
-  { field: '{{asset_links}}',           label: 'Asset links',          hint: 'URLs added on the Assets step' },
+ *  it's genuinely absent from the final message. Non-blocking. */
+const REQUIRED_FIELDS: Array<{ field: string; description: string }> = [
+  { field: '{{partner_contact_name}}', description: "This is the partner's name you add on the previous step" },
+  { field: '{{asset_links}}',          description: 'This is where you want the asset links to appear in your message' },
+  { field: '{{submitter_name}}',       description: 'This is your name, introduce yourself or sign off so the partner knows who the message is from.' },
 ]
 
 function MissingMergeFieldsWarning({
@@ -102,22 +100,16 @@ function MissingMergeFieldsWarning({
       <AlertCircle size={15} className="text-amber-600 shrink-0 mt-0.5" />
       <div className="flex-1 min-w-0">
         <p className="text-xs font-semibold text-amber-900">
-          These merge fields aren't in your message — the values won't appear just because you set them elsewhere.
+          The values below aren't detected in your message. Ensure these values are added so your message contains the proper context.
         </p>
-        <ul className="mt-1.5 space-y-0.5">
+        <ul className="mt-1.5 space-y-1">
           {missing.map(f => (
-            <li key={f.field} className="text-xs text-amber-900">
+            <li key={f.field} className="text-xs text-amber-900 leading-relaxed">
               <code className="font-mono text-[11px] bg-amber-100 px-1.5 py-0.5 rounded">{f.field}</code>
-              <span className="ml-1.5">
-                <span className="font-semibold">{f.label}</span>
-                <span className="text-amber-900/70"> — {f.hint}</span>
-              </span>
+              <span className="ml-1.5">: {f.description}</span>
             </li>
           ))}
         </ul>
-        <p className="mt-1.5 text-[11px] text-amber-900/80">
-          Add the placeholder(s) where you want them to appear, or turn on the Standard Footer if it carries them for you.
-        </p>
       </div>
     </div>
   )
