@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ChevronDown, ChevronRight, Info, ToggleLeft, ToggleRight, Bold, Italic, Code, List, ListOrdered, Minus, Link as LinkIcon } from 'lucide-react'
+import { AlertCircle, ChevronDown, ChevronRight, Info, ToggleLeft, ToggleRight, Bold, Italic, Code, List, ListOrdered, Minus, Link as LinkIcon } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { resolveMergeFields } from '../../lib/mergeFields'
@@ -10,9 +10,11 @@ import type { StepProps } from './types'
 import type { StrategyMessageTemplate } from '../../types/database'
 import StepNav from './StepNav'
 
+// Note: {{first_name_of_primary}} is still a valid merge field (resolved in
+// lib/mergeFields.ts) — hidden here because staff found it confusing
+// alongside {{partner_contact_name}}. Existing templates continue to work.
 const MERGE_FIELDS = [
   { field: '{{church_name}}', note: 'Partner church name' },
-  { field: '{{first_name_of_primary}}', note: 'Primary contact first name' },
   { field: '{{step_name}}', note: 'Current milestone step name' },
   { field: '{{section_group}}', note: 'Milestone section group' },
   { field: '{{submitter_name}}', note: 'Staff member submitting' },
@@ -70,6 +72,54 @@ function AppendToggle({
         {enabled ? 'ON' : 'OFF'}
       </span>
     </button>
+  )
+}
+
+/** Warns when critical merge fields are missing from what will be sent.
+ *  The footer is included in the scan because the default standard footer
+ *  already contains `{{submitter_name}}` — so the warning only fires when
+ *  it's genuinely absent from the final message. Non-blocking: staff can
+ *  still proceed, but the amber card makes it obvious those pieces of data
+ *  won't appear even though they were "set" elsewhere. */
+const REQUIRED_FIELDS: Array<{ field: string; label: string; hint: string }> = [
+  { field: '{{submitter_name}}',        label: 'Your name',            hint: 'staff name set at login' },
+  { field: '{{partner_contact_name}}',  label: 'Partner @mention',     hint: 'contact you select on this step' },
+  { field: '{{asset_links}}',           label: 'Asset links',          hint: 'URLs added on the Assets step' },
+]
+
+function MissingMergeFieldsWarning({
+  messageBody, includeFooter, footerText,
+}: {
+  messageBody: string
+  includeFooter: boolean
+  footerText: string
+}) {
+  const finalMessage = includeFooter ? `${messageBody}\n${footerText}` : messageBody
+  const missing = REQUIRED_FIELDS.filter(f => !finalMessage.includes(f.field))
+  if (missing.length === 0) return null
+  return (
+    <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-2.5">
+      <AlertCircle size={15} className="text-amber-600 shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-semibold text-amber-900">
+          These merge fields aren't in your message — the values won't appear just because you set them elsewhere.
+        </p>
+        <ul className="mt-1.5 space-y-0.5">
+          {missing.map(f => (
+            <li key={f.field} className="text-xs text-amber-900">
+              <code className="font-mono text-[11px] bg-amber-100 px-1.5 py-0.5 rounded">{f.field}</code>
+              <span className="ml-1.5">
+                <span className="font-semibold">{f.label}</span>
+                <span className="text-amber-900/70"> — {f.hint}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-1.5 text-[11px] text-amber-900/80">
+          Add the placeholder(s) where you want them to appear, or turn on the Standard Footer if it carries them for you.
+        </p>
+      </div>
+    </div>
   )
 }
 
@@ -366,6 +416,16 @@ export default function Step4Message({ formData, updateForm, onNext, onBack, all
           <p className="text-xs text-purple-gray mt-1 text-right">
             {formData.messageBody.length} characters · Markdown: **bold**, _italic_, `code`, - bullets, 1. numbered, --- divider
           </p>
+
+          {/* Missing-merge-field warning — these get set/resolved in later
+               steps, but only if the placeholder is actually in the message
+               (or in the footer, for submitter_name). Staff kept assuming
+               the values would be auto-inserted. */}
+          <MissingMergeFieldsWarning
+            messageBody={formData.messageBody}
+            includeFooter={formData.includeFooter}
+            footerText={appConfig.standard_footer}
+          />
 
           {/* Append toggles */}
           <div className="mt-3 rounded-xl border border-lavender bg-lavender-tint/30 divide-y divide-lavender/60">

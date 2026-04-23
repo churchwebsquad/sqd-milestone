@@ -12,9 +12,12 @@ import { SQUAD_LABELS, PATHWAY_LABELS } from '../components/submit/types'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
+// Note: {{first_name_of_primary}} is still a valid merge field (resolved in
+// lib/mergeFields.ts) — hidden from this list because staff found it
+// confusing alongside {{partner_contact_name}}. Existing templates that
+// reference it continue to work.
 const MERGE_FIELDS = [
   { field: '{{church_name}}', description: 'Partner church name' },
-  { field: '{{first_name_of_primary}}', description: 'Primary contact first name' },
   { field: '{{step_name}}', description: 'Current milestone step name' },
   { field: '{{section_group}}', description: 'Milestone section group (e.g. review label)' },
   { field: '{{submitter_name}}', description: 'Staff member submitting the update' },
