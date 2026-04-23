@@ -75,25 +75,18 @@ function AppendToggle({
   )
 }
 
-/** Warns when critical merge fields are missing from what will be sent.
- *  The footer is included in the scan because the default standard footer
- *  already contains `{{submitter_name}}` — so the warning only fires when
- *  it's genuinely absent from the final message. Non-blocking. */
+/** Warns when critical merge fields are missing from the drafted body.
+ *  Footer contents are deliberately NOT considered — staff want the warning
+ *  to reflect what they've typed, not whether a template's footer happens
+ *  to carry a field on their behalf. Non-blocking. */
 const REQUIRED_FIELDS: Array<{ field: string; description: string }> = [
   { field: '{{partner_contact_name}}', description: "This is the partner's name you add on the previous step" },
   { field: '{{asset_links}}',          description: 'This is where you want the asset links to appear in your message' },
   { field: '{{submitter_name}}',       description: 'This is your name, introduce yourself or sign off so the partner knows who the message is from.' },
 ]
 
-function MissingMergeFieldsWarning({
-  messageBody, includeFooter, footerText,
-}: {
-  messageBody: string
-  includeFooter: boolean
-  footerText: string
-}) {
-  const finalMessage = includeFooter ? `${messageBody}\n${footerText}` : messageBody
-  const missing = REQUIRED_FIELDS.filter(f => !finalMessage.includes(f.field))
+function MissingMergeFieldsWarning({ messageBody }: { messageBody: string }) {
+  const missing = REQUIRED_FIELDS.filter(f => !messageBody.includes(f.field))
   if (missing.length === 0) return null
   return (
     <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-2.5">
@@ -410,14 +403,9 @@ export default function Step4Message({ formData, updateForm, onNext, onBack, all
           </p>
 
           {/* Missing-merge-field warning — these get set/resolved in later
-               steps, but only if the placeholder is actually in the message
-               (or in the footer, for submitter_name). Staff kept assuming
-               the values would be auto-inserted. */}
-          <MissingMergeFieldsWarning
-            messageBody={formData.messageBody}
-            includeFooter={formData.includeFooter}
-            footerText={appConfig.standard_footer}
-          />
+               steps, but only if the placeholder is actually in the body.
+               Staff kept assuming the values would be auto-inserted. */}
+          <MissingMergeFieldsWarning messageBody={formData.messageBody} />
 
           {/* Append toggles */}
           <div className="mt-3 rounded-xl border border-lavender bg-lavender-tint/30 divide-y divide-lavender/60">
