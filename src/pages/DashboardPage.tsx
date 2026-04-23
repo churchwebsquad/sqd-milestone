@@ -282,6 +282,9 @@ export default function DashboardPage() {
             .in('submission_id', partnerRepliedIds)
             .is('triage_category', null)
             .eq('is_partner_reply', true)
+            // Folder children are auto-triaged — don't double-count the
+            // same submission once for the folder and again for each child.
+            .is('folder_id', null)
 
           const untriagedSubIds = new Set(
             (untriagedRows ?? []).map((r: { submission_id: string }) => r.submission_id),

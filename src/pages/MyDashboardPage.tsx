@@ -449,6 +449,9 @@ export default function MyDashboardPage() {
             .in('submission_id', submissionIds)
             .eq('is_partner_reply', true)
             .is('triage_category', null)
+            // Folder children are auto-triaged; only show top-level rows
+            // (individual replies + markup folders) in needs-attention.
+            .is('folder_id', null)
             .order('detected_at', { ascending: false }),
           supabase
             .from('strategy_submission_assets')

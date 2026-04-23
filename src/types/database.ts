@@ -380,6 +380,12 @@ export interface StrategyMilestoneReply {
   source: string                   // 'clickup_thread' | 'markup_review'
   detected_at: string              // timestamptz
   clickup_reply_id: string | null
+  /** markup_review replies are auto-grouped under a folder row (is_folder=true).
+   *  Staff triage the folder; children are auto-set to 'no_action_needed' and
+   *  render as collapsible context under the folder. ClickUp replies stay as
+   *  standalone rows (is_folder=false, folder_id=null). */
+  is_folder: boolean
+  folder_id: string | null
   created_at: string
   updated_at: string
   [key: string]: unknown

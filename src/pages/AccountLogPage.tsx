@@ -270,93 +270,179 @@ function ReplyThread({
   const channelUrl  = channelUrlFromThread(submissionThreadUrl)
   const markupAsset = assets.find(a => a.asset_type === 'markup_review')
 
+  // Group children under their folders. Everything else renders standalone.
+  // Display order preserves detected_at on the top-level rows (folder OR
+  // standalone reply), so a markup folder that received its first comment
+  // on Monday sits before a ClickUp reply from Tuesday.
+  const childrenByFolder = new Map<string, StrategyMilestoneReply[]>()
+  for (const r of replies) {
+    if (r.folder_id) {
+      const arr = childrenByFolder.get(r.folder_id) ?? []
+      arr.push(r)
+      childrenByFolder.set(r.folder_id, arr)
+    }
+  }
+  const topLevel = replies.filter(r => !r.folder_id)
+
   return (
     <div className="space-y-3">
-      {replies.map(reply => {
+      {topLevel.map(reply => {
         const openUrl = reply.source === 'clickup_thread'
           ? channelUrl
           : reply.source === 'markup_review'
             ? (markupAsset?.asset_url ?? null)
             : null
 
+        const children = reply.is_folder ? (childrenByFolder.get(reply.id) ?? []) : []
+
         return (
-          <div
+          <ReplyCard
             key={reply.id}
-            className={`rounded-lg px-3 py-2.5 border ${
-              reply.is_partner_reply
-                ? 'bg-blue-50 border-blue-200'
-                : 'bg-lavender-tint/50 border-lavender'
-            }`}
-          >
-            {/* Header row: author · role · source badge · date   [Open Link →] */}
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
-              <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                <span className="text-xs font-semibold text-deep-plum truncate">
-                  {reply.reply_author_name}
-                </span>
-                {reply.is_partner_reply && (
-                  <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 uppercase tracking-wide shrink-0">
-                    Partner
-                  </span>
-                )}
-                {reply.source && SOURCE_LABELS[reply.source] && (
-                  <span className="inline-flex items-center rounded-full bg-primary-purple/10 text-primary-purple text-[10px] font-bold px-1.5 py-0.5 shrink-0">
-                    {SOURCE_LABELS[reply.source]}
-                  </span>
-                )}
-                <span className="text-[10px] text-purple-gray shrink-0">
-                  {formatDateShort(reply.detected_at)}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                {openUrl && (
-                  <a
-                    href={openUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded-full border border-lavender bg-white text-[11px] font-semibold text-deep-plum px-2.5 py-0.5 hover:bg-lavender-tint hover:border-primary-purple transition-colors"
-                  >
-                    Open Link
-                    <ExternalLink size={9} />
-                  </a>
-                )}
-                {reply.is_partner_reply && (
-                  <TriageDropdown
-                    replyId={reply.id}
-                    current={reply.triage_category}
-                    onSave={onTriageSave}
-                  />
-                )}
-              </div>
-            </div>
-
-            {/* Reply text */}
-            <p className="text-xs text-deep-plum leading-relaxed whitespace-pre-wrap">
-              {displayReplyText(reply.reply_text) || <span className="italic text-purple-gray/60">(empty)</span>}
-            </p>
-
-            {reply.triage_category && (
-              <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                <p className="text-[10px] font-semibold text-purple-gray uppercase tracking-wide">
-                  Triaged: {TRIAGE_LABELS[reply.triage_category]}
-                </p>
-                {reply.edit_task_url && reply.triage_category !== 'no_action_needed' && (
-                  <a
-                    href={reply.edit_task_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded-full border border-lavender bg-white text-[11px] font-semibold text-deep-plum px-2.5 py-0.5 hover:bg-lavender-tint hover:border-primary-purple transition-colors"
-                  >
-                    View Task
-                    <ExternalLink size={9} />
-                  </a>
-                )}
-              </div>
-            )}
-          </div>
+            reply={reply}
+            openUrl={openUrl}
+            onTriageSave={onTriageSave}
+            children={children}
+            markupUrl={markupAsset?.asset_url ?? null}
+          />
         )
       })}
+    </div>
+  )
+}
+
+/** Single reply card — handles standalone rows and folder rows. For folder
+ *  rows, children render collapsed behind a toggle so the thread stays scannable
+ *  when a review has 20+ markup comments. */
+function ReplyCard({
+  reply, openUrl, onTriageSave, children, markupUrl,
+}: {
+  reply: StrategyMilestoneReply
+  openUrl: string | null
+  onTriageSave: (replyId: string, category: TriageCategory | null) => Promise<void>
+  children: StrategyMilestoneReply[]
+  markupUrl: string | null
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const isFolder = reply.is_folder
+  const childCount = children.length
+
+  return (
+    <div className={`rounded-lg px-3 py-2.5 border ${
+      reply.is_partner_reply ? 'bg-blue-50 border-blue-200' : 'bg-lavender-tint/50 border-lavender'
+    }`}>
+      {/* Header row */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+          <span className="text-xs font-semibold text-deep-plum truncate">
+            {isFolder ? `MarkUp bulk · ${childCount} comment${childCount === 1 ? '' : 's'}` : reply.reply_author_name}
+          </span>
+          {reply.is_partner_reply && !isFolder && (
+            <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 uppercase tracking-wide shrink-0">
+              Partner
+            </span>
+          )}
+          {reply.source && SOURCE_LABELS[reply.source] && (
+            <span className="inline-flex items-center rounded-full bg-primary-purple/10 text-primary-purple text-[10px] font-bold px-1.5 py-0.5 shrink-0">
+              {SOURCE_LABELS[reply.source]}
+            </span>
+          )}
+          {isFolder && (
+            <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 shrink-0 uppercase tracking-wide">
+              Bulk
+            </span>
+          )}
+          <span className="text-[10px] text-purple-gray shrink-0">
+            {formatDateShort(reply.detected_at)}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {openUrl && (
+            <a
+              href={openUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-full border border-lavender bg-white text-[11px] font-semibold text-deep-plum px-2.5 py-0.5 hover:bg-lavender-tint hover:border-primary-purple transition-colors"
+            >
+              Open Link
+              <ExternalLink size={9} />
+            </a>
+          )}
+          {reply.is_partner_reply && (
+            <TriageDropdown
+              replyId={reply.id}
+              current={reply.triage_category}
+              onSave={onTriageSave}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Body — folder shows collapsed summary + expand toggle; standalone shows text */}
+      {isFolder ? (
+        <>
+          <button
+            type="button"
+            onClick={() => setExpanded(v => !v)}
+            className="text-[11px] font-semibold text-primary-purple hover:text-deep-plum mt-1 inline-flex items-center gap-1"
+          >
+            {expanded ? 'Hide' : 'Show'} {childCount} comment{childCount === 1 ? '' : 's'}
+            {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          </button>
+          {expanded && (
+            <div className="mt-2 space-y-1.5 pl-3 border-l-2 border-blue-200">
+              {children
+                .slice()
+                .sort((a, b) => a.detected_at.localeCompare(b.detected_at))
+                .map(c => (
+                  <div key={c.id} className="bg-white/60 rounded px-2.5 py-1.5">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span className="text-[11px] font-semibold text-deep-plum">{c.reply_author_name}</span>
+                      <span className="text-[10px] text-purple-gray">{formatDateShort(c.detected_at)}</span>
+                      {markupUrl && (
+                        <a
+                          href={markupUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="ml-auto text-[10px] text-primary-purple hover:underline inline-flex items-center gap-0.5"
+                        >
+                          Open
+                          <ExternalLink size={8} />
+                        </a>
+                      )}
+                    </div>
+                    <p className="text-xs text-deep-plum leading-relaxed whitespace-pre-wrap">
+                      {displayReplyText(c.reply_text) || <span className="italic text-purple-gray/60">(empty)</span>}
+                    </p>
+                  </div>
+                ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="text-xs text-deep-plum leading-relaxed whitespace-pre-wrap">
+          {displayReplyText(reply.reply_text) || <span className="italic text-purple-gray/60">(empty)</span>}
+        </p>
+      )}
+
+      {reply.triage_category && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          <p className="text-[10px] font-semibold text-purple-gray uppercase tracking-wide">
+            Triaged: {TRIAGE_LABELS[reply.triage_category]}
+          </p>
+          {reply.edit_task_url && reply.triage_category !== 'no_action_needed' && (
+            <a
+              href={reply.edit_task_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-full border border-lavender bg-white text-[11px] font-semibold text-deep-plum px-2.5 py-0.5 hover:bg-lavender-tint hover:border-primary-purple transition-colors"
+            >
+              View Task
+              <ExternalLink size={9} />
+            </a>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -408,7 +494,9 @@ function SubmissionCard({
       ? allSubmissions.find(e => e.submission.id === submission.continuation_of)
       : null
 
-  const partnerReplies = replies.filter(r => r.is_partner_reply)
+  // For counts we only consider "top-level" replies — folder children are
+  // already auto-triaged to 'no_action_needed' and don't represent user work.
+  const partnerReplies = replies.filter(r => r.is_partner_reply && !r.folder_id)
   const untriagedCount = partnerReplies.filter(r => r.triage_category === null).length
 
   return (
@@ -579,7 +667,8 @@ function SubmissionCard({
         </div>
       )}
 
-      {/* Reply thread (collapsible) ──────────────────────────────────────── */}
+      {/* Reply thread (collapsible). Count reflects top-level rows — folder
+           children sit inside the folder and aren't counted separately. */}
       {replies.length > 0 && (
         <div className="border-t border-lavender">
           <button
@@ -589,7 +678,7 @@ function SubmissionCard({
           >
             <span className="flex items-center gap-2">
               <MessageSquare size={12} />
-              Replies ({replies.length})
+              Replies ({replies.filter(r => !r.folder_id).length})
               {untriagedCount > 0 && (
                 <span className="rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold px-1.5 py-0.5">
                   {untriagedCount} untriaged
