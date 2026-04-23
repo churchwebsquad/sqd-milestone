@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, ExternalLink, ChevronDown, ChevronRight, Copy, Check, AlertTriangle, Link, MessageSquare, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { displayReplyText } from '../lib/replyDisplay'
 import { useAuth } from '../contexts/AuthContext'
 import type {
   StrategyMilestoneDefinition,
@@ -332,7 +333,7 @@ function ReplyThread({
 
             {/* Reply text */}
             <p className="text-xs text-deep-plum leading-relaxed whitespace-pre-wrap">
-              {reply.reply_text || <span className="italic text-purple-gray/60">(empty)</span>}
+              {displayReplyText(reply.reply_text) || <span className="italic text-purple-gray/60">(empty)</span>}
             </p>
 
             {reply.triage_category && (

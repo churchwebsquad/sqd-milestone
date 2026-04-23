@@ -5,6 +5,7 @@ import {
   CheckCircle2, AlertTriangle, X, Clock, Send,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { displayReplyText } from '../lib/replyDisplay'
 import { useAuth } from '../contexts/AuthContext'
 import type {
   StrategyMilestoneReply,
@@ -241,7 +242,7 @@ function TriageCard({
         </div>
 
         <p className="text-sm text-deep-plum leading-relaxed line-clamp-4 whitespace-pre-wrap">
-          {reply.reply_text || <span className="italic text-purple-gray/50">(empty reply)</span>}
+          {displayReplyText(reply.reply_text) || <span className="italic text-purple-gray/50">(empty reply)</span>}
         </p>
       </div>
 
