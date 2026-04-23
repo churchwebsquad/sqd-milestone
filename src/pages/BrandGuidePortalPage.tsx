@@ -333,13 +333,28 @@ function TopBar({ payload, theme }: {
       // converting to PNG data URLs up front guarantees they render.
       // In parallel, resolve any Google-detected brand fonts into direct
       // .woff2 URLs react-pdf can register (Google Fonts CSS links themselves
-      // aren't consumable).
+      // aren't consumable). Font resolution is allowed to fail silently —
+      // we fall back to Helvetica rather than refusing to render.
       const [prepared, resolvedFonts] = await Promise.all([
         preparePayloadForPdf(payload, rasterizeForPdf),
-        resolveGoogleFontsForPdf(payload.typography),
+        resolveGoogleFontsForPdf(payload.typography).catch(err => {
+          console.warn('[BrandGuidePortalPage] Brand font resolution failed, falling back:', err)
+          return []
+        }),
       ])
 
-      const blob = await pdf(<BrandGuidePdf payload={prepared} resolvedFonts={resolvedFonts} />).toBlob()
+      // Try to render with brand fonts. If react-pdf throws while fetching or
+      // embedding those fonts (rare, but possible if gstatic returns a bad
+      // subset or a URL shape we didn't account for), retry once with brand
+      // fonts disabled. Helvetica is always available, so the second attempt
+      // effectively never fails.
+      let blob: Blob
+      try {
+        blob = await pdf(<BrandGuidePdf payload={prepared} resolvedFonts={resolvedFonts} />).toBlob()
+      } catch (fontErr) {
+        console.warn('[BrandGuidePortalPage] Brand font render failed, retrying with Helvetica:', fontErr)
+        blob = await pdf(<BrandGuidePdf payload={prepared} resolvedFonts={[]} />).toBlob()
+      }
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url

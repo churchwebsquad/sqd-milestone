@@ -141,7 +141,11 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   church: { fontSize: 22, fontWeight: 700, color: INK },
-  pageLabel: { fontSize: 8, letterSpacing: 1.2, color: INK_MUTED, textTransform: 'uppercase' },
+  // All uppercase labels are rendered pre-transformed via String.toUpperCase()
+  // at the call site rather than via CSS `textTransform`. react-pdf's text
+  // layout engine has a shaping bug where letterSpacing + textTransform drops
+  // specific glyphs (notably U+0041 "A") — the pre-transform sidesteps it.
+  pageLabel: { fontSize: 8, letterSpacing: 1.2, color: INK_MUTED },
   // Big, prominent section title block used on each content page. Replaces
   // the thin rule+label combo that used to divide sub-sections — sections now
   // own their own page (or half-page) and read more like chapter openers.
@@ -156,7 +160,6 @@ const styles = StyleSheet.create({
     fontSize: 8,
     letterSpacing: 1.4,
     color: INK_MUTED,
-    textTransform: 'uppercase',
     fontWeight: 700,
     marginBottom: 4,
   },
@@ -184,7 +187,6 @@ const styles = StyleSheet.create({
     fontSize: 8,
     letterSpacing: 1.2,
     color: INK_MUTED,
-    textTransform: 'uppercase',
     fontWeight: 700,
     paddingRight: 12,
     flexShrink: 0,
@@ -277,7 +279,6 @@ const styles = StyleSheet.create({
     fontSize: 7,
     letterSpacing: 1.2,
     color: INK_MUTED,
-    textTransform: 'uppercase',
     fontWeight: 700,
     marginBottom: 3,
   },
@@ -429,10 +430,10 @@ function PageHeader({ eyebrow, bigTitle, pageLabel, headingFont }: {
   return (
     <View style={styles.header}>
       <View>
-        <Text style={styles.pageLabel}>{eyebrow}</Text>
+        <Text style={styles.pageLabel}>{eyebrow.toUpperCase()}</Text>
         <Text style={[styles.church, { fontFamily: headingFont }]}>{bigTitle}</Text>
       </View>
-      <Text style={styles.pageLabel}>{pageLabel}</Text>
+      <Text style={styles.pageLabel}>{pageLabel.toUpperCase()}</Text>
     </View>
   )
 }
@@ -444,7 +445,7 @@ function SectionOpener({ eyebrow, title, headingFont }: {
 }) {
   return (
     <View style={styles.sectionTitleBlock}>
-      <Text style={styles.sectionEyebrow}>{eyebrow}</Text>
+      <Text style={styles.sectionEyebrow}>{eyebrow.toUpperCase()}</Text>
       <Text style={[styles.sectionTitle, { fontFamily: headingFont }]}>{title}</Text>
       <View style={styles.sectionTitleRule} />
     </View>
@@ -456,7 +457,7 @@ function SectionOpener({ eyebrow, title, headingFont }: {
 function SectionRule({ label }: { label: string }) {
   return (
     <View style={styles.sectionDivider}>
-      <Text style={styles.sectionLabel}>{label}</Text>
+      <Text style={styles.sectionLabel}>{label.toUpperCase()}</Text>
       <View style={styles.sectionRule} />
     </View>
   )
@@ -597,7 +598,7 @@ function TypographyList({ typography, headingFont }: {
     <View style={styles.typeList}>
       {typography.map(font => (
         <View key={font.id} style={styles.typeChip}>
-          <Text style={styles.typeChipEyebrow}>{TIER_LABEL[font.tier] ?? font.tier}</Text>
+          <Text style={styles.typeChipEyebrow}>{(TIER_LABEL[font.tier] ?? font.tier).toUpperCase()}</Text>
           <Text style={[styles.typeChipName, { fontFamily: headingFont }]}>{font.family_name}</Text>
           {font.weight && <Text style={styles.typeChipDetail}>Weights: {font.weight}</Text>}
           {font.suggested_use && <Text style={styles.typeChipDetail}>Use: {font.suggested_use}</Text>}
