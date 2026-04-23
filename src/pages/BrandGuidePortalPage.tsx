@@ -321,40 +321,19 @@ function TopBar({ payload, theme }: {
     setDownloadingPdf(true)
     try {
       // Dynamic import so @react-pdf/renderer isn't in the initial bundle.
-      const [{ pdf }, { BrandGuidePdf }, { rasterizeForPdf }, { resolveGoogleFontsForPdf }] = await Promise.all([
+      const [{ pdf }, { BrandGuidePdf }, { rasterizeForPdf }] = await Promise.all([
         import('@react-pdf/renderer'),
         import('../components/brand/BrandGuidePdf'),
         import('../lib/pdfImageRaster'),
-        import('../lib/pdfFontResolver'),
       ])
 
       // Pre-rasterize every image URL the PDF will reference. react-pdf's
       // <Image> can't render SVG and sometimes silently drops remote URLs —
-      // converting to PNG data URLs up front guarantees they render.
-      // In parallel, resolve any Google-detected brand fonts into direct
-      // .woff2 URLs react-pdf can register (Google Fonts CSS links themselves
-      // aren't consumable). Font resolution is allowed to fail silently —
-      // we fall back to Helvetica rather than refusing to render.
-      const [prepared, resolvedFonts] = await Promise.all([
-        preparePayloadForPdf(payload, rasterizeForPdf),
-        resolveGoogleFontsForPdf(payload.typography).catch(err => {
-          console.warn('[BrandGuidePortalPage] Brand font resolution failed, falling back:', err)
-          return []
-        }),
-      ])
-
-      // Try to render with brand fonts. If react-pdf throws while fetching or
-      // embedding those fonts (rare, but possible if gstatic returns a bad
-      // subset or a URL shape we didn't account for), retry once with brand
-      // fonts disabled. Helvetica is always available, so the second attempt
-      // effectively never fails.
-      let blob: Blob
-      try {
-        blob = await pdf(<BrandGuidePdf payload={prepared} resolvedFonts={resolvedFonts} />).toBlob()
-      } catch (fontErr) {
-        console.warn('[BrandGuidePortalPage] Brand font render failed, retrying with Helvetica:', fontErr)
-        blob = await pdf(<BrandGuidePdf payload={prepared} resolvedFonts={[]} />).toBlob()
-      }
+      // converting to PNG data URLs up front guarantees they render. The
+      // PDF renders in Helvetica exclusively — brand character comes from
+      // the color palette applied to rules and borders, not the font.
+      const prepared = await preparePayloadForPdf(payload, rasterizeForPdf)
+      const blob = await pdf(<BrandGuidePdf payload={prepared} />).toBlob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url

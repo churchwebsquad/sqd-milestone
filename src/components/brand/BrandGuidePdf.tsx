@@ -4,66 +4,24 @@ import type {
   StrategyBrandTypography, StrategyBrandVoiceAttribute, StrategyBrandVoiceGuideline,
   StrategyBrandAttribute,
 } from '../../types/database'
-import type { ResolvedGoogleFont } from '../../lib/pdfFontResolver'
 
-// ── Font / hyphenation setup ──────────────────────────────────────────────
+// ── Hyphenation ──────────────────────────────────────────────────────────
 // Disable hyphenation globally. react-pdf's default hyphenator inserts a
 // hyphen in long all-caps strings ("TONE CHARACTERIS-TICS" in the section
 // labels). For this layout we'd rather wrap at a space or let the word run
 // on its own line than split a word with a hyphen.
 Font.registerHyphenationCallback(word => [word])
 
-// Two sources of brand fonts for the PDF:
-//   1. Uploaded webfont files (.woff/.woff2/.ttf/.otf) — registered by URL.
-//   2. Google-detected fonts — .woff2 URLs are resolved upstream in
-//      pdfFontResolver.ts and passed in via the `resolvedFonts` prop. For
-//      Google fonts we register one entry per weight so react-pdf can pick
-//      the nearest match at render time.
-// Registration is idempotent — react-pdf ignores duplicate registrations.
-
-const REGISTERED = new Set<string>()
-
-function registerUploadedBrandFonts(typography: StrategyBrandTypography[]) {
-  for (const font of typography) {
-    if (!font.font_url) continue
-    if (!/\.(woff2?|ttf|otf)(\?|$)/i.test(font.font_url)) continue
-    const family = font.web_font_family ?? font.family_name
-    if (REGISTERED.has(family)) continue
-    try {
-      Font.register({ family, src: font.font_url })
-      REGISTERED.add(family)
-    } catch {
-      // ignore — we'll fall back to Helvetica
-    }
-  }
-}
-
-function registerResolvedGoogleFonts(resolved: readonly ResolvedGoogleFont[]) {
-  for (const rf of resolved) {
-    if (REGISTERED.has(rf.family)) continue
-    try {
-      Font.register({
-        family: rf.family,
-        fonts: rf.sources.map(s => ({ src: s.src, fontWeight: s.weight })),
-      })
-      REGISTERED.add(rf.family)
-    } catch {
-      // ignore — per-family failure falls back to Helvetica for that tier
-    }
-  }
-}
-
-/** Resolve a reasonable font family for a tier, falling back gracefully.
- *  Returns the brand family name if it's registered (either from an uploaded
- *  webfont file or from the Google Fonts resolver), Times-Roman for accent
- *  tier when nothing is available, Helvetica otherwise. */
-function fontForTier(typography: StrategyBrandTypography[], tier: 'primary' | 'secondary' | 'accent'): string {
-  const match = typography.find(t => t.tier === tier)
-  if (!match) return tier === 'accent' ? 'Times-Roman' : 'Helvetica'
-  const family = match.web_font_family ?? match.family_name
-  if (REGISTERED.has(family)) return family
-  return tier === 'accent' ? 'Times-Roman' : 'Helvetica'
-}
+// ── Fonts ────────────────────────────────────────────────────────────────
+// The PDF intentionally renders in the built-in Helvetica family only. We
+// tried registering brand fonts (uploaded webfonts + Google-resolved woff2)
+// but hit two unreliable paths: (a) subsetted Google woff2 files produced
+// broken PDF font subsets in fontkit/PDFKit (PDF viewers showed "Cannot
+// extract the embedded font"), and (b) react-pdf's text-shaping engine
+// dropped specific glyphs under certain font+style combinations. Helvetica
+// is always available, always embeds cleanly, and reads consistently on
+// screen and in print. Brand character comes from the accent color
+// applied to borders, rules, and eyebrow labels — see `brand` below.
 
 // ── Color helpers ─────────────────────────────────────────────────────────
 
@@ -112,9 +70,10 @@ function contrastInk(hex: string): string {
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────
-// Printer-friendly: white page background (no ink wasted on a cream tint),
-// hairline dividers, brand colors ONLY in swatches and proportion bars.
-// Headings stay ink-black.
+// Printer-friendly: white page background, Helvetica everywhere, thin rules.
+// Brand color (computed per-render from the guide's `primary` color tier)
+// is applied inline to the `Brand` prop-dependent elements below — section
+// eyebrows, thin rules, frame borders, positioning quote border.
 
 const PAGE_BG = '#ffffff'
 const INK = '#111111'
@@ -135,7 +94,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
-    borderBottomColor: HAIRLINE,
     borderBottomWidth: 0.5,
     paddingBottom: 10,
     marginBottom: 18,
@@ -145,13 +103,7 @@ const styles = StyleSheet.create({
   // at the call site rather than via CSS `textTransform`. react-pdf's text
   // layout engine has a shaping bug where letterSpacing + textTransform drops
   // specific glyphs (notably U+0041 "A") — the pre-transform sidesteps it.
-  pageLabel: { fontSize: 8, letterSpacing: 1.2, color: INK_MUTED },
-  // Big, prominent section title block used on each content page. Replaces
-  // the thin rule+label combo that used to divide sub-sections — sections now
-  // own their own page (or half-page) and read more like chapter openers.
-  // marginTop is generous (32pt) so when two sections share a page (Color +
-  // Typography on page 2) they aren't visually touching. On single-section
-  // pages the extra top air reads as intentional chapter breathing room.
+  pageLabel: { fontSize: 8, letterSpacing: 1.2 },
   sectionTitleBlock: {
     marginTop: 32,
     marginBottom: 18,
@@ -159,7 +111,6 @@ const styles = StyleSheet.create({
   sectionEyebrow: {
     fontSize: 8,
     letterSpacing: 1.4,
-    color: INK_MUTED,
     fontWeight: 700,
     marginBottom: 4,
   },
@@ -172,11 +123,8 @@ const styles = StyleSheet.create({
   sectionTitleRule: {
     height: 2,
     width: 48,
-    backgroundColor: INK,
     marginTop: 10,
   },
-  // Sub-section divider inside a page — still used for "Tone characteristics"
-  // etc. on the voice page.
   sectionDivider: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -186,7 +134,6 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontSize: 8,
     letterSpacing: 1.2,
-    color: INK_MUTED,
     fontWeight: 700,
     paddingRight: 12,
     flexShrink: 0,
@@ -194,7 +141,6 @@ const styles = StyleSheet.create({
   sectionRule: {
     flex: 1,
     height: 0.5,
-    backgroundColor: HAIRLINE,
   },
   body: { fontSize: 9, lineHeight: 1.5, color: INK_MUTED },
   footer: {
@@ -202,19 +148,16 @@ const styles = StyleSheet.create({
     left: 54, right: 54, bottom: 24,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    borderTopColor: HAIRLINE,
     borderTopWidth: 0.5,
     paddingTop: 8,
     fontSize: 7.5,
     color: INK_MUTED,
   },
-  // Logo — now on its own page, so the frames can be taller.
   logoPrimaryFrame: {
     height: 280,
     padding: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    borderColor: HAIRLINE,
     borderWidth: 0.5,
     backgroundColor: '#ffffff',
     marginBottom: 14,
@@ -230,11 +173,9 @@ const styles = StyleSheet.create({
     padding: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    borderColor: HAIRLINE,
     borderWidth: 0.5,
     backgroundColor: '#ffffff',
   },
-  // Colors — bigger chips so the page reads as a proper spread alongside type.
   swatchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   swatch: {
     width: '31.5%',
@@ -262,7 +203,6 @@ const styles = StyleSheet.create({
     borderColor: HAIRLINE, borderWidth: 0.5,
     alignItems: 'center', justifyContent: 'center',
   },
-  // Typography list — no specimens, just a flex-wrap list of families.
   typeList: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -270,7 +210,6 @@ const styles = StyleSheet.create({
   },
   typeChip: {
     minWidth: 180,
-    borderColor: HAIRLINE,
     borderWidth: 0.5,
     paddingVertical: 10,
     paddingHorizontal: 12,
@@ -278,13 +217,11 @@ const styles = StyleSheet.create({
   typeChipEyebrow: {
     fontSize: 7,
     letterSpacing: 1.2,
-    color: INK_MUTED,
     fontWeight: 700,
     marginBottom: 3,
   },
   typeChipName: { fontSize: 13, fontWeight: 700, color: INK },
   typeChipDetail: { fontSize: 7.5, color: INK_MUTED, marginTop: 2 },
-  // Voice / page 3
   voiceOverview: { fontSize: 11, lineHeight: 1.5, color: INK, marginBottom: 14 },
   twoByTwo: {
     flexDirection: 'row',
@@ -306,28 +243,40 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     paddingLeft: 14,
     borderLeftWidth: 1.5,
-    borderLeftColor: INK,
   },
 })
 
+/** Brand-color resolver — derives a single accent color from the guide's
+ *  colors array. Used for borders, rules, and eyebrow text; the rest of
+ *  the PDF stays in monochrome ink + muted gray. If no primary color is
+ *  set, we fall back to the existing neutral palette so unbranded guides
+ *  read the same as they used to. */
+interface Brand {
+  /** Border color for frames, rules, hairlines. */
+  line: string
+  /** Accent text color (section eyebrows, page labels, sub-section labels). */
+  accent: string
+  /** Stronger accent for hero rules and the positioning blockquote. */
+  strong: string
+}
+
+function deriveBrand(colors: readonly StrategyBrandColor[]): Brand {
+  const primary = colors.find(c => c.tier === 'primary')?.hex
+  if (!primary) {
+    return { line: HAIRLINE, accent: INK_MUTED, strong: INK }
+  }
+  return { line: primary, accent: primary, strong: primary }
+}
+
 // ── Component ─────────────────────────────────────────────────────────────
 
-export function BrandGuidePdf({ payload, resolvedFonts = [] }: {
-  payload: BrandGuidePortalPayload
-  /** Google-resolved .woff2 entries from pdfFontResolver. Empty array is fine
-   *  — PDF falls back to Helvetica for any unresolved tier. */
-  resolvedFonts?: readonly ResolvedGoogleFont[]
-}) {
-  registerUploadedBrandFonts(payload.typography)
-  registerResolvedGoogleFonts(resolvedFonts)
+export function BrandGuidePdf({ payload }: { payload: BrandGuidePortalPayload }) {
   const { guide, logos, colors, color_combinations, typography, voice_attributes, voice_guidelines, attributes, parent } = payload
+  const brand = deriveBrand(colors)
 
-  const primary = logos.find(l => l.kind === 'primary') ?? logos[0]
-  const supporting = logos.filter(l => l !== primary)
+  const primaryLogo = logos.find(l => l.kind === 'primary') ?? logos[0]
+  const supporting = logos.filter(l => l !== primaryLogo)
   const downloadDate = new Date().toISOString().slice(0, 10)
-
-  const headingFont = fontForTier(typography, 'primary')
-  const bodyFont = fontForTier(typography, 'secondary')
 
   // Subbrand guides: church name on the eyebrow, ministry on the big heading,
   // plus a combined string for the PDF file title and footer.
@@ -347,21 +296,21 @@ export function BrandGuidePdf({ payload, resolvedFonts = [] }: {
   return (
     <Document title={docTitle}>
       {/* ── PAGE 1 — LOGOS ───────────────────────────────────────────────── */}
-      {primary && (
-        <Page size="A4" style={[styles.page, { fontFamily: bodyFont }]}>
-          <PageHeader eyebrow={eyebrow} bigTitle={bigTitle} pageLabel="How we look" headingFont={headingFont} />
-          <SectionOpener eyebrow="01 · Identity" title="Logo" headingFont={headingFont} />
-          <LogoRow primary={primary} supporting={supporting} />
-          <FooterBar display={bigTitle} date={downloadDate} />
+      {primaryLogo && (
+        <Page size="A4" style={styles.page}>
+          <PageHeader eyebrow={eyebrow} bigTitle={bigTitle} pageLabel="How we look" brand={brand} />
+          <SectionOpener eyebrow="01 · Identity" title="Logo" brand={brand} />
+          <LogoRow primary={primaryLogo} supporting={supporting} brand={brand} />
+          <FooterBar display={bigTitle} date={downloadDate} brand={brand} />
         </Page>
       )}
 
       {/* ── PAGE 2 — COLORS + TYPOGRAPHY ─────────────────────────────────── */}
-      <Page size="A4" style={[styles.page, { fontFamily: bodyFont }]}>
-        <PageHeader eyebrow={eyebrow} bigTitle={bigTitle} pageLabel="How we look" headingFont={headingFont} />
+      <Page size="A4" style={styles.page}>
+        <PageHeader eyebrow={eyebrow} bigTitle={bigTitle} pageLabel="How we look" brand={brand} />
 
         <View wrap={false}>
-          <SectionOpener eyebrow="02 · Palette" title="Color" headingFont={headingFont} />
+          <SectionOpener eyebrow="02 · Palette" title="Color" brand={brand} />
           <ColorSwatches colors={colors} />
           <ProportionBar colors={colors} />
           <CombinationsRow combinations={color_combinations} colors={colors} />
@@ -369,96 +318,94 @@ export function BrandGuidePdf({ payload, resolvedFonts = [] }: {
 
         {typography.length > 0 && (
           <View wrap={false}>
-            <SectionOpener eyebrow="03 · Type system" title="Typography" headingFont={headingFont} />
-            <TypographyList typography={typography} headingFont={headingFont} />
+            <SectionOpener eyebrow="03 · Type system" title="Typography" brand={brand} />
+            <TypographyList typography={typography} brand={brand} />
           </View>
         )}
 
-        <FooterBar display={bigTitle} date={downloadDate} />
+        <FooterBar display={bigTitle} date={downloadDate} brand={brand} />
       </Page>
 
       {/* ── PAGE 3 — HOW WE SOUND ────────────────────────────────────────── */}
       {hasSoundPage && (
-        <Page size="A4" style={[styles.page, { fontFamily: bodyFont }]}>
-          <PageHeader eyebrow={eyebrow} bigTitle={bigTitle} pageLabel="How we sound" headingFont={headingFont} />
+        <Page size="A4" style={styles.page}>
+          <PageHeader eyebrow={eyebrow} bigTitle={bigTitle} pageLabel="How we sound" brand={brand} />
 
-          <SectionOpener eyebrow="04 · Brand voice" title="Voice" headingFont={headingFont} />
+          <SectionOpener eyebrow="04 · Brand voice" title="Voice" brand={brand} />
 
           {guide.voice_overview && <Text style={styles.voiceOverview}>{guide.voice_overview}</Text>}
 
           {voice_attributes.length > 0 && (
             <View wrap={false}>
-              <SectionRule label="Tone characteristics" />
-              <TwoByTwo items={voice_attributes} headingFont={headingFont} />
+              <SectionRule label="Tone characteristics" brand={brand} />
+              <TwoByTwo items={voice_attributes} />
             </View>
           )}
 
           {voice_guidelines.length > 0 && (
             <View wrap={false}>
-              <SectionRule label="Voice guidelines" />
-              <TwoByTwo items={voice_guidelines} headingFont={headingFont} />
+              <SectionRule label="Voice guidelines" brand={brand} />
+              <TwoByTwo items={voice_guidelines} />
             </View>
           )}
 
           {attributes.length > 0 && (
             <View wrap={false}>
-              <SectionRule label="Attributes" />
-              <AttributesBlock items={attributes} headingFont={headingFont} />
+              <SectionRule label="Attributes" brand={brand} />
+              <AttributesBlock items={attributes} />
             </View>
           )}
 
           {guide.brand_statement && (
             <View wrap={false}>
-              <SectionRule label="Positioning" />
-              <Text style={[styles.statement, { fontFamily: headingFont }]}>"{guide.brand_statement}"</Text>
+              <SectionRule label="Positioning" brand={brand} />
+              <Text style={[styles.statement, { borderLeftColor: brand.strong }]}>"{guide.brand_statement}"</Text>
             </View>
           )}
 
-          <FooterBar display={bigTitle} date={downloadDate} />
+          <FooterBar display={bigTitle} date={downloadDate} brand={brand} />
         </Page>
       )}
     </Document>
   )
 }
 
-function PageHeader({ eyebrow, bigTitle, pageLabel, headingFont }: {
+function PageHeader({ eyebrow, bigTitle, pageLabel, brand }: {
   eyebrow: string
   bigTitle: string
   pageLabel: string
-  headingFont: string
+  brand: Brand
 }) {
   return (
-    <View style={styles.header}>
+    <View style={[styles.header, { borderBottomColor: brand.line }]}>
       <View>
-        <Text style={styles.pageLabel}>{eyebrow.toUpperCase()}</Text>
-        <Text style={[styles.church, { fontFamily: headingFont }]}>{bigTitle}</Text>
+        <Text style={[styles.pageLabel, { color: brand.accent }]}>{eyebrow.toUpperCase()}</Text>
+        <Text style={styles.church}>{bigTitle}</Text>
       </View>
-      <Text style={styles.pageLabel}>{pageLabel.toUpperCase()}</Text>
+      <Text style={[styles.pageLabel, { color: brand.accent }]}>{pageLabel.toUpperCase()}</Text>
     </View>
   )
 }
 
-function SectionOpener({ eyebrow, title, headingFont }: {
+function SectionOpener({ eyebrow, title, brand }: {
   eyebrow: string
   title: string
-  headingFont: string
+  brand: Brand
 }) {
   return (
     <View style={styles.sectionTitleBlock}>
-      <Text style={styles.sectionEyebrow}>{eyebrow.toUpperCase()}</Text>
-      <Text style={[styles.sectionTitle, { fontFamily: headingFont }]}>{title}</Text>
-      <View style={styles.sectionTitleRule} />
+      <Text style={[styles.sectionEyebrow, { color: brand.accent }]}>{eyebrow.toUpperCase()}</Text>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <View style={[styles.sectionTitleRule, { backgroundColor: brand.strong }]} />
     </View>
   )
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────
-
-function SectionRule({ label }: { label: string }) {
+function SectionRule({ label, brand }: { label: string; brand: Brand }) {
   return (
     <View style={styles.sectionDivider}>
-      <Text style={styles.sectionLabel}>{label.toUpperCase()}</Text>
-      <View style={styles.sectionRule} />
+      <Text style={[styles.sectionLabel, { color: brand.accent }]}>{label.toUpperCase()}</Text>
+      <View style={[styles.sectionRule, { backgroundColor: brand.line }]} />
     </View>
   )
 }
@@ -481,10 +428,14 @@ function fitToBox(
   return { width: natW * scale, height: natH * scale }
 }
 
-function LogoRow({ primary, supporting }: { primary: StrategyBrandLogo | undefined; supporting: StrategyBrandLogo[] }) {
+function LogoRow({ primary, supporting, brand }: {
+  primary: StrategyBrandLogo | undefined
+  supporting: StrategyBrandLogo[]
+  brand: Brand
+}) {
   if (!primary) return null
 
-  // Primary now fills its own page — bigger frame (280pt tall, 24pt padding
+  // Primary fills its own page — bigger frame (280pt tall, 24pt padding
   // → usable ~440×232pt). More breathing room feels like a hero treatment.
   const primaryDims = fitToBox(
     (primary as { preview_w?: number | null }).preview_w,
@@ -494,7 +445,7 @@ function LogoRow({ primary, supporting }: { primary: StrategyBrandLogo | undefin
 
   return (
     <View>
-      <View style={styles.logoPrimaryFrame}>
+      <View style={[styles.logoPrimaryFrame, { borderColor: brand.line }]}>
         {primary.preview_url && !primary.preview_url.endsWith('.mp4') && (
           <Image src={{ uri: primary.preview_url }} style={primaryDims} />
         )}
@@ -510,7 +461,7 @@ function LogoRow({ primary, supporting }: { primary: StrategyBrandLogo | undefin
               122, 110,
             )
             return (
-              <View key={logo.id} style={styles.logoSupportingFrame}>
+              <View key={logo.id} style={[styles.logoSupportingFrame, { borderColor: brand.line }]}>
                 {logo.preview_url && !logo.preview_url.endsWith('.mp4') && (
                   <Image src={{ uri: logo.preview_url }} style={dims} />
                 )}
@@ -588,18 +539,18 @@ function CombinationsRow({ combinations, colors }: {
   )
 }
 
-function TypographyList({ typography, headingFont }: {
+function TypographyList({ typography, brand }: {
   typography: StrategyBrandTypography[]
-  headingFont: string
+  brand: Brand
 }) {
   if (typography.length === 0) return null
   const TIER_LABEL: Record<string, string> = { primary: 'Heading', secondary: 'Body', accent: 'Accent' }
   return (
     <View style={styles.typeList}>
       {typography.map(font => (
-        <View key={font.id} style={styles.typeChip}>
-          <Text style={styles.typeChipEyebrow}>{(TIER_LABEL[font.tier] ?? font.tier).toUpperCase()}</Text>
-          <Text style={[styles.typeChipName, { fontFamily: headingFont }]}>{font.family_name}</Text>
+        <View key={font.id} style={[styles.typeChip, { borderColor: brand.line }]}>
+          <Text style={[styles.typeChipEyebrow, { color: brand.accent }]}>{(TIER_LABEL[font.tier] ?? font.tier).toUpperCase()}</Text>
+          <Text style={styles.typeChipName}>{font.family_name}</Text>
           {font.weight && <Text style={styles.typeChipDetail}>Weights: {font.weight}</Text>}
           {font.suggested_use && <Text style={styles.typeChipDetail}>Use: {font.suggested_use}</Text>}
         </View>
@@ -608,16 +559,15 @@ function TypographyList({ typography, headingFont }: {
   )
 }
 
-function TwoByTwo({ items, headingFont }: {
+function TwoByTwo({ items }: {
   items: StrategyBrandVoiceAttribute[] | StrategyBrandVoiceGuideline[]
-  headingFont: string
 }) {
   if (items.length === 0) return null
   return (
     <View style={styles.twoByTwo}>
       {items.map(item => (
         <View key={item.id} style={styles.voiceCell}>
-          <Text style={[styles.voiceTitle, { fontFamily: headingFont }]}>{item.title}</Text>
+          <Text style={styles.voiceTitle}>{item.title}</Text>
           <Text style={styles.voiceDesc}>{item.description}</Text>
         </View>
       ))}
@@ -625,13 +575,13 @@ function TwoByTwo({ items, headingFont }: {
   )
 }
 
-function AttributesBlock({ items, headingFont }: { items: StrategyBrandAttribute[]; headingFont: string }) {
+function AttributesBlock({ items }: { items: StrategyBrandAttribute[] }) {
   if (items.length === 0) return null
   return (
     <View style={styles.attrRow}>
       {items.map(a => (
         <View key={a.id} style={styles.attrCell}>
-          <Text style={[styles.attrLabel, { fontFamily: headingFont }]}>{a.label}</Text>
+          <Text style={styles.attrLabel}>{a.label}</Text>
           {a.description && <Text style={styles.attrDesc}>{a.description}</Text>}
         </View>
       ))}
@@ -639,9 +589,9 @@ function AttributesBlock({ items, headingFont }: { items: StrategyBrandAttribute
   )
 }
 
-function FooterBar({ display, date }: { display: string; date: string }) {
+function FooterBar({ display, date, brand }: { display: string; date: string; brand: Brand }) {
   return (
-    <View style={styles.footer} fixed>
+    <View style={[styles.footer, { borderTopColor: brand.line }]} fixed>
       <Text>{display} · Brand Guidelines</Text>
       <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
       <Text>Downloaded {date}</Text>
