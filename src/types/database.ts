@@ -525,6 +525,18 @@ export interface StrategyBrandGuide {
   is_published: boolean
   last_updated_at: string | null
   created_by: string | null
+  /** Optional Adobe Swatch Exchange (.ase) file — opens in
+   *  Photoshop/Illustrator to import the palette in one step. Renders as a
+   *  download button on the public portal's Color section and the handoff
+   *  Overview tab. */
+  ase_swatch_url: string | null
+  /** Controlled-vocabulary tags for internal handoff classification (minimal,
+   *  bold, colorful, etc.). Managed in the staff editor; surfaces on the
+   *  handoff doc Overview tab. Not exposed on the partner-facing portal. */
+  style_tags: string[]
+  /** Short designer-facing brief (1–3 sentences) from the brand squad.
+   *  Staff-only — not in the public RPC payload. */
+  handoff_notes: string | null
   created_at: string
   updated_at: string
   [key: string]: unknown
@@ -576,9 +588,29 @@ export interface StrategyBrandTypography {
   tier: BrandTypographyTier
   family_name: string
   weight: string | null
+  /** Friendly weight description shown to partners/designers — e.g. "Bold",
+   *  "Semibold", "Medium only". The `weight` column remains the technical
+   *  source (numeric list like "400, 700"). */
+  weight_label: string | null
   suggested_use: string | null
-  web_font_family: string | null
+  /** How the typeface should be set — e.g. "UPPERCASE", "Title Case",
+   *  "Sentence case". Free text. */
+  letter_case: string | null
+  /** Open-source source — Google Fonts URL or uploaded webfont file URL.
+   *  When this is a Google Fonts URL, the editor auto-prefills
+   *  `web_font_family` from `family_name`. */
   font_url: string | null
+  /** Where to purchase a license for the custom / paid font. Presence of
+   *  this URL signals "the family_name is a paid typeface"; the editor
+   *  then flags `free_alt_*` as required. */
+  custom_font_purchase_url: string | null
+  /** Royalty-free alternative used when the paid font isn't licensed. */
+  free_alt_family: string | null
+  free_alt_font_url: string | null
+  /** CSS family the online brand guide + downstream web projects render
+   *  text in. Required on every row — auto-prefilled by the editor when
+   *  `font_url` is a Google Fonts URL. */
+  web_font_family: string | null
   sort_order: number
   created_at: string
   [key: string]: unknown
@@ -641,6 +673,7 @@ export interface BrandGuidePortalPayload {
     voice_overview: string | null
     brand_statement: string | null
     assets_zip_url: string | null
+    ase_swatch_url: string | null
     last_updated_at: string | null
     updated_at: string
   }
@@ -658,6 +691,52 @@ export interface BrandGuidePortalPayload {
   /** Peer subbrands under the same parent, excluding the current guide. Empty
    *  array for main guides. */
   siblings: Array<{ slug: string; display_name: string }>
+}
+
+// ============================================================================
+// BRAND HANDOFF — staff-side quick-reference for Graphics / Social / Web / Video squads
+// ============================================================================
+
+/** Compact task card for the handoff's past-work feed. Derived from
+ *  task_details + view_task_account. Filtered server-side to approved-ish
+ *  statuses for the active church. */
+export interface HandoffTaskCard {
+  task_id: string
+  task_name: string
+  list_name: string | null
+  current_status: string | null
+  status_changed_at: string | null
+  assignee_names: string[] | null
+  tags: string[] | null
+}
+
+/** Digested church intel — only the keys the handoff Social tab consumes.
+ *  Typed loosely (unknown) so we can surface whatever the intel_profile
+ *  currently has without breaking when the schema drifts. */
+export interface HandoffIntelDigest {
+  intel_version: number | null
+  intel_updated_at: string | null
+  profile: Record<string, unknown> | null
+}
+
+/** Everything the handoff page needs in one payload. `guide` is null for a
+ *  church that has a portal_token but no brand guide yet. */
+export interface BrandHandoffPayload {
+  church: {
+    member: number
+    church_name: string | null
+    portal_token: string
+  }
+  guide: StrategyBrandGuide | null
+  logos: StrategyBrandLogo[]
+  colors: StrategyBrandColor[]
+  typography: StrategyBrandTypography[]
+  elements: StrategyBrandElement[]
+  voice_attributes: StrategyBrandVoiceAttribute[]
+  voice_guidelines: StrategyBrandVoiceGuideline[]
+  attributes: StrategyBrandAttribute[]
+  intel: HandoffIntelDigest | null
+  pastWork: HandoffTaskCard[]
 }
 
 // ============================================================================

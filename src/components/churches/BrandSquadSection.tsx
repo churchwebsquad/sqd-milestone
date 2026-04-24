@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronDown, ChevronRight, ExternalLink, Link, Check, Palette, BookOpen } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink, Link, Check, Palette, BookOpen, Sparkles } from 'lucide-react'
 import type { StrategyAccountProgress, PrfBrandGuide, MilestoneStatus } from '../../types/database'
 import type { EnrichedSubmission } from '../../pages/ChurchDetailPage'
 import { extractBrandPathway } from '../../types/churches'
@@ -134,12 +134,20 @@ export default function BrandSquadSection({ church, submissions, brandGuides, po
         title="Brand Squad"
         theme="brand"
         action={
-          <AppLink
-            label="Brand Guide"
-            icon={BookOpen}
-            onClick={() => navigate(`/churches/${memberId}/brand`)}
-            variant="primary"
-          />
+          <div className="flex items-center gap-1.5">
+            <AppLink
+              label="Handoff"
+              icon={Sparkles}
+              onClick={() => navigate(`/branding/${portalToken ?? ''}`)}
+              variant="primary"
+            />
+            <AppLink
+              label="Brand Guide"
+              icon={BookOpen}
+              onClick={() => navigate(`/churches/${memberId}/brand`)}
+              variant="primary"
+            />
+          </div>
         }
       />
 

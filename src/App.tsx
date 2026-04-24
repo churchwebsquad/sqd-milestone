@@ -17,6 +17,8 @@ import MyDashboardPage from './pages/MyDashboardPage'
 import ClientPortalPage from './pages/ClientPortalPage'
 import CopyReviewPortalPage from './pages/CopyReviewPortalPage'
 import BrandGuidePortalPage from './pages/BrandGuidePortalPage'
+import BrandingIndexPage from './pages/BrandingIndexPage'
+import BrandHandoffPage from './pages/BrandHandoffPage'
 import { BRAND_PORTAL_HOST } from './lib/portalUrl'
 
 // `brand.thesqd.com` is a dedicated subdomain for partner-facing brand
@@ -71,6 +73,10 @@ export default function App() {
             <Route path="/churches/:memberId/copy-review/:reviewId" element={<CopyReviewAdminPage />} />
             <Route path="/churches/:memberId/brand" element={<BrandGuideEditorPage />} />
             <Route path="/churches/:memberId/brand/:subSlug" element={<BrandGuideEditorPage />} />
+
+            {/* Internal brand handoff — staff-only search + per-church doc */}
+            <Route path="/branding" element={<BrandingIndexPage />} />
+            <Route path="/branding/:token" element={<BrandHandoffPage />} />
 
             {/* All In Journey Milestones */}
             <Route path="/pathway" element={<ComingSoonPage title="Pathway Viewer" />} />

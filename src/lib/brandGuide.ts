@@ -65,9 +65,20 @@ export interface TypographyDraft {
   tier: import('../types/database').BrandTypographyTier
   family_name: string
   weight: string | null
+  /** Friendly weight description ("Bold", "Semibold"). */
+  weight_label: string | null
   suggested_use: string | null
-  web_font_family: string | null
+  /** How the typeface should be set ("UPPERCASE", "Title Case", …). */
+  letter_case: string | null
+  /** Open-source source — Google Fonts URL or uploaded webfont. */
   font_url: string | null
+  /** If the family is a paid/custom font, purchase URL for the license. */
+  custom_font_purchase_url: string | null
+  /** Royalty-free alternative when the paid font isn't licensed. */
+  free_alt_family: string | null
+  free_alt_font_url: string | null
+  /** CSS family used on the online brand guide + web deliverables. */
+  web_font_family: string | null
 }
 
 export interface ElementDraft {
@@ -431,20 +442,28 @@ export async function saveTypography(
   await deleteMissing('strategy_brand_typography', existingIds, keep)
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i]
+    const fields = {
+      tier: r.tier,
+      family_name: r.family_name,
+      weight: r.weight,
+      weight_label: r.weight_label,
+      suggested_use: r.suggested_use,
+      letter_case: r.letter_case,
+      font_url: r.font_url,
+      custom_font_purchase_url: r.custom_font_purchase_url,
+      free_alt_family: r.free_alt_family,
+      free_alt_font_url: r.free_alt_font_url,
+      web_font_family: r.web_font_family,
+      sort_order: i,
+    }
     if (r.id) {
       const { error } = await supabase.from('strategy_brand_typography')
-        .update({
-          tier: r.tier, family_name: r.family_name, weight: r.weight,
-          suggested_use: r.suggested_use, web_font_family: r.web_font_family,
-          font_url: r.font_url, sort_order: i,
-        }).eq('id', r.id)
+        .update(fields).eq('id', r.id)
       if (error) throw new Error(error.message)
     } else {
       const { error } = await supabase.from('strategy_brand_typography').insert({
         brand_guide_id: guideId,
-        tier: r.tier, family_name: r.family_name, weight: r.weight,
-        suggested_use: r.suggested_use, web_font_family: r.web_font_family,
-        font_url: r.font_url, sort_order: i,
+        ...fields,
       })
       if (error) throw new Error(error.message)
     }

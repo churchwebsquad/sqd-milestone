@@ -24,6 +24,7 @@ import {
 import { uploadAttachment, AttachmentError } from '../lib/attachmentUpload'
 import { isGoogleFont } from '../lib/googleFonts'
 import { buildPortalUrl } from '../lib/portalUrl'
+import { STYLE_TAG_OPTIONS } from '../lib/brandStyleTags'
 
 const BRAND_BUCKET = 'brand-assets'
 const LOGO_MIME = ['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'video/mp4']
@@ -225,12 +226,23 @@ export default function BrandGuideEditorPage() {
         />
 
         <LogosSection bundle={bundle} staffName={staffProfile?.full_name ?? null} onSaved={reload} onError={setError} />
-        <ColorsSection bundle={bundle} parentBundle={parentBundle} onSaved={reload} onError={setError} />
+        <ColorsSection
+          bundle={bundle}
+          parentBundle={parentBundle}
+          onGuideChange={(g) => setBundle({ ...bundle, guide: g })}
+          onSaved={reload}
+          onError={setError}
+        />
         <ColorCombinationsSection bundle={bundle} onSaved={reload} onError={setError} />
         <TypographySection bundle={bundle} parentBundle={parentBundle} onSaved={reload} onError={setError} />
         <ElementsSection bundle={bundle} onSaved={reload} onError={setError} />
         {!isSubbrand && (
           <>
+            <HandoffMetaSection
+              guide={bundle.guide}
+              onChange={(g) => setBundle({ ...bundle, guide: g })}
+              onError={setError}
+            />
             <VoicePrefillCard
               bundle={bundle}
               onPrefilled={reload}
@@ -700,9 +712,13 @@ const TIER_LABEL: Record<BrandColorTier, string> = {
   background: 'Background', text: 'Text', light: 'Light', dark: 'Dark',
 }
 
-function ColorsSection({ bundle, parentBundle, onSaved, onError }: {
+function ColorsSection({ bundle, parentBundle, onGuideChange, onSaved, onError }: {
   bundle: BrandGuideBundle
   parentBundle?: BrandGuideBundle | null
+  /** Direct guide-row patch channel — used by the ASE swatch upload, which
+   *  writes to `strategy_brand_guides.ase_swatch_url` rather than to the
+   *  color rows themselves. */
+  onGuideChange: (next: import('../types/database').StrategyBrandGuide) => void
   onSaved: () => Promise<void>
   onError: (msg: string) => void
 }) {
@@ -713,6 +729,46 @@ function ColorsSection({ bundle, parentBundle, onSaved, onError }: {
   const [newName, setNewName] = useState('')
   const onColorInputRef = useRef<HTMLInputElement | null>(null)
   const [onColorIdx, setOnColorIdx] = useState<number | null>(null)
+  // ── .ase swatch upload (Adobe Swatch Exchange) ─────────────────────────
+  const [uploadingAse, setUploadingAse] = useState(false)
+  const aseInputRef = useRef<HTMLInputElement | null>(null)
+
+  const pickAse = () => aseInputRef.current?.click()
+  const handleAse = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    // Browsers almost never send a useful MIME for .ase — they report empty
+    // string or application/octet-stream. Validate on extension.
+    if (!/\.ase$/i.test(file.name)) {
+      onError('Please select an Adobe Swatch Exchange (.ase) file.')
+      return
+    }
+    setUploadingAse(true)
+    try {
+      const result = await uploadAttachment(file, null, undefined, {
+        bucket: BRAND_BUCKET,
+        pathPrefix: `${bundle.guide.id}/swatch`,
+        allowedMime: ['application/octet-stream', ''],
+        maxBytes: 2 * 1024 * 1024,
+      })
+      const next = await updateGuideMeta(bundle.guide.id, { ase_swatch_url: result.url })
+      onGuideChange(next)
+    } catch (err) {
+      const msg = err instanceof AttachmentError ? err.message : (err as { message?: string })?.message ?? 'Upload failed'
+      onError(msg)
+    } finally {
+      setUploadingAse(false)
+    }
+  }
+  const clearAse = async () => {
+    try {
+      const next = await updateGuideMeta(bundle.guide.id, { ase_swatch_url: null })
+      onGuideChange(next)
+    } catch (err) {
+      onError((err as { message?: string })?.message ?? 'Failed to clear swatch')
+    }
+  }
 
   useEffect(() => { setDraft(bundle.colors) }, [bundle.colors])
 
@@ -917,6 +973,34 @@ function ColorsSection({ bundle, parentBundle, onSaved, onError }: {
         </button>
       </div>
 
+      {/* Adobe Swatch Exchange (.ase) — designer-friendly one-click palette import */}
+      <div className="mt-4 rounded-xl border border-lavender/70 bg-lavender-tint/20 p-3 flex items-center justify-between gap-3 flex-wrap">
+        <input ref={aseInputRef} type="file" className="hidden" accept=".ase,application/octet-stream" onChange={handleAse} />
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-purple-gray">Color swatch (.ase)</p>
+          <p className="text-xs text-deep-plum mt-0.5">
+            {bundle.guide.ase_swatch_url ? 'Uploaded — designers can import the full palette into Photoshop / Illustrator in one click.' : 'Optional — Adobe Swatch Exchange file. Appears as a "Download .ase swatch" button on the public portal and internal handoff.'}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {bundle.guide.ase_swatch_url && (
+            <a href={bundle.guide.ase_swatch_url} target="_blank" rel="noopener noreferrer"
+              className="text-[11px] text-primary-purple hover:underline font-semibold">
+              View current
+            </a>
+          )}
+          <button type="button" onClick={pickAse} disabled={uploadingAse}
+            className="inline-flex items-center gap-1 rounded-full border border-lavender bg-white text-xs font-semibold text-deep-plum px-3 py-1.5 hover:bg-lavender-tint disabled:opacity-50">
+            {uploadingAse ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+            {bundle.guide.ase_swatch_url ? 'Replace' : 'Upload .ase'}
+          </button>
+          {bundle.guide.ase_swatch_url && (
+            <button type="button" onClick={clearAse}
+              className="text-[11px] text-purple-gray hover:text-red-500 px-2 py-1">Clear</button>
+          )}
+        </div>
+      </div>
+
       <SectionFooter dirty={dirty} saving={saving} onSave={save} onReset={() => setDraft(bundle.colors)} />
     </SectionCard>
   )
@@ -1029,7 +1113,15 @@ function TypographySection({ bundle, parentBundle, onSaved, onError }: {
 
   useEffect(() => { setDraft(bundle.typography) }, [bundle.typography])
 
-  const dirty = !rowsEqual(draft, bundle.typography, ['tier', 'family_name', 'weight', 'suggested_use', 'web_font_family', 'font_url'])
+  const dirty = !rowsEqual(draft, bundle.typography, [
+    'tier', 'family_name',
+    'weight', 'weight_label',
+    'suggested_use', 'letter_case',
+    'font_url',
+    'custom_font_purchase_url',
+    'free_alt_family', 'free_alt_font_url',
+    'web_font_family',
+  ])
 
   const save = async () => {
     setSaving(true)
@@ -1040,7 +1132,15 @@ function TypographySection({ bundle, parentBundle, onSaved, onError }: {
     finally { setSaving(false) }
   }
 
-  const addRow = () => setDraft([...draft, { tier: 'primary', family_name: '', weight: null, suggested_use: null, web_font_family: null, font_url: null }])
+  const addRow = () => setDraft([...draft, {
+    tier: 'primary', family_name: '',
+    weight: null, weight_label: null,
+    suggested_use: null, letter_case: null,
+    font_url: null,
+    custom_font_purchase_url: null,
+    free_alt_family: null, free_alt_font_url: null,
+    web_font_family: null,
+  }])
   const removeRow = (i: number) => setDraft(draft.filter((_, idx) => idx !== i))
   const updateRow = (i: number, patch: Partial<TypographyDraft>) => setDraft(draft.map((r, idx) => idx === i ? { ...r, ...patch } : r))
 
@@ -1050,6 +1150,24 @@ function TypographySection({ bundle, parentBundle, onSaved, onError }: {
       title="Typography"
       description="One row per font role. Google Fonts auto-load from the family name; non-Google fonts need a licensed webfont file before the portal can show a sample."
     >
+      {/* Shared autocomplete suggestions for weight label + display case. */}
+      <datalist id="weight-label-suggestions">
+        <option value="Light" />
+        <option value="Regular" />
+        <option value="Medium" />
+        <option value="Semibold" />
+        <option value="Bold" />
+        <option value="Extra Bold" />
+        <option value="Black" />
+      </datalist>
+      <datalist id="letter-case-suggestions">
+        <option value="UPPERCASE" />
+        <option value="lowercase" />
+        <option value="Title Case" />
+        <option value="Sentence case" />
+        <option value="Mixed" />
+      </datalist>
+
       {parentBundle && (
         <LoadFromParentBar
           parentName={parentBundle.guide.display_name}
@@ -1059,9 +1177,13 @@ function TypographySection({ bundle, parentBundle, onSaved, onError }: {
             setDraft(prev => [
               ...prev,
               ...parentBundle.typography.map(t => ({
-                tier: t.tier, family_name: t.family_name, weight: t.weight,
-                suggested_use: t.suggested_use, web_font_family: t.web_font_family,
+                tier: t.tier, family_name: t.family_name,
+                weight: t.weight, weight_label: t.weight_label,
+                suggested_use: t.suggested_use, letter_case: t.letter_case,
                 font_url: t.font_url,
+                custom_font_purchase_url: t.custom_font_purchase_url,
+                free_alt_family: t.free_alt_family, free_alt_font_url: t.free_alt_font_url,
+                web_font_family: t.web_font_family,
               })),
             ])
           }}
@@ -1102,6 +1224,20 @@ function FontRow({ row, guideId, onChange, onRemove, onError }: {
   const [uploading, setUploading] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
 
+  // Auto-prefill web_font_family when either signal says "this family is a
+  // Google Font" — the user pasted a Google Fonts URL, OR the family name
+  // alone matches our known Google Fonts list. Only fires when the web
+  // family is empty so manual entries are never overwritten.
+  useEffect(() => {
+    if (row.web_font_family?.trim()) return
+    if (!row.family_name?.trim()) return
+    const urlIsGoogle = row.font_url && /fonts\.googleapis\.com/i.test(row.font_url)
+    const nameIsGoogleFont = isGoogleFont(row.family_name)
+    if (!urlIsGoogle && !nameIsGoogleFont) return
+    onChange({ web_font_family: row.family_name })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row.font_url, row.family_name])
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     e.target.value = ''
@@ -1114,9 +1250,6 @@ function FontRow({ row, guideId, onChange, onRemove, onError }: {
         allowedMime: FONT_MIME,
         maxBytes: 5 * 1024 * 1024,
       })
-      // Set web_font_family to the typed family_name so the @font-face rule
-      // on the portal binds correctly. If family_name is empty, derive from
-      // the filename.
       const fallbackName = file.name.replace(/\.[^.]+$/, '')
       onChange({
         font_url: result.url,
@@ -1131,9 +1264,14 @@ function FontRow({ row, guideId, onChange, onRemove, onError }: {
     }
   }
 
+  const hasCustomPurchase = !!row.custom_font_purchase_url?.trim()
+  const freeAltMissing = hasCustomPurchase && !(row.free_alt_family?.trim() && row.free_alt_font_url?.trim())
+  const webFontMissing = !row.web_font_family?.trim()
+
   return (
     <div className="rounded-xl border border-lavender p-3 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-start">
-      <div className="space-y-2">
+      <div className="space-y-3">
+        {/* ── Top metadata ─────────────────────────────────────── */}
         <div className="grid grid-cols-2 gap-2">
           <Field label="Family">
             <input type="text" value={row.family_name} onChange={e => onChange({ family_name: e.target.value })}
@@ -1148,66 +1286,166 @@ function FontRow({ row, guideId, onChange, onRemove, onError }: {
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Weights">
+          <Field label="Weights (technical)">
             <input type="text" value={row.weight ?? ''} onChange={e => onChange({ weight: e.target.value || null })}
               placeholder="400, 700"
               className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple" />
           </Field>
+          <Field label="Weight label (client-friendly)">
+            <input
+              type="text"
+              list="weight-label-suggestions"
+              value={row.weight_label ?? ''}
+              onChange={e => onChange({ weight_label: e.target.value || null })}
+              placeholder="Bold"
+              className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple"
+            />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
           <Field label="Suggested use">
             <input type="text" value={row.suggested_use ?? ''} onChange={e => onChange({ suggested_use: e.target.value || null })}
               placeholder="Headlines"
               className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple" />
           </Field>
+          <Field label="Display case">
+            <input
+              type="text"
+              list="letter-case-suggestions"
+              value={row.letter_case ?? ''}
+              onChange={e => onChange({ letter_case: e.target.value || null })}
+              placeholder="Title Case"
+              className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple"
+            />
+          </Field>
         </div>
 
         <FontStatusRow status={status} family={row.family_name} fontUrl={row.font_url} />
 
-        {status === 'custom-none' && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
-            <p className="text-xs text-amber-900">
-              <AlertCircle size={12} className="inline -mt-0.5 mr-1" />
-              <strong>Custom font detected.</strong> We can't display this font on the public guide without a proper webfont license. Upload a licensed webfont file (WOFF/WOFF2/TTF/OTF), or leave empty — the sample will be hidden and only the font name will show.
+        {/* ── 1. Open-source source ────────────────────────────── */}
+        <div className="rounded-lg border border-lavender bg-white p-2.5 space-y-2">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-purple-gray">
+              1. Open-source source
             </p>
-            <label className="flex items-start gap-2 text-[11px] text-amber-900 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={licenseOk}
-                onChange={e => setLicenseOk(e.target.checked)}
-                className="mt-0.5 accent-amber-600"
+            <p className="text-[10px] text-purple-gray/60">Google Font link or uploaded webfont file</p>
+          </div>
+          <input type="url" value={row.font_url ?? ''} onChange={e => onChange({ font_url: e.target.value || null })}
+            placeholder="https://fonts.googleapis.com/css2?family=…"
+            className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple font-mono text-xs" />
+          {/* Inline upload flow (with license confirmation) for when the
+               church is self-hosting a webfont file they have rights to. */}
+          <details className="text-[11px]">
+            <summary className="cursor-pointer text-purple-gray hover:text-deep-plum inline-flex items-center gap-1">
+              <Upload size={10} /> Upload a webfont file instead
+            </summary>
+            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2.5 space-y-2">
+              <label className="flex items-start gap-2 text-amber-900 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={licenseOk}
+                  onChange={e => setLicenseOk(e.target.checked)}
+                  className="mt-0.5 accent-amber-600"
+                />
+                <span>I confirm this church has a valid webfont license for <strong>{row.family_name || 'this font'}</strong>.</span>
+              </label>
+              <input ref={uploadInputRef} type="file" className="hidden"
+                accept={FONT_MIME.join(',') + ',.woff,.woff2,.ttf,.otf'}
+                onChange={handleUpload}
               />
-              <span>I confirm this church has a valid webfont license for <strong>{row.family_name || 'this font'}</strong>.</span>
-            </label>
-            <input ref={uploadInputRef} type="file" className="hidden"
-              accept={FONT_MIME.join(',') + ',.woff,.woff2,.ttf,.otf'}
-              onChange={handleUpload}
-            />
-            <button
-              type="button"
-              disabled={!licenseOk || uploading}
-              onClick={() => uploadInputRef.current?.click()}
-              className="inline-flex items-center gap-1.5 rounded-full bg-amber-600 text-white text-xs font-semibold px-3 py-1.5 hover:bg-amber-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
-              Upload licensed webfont
-            </button>
+              <button
+                type="button"
+                disabled={!licenseOk || uploading}
+                onClick={() => uploadInputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 rounded-full bg-amber-600 text-white text-xs font-semibold px-3 py-1.5 hover:bg-amber-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                Upload licensed webfont
+              </button>
+            </div>
+          </details>
+        </div>
+
+        {/* ── 2. Custom paid font ──────────────────────────────── */}
+        <div className="rounded-lg border border-lavender bg-white p-2.5 space-y-2">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-purple-gray">
+              2. Custom paid font <span className="text-purple-gray/60 font-normal">(optional)</span>
+            </p>
+          </div>
+          <input type="url" value={row.custom_font_purchase_url ?? ''}
+            onChange={e => onChange({ custom_font_purchase_url: e.target.value || null })}
+            placeholder="https://typography.com/fonts/…"
+            className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple font-mono text-xs" />
+          <p className="text-[11px] text-purple-gray/80 leading-relaxed">
+            If the brand uses a paid typeface, drop the purchase page here.
+            Custom font licenses are a one-time investment that honors the
+            typographer's craft and keeps the church's design work rights-clean.
+            We'll show partners a friendly link to purchase when they visit
+            the brand guide.
+          </p>
+        </div>
+
+        {/* ── 3. Free alternative (only when paid font is specified) ── */}
+        {hasCustomPurchase && (
+          <div className={`rounded-lg border p-2.5 space-y-2 ${
+            freeAltMissing ? 'border-amber-300 bg-amber-50' : 'border-lavender bg-white'
+          }`}>
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-purple-gray">
+                3. Free alternative <span className="text-red-600 font-normal">required</span>
+              </p>
+            </div>
+            <p className="text-[11px] text-purple-gray leading-relaxed">
+              Royalty-free fallback for when the paid font isn't licensed.
+              Downstream design + web work uses this when the license is missing.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Family name">
+                <input type="text" value={row.free_alt_family ?? ''}
+                  onChange={e => onChange({ free_alt_family: e.target.value || null })}
+                  placeholder="Montserrat"
+                  className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple" />
+              </Field>
+              <Field label="Download / Google Fonts URL">
+                <input type="url" value={row.free_alt_font_url ?? ''}
+                  onChange={e => onChange({ free_alt_font_url: e.target.value || null })}
+                  placeholder="https://fonts.googleapis.com/css2?family=Montserrat"
+                  className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple font-mono text-xs" />
+              </Field>
+            </div>
+            {freeAltMissing && (
+              <p className="text-[11px] text-amber-900 flex items-center gap-1">
+                <AlertCircle size={11} /> Both a family name and a download URL are needed.
+              </p>
+            )}
           </div>
         )}
 
-        <details className="text-[11px]">
-          <summary className="cursor-pointer text-purple-gray hover:text-deep-plum">Advanced (font URL / web family override)</summary>
-          <div className="mt-2 space-y-2">
-            <Field label="Font URL (Google Fonts / Adobe Fonts / uploaded file)">
-              <input type="url" value={row.font_url ?? ''} onChange={e => onChange({ font_url: e.target.value || null })}
-                placeholder="https://fonts.googleapis.com/css2?family=…"
-                className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple font-mono text-xs" />
-            </Field>
-            <Field label="Web font override (optional)">
-              <input type="text" value={row.web_font_family ?? ''} onChange={e => onChange({ web_font_family: e.target.value || null })}
-                placeholder="Inter"
-                className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple" />
-            </Field>
+        {/* ── 4. Web font family (always required) ─────────────── */}
+        <div className={`rounded-lg border p-2.5 space-y-2 ${
+          webFontMissing ? 'border-amber-300 bg-amber-50' : 'border-lavender bg-white'
+        }`}>
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-purple-gray">
+              4. Web font family <span className="text-red-600 font-normal">required</span>
+            </p>
           </div>
-        </details>
+          <p className="text-[11px] text-purple-gray leading-relaxed">
+            The CSS family name the online brand guide and downstream web squad
+            projects render text in. Auto-fills from the family name above when
+            you paste a Google Fonts link in section 1.
+          </p>
+          <input type="text" value={row.web_font_family ?? ''}
+            onChange={e => onChange({ web_font_family: e.target.value || null })}
+            placeholder={row.family_name || 'Inter'}
+            className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple" />
+          {webFontMissing && (
+            <p className="text-[11px] text-amber-900 flex items-center gap-1">
+              <AlertCircle size={11} /> Please set this — the online guide can't render without a web family.
+            </p>
+          )}
+        </div>
       </div>
       <button type="button" onClick={onRemove} className="text-purple-gray hover:text-red-500 p-1.5" aria-label="Remove">
         <Trash2 size={14} />
@@ -1356,6 +1594,104 @@ function ElementsSection({ bundle, onSaved, onError }: {
 }
 
 // ── Voice (paragraphs) ─────────────────────────────────────────────────────
+
+/**
+ * Handoff metadata section — staff-only classifiers the brand squad sets
+ * to help Graphics/Video/Social/Web squads pick up a project faster. Data
+ * surfaces on the `/branding/{token}` handoff doc's Overview tab.
+ *
+ *  - Style tags: controlled vocabulary from STYLE_TAG_OPTIONS, rendered as
+ *    toggleable chips. Nothing blocks a user from leaving it empty.
+ *  - Handoff notes: short free-text brief (1–3 sentences) shown alongside
+ *    the logo/color/font quick-reference.
+ */
+function HandoffMetaSection({ guide, onChange, onError }: {
+  guide: StrategyBrandGuide
+  onChange: (g: StrategyBrandGuide) => void
+  onError: (msg: string) => void
+}) {
+  const initialTags = (guide.style_tags ?? []) as string[]
+  const [tags, setTags] = useState<string[]>(initialTags)
+  const [notes, setNotes] = useState(guide.handoff_notes ?? '')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => { setTags((guide.style_tags ?? []) as string[]) }, [guide.style_tags])
+  useEffect(() => { setNotes(guide.handoff_notes ?? '') }, [guide.handoff_notes])
+
+  const tagsEqual = tags.length === initialTags.length && tags.every(t => initialTags.includes(t))
+  const dirty = !tagsEqual || notes !== (guide.handoff_notes ?? '')
+
+  const toggleTag = (tag: string) => {
+    setTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag])
+  }
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      const next = await updateGuideMeta(guide.id, {
+        style_tags: tags,
+        handoff_notes: notes.trim() || null,
+      })
+      onChange(next)
+    } catch (err) {
+      onError((err as { message?: string })?.message ?? 'Failed to save handoff metadata')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const reset = () => {
+    setTags((guide.style_tags ?? []) as string[])
+    setNotes(guide.handoff_notes ?? '')
+  }
+
+  return (
+    <SectionCard
+      icon={Sparkles}
+      title="Handoff metadata"
+      description="Staff-only. Surfaces on the internal handoff doc (/branding) to help designers start faster."
+    >
+      <div className="space-y-4">
+        <Field label="Style tags">
+          <div className="flex flex-wrap gap-1.5">
+            {STYLE_TAG_OPTIONS.map(tag => {
+              const active = tags.includes(tag)
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => toggleTag(tag)}
+                  className={`text-xs font-semibold rounded-full px-3 py-1 border transition-colors ${
+                    active
+                      ? 'bg-primary-purple border-primary-purple text-white'
+                      : 'border-lavender text-deep-plum hover:border-primary-purple hover:text-primary-purple'
+                  }`}
+                >
+                  {tag}
+                </button>
+              )
+            })}
+          </div>
+          {tags.length === 0 && (
+            <p className="text-[11px] text-purple-gray/70 mt-1.5">No tags set yet — tap any above.</p>
+          )}
+        </Field>
+
+        <Field label="Handoff notes (1–3 sentences)">
+          <textarea
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            rows={3}
+            placeholder="e.g. This brand leans warm and classic — prefer serif accents, avoid neon palettes."
+            className="w-full rounded-lg border border-lavender px-3 py-2 text-sm text-deep-plum outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20 resize-y"
+          />
+        </Field>
+      </div>
+
+      <SectionFooter dirty={dirty} saving={saving} onSave={save} onReset={reset} />
+    </SectionCard>
+  )
+}
 
 /**
  * Upload-and-commit flow for AI prefill.

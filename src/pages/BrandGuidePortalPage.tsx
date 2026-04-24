@@ -491,7 +491,7 @@ function Body({ payload, theme }: { payload: BrandGuidePortalPayload; theme: Por
 
           <main className="px-6 md:px-10 py-8 md:py-12 space-y-16 md:space-y-24" style={{ fontFamily: theme.bodyFont, color: theme.text }}>
             <LogoSection logos={payload.logos} colors={payload.colors} theme={theme} />
-            <ColorSection colors={payload.colors} combinations={payload.color_combinations} theme={theme} onCopy={showToast} />
+            <ColorSection colors={payload.colors} combinations={payload.color_combinations} aseSwatchUrl={payload.guide.ase_swatch_url} theme={theme} onCopy={showToast} />
             <TypographySection typography={payload.typography} theme={theme} />
             <ElementsSection elements={payload.elements} theme={theme} />
             {!isSubbrand && (
@@ -745,9 +745,10 @@ function LogoArtwork({ logo, maxHeight }: { logo: StrategyBrandLogo; maxHeight: 
 
 const COLOR_TIER_ORDER = ['primary', 'secondary', 'accent', 'light', 'dark', 'background', 'text'] as const
 
-function ColorSection({ colors, combinations, theme, onCopy }: {
+function ColorSection({ colors, combinations, aseSwatchUrl, theme, onCopy }: {
   colors: StrategyBrandColor[]
   combinations: BrandGuidePortalPayload['color_combinations']
+  aseSwatchUrl: string | null
   theme: PortalTheme
   onCopy: (msg: string) => void
 }) {
@@ -846,6 +847,23 @@ function ColorSection({ colors, combinations, theme, onCopy }: {
               )
             })}
           </div>
+        </div>
+      )}
+
+      {aseSwatchUrl && (
+        <div className="mt-12">
+          <h3 className="text-base font-bold mb-2" style={{ fontFamily: theme.headingFont, color: theme.text }}>Swatch file</h3>
+          <p className="text-sm text-gray-600 mb-3 max-w-2xl">
+            Designers can load the full palette into Photoshop, Illustrator, or InDesign in one click.
+          </p>
+          <a
+            href={aseSwatchUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white text-sm font-semibold text-gray-900 px-4 py-2 hover:border-gray-400 transition-colors"
+          >
+            <Download size={13} /> Download .ase swatch
+          </a>
         </div>
       )}
     </section>
@@ -955,18 +973,41 @@ function TypographySection({ typography, theme }: { typography: StrategyBrandTyp
                   {TYPE_TIER_LABEL[font.tier] ?? font.tier}
                 </p>
                 <p className="text-xl font-bold" style={{ fontFamily: theme.headingFont, color: theme.text }}>{font.family_name}</p>
-                {font.weight && <p className="text-xs text-gray-600 mt-0.5">Weights: {font.weight}</p>}
+                {font.weight_label && <p className="text-xs text-gray-600 mt-0.5">Weight: {font.weight_label}</p>}
+                {font.weight && <p className="text-xs text-gray-500 mt-0.5">Technical: {font.weight}</p>}
+                {font.letter_case && <p className="text-xs text-gray-600 mt-0.5">Set in: {font.letter_case}</p>}
                 {font.suggested_use && <p className="text-xs text-gray-600 mt-0.5">Use: {font.suggested_use}</p>}
-                {font.font_url && (
-                  <a
-                    href={font.font_url}
-                    target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 mt-2 text-[11px] hover:underline"
-                    style={{ color: theme.accent }}
-                  >
-                    Font source <ExternalLink size={10} />
-                  </a>
-                )}
+                <div className="mt-2 flex flex-col gap-1 text-[11px]">
+                  {font.font_url && (
+                    <a href={font.font_url} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 hover:underline"
+                      style={{ color: theme.accent }}>
+                      Open-source source <ExternalLink size={10} />
+                    </a>
+                  )}
+                  {font.custom_font_purchase_url && (
+                    <a href={font.custom_font_purchase_url} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 hover:underline"
+                      style={{ color: theme.accent }}>
+                      Purchase license <ExternalLink size={10} />
+                    </a>
+                  )}
+                  {font.free_alt_family && (
+                    <span className="text-gray-600">
+                      Free alt: <span className="font-semibold">{font.free_alt_family}</span>
+                      {font.free_alt_font_url && (
+                        <>
+                          {' · '}
+                          <a href={font.free_alt_font_url} target="_blank" rel="noopener noreferrer"
+                            className="hover:underline"
+                            style={{ color: theme.accent }}>
+                            download
+                          </a>
+                        </>
+                      )}
+                    </span>
+                  )}
+                </div>
               </div>
               <div>
                 <p className="text-7xl md:text-8xl leading-none" style={{ fontFamily: stack, color: theme.text }}>Aa</p>
@@ -991,18 +1032,37 @@ function TypographySection({ typography, theme }: { typography: StrategyBrandTyp
                 {TYPE_TIER_LABEL[font.tier] ?? font.tier}
               </p>
               <p className="text-xl font-bold" style={{ fontFamily: theme.headingFont, color: theme.text }}>{font.family_name}</p>
-              {font.weight && <p className="text-xs text-gray-500">Weights: {font.weight}</p>}
+              {font.weight_label && <p className="text-xs text-gray-500">Weight: {font.weight_label}</p>}
+              {font.letter_case && <p className="text-xs text-gray-500">Set in: {font.letter_case}</p>}
               {font.suggested_use && <p className="text-xs text-gray-500">Use: {font.suggested_use}</p>}
-              {font.font_url && (
-                <a
-                  href={font.font_url}
-                  target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-[11px] hover:underline ml-auto"
-                  style={{ color: theme.accent }}
-                >
-                  Font source <ExternalLink size={10} />
-                </a>
+              {font.free_alt_family && (
+                <p className="text-xs text-gray-500">
+                  Free alt: <span className="font-semibold">{font.free_alt_family}</span>
+                </p>
               )}
+              <span className="ml-auto flex items-center gap-3">
+                {font.font_url && (
+                  <a href={font.font_url} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] hover:underline"
+                    style={{ color: theme.accent }}>
+                    Source <ExternalLink size={10} />
+                  </a>
+                )}
+                {font.custom_font_purchase_url && (
+                  <a href={font.custom_font_purchase_url} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] hover:underline"
+                    style={{ color: theme.accent }}>
+                    Purchase <ExternalLink size={10} />
+                  </a>
+                )}
+                {font.free_alt_font_url && (
+                  <a href={font.free_alt_font_url} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] hover:underline"
+                    style={{ color: theme.accent }}>
+                    Free alt <ExternalLink size={10} />
+                  </a>
+                )}
+              </span>
             </div>
           ))}
         </div>

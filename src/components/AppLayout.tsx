@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import {
   Send, FileText, LayoutDashboard, User, LogOut, Menu, X,
-  Building2, GitBranch, Sparkles, Search, Settings, CalendarDays,
+  Building2, GitBranch, Sparkles, Search, Settings, CalendarDays, Palette,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
@@ -18,6 +18,7 @@ function isGroup(entry: NavEntry): entry is NavGroup {
 const NAV_STRUCTURE: NavEntry[] = [
   { to: '/', label: 'My Dashboard', icon: User, end: true },
   { to: '/churches', label: 'Churches Dashboard', icon: Building2, end: false },
+  { to: '/branding', label: 'Brand Handoffs', icon: Palette, end: false },
   {
     heading: 'All In Journey Milestones',
     items: [
