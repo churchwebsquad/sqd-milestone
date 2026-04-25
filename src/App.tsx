@@ -19,6 +19,23 @@ import CopyReviewPortalPage from './pages/CopyReviewPortalPage'
 import BrandGuidePortalPage from './pages/BrandGuidePortalPage'
 import BrandingIndexPage from './pages/BrandingIndexPage'
 import BrandHandoffPage from './pages/BrandHandoffPage'
+import InitiativesPage from './pages/strategy/InitiativesPage'
+import InitiativeDetailPage from './pages/strategy/InitiativeDetailPage'
+import ActionItemDetailPage from './pages/strategy/ActionItemDetailPage'
+import MyActionItemsPage from './pages/strategy/MyActionItemsPage'
+import RoadmapPage from './pages/strategy/RoadmapPage'
+import ProgressPage from './pages/strategy/ProgressPage'
+import LibraryLayout from './pages/strategy/library/LibraryLayout'
+import LibraryHomePage from './pages/strategy/library/LibraryHomePage'
+import LibraryProcessPage from './pages/strategy/library/LibraryProcessPage'
+import LibraryCategoryPage from './pages/strategy/library/LibraryCategoryPage'
+import LibraryRecentPage from './pages/strategy/library/LibraryRecentPage'
+import LibraryStartHerePage from './pages/strategy/library/LibraryStartHerePage'
+import LibraryDocPage from './pages/strategy/library/LibraryDocPage'
+import LibraryAdminPage from './pages/strategy/library/LibraryAdminPage'
+import LibraryDocManagerPage from './pages/strategy/library/LibraryDocManagerPage'
+import LibrarySearchPage from './pages/strategy/library/LibrarySearchPage'
+import LibraryProductsPage from './pages/strategy/library/LibraryProductsPage'
 import { BRAND_PORTAL_HOST } from './lib/portalUrl'
 
 // `brand.thesqd.com` is a dedicated subdomain for partner-facing brand
@@ -84,11 +101,42 @@ export default function App() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/templates" element={<TemplateEditorPage />} />
 
-            {/* Social Media */}
+            {/* Social Media — Prompt Settings nests under SRP Generator
+                (the only tool that consumes them). The legacy
+                /social/prompts URL still routes for old links. */}
             <Route path="/social/srp" element={<ComingSoonPage title="SRP Generator" />} />
+            <Route path="/social/srp/prompts" element={<ComingSoonPage title="Prompt Settings (SRP)" />} />
             <Route path="/social/intel" element={<IntelAuditToolPage />} />
-            <Route path="/social/prompts" element={<ComingSoonPage title="Prompt Settings" />} />
+            <Route path="/social/prompts" element={<Navigate to="/social/srp/prompts" replace />} />
             <Route path="/social/planner" element={<ComingSoonPage title="Planning Calendar" />} />
+
+            {/* Strategy — Command Center retired in Phase 3; "/strategy"
+                redirects to Initiatives so old bookmarks still land somewhere. */}
+            <Route path="/strategy" element={<Navigate to="/strategy/initiatives" replace />} />
+            <Route path="/strategy/initiatives" element={<InitiativesPage />} />
+            <Route path="/strategy/initiatives/:id" element={<InitiativeDetailPage />} />
+            <Route path="/strategy/action-items" element={<MyActionItemsPage />} />
+            <Route path="/strategy/action-items/:id" element={<ActionItemDetailPage />} />
+            <Route path="/strategy/roadmap" element={<RoadmapPage />} />
+            <Route path="/strategy/progress" element={<ProgressPage />} />
+            {/* Library — nested layout so the data context loads once and
+                every sub-route shares it. */}
+            <Route path="/strategy/library" element={<LibraryLayout />}>
+              <Route index element={<LibraryHomePage />} />
+              <Route path="process" element={<LibraryProcessPage />} />
+              <Route path="category/:slug" element={<LibraryCategoryPage />} />
+              <Route path="recent" element={<LibraryRecentPage />} />
+              {/* The standalone Review Queue page has been folded into
+                  the Doc Manager's Needs Verification tab. The route is
+                  preserved as a redirect so old links don't 404. */}
+              <Route path="queue" element={<Navigate to="/strategy/library/manager?tab=needs-verification" replace />} />
+              <Route path="start-here" element={<LibraryStartHerePage />} />
+              <Route path="doc/:id" element={<LibraryDocPage />} />
+              <Route path="admin" element={<LibraryAdminPage />} />
+              <Route path="manager" element={<LibraryDocManagerPage />} />
+              <Route path="search" element={<LibrarySearchPage />} />
+              <Route path="products" element={<LibraryProductsPage />} />
+            </Route>
 
             {/* Detail pages */}
             <Route path="/account/:memberId" element={<AccountLogPage />} />

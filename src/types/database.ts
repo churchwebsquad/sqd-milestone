@@ -660,6 +660,33 @@ export interface StrategyBrandAttribute {
   [key: string]: unknown
 }
 
+// ── Phase 3 — Strategy Library tables ────────────────────────────────────
+
+/** Per-user-per-doc read receipt for the Library's "Mark as Read" flow.
+ *  One row per user per doc the user has marked read. v1 is one-way:
+ *  there's no unmark; an upsert-with-ignore catches re-marks. */
+export interface StrategyWikiRead {
+  id: string
+  user_id: string
+  doc_notion_id: string
+  marked_read_at: string
+  [key: string]: unknown
+}
+
+/** Per-department default verifier (director) + optional delegate. The
+ *  single source of truth for routing logic — `getActiveVerifier()` reads
+ *  this row to decide who a "Needs Verification" doc routes to. */
+export interface StrategyWikiVerifierDefault {
+  dept: 'all-in' | 'web' | 'branding' | 'social'
+  director_employee_id: string
+  delegate_employee_id: string | null
+  delegation_until: string | null
+  notes: string | null
+  updated_at: string
+  updated_by: string
+  [key: string]: unknown
+}
+
 /** Shape returned by get_brand_guide_by_slug RPC */
 export interface BrandGuidePortalPayload {
   guide: {
@@ -968,6 +995,19 @@ export interface Database {
         Row: StrategyBrandAttribute
         Insert: Omit<StrategyBrandAttribute, 'id' | 'created_at'>
         Update: Partial<Omit<StrategyBrandAttribute, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      // Phase 3 — Strategy Library
+      strategy_wiki_reads: {
+        Row: StrategyWikiRead
+        Insert: Partial<StrategyWikiRead>
+        Update: Partial<StrategyWikiRead>
+        Relationships: []
+      }
+      strategy_wiki_verifier_defaults: {
+        Row: StrategyWikiVerifierDefault
+        Insert: Partial<StrategyWikiVerifierDefault>
+        Update: Partial<StrategyWikiVerifierDefault>
         Relationships: []
       }
     }

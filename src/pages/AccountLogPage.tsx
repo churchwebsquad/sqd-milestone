@@ -773,6 +773,7 @@ export default function AccountLogPage() {
   const [squadFilter, setSquadFilter] = useState<string>('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [logMissedOpen, setLogMissedOpen] = useState(false)
 
   const [webhookWarning, setWebhookWarning] = useState<string | null>(null)
 
@@ -882,7 +883,9 @@ export default function AccountLogPage() {
   }
 
   // ── Load ──────────────────────────────────────────────────────────────────
-  useEffect(() => {
+  /** Reload partner + submissions. Hoisted so the Log-Missed-Milestone
+   *  modal can re-trigger after a successful insert. */
+  const reload = useCallback(async () => {
     if (!memberId) return
     const memberNum = Number(memberId)
     if (isNaN(memberNum)) {
@@ -890,10 +893,8 @@ export default function AccountLogPage() {
       setLoading(false)
       return
     }
-
-    const load = async () => {
-      try {
-        const [partnerRes, subsRes] = await Promise.all([
+    try {
+      const [partnerRes, subsRes] = await Promise.all([
           supabase
             .from('strategy_account_progress')
             .select('member, church_name, first_name_of_primary, css_rep, portal_token')
@@ -967,15 +968,14 @@ export default function AccountLogPage() {
             replies: repliesMap.get(s.id) ?? [],
           })),
         )
-      } catch (err) {
-        setError((err as { message?: string })?.message ?? 'Failed to load account data')
-      } finally {
-        setLoading(false)
-      }
+    } catch (err) {
+      setError((err as { message?: string })?.message ?? 'Failed to load account data')
+    } finally {
+      setLoading(false)
     }
-
-    load()
   }, [memberId])
+
+  useEffect(() => { void reload() }, [reload])
 
   // Derive the unique squads present in this account's submissions
   const presentSquads = [...new Set(
@@ -1045,8 +1045,24 @@ export default function AccountLogPage() {
               >
                 Submit New Milestone →
               </button>
+              <button
+                type="button"
+                onClick={() => setLogMissedOpen(true)}
+                className="rounded-full border border-deep-plum text-deep-plum text-sm font-semibold px-5 py-2.5 hover:bg-deep-plum hover:text-white transition-colors"
+                title="Log a milestone that was already sent to the partner outside this app — captures assets + the existing message link without sending a new ClickUp message."
+              >
+                Log Missed Milestone
+              </button>
             </div>
           </div>
+        )}
+
+        {logMissedOpen && partner && (
+          <LogMissedMilestoneModal
+            partner={partner}
+            onClose={() => setLogMissedOpen(false)}
+            onLogged={() => { setLogMissedOpen(false); reload() }}
+          />
         )}
 
         {/* Submissions ────────────────────────────────────────────────────── */}
@@ -1114,6 +1130,343 @@ export default function AccountLogPage() {
             </div>
           )
         )}
+      </div>
+    </div>
+  )
+}
+
+// ── Log Missed Milestone modal ─────────────────────────────────────────────
+//
+// Captures a milestone that was already sent to the partner outside this
+// app. Inserts a `strategy_milestone_submissions` row with the existing
+// ClickUp message URL parsed into channel + message id, plus
+// `strategy_submission_assets` rows for any assets the user attaches. No
+// ClickUp send happens — the message already exists. Once logged, the
+// reply-scrub cron will pick up partner replies on that thread the same
+// way it does for app-sent submissions.
+
+interface LogMissedMilestoneModalProps {
+  partner: PartnerInfo
+  onClose: () => void
+  onLogged: () => void
+}
+
+interface MissedAsset {
+  type: string
+  url: string
+  label: string
+}
+
+/** Parse a ClickUp message URL into its channel + message ids. ClickUp
+ *  thread URLs look like:
+ *    https://app.clickup.com/{teamId}/chat/r/{channelId}/t/{messageId}
+ *    https://app.clickup.com/{teamId}/v/cn/{channelId}/t/{messageId}
+ *  Both are valid; both encode the channel as the segment after `r/` or
+ *  `cn/` and the message as the segment after `t/`. Returns null fields
+ *  for any segment we can't extract. */
+function parseClickUpUrl(url: string): { channelId: string | null; messageId: string | null } {
+  if (!url) return { channelId: null, messageId: null }
+  try {
+    const u = new URL(url)
+    const segments = u.pathname.split('/').filter(Boolean)
+    let channelId: string | null = null
+    let messageId: string | null = null
+    for (let i = 0; i < segments.length - 1; i++) {
+      if ((segments[i] === 'r' || segments[i] === 'cn') && segments[i + 1]) {
+        channelId = segments[i + 1]
+      }
+      if (segments[i] === 't' && segments[i + 1]) {
+        messageId = segments[i + 1]
+      }
+    }
+    return { channelId, messageId }
+  } catch {
+    return { channelId: null, messageId: null }
+  }
+}
+
+const ASSET_TYPE_OPTIONS = [
+  'Mood Board', 'Brand Guide', 'Logo', 'Asset Pack', 'Strategy Brief',
+  'Wireframe', 'Mockup', 'Site Preview', 'Vista Social', 'Other',
+]
+
+function LogMissedMilestoneModal({ partner, onClose, onLogged }: LogMissedMilestoneModalProps) {
+  const { staffProfile } = useAuth()
+  const [milestones, setMilestones] = useState<StrategyMilestoneDefinition[]>([])
+  const [milestoneId, setMilestoneId] = useState('')
+  const [trackName, setTrackName] = useState('')
+  const [messageUrl, setMessageUrl] = useState('')
+  const [submittedAt, setSubmittedAt] = useState(new Date().toISOString().slice(0, 10))
+  const [assets, setAssets] = useState<MissedAsset[]>([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Load active milestone definitions for the picker.
+  useEffect(() => {
+    let cancelled = false
+    supabase
+      .from('strategy_milestone_definitions')
+      .select('*')
+      .eq('is_active', true)
+      .order('squad').order('pathway').order('step_number')
+      .then(({ data }) => { if (!cancelled) setMilestones((data ?? []) as StrategyMilestoneDefinition[]) })
+    return () => { cancelled = true }
+  }, [])
+
+  const parsed = parseClickUpUrl(messageUrl)
+  const canSubmit = !!milestoneId && !!messageUrl.trim() && (parsed.channelId || parsed.messageId)
+
+  const addAsset = () => setAssets(a => [...a, { type: 'Other', url: '', label: '' }])
+  const removeAsset = (idx: number) => setAssets(a => a.filter((_, i) => i !== idx))
+  const updateAsset = (idx: number, patch: Partial<MissedAsset>) =>
+    setAssets(a => a.map((row, i) => i === idx ? { ...row, ...patch } : row))
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return
+    setBusy(true)
+    setError(null)
+    try {
+      const milestone = milestones.find(m => m.id === milestoneId)
+      const submitterEmail = staffProfile?.email ?? null
+      const submitterName = staffProfile?.full_name ?? staffProfile?.name ?? null
+
+      const submittedAtIso = new Date(submittedAt).toISOString()
+
+      // Insert the submission row. `milestone_status` = 'sent' so it
+      // matches the active set the reply-scrub cron walks. The cron uses
+      // clickup_channel_id + clickup_message_id to fetch replies.
+      const { data: row, error: insertErr } = await supabase
+        .from('strategy_milestone_submissions')
+        .insert({
+          member: partner.member,
+          church_name: partner.church_name,
+          milestone_id: milestoneId,
+          current_milestone_id: milestoneId,
+          next_milestone_id: null,
+          track_name: trackName || null,
+          message_body: '(Logged after the fact — original message lives in ClickUp)',
+          milestone_status: 'sent',
+          submitted_by_name: submitterName,
+          submitted_by_email: submitterEmail,
+          submitted_at: submittedAtIso,
+          clickup_channel_id: parsed.channelId,
+          clickup_message_id: parsed.messageId,
+          clickup_thread_url: messageUrl.trim(),
+          partner_contact_name: null,
+          partner_contact_clickup_id: null,
+          is_continuation: false,
+          continuation_of: null,
+          step_squad: milestone?.squad ?? null,
+          step_pathway: milestone?.pathway ?? null,
+          logged_after_the_fact: true,
+        })
+        .select('id')
+        .single()
+
+      if (insertErr) throw insertErr
+      const submissionId = (row as { id: string } | null)?.id
+      if (!submissionId) throw new Error('Submission insert returned no id')
+
+      // Insert any attached assets.
+      const validAssets = assets
+        .filter(a => a.url.trim())
+        .map((a, i) => ({
+          submission_id: submissionId,
+          asset_type: a.type,
+          asset_url: a.url.trim(),
+          asset_label: a.label.trim() || null,
+          sort_order: i,
+        }))
+      if (validAssets.length > 0) {
+        const { error: assetsErr } = await supabase
+          .from('strategy_submission_assets')
+          .insert(validAssets)
+        if (assetsErr) throw assetsErr
+      }
+
+      onLogged()
+    } catch (err) {
+      setError((err as { message?: string })?.message ?? 'Failed to log milestone')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-center bg-black/40 px-4 py-6" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="sticky top-0 bg-white border-b border-lavender px-5 py-4 flex items-start justify-between gap-3 z-10">
+          <div>
+            <h2 className="text-lg font-semibold text-deep-plum">Log a missed milestone</h2>
+            <p className="text-xs text-purple-gray mt-0.5">
+              Capture a milestone that was already sent to <strong>{partner.church_name ?? `member ${partner.member}`}</strong> outside this app. We won't send a new ClickUp message — paste the existing thread link so we can track replies and surface assets on their portal.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-purple-gray hover:text-deep-plum"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-4">
+          {/* Milestone picker */}
+          <div>
+            <label className="block text-[10px] font-bold text-purple-gray uppercase tracking-widest mb-1">
+              Milestone *
+            </label>
+            <select
+              value={milestoneId}
+              onChange={e => setMilestoneId(e.target.value)}
+              className="w-full rounded-lg border border-lavender bg-white px-3 py-2 text-sm outline-none focus:border-primary-purple"
+            >
+              <option value="">Select a milestone…</option>
+              {milestones.map(m => (
+                <option key={m.id} value={m.id}>
+                  {SQUAD_LABELS[m.squad] ?? m.squad} · {PATHWAY_LABELS[m.pathway] ?? m.pathway} · {m.step_number}. {m.step_name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Track name (optional) */}
+          <div>
+            <label className="block text-[10px] font-bold text-purple-gray uppercase tracking-widest mb-1">
+              Track / sequence name (optional)
+            </label>
+            <input
+              type="text"
+              value={trackName}
+              onChange={e => setTrackName(e.target.value)}
+              placeholder="e.g. Kids Ministry, Spanish Service"
+              className="w-full rounded-lg border border-lavender bg-white px-3 py-2 text-sm outline-none focus:border-primary-purple"
+            />
+            <p className="text-[10px] text-purple-gray mt-1">Leave blank if this milestone wasn't part of a sub-track.</p>
+          </div>
+
+          {/* ClickUp thread URL */}
+          <div>
+            <label className="block text-[10px] font-bold text-purple-gray uppercase tracking-widest mb-1">
+              ClickUp message link *
+            </label>
+            <input
+              type="url"
+              value={messageUrl}
+              onChange={e => setMessageUrl(e.target.value)}
+              placeholder="https://app.clickup.com/.../chat/r/.../t/..."
+              className="w-full rounded-lg border border-lavender bg-white px-3 py-2 text-sm outline-none focus:border-primary-purple font-mono"
+            />
+            {messageUrl && (
+              <p className="text-[10px] mt-1">
+                {parsed.channelId && parsed.messageId
+                  ? <span className="text-green-700">✓ Parsed channel <code>{parsed.channelId}</code> and message <code>{parsed.messageId}</code></span>
+                  : <span className="text-amber-700">⚠ Couldn't parse a channel and message id from this URL — replies won't be tracked unless we have both.</span>}
+              </p>
+            )}
+          </div>
+
+          {/* Submitted at */}
+          <div>
+            <label className="block text-[10px] font-bold text-purple-gray uppercase tracking-widest mb-1">
+              Date sent
+            </label>
+            <input
+              type="date"
+              value={submittedAt}
+              onChange={e => setSubmittedAt(e.target.value)}
+              className="rounded-lg border border-lavender bg-white px-3 py-2 text-sm outline-none focus:border-primary-purple"
+            />
+          </div>
+
+          {/* Assets */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[10px] font-bold text-purple-gray uppercase tracking-widest">
+                Assets ({assets.length})
+              </label>
+              <button
+                type="button"
+                onClick={addAsset}
+                className="text-[11px] font-semibold text-primary-purple hover:underline"
+              >
+                + Add asset
+              </button>
+            </div>
+            <p className="text-[10px] text-purple-gray mb-2">
+              Same asset types as a normal submission. These appear on the partner's portal once logged.
+            </p>
+            {assets.length === 0 ? (
+              <p className="text-xs text-purple-gray italic">No assets attached.</p>
+            ) : (
+              <div className="space-y-2">
+                {assets.map((a, idx) => (
+                  <div key={idx} className="grid grid-cols-[120px_1fr_1fr_auto] gap-2 items-center">
+                    <select
+                      value={a.type}
+                      onChange={e => updateAsset(idx, { type: e.target.value })}
+                      className="rounded-md border border-lavender bg-white text-xs px-2 py-1.5 outline-none"
+                    >
+                      {ASSET_TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <input
+                      type="url"
+                      value={a.url}
+                      onChange={e => updateAsset(idx, { url: e.target.value })}
+                      placeholder="https://…"
+                      className="rounded-md border border-lavender bg-white text-xs px-2 py-1.5 outline-none focus:border-primary-purple font-mono"
+                    />
+                    <input
+                      type="text"
+                      value={a.label}
+                      onChange={e => updateAsset(idx, { label: e.target.value })}
+                      placeholder="Label (optional)"
+                      className="rounded-md border border-lavender bg-white text-xs px-2 py-1.5 outline-none focus:border-primary-purple"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeAsset(idx)}
+                      className="text-purple-gray hover:text-red-600 text-xs px-1"
+                      title="Remove"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="sticky bottom-0 bg-white border-t border-lavender px-5 py-3 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="rounded-full border border-lavender bg-white text-sm font-medium text-deep-plum px-4 py-2 hover:bg-lavender-tint"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!canSubmit || busy}
+            className="rounded-full bg-deep-plum text-white text-sm font-semibold px-4 py-2 hover:bg-primary-purple disabled:opacity-50"
+          >
+            {busy ? 'Logging…' : 'Log milestone'}
+          </button>
+        </div>
       </div>
     </div>
   )

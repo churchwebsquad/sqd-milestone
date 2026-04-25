@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronUp, ChevronDown, Search, X } from 'lucide-react'
+import { ChevronUp, ChevronDown, GitBranch, Search, Table as TableIcon, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { StrategyMilestoneDefinition, StrategyMilestoneSubmission, MilestoneStatus } from '../types/database'
 import type { ChurchGridRow, ChurchSortField } from '../types/churches'
@@ -286,12 +286,37 @@ export default function ChurchesDashboardPage() {
       <div className="max-w-7xl mx-auto">
 
         {/* Page header */}
-        <div className="mb-6">
-          <p className="text-xs font-bold text-primary-purple uppercase tracking-widest mb-1">Churches Dashboard</p>
-          <h1 className="text-2xl font-semibold text-deep-plum">Churches</h1>
-          <p className="text-sm text-purple-gray mt-0.5">
-            All partner accounts across Brand, Web, and Social squads.
-          </p>
+        <div className="mb-4 flex items-end justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-xs font-bold text-primary-purple uppercase tracking-widest mb-1">Churches Dashboard</p>
+            <h1 className="text-2xl font-semibold text-deep-plum">Churches</h1>
+            <p className="text-sm text-purple-gray mt-0.5">
+              All partner accounts across Brand, Web, and Social squads.
+            </p>
+          </div>
+
+          {/* View toggle — Table is the live view; Pathway is reserved for
+              the in-progress milestone-flow visualization (replaces the old
+              standalone /pathway route). */}
+          <div className="inline-flex items-center gap-1 rounded-lg bg-lavender-tint p-1">
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 rounded-md bg-white text-deep-plum text-sm font-medium px-3 py-1.5 shadow-sm"
+            >
+              <TableIcon size={13} />
+              Table view
+            </button>
+            <button
+              type="button"
+              disabled
+              title="Pathway view — coming soon"
+              className="inline-flex items-center gap-1.5 rounded-md text-purple-gray/60 text-sm font-medium px-3 py-1.5 cursor-not-allowed"
+            >
+              <GitBranch size={13} />
+              Pathway view
+              <span className="ml-1 text-[9px] uppercase tracking-widest font-bold">Soon</span>
+            </button>
+          </div>
         </div>
 
         {/* Summary counts */}

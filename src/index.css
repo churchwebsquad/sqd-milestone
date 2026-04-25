@@ -10,6 +10,73 @@
   --color-purple-mid: #6B5CE7;
   --color-purple-gray: #6B6180;
 
+  /* Strategy module — department palette (hue + soft variant). Used on
+     Initiative cards, Roadmap chips, Milestone event borders, sidebar
+     dots. Same hue = same meaning everywhere the Strategy module renders. */
+  --color-dept-allin: #C2410C;
+  --color-dept-allin-soft: #FFEDD5;
+  --color-dept-social: #BE123C;
+  --color-dept-social-soft: #FFE4E6;
+  --color-dept-branding: #1D4ED8;
+  --color-dept-branding-soft: #DBEAFE;
+  --color-dept-web: #047857;
+  --color-dept-web-soft: #D1FAE5;
+
+  /* Strategy module — Initiative status dot colors (dot + text pattern,
+     never filled pills). */
+  --color-status-proposed: #78716C;
+  --color-status-scoping: #92400E;
+  --color-status-inprogress: #A16207;
+  --color-status-testing: #C2410C;
+  --color-status-blocked: #BE123C;
+  --color-status-inreview: #7C3AED;
+  --color-status-launched: #047857;
+  --color-status-paused: #1D4ED8;
+  --color-status-archived: #78716C;
+
+  /* Strategy module — Priority mark colors (square + text). */
+  --color-priority-high: #BE123C;
+  --color-priority-medium: #A16207;
+  --color-priority-low: #047857;
+
+  /* Strategy module — Progress-entry category pill palette. Soft bg +
+     ink text. Six categories mirror the Notion multi-select. */
+  --color-cat-progress-bg: #D1FAE5;
+  --color-cat-progress-fg: #065F46;
+  --color-cat-decision-bg: #EDE9FE;
+  --color-cat-decision-fg: #5B21B6;
+  --color-cat-resource-bg: #DBEAFE;
+  --color-cat-resource-fg: #1E40AF;
+  --color-cat-feedback-bg: #FCE7F3;
+  --color-cat-feedback-fg: #9D174D;
+  --color-cat-intel-bg: #FFEDD5;
+  --color-cat-intel-fg: #9A3412;
+  --color-cat-blocker-bg: #FEE2E2;
+  --color-cat-blocker-fg: #991B1B;
+
+  /* Library module — editorial palette from the prototype. Warm bg +
+     borders-not-shadows + a dedicated indigo-purple accent. Used inside
+     Strategy/Library surfaces only (the rest of the app keeps its existing
+     primary-purple/deep-plum scheme). */
+  --color-lib-bg:           #FAFAF7;
+  --color-lib-surface:      #FFFFFF;
+  --color-lib-border:       #E8E6E1;
+  --color-lib-border-strong:#CFCDC7;
+  --color-lib-text:         #1C1B1A;
+  --color-lib-text-muted:   #6B6B66;
+  --color-lib-text-subtle:  #9A9A94;
+  --color-lib-accent:       #6D28D9;
+  --color-lib-accent-soft:  #F3EDFD;
+  --color-lib-accent-hover: #5B21B6;
+
+  /* Verification status palette (status-property colors from Notion) */
+  --color-verif-needs-bg: #FEF3C7;
+  --color-verif-needs-fg: #92400E;
+  --color-verif-progress-bg: #DBEAFE;
+  --color-verif-progress-fg: #1D4ED8;
+  --color-verif-verified-bg: #D1FAE5;
+  --color-verif-verified-fg: #047857;
+
   /* Typography */
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-serif: Georgia, serif;

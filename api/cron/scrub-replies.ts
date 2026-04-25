@@ -24,6 +24,8 @@ interface ActiveSubmission {
   clickup_channel_id: string
   clickup_message_id: string
   milestone_status: string
+  is_continuation: boolean
+  continuation_of: string | null
 }
 
 interface V3Reply {
@@ -130,9 +132,15 @@ export default async function handler(
   }
 
   // ── Fetch active submissions ───────────────────────────────────────────────
+  // We pull `is_continuation` + `continuation_of` so we can group every
+  // submission in a continuation chain together. ClickUp threads are
+  // flat — replies to a continuation message live in the same thread as
+  // the original — so we fetch replies once per root and route each
+  // reply to the continuation submission whose message_id matches the
+  // reply's `parent_message` field.
   const { data: subData, error: fetchErr } = await supabase
     .from('strategy_milestone_submissions')
-    .select('id, clickup_channel_id, clickup_message_id, milestone_status')
+    .select('id, clickup_channel_id, clickup_message_id, milestone_status, is_continuation, continuation_of')
     .in('milestone_status', ['sent', 'waiting_on_partner'])
     .not('clickup_channel_id', 'is', null)
     .not('clickup_message_id', 'is', null)
@@ -143,16 +151,83 @@ export default async function handler(
   }
 
   const active = (subData ?? []) as ActiveSubmission[]
-  console.log(`[scrub-replies] processing ${active.length} submissions`)
+
+  // Resolve the root message_id for each chain. We need *all* submissions
+  // in each chain (not just the active ones) to route replies correctly,
+  // so pull the entire chain via `continuation_of` walks. For non-active
+  // root submissions (status = verified/launched/etc.), we still want
+  // their message_id for routing — but we won't update their status.
+  const allSubs = new Map<string, ActiveSubmission>()
+  for (const s of active) allSubs.set(s.id, s)
+
+  // Walk continuation_of upward to find every parent submission.
+  const parentIdsToFetch = new Set<string>()
+  for (const s of active) {
+    let cursor: string | null = s.continuation_of
+    while (cursor && !allSubs.has(cursor) && !parentIdsToFetch.has(cursor)) {
+      parentIdsToFetch.add(cursor)
+      // We don't have the row yet to walk further — fetch in batch below.
+      break
+    }
+  }
+  if (parentIdsToFetch.size > 0) {
+    const { data: parentRows } = await supabase
+      .from('strategy_milestone_submissions')
+      .select('id, clickup_channel_id, clickup_message_id, milestone_status, is_continuation, continuation_of')
+      .in('id', [...parentIdsToFetch])
+    for (const r of (parentRows ?? []) as ActiveSubmission[]) {
+      if (r.clickup_message_id) allSubs.set(r.id, r)
+      // We don't recursively walk further — for v1, one hop up is enough
+      // for the typical 2- or 3-step continuation chain. Deep chains will
+      // miss intermediate hops; revisit if needed.
+    }
+  }
+
+  /** Walk to the root submission (non-continuation ancestor) and return
+   *  every submission in the chain. */
+  const findChain = (start: ActiveSubmission): ActiveSubmission[] => {
+    const chain: ActiveSubmission[] = [start]
+    let cursor: string | null = start.continuation_of
+    const seen = new Set<string>([start.id])
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor)
+      const parent = allSubs.get(cursor)
+      if (!parent) break
+      chain.unshift(parent)
+      cursor = parent.continuation_of
+    }
+    return chain
+  }
+
+  // Group by root message id. The root is whichever submission in the
+  // chain isn't a continuation (or the earliest one we have).
+  const chainsByRoot = new Map<string, ActiveSubmission[]>()
+  const rootForActive = new Map<string, string>() // active sub id → root message id
+  const processedRoots = new Set<string>()
+  for (const s of active) {
+    const chain = findChain(s)
+    const root = chain.find(c => !c.is_continuation) ?? chain[0]
+    if (!root.clickup_message_id) continue
+    rootForActive.set(s.id, root.clickup_message_id)
+    if (!processedRoots.has(root.clickup_message_id)) {
+      chainsByRoot.set(root.clickup_message_id, chain)
+      processedRoots.add(root.clickup_message_id)
+    }
+  }
+
+  console.log(`[scrub-replies] processing ${active.length} active submissions across ${chainsByRoot.size} threads`)
 
   let repliesInserted = 0
   let statusesUpdated = 0
   let errors = 0
 
-  for (const sub of active) {
+  for (const [rootMessageId, chain] of chainsByRoot) {
     try {
-      // ── Fetch thread replies for this specific message ───────────────────
-      const replies = await fetchAllReplies(teamId, sub.clickup_message_id, clickupToken)
+      // ── Fetch thread replies once for the root ─────────────────────────
+      // ClickUp's thread structure is flat — all replies on a continuation
+      // message live under the root's reply list — so a single GET pulls
+      // the whole conversation.
+      const replies = await fetchAllReplies(teamId, rootMessageId, clickupToken)
 
       if (replies.length === 0) {
         await delay(200)
@@ -171,11 +246,15 @@ export default async function handler(
         userMap.set(u.clickup_id, u)
       }
 
-      // ── Load existing stored reply IDs to skip duplicates ────────────────
+      // ── Load existing reply IDs across the chain to dedupe ──────────────
+      // Replies are deduped per-submission, but we check across the chain
+      // so we don't double-count the same reply when a reply could route
+      // to multiple submissions.
+      const submissionIds = chain.map(c => c.id)
       const { data: existingRows } = await supabase
         .from('strategy_milestone_replies')
-        .select('clickup_reply_id')
-        .eq('submission_id', sub.id)
+        .select('clickup_reply_id, submission_id')
+        .in('submission_id', submissionIds)
         .not('clickup_reply_id', 'is', null)
 
       const existingIds = new Set<string>(
@@ -184,17 +263,38 @@ export default async function handler(
           .filter((id): id is string => id !== null),
       )
 
-      let hasNewPartnerReply = false
+      // Map message_id → submission for parent_message routing.
+      const subByMessageId = new Map<string, ActiveSubmission>()
+      for (const c of chain) subByMessageId.set(c.clickup_message_id, c)
+
+      const partnerReplyForSub = new Set<string>()
 
       for (const reply of replies) {
         const replyId = String(reply.id)
         if (existingIds.has(replyId)) continue
 
+        // ── Route by parent_message ─────────────────────────────────────
+        // If the reply's parent_message matches a submission in the chain
+        // (the partner replied directly to that continuation message),
+        // attribute the reply to that submission. Otherwise fall back to
+        // the most recent active submission in the chain (the one the
+        // partner is most likely responding to in the broader thread).
+        let targetSub: ActiveSubmission | null = null
+        if (reply.parent_message) {
+          targetSub = subByMessageId.get(reply.parent_message) ?? null
+        }
+        if (!targetSub) {
+          // Prefer the most recent ACTIVE submission so the status flip
+          // surfaces the reply on the right row in the queue.
+          const activeInChain = chain.filter(c => active.some(a => a.id === c.id))
+          targetSub = activeInChain[activeInChain.length - 1]
+            ?? chain[chain.length - 1]
+        }
+
         const userId    = Number(reply.user_id)
         const userData  = userMap.get(userId)
         const authorName  = userData?.username ?? `User ${userId}`
         const authorEmail = userData?.email ?? null
-        // Staff if: employee field is set OR email contains @churchmediasquad.com
         const isPartner   = !userData?.employee &&
           !userData?.email?.toLowerCase().includes('@churchmediasquad.com')
 
@@ -205,7 +305,7 @@ export default async function handler(
         const { error: insertErr } = await supabase
           .from('strategy_milestone_replies')
           .insert({
-            submission_id:      sub.id,
+            submission_id:      targetSub.id,
             reply_text:         reply.content ?? '',
             reply_author_name:  authorName,
             reply_author_email: authorEmail,
@@ -217,33 +317,39 @@ export default async function handler(
           })
 
         if (insertErr) {
-          console.warn(`[scrub-replies] insert failed (sub ${sub.id}):`, insertErr.message)
+          console.warn(`[scrub-replies] insert failed (sub ${targetSub.id}):`, insertErr.message)
         } else {
           repliesInserted++
-          if (isPartner) hasNewPartnerReply = true
+          if (isPartner) partnerReplyForSub.add(targetSub.id)
         }
       }
 
-      // Advance to partner_replied only from sent / waiting_on_partner
-      if (hasNewPartnerReply) {
+      // ── Advance status for each submission that received a partner reply
+      for (const subId of partnerReplyForSub) {
         const { error: updateErr } = await supabase
           .from('strategy_milestone_submissions')
           .update({ milestone_status: 'partner_replied' })
-          .eq('id', sub.id)
+          .eq('id', subId)
           .in('milestone_status', ['sent', 'waiting_on_partner'])
 
         if (!updateErr) statusesUpdated++
-        else console.warn(`[scrub-replies] status update failed (sub ${sub.id}):`, updateErr.message)
+        else console.warn(`[scrub-replies] status update failed (sub ${subId}):`, updateErr.message)
       }
     } catch (err) {
-      console.error(`[scrub-replies] error for sub ${sub.id}:`, err instanceof Error ? err.message : String(err))
+      console.error(`[scrub-replies] error for thread ${rootMessageId}:`, err instanceof Error ? err.message : String(err))
       errors++
     }
 
     await delay(200)
   }
 
-  const summary = { processed: active.length, replies_inserted: repliesInserted, statuses_updated: statusesUpdated, errors }
+  const summary = {
+    processed: active.length,
+    threads_processed: chainsByRoot.size,
+    replies_inserted: repliesInserted,
+    statuses_updated: statusesUpdated,
+    errors,
+  }
   console.log('[scrub-replies] done:', summary)
   return res.status(200).json(summary)
 }
