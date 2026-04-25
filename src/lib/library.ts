@@ -562,7 +562,7 @@ export async function addOnboardingAssignment(input: AddAssignmentInput): Promis
   }
   const { data, error } = await supabase
     .from('strategy_onboarding_assignments')
-    .insert(row as AssignmentRow)
+    .insert(row)
     .select('*')
     .single()
   if (error) throw error

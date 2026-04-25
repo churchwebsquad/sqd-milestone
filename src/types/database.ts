@@ -687,6 +687,33 @@ export interface StrategyWikiVerifierDefault {
   [key: string]: unknown
 }
 
+/** Presence-based table — if a Notion doc id is in this table, the doc
+ *  is flagged as required reading (surfaces on Recent Updates, drives
+ *  the Attention Needed panel on My Dashboard). */
+export interface StrategyRequiredReading {
+  doc_notion_id: string
+  set_by: string
+  set_at?: string
+  [key: string]: unknown
+}
+
+/** Onboarding + ongoing-reading-list assignments. Three scopes (global,
+ *  department, user) × two kinds (onboarding, reading-list). Soft-delete
+ *  via `is_active = false` keeps an audit trail. */
+export interface StrategyOnboardingAssignment {
+  id: string
+  doc_notion_id: string
+  scope: 'global' | 'department' | 'user'
+  kind: 'onboarding' | 'reading-list'
+  department: string | null
+  employee_id: string | null
+  is_active: boolean
+  created_at: string
+  created_by: string | null
+  notes: string | null
+  [key: string]: unknown
+}
+
 /** Shape returned by get_brand_guide_by_slug RPC */
 export interface BrandGuidePortalPayload {
   guide: {
@@ -1008,6 +1035,18 @@ export interface Database {
         Row: StrategyWikiVerifierDefault
         Insert: Partial<StrategyWikiVerifierDefault>
         Update: Partial<StrategyWikiVerifierDefault>
+        Relationships: []
+      }
+      strategy_required_reading: {
+        Row: StrategyRequiredReading
+        Insert: Partial<StrategyRequiredReading>
+        Update: Partial<StrategyRequiredReading>
+        Relationships: []
+      }
+      strategy_onboarding_assignments: {
+        Row: StrategyOnboardingAssignment
+        Insert: Partial<StrategyOnboardingAssignment>
+        Update: Partial<StrategyOnboardingAssignment>
         Relationships: []
       }
     }

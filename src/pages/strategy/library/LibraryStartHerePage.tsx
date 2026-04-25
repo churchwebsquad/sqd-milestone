@@ -241,7 +241,12 @@ export function OnboardingDirectorTools() {
 // Designed for the case where a director is onboarding a specific new hire
 // and wants to curate their reading list in one place.
 
-function PerPersonView() {
+// Per-person view — defined but not currently linked from the page
+// chrome (replaced by ManageAssignmentsSection's per-user rows). Kept
+// in scope as a named export so tsc's noUnusedLocals doesn't strip
+// it; ready to re-mount when the dedicated per-person surface comes
+// back.
+export function PerPersonView() {
   const { me, docs, onboardingAssignments, addAssignment, removeAssignment } = useLibraryData()
   const [employees, setEmployees] = useState<EmployeeRef[]>([])
   const [pickedEmployeeId, setPickedEmployeeId] = useState('')
@@ -312,7 +317,7 @@ function PerPersonView() {
       if (a.scope === 'global') {
         const row = ensure(a.docNotionId)
         row.assignments.push({ id: a.id, scope: 'global', label: 'Global' })
-      } else if (a.scope === 'department' && a.department === employeeStrategyDept) {
+      } else if (a.scope === 'department' && a.department && a.department === employeeStrategyDept) {
         const row = ensure(a.docNotionId)
         row.assignments.push({ id: a.id, scope: 'department', label: `${DEPT_LABEL[a.department]} dept` })
       } else if (a.scope === 'user' && a.employeeId === employee.id) {
@@ -505,7 +510,7 @@ function PerPersonView() {
                   disabled={adding}
                   className="inline-flex items-center gap-1 rounded-sm bg-[var(--color-lib-accent)] text-white text-xs font-medium px-2.5 py-1 hover:bg-[var(--color-lib-accent-hover)] disabled:opacity-50"
                 >
-                  {adding ? 'Adding…' : `Assign to ${employee.fullName.split(' ')[0]}`}
+                  {adding ? 'Adding…' : `Assign to ${(employee.fullName ?? 'this person').split(' ')[0]}`}
                 </button>
               </div>
             )}

@@ -59,7 +59,7 @@ export function DocBlocks({ blocks, editable, onEdit, onArchive }: DocBlocksProp
               onEdit={onEdit}
               onArchive={onArchive}
             >
-              {(text, isEditing) => (
+              {(text, editingNode) => (
                 <div className="flex items-start gap-2.5">
                   <span
                     className={[
@@ -71,8 +71,8 @@ export function DocBlocks({ blocks, editable, onEdit, onArchive }: DocBlocksProp
                   >
                     {b.meta?.checked && <span className="text-[8px] leading-none">✓</span>}
                   </span>
-                  <span className={isEditing ? 'flex-1' : (b.meta?.checked ? 'line-through opacity-60 flex-1' : 'flex-1')}>
-                    {isEditing ? text : <Inline text={text} />}
+                  <span className={editingNode ? 'flex-1' : (b.meta?.checked ? 'line-through opacity-60 flex-1' : 'flex-1')}>
+                    {editingNode ?? <Inline text={text} />}
                   </span>
                 </div>
               )}
@@ -93,10 +93,10 @@ export function DocBlocks({ blocks, editable, onEdit, onArchive }: DocBlocksProp
                 onEdit={onEdit}
                 onArchive={onArchive}
               >
-                {(text, isEditing) => (
+                {(text, editingNode) => (
                   <>
-                    {isEditing ? text : <Inline text={text} />}
-                    {b.children && b.children.length > 0 && !isEditing && (
+                    {editingNode ?? <Inline text={text} />}
+                    {b.children && b.children.length > 0 && !editingNode && (
                       <DocBlocks blocks={b.children} editable={editable} onEdit={onEdit} onArchive={onArchive} />
                     )}
                   </>
@@ -151,9 +151,9 @@ function Block({ block, editable, onEdit, onArchive }: BlockProps) {
     case 'heading_1':
       return (
         <EditableShell block={block} editable={editable} onEdit={onEdit} onArchive={onArchive}>
-          {(text, isEditing) => (
+          {(text, editingNode) => (
             <h2 className="text-xl font-semibold tracking-tight mt-6 mb-3">
-              {isEditing ? text : <Inline text={text} />}
+              {editingNode ?? <Inline text={text} />}
             </h2>
           )}
         </EditableShell>
@@ -161,9 +161,9 @@ function Block({ block, editable, onEdit, onArchive }: BlockProps) {
     case 'heading_2':
       return (
         <EditableShell block={block} editable={editable} onEdit={onEdit} onArchive={onArchive}>
-          {(text, isEditing) => (
+          {(text, editingNode) => (
             <h3 className="text-lg font-semibold mt-5 mb-2">
-              {isEditing ? text : <Inline text={text} />}
+              {editingNode ?? <Inline text={text} />}
             </h3>
           )}
         </EditableShell>
@@ -171,9 +171,9 @@ function Block({ block, editable, onEdit, onArchive }: BlockProps) {
     case 'heading_3':
       return (
         <EditableShell block={block} editable={editable} onEdit={onEdit} onArchive={onArchive}>
-          {(text, isEditing) => (
+          {(text, editingNode) => (
             <h4 className="text-base font-semibold mt-4 mb-2">
-              {isEditing ? text : <Inline text={text} />}
+              {editingNode ?? <Inline text={text} />}
             </h4>
           )}
         </EditableShell>
@@ -182,20 +182,20 @@ function Block({ block, editable, onEdit, onArchive }: BlockProps) {
       if (!block.text && !editable) return <div className="h-3" />
       return (
         <EditableShell block={block} editable={editable} onEdit={onEdit} onArchive={onArchive}>
-          {(text, isEditing) => (
-            <p className="mb-3">{isEditing ? text : (text ? <Inline text={text} /> : <span className="text-[var(--color-lib-text-subtle)] italic">Empty paragraph</span>)}</p>
+          {(text, editingNode) => (
+            <p className="mb-3">{editingNode ?? (text ? <Inline text={text} /> : <span className="text-[var(--color-lib-text-subtle)] italic">Empty paragraph</span>)}</p>
           )}
         </EditableShell>
       )
     case 'callout':
       return (
         <EditableShell block={block} editable={editable} onEdit={onEdit} onArchive={onArchive}>
-          {(text, isEditing) => (
+          {(text, editingNode) => (
             <div className="rounded-md border-l-[3px] border-[var(--color-lib-accent)] bg-[var(--color-lib-accent-soft)] px-4 py-3 my-4 italic flex gap-3 items-start">
               {block.meta?.emoji && <span className="not-italic">{block.meta.emoji}</span>}
               <div className="flex-1">
-                {isEditing ? text : <Inline text={text} />}
-                {block.children && block.children.length > 0 && !isEditing && (
+                {editingNode ?? <Inline text={text} />}
+                {block.children && block.children.length > 0 && !editingNode && (
                   <div className="mt-2 not-italic">
                     <DocBlocks blocks={block.children} editable={editable} onEdit={onEdit} onArchive={onArchive} />
                   </div>
@@ -208,9 +208,9 @@ function Block({ block, editable, onEdit, onArchive }: BlockProps) {
     case 'quote':
       return (
         <EditableShell block={block} editable={editable} onEdit={onEdit} onArchive={onArchive}>
-          {(text, isEditing) => (
+          {(text, editingNode) => (
             <blockquote className="border-l-[3px] border-[var(--color-lib-accent)] bg-[var(--color-lib-accent-soft)] px-4 py-3 my-4 italic">
-              {isEditing ? text : <Inline text={text} />}
+              {editingNode ?? <Inline text={text} />}
             </blockquote>
           )}
         </EditableShell>
@@ -230,13 +230,13 @@ function Block({ block, editable, onEdit, onArchive }: BlockProps) {
     case 'toggle':
       return (
         <EditableShell block={block} editable={editable} onEdit={onEdit} onArchive={onArchive}>
-          {(text, isEditing) => (
+          {(text, editingNode) => (
             <details className="my-3 group/toggle rounded-md border border-[var(--color-lib-border)] bg-[var(--color-lib-surface)] open:bg-[var(--color-lib-bg)]">
               <summary className="flex items-center gap-2 px-3 py-2 cursor-pointer text-[var(--color-lib-text)] list-none [&::-webkit-details-marker]:hidden">
                 <ChevronDown size={14} className="text-[var(--color-lib-text-subtle)] transition-transform group-open/toggle:rotate-0 -rotate-90" />
-                <span className="flex-1">{isEditing ? text : <Inline text={text} />}</span>
+                <span className="flex-1">{editingNode ?? <Inline text={text} />}</span>
               </summary>
-              {block.children && block.children.length > 0 && !isEditing && (
+              {block.children && block.children.length > 0 && !editingNode && (
                 <div className="px-3 pb-3 pl-9">
                   <DocBlocks blocks={block.children} editable={editable} onEdit={onEdit} onArchive={onArchive} />
                 </div>
@@ -381,7 +381,13 @@ function EditableShell({
   editable?: boolean
   onEdit?: (blockId: string, type: EditableBlockType, text: string) => Promise<void>
   onArchive?: (blockId: string) => Promise<void>
-  children: (text: ReactNode | string, isEditing: boolean) => ReactNode
+  /** Render-prop. `text` is always a string (the block's current text);
+   *  `editingNode` is the textarea ReactNode when in edit mode, or
+   *  `null` otherwise. Caller does `editingNode ?? <Inline text={text}/>`
+   *  so the textarea visually replaces the rendered content. Splitting
+   *  the params (vs. a `ReactNode | string` union) lets callers compose
+   *  `<Inline text={text}/>` without TS narrowing complaints. */
+  children: (text: string, editingNode: ReactNode | null) => ReactNode
 }) {
   const canEdit = !!editable && !!block.id && !!onEdit && EDITABLE_TYPES.has(block.type)
   const [editing, setEditing] = useState(false)
@@ -408,7 +414,7 @@ function EditableShell({
   }, [editing])
 
   if (!canEdit) {
-    return <>{children(block.text, false)}</>
+    return <>{children(block.text, null)}</>
   }
 
   const save = async () => {
@@ -468,7 +474,7 @@ function EditableShell({
     )
     return (
       <div className="relative group/edit">
-        {children(ta, true)}
+        {children(draft, ta)}
         <div className="flex items-center gap-2 mt-1 text-[11px]">
           <button
             type="button"
@@ -495,7 +501,7 @@ function EditableShell({
 
   return (
     <div className="relative group/edit">
-      {children(block.text, false)}
+      {children(block.text, null)}
       <div className="absolute top-0 right-0 hidden group-hover/edit:flex items-center gap-1 bg-white border border-[var(--color-lib-border)] rounded-sm shadow-sm px-1 py-0.5">
         <button
           type="button"

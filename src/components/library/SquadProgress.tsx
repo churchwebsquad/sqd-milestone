@@ -783,7 +783,7 @@ function MemberCard({
           <DocSearchAdder
             excludeIds={new Set(userOnboarding.map(a => a.docNotionId))}
             allDocs={allDocs}
-            placeholder={`Search to add onboarding doc for ${member.name}…`}
+            placeholder={`Search to add onboarding doc for ${member.fullName ?? 'this member'}…`}
             onAdd={(docId) => handleAdd(docId, 'onboarding')}
             busyId={busyId}
             compact
@@ -825,7 +825,7 @@ function MemberCard({
           <DocSearchAdder
             excludeIds={new Set(userReadingList.map(a => a.docNotionId))}
             allDocs={allDocs}
-            placeholder={`Search to add reading-list doc for ${member.name}…`}
+            placeholder={`Search to add reading-list doc for ${member.fullName ?? 'this member'}…`}
             onAdd={(docId) => handleAdd(docId, 'reading-list')}
             busyId={busyId}
             compact

@@ -447,7 +447,7 @@ function SquadProgressPreview() {
     let totalMembers = 0
     let totalRequiredRead = 0
     let totalRequiredCount = 0
-    for (const dept of ledDepts) {
+    for (const _dept of ledDepts) {
       // For the preview: count team-read entries that fall in this dept.
       // We don't have per-dept staff counts inline, so count distinct
       // user_ids in teamReads as a proxy for active staff.

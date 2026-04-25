@@ -14,11 +14,11 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import {
-  AlertTriangle, Archive, Check, ChevronDown, ChevronRight, ExternalLink,
+  AlertTriangle, Archive, Check, ChevronDown, ChevronRight,
   Filter, GripVertical, ListChecks, Loader2, Pencil, Plus,
-  Search, Settings, Sparkles, Star, Trash2, Users, X,
+  Search, Settings, Sparkles, Star, Trash2, Users,
 } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { useLibraryData } from '../../../components/library/LibraryDataContext'
@@ -26,7 +26,7 @@ import {
   LibraryNavBar, LibraryDrilldownHeader, DocTypeIcon, DeptPill,
   VerifBadge,
 } from '../../../components/library/LibraryShell'
-import { StrategyEmptyCard, StrategyLoadingCard } from '../../../components/strategy/StrategyUI'
+import { StrategyEmptyCard } from '../../../components/strategy/StrategyUI'
 import {
   archivePage, listDocCommentsBulk, updateDoc, verifyDoc,
 } from '../../../lib/strategyNotion'
@@ -48,10 +48,6 @@ import type {
 import type { DocCommentSummary } from '../../../lib/strategyNotion'
 
 type Bucket = 'needs-verification' | 'suggested' | 'library' | 'squad' | 'milestones'
-
-const DEPT_LABEL: Record<Department, string> = {
-  'all-in': 'All In', web: 'Web', branding: 'Brand', social: 'Social',
-}
 
 
 export default function LibraryDocManagerPage() {
@@ -364,7 +360,6 @@ function DocTable({ bucket, docs, applyDocUpdate, applyDocArchived, requiredRead
   applyDocArchived: (id: string) => void
   requiredReading: Set<string>
 }) {
-  const { me } = useLibraryData()
   const [search, setSearch] = useState('')
   const [deptFilter, setDeptFilter] = useState<Department | 'all'>('all')
   const [verifFilter, setVerifFilter] = useState<VerificationStatus | 'all'>('all')
