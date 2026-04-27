@@ -52,6 +52,22 @@ export interface FormState {
   messageBody: string
   includeFooter: boolean
   includeRecap: boolean
+  /** Subject-line source the user picked on the Message step:
+   *   - 'milestone' (default): use the milestone step name (with optional
+   *     trackName prefix) — same behavior the page had before this field
+   *     existed, so legacy submissions match.
+   *   - 'template': use the applied template's `subject_line`. Tracked
+   *     via `templateSubjectLine` because the template object isn't
+   *     persisted across step navigations.
+   *   - 'custom': use `customSubject` verbatim (merge fields resolve at
+   *     submit time). */
+  subjectMode: 'milestone' | 'template' | 'custom'
+  /** Subject from the most recently applied template. Stamped when a
+   *  template is picked in Step 5; null if no template has been applied
+   *  or the template doesn't define a subject. */
+  templateSubjectLine: string | null
+  /** User-typed subject when `subjectMode === 'custom'`. */
+  customSubject: string
   // Step 5
   assets: AssetRow[]
   // Step 6 — partnerContactName/partnerContactClickupId are derived from
@@ -77,6 +93,9 @@ export const INITIAL_FORM_STATE: FormState = {
   messageBody: '',
   includeFooter: true,
   includeRecap: true,
+  subjectMode: 'milestone',
+  templateSubjectLine: null,
+  customSubject: '',
   assets: [],
   partnerContactName: '',
   partnerContactClickupId: null,

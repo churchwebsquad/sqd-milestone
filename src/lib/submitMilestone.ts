@@ -235,12 +235,36 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
         }
       }
 
-      // Announcement title = milestone step name (e.g. "Brand Guide", "Strategy Brief").
-      // For continuations with a track name, prefix it: "Kids Ministry — Brand Guide".
+      // Announcement title — sourced based on the user's pick on the
+      // Message step:
+      //   - 'milestone' (default + legacy): step name, with the
+      //     track-name prefix for ministry-subbrand continuations.
+      //   - 'template':  the applied template's subject_line, with
+      //     merge fields resolved (same set the body uses).
+      //   - 'custom':    user-typed subject, also merge-resolved.
       const stepName = formData.selectedMilestone?.step_name ?? 'Milestone Update'
-      const announcementTitle = formData.trackName
+      const milestoneSubject = formData.trackName
         ? `${formData.trackName} — ${stepName}`
         : stepName
+
+      const subjectMergeData = {
+        church_name: formData.partner?.church_name,
+        first_name_of_primary: formData.partner?.first_name_of_primary,
+        step_name: formData.selectedMilestone?.step_name,
+        section_group: formData.selectedMilestone?.section_group,
+        submitter_name: submittedByName,
+        account_manager: formData.partner?.css_rep,
+        partner_contact_name: formData.partnerContactName || null,
+      }
+
+      let announcementTitle: string
+      if (formData.subjectMode === 'template' && formData.templateSubjectLine) {
+        announcementTitle = resolveMergeFields(formData.templateSubjectLine, subjectMergeData).trim() || milestoneSubject
+      } else if (formData.subjectMode === 'custom' && formData.customSubject.trim()) {
+        announcementTitle = resolveMergeFields(formData.customSubject, subjectMergeData).trim() || milestoneSubject
+      } else {
+        announcementTitle = milestoneSubject
+      }
 
       const result = await sendClickUpMessage(formData.channelId, commentArray, parentMessageId, announcementTitle)
       clickupMessageId = result.id

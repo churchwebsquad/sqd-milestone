@@ -108,6 +108,116 @@ function MissingMergeFieldsWarning({ messageBody }: { messageBody: string }) {
   )
 }
 
+// ── Subject Line picker ──────────────────────────────────────────────────
+//
+// Three sources for the ClickUp post title:
+//   1. `milestone`  — the milestone step name (with optional trackName
+//                     prefix). Default + legacy behavior.
+//   2. `template`   — the applied template's subject_line, with merge
+//                     fields already resolved. Disabled when no
+//                     template-with-subject has been applied.
+//   3. `custom`     — user-typed string. Surfaced via an input.
+//
+// The pill row picks the mode; the live preview underneath confirms
+// what will go out. Staff were over-relying on the milestone name
+// even when the template offered a punchier subject, so the picker
+// makes the choice explicit without changing the historic default.
+
+function SubjectLinePicker({
+  mode, onModeChange,
+  milestoneSubject,
+  templateSubject,
+  customSubject,
+  onCustomChange,
+}: {
+  mode: 'milestone' | 'template' | 'custom'
+  onModeChange: (mode: 'milestone' | 'template' | 'custom') => void
+  milestoneSubject: string
+  templateSubject: string | null
+  customSubject: string
+  onCustomChange: (value: string) => void
+}) {
+  const templateAvailable = !!templateSubject && templateSubject.trim().length > 0
+  const preview = mode === 'template'
+    ? (templateSubject ?? '')
+    : mode === 'custom'
+      ? customSubject
+      : milestoneSubject
+  return (
+    <div className="rounded-xl border border-lavender bg-white px-4 py-3">
+      <div className="flex items-baseline justify-between gap-2 mb-2">
+        <p className="text-xs font-semibold text-deep-plum">Subject line</p>
+        <p className="text-[11px] text-purple-gray/70">
+          Shows as the ClickUp post title.
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2 mb-2">
+        <SubjectModePill
+          active={mode === 'milestone'}
+          onClick={() => onModeChange('milestone')}
+          label="Milestone name"
+        />
+        <SubjectModePill
+          active={mode === 'template'}
+          disabled={!templateAvailable}
+          onClick={() => templateAvailable && onModeChange('template')}
+          label="Template subject"
+          tooltip={templateAvailable ? undefined : 'Apply a template that defines a subject line to enable.'}
+        />
+        <SubjectModePill
+          active={mode === 'custom'}
+          onClick={() => onModeChange('custom')}
+          label="Custom"
+        />
+      </div>
+      {mode === 'custom' && (
+        <input
+          type="text"
+          value={customSubject}
+          onChange={e => onCustomChange(e.target.value)}
+          placeholder="Type the subject line — merge fields like {{church_name}} resolve on send."
+          className="w-full rounded-lg border border-lavender bg-white px-3 py-2 text-sm text-deep-plum placeholder-purple-gray/50 outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20 mb-2"
+        />
+      )}
+      <div className="rounded-lg bg-lavender-tint/40 px-3 py-2">
+        <p className="text-[10px] uppercase tracking-widest font-bold text-purple-gray/70 mb-0.5">
+          Preview
+        </p>
+        <p className={`text-sm font-medium leading-snug ${preview.trim() ? 'text-deep-plum' : 'text-purple-gray/50 italic'}`}>
+          {preview.trim() || '(empty subject)'}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function SubjectModePill({ active, disabled, onClick, label, tooltip }: {
+  active: boolean
+  disabled?: boolean
+  onClick: () => void
+  label: string
+  tooltip?: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={tooltip}
+      className={[
+        'rounded-full border text-xs font-medium px-3 py-1 transition-colors',
+        disabled
+          ? 'border-lavender/60 bg-lavender-tint/40 text-purple-gray/50 cursor-not-allowed'
+          : active
+            ? 'bg-primary-purple border-primary-purple text-white'
+            : 'border-lavender text-deep-plum hover:border-primary-purple hover:text-primary-purple',
+      ].join(' ')}
+    >
+      {label}
+    </button>
+  )
+}
+
 function MergeFieldsPanel({ footer }: { footer: string }) {
   const [open, setOpen] = useState(false)
   return (
@@ -245,10 +355,20 @@ export default function Step4Message({ formData, updateForm, onNext, onBack, all
     const body = resolveMergeFields(template.template_body, mergeData)
     // Templates can set defaults for the footer + recap toggles. Default to
     // true if the field is missing (pre-migration templates).
+    //
+    // Subject line: capture the template's `subject_line` so the picker
+    // can offer it as one of the three options. We DON'T auto-switch
+    // the user's `subjectMode` — staff have built habits around the
+    // milestone-name default, and an automatic switch on every
+    // template click would be jarring. They can flip to "Template
+    // subject line" explicitly if they want it.
     updateForm({
       messageBody: body,
       includeFooter: template.include_footer ?? true,
       includeRecap: template.include_recap ?? true,
+      templateSubjectLine: template.subject_line && template.subject_line.trim()
+        ? template.subject_line
+        : null,
     })
   }
 
@@ -353,6 +473,28 @@ export default function Step4Message({ formData, updateForm, onNext, onBack, all
           {/* Merge field reference */}
           <div className="mb-4">
             <MergeFieldsPanel footer={appConfig.standard_footer} />
+          </div>
+
+          {/* Subject line picker — what shows up as the ClickUp post
+              title. Defaults to the milestone name (legacy behavior) so
+              old submissions look identical; staff can flip to the
+              applied template's subject_line or type a custom string. */}
+          <div className="mb-4">
+            <SubjectLinePicker
+              mode={formData.subjectMode}
+              onModeChange={mode => updateForm({ subjectMode: mode })}
+              milestoneSubject={(() => {
+                const stepName = formData.selectedMilestone?.step_name ?? 'Milestone Update'
+                return formData.trackName
+                  ? `${formData.trackName} — ${stepName}`
+                  : stepName
+              })()}
+              templateSubject={formData.templateSubjectLine
+                ? resolveMergeFields(formData.templateSubjectLine, mergeData)
+                : null}
+              customSubject={formData.customSubject}
+              onCustomChange={value => updateForm({ customSubject: value })}
+            />
           </div>
 
           {/* Message editor — toolbar + textarea */}

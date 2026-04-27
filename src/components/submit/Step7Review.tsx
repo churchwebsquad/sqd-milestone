@@ -47,6 +47,31 @@ export default function Step7Review({ formData, onBack, onReset, allMilestones }
     next_step_name: nextMilestone?.step_name,
   })
 
+  // Resolve the subject line preview the same way submitMilestone does
+  // at send time, so the Review surface mirrors what ClickUp will get.
+  const subjectMergeData = {
+    church_name: formData.partner?.church_name,
+    first_name_of_primary: formData.partner?.first_name_of_primary,
+    step_name: formData.selectedMilestone?.step_name,
+    section_group: formData.selectedMilestone?.section_group,
+    submitter_name: staffProfile?.full_name ?? staffProfile?.name ?? undefined,
+    account_manager: formData.partner?.css_rep,
+    partner_contact_name: formData.partnerContactName || undefined,
+  }
+  const milestoneSubject = (() => {
+    const stepName = formData.selectedMilestone?.step_name ?? 'Milestone Update'
+    return formData.trackName ? `${formData.trackName} — ${stepName}` : stepName
+  })()
+  const finalSubject = (() => {
+    if (formData.subjectMode === 'template' && formData.templateSubjectLine) {
+      return resolveMergeFields(formData.templateSubjectLine, subjectMergeData).trim() || milestoneSubject
+    }
+    if (formData.subjectMode === 'custom' && formData.customSubject.trim()) {
+      return resolveMergeFields(formData.customSubject, subjectMergeData).trim() || milestoneSubject
+    }
+    return milestoneSubject
+  })()
+
   // Fetch the cross-squad progress recap for preview + reuse on submit
   useEffect(() => {
     if (!formData.includeRecap || !formData.partner?.member || !formData.selectedMilestone) {
@@ -237,6 +262,15 @@ export default function Step7Review({ formData, onBack, onReset, allMilestones }
 
         {/* Final Message — shows body + recap + footer exactly as the partner receives it */}
         <ReviewCard label="Final Message">
+          {/* Subject line — what shows up as the ClickUp post title */}
+          <div className="mb-3 pb-3 border-b border-lavender/60">
+            <p className="text-[10px] font-bold text-purple-gray uppercase tracking-widest mb-0.5">
+              Subject
+            </p>
+            <p className="text-sm font-semibold text-deep-plum leading-snug">
+              {finalSubject}
+            </p>
+          </div>
           {/* Main body */}
           <pre className="whitespace-pre-wrap text-sm text-deep-plum font-sans leading-relaxed">
             {finalMessage}
