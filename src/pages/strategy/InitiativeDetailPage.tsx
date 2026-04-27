@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import {
-  ArrowLeft, ChevronDown, ExternalLink, FileText, Pencil, Plus, Send,
+  ArrowLeft, ExternalLink, FileText, Pencil, Plus, Send,
   Target, Activity, CheckCircle2, Trash2, MoreHorizontal,
 } from 'lucide-react'
 import {
@@ -16,9 +16,9 @@ import { detailFeed } from '../../lib/strategyFeed'
 import type {
   Department, DateConfidence, DocBlock, Initiative, InitiativeDetailBundle,
   InitiativeStatus, InitiativeWritable, Milestone, Priority, ProgressEntry,
-  ProgressFeedEntry,
 } from '../../types/strategy'
 import { MilestoneItem } from '../../components/strategy/MilestoneItem'
+import { MilestoneEventItem } from '../../components/strategy/MilestoneEventItem'
 import { ProgressEntryItem } from '../../components/strategy/ProgressEntryItem'
 import { DocBlocks } from '../../components/library/DocBlockRender'
 import { CheckInPanel } from '../../components/strategy/CheckInPanel'
@@ -466,6 +466,57 @@ export default function InitiativeDetailPage() {
                 onPromoted={onMilestoneUpdated}
                 onArchived={onMilestoneArchived}
               />
+
+              {/* Progress feed — lives below Action Items so the
+                  narrative thread sits next to the work that produced
+                  it. Full ProgressEntryItem cards (not the compact
+                  variant) so the body, categories, and edit
+                  affordances all read at a glance. */}
+              <Section
+                icon={Activity}
+                title="Progress"
+                action={
+                  posting ? null : (
+                    <button
+                      type="button"
+                      onClick={() => setPosting(true)}
+                      className="inline-flex items-center gap-1 rounded-full bg-primary-purple text-white text-[11px] font-semibold px-3 py-1 hover:bg-deep-plum"
+                    >
+                      <Send size={10} />
+                      Post update
+                    </button>
+                  )
+                }
+              >
+                {posting && (
+                  <div className="mb-4">
+                    <PostProgressForm
+                      initiativeId={bundle.initiative.id}
+                      onPosted={onProgressPosted}
+                      onCancel={() => setPosting(false)}
+                    />
+                  </div>
+                )}
+                {feed.length === 0 ? (
+                  <p className="text-sm text-[var(--color-lib-text-muted)] italic">
+                    No progress posted yet.
+                  </p>
+                ) : (
+                  <div className="divide-y divide-lavender/60">
+                    {feed.map(item =>
+                      item.kind === 'progress-entry'
+                        ? <ProgressEntryItem
+                            key={item.id}
+                            entry={item}
+                            showInitiative={false}
+                            onUpdated={next => onProgressUpdated(next)}
+                            onArchived={onProgressArchived}
+                          />
+                        : <MilestoneEventItem key={item.id} event={item} showInitiative={false} />
+                    )}
+                  </div>
+                )}
+              </Section>
             </div>
 
             <aside className="space-y-4">
@@ -526,21 +577,6 @@ export default function InitiativeDetailPage() {
                 </div>
               </div>
 
-              {/* Compact Progress feed — moved out of the main column so
-                  the body content + action items get the spotlight.
-                  Each row shows title + author + date inline; click to
-                  expand the full body. Posting opens the same form
-                  used elsewhere; the entry slots into the local feed. */}
-              <ProgressFeedAside
-                feed={feed}
-                initiativeId={bundle.initiative.id}
-                posting={posting}
-                onStartPost={() => setPosting(true)}
-                onCancelPost={() => setPosting(false)}
-                onPosted={onProgressPosted}
-                onUpdated={onProgressUpdated}
-                onArchived={onProgressArchived}
-              />
             </aside>
           </div>
         </>
@@ -551,153 +587,6 @@ export default function InitiativeDetailPage() {
       )}
     </StrategyShell>
   )
-}
-
-// ── Compact Progress feed (right aside) ─────────────────────────────────
-//
-// One row per progress entry: title + author + date. Click a row to
-// expand the full ProgressEntryItem (with body, edit/archive
-// affordances). Milestone-complete events render as a single line
-// each — no expansion since they have no body. Posting opens the
-// form inline above the feed.
-
-function ProgressFeedAside({
-  feed, initiativeId, posting, onStartPost, onCancelPost,
-  onPosted, onUpdated, onArchived,
-}: {
-  feed: ReturnType<typeof detailFeed>
-  initiativeId: string
-  posting: boolean
-  onStartPost: () => void
-  onCancelPost: () => void
-  onPosted: (entry: ProgressEntry) => void
-  onUpdated: (next: ProgressEntry) => void
-  onArchived: (id: string) => void
-}) {
-  return (
-    <div className="rounded-md border border-[var(--color-lib-border)] bg-[var(--color-lib-surface)] p-4">
-      <div className="flex items-center justify-between gap-2 mb-3">
-        <div className="flex items-center gap-2">
-          <Activity size={13} className="text-[var(--color-lib-accent)]" />
-          <h2 className="text-[11px] font-semibold text-[var(--color-lib-text-subtle)] uppercase tracking-widest">
-            Progress ({feed.length})
-          </h2>
-        </div>
-        {!posting && (
-          <button
-            type="button"
-            onClick={onStartPost}
-            className="inline-flex items-center gap-1 rounded-full bg-primary-purple text-white text-[11px] font-semibold px-2.5 py-0.5 hover:bg-deep-plum"
-          >
-            <Send size={9} />
-            Post
-          </button>
-        )}
-      </div>
-
-      {posting && (
-        <div className="mb-3">
-          <PostProgressForm
-            initiativeId={initiativeId}
-            onPosted={onPosted}
-            onCancel={onCancelPost}
-          />
-        </div>
-      )}
-
-      {feed.length === 0 ? (
-        <p className="text-xs text-[var(--color-lib-text-muted)] italic">
-          No progress posted yet.
-        </p>
-      ) : (
-        <div className="space-y-1">
-          {feed.map(item =>
-            item.kind === 'progress-entry'
-              ? <CompactProgressRow
-                  key={item.id}
-                  entry={item}
-                  onUpdated={onUpdated}
-                  onArchived={onArchived}
-                />
-              : <CompactMilestoneEventRow key={item.id} event={item} />
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** Single-row progress card — title + meta only. Clicking expands a
- *  panel below it that contains the full ProgressEntryItem (body,
- *  category pills, edit / archive affordances). Collapsed by default
- *  so a long feed stays browsable. */
-function CompactProgressRow({ entry, onUpdated, onArchived }: {
-  entry: ProgressFeedEntry
-  onUpdated: (next: ProgressEntry) => void
-  onArchived: (id: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="rounded-sm border border-transparent hover:border-[var(--color-lib-border)] transition-colors">
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className="w-full text-left flex items-center gap-2 px-2 py-1.5 hover:bg-[var(--color-lib-bg)]/40 rounded-sm"
-      >
-        <ChevronDown
-          size={11}
-          className={[
-            'shrink-0 text-[var(--color-lib-text-subtle)] transition-transform',
-            open ? '' : '-rotate-90',
-          ].join(' ')}
-        />
-        <span className="flex-1 min-w-0 text-xs font-medium text-[var(--color-lib-text)] truncate">
-          {entry.title}
-        </span>
-        <span className="text-[10px] text-[var(--color-lib-text-subtle)] shrink-0 whitespace-nowrap">
-          {entry.author?.name?.split(' ')[0] ?? ''}
-          {entry.datePosted && (
-            <> · {formatShort(entry.datePosted)}</>
-          )}
-        </span>
-      </button>
-      {open && (
-        <div className="px-2 pb-2 -mt-1">
-          <ProgressEntryItem
-            entry={entry}
-            showInitiative={false}
-            onUpdated={onUpdated}
-            onArchived={onArchived}
-          />
-        </div>
-      )}
-    </div>
-  )
-}
-
-function CompactMilestoneEventRow({ event }: {
-  event: Extract<ReturnType<typeof detailFeed>[number], { kind: 'milestone-event' }>
-}) {
-  return (
-    <div className="px-2 py-1.5 flex items-center gap-2 text-xs text-[var(--color-lib-text-muted)]">
-      <CheckCircle2 size={11} className="text-[var(--color-status-launched)] shrink-0" />
-      <span className="flex-1 min-w-0 truncate">
-        Completed: <span className="text-[var(--color-lib-text)] font-medium">{event.milestoneName}</span>
-      </span>
-      {event.completedAt && (
-        <span className="text-[10px] text-[var(--color-lib-text-subtle)] shrink-0">
-          {formatShort(event.completedAt)}
-        </span>
-      )}
-    </div>
-  )
-}
-
-function formatShort(iso: string): string {
-  const parts = iso.slice(0, 10).split('-').map(Number)
-  if (parts.length !== 3 || parts.some(n => !Number.isFinite(n))) return iso
-  const d = new Date(parts[0], parts[1] - 1, parts[2])
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
 // ── Block-tree helpers (mirror ActionItemDetailPage) ────────────────────
