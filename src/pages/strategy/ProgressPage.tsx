@@ -109,13 +109,18 @@ export default function ProgressPage() {
               ))}
             </select>
           </div>
-          {chosenInitiative && (
-            <PostProgressForm
-              initiativeId={chosenInitiative}
-              onPosted={onPosted}
-              onCancel={() => { setPosting(false); setChosenInitiative('') }}
-            />
-          )}
+          {chosenInitiative && (() => {
+            const picked = (initiatives ?? []).find(i => i.id === chosenInitiative)
+            return (
+              <PostProgressForm
+                initiativeId={chosenInitiative}
+                initiativeName={picked?.name}
+                initiativeDepartment={picked?.department ?? null}
+                onPosted={onPosted}
+                onCancel={() => { setPosting(false); setChosenInitiative('') }}
+              />
+            )
+          })()}
           {!chosenInitiative && (
             <div className="flex justify-end">
               <button

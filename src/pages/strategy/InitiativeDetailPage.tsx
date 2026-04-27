@@ -492,6 +492,8 @@ export default function InitiativeDetailPage() {
                   <div className="mb-4">
                     <PostProgressForm
                       initiativeId={bundle.initiative.id}
+                      initiativeName={bundle.initiative.name}
+                      initiativeDepartment={bundle.initiative.department}
                       onPosted={onProgressPosted}
                       onCancel={() => setPosting(false)}
                     />

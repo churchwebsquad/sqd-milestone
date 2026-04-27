@@ -311,6 +311,8 @@ export default function ActionItemDetailPage() {
             <ActionItemProgress
               actionItemId={ai.id}
               initiativeId={initiativeId ?? null}
+              initiativeName={bundle?.initiative.name ?? null}
+              initiativeDepartment={bundle?.initiative.department ?? null}
               entries={progressForActionItem}
               onChanged={reloadBundle}
             />
@@ -731,10 +733,13 @@ function SuggestNextForm({ parentId, onCancel, onSuggested }: {
 // Notion side persisted the linkage.
 
 function ActionItemProgress({
-  actionItemId, initiativeId, entries, onChanged,
+  actionItemId, initiativeId, initiativeName, initiativeDepartment,
+  entries, onChanged,
 }: {
   actionItemId: string
   initiativeId: string | null
+  initiativeName: string | null
+  initiativeDepartment: import('../../types/strategy').Department | null
   entries: ProgressEntry[]
   onChanged: () => void
 }) {
@@ -784,6 +789,8 @@ function ActionItemProgress({
         <div className="mb-3">
           <PostProgressForm
             initiativeId={initiativeId}
+            initiativeName={initiativeName ?? undefined}
+            initiativeDepartment={initiativeDepartment}
             presetActionItemId={actionItemId}
             onPosted={entry => {
               // Stamp the action-item id on the local copy even if the

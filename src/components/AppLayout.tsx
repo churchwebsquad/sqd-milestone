@@ -8,6 +8,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCollapsibleGroups } from '../hooks/useCollapsibleGroups'
+import { AnnouncementProvider } from './announcements/AnnouncementProvider'
 
 // ── Nav data types ────────────────────────────────────────────────────────
 
@@ -259,7 +260,12 @@ export default function AppLayout() {
 
         {/* Page content */}
         <main className="flex-1 overflow-auto bg-cream">
-          <Outlet />
+          {/* AnnouncementProvider mounts the global "What's New" popup
+              above the route Outlet so any signed-in staff member sees
+              pending announcements regardless of which page they're on. */}
+          <AnnouncementProvider>
+            <Outlet />
+          </AnnouncementProvider>
         </main>
       </div>
     </div>

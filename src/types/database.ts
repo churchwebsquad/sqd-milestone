@@ -714,6 +714,34 @@ export interface StrategyOnboardingAssignment {
   [key: string]: unknown
 }
 
+/** "What's New" popup announcements generated from initiative progress
+ *  entries. Title / body / dept are denormalized off the Notion
+ *  Progress page so the popup loads without a Notion fetch.
+ *  - `initiative_department = 'all-in'` (or null) → shown to everyone.
+ *  - Otherwise → shown only to staff in the matching strategy dept. */
+export interface StrategyAnnouncement {
+  id: string
+  progress_notion_id: string
+  initiative_notion_id: string
+  initiative_name: string
+  initiative_department: 'all-in' | 'social' | 'branding' | 'web' | null
+  headline: string
+  body: string | null
+  created_by_employee_id: string | null
+  created_at: string
+  is_active: boolean
+  retired_at: string | null
+  [key: string]: unknown
+}
+
+/** Per-user dismissal record so each announcement only popups once. */
+export interface StrategyAnnouncementDismissal {
+  announcement_id: string
+  user_id: string
+  dismissed_at: string
+  [key: string]: unknown
+}
+
 /** Shape returned by get_brand_guide_by_slug RPC */
 export interface BrandGuidePortalPayload {
   guide: {
@@ -1047,6 +1075,18 @@ export interface Database {
         Row: StrategyOnboardingAssignment
         Insert: Partial<StrategyOnboardingAssignment>
         Update: Partial<StrategyOnboardingAssignment>
+        Relationships: []
+      }
+      strategy_announcements: {
+        Row: StrategyAnnouncement
+        Insert: Partial<StrategyAnnouncement>
+        Update: Partial<StrategyAnnouncement>
+        Relationships: []
+      }
+      strategy_announcement_dismissals: {
+        Row: StrategyAnnouncementDismissal
+        Insert: Partial<StrategyAnnouncementDismissal>
+        Update: Partial<StrategyAnnouncementDismissal>
         Relationships: []
       }
     }

@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Send, X } from 'lucide-react'
+import { Megaphone, Send, X } from 'lucide-react'
 import { createProgress, getInitiativeDetail } from '../../../lib/strategyNotion'
-import type { Milestone, ProgressCategory, ProgressEntry } from '../../../types/strategy'
+import { createAnnouncement } from '../../../lib/announcements'
+import {
+  isDirectorByEmployeeId, isVPByEmail, listVerifierDefaults,
+} from '../../../lib/library'
+import { useAuth } from '../../../contexts/AuthContext'
+import type {
+  Department, Milestone, ProgressCategory, ProgressEntry, VerifierDefault,
+} from '../../../types/strategy'
 
 const CATEGORIES: Array<{ value: ProgressCategory; label: string }> = [
   { value: 'progress', label: 'Progress' },
@@ -12,6 +19,19 @@ const CATEGORIES: Array<{ value: ProgressCategory; label: string }> = [
   { value: 'blocker',  label: 'Blocker' },
 ]
 
+/** Human-readable audience label for the announcement toggle. The
+ *  initiative dept drives who sees the popup; null/all-in broadcasts
+ *  to everyone, dept-specific narrows. */
+function announcementAudience(dept: Department | null | undefined): string {
+  if (!dept || dept === 'all-in') return 'every staff member'
+  const map: Record<Exclude<Department, 'all-in'>, string> = {
+    web:      'everyone in Web',
+    branding: 'everyone in Branding',
+    social:   'everyone in Social',
+  }
+  return map[dept]
+}
+
 /** Inline form for posting a Progress update on the Initiative Detail.
  *  Author is set server-side; we don't ask the user to pick.
  *
@@ -20,15 +40,34 @@ const CATEGORIES: Array<{ value: ProgressCategory; label: string }> = [
  *  Item and the picker is hidden. Otherwise the picker fetches the
  *  initiative's Action Items so the user can attach the update to one of
  *  them — leaving it blank still records the update on the initiative
- *  itself. */
+ *  itself.
+ *
+ *  Announcement toggle: VPs + dept directors can flip "Push as
+ *  announcement" to broadcast the update as a "What's New" popup to
+ *  every staff member in the initiative's dept (or to everyone, when
+ *  the initiative is `'all-in'`). The toggle is hidden for non-eligible
+ *  authors. The announcement insert is best-effort — if it fails, the
+ *  Progress entry still landed in Notion and we surface a non-blocking
+ *  warning. */
 export function PostProgressForm({
-  initiativeId, presetActionItemId, onPosted, onCancel,
+  initiativeId, initiativeName, initiativeDepartment,
+  presetActionItemId, onPosted, onCancel,
 }: {
   initiativeId: string
+  /** Initiative's display name. When omitted the announcement toggle
+   *  stays hidden — without a name we can't surface the popup subhead
+   *  correctly. Pass it from the parent (InitiativeDetailPage knows
+   *  the bundle; ProgressPage looks it up from the initiative list). */
+  initiativeName?: string
+  /** Initiative's strategy dept. Drives the targeting copy on the
+   *  toggle ("Everyone in Branding will see this once") and is
+   *  denormalized onto the announcement row at create time. */
+  initiativeDepartment?: Department | null
   presetActionItemId?: string
   onPosted: (entry: ProgressEntry) => void
   onCancel: () => void
 }) {
+  const { user, staffProfile } = useAuth()
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [categories, setCategories] = useState<ProgressCategory[]>(['progress'])
@@ -36,6 +75,27 @@ export function PostProgressForm({
   const [actionItems, setActionItems] = useState<Milestone[] | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // ── Announcement gate ───────────────────────────────────────────────
+  // Toggle is rendered only when the author is the VP or a seated/
+  // delegated director. We need the verifier-defaults table to make
+  // the director check; load it lazily so the form mount doesn't pay
+  // for it when the user is unlikely to qualify.
+  const [pushAnnouncement, setPushAnnouncement] = useState(false)
+  const [verifierDefaults, setVerifierDefaults] = useState<VerifierDefault[] | null>(null)
+  useEffect(() => {
+    if (!staffProfile) return
+    let cancelled = false
+    listVerifierDefaults()
+      .then(rows => { if (!cancelled) setVerifierDefaults(rows) })
+      .catch(() => { if (!cancelled) setVerifierDefaults([]) })
+    return () => { cancelled = true }
+  }, [staffProfile])
+  const isAnnouncementAuthor =
+    isVPByEmail(staffProfile?.email ?? null) ||
+    isDirectorByEmployeeId(staffProfile?.id ?? null, verifierDefaults ?? [])
+  const announcementToggleAvailable =
+    isAnnouncementAuthor && !!initiativeName
 
   // Lazy-load this initiative's Action Items only when the picker is
   // shown (no preset). Caches in component state — one fetch per mount.
@@ -63,6 +123,27 @@ export function PostProgressForm({
         categories,
         actionItemIds: actionItemId ? [actionItemId] : undefined,
       })
+      // Announcement insert is best-effort — the Progress entry
+      // already landed in Notion at this point, so a failure here
+      // shouldn't block the rest of the submit flow. Surface a
+      // non-blocking warning and hand the entry back to the parent.
+      if (pushAnnouncement && initiativeName && user?.id) {
+        try {
+          await createAnnouncement({
+            progress: entry,
+            initiative: {
+              id: initiativeId,
+              name: initiativeName,
+              department: initiativeDepartment ?? null,
+            },
+            body: body.trim(),
+            createdByEmployeeId: staffProfile?.id ?? null,
+          })
+        } catch (annErr) {
+          const msg = annErr instanceof Error ? annErr.message : String(annErr)
+          setError(`Update posted, but announcement failed: ${msg}`)
+        }
+      }
       onPosted(entry)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -155,6 +236,47 @@ export function PostProgressForm({
         ))}
       </div>
 
+      {/* "Push as announcement" — VP + directors only. Surfaces the
+          dept-targeting copy so the author knows the blast radius
+          before they hit submit. */}
+      {announcementToggleAvailable && (
+        <button
+          type="button"
+          onClick={() => setPushAnnouncement(v => !v)}
+          disabled={!title.trim() || !body.trim()}
+          className={[
+            'w-full flex items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors',
+            pushAnnouncement
+              ? 'border-primary-purple bg-primary-purple/10'
+              : 'border-lavender bg-white hover:border-primary-purple/40',
+            (!title.trim() || !body.trim()) ? 'opacity-50 cursor-not-allowed' : '',
+          ].join(' ')}
+          title={!title.trim() || !body.trim()
+            ? 'Add a title and body before announcing.'
+            : undefined}
+        >
+          <Megaphone size={14} className="text-primary-purple shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-deep-plum">
+              Push as &ldquo;What&rsquo;s New&rdquo; announcement
+            </p>
+            <p className="text-[11px] text-purple-gray mt-0.5 leading-relaxed">
+              {pushAnnouncement
+                ? <>{announcementAudience(initiativeDepartment)} will see this once as a popup.</>
+                : <>Surface this update as a one-time popup for {announcementAudience(initiativeDepartment)}.</>}
+            </p>
+          </div>
+          <span className={[
+            'text-[10px] font-bold rounded-full px-2 py-0.5 shrink-0',
+            pushAnnouncement
+              ? 'bg-primary-purple text-white'
+              : 'bg-lavender/60 text-purple-gray',
+          ].join(' ')}>
+            {pushAnnouncement ? 'ON' : 'OFF'}
+          </span>
+        </button>
+      )}
+
       {error && <p className="text-xs text-red-600">{error}</p>}
 
       <div className="flex justify-end gap-2">
@@ -169,11 +291,13 @@ export function PostProgressForm({
         <button
           type="button"
           onClick={submit}
-          disabled={submitting || !title.trim()}
+          disabled={submitting || !title.trim() || (pushAnnouncement && !body.trim())}
           className="inline-flex items-center gap-1.5 rounded-full bg-primary-purple text-white text-xs font-semibold px-3 py-1.5 hover:bg-deep-plum disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <Send size={11} />
-          {submitting ? 'Posting…' : 'Post update'}
+          {pushAnnouncement ? <Megaphone size={11} /> : <Send size={11} />}
+          {submitting
+            ? 'Posting…'
+            : pushAnnouncement ? 'Post + announce' : 'Post update'}
         </button>
       </div>
     </div>

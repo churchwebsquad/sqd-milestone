@@ -372,6 +372,8 @@ function ActionItemRow({ item, initiative, isLast, onUpdated }: {
         <div className="px-4 pb-4">
           <PostProgressForm
             initiativeId={initiative.id}
+            initiativeName={initiative.name}
+            initiativeDepartment={initiative.department}
             presetActionItemId={item.id}
             onPosted={onPosted}
             onCancel={() => setPosting(false)}
