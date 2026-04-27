@@ -26,6 +26,13 @@ interface ActiveSubmission {
   milestone_status: string
   is_continuation: boolean
   continuation_of: string | null
+  /** Used by the timestamp-window routing rule — partner replies in a
+   *  shared thread attribute to whichever round was active when the
+   *  reply landed, not to whichever submission the partner happened to
+   *  click "reply" on (ClickUp threads are flat, so partners often
+   *  reply at the thread root regardless of which round they're
+   *  responding to). */
+  submitted_at: string
 }
 
 interface V3Reply {
@@ -140,7 +147,7 @@ export default async function handler(
   // reply's `parent_message` field.
   const { data: subData, error: fetchErr } = await supabase
     .from('strategy_milestone_submissions')
-    .select('id, clickup_channel_id, clickup_message_id, milestone_status, is_continuation, continuation_of')
+    .select('id, clickup_channel_id, clickup_message_id, milestone_status, is_continuation, continuation_of, submitted_at')
     .in('milestone_status', ['sent', 'waiting_on_partner'])
     .not('clickup_channel_id', 'is', null)
     .not('clickup_message_id', 'is', null)
@@ -173,7 +180,7 @@ export default async function handler(
   if (parentIdsToFetch.size > 0) {
     const { data: parentRows } = await supabase
       .from('strategy_milestone_submissions')
-      .select('id, clickup_channel_id, clickup_message_id, milestone_status, is_continuation, continuation_of')
+      .select('id, clickup_channel_id, clickup_message_id, milestone_status, is_continuation, continuation_of, submitted_at')
       .in('id', [...parentIdsToFetch])
     for (const r of (parentRows ?? []) as ActiveSubmission[]) {
       if (r.clickup_message_id) allSubs.set(r.id, r)
@@ -263,9 +270,24 @@ export default async function handler(
           .filter((id): id is string => id !== null),
       )
 
-      // Map message_id → submission for parent_message routing.
-      const subByMessageId = new Map<string, ActiveSubmission>()
-      for (const c of chain) subByMessageId.set(c.clickup_message_id, c)
+      // ── Routing: timestamp-window rule ─────────────────────────────────
+      //
+      // ClickUp threads are flat: a continuation post and its partner
+      // replies all land in the same thread root, and partners often
+      // hit "reply" at the thread root rather than on a specific
+      // round's message. That made the old `parent_message`-based
+      // routing attribute *every* reply to Round 1.
+      //
+      // New rule (per Ashley): each reply attributes to whichever
+      // submission was the most recent at the time the reply was
+      // posted. Build a chain sorted by `submitted_at` ascending; for
+      // each reply, walk the chain and keep the latest submission
+      // whose send time precedes the reply timestamp. Falls back to
+      // the root submission if a reply somehow predates every send
+      // (shouldn't happen but harmless).
+      const chainBySendTime = [...chain].sort(
+        (a, b) => a.submitted_at.localeCompare(b.submitted_at),
+      )
 
       const partnerReplyForSub = new Set<string>()
 
@@ -273,22 +295,16 @@ export default async function handler(
         const replyId = String(reply.id)
         if (existingIds.has(replyId)) continue
 
-        // ── Route by parent_message ─────────────────────────────────────
-        // If the reply's parent_message matches a submission in the chain
-        // (the partner replied directly to that continuation message),
-        // attribute the reply to that submission. Otherwise fall back to
-        // the most recent active submission in the chain (the one the
-        // partner is most likely responding to in the broader thread).
+        const replyTsRaw = reply.date ?? reply.date_assigned
+        const replyTs = replyTsRaw ? new Date(replyTsRaw).toISOString() : new Date().toISOString()
+
         let targetSub: ActiveSubmission | null = null
-        if (reply.parent_message) {
-          targetSub = subByMessageId.get(reply.parent_message) ?? null
+        for (const c of chainBySendTime) {
+          if (c.submitted_at <= replyTs) targetSub = c
+          else break
         }
         if (!targetSub) {
-          // Prefer the most recent ACTIVE submission so the status flip
-          // surfaces the reply on the right row in the queue.
-          const activeInChain = chain.filter(c => active.some(a => a.id === c.id))
-          targetSub = activeInChain[activeInChain.length - 1]
-            ?? chain[chain.length - 1]
+          targetSub = chainBySendTime[0] ?? chain[0]
         }
 
         const userId    = Number(reply.user_id)
@@ -297,10 +313,6 @@ export default async function handler(
         const authorEmail = userData?.email ?? null
         const isPartner   = !userData?.employee &&
           !userData?.email?.toLowerCase().includes('@churchmediasquad.com')
-
-        const detectedAt = reply.date ?? reply.date_assigned
-          ? new Date(reply.date ?? reply.date_assigned!).toISOString()
-          : new Date().toISOString()
 
         const { error: insertErr } = await supabase
           .from('strategy_milestone_replies')
@@ -312,7 +324,7 @@ export default async function handler(
             is_partner_reply:   isPartner,
             triage_category:    null,
             source:             'clickup_thread',
-            detected_at:        detectedAt,
+            detected_at:        replyTs,
             clickup_reply_id:   replyId,
           })
 
@@ -343,11 +355,49 @@ export default async function handler(
     await delay(200)
   }
 
+  // ── One-off backfill ─────────────────────────────────────────────────────
+  //
+  // The existing reply rows aren't re-evaluated against the new
+  // timestamp-window logic — the dedupe set on `clickup_reply_id`
+  // skips them. Ashley flagged one specific reply that was misrouted
+  // under the old `parent_message`-based rule and needs to land on
+  // the continuation row instead. This runs every cron call but is
+  // idempotent: once the row's `submission_id` matches the target,
+  // the UPDATE no-ops via the `.neq` guard.
+  let backfillUpdated = 0
+  const ONE_OFF_REPLY_BACKFILLS: Array<{ reply: string; targetMessageId: string }> = [
+    { reply: '80170029766692', targetMessageId: '80170029757356' },
+  ]
+  for (const job of ONE_OFF_REPLY_BACKFILLS) {
+    try {
+      const { data: targetSub } = await supabase
+        .from('strategy_milestone_submissions')
+        .select('id')
+        .eq('clickup_message_id', job.targetMessageId)
+        .maybeSingle()
+      if (!targetSub?.id) continue
+      const { error: updateErr, count } = await supabase
+        .from('strategy_milestone_replies')
+        .update({ submission_id: targetSub.id }, { count: 'exact' })
+        .eq('clickup_reply_id', job.reply)
+        .neq('submission_id', targetSub.id)
+      if (updateErr) {
+        console.warn(`[scrub-replies] backfill failed for reply ${job.reply}:`, updateErr.message)
+      } else if (count && count > 0) {
+        backfillUpdated += count
+        console.log(`[scrub-replies] backfilled reply ${job.reply} → submission ${targetSub.id}`)
+      }
+    } catch (err) {
+      console.warn(`[scrub-replies] backfill error for reply ${job.reply}:`, err instanceof Error ? err.message : String(err))
+    }
+  }
+
   const summary = {
     processed: active.length,
     threads_processed: chainsByRoot.size,
     replies_inserted: repliesInserted,
     statuses_updated: statusesUpdated,
+    backfill_updated: backfillUpdated,
     errors,
   }
   console.log('[scrub-replies] done:', summary)
