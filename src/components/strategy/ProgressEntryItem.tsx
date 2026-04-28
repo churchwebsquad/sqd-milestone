@@ -4,6 +4,7 @@ import { ArrowRight, BookOpen, ExternalLink, Pencil, Trash2, Check, X } from 'lu
 import type { ProgressCategory, ProgressEntry, ProgressFeedEntry } from '../../types/strategy'
 import { archivePage, updateProgress } from '../../lib/strategyNotion'
 import { CategoryPill, DepartmentBadge } from './StrategyUI'
+import { MarkdownBody } from './MarkdownBody'
 
 const ALL_CATEGORIES: ProgressCategory[] = ['progress', 'decision', 'resource', 'feedback', 'intel', 'blocker']
 
@@ -71,8 +72,6 @@ export function ProgressEntryItem({ entry, showInitiative = true, linkedDocs, on
     await archivePage(entry.id, 'progress')
     onArchived?.(entry.id)
   }
-
-  const paragraphs = entry.body.split(/\n{2,}/).map(s => s.trim()).filter(Boolean)
 
   // Card-wide click: navigate to the related initiative. Suspended in
   // edit mode and ignored when the click target is an action button.
@@ -233,12 +232,11 @@ export function ProgressEntryItem({ entry, showInitiative = true, linkedDocs, on
           </div>
         </div>
       ) : (
-        paragraphs.length > 0 && (
-          <div className="text-sm text-[var(--color-lib-text)] leading-relaxed space-y-2">
-            {paragraphs.map((p, i) => (
-              <p key={i}>{p}</p>
-            ))}
-          </div>
+        entry.body.trim() && (
+          <MarkdownBody
+            text={entry.body}
+            className="text-sm text-[var(--color-lib-text)] leading-relaxed space-y-2"
+          />
         )
       )}
 

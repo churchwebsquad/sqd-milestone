@@ -12,6 +12,7 @@ import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, BookOpen, ExternalLink, Sparkles, X } from 'lucide-react'
 import type { StrategyAnnouncement } from '../../types/database'
+import { MarkdownBody } from '../strategy/MarkdownBody'
 
 export function AnnouncementPopup({ announcement, onDismiss }: {
   announcement: StrategyAnnouncement
@@ -69,9 +70,10 @@ export function AnnouncementPopup({ announcement, onDismiss }: {
             {announcement.headline}
           </h2>
           {announcement.body && (
-            <p className="text-sm text-deep-plum/80 leading-relaxed whitespace-pre-wrap">
-              {announcement.body}
-            </p>
+            <MarkdownBody
+              text={announcement.body}
+              className="text-sm text-deep-plum/80 leading-relaxed space-y-2"
+            />
           )}
 
           {/* Linked Library docs — surfaced as primary CTAs above the

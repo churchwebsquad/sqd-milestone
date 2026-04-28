@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpen, Megaphone, Search, Send, X } from 'lucide-react'
 import { createProgress, getInitiativeDetail, listDocs } from '../../../lib/strategyNotion'
 import { createAnnouncement } from '../../../lib/announcements'
@@ -10,6 +10,7 @@ import type {
   Department, DocHubEntry, Milestone, ProgressCategory, ProgressEntry,
   VerifierDefault,
 } from '../../../types/strategy'
+import { MarkdownToolbar } from './MarkdownToolbar'
 
 const CATEGORIES: Array<{ value: ProgressCategory; label: string }> = [
   { value: 'progress', label: 'Progress' },
@@ -71,6 +72,7 @@ export function PostProgressForm({
   const { user, staffProfile } = useAuth()
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
+  const bodyRef = useRef<HTMLTextAreaElement | null>(null)
   const [categories, setCategories] = useState<ProgressCategory[]>(['progress'])
   const [actionItemId, setActionItemId] = useState<string>(presetActionItemId ?? '')
   const [actionItems, setActionItems] = useState<Milestone[] | null>(null)
@@ -211,13 +213,25 @@ export function PostProgressForm({
         className="w-full rounded border border-lavender bg-white px-3 py-2 text-sm text-deep-plum outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20"
       />
 
-      <textarea
-        value={body}
-        onChange={e => setBody(e.target.value)}
-        placeholder="Optional details, decisions, or context (plain text — formatting collapses on save)"
-        rows={4}
-        className="w-full rounded border border-lavender bg-white px-3 py-2 text-sm text-deep-plum outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20"
-      />
+      {/* Body editor — toolbar + textarea. Toolbar emits markdown
+          markers (**bold**, _italic_, etc.); MarkdownBody renders them
+          on the feed cards + announcement popup. The supported set is
+          deliberately small so authors don't have to learn a syntax. */}
+      <div className="rounded border border-lavender overflow-hidden focus-within:border-primary-purple focus-within:ring-2 focus-within:ring-primary-purple/20 transition-colors">
+        <MarkdownToolbar
+          textareaRef={bodyRef}
+          value={body}
+          onChange={setBody}
+        />
+        <textarea
+          ref={bodyRef}
+          value={body}
+          onChange={e => setBody(e.target.value)}
+          placeholder="Optional details, decisions, or context. Use the toolbar for **bold**, _italic_, lists, links."
+          rows={5}
+          className="w-full px-3 py-2 text-sm text-deep-plum placeholder-purple-gray/50 outline-none resize-y leading-relaxed font-sans border-0"
+        />
+      </div>
 
       {/* Action Item linkage. */}
       {presetActionItemId ? (

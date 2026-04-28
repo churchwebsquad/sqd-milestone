@@ -110,6 +110,39 @@ serve(async (req: Request) => {
         return json({ notionUserId: await resolveNotionUserId(email) })
       }
 
+      // Temporary diagnostic — surfaces what Notion's /users endpoint
+      // is actually returning so the "couldn't match your email"
+      // failures are debuggable. Returns the caller's email, the
+      // total count + with-email count, and a sanitized sample
+      // (names + email domain only) so we don't leak addresses.
+      case 'diagnose-user-resolution': {
+        const callerEmail = await resolveCallerEmail(req)
+        const { listUsersAll } = await import('./_lib/notion.ts')
+        const users = await listUsersAll()
+        const withEmail = users.filter(u => u.person?.email)
+        const lc = (callerEmail ?? '').toLowerCase().trim()
+        const found = withEmail.some(u =>
+          (u.person?.email ?? '').toLowerCase().trim() === lc,
+        )
+        const sample = users.slice(0, 30).map(u => ({
+          name: u.name,
+          type: u.type ?? null,
+          hasEmail: !!u.person?.email,
+          // Last 4 chars + domain only — enough to spot Ashley without
+          // leaking the full list to the browser console.
+          emailHint: u.person?.email
+            ? `…${u.person.email.slice(-Math.min(u.person.email.length, 18))}`
+            : null,
+        }))
+        return json({
+          callerEmail,
+          callerEmailFoundInIndex: found,
+          totalUsers: users.length,
+          usersWithEmail: withEmail.length,
+          sample,
+        })
+      }
+
       case 'list-docs':
         return json({ docs: await listDocs() })
 
