@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react'
-import { Megaphone, Send, X } from 'lucide-react'
-import { createProgress, getInitiativeDetail } from '../../../lib/strategyNotion'
+import { useEffect, useMemo, useState } from 'react'
+import { BookOpen, Megaphone, Search, Send, X } from 'lucide-react'
+import { createProgress, getInitiativeDetail, listDocs } from '../../../lib/strategyNotion'
 import { createAnnouncement } from '../../../lib/announcements'
 import {
   isDirectorByEmployeeId, isVPByEmail, listVerifierDefaults,
 } from '../../../lib/library'
 import { useAuth } from '../../../contexts/AuthContext'
 import type {
-  Department, Milestone, ProgressCategory, ProgressEntry, VerifierDefault,
+  Department, DocHubEntry, Milestone, ProgressCategory, ProgressEntry,
+  VerifierDefault,
 } from '../../../types/strategy'
 
 const CATEGORIES: Array<{ value: ProgressCategory; label: string }> = [
@@ -97,6 +98,38 @@ export function PostProgressForm({
   const announcementToggleAvailable =
     isAnnouncementAuthor && !!initiativeName
 
+  // ── Library doc linker ──────────────────────────────────────────────
+  // When the announcement toggle is on, the author can attach Library
+  // docs that show up as one-click buttons in the popup. We lazy-load
+  // the doc list only after the toggle goes on so the form doesn't
+  // pay for the docs query when no announcement is being authored.
+  const [linkedDocIds, setLinkedDocIds] = useState<string[]>([])
+  const [allDocs, setAllDocs] = useState<DocHubEntry[] | null>(null)
+  const [docSearch, setDocSearch] = useState('')
+  useEffect(() => {
+    if (!pushAnnouncement || allDocs !== null) return
+    let cancelled = false
+    listDocs()
+      .then(docs => { if (!cancelled) setAllDocs(docs) })
+      .catch(() => { if (!cancelled) setAllDocs([]) })
+    return () => { cancelled = true }
+  }, [pushAnnouncement, allDocs])
+  const docMatches = useMemo(() => {
+    if (!allDocs) return [] as DocHubEntry[]
+    const q = docSearch.trim().toLowerCase()
+    if (!q) return [] as DocHubEntry[]
+    return allDocs
+      .filter(d => !linkedDocIds.includes(d.id))
+      .filter(d => d.title.toLowerCase().includes(q))
+      .slice(0, 6)
+  }, [allDocs, docSearch, linkedDocIds])
+  const linkedDocs = useMemo(() => {
+    const map = new Map((allDocs ?? []).map(d => [d.id, d]))
+    return linkedDocIds
+      .map(id => map.get(id))
+      .filter((d): d is DocHubEntry => !!d)
+  }, [allDocs, linkedDocIds])
+
   // Lazy-load this initiative's Action Items only when the picker is
   // shown (no preset). Caches in component state — one fetch per mount.
   useEffect(() => {
@@ -138,6 +171,7 @@ export function PostProgressForm({
             },
             body: body.trim(),
             createdByEmployeeId: staffProfile?.id ?? null,
+            linkedDocs: linkedDocs.map(d => ({ notion_id: d.id, title: d.title })),
           })
         } catch (annErr) {
           const msg = annErr instanceof Error ? annErr.message : String(annErr)
@@ -275,6 +309,75 @@ export function PostProgressForm({
             {pushAnnouncement ? 'ON' : 'OFF'}
           </span>
         </button>
+      )}
+
+      {/* Library-doc linker — surfaces only when the announcement
+          toggle is on. Each linked doc renders as a chip + becomes a
+          "View [Doc Title]" button on the popup; clicking navigates to
+          /strategy/library/doc/{id} where reading auto-tracks via the
+          existing strategy_wiki_reads pipeline. */}
+      {announcementToggleAvailable && pushAnnouncement && (
+        <div className="rounded-lg border border-primary-purple/30 bg-white px-3 py-2.5 space-y-2">
+          <div className="flex items-center gap-1.5">
+            <BookOpen size={12} className="text-primary-purple" />
+            <p className="text-[11px] font-bold text-deep-plum">
+              Link Library docs <span className="font-normal text-purple-gray/70">(optional)</span>
+            </p>
+          </div>
+          {linkedDocs.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {linkedDocs.map(d => (
+                <span
+                  key={d.id}
+                  className="inline-flex items-center gap-1 rounded-full bg-primary-purple/10 text-primary-purple text-[11px] font-semibold px-2.5 py-0.5"
+                >
+                  <BookOpen size={10} />
+                  <span className="truncate max-w-[200px]">{d.title}</span>
+                  <button
+                    type="button"
+                    onClick={() => setLinkedDocIds(prev => prev.filter(id => id !== d.id))}
+                    className="text-primary-purple/70 hover:text-primary-purple"
+                    aria-label={`Remove ${d.title}`}
+                  >
+                    <X size={10} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="relative">
+            <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-purple-gray/60" />
+            <input
+              type="text"
+              value={docSearch}
+              onChange={e => setDocSearch(e.target.value)}
+              placeholder={allDocs === null ? 'Loading library docs…' : 'Search a doc to link…'}
+              disabled={allDocs === null}
+              className="w-full pl-7 pr-3 py-1.5 rounded border border-lavender bg-white text-xs text-deep-plum outline-none focus:border-primary-purple disabled:bg-lavender-tint/30"
+            />
+          </div>
+          {docMatches.length > 0 && (
+            <div className="rounded border border-lavender bg-white max-h-44 overflow-y-auto">
+              {docMatches.map(d => (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => {
+                    setLinkedDocIds(prev => [...prev, d.id])
+                    setDocSearch('')
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-left hover:bg-lavender-tint border-b border-lavender last:border-b-0"
+                >
+                  <BookOpen size={11} className="text-primary-purple shrink-0" />
+                  <span className="flex-1 truncate text-deep-plum">{d.title}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="text-[10px] text-purple-gray/70 leading-relaxed">
+            Recipients see each linked doc as a button on the popup. Clicking opens it in the Library, where reading is auto-tracked.
+          </p>
+        </div>
       )}
 
       {error && <p className="text-xs text-red-600">{error}</p>}

@@ -727,6 +727,13 @@ export interface StrategyAnnouncement {
   initiative_department: 'all-in' | 'social' | 'branding' | 'web' | null
   headline: string
   body: string | null
+  /** Optional Library docs the author linked from the announcement.
+   *  The popup renders one button per linked doc that navigates to
+   *  /strategy/library/doc/{notion_id} — reading there is
+   *  auto-tracked via strategy_wiki_reads, so no extra wiring is
+   *  needed for "mark as read." Title is denormalized at create time
+   *  so the popup doesn't need a side fetch to label the buttons. */
+  linked_docs: Array<{ notion_id: string; title: string }>
   created_by_employee_id: string | null
   created_at: string
   is_active: boolean

@@ -117,6 +117,10 @@ interface CreateAnnouncementInput {
   /** Caller's employees.id, used for the `created_by_employee_id` column.
    *  Pass null if unresolved; the column is nullable. */
   createdByEmployeeId: string | null
+  /** Library docs the author linked. Each becomes a CTA button on
+   *  the popup. Title is denormalized so the popup doesn't need a
+   *  side fetch to label the buttons. Empty array = no doc links. */
+  linkedDocs?: Array<{ notion_id: string; title: string }>
 }
 
 /** Persist the announcement row. Caller should already have created the
@@ -132,6 +136,7 @@ export async function createAnnouncement(
     initiative_department: input.initiative.department,
     headline: input.progress.title,
     body: input.body || null,
+    linked_docs: input.linkedDocs ?? [],
     created_by_employee_id: input.createdByEmployeeId,
     is_active: true,
   }
