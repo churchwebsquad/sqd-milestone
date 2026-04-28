@@ -16,6 +16,7 @@ import { EditableDate } from '../../components/strategy/editors/EditableDate'
 import { EditableText } from '../../components/strategy/editors/EditableText'
 import { usePopoverDismiss } from '../../components/strategy/editors/usePopover'
 import { useStrategyFetch } from '../../hooks/useStrategyFetch'
+import { useLinkedDocsByProgressIds } from '../../hooks/useLinkedDocsByProgressIds'
 import type {
   ActionItemContent, DocBlock, Initiative, InitiativeDetailBundle, Milestone, MilestoneStatus,
   ProgressEntry,
@@ -767,6 +768,10 @@ function ActionItemProgress({
     return out
   }, [justPosted, entries])
 
+  // Bulk-fetch linked Library docs so each ProgressEntryItem can
+  // render its "Read the docs" row.
+  const linkedDocsByProgressId = useLinkedDocsByProgressIds(merged.map(e => e.id))
+
   return (
     <div className="mt-7 pt-5 border-t border-[var(--color-lib-border)]">
       <div className="flex items-center justify-between mb-3">
@@ -824,6 +829,7 @@ function ActionItemProgress({
               key={e.id}
               entry={{ ...e, kind: 'progress-entry' }}
               showInitiative={false}
+              linkedDocs={linkedDocsByProgressId.get(e.id)}
               onUpdated={next => {
                 // Keep the local list in sync if the user edits a
                 // just-posted entry before the bundle catches up.

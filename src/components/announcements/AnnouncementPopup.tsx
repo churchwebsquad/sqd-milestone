@@ -10,7 +10,7 @@
 
 import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, BookOpen, Sparkles, X } from 'lucide-react'
+import { ArrowRight, BookOpen, ExternalLink, Sparkles, X } from 'lucide-react'
 import type { StrategyAnnouncement } from '../../types/database'
 
 export function AnnouncementPopup({ announcement, onDismiss }: {
@@ -75,28 +75,36 @@ export function AnnouncementPopup({ announcement, onDismiss }: {
           )}
 
           {/* Linked Library docs — surfaced as primary CTAs above the
-              footer when the author attached them. Click navigates to
-              the Library doc page; reading there auto-tracks via
-              strategy_wiki_reads, so this doubles as the "mark as
-              read" path. We dismiss the popup on click so the user
-              isn't blocked when they navigate back. */}
+              footer when the author attached them. Open in a new tab
+              so the popup stays visible — staff can click through
+              every doc, then click 'Got it' once. Reading the target
+              Library page auto-tracks via strategy_wiki_reads, so
+              this doubles as the "mark as read" path. The same docs
+              also surface persistently on the progress entry, so a
+              user who dismisses too soon can still find them later. */}
           {(announcement.linked_docs ?? []).length > 0 && (
             <div className="mt-4 pt-4 border-t border-lavender/60 space-y-1.5">
               <p className="text-[10px] uppercase tracking-widest font-bold text-purple-gray/70">
                 Read the docs
               </p>
               {(announcement.linked_docs ?? []).map(doc => (
-                <Link
+                <a
                   key={doc.notion_id}
-                  to={`/strategy/library/doc/${doc.notion_id}`}
-                  onClick={onDismiss}
+                  href={`/strategy/library/doc/${doc.notion_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="flex items-center gap-2 rounded-md border border-lavender bg-white px-3 py-2 text-xs font-semibold text-deep-plum hover:border-primary-purple hover:text-primary-purple hover:bg-lavender-tint/40 transition-colors"
                 >
                   <BookOpen size={12} className="text-primary-purple shrink-0" />
                   <span className="flex-1 min-w-0 truncate">{doc.title}</span>
-                  <ArrowRight size={11} />
-                </Link>
+                  <ExternalLink size={10} className="text-purple-gray/60 shrink-0" />
+                </a>
               ))}
+              {(announcement.linked_docs ?? []).length > 1 && (
+                <p className="text-[10px] text-purple-gray/70 pt-0.5">
+                  Each opens in a new tab — keep this popup open while you click through.
+                </p>
+              )}
             </div>
           )}
         </div>

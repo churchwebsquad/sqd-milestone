@@ -12,6 +12,7 @@ import type { EditableBlockType } from '../../lib/strategyNotion'
 import { useAuth } from '../../contexts/AuthContext'
 import { isVPByEmail } from '../../lib/library'
 import { useStrategyFetch } from '../../hooks/useStrategyFetch'
+import { useLinkedDocsByProgressIds } from '../../hooks/useLinkedDocsByProgressIds'
 import { detailFeed } from '../../lib/strategyFeed'
 import type {
   Department, DateConfidence, DocBlock, Initiative, InitiativeDetailBundle,
@@ -119,6 +120,15 @@ export default function InitiativeDetailPage() {
   useEffect(() => { setBundle(data) }, [data])
 
   const feed = useMemo(() => (bundle ? detailFeed(bundle) : []), [bundle])
+
+  // Bulk-fetch linked Library docs for every progress entry in the
+  // feed so each ProgressEntryItem can render its "Read the docs"
+  // row. One round-trip on bundle load; cheap.
+  const progressIdsForLinkedDocs = useMemo(
+    () => feed.filter(f => f.kind === 'progress-entry').map(f => f.id),
+    [feed],
+  )
+  const linkedDocsByProgressId = useLinkedDocsByProgressIds(progressIdsForLinkedDocs)
 
   const [posting, setPosting] = useState(false)
 
@@ -511,6 +521,7 @@ export default function InitiativeDetailPage() {
                             key={item.id}
                             entry={item}
                             showInitiative={false}
+                            linkedDocs={linkedDocsByProgressId.get(item.id)}
                             onUpdated={next => onProgressUpdated(next)}
                             onArchived={onProgressArchived}
                           />

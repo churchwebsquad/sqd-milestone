@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Activity, Plus } from 'lucide-react'
 import { listInitiatives, listProgress } from '../../lib/strategyNotion'
 import { useStrategyFetch } from '../../hooks/useStrategyFetch'
+import { useLinkedDocsByProgressIds } from '../../hooks/useLinkedDocsByProgressIds'
 import type { Department, FeedItem, Initiative, ProgressEntry, ProgressFeedEntry } from '../../types/strategy'
 import { ProgressEntryItem } from '../../components/strategy/ProgressEntryItem'
 import { MilestoneEventItem } from '../../components/strategy/MilestoneEventItem'
@@ -44,6 +45,14 @@ export default function ProgressPage() {
     if (dept === 'all') return items
     return items.filter(i => i.department === dept)
   }, [items, dept])
+
+  // Bulk-fetch linked Library docs for the visible feed so each
+  // ProgressEntryItem can render its "Read the docs" row.
+  const progressIdsForLinkedDocs = useMemo(
+    () => filtered.filter(f => f.kind === 'progress-entry').map(f => f.id),
+    [filtered],
+  )
+  const linkedDocsByProgressId = useLinkedDocsByProgressIds(progressIdsForLinkedDocs)
 
   const onPosted = (entry: ProgressEntry) => {
     const feedItem: ProgressFeedEntry = { ...entry, kind: 'progress-entry' }
@@ -172,6 +181,7 @@ export default function ProgressPage() {
               ? <ProgressEntryItem
                   key={item.id}
                   entry={item}
+                  linkedDocs={linkedDocsByProgressId.get(item.id)}
                   onUpdated={onUpdated}
                   onArchived={onArchived}
                 />

@@ -71,6 +71,16 @@ export default function LibraryProcessPage() {
     return [...tags].sort()
   }, [filtered, knownStepNames])
 
+  // Untagged P&W docs — `Document Group = Process & Workflows` but no
+  // `Workflow Step` value at all. Without this section, those docs are
+  // invisible on this page even though they match the page's filter,
+  // mirroring the "show every doc" pattern on the other category pages.
+  // Surface them so directors notice gaps and tag them properly.
+  const untaggedDocs = useMemo(
+    () => filtered.filter(d => d.workflowSteps.length === 0),
+    [filtered],
+  )
+
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<WorkflowStepSyncResult | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -206,6 +216,26 @@ export default function LibraryProcessPage() {
         )
       })}
 
+      {/* Untagged — P&W docs with no Workflow Step set at all. We
+          surface these so directors can see gaps and add the missing
+          tag; otherwise they'd be silently hidden from this page even
+          though they match the page filter. */}
+      {untaggedDocs.length > 0 && (
+        <>
+          <h3 className="text-xs font-semibold uppercase tracking-widest text-[var(--color-lib-text-subtle)] mt-8 mb-3">
+            Untagged
+          </h3>
+          <FlatStageCard
+            label="No Workflow Step"
+            internal={false}
+            untagged
+            docs={untaggedDocs}
+            myReads={myReads}
+            onAddDoc={() => setAdding(true)}
+          />
+        </>
+      )}
+
       {adding && (
         <StaffAddDocFlyout
           defaultDept={me.department}
@@ -301,14 +331,20 @@ function PathwayStageCard({ label, steps, myReads, onAddDoc }: {
   )
 }
 
-function FlatStageCard({ label, internal, legacy, docs, myReads, onAddDoc }: {
+function FlatStageCard({ label, internal, legacy, untagged, docs, myReads, onAddDoc }: {
   label: string
   internal: boolean
   legacy?: boolean
+  untagged?: boolean
   docs: DocHubEntry[]
   myReads: Set<string>
   onAddDoc: () => void
 }) {
+  const subLabel = untagged
+    ? 'No workflow step set — open each doc and tag it to surface here'
+    : internal ? 'Internal milestone'
+    : legacy ? 'Legacy tag'
+    : 'Workflow tag'
   return (
     <div className="rounded-md border border-[var(--color-lib-border)] bg-[var(--color-lib-surface)] mb-3 overflow-hidden">
       <div
@@ -320,7 +356,7 @@ function FlatStageCard({ label, internal, legacy, docs, myReads, onAddDoc }: {
             {label}
           </div>
           <div className="text-[11px] text-[var(--color-lib-text-muted)]">
-            {internal ? 'Internal milestone' : legacy ? 'Legacy tag' : 'Workflow tag'}
+            {subLabel}
           </div>
         </div>
         <span className="text-[11px] text-[var(--color-lib-text-subtle)]">

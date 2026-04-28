@@ -149,6 +149,54 @@ export async function createAnnouncement(
   return data as StrategyAnnouncement
 }
 
+/** Bulk lookup of linked Library docs for a set of Progress entries.
+ *  Used by progress-feed surfaces (Initiative Detail, Progress page,
+ *  Action Item detail, My Dashboard) so each entry can render the
+ *  same "Read the docs" buttons the announcement popup shows — gives
+ *  staff a persistent home for the doc list, instead of one chance
+ *  in the popup.
+ *
+ *  Includes retired announcements too: once a doc has been linked to
+ *  a progress entry, the link stays visible on that entry forever
+ *  (the popup is one-shot, the entry's a record).
+ *
+ *  Single round-trip — caller passes every progressId in the visible
+ *  feed at once. Empty input array → empty map. */
+export async function listLinkedDocsByProgressIds(
+  progressIds: string[],
+): Promise<Map<string, Array<{ notion_id: string; title: string }>>> {
+  const out = new Map<string, Array<{ notion_id: string; title: string }>>()
+  if (progressIds.length === 0) return out
+  const { data, error } = await supabase
+    .from('strategy_announcements')
+    .select('progress_notion_id, linked_docs')
+    .in('progress_notion_id', progressIds)
+  if (error) {
+    console.warn('[announcements] linked-docs lookup failed:', error.message)
+    return out
+  }
+  for (const row of (data ?? []) as Array<{
+    progress_notion_id: string
+    linked_docs: Array<{ notion_id: string; title: string }> | null
+  }>) {
+    const docs = Array.isArray(row.linked_docs) ? row.linked_docs : []
+    if (docs.length === 0) continue
+    // Multiple announcements per progress entry are unlikely (the form
+    // creates one per submit) but be defensive: merge by notion_id so
+    // the same doc doesn't render twice.
+    const existing = out.get(row.progress_notion_id) ?? []
+    const seen = new Set(existing.map(d => d.notion_id))
+    for (const d of docs) {
+      if (!seen.has(d.notion_id)) {
+        existing.push(d)
+        seen.add(d.notion_id)
+      }
+    }
+    out.set(row.progress_notion_id, existing)
+  }
+  return out
+}
+
 /** Soft-retire an announcement. No UI for this in v1 — directors run
  *  this via SQL. Exposed here so a future admin surface can call it. */
 export async function retireAnnouncement(id: string): Promise<void> {

@@ -22,6 +22,7 @@ import type {
   StrategyNotionSetupError, DocHubEntry,
 } from '../types/strategy'
 import { ProgressEntryItem } from '../components/strategy/ProgressEntryItem'
+import { useLinkedDocsByProgressIds } from '../hooks/useLinkedDocsByProgressIds'
 import { MilestoneEventItem } from '../components/strategy/MilestoneEventItem'
 import { InitiativeCard } from '../components/strategy/InitiativeCard'
 import {
@@ -604,6 +605,14 @@ export default function MyDashboardPage() {
   // panel below the stat tiles. Populated alongside the strategy bundle
   // so the user's Notion id is already resolved when filtering.
   const [myActionItems, setMyActionItems] = useState<Milestone[]>([])
+
+  // Linked Library docs for the visible Recent Progress feed — same
+  // bulk-lookup pattern the Initiative Detail / Progress page use.
+  const recentProgressIds = (strategyBundle?.recentFeed ?? [])
+    .filter(f => f.kind === 'progress-entry')
+    .slice(0, 6)
+    .map(f => f.id)
+  const recentLinkedDocs = useLinkedDocsByProgressIds(recentProgressIds)
 
   // Library counters (Phase 3) — Verify Docs + Recent Updates depend on
   // Doc Hub + the current user's read receipts. Loaded in parallel with
@@ -1204,7 +1213,11 @@ export default function MyDashboardPage() {
           <div className="rounded-2xl border border-lavender bg-white px-5 shadow-sm">
             {strategyBundle.recentFeed.slice(0, 6).map(item =>
               item.kind === 'progress-entry'
-                ? <ProgressEntryItem key={item.id} entry={item} />
+                ? <ProgressEntryItem
+                    key={item.id}
+                    entry={item}
+                    linkedDocs={recentLinkedDocs.get(item.id)}
+                  />
                 : <MilestoneEventItem key={item.id} event={item} />
             )}
             <Link

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ExternalLink, Pencil, Trash2, Check, X } from 'lucide-react'
+import { ArrowRight, BookOpen, ExternalLink, Pencil, Trash2, Check, X } from 'lucide-react'
 import type { ProgressCategory, ProgressEntry, ProgressFeedEntry } from '../../types/strategy'
 import { archivePage, updateProgress } from '../../lib/strategyNotion'
 import { CategoryPill, DepartmentBadge } from './StrategyUI'
@@ -14,10 +14,20 @@ const ALL_CATEGORIES: ProgressCategory[] = ['progress', 'decision', 'resource', 
  *
  *  Author avatar + name shows above the date so attribution reads at a
  *  glance. The "View in Notion" link is always visible (not hover-gated)
- *  so the affordance is discoverable. */
-export function ProgressEntryItem({ entry, showInitiative = true, onUpdated, onArchived }: {
+ *  so the affordance is discoverable.
+ *
+ *  Linked docs: when this entry was authored as an announcement and
+ *  the author attached Library docs, the parent passes `linkedDocs` so
+ *  every reader has a persistent home for the doc list — not just the
+ *  one shot in the announcement popup. */
+export function ProgressEntryItem({ entry, showInitiative = true, linkedDocs, onUpdated, onArchived }: {
   entry: ProgressFeedEntry
   showInitiative?: boolean
+  /** Library docs the author linked when posting this update. Renders
+   *  as a "Read the docs" row below the body. Empty array or
+   *  undefined → row hidden. Each doc opens its Library page in a
+   *  new tab so the user can keep the entry visible. */
+  linkedDocs?: Array<{ notion_id: string; title: string }>
   onUpdated?: (next: ProgressEntry) => void
   onArchived?: (id: string) => void
 }) {
@@ -230,6 +240,34 @@ export function ProgressEntryItem({ entry, showInitiative = true, onUpdated, onA
             ))}
           </div>
         )
+      )}
+
+      {/* Linked Library docs — when this update was authored as a
+          "What's New" announcement and the author attached docs, they
+          surface here as persistent CTAs. Open in a new tab so the
+          user keeps this entry visible while reading; reading the
+          target Library page auto-tracks via strategy_wiki_reads. */}
+      {!editing && linkedDocs && linkedDocs.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-lavender/60">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-purple-gray/70 mb-1.5">
+            Read the docs
+          </p>
+          <div className="flex flex-col gap-1.5" onClick={stop}>
+            {linkedDocs.map(d => (
+              <a
+                key={d.notion_id}
+                href={`/strategy/library/doc/${d.notion_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-md border border-lavender bg-white px-3 py-1.5 text-xs font-semibold text-deep-plum hover:border-primary-purple hover:text-primary-purple hover:bg-lavender-tint/40 transition-colors w-fit max-w-full"
+              >
+                <BookOpen size={11} className="text-primary-purple shrink-0" />
+                <span className="truncate">{d.title}</span>
+                <ArrowRight size={10} className="shrink-0" />
+              </a>
+            ))}
+          </div>
+        </div>
       )}
     </article>
   )
