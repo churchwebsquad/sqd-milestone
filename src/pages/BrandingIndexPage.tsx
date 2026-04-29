@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRight, ExternalLink, Search, X } from 'lucide-react'
+import { ArrowRight, Search, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { loadBrandGuidesForMembers, type MemberBrandGuides, type BrandGuideStatus } from '../lib/brandGuides'
 
@@ -134,22 +134,17 @@ export default function BrandingIndexPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {filtered.map(row => {
                   const guides = guidesByMember.get(row.member)
-                  // 'standards' churches haven't migrated to the new SQD
-                  // brand-guide system yet — skip the in-app handoff doc
-                  // (which has nothing to render for them) and send staff
-                  // straight to live.standards.site.
-                  const onClick = () => {
-                    if (guides?.status === 'standards' && guides.primaryUrl) {
-                      window.open(guides.primaryUrl, '_blank', 'noopener,noreferrer')
-                      return
-                    }
-                    navigate(`/branding/${row.portal_token}`)
-                  }
+                  // Always route into the handoff doc — even when the
+                  // partner is on Standards, the doc surfaces the
+                  // Brand Guide Library with the parent + every
+                  // ministry/subbrand. Staff need that landing spot;
+                  // jumping straight to a single Standards URL hides
+                  // the others.
                   return (
                     <button
                       key={row.portal_token}
                       type="button"
-                      onClick={onClick}
+                      onClick={() => navigate(`/branding/${row.portal_token}`)}
                       className="text-left rounded-xl border border-lavender bg-white px-4 py-3 hover:border-primary-purple hover:shadow-sm transition-all flex items-center justify-between gap-3"
                     >
                       <div className="min-w-0 flex-1">
@@ -161,9 +156,7 @@ export default function BrandingIndexPage() {
                           <BrandGuideStatusPill status={guides?.status ?? 'none'} />
                         </div>
                       </div>
-                      {guides?.status === 'standards'
-                        ? <ExternalLink size={14} className="text-primary-purple shrink-0" />
-                        : <ArrowRight size={14} className="text-primary-purple shrink-0" />}
+                      <ArrowRight size={14} className="text-primary-purple shrink-0" />
                     </button>
                   )
                 })}
