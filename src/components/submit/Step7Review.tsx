@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { AlertTriangle, CheckCircle, Link, Check } from 'lucide-react'
+import { AlertTriangle, CheckCircle, Link, Check, ExternalLink, MessageSquare } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { resolveMergeFields, formatAssetLinks } from '../../lib/mergeFields'
 import { submitMilestone } from '../../lib/submitMilestone'
@@ -130,6 +130,7 @@ export default function Step7Review({ formData, onBack, onReset, allMilestones }
         memberId={formData.partner?.member ?? 0}
         portalToken={formData.partner?.portal_token ?? null}
         submissionId={result.submission.id}
+        clickupThreadUrl={result.clickupThreadUrl}
         onReset={onReset ?? (() => {})}
       />
     )
@@ -337,12 +338,14 @@ function SuccessScreen({
   memberId,
   portalToken,
   submissionId,
+  clickupThreadUrl,
   onReset,
 }: {
   churchName: string
   memberId: number
   portalToken: string | null
   submissionId: string
+  clickupThreadUrl: string | null
   onReset: () => void
 }) {
   const [copied, setCopied] = useState(false)
@@ -368,6 +371,25 @@ function SuccessScreen({
         Submission ID: <span className="font-mono">{submissionId}</span>
       </p>
 
+      {/* Open the ClickUp thread we just posted to — staff jump
+          straight into the chat to monitor replies. Only renders when
+          the API returned a thread URL (skipped on the rare path
+          where the message landed but ClickUp didn't return a link). */}
+      {clickupThreadUrl && (
+        <div className="mb-3">
+          <a
+            href={clickupThreadUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-full bg-deep-plum text-white text-sm font-semibold py-2 px-4 hover:bg-primary-purple transition-colors"
+          >
+            <MessageSquare size={13} />
+            View in ClickUp
+            <ExternalLink size={12} className="opacity-80" />
+          </a>
+        </div>
+      )}
+
       {/* Portal share */}
       <div className="mb-6 rounded-xl border border-lavender bg-lavender-tint/40 px-4 py-3 text-left">
         <p className="text-xs font-semibold text-purple-gray uppercase tracking-wide mb-2">
@@ -389,7 +411,7 @@ function SuccessScreen({
       <button
         type="button"
         onClick={onReset}
-        className="rounded-full bg-deep-plum text-white text-sm font-semibold py-2.5 px-6 hover:bg-primary-purple transition-colors"
+        className="rounded-full border border-lavender bg-white text-deep-plum text-sm font-semibold py-2.5 px-6 hover:border-primary-purple hover:text-primary-purple transition-colors"
       >
         Submit Another →
       </button>

@@ -26,12 +26,27 @@ export interface SubmitMilestoneParams {
 export interface SubmitMilestoneResult {
   submission: StrategyMilestoneSubmission
   clickupMessageId: string | null
+  /** Deep link to the chat channel + the message we just posted, when
+   *  ClickUp returned one. Surfaced on the success screen so staff can
+   *  jump back into the thread to monitor replies. */
+  clickupThreadUrl: string | null
   status: 'sent' | 'failed'
   /** Present when the ClickUp send failed but the DB record was still saved. */
   clickupError?: string
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+export interface ResolvedRoot {
+  messageId: string | null
+  /** The root submission's clickup_channel_id — used as a fallback
+   *  when the partner has no `clickup_chat_channels` row (e.g. they
+   *  were onboarded purely via Log Missed Milestone, where the
+   *  channel was scraped from the pasted URL). Reply mode doesn't
+   *  technically need the channel for the API call, but the response
+   *  thread URL builds it in. */
+  channelId: string | null
+}
 
 /**
  * Walk the continuation chain up to find the ROOT submission's clickup_message_id,
@@ -41,22 +56,27 @@ export interface SubmitMilestoneResult {
  *
  * Returns the clickup_message_id of the earliest same-milestone+track submission
  * in the chain (the root). Falls back to the most recent matching submission's
- * message id if the chain breaks or the root itself has no message id.
+ * message id if the chain breaks or the root itself has no message id. Also
+ * returns the matching `clickup_channel_id` from the same row so callers can
+ * route the reply even when the partner has no canonical channel-table row.
+ *
+ * Exported so the resend-submission helper can reuse it on retries.
  */
-async function resolveRootMessageId(
+export async function resolveRoot(
   startSubmissionId: string,
   expectedMilestoneId: string,
   expectedTrackName: string | null,
-): Promise<string | null> {
+): Promise<ResolvedRoot> {
   let currentId: string | null = startSubmissionId
   const seen = new Set<string>()
   let fallbackMessageId: string | null = null
+  let fallbackChannelId: string | null = null
 
   while (currentId && !seen.has(currentId)) {
     seen.add(currentId)
     const { data } = await supabase
       .from('strategy_milestone_submissions')
-      .select('id, is_continuation, continuation_of, clickup_message_id, milestone_id, track_name')
+      .select('id, is_continuation, continuation_of, clickup_message_id, clickup_channel_id, milestone_id, track_name')
       .eq('id', currentId)
       .maybeSingle()
 
@@ -66,6 +86,7 @@ async function resolveRootMessageId(
       is_continuation: boolean
       continuation_of: string | null
       clickup_message_id: string | null
+      clickup_channel_id: string | null
       milestone_id: string
       track_name: string | null
     }
@@ -77,18 +98,22 @@ async function resolveRootMessageId(
       break
     }
 
-    // Remember the most recent matching message id as a fallback
+    // Remember the most recent matching ids as fallbacks
     if (row.clickup_message_id) fallbackMessageId = row.clickup_message_id
+    if (row.clickup_channel_id) fallbackChannelId = row.clickup_channel_id
 
     // Reached the root (or orphaned continuation with no parent)
     if (!row.is_continuation || !row.continuation_of) {
-      return row.clickup_message_id ?? fallbackMessageId
+      return {
+        messageId: row.clickup_message_id ?? fallbackMessageId,
+        channelId: row.clickup_channel_id ?? fallbackChannelId,
+      }
     }
 
     currentId = row.continuation_of
   }
 
-  return fallbackMessageId
+  return { messageId: fallbackMessageId, channelId: fallbackChannelId }
 }
 
 /**
@@ -145,8 +170,43 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
   let status: 'sent' | 'failed' = 'failed'
   let clickupError: string | undefined
 
+  // ── Resolve continuation thread root up-front ────────────────────────────
+  // We need the root's clickup_message_id (parentMessageId) AND
+  // clickup_channel_id ahead of the channel check below — partners
+  // logged in via the missed-milestone path have a thread + channel
+  // captured on the root submission, even when `clickup_chat_channels`
+  // doesn't have a row keyed to their member. Without this, the
+  // continuation submit short-circuits with "No ClickUp channel is
+  // configured for this partner" and the reply never goes out.
+  let parentMessageId: string | null = null
+  let rootChannelId: string | null = null
+  if (formData.isContinuation && formData.postAsThreadReply && formData.continuationOfId) {
+    const root = await resolveRoot(
+      formData.continuationOfId,
+      formData.selectedMilestone!.id,
+      formData.trackName ?? null,
+    )
+    parentMessageId = root.messageId
+    rootChannelId = root.channelId
+    if (!parentMessageId) {
+      console.warn('[submitMilestone] No matching root message ID for continuation; falling back to new channel post')
+    } else {
+      console.log('[submitMilestone] Posting as reply to thread root:', parentMessageId, 'channel:', rootChannelId)
+    }
+  }
+
+  // For top-level posts the channel ID must come from the partner's
+  // clickup_chat_channels row. For thread replies we don't strictly
+  // need a channel ID for the API call (the reply endpoint keys off
+  // parentMessageId), but the root's channel still gives us a clean
+  // threadUrl to return.
+  const effectiveChannelId = formData.channelId ?? rootChannelId
+  const canSend = parentMessageId
+    ? !!effectiveChannelId || !!parentMessageId
+    : !!formData.channelId
+
   // ── Step 1: Build comment array + send ClickUp message ───────────────────
-  if (formData.channelId) {
+  if (canSend) {
     try {
       // Best-effort: look up AM's clickup_id for real @tag in footer.
       const amClickupId = formData.partner?.css_rep
@@ -217,23 +277,9 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
 
       console.log('[submitMilestone] final comment array:', JSON.stringify(commentArray, null, 2))
 
-      // ── Resolve parent thread message ID for continuations ───────────────
-      // Walk up the continuation chain to find the root message, enforcing
-      // that every hop shares the same milestone + track. This guarantees we
-      // reply in the thread of the milestone with the matching name/track.
-      let parentMessageId: string | null = null
-      if (formData.isContinuation && formData.postAsThreadReply && formData.continuationOfId) {
-        parentMessageId = await resolveRootMessageId(
-          formData.continuationOfId,
-          formData.selectedMilestone!.id,
-          formData.trackName ?? null,
-        )
-        if (!parentMessageId) {
-          console.warn('[submitMilestone] No matching root message ID for continuation; falling back to new channel post')
-        } else {
-          console.log('[submitMilestone] Posting as reply to thread root:', parentMessageId)
-        }
-      }
+      // (Continuation thread root was already resolved above so we
+      // could decide whether to send at all; parentMessageId +
+      // effectiveChannelId are in scope here.)
 
       // Announcement title — sourced based on the user's pick on the
       // Message step:
@@ -266,7 +312,7 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
         announcementTitle = milestoneSubject
       }
 
-      const result = await sendClickUpMessage(formData.channelId, commentArray, parentMessageId, announcementTitle)
+      const result = await sendClickUpMessage(effectiveChannelId ?? '', commentArray, parentMessageId, announcementTitle)
       clickupMessageId = result.id
       clickupThreadUrl = result.threadUrl
       status = 'sent'
@@ -381,6 +427,7 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
   return {
     submission: submission as StrategyMilestoneSubmission,
     clickupMessageId,
+    clickupThreadUrl,
     status,
     clickupError,
   }

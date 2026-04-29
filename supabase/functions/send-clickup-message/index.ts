@@ -80,15 +80,25 @@ Deno.serve(async (req) => {
 
   try {
     const { channelId, comment, parentMessageId, title } = await req.json() as {
-      channelId: string
+      channelId?: string | null
       comment: CommentSegment[]
       parentMessageId?: string | null
       title?: string | null
     }
 
-    if (!channelId || !Array.isArray(comment) || comment.length === 0) {
+    // Reply mode (parentMessageId set) talks to /chat/messages/{id}/replies
+    // and never references a channel — let it proceed even when the
+    // partner has no canonical clickup_chat_channels row. Top-level
+    // posts still require a channel because the URL keys off it.
+    if (!Array.isArray(comment) || comment.length === 0) {
       return new Response(
-        JSON.stringify({ error: 'channelId and a non-empty comment array are required' }),
+        JSON.stringify({ error: 'A non-empty comment array is required' }),
+        { status: 400, headers: { ...CORS, 'Content-Type': 'application/json' } },
+      )
+    }
+    if (!parentMessageId && !channelId) {
+      return new Response(
+        JSON.stringify({ error: 'channelId is required for top-level posts' }),
         { status: 400, headers: { ...CORS, 'Content-Type': 'application/json' } },
       )
     }
@@ -189,8 +199,10 @@ Deno.serve(async (req) => {
     // ── Build thread URL ──────────────────────────────────────────────────────
     // For a reply, the thread URL should still point at the ROOT message (parentMessageId)
     // so readers land in the same conversation. For a top-level post, it's the new messageId.
+    // Skip the URL when channelId isn't known — happens for replies on
+    // partners with no canonical channel-table row.
     let threadUrl: string | null = null
-    if (teamId) {
+    if (teamId && channelId) {
       const threadId = isReply ? parentMessageId : messageId
       threadUrl = threadId
         ? `https://app.clickup.com/${teamId}/chat/r/${channelId}/t/${threadId}`

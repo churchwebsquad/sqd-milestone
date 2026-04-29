@@ -13,6 +13,7 @@ import type {
   TriageCategory,
 } from '../types/database'
 import { SQUAD_LABELS, PATHWAY_LABELS, ASSET_TYPE_LABELS } from '../components/submit/types'
+import { resendSubmission } from '../lib/resendSubmission'
 
 const N8N_TRIAGE_PROXY = '/api/webhook/reply-triage'
 
@@ -477,12 +478,15 @@ function SubmissionCard({
   allSubmissions,
   onStatusChange,
   onTriageSave,
+  onResend,
 }: {
   enriched: EnrichedSubmission
   allSubmissions: EnrichedSubmission[]
   onStatusChange: (id: string, status: MilestoneStatus) => Promise<void>
   onTriageSave: (replyId: string, submissionId: string, category: TriageCategory | null) => Promise<void>
+  onResend: (id: string) => Promise<void>
 }) {
+  const [resending, setResending] = useState(false)
   const { submission, milestone, currentMilestone, nextMilestone, assets, replies } = enriched
   const [messageOpen, setMessageOpen] = useState(false)
   const [repliesOpen, setRepliesOpen] = useState(
@@ -539,6 +543,24 @@ function SubmissionCard({
             onChange={onStatusChange}
           />
           <DeliveryBadge status={submission.status} />
+          {/* Recovery affordance — only when ClickUp didn't accept the
+              original send. The handler shows a confirm prompt before
+              posting (so a stray click can't double-send). */}
+          {submission.status === 'failed' && (
+            <button
+              type="button"
+              onClick={async () => {
+                if (resending) return
+                setResending(true)
+                try { await onResend(submission.id) }
+                finally { setResending(false) }
+              }}
+              disabled={resending}
+              className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 text-[11px] font-bold uppercase tracking-wide text-amber-900 px-2.5 py-0.5 hover:bg-amber-100 hover:border-amber-400 transition-colors disabled:opacity-60"
+            >
+              {resending ? 'Resending…' : 'Resend to ClickUp'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -787,6 +809,31 @@ export default function AccountLogPage() {
       setPortalCopied(true)
       setTimeout(() => setPortalCopied(false), 2000)
     })
+  }
+
+  // ── Resend a failed ClickUp send ──────────────────────────────────────────
+  // Recovery affordance for the rare path where the original send
+  // failed (e.g. partner with no clickup_chat_channels row when the
+  // continuation fix wasn't yet deployed). Shows a confirm prompt
+  // because clicking it posts a real message to the partner's chat.
+  const handleResend = async (id: string) => {
+    const ok = window.confirm(
+      'Resend this message to ClickUp?\n\n'
+      + 'This posts the message to the partner\'s chat — only do this if the original send failed and you want to retry. '
+      + '@-mentions from the original send won\'t fire again.',
+    )
+    if (!ok) return
+    const result = await resendSubmission(id)
+    if (!result.success) {
+      setWebhookWarning(`Resend failed: ${result.error ?? 'Unknown error.'}`)
+      return
+    }
+    if (result.error) {
+      // Sent to ClickUp but the local row didn't update — still
+      // surface so staff can reconcile manually.
+      setWebhookWarning(result.error)
+    }
+    await reload()
   }
 
   // ── Milestone status change ───────────────────────────────────────────────
@@ -1124,6 +1171,7 @@ export default function AccountLogPage() {
                     allSubmissions={enriched}
                     onStatusChange={handleStatusChange}
                     onTriageSave={handleTriageSave}
+                    onResend={handleResend}
                   />
                 ))
               )}
