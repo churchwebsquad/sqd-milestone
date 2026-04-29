@@ -9,6 +9,7 @@ import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCollapsibleGroups } from '../hooks/useCollapsibleGroups'
 import { AnnouncementProvider } from './announcements/AnnouncementProvider'
+import UpdateAvailableToast from './UpdateAvailableToast'
 
 // ── Nav data types ────────────────────────────────────────────────────────
 
@@ -268,6 +269,10 @@ export default function AppLayout() {
           </AnnouncementProvider>
         </main>
       </div>
+      {/* App-wide "Update available" prompt — shown when /version.json
+          drifts from the bundle's stamp so staff who keep tabs open
+          across deploys actually get the new features. */}
+      <UpdateAvailableToast />
     </div>
   )
 }
