@@ -4,6 +4,7 @@ import type { StrategyAccountProgress } from '../../types/database'
 import type { EnrichedSubmission } from '../../pages/ChurchDetailPage'
 import { ASSET_TYPE_LABELS } from '../submit/types'
 import { SectionHeader, SubSectionLabel, DocLink } from './ChurchUI'
+import DiscoveryBriefCard from './DiscoveryBriefCard'
 
 interface Props {
   church: StrategyAccountProgress
@@ -26,6 +27,13 @@ export default function AssetsSection({ church, submissions }: Props) {
   return (
     <section id="assets" className="bg-white border border-lavender rounded-xl p-5 shadow-sm scroll-mt-6">
       <SectionHeader icon={Paperclip} title="Assets" />
+
+      {/* Discovery Brief — featured CTA inside the section. The brief
+          informs every other asset on this page (logos, brand voice,
+          web answers), so it gets prime real estate above the rest. */}
+      <div className="mb-4">
+        <DiscoveryBriefCard member={church.member} />
+      </div>
 
       {/* Church-level asset links */}
       {churchAssetsPresent.length > 0 && (

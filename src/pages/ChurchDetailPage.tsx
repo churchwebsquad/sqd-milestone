@@ -12,7 +12,6 @@ import SectionAnchorNav from '../components/churches/SectionAnchorNav'
 import ChurchInfoSection from '../components/churches/ChurchInfoSection'
 import AssetsSection from '../components/churches/AssetsSection'
 import HandoffSection from '../components/churches/HandoffSection'
-import DiscoveryBriefCard from '../components/churches/DiscoveryBriefCard'
 import BrandSquadSection from '../components/churches/BrandSquadSection'
 import BrandVoiceSection from '../components/churches/BrandVoiceSection'
 import WebSquadSection from '../components/churches/WebSquadSection'
@@ -210,13 +209,6 @@ export default function ChurchDetailPage() {
             {portalCopied ? <Check size={12} className="text-green-600" /> : <Link size={12} />}
             {portalCopied ? 'Copied!' : 'Partner Milestone Portal'}
           </button>
-        </div>
-
-        {/* Discovery Brief — featured CTA. Sits above the anchor nav so
-            it's the first thing the AM sees; the brief informs every
-            downstream section (assets, brand voice, web). */}
-        <div className="mb-6">
-          <DiscoveryBriefCard member={memberNum} />
         </div>
 
         {/* Content layout: anchor nav + sections */}
