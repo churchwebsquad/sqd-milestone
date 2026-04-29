@@ -79,15 +79,26 @@ function normalizeStandardsUrl(url: string | null | undefined): string | null {
   return `https://${trimmed}`
 }
 
-/** Bulk version for the index page. One query per table. */
+/** Bulk version for the index page. One query per table.
+ *
+ *  Important: Supabase JS caps reads at 1000 rows by default; without
+ *  an explicit limit, churches whose rows fall past the cut-off
+ *  silently appear as "No Brand Guide Published" on the index even
+ *  when prf_brand_guides has live entries for them (Amplify Church
+ *  was the canary — the handoff page's singleton fetch worked, but
+ *  the index's bulk fetch was truncated). 10k is comfortably above
+ *  current row counts in both tables. */
 export async function loadAllBrandGuidesIndex(): Promise<Map<number, MemberBrandGuides>> {
+  const ROW_LIMIT = 10000
   const [sqdRes, prfRes] = await Promise.all([
     supabase
       .from('strategy_brand_guides')
-      .select('member, parent_id, id, slug, display_name, is_published'),
+      .select('member, parent_id, id, slug, display_name, is_published')
+      .limit(ROW_LIMIT),
     supabase
       .from('prf_brand_guides')
-      .select('account, brand_guide_link, brand_name, is_active'),
+      .select('account, brand_guide_link, brand_name, is_active')
+      .limit(ROW_LIMIT),
   ])
   const sqd = (sqdRes.data ?? []) as SqdRow[]
   const prf = (prfRes.data ?? []) as PrfRow[]

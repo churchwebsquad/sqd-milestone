@@ -13,7 +13,6 @@ import type {
   TriageCategory,
 } from '../types/database'
 import { SQUAD_LABELS, PATHWAY_LABELS, ASSET_TYPE_LABELS } from '../components/submit/types'
-import DiscoveryBriefCard from '../components/churches/DiscoveryBriefCard'
 
 const N8N_TRIAGE_PROXY = '/api/webhook/reply-triage'
 
@@ -1064,13 +1063,6 @@ export default function AccountLogPage() {
             onClose={() => setLogMissedOpen(false)}
             onLogged={() => { setLogMissedOpen(false); reload() }}
           />
-        )}
-
-        {/* Discovery Brief ────────────────────────────────────────────────── */}
-        {partner && (
-          <div className="mb-6">
-            <DiscoveryBriefCard member={partner.member} />
-          </div>
         )}
 
         {/* Submissions ────────────────────────────────────────────────────── */}

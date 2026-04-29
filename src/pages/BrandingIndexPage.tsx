@@ -181,7 +181,7 @@ function BrandGuideStatusPill({ status }: { status: BrandGuideStatus }) {
   if (status === 'standards') {
     return (
       <span className="inline-flex items-center rounded-full text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 bg-amber-100 text-amber-800 border border-amber-200">
-        Live on Standards
+        Standards Brand Guide
       </span>
     )
   }
