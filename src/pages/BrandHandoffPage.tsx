@@ -115,33 +115,44 @@ export default function BrandHandoffPage() {
     )
   }
 
+  // No SQD brand guide on this church → strip the page down to the
+  // overview tab + brand-guide library card. Logos / Colors /
+  // Typography have nothing to render, and the Graphics / Social /
+  // Web tabs all draw on guide-derived content (style tags, colors,
+  // tokens, components) that doesn't exist yet.
+  const hasSqdGuide = !!payload.guide
+  const visibleTabs = hasSqdGuide ? TABS : TABS.filter(t => t.id === 'overview')
+  const activeTab: TabId = hasSqdGuide ? tab : 'overview'
+
   return (
     <div className="min-h-full py-6 px-4 md:px-6">
       <div className="max-w-6xl mx-auto">
         <BackLink />
         <PageHeader payload={payload} onNavigateChurch={() => navigate(`/churches/${payload.church.member}`)} />
 
-        <nav className="flex gap-1 flex-wrap mb-5">
-          {TABS.map(t => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              className={`text-xs font-semibold rounded-full px-4 py-1.5 transition-colors ${
-                tab === t.id
-                  ? 'bg-deep-plum text-white'
-                  : 'bg-white border border-lavender text-deep-plum hover:border-primary-purple hover:text-primary-purple'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
+        {visibleTabs.length > 1 && (
+          <nav className="flex gap-1 flex-wrap mb-5">
+            {visibleTabs.map(t => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                className={`text-xs font-semibold rounded-full px-4 py-1.5 transition-colors ${
+                  activeTab === t.id
+                    ? 'bg-deep-plum text-white'
+                    : 'bg-white border border-lavender text-deep-plum hover:border-primary-purple hover:text-primary-purple'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+        )}
 
-        {tab === 'overview' && <OverviewTab payload={payload} />}
-        {tab === 'graphics' && <GraphicsTab payload={payload} />}
-        {tab === 'social'   && <SocialTab payload={payload} />}
-        {tab === 'web'      && <WebTab payload={payload} />}
+        {activeTab === 'overview' && <OverviewTab payload={payload} />}
+        {hasSqdGuide && activeTab === 'graphics' && <GraphicsTab payload={payload} />}
+        {hasSqdGuide && activeTab === 'social'   && <SocialTab payload={payload} />}
+        {hasSqdGuide && activeTab === 'web'      && <WebTab payload={payload} />}
       </div>
     </div>
   )
@@ -225,14 +236,20 @@ function PageHeader({ payload, onNavigateChurch }: {
             {copied ? <Check size={11} className="text-green-600" /> : <Share2 size={11} />}
             {copied ? 'Copied' : 'Copy handoff link'}
           </button>
-          <button
-            type="button"
-            onClick={downloadMd}
-            className="inline-flex items-center gap-1 text-xs font-semibold rounded-full bg-deep-plum text-white px-3 py-1.5 hover:bg-primary-purple transition-colors"
-          >
-            {downloaded ? <Check size={11} /> : <Download size={11} />}
-            {downloaded ? 'Downloaded' : 'Download for AI'}
-          </button>
+          {/* The AI handoff markdown is built from the SQD guide's
+              voice / colors / tokens — pointless when no guide
+              exists. Hidden in that case so staff don't download an
+              empty .md. */}
+          {payload.guide && (
+            <button
+              type="button"
+              onClick={downloadMd}
+              className="inline-flex items-center gap-1 text-xs font-semibold rounded-full bg-deep-plum text-white px-3 py-1.5 hover:bg-primary-purple transition-colors"
+            >
+              {downloaded ? <Check size={11} /> : <Download size={11} />}
+              {downloaded ? 'Downloaded' : 'Download for AI'}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -388,6 +405,12 @@ function OverviewTab({ payload }: { payload: BrandHandoffPayload }) {
         </Card>
       )}
 
+      {/* Everything below renders only when a SQD brand guide exists.
+          Without one, logos/colors/typography/elements have nothing
+          authoritative to draw from — the partner is still on
+          Standards (or has nothing published), so we skip straight
+          past these sections. */}
+      {guide && <>
       <Card title="Logos" icon={ImageIcon}>
         {logos.length === 0 ? (
           <EmptyHint>No logos uploaded yet.</EmptyHint>
@@ -534,6 +557,7 @@ function OverviewTab({ payload }: { payload: BrandHandoffPayload }) {
       </Card>
 
       <ElementsCard elements={payload.elements} />
+      </>}
     </>
   )
 }

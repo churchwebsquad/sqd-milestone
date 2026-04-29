@@ -61,10 +61,22 @@ interface PrfRow {
   is_active: boolean | null
 }
 
-const STANDARDS_HOST_PREFIX = 'https://live.standards.site'
-
-function isValidStandardsUrl(url: string | null | undefined): url is string {
-  return typeof url === 'string' && url.startsWith(STANDARDS_HOST_PREFIX)
+/** Normalize a `prf_brand_guides.brand_guide_link` value to a URL the
+ *  browser can open. Any non-empty string counts — partners on
+ *  Standards have `https://live.standards.site/...`, but the table
+ *  also holds rows for guides hosted on Notion, Drive, Frontify, and
+ *  occasionally bare-host strings. The original strict
+ *  `startsWith('https://live.standards.site')` filter was hiding
+ *  those, which made churches with valid Standards-hosted guides
+ *  appear as "no brand guide" on the index. Returns null when the
+ *  field is missing or whitespace. */
+function normalizeStandardsUrl(url: string | null | undefined): string | null {
+  if (typeof url !== 'string') return null
+  const trimmed = url.trim()
+  if (!trimmed) return null
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  // Bare host like `live.standards.site/abc` — make it openable.
+  return `https://${trimmed}`
 }
 
 /** Bulk version for the index page. One query per table. */
@@ -166,16 +178,17 @@ function buildMemberBrandGuides(sqdRows: SqdRow[], prfRows: PrfRow[]): MemberBra
     })
   }
 
-  // Standards entries — only those with a usable URL. Inactive rows
-  // get a "(inactive)" label suffix, matching BrandSquadSection.
+  // Legacy / Standards entries — any row with a usable URL counts.
+  // Inactive rows get a "(inactive)" label suffix.
   for (const r of prfRows) {
-    if (!isValidStandardsUrl(r.brand_guide_link)) continue
+    const url = normalizeStandardsUrl(r.brand_guide_link)
+    if (!url) continue
     const base = r.brand_name ?? 'Standards Brand Guide'
     const label = r.is_active === false ? `${base} (inactive)` : base
     entries.push({
       kind: 'standards',
       label,
-      url: r.brand_guide_link,
+      url,
       legacy: true,
     })
   }
