@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRight, Search, X } from 'lucide-react'
+import { ArrowRight, ExternalLink, Search, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { loadAllBrandGuidesIndex, type MemberBrandGuides, type BrandGuideStatus } from '../lib/brandGuides'
 
 interface BrandingChurchRow {
   member: number
@@ -18,6 +19,10 @@ interface BrandingChurchRow {
 export default function BrandingIndexPage() {
   const navigate = useNavigate()
   const [rows, setRows] = useState<BrandingChurchRow[]>([])
+  // Per-member brand-guide status. Drives the pill on each card and
+  // whether clicking the card opens the in-app handoff doc or punches
+  // straight through to live.standards.site.
+  const [guidesByMember, setGuidesByMember] = useState<Map<number, MemberBrandGuides>>(new Map())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -26,18 +31,27 @@ export default function BrandingIndexPage() {
     let cancelled = false
     const load = async () => {
       setLoading(true)
-      const { data, error: err } = await supabase
-        .from('strategy_account_progress')
-        .select('member, church_name, portal_token')
-        .not('portal_token', 'is', null)
-        .order('church_name')
-      if (cancelled) return
-      if (err) {
-        setError(err.message)
-      } else {
-        setRows((data ?? []) as BrandingChurchRow[])
+      try {
+        const [churchesRes, guidesIndex] = await Promise.all([
+          supabase
+            .from('strategy_account_progress')
+            .select('member, church_name, portal_token')
+            .not('portal_token', 'is', null)
+            .order('church_name'),
+          loadAllBrandGuidesIndex(),
+        ])
+        if (cancelled) return
+        if (churchesRes.error) {
+          setError(churchesRes.error.message)
+        } else {
+          setRows((churchesRes.data ?? []) as BrandingChurchRow[])
+          setGuidesByMember(guidesIndex)
+        }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load')
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-      setLoading(false)
     }
     load()
     return () => { cancelled = true }
@@ -112,27 +126,68 @@ export default function BrandingIndexPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {filtered.map(row => (
-                  <button
-                    key={row.portal_token}
-                    type="button"
-                    onClick={() => navigate(`/branding/${row.portal_token}`)}
-                    className="text-left rounded-xl border border-lavender bg-white px-4 py-3 hover:border-primary-purple hover:shadow-sm transition-all flex items-center justify-between gap-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-deep-plum truncate">
-                        {row.church_name ?? `Member #${row.member}`}
-                      </p>
-                      <p className="text-[11px] text-purple-gray">#{row.member}</p>
-                    </div>
-                    <ArrowRight size={14} className="text-primary-purple shrink-0" />
-                  </button>
-                ))}
+                {filtered.map(row => {
+                  const guides = guidesByMember.get(row.member)
+                  // 'standards' churches haven't migrated to the new SQD
+                  // brand-guide system yet — skip the in-app handoff doc
+                  // (which has nothing to render for them) and send staff
+                  // straight to live.standards.site.
+                  const onClick = () => {
+                    if (guides?.status === 'standards' && guides.primaryUrl) {
+                      window.open(guides.primaryUrl, '_blank', 'noopener,noreferrer')
+                      return
+                    }
+                    navigate(`/branding/${row.portal_token}`)
+                  }
+                  return (
+                    <button
+                      key={row.portal_token}
+                      type="button"
+                      onClick={onClick}
+                      className="text-left rounded-xl border border-lavender bg-white px-4 py-3 hover:border-primary-purple hover:shadow-sm transition-all flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-deep-plum truncate">
+                          {row.church_name ?? `Member #${row.member}`}
+                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <p className="text-[11px] text-purple-gray">#{row.member}</p>
+                          <BrandGuideStatusPill status={guides?.status ?? 'none'} />
+                        </div>
+                      </div>
+                      {guides?.status === 'standards'
+                        ? <ExternalLink size={14} className="text-primary-purple shrink-0" />
+                        : <ArrowRight size={14} className="text-primary-purple shrink-0" />}
+                    </button>
+                  )
+                })}
               </div>
             )}
           </>
         )}
       </div>
     </div>
+  )
+}
+
+function BrandGuideStatusPill({ status }: { status: BrandGuideStatus }) {
+  if (status === 'sqd') {
+    return (
+      <span className="inline-flex items-center rounded-full text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 bg-primary-purple/10 text-primary-purple border border-primary-purple/20">
+        New SQD Brand Guide
+      </span>
+    )
+  }
+  if (status === 'standards') {
+    return (
+      <span className="inline-flex items-center rounded-full text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 bg-amber-100 text-amber-800 border border-amber-200">
+        Live on Standards
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center rounded-full text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 bg-lavender-tint text-purple-gray border border-lavender">
+      No Brand Guide Published
+    </span>
   )
 }

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
 import {
-  ArrowLeft, ArrowRight, Check, Copy, Download, ExternalLink, FileText, Image as ImageIcon,
+  ArrowLeft, ArrowRight, BookOpen, Check, Copy, Download, ExternalLink, FileText, Image as ImageIcon,
   MessageCircle, Palette, Share2, Sparkles, Type as TypeIcon, Users,
 } from 'lucide-react'
 import { loadHandoff, buildHandoffMarkdown, buildDesignTokens, HANDOFF_LIST_NAMES } from '../lib/brandHandoff'
+import { loadBrandGuidesForMember, type MemberBrandGuides, type BrandGuideEntry } from '../lib/brandGuides'
 import { isGoogleFont, buildGoogleFontsUrls } from '../lib/googleFonts'
 import type {
   BrandHandoffPayload, HandoffTaskCard,
@@ -286,13 +287,87 @@ function EmptyHint({ children }: { children: React.ReactNode }) {
   )
 }
 
+// ── Brand-guide library ─────────────────────────────────────────────────────
+//
+// Lists every published brand guide for the church — the SQD parent,
+// any SQD subbrands, and any Standards-hosted brands the church
+// hasn't migrated yet. Subbrands often live on Standards while the
+// parent is in the new SQD system, so this card guarantees staff can
+// reach them all from one spot regardless of where each one lives.
+
+function BrandGuideLibraryCard({ guides }: { guides: MemberBrandGuides }) {
+  const sqdEntries = guides.entries.filter(e => e.kind !== 'standards')
+  const standardsEntries = guides.entries.filter(e => e.kind === 'standards')
+  return (
+    <Card title="Brand guide library" icon={BookOpen}>
+      {sqdEntries.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-primary-purple mb-1.5">
+            New SQD brand guides
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {sqdEntries.map((e, i) => <BrandGuideRow key={`sqd-${i}`} entry={e} />)}
+          </div>
+        </div>
+      )}
+      {standardsEntries.length > 0 && (
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-amber-700 mb-1.5">
+            Live on Standards
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {standardsEntries.map((e, i) => <BrandGuideRow key={`std-${i}`} entry={e} />)}
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function BrandGuideRow({ entry }: { entry: BrandGuideEntry }) {
+  const isSub = entry.kind === 'sqd-sub'
+  return (
+    <a
+      href={entry.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
+        entry.legacy
+          ? 'border-amber-200 bg-amber-50/40 text-amber-900 hover:border-amber-300'
+          : 'border-lavender bg-white text-deep-plum hover:border-primary-purple hover:text-primary-purple hover:bg-lavender-tint/30'
+      }`}
+    >
+      {isSub && <span aria-hidden className="text-purple-gray/40">↳</span>}
+      <BookOpen size={12} className={`shrink-0 ${entry.legacy ? 'text-amber-700' : 'text-primary-purple'}`} />
+      <span className="flex-1 min-w-0 truncate font-semibold">{entry.label}</span>
+      <ExternalLink size={11} className={entry.legacy ? 'text-amber-700/70 shrink-0' : 'text-purple-gray/60 shrink-0'} />
+    </a>
+  )
+}
+
 // ── Overview tab ────────────────────────────────────────────────────────────
 
 function OverviewTab({ payload }: { payload: BrandHandoffPayload }) {
   const { guide, logos, colors, typography } = payload
 
+  // Independent fetch — keeps the handoff payload shape unchanged and
+  // lets the library render even on Standards-only churches who don't
+  // have a SQD guide yet.
+  const [allGuides, setAllGuides] = useState<MemberBrandGuides | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    loadBrandGuidesForMember(payload.church.member)
+      .then(g => { if (!cancelled) setAllGuides(g) })
+      .catch(() => { if (!cancelled) setAllGuides(null) })
+    return () => { cancelled = true }
+  }, [payload.church.member])
+
   return (
     <>
+      {allGuides && allGuides.entries.length > 0 && (
+        <BrandGuideLibraryCard guides={allGuides} />
+      )}
+
       {guide?.handoff_notes && (
         <Card title="Designer notes" icon={Sparkles}>
           <p className="text-sm text-deep-plum whitespace-pre-wrap leading-relaxed">
