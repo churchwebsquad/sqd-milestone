@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, BookOpen, ExternalLink, Pencil, Trash2, Check, X } from 'lucide-react'
-import type { ProgressCategory, ProgressEntry, ProgressFeedEntry } from '../../types/strategy'
-import { archivePage, updateProgress } from '../../lib/strategyNotion'
+import { ArrowRight, BookOpen, ExternalLink, Pencil, Plus, Trash2, Check, X } from 'lucide-react'
+import type { Milestone, ProgressCategory, ProgressEntry, ProgressFeedEntry } from '../../types/strategy'
+import { archivePage, getInitiativeDetail, updateProgress } from '../../lib/strategyNotion'
 import { CategoryPill, DepartmentBadge } from './StrategyUI'
 import { MarkdownBody } from './MarkdownBody'
 
@@ -37,13 +37,32 @@ export function ProgressEntryItem({ entry, showInitiative = true, linkedDocs, on
   const [draftTitle, setDraftTitle] = useState(entry.title)
   const [draftBody, setDraftBody] = useState(entry.body)
   const [draftCats, setDraftCats] = useState<ProgressCategory[]>(entry.categories)
+  const [draftActionItemIds, setDraftActionItemIds] = useState<string[]>(entry.actionItemIds ?? [])
+  // Picker source — populated lazily on first edit so we don't hit
+  // Notion for entries the user never opens. Indexed by id so we can
+  // resolve names for the currently-linked items even if their parent
+  // initiative changed.
+  const [actionItemOptions, setActionItemOptions] = useState<Milestone[]>([])
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Lazy-load this entry's initiative's Action Items the first time the
+  // user opens edit mode. Skipped when the entry has no initiative
+  // (orphan progress) — the picker just shows already-linked ids.
+  useEffect(() => {
+    if (!editing || !entry.initiativeId || actionItemOptions.length > 0) return
+    let cancelled = false
+    getInitiativeDetail(entry.initiativeId)
+      .then(b => { if (!cancelled) setActionItemOptions(b.milestones) })
+      .catch(() => { /* picker degrades to "no options"; the user can still remove existing links */ })
+    return () => { cancelled = true }
+  }, [editing, entry.initiativeId, actionItemOptions.length])
 
   const startEdit = () => {
     setDraftTitle(entry.title)
     setDraftBody(entry.body)
     setDraftCats(entry.categories)
+    setDraftActionItemIds(entry.actionItemIds ?? [])
     setError(null)
     setEditing(true)
   }
@@ -57,6 +76,10 @@ export function ProgressEntryItem({ entry, showInitiative = true, linkedDocs, on
         title: draftTitle.trim(),
         body: draftBody,
         categories: draftCats,
+        // Always send the relation so a clearing edit (user removes
+        // every link) actually clears it server-side. The writer
+        // handles `[]` → empty relation.
+        actionItemIds: draftActionItemIds,
       })
       onUpdated?.({ ...next, kind: 'progress-entry' } as ProgressEntry)
       setEditing(false)
@@ -209,6 +232,24 @@ export function ProgressEntryItem({ entry, showInitiative = true, linkedDocs, on
               </button>
             ))}
           </div>
+
+          {/* Linked Action Items — recovery affordance. The post form
+              writes the relation up front, but earlier bugs let the
+              link drop silently; this is the only path users have to
+              fix already-posted entries. Shown for every entry, even
+              ones with no initiative — staff can at least remove
+              stale ids. */}
+          <ActionItemPicker
+            options={actionItemOptions}
+            selectedIds={draftActionItemIds}
+            onChange={setDraftActionItemIds}
+            // For lookups when the original action item isn't in this
+            // initiative's set anymore (renamed initiative, etc.).
+            originalNames={entry.actionItemNames ?? []}
+            originalIds={entry.actionItemIds ?? []}
+            initiativeMissing={!entry.initiativeId}
+          />
+
           {error && <p className="text-xs text-red-600">{error}</p>}
           <div className="flex justify-end gap-2">
             <button
@@ -268,6 +309,95 @@ export function ProgressEntryItem({ entry, showInitiative = true, linkedDocs, on
         </div>
       )}
     </article>
+  )
+}
+
+/** Add/remove the Action Items relation from a Progress entry's edit
+ *  form. Renders a row of selected items as removable chips and an
+ *  inline dropdown that lists every Action Item on the entry's
+ *  initiative which isn't already linked. Staff can both clear stale
+ *  links (the bug we shipped this for) and attach new ones. */
+function ActionItemPicker({
+  options, selectedIds, onChange, originalNames, originalIds, initiativeMissing,
+}: {
+  options: Milestone[]
+  selectedIds: string[]
+  onChange: (next: string[]) => void
+  originalNames: string[]
+  originalIds: string[]
+  initiativeMissing: boolean
+}) {
+  // Build a name lookup from both the picker's option set (current
+  // initiative) and the entry's own original ids → names mapping (for
+  // links that point at items outside the current initiative). Falls
+  // back to a generic label when neither source has a name.
+  const nameById = new Map<string, string>()
+  for (const opt of options) nameById.set(opt.id, opt.name)
+  for (let i = 0; i < originalIds.length; i++) {
+    if (!nameById.has(originalIds[i])) {
+      nameById.set(originalIds[i], originalNames[i] ?? 'Action Item')
+    }
+  }
+
+  const remaining = options.filter(o => !selectedIds.includes(o.id))
+
+  return (
+    <div className="rounded-lg border border-[var(--color-lib-border)] bg-white px-3 py-2 space-y-1.5">
+      <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-lib-text-muted)]">
+        Linked action items
+      </p>
+
+      {selectedIds.length === 0 ? (
+        <p className="text-[11px] italic text-[var(--color-lib-text-muted)]">None linked.</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {selectedIds.map(id => (
+            <span
+              key={id}
+              className="inline-flex items-center gap-1 rounded-full bg-[var(--color-lib-accent-soft)] text-[var(--color-lib-accent)] pl-2.5 pr-1 py-0.5 text-[11px] font-medium"
+            >
+              {nameById.get(id) ?? 'Action Item'}
+              <button
+                type="button"
+                onClick={() => onChange(selectedIds.filter(x => x !== id))}
+                className="rounded-full hover:bg-[var(--color-lib-accent)]/20 p-0.5"
+                title="Remove this link"
+                aria-label="Remove"
+              >
+                <X size={10} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {initiativeMissing ? (
+        <p className="text-[10px] text-[var(--color-lib-text-muted)] italic">
+          Set an initiative on this entry to add new action-item links.
+        </p>
+      ) : remaining.length > 0 ? (
+        <div className="flex items-center gap-1.5">
+          <Plus size={11} className="text-[var(--color-lib-text-muted)]" />
+          <select
+            value=""
+            onChange={e => {
+              if (!e.target.value) return
+              onChange([...selectedIds, e.target.value])
+            }}
+            className="flex-1 rounded border border-[var(--color-lib-border)] bg-white px-2 py-1 text-[11px] text-[var(--color-lib-text)] outline-none focus:border-[var(--color-lib-accent)]"
+          >
+            <option value="">Add an action item…</option>
+            {remaining.map(o => (
+              <option key={o.id} value={o.id}>{o.name}</option>
+            ))}
+          </select>
+        </div>
+      ) : options.length === 0 ? (
+        <p className="text-[10px] text-[var(--color-lib-text-muted)] italic">Loading action items…</p>
+      ) : (
+        <p className="text-[10px] text-[var(--color-lib-text-muted)] italic">All action items already linked.</p>
+      )}
+    </div>
   )
 }
 
