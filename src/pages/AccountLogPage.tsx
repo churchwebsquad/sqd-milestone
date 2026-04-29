@@ -1208,31 +1208,85 @@ interface MissedAsset {
   label: string
 }
 
-/** Parse a ClickUp message URL into its channel + message ids. ClickUp
- *  thread URLs look like:
- *    https://app.clickup.com/{teamId}/chat/r/{channelId}/t/{messageId}
- *    https://app.clickup.com/{teamId}/v/cn/{channelId}/t/{messageId}
- *  Both are valid; both encode the channel as the segment after `r/` or
- *  `cn/` and the message as the segment after `t/`. Returns null fields
- *  for any segment we can't extract. */
-function parseClickUpUrl(url: string): { channelId: string | null; messageId: string | null } {
-  if (!url) return { channelId: null, messageId: null }
+/** Parse a ClickUp message URL into its channel + chat-post ids.
+ *
+ *  ClickUp uses several URL shapes that look superficially similar but
+ *  encode different things in their `/t/` segment:
+ *
+ *    Chat channel view, post pinned:
+ *      https://app.clickup.com/{teamId}/v/cn/{channelId}/p/{postId}      ✅ post id
+ *
+ *    Chat message permalink (from "Copy link" on a message):
+ *      https://app.clickup.com/{teamId}/chat/r/{channelId}/t/{messageId} ✅ message id
+ *
+ *    Chat channel view, TASK pinned (a task in a channel — NOT a chat post):
+ *      https://app.clickup.com/{teamId}/v/cn/{channelId}/t/{taskId}      ❌ task id
+ *
+ *  The earlier parser blindly extracted `/t/{...}` as a message id,
+ *  which silently accepted task URLs. That bit us on member 3585 — the
+ *  resend tried to reply to a task and ClickUp routed the message
+ *  somewhere unexpected. The hardened parser refuses task URLs and
+ *  hands callers a `looksLikeTaskUrl` flag so the UI can warn the
+ *  user to paste the correct link.
+ *
+ *  Rule:
+ *    - `/p/{id}` is unambiguous — always a chat post id (preferred)
+ *    - `/t/{id}` is a chat message id ONLY when the URL is in
+ *      `/chat/r/{channelId}/` context. Anywhere else it's a task id.
+ */
+function parseClickUpUrl(url: string): {
+  channelId: string | null
+  messageId: string | null
+  /** True when the URL pasted was a task link rather than a chat
+   *  post / message — drives a guidance error in the UI. */
+  looksLikeTaskUrl: boolean
+} {
+  if (!url) return { channelId: null, messageId: null, looksLikeTaskUrl: false }
   try {
     const u = new URL(url)
     const segments = u.pathname.split('/').filter(Boolean)
     let channelId: string | null = null
     let messageId: string | null = null
+    let context: 'chat' | 'view' | null = null
+
+    // Find channel segment and record whether we're in a chat permalink
+    // path (/chat/r/...) or a channel-view path (/v/cn/...).
     for (let i = 0; i < segments.length - 1; i++) {
-      if ((segments[i] === 'r' || segments[i] === 'cn') && segments[i + 1]) {
+      if (segments[i] === 'r' && segments[i + 1]) {
         channelId = segments[i + 1]
+        if (i > 0 && segments[i - 1] === 'chat') context = 'chat'
+      } else if (segments[i] === 'cn' && segments[i + 1]) {
+        channelId = segments[i + 1]
+        if (i > 0 && segments[i - 1] === 'v') context = 'view'
       }
-      if (segments[i] === 't' && segments[i + 1]) {
+    }
+
+    // /p/{id} — canonical chat post id. Wins over /t/ whenever both
+    // appear (we never expect both, but being explicit is safer).
+    for (let i = 0; i < segments.length - 1; i++) {
+      if (segments[i] === 'p' && /^\d+$/.test(segments[i + 1] ?? '')) {
         messageId = segments[i + 1]
       }
     }
-    return { channelId, messageId }
+
+    // /t/{id} — only valid as a chat message id in /chat/r/ context.
+    // In /v/cn/ context, /t/ is a task id; flag and skip.
+    let looksLikeTaskUrl = false
+    if (!messageId) {
+      for (let i = 0; i < segments.length - 1; i++) {
+        if (segments[i] === 't' && /^\d+$/.test(segments[i + 1] ?? '')) {
+          if (context === 'chat') {
+            messageId = segments[i + 1]
+          } else {
+            looksLikeTaskUrl = true
+          }
+        }
+      }
+    }
+
+    return { channelId, messageId, looksLikeTaskUrl }
   } catch {
-    return { channelId: null, messageId: null }
+    return { channelId: null, messageId: null, looksLikeTaskUrl: false }
   }
 }
 
@@ -1265,7 +1319,11 @@ function LogMissedMilestoneModal({ partner, onClose, onLogged }: LogMissedMilest
   }, [])
 
   const parsed = parseClickUpUrl(messageUrl)
-  const canSubmit = !!milestoneId && !!messageUrl.trim() && (parsed.channelId || parsed.messageId)
+  // Both ids are required — replies won't track without the channel,
+  // and continuations can't reply without the message id. Task URLs
+  // are surfaced via parsed.looksLikeTaskUrl below and disabled here
+  // so a stray paste can't write a task id into clickup_message_id.
+  const canSubmit = !!milestoneId && !!messageUrl.trim() && !!parsed.channelId && !!parsed.messageId
 
   const addAsset = () => setAssets(a => [...a, { type: 'Other', url: '', label: '' }])
   const removeAsset = (idx: number) => setAssets(a => a.filter((_, i) => i !== idx))
@@ -1418,11 +1476,24 @@ function LogMissedMilestoneModal({ partner, onClose, onLogged }: LogMissedMilest
               className="w-full rounded-lg border border-lavender bg-white px-3 py-2 text-sm outline-none focus:border-primary-purple font-mono"
             />
             {messageUrl && (
-              <p className="text-[10px] mt-1">
-                {parsed.channelId && parsed.messageId
-                  ? <span className="text-green-700">✓ Parsed channel <code>{parsed.channelId}</code> and message <code>{parsed.messageId}</code></span>
-                  : <span className="text-amber-700">⚠ Couldn't parse a channel and message id from this URL — replies won't be tracked unless we have both.</span>}
-              </p>
+              <div className="text-[10px] mt-1 space-y-1">
+                {parsed.looksLikeTaskUrl ? (
+                  <p className="text-red-700 leading-relaxed">
+                    ⚠ This looks like a <strong>task</strong> URL, not a chat post. Logging it would
+                    save the task id as the message id and break thread replies + reply tracking.
+                    In ClickUp, right-click the chat post itself and choose "Copy link" to get the
+                    correct URL (it should contain <code>/p/&lt;id&gt;</code> or <code>/chat/r/.../t/&lt;id&gt;</code>).
+                  </p>
+                ) : parsed.channelId && parsed.messageId ? (
+                  <p className="text-green-700">
+                    ✓ Parsed channel <code>{parsed.channelId}</code> and message <code>{parsed.messageId}</code>
+                  </p>
+                ) : (
+                  <p className="text-amber-700">
+                    ⚠ Couldn't parse a channel and message id from this URL — paste the chat-post link from ClickUp.
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
