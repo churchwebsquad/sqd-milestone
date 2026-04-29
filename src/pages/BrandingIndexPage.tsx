@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowRight, ExternalLink, Search, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { loadAllBrandGuidesIndex, type MemberBrandGuides, type BrandGuideStatus } from '../lib/brandGuides'
+import { loadBrandGuidesForMembers, type MemberBrandGuides, type BrandGuideStatus } from '../lib/brandGuides'
 
 interface BrandingChurchRow {
   member: number
@@ -32,21 +32,27 @@ export default function BrandingIndexPage() {
     const load = async () => {
       setLoading(true)
       try {
-        const [churchesRes, guidesIndex] = await Promise.all([
-          supabase
-            .from('strategy_account_progress')
-            .select('member, church_name, portal_token')
-            .not('portal_token', 'is', null)
-            .order('church_name'),
-          loadAllBrandGuidesIndex(),
-        ])
+        // Sequential, not parallel: the brand-guide fetch is scoped
+        // to the church list's member IDs (cheap, scoped IN-clause)
+        // so the caller can't be silently truncated by PostgREST's
+        // max-rows cap. The first round-trip is small.
+        const churchesRes = await supabase
+          .from('strategy_account_progress')
+          .select('member, church_name, portal_token')
+          .not('portal_token', 'is', null)
+          .order('church_name')
         if (cancelled) return
         if (churchesRes.error) {
           setError(churchesRes.error.message)
-        } else {
-          setRows((churchesRes.data ?? []) as BrandingChurchRow[])
-          setGuidesByMember(guidesIndex)
+          return
         }
+        const churches = (churchesRes.data ?? []) as BrandingChurchRow[]
+        setRows(churches)
+        const guidesIndex = await loadBrandGuidesForMembers(
+          churches.map(c => c.member).filter((m): m is number => Number.isFinite(m)),
+        )
+        if (cancelled) return
+        setGuidesByMember(guidesIndex)
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load')
       } finally {

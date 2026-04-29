@@ -79,52 +79,71 @@ function normalizeStandardsUrl(url: string | null | undefined): string | null {
   return `https://${trimmed}`
 }
 
-/** Bulk version for the index page. One query per table.
+/** Bulk version for the index page.
  *
- *  Important: Supabase JS caps reads at 1000 rows by default; without
- *  an explicit limit, churches whose rows fall past the cut-off
- *  silently appear as "No Brand Guide Published" on the index even
- *  when prf_brand_guides has live entries for them (Amplify Church
- *  was the canary — the handoff page's singleton fetch worked, but
- *  the index's bulk fetch was truncated). 10k is comfortably above
- *  current row counts in both tables. */
-export async function loadAllBrandGuidesIndex(): Promise<Map<number, MemberBrandGuides>> {
-  const ROW_LIMIT = 10000
+ *  Scopes the query to the exact set of churches the caller is about
+ *  to render. Two reasons we do this instead of a blanket fetch:
+ *    1. PostgREST's `max-rows` cap silently truncates large reads —
+ *       early versions of this helper had no scope and Amplify Church
+ *       (member 3549) showed "No Brand Guide Published" on the index
+ *       while the singleton fetch on the handoff page rendered three
+ *       Standards entries.
+ *    2. `prf_brand_guides.account` and `strategy_brand_guides.member`
+ *       can come back from PostgREST as strings even though the
+ *       column types are numeric — any Map keyed by the raw value
+ *       and looked up with a number would miss. Coercing to Number
+ *       on both ends side-steps that. */
+export async function loadBrandGuidesForMembers(
+  memberIds: number[],
+): Promise<Map<number, MemberBrandGuides>> {
+  const out = new Map<number, MemberBrandGuides>()
+  if (memberIds.length === 0) return out
+
   const [sqdRes, prfRes] = await Promise.all([
     supabase
       .from('strategy_brand_guides')
       .select('member, parent_id, id, slug, display_name, is_published')
-      .limit(ROW_LIMIT),
+      .in('member', memberIds),
     supabase
       .from('prf_brand_guides')
       .select('account, brand_guide_link, brand_name, is_active')
-      .limit(ROW_LIMIT),
+      .in('account', memberIds),
   ])
   const sqd = (sqdRes.data ?? []) as SqdRow[]
   const prf = (prfRes.data ?? []) as PrfRow[]
 
   const sqdByMember = new Map<number, SqdRow[]>()
   for (const r of sqd) {
-    if (!r.member) continue
-    const arr = sqdByMember.get(r.member) ?? []
+    const key = toMemberKey(r.member)
+    if (key == null) continue
+    const arr = sqdByMember.get(key) ?? []
     arr.push(r)
-    sqdByMember.set(r.member, arr)
+    sqdByMember.set(key, arr)
   }
 
   const prfByMember = new Map<number, PrfRow[]>()
   for (const r of prf) {
-    if (r.account == null) continue
-    const arr = prfByMember.get(r.account) ?? []
+    const key = toMemberKey(r.account)
+    if (key == null) continue
+    const arr = prfByMember.get(key) ?? []
     arr.push(r)
-    prfByMember.set(r.account, arr)
+    prfByMember.set(key, arr)
   }
 
-  const memberIds = new Set<number>([...sqdByMember.keys(), ...prfByMember.keys()])
-  const out = new Map<number, MemberBrandGuides>()
   for (const m of memberIds) {
     out.set(m, buildMemberBrandGuides(sqdByMember.get(m) ?? [], prfByMember.get(m) ?? []))
   }
   return out
+}
+
+/** Coerce member-key candidates (which the JSON layer can hand back as
+ *  number, numeric string, or null) into a finite `number`. Returns
+ *  null when the value can't be made into one so callers can skip
+ *  the row cleanly. */
+function toMemberKey(value: unknown): number | null {
+  if (value == null) return null
+  const n = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(n) ? n : null
 }
 
 /** Single-member version for the handoff page. */
