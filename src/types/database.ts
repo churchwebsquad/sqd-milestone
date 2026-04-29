@@ -749,6 +749,119 @@ export interface StrategyAnnouncementDismissal {
   [key: string]: unknown
 }
 
+/** A partner Discovery Questionnaire submission. Hybrid storage:
+ *  typed columns for the answers downstream tools query directly +
+ *  `raw_payload` JSONB for everything else. Ingested by an n8n
+ *  workflow (Airtable migration today, FillOut webhook tomorrow). */
+export interface StrategyDiscoveryQuestionnaire {
+  id: string
+  member: number
+  submission_id: string | null
+  airtable_record_id: string | null
+  source: 'airtable_legacy' | 'fillout_webhook' | 'native'
+  submitted_at: string
+  cohort: string | null
+  discovery_call_booking: string | null
+
+  primary_contact_name: string | null
+  primary_contact_email: string | null
+  primary_contact_role: string | null
+  primary_contact_phone: string | null
+
+  how_heard_about_us: string | null
+
+  church_name_meaning: string | null
+  mission_vision_statement: string | null
+  service_terminology: string | null
+  defining_milestones: string | null
+  identity_phrase_or_verse: string | null
+
+  next_12_months_success: string | null
+
+  typical_audience_description: string | null
+  online_audience_difference: string | null
+  ideal_in_person_experience: string | null
+  ideal_website_experience: string | null
+  best_outreach_methods: string | null
+
+  audience_voice_style: string | null
+  current_voice_assessment: string | null
+  one_key_message: string | null
+  desired_emotions: string | null
+  words_tones_to_avoid: string | null
+  communication_tone_consistency: string | null
+  recurring_message_theme: string | null
+
+  visual_simple_to_elevated: number | null
+  visual_traditional_to_modern: number | null
+  visual_timeless_to_trendy: number | null
+  visual_function_to_form: number | null
+  storytelling_literal_to_abstract: number | null
+
+  brand_redesign_needs: string | null
+  font_preferences: string | null
+  symbols_or_imagery: string | null
+  inspirational_brands: string | null
+  brands_to_avoid: string | null
+  inspirational_websites: string | null
+  exceptional_communicators: string | null
+  branding_additional_notes: string | null
+
+  current_website_url: string | null
+  current_website_platforms: string[] | null
+  software_in_use: string | null
+  google_business_claimed: string | null
+  website_redesign_needs: string | null
+  parts_to_refresh: string[] | null
+  website_comments: string | null
+  copy_approach: string | null
+  current_platform_satisfaction: string | null
+  weekly_maintenance_hours: string | null
+  top_website_priority: string | null
+  top_3_website_goals: string | null
+  current_navigation_satisfaction: number | null
+  initial_web_support_preferences: string[] | null
+
+  social_platforms: string[] | null
+  speaking_pastor_reference: string | null
+  social_scheduling_email: string | null
+
+  current_video_use: string | null
+  desired_video_formats: string | null
+  storytelling_approach: string | null
+  video_communication_avoidances: string | null
+  produced_vs_authentic_preference: string | null
+  exemplary_video_moment: string | null
+
+  internal_decision_makers: string | null
+
+  bible_translations: string[] | null
+  deviates_from_primary_translation: string | null
+
+  raw_payload: Record<string, unknown>
+  legacy_links: Record<string, string | null> | null
+
+  created_at: string
+  updated_at: string
+  [key: string]: unknown
+}
+
+/** A file attached to a Discovery Questionnaire (logo, brand guide,
+ *  or the generated submission PDF). Stored in the private
+ *  'discovery-questionnaire' Supabase Storage bucket. */
+export interface StrategyDiscoveryQuestionnaireFile {
+  id: string
+  questionnaire_id: string
+  file_kind: 'logo' | 'brand_guide' | 'submission_pdf' | 'other'
+  filename: string | null
+  storage_path: string | null
+  source_url: string | null
+  mime_type: string | null
+  size_bytes: number | null
+  created_at: string
+  [key: string]: unknown
+}
+
 /** Shape returned by get_brand_guide_by_slug RPC */
 export interface BrandGuidePortalPayload {
   guide: {
@@ -1094,6 +1207,18 @@ export interface Database {
         Row: StrategyAnnouncementDismissal
         Insert: Partial<StrategyAnnouncementDismissal>
         Update: Partial<StrategyAnnouncementDismissal>
+        Relationships: []
+      }
+      strategy_discovery_questionnaire: {
+        Row: StrategyDiscoveryQuestionnaire
+        Insert: Partial<StrategyDiscoveryQuestionnaire>
+        Update: Partial<StrategyDiscoveryQuestionnaire>
+        Relationships: []
+      }
+      strategy_discovery_questionnaire_files: {
+        Row: StrategyDiscoveryQuestionnaireFile
+        Insert: Partial<StrategyDiscoveryQuestionnaireFile>
+        Update: Partial<StrategyDiscoveryQuestionnaireFile>
         Relationships: []
       }
     }

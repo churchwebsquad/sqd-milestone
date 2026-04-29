@@ -5,6 +5,7 @@ import AppLayout from './components/AppLayout'
 import ComingSoonPage from './components/ComingSoonPage'
 import ChurchesDashboardPage from './pages/ChurchesDashboardPage'
 import ChurchDetailPage from './pages/ChurchDetailPage'
+import DiscoveryBriefPage from './pages/DiscoveryBriefPage'
 import CopyReviewAdminPage from './pages/CopyReviewAdminPage'
 import BrandGuideEditorPage from './pages/BrandGuideEditorPage'
 import IntelAuditToolPage from './pages/IntelAuditToolPage'
@@ -87,6 +88,7 @@ export default function App() {
             <Route path="/" element={<MyDashboardPage />} />
             <Route path="/churches" element={<ChurchesDashboardPage />} />
             <Route path="/churches/:memberId" element={<ChurchDetailPage />} />
+            <Route path="/churches/:memberId/discovery-brief" element={<DiscoveryBriefPage />} />
             <Route path="/churches/:memberId/copy-review/:reviewId" element={<CopyReviewAdminPage />} />
             <Route path="/churches/:memberId/brand" element={<BrandGuideEditorPage />} />
             <Route path="/churches/:memberId/brand/:subSlug" element={<BrandGuideEditorPage />} />
