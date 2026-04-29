@@ -1226,39 +1226,43 @@ function LogMissedMilestoneModal({ partner, onClose, onLogged }: LogMissedMilest
     setBusy(true)
     setError(null)
     try {
-      const milestone = milestones.find(m => m.id === milestoneId)
       const submitterEmail = staffProfile?.email ?? null
       const submitterName = staffProfile?.full_name ?? staffProfile?.name ?? null
 
       const submittedAtIso = new Date(submittedAt).toISOString()
 
       // Insert the submission row. `milestone_status` = 'sent' so it
-      // matches the active set the reply-scrub cron walks. The cron uses
-      // clickup_channel_id + clickup_message_id to fetch replies.
+      // matches the active set the reply-scrub cron walks. The cron
+      // uses clickup_channel_id + clickup_message_id to fetch replies.
+      //
+      // Column set mirrors the canonical insert in submitMilestone.ts —
+      // strategy_milestone_submissions has no church_name / step_squad /
+      // step_pathway / logged_after_the_fact column, and the body
+      // column is `rendered_message`. The "logged after the fact"
+      // signal stays in the rendered_message text so staff browsing
+      // submissions can spot these rows.
       const { data: row, error: insertErr } = await supabase
         .from('strategy_milestone_submissions')
         .insert({
           member: partner.member,
-          church_name: partner.church_name,
           milestone_id: milestoneId,
+          template_id: null,
+          is_continuation: false,
+          continuation_of: null,
+          track_name: trackName || null,
           current_milestone_id: milestoneId,
           next_milestone_id: null,
-          track_name: trackName || null,
-          message_body: '(Logged after the fact — original message lives in ClickUp)',
-          milestone_status: 'sent',
-          submitted_by_name: submitterName,
-          submitted_by_email: submitterEmail,
-          submitted_at: submittedAtIso,
+          rendered_message: '(Logged after the fact — original message lives in ClickUp)',
           clickup_channel_id: parsed.channelId,
           clickup_message_id: parsed.messageId,
           clickup_thread_url: messageUrl.trim(),
           partner_contact_name: null,
           partner_contact_clickup_id: null,
-          is_continuation: false,
-          continuation_of: null,
-          step_squad: milestone?.squad ?? null,
-          step_pathway: milestone?.pathway ?? null,
-          logged_after_the_fact: true,
+          submitted_by_email: submitterEmail,
+          submitted_by_name: submitterName,
+          submitted_at: submittedAtIso,
+          status: 'sent',
+          milestone_status: 'sent',
         })
         .select('id')
         .single()
