@@ -543,10 +543,13 @@ function SubmissionCard({
             onChange={onStatusChange}
           />
           <DeliveryBadge status={submission.status} />
-          {/* Recovery affordance — only when ClickUp didn't accept the
-              original send. The handler shows a confirm prompt before
-              posting (so a stray click can't double-send). */}
-          {submission.status === 'failed' && (
+          {/* Recovery affordance — show whenever the row has no
+              clickup_message_id (i.e. nothing has been sent yet). This
+              is broader than `status === 'failed'` because some
+              short-circuit paths leave status unset while the message
+              never went out. We never show it on rows that already
+              have a message id, so a stray click can't double-send. */}
+          {!submission.clickup_message_id && (
             <button
               type="button"
               onClick={async () => {
