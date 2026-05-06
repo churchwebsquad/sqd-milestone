@@ -76,7 +76,7 @@ export async function resolveRoot(
     seen.add(currentId)
     const { data } = await supabase
       .from('strategy_milestone_submissions')
-      .select('id, is_continuation, continuation_of, clickup_message_id, clickup_channel_id, milestone_id, track_name')
+      .select('id, is_continuation, continuation_of, clickup_message_id, clickup_channel_id, milestone_id, track_name, is_active')
       .eq('id', currentId)
       .maybeSingle()
 
@@ -89,6 +89,13 @@ export async function resolveRoot(
       clickup_channel_id: string | null
       milestone_id: string
       track_name: string | null
+      is_active: boolean
+    }
+    // Archived hops shouldn't anchor a thread reply — skip past them
+    // along the continuation chain.
+    if (row.is_active === false) {
+      currentId = row.continuation_of
+      continue
     }
 
     // Safety: if this hop isn't the same milestone + track, stop walking.
@@ -388,6 +395,7 @@ export async function submitMilestone(params: SubmitMilestoneParams): Promise<Su
           .from('strategy_milestone_submissions')
           .update({ milestone_status: 'approved' } as Record<string, unknown>)
           .eq('member', formData.partner!.member)
+          .eq('is_active', true)
           .in('milestone_id', priorIds)
           .not('milestone_status', 'in', '("approved","escalated")')
         if (formData.trackName) q = q.eq('track_name', formData.trackName)

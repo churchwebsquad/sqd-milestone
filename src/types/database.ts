@@ -354,6 +354,11 @@ export interface StrategyMilestoneSubmission {
   updated_at: string
   status: SubmissionStatus          // ClickUp delivery status
   milestone_status: MilestoneStatus // workflow status (default 'sent')
+  /** Soft-delete flag. Archived rows (`false`) are hidden from the
+   *  partner portal, dashboards, continuation lookups, and reply
+   *  scrubbing — but still visible to staff via the AccountLog
+   *  "Show archived" toggle for restore. */
+  is_active: boolean
   [key: string]: unknown
 }
 

@@ -42,6 +42,7 @@ interface SubmissionRow {
   clickup_channel_id: string | null
   clickup_message_id: string | null
   status: string
+  is_active: boolean
 }
 
 interface MilestoneRow {
@@ -56,7 +57,7 @@ export async function resendSubmission(submissionId: string): Promise<ResendResu
   // ── Load the submission ─────────────────────────────────────────────────
   const { data: subData, error: subErr } = await supabase
     .from('strategy_milestone_submissions')
-    .select('id, member, milestone_id, is_continuation, continuation_of, track_name, rendered_message, clickup_channel_id, clickup_message_id, status')
+    .select('id, member, milestone_id, is_continuation, continuation_of, track_name, rendered_message, clickup_channel_id, clickup_message_id, status, is_active')
     .eq('id', submissionId)
     .maybeSingle()
 
@@ -65,6 +66,13 @@ export async function resendSubmission(submissionId: string): Promise<ResendResu
 
   const submission = subData as SubmissionRow
 
+  if (submission.is_active === false) {
+    return {
+      success: false,
+      threadUrl: null,
+      error: 'This submission is archived — restore it first if you really want to resend.',
+    }
+  }
   if (submission.status === 'sent') {
     return {
       success: false,

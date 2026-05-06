@@ -50,6 +50,7 @@ export default function Step2Milestone({ formData, updateForm, onNext, onBack, a
         .select('id, milestone_id, submitted_at')
         .eq('member', formData.partner.member)
         .eq('milestone_id', milestone.id)
+        .eq('is_active', true)
       if (trackName) q = q.eq('track_name', trackName)
       else q = q.is('track_name', null)
 
@@ -89,6 +90,7 @@ export default function Step2Milestone({ formData, updateForm, onNext, onBack, a
         .from('strategy_milestone_submissions')
         .select('track_name, milestone_id, submitted_at')
         .eq('member', formData.partner.member)
+        .eq('is_active', true)
         .not('track_name', 'is', null)
         .order('submitted_at', { ascending: false })
 

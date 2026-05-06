@@ -636,6 +636,7 @@ export default function MyDashboardPage() {
           .from('strategy_milestone_submissions')
           .select('id, member, current_milestone_id, milestone_id, submitted_at, status, milestone_status, clickup_thread_url')
           .eq('submitted_by_email', userEmail)
+          .eq('is_active', true)
           .order('submitted_at', { ascending: false })
           .limit(50)
 

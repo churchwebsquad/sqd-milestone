@@ -479,14 +479,20 @@ function SubmissionCard({
   onStatusChange,
   onTriageSave,
   onResend,
+  onArchive,
+  onRestore,
 }: {
   enriched: EnrichedSubmission
   allSubmissions: EnrichedSubmission[]
   onStatusChange: (id: string, status: MilestoneStatus) => Promise<void>
   onTriageSave: (replyId: string, submissionId: string, category: TriageCategory | null) => Promise<void>
   onResend: (id: string) => Promise<void>
+  onArchive: (id: string) => Promise<void>
+  onRestore: (id: string) => Promise<void>
 }) {
   const [resending, setResending] = useState(false)
+  const [archiving, setArchiving] = useState(false)
+  const archived = enriched.submission.is_active === false
   const { submission, milestone, currentMilestone, nextMilestone, assets, replies } = enriched
   const [messageOpen, setMessageOpen] = useState(false)
   const [repliesOpen, setRepliesOpen] = useState(
@@ -504,7 +510,7 @@ function SubmissionCard({
   const untriagedCount = partnerReplies.filter(r => r.triage_category === null).length
 
   return (
-    <div className="bg-white border border-lavender rounded-xl shadow-sm overflow-hidden">
+    <div className={`bg-white border rounded-xl shadow-sm overflow-hidden ${archived ? 'border-purple-gray/30 opacity-70' : 'border-lavender'}`}>
       {/* Card header ─────────────────────────────────────────────────────── */}
       <div className="px-4 py-3 bg-lavender-tint/50 border-b border-lavender">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -549,7 +555,7 @@ function SubmissionCard({
               short-circuit paths leave status unset while the message
               never went out. We never show it on rows that already
               have a message id, so a stray click can't double-send. */}
-          {!submission.clickup_message_id && (
+          {!submission.clickup_message_id && !archived && (
             <button
               type="button"
               onClick={async () => {
@@ -564,6 +570,29 @@ function SubmissionCard({
               {resending ? 'Resending…' : 'Resend to ClickUp'}
             </button>
           )}
+          {archived && (
+            <span className="inline-flex items-center rounded-full bg-purple-gray/10 text-purple-gray border border-purple-gray/20 text-[11px] font-bold uppercase tracking-wide px-2.5 py-0.5">
+              Archived
+            </span>
+          )}
+          {/* Archive / restore — soft-delete control. Hidden when the
+              row is mid-mutation to avoid double-clicks. */}
+          <button
+            type="button"
+            onClick={async () => {
+              if (archiving) return
+              setArchiving(true)
+              try {
+                if (archived) await onRestore(submission.id)
+                else await onArchive(submission.id)
+              } finally { setArchiving(false) }
+            }}
+            disabled={archiving}
+            className="ml-auto inline-flex items-center gap-1 rounded-full border border-lavender bg-white text-[11px] font-semibold text-purple-gray px-2.5 py-0.5 hover:border-deep-plum hover:text-deep-plum transition-colors disabled:opacity-60"
+            title={archived ? 'Restore this submission' : 'Archive this submission'}
+          >
+            {archiving ? '…' : archived ? 'Restore' : 'Archive'}
+          </button>
         </div>
       </div>
 
@@ -796,6 +825,10 @@ export default function AccountLogPage() {
   const [partner, setPartner] = useState<PartnerInfo | null>(null)
   const [enriched, setEnriched] = useState<EnrichedSubmission[]>([])
   const [squadFilter, setSquadFilter] = useState<string>('all')
+  // Archived submissions are hidden by default on this page (and
+  // everywhere else). Staff can flip this on to find / restore items
+  // they previously archived.
+  const [showArchived, setShowArchived] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [logMissedOpen, setLogMissedOpen] = useState(false)
@@ -835,6 +868,40 @@ export default function AccountLogPage() {
       // Sent to ClickUp but the local row didn't update — still
       // surface so staff can reconcile manually.
       setWebhookWarning(result.error)
+    }
+    await reload()
+  }
+
+  // ── Archive / restore (soft-delete) ───────────────────────────────────────
+  // Non-destructive: flips is_active so the row drops out of the
+  // partner portal, dashboards, continuation lookups, and the
+  // reply-scrub cron. Staff can flip "Show archived" on to undo.
+  const handleArchive = async (id: string) => {
+    const ok = window.confirm(
+      'Archive this submission?\n\n'
+      + 'It will be hidden from the partner portal, dashboards, and continuation lookups. '
+      + 'Nothing is sent or deleted — toggle "Show archived" to restore later.',
+    )
+    if (!ok) return
+    const { error: archErr } = await supabase
+      .from('strategy_milestone_submissions')
+      .update({ is_active: false })
+      .eq('id', id)
+    if (archErr) {
+      setWebhookWarning(`Archive failed: ${archErr.message}`)
+      return
+    }
+    await reload()
+  }
+
+  const handleRestore = async (id: string) => {
+    const { error: restErr } = await supabase
+      .from('strategy_milestone_submissions')
+      .update({ is_active: true })
+      .eq('id', id)
+    if (restErr) {
+      setWebhookWarning(`Restore failed: ${restErr.message}`)
+      return
     }
     await reload()
   }
@@ -1027,14 +1094,20 @@ export default function AccountLogPage() {
 
   useEffect(() => { void reload() }, [reload])
 
+  // Active vs archived split — derived once so the toggle and the
+  // squad filter compose cleanly.
+  const activeEnriched = enriched.filter(e => e.submission.is_active !== false)
+  const archivedEnriched = enriched.filter(e => e.submission.is_active === false)
+  const visibleEnriched = showArchived ? enriched : activeEnriched
+
   // Derive the unique squads present in this account's submissions
   const presentSquads = [...new Set(
-    enriched.flatMap(e => e.milestone?.squad ? [e.milestone.squad] : [])
+    visibleEnriched.flatMap(e => e.milestone?.squad ? [e.milestone.squad] : [])
   )].sort()
 
   const filteredEnriched = squadFilter === 'all'
-    ? enriched
-    : enriched.filter(e => e.milestone?.squad === squadFilter)
+    ? visibleEnriched
+    : visibleEnriched.filter(e => e.milestone?.squad === squadFilter)
 
   return (
     <div className="min-h-full py-6 px-4 md:px-6">
@@ -1158,9 +1231,25 @@ export default function AccountLogPage() {
                 </div>
               )}
 
-              <p className="text-xs text-purple-gray">
-                {filteredEnriched.length}{enriched.length !== filteredEnriched.length ? ` of ${enriched.length}` : ''} submission{filteredEnriched.length !== 1 ? 's' : ''} · most recent first
-              </p>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <p className="text-xs text-purple-gray">
+                  {filteredEnriched.length}{enriched.length !== filteredEnriched.length ? ` of ${enriched.length}` : ''} submission{filteredEnriched.length !== 1 ? 's' : ''} · most recent first
+                </p>
+                {/* Archived toggle — shows up only when at least one
+                    archived row exists, so the affordance is hidden
+                    on partners with a clean log. */}
+                {archivedEnriched.length > 0 && (
+                  <label className="inline-flex items-center gap-1.5 text-xs text-purple-gray cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={showArchived}
+                      onChange={e => setShowArchived(e.target.checked)}
+                      className="accent-deep-plum"
+                    />
+                    Show archived ({archivedEnriched.length})
+                  </label>
+                )}
+              </div>
 
               {filteredEnriched.length === 0 ? (
                 <div className="bg-white border border-lavender rounded-xl p-8 text-center">
@@ -1175,6 +1264,8 @@ export default function AccountLogPage() {
                     onStatusChange={handleStatusChange}
                     onTriageSave={handleTriageSave}
                     onResend={handleResend}
+                    onArchive={handleArchive}
+                    onRestore={handleRestore}
                   />
                 ))
               )}

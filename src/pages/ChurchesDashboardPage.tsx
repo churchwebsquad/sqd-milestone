@@ -133,6 +133,7 @@ export default function ChurchesDashboardPage() {
             .from('strategy_milestone_submissions')
             .select('member, current_milestone_id, submitted_at, milestone_status')
             .in('member', visibleMembers)
+            .eq('is_active', true)
             .order('submitted_at', { ascending: false }),
           supabase
             .from('strategy_milestone_definitions')

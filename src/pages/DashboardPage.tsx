@@ -198,6 +198,7 @@ export default function DashboardPage() {
         const { data: subData, error: subErr } = await supabase
           .from('strategy_milestone_submissions')
           .select('*')
+          .eq('is_active', true)
           .order('submitted_at', { ascending: false })
 
         if (subErr) throw subErr

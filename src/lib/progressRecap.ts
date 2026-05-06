@@ -51,6 +51,7 @@ export async function fetchProgressRecap(
     .select('current_milestone_id, next_milestone_id')
     .eq('member', memberId)
     .eq('status', 'sent')
+    .eq('is_active', true)
     .order('submitted_at', { ascending: false })
     .limit(30)
 

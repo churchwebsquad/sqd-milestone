@@ -149,6 +149,7 @@ export default async function handler(
     .from('strategy_milestone_submissions')
     .select('id, clickup_channel_id, clickup_message_id, milestone_status, is_continuation, continuation_of, submitted_at')
     .in('milestone_status', ['sent', 'waiting_on_partner'])
+    .eq('is_active', true)
     .not('clickup_channel_id', 'is', null)
     .not('clickup_message_id', 'is', null)
 

@@ -328,6 +328,7 @@ export default function ClientPortalPage() {
           .from('strategy_milestone_submissions')
           .select('*')
           .eq('member', partnerData.member)
+          .eq('is_active', true)
           .order('submitted_at', { ascending: false })
 
         const submissions = (submissionsData ?? []) as StrategyMilestoneSubmission[]

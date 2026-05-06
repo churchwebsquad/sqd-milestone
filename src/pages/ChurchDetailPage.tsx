@@ -57,7 +57,7 @@ export default function ChurchDetailPage() {
         const [churchRes, acctRes, subRes, defsRes, guidesRes, folderRes, listsRes, auditRes, intelRes] = await Promise.all([
           supabase.from('strategy_account_progress').select('*').eq('member', memberNum).maybeSingle(),
           supabase.from('accounts').select('*').eq('account', memberNum).maybeSingle(),
-          supabase.from('strategy_milestone_submissions').select('*').eq('member', memberNum).order('submitted_at', { ascending: false }),
+          supabase.from('strategy_milestone_submissions').select('*').eq('member', memberNum).eq('is_active', true).order('submitted_at', { ascending: false }),
           supabase.from('strategy_milestone_definitions').select('*'),
           supabase.from('prf_brand_guides').select('*').eq('account', memberNum),
           supabase.from('clickup_folders').select('*').eq('account', memberNum).eq('space_id', 90171129510).maybeSingle(),
