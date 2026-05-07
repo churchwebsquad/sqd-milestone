@@ -4,7 +4,13 @@ const DEFAULT_BUCKET = 'submission-attachments'
 const DEFAULT_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf']
 const DEFAULT_MAX_BYTES = 20 * 1024 * 1024    // 20 MB — matches submission-attachments bucket policy (widened in v14)
 const DEFAULT_MAX_DIM = 2000                  // resize larger images down to 2000px max
-const JPEG_QUALITY = 0.85
+// Files at or under this size that fit within DEFAULT_MAX_DIM are
+// uploaded verbatim — no canvas re-encode. The earlier 2 MB
+// threshold caught too many staff-prepared files (mockups, hero
+// shots) that were already optimized, putting them through a lossy
+// JPEG re-encode for no real benefit.
+const RESIZE_BYPASS_BYTES = 10 * 1024 * 1024  // 10 MB
+const JPEG_QUALITY = 0.92                     // crisper than the prior 0.85 for the rare files that do need a resize
 
 /** MIME types that cannot be losslessly canvas-resized; uploaded as-is. */
 const NON_RESIZABLE_MIME = new Set<string>([
@@ -79,7 +85,7 @@ function resize(file: File, maxDim: number): Promise<{ blob: Blob; mime: string 
     img.onload = () => {
       URL.revokeObjectURL(url)
       const longest = Math.max(img.width, img.height)
-      if (longest <= maxDim && file.size < 2 * 1024 * 1024) {
+      if (longest <= maxDim && file.size < RESIZE_BYPASS_BYTES) {
         resolve({ blob: file, mime: file.type })
         return
       }
@@ -95,14 +101,19 @@ function resize(file: File, maxDim: number): Promise<{ blob: Blob; mime: string 
         return
       }
       ctx.drawImage(img, 0, 0, w, h)
-      const outMime = file.type === 'image/png' ? 'image/png' : 'image/jpeg'
+      // Preserve the source format when the browser can encode it
+      // losslessly (PNG) or when the partner deliberately delivered
+      // WebP (don't downgrade to JPEG just because we resized).
+      const outMime = file.type === 'image/png' ? 'image/png'
+        : file.type === 'image/webp' ? 'image/webp'
+        : 'image/jpeg'
       canvas.toBlob(
         (blob) => {
           if (!blob) { reject(new AttachmentError('resize', 'Failed to encode resized image')); return }
           resolve({ blob, mime: outMime })
         },
         outMime,
-        outMime === 'image/jpeg' ? JPEG_QUALITY : undefined,
+        outMime === 'image/png' ? undefined : JPEG_QUALITY,
       )
     }
     img.onerror = () => { URL.revokeObjectURL(url); reject(new AttachmentError('resize', 'Image load failed')) }
