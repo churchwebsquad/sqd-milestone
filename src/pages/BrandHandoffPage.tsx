@@ -419,25 +419,46 @@ function OverviewTab({ payload }: { payload: BrandHandoffPayload }) {
             {logos.map(logo => {
               const src = logo.preview_url
               const dl = logo.download_url ?? logo.preview_url
+              const animUrl = logo.animation_url ?? null
               return (
-                <a
+                <div
                   key={logo.id}
-                  href={dl}
-                  download
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group rounded-lg border border-lavender bg-white p-3 flex flex-col hover:border-primary-purple transition-colors"
+                  className="group rounded-lg border border-lavender bg-white p-3 flex flex-col hover:border-primary-purple transition-colors relative"
                 >
-                  <div className="h-20 flex items-center justify-center rounded bg-lavender-tint/30 mb-2 overflow-hidden">
-                    {src && !src.endsWith('.mp4') && (
-                      <img src={src} alt={logo.label ?? logo.kind} className="max-h-full max-w-full object-contain" />
-                    )}
-                  </div>
-                  <p className="text-[11px] font-semibold text-deep-plum truncate">{logo.label ?? logo.kind}</p>
-                  <p className="text-[10px] text-purple-gray/60 mt-0.5 inline-flex items-center gap-1">
-                    <Download size={9} /> Download
-                  </p>
-                </a>
+                  {animUrl && (
+                    <span className="absolute top-2 right-2 inline-flex items-center gap-0.5 rounded-full bg-primary-purple/10 text-primary-purple text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 z-10">
+                      ▶ Motion
+                    </span>
+                  )}
+                  <a
+                    href={dl}
+                    download
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block"
+                  >
+                    <div className="h-20 flex items-center justify-center rounded bg-lavender-tint/30 mb-2 overflow-hidden">
+                      {src && !src.endsWith('.mp4') && (
+                        <img src={src} alt={logo.label ?? logo.kind} className="max-h-full max-w-full object-contain" />
+                      )}
+                    </div>
+                    <p className="text-[11px] font-semibold text-deep-plum truncate">{logo.label ?? logo.kind}</p>
+                    <p className="text-[10px] text-purple-gray/60 mt-0.5 inline-flex items-center gap-1">
+                      <Download size={9} /> Still
+                    </p>
+                  </a>
+                  {animUrl && (
+                    <a
+                      href={animUrl}
+                      download
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-primary-purple mt-0.5 inline-flex items-center gap-1 hover:underline"
+                    >
+                      <Download size={9} /> Animation
+                    </a>
+                  )}
+                </div>
               )
             })}
           </div>

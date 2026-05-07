@@ -554,6 +554,11 @@ export interface StrategyBrandLogo {
   label: string | null
   preview_url: string
   download_url: string | null
+  /** Optional animation file (mp4/webm/Lottie JSON) for this specific
+   *  logo variant. Surfaced as a video tile alongside the still logo
+   *  on the public portal + brand handoff. NULL when the variant has
+   *  no motion version. */
+  animation_url: string | null
   clear_space_note: string | null
   sort_order: number
   created_at: string

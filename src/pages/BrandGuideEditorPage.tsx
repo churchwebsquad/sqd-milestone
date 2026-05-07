@@ -28,6 +28,10 @@ import { STYLE_TAG_OPTIONS } from '../lib/brandStyleTags'
 
 const BRAND_BUCKET = 'brand-assets'
 const LOGO_MIME = ['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'video/mp4']
+// Per-logo motion file. Lottie ships as JSON; videos / WebP+GIF
+// covered for partners that didn't deliver a Lottie. Cap is enforced
+// at upload time (40 MB).
+const LOGO_ANIMATION_MIME = ['video/mp4', 'video/webm', 'video/quicktime', 'image/gif', 'application/json']
 const PATTERN_MIME = ['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const FONT_MIME = ['font/woff', 'font/woff2', 'font/ttf', 'font/otf', 'application/octet-stream']
 
@@ -589,11 +593,13 @@ function LogosSection({ bundle, staffName, onSaved, onError }: {
   const [draft, setDraft] = useState<LogoDraft[]>(bundle.logos)
   const [saving, setSaving] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const animationInputRef = useRef<HTMLInputElement | null>(null)
   const [uploadingIdx, setUploadingIdx] = useState<number | null>(null)
+  const [uploadingAnimationIdx, setUploadingAnimationIdx] = useState<number | null>(null)
 
   useEffect(() => { setDraft(bundle.logos) }, [bundle.logos])
 
-  const dirty = !rowsEqual(draft, bundle.logos, ['kind', 'label', 'preview_url', 'download_url', 'clear_space_note'])
+  const dirty = !rowsEqual(draft, bundle.logos, ['kind', 'label', 'preview_url', 'download_url', 'animation_url', 'clear_space_note'])
 
   const save = async () => {
     setSaving(true)
@@ -604,7 +610,7 @@ function LogosSection({ bundle, staffName, onSaved, onError }: {
     finally { setSaving(false) }
   }
 
-  const addRow = () => setDraft([...draft, { kind: 'primary', label: staffName ? `${staffName}'s Logo` : 'Logo', preview_url: '', download_url: null, clear_space_note: null }])
+  const addRow = () => setDraft([...draft, { kind: 'primary', label: staffName ? `${staffName}'s Logo` : 'Logo', preview_url: '', download_url: null, animation_url: null, clear_space_note: null }])
   const removeRow = (i: number) => setDraft(draft.filter((_, idx) => idx !== i))
   const updateRow = (i: number, patch: Partial<LogoDraft>) => setDraft(draft.map((r, idx) => idx === i ? { ...r, ...patch } : r))
 
@@ -631,6 +637,32 @@ function LogosSection({ bundle, staffName, onSaved, onError }: {
     }
   }
 
+  // Animation upload — separate path so the still preview and the
+  // motion file are tracked independently. Larger size cap (40 MB)
+  // because partner-supplied motion logos are routinely heavier than
+  // a still SVG/PNG.
+  const pickAnimation = (i: number) => { setUploadingAnimationIdx(i); animationInputRef.current?.click() }
+  const handleAnimation = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || uploadingAnimationIdx == null) return
+    const idx = uploadingAnimationIdx
+    try {
+      const result = await uploadAttachment(file, null, undefined, {
+        bucket: BRAND_BUCKET,
+        pathPrefix: `${bundle.guide.id}/logos/animations`,
+        allowedMime: LOGO_ANIMATION_MIME,
+        maxBytes: 40 * 1024 * 1024,
+      })
+      updateRow(idx, { animation_url: result.url })
+    } catch (err) {
+      const msg = err instanceof AttachmentError ? err.message : (err as { message?: string })?.message ?? 'Upload failed'
+      onError(msg)
+    } finally {
+      setUploadingAnimationIdx(null)
+    }
+  }
+
   return (
     <SectionCard
       icon={ImageIcon}
@@ -641,6 +673,11 @@ function LogosSection({ bundle, staffName, onSaved, onError }: {
         ref={fileInputRef} type="file" className="hidden"
         accept={LOGO_MIME.join(',')}
         onChange={handleFile}
+      />
+      <input
+        ref={animationInputRef} type="file" className="hidden"
+        accept={LOGO_ANIMATION_MIME.join(',')}
+        onChange={handleAnimation}
       />
 
       <div className="space-y-3">
@@ -672,15 +709,64 @@ function LogosSection({ bundle, staffName, onSaved, onError }: {
                     className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple" />
                 </Field>
               </div>
-              <Field label="Download URL (Dropbox or similar)">
+              <Field label="Download URL (optional)">
                 <input type="url" value={row.download_url ?? ''} onChange={e => updateRow(i, { download_url: e.target.value || null })}
                   placeholder="https://www.dropbox.com/…"
                   className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple" />
+                <p className="mt-1 text-[11px] text-purple-gray/80">
+                  We'll automatically use the uploaded preview as the download. Set this to override with a Dropbox / Drive link if you want partners to grab a different file.
+                </p>
               </Field>
               <Field label="Clear space note (optional)">
                 <input type="text" value={row.clear_space_note ?? ''} onChange={e => updateRow(i, { clear_space_note: e.target.value || null })}
                   placeholder="Maintain clear space equal to the height of the 'R' on all sides."
                   className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple" />
+              </Field>
+              {/* Per-logo animation file. Optional — partners often
+                  ship motion versions for the primary + the badge but
+                  not every variant. Renders as a video tile alongside
+                  the still on the public portal + handoff. */}
+              <Field label="Logo animation (optional)">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {row.animation_url ? (
+                    <>
+                      <a
+                        href={row.animation_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] text-primary-purple hover:underline font-semibold truncate max-w-[200px]"
+                      >
+                        {row.animation_url.split('/').pop() ?? 'Animation file'}
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => pickAnimation(i)}
+                        disabled={uploadingAnimationIdx === i}
+                        className="inline-flex items-center gap-1 rounded-full border border-lavender bg-white text-[11px] font-semibold text-deep-plum px-2.5 py-1 hover:border-primary-purple hover:text-primary-purple disabled:opacity-60"
+                      >
+                        {uploadingAnimationIdx === i ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                        {uploadingAnimationIdx === i ? 'Uploading…' : 'Replace'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateRow(i, { animation_url: null })}
+                        className="text-[11px] text-purple-gray hover:text-red-500"
+                      >
+                        Remove
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => pickAnimation(i)}
+                      disabled={uploadingAnimationIdx === i}
+                      className="inline-flex items-center gap-1 rounded-full border border-dashed border-lavender bg-white text-[11px] font-semibold text-deep-plum px-3 py-1 hover:border-primary-purple hover:text-primary-purple disabled:opacity-60"
+                    >
+                      {uploadingAnimationIdx === i ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                      {uploadingAnimationIdx === i ? 'Uploading…' : 'Upload animation (mp4 / webm / Lottie JSON)'}
+                    </button>
+                  )}
+                </div>
               </Field>
               {row.preview_url && (
                 <button type="button" onClick={() => pickFile(i)} className="text-[11px] text-primary-purple hover:underline font-semibold">

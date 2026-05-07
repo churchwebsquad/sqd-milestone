@@ -651,10 +651,15 @@ function LogoSection({ logos, colors, theme }: {
 
       {primary ? (
         <div className="rounded-xl border border-gray-200 p-6 md:p-12 bg-white flex items-center justify-center min-h-[220px] mb-6 relative">
-          {primary.download_url && (
+          {/* Download falls back to the uploaded preview (already a
+              public Supabase URL) when no override was set on the
+              editor — so the button is never hidden just because a
+              partner didn't paste a Dropbox link. */}
+          {(primary.download_url || primary.preview_url) && (
             <a
-              href={primary.download_url}
+              href={primary.download_url ?? primary.preview_url}
               target="_blank" rel="noopener noreferrer"
+              download
               className="absolute top-4 right-4 inline-flex items-center gap-1.5 rounded-full text-white text-xs font-semibold px-3 py-1.5 transition-opacity hover:opacity-90"
               style={{ backgroundColor: theme.topbarBg }}
             >
@@ -674,10 +679,11 @@ function LogoSection({ logos, colors, theme }: {
             {supporting.map(logo => (
               <div key={logo.id} className="group relative rounded-xl border border-gray-200 bg-white aspect-square flex items-center justify-center p-6">
                 <LogoArtwork logo={logo} maxHeight="max-h-24" />
-                {logo.download_url && (
+                {(logo.download_url || logo.preview_url) && (
                   <a
-                    href={logo.download_url}
+                    href={logo.download_url ?? logo.preview_url}
                     target="_blank" rel="noopener noreferrer"
+                    download
                     className="absolute inset-x-0 bottom-0 text-[11px] text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity py-1.5 text-center bg-white/90 backdrop-blur"
                   >
                     Download ↗
@@ -689,6 +695,20 @@ function LogoSection({ logos, colors, theme }: {
                   </p>
                 )}
               </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* In-motion versions — partners may ship a motion file for the
+          primary, the badge, or any other variant. Render only when
+          at least one is on file. */}
+      {logos.some(l => !!l.animation_url) && (
+        <>
+          <h3 className="text-base font-bold mt-10 mb-3" style={{ fontFamily: theme.headingFont, color: theme.text }}>In motion</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {logos.filter(l => !!l.animation_url).map(logo => (
+              <LogoAnimationTile key={`anim-${logo.id}`} logo={logo} />
             ))}
           </div>
         </>
@@ -728,6 +748,47 @@ function LogoSection({ logos, colors, theme }: {
         </p>
       )}
     </section>
+  )
+}
+
+/** Renders a logo's `animation_url` as the appropriate motion tile.
+ *  Lottie JSON is opened in a new tab (we don't currently bundle a
+ *  Lottie player on the partner portal); video files autoplay muted/
+ *  looped inline. GIFs render via <img>. */
+function LogoAnimationTile({ logo }: { logo: StrategyBrandLogo }) {
+  const url = logo.animation_url
+  if (!url) return null
+  const lower = url.toLowerCase()
+  const isLottie = lower.endsWith('.json')
+  const isGif = lower.endsWith('.gif')
+  const isVideo = /\.(mp4|webm|mov)(\?|$)/.test(lower)
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white aspect-video flex items-center justify-center p-6 relative overflow-hidden">
+      {logo.label && (
+        <p className="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+          {logo.label}
+        </p>
+      )}
+      {isLottie ? (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs font-semibold text-gray-700 underline"
+        >
+          Lottie animation ({url.split('/').pop()})
+        </a>
+      ) : isGif ? (
+        <img src={url} alt={logo.label ?? 'Logo animation'} className="max-h-32 max-w-full object-contain" />
+      ) : isVideo ? (
+        <video src={url} className="max-h-32 max-w-full" autoPlay loop muted playsInline />
+      ) : (
+        <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-gray-700 underline">
+          Download animation ({url.split('/').pop()})
+        </a>
+      )}
+    </div>
   )
 }
 

@@ -38,6 +38,9 @@ export interface LogoDraft {
   label: string | null
   preview_url: string
   download_url: string | null
+  /** Optional motion version of this logo (mp4/webm/Lottie). Surfaced
+   *  alongside the still preview on the public portal + handoff. */
+  animation_url: string | null
   clear_space_note: string | null
 }
 
@@ -361,7 +364,8 @@ export async function saveLogos(
       const { error } = await supabase.from('strategy_brand_logos')
         .update({
           kind: r.kind, label: r.label, preview_url: r.preview_url,
-          download_url: r.download_url, clear_space_note: r.clear_space_note,
+          download_url: r.download_url, animation_url: r.animation_url,
+          clear_space_note: r.clear_space_note,
           sort_order: i,
         }).eq('id', r.id)
       if (error) throw new Error(error.message)
@@ -369,7 +373,8 @@ export async function saveLogos(
       const { error } = await supabase.from('strategy_brand_logos').insert({
         brand_guide_id: guideId,
         kind: r.kind, label: r.label, preview_url: r.preview_url,
-        download_url: r.download_url, clear_space_note: r.clear_space_note,
+        download_url: r.download_url, animation_url: r.animation_url,
+        clear_space_note: r.clear_space_note,
         sort_order: i,
       })
       if (error) throw new Error(error.message)
