@@ -14,6 +14,7 @@ import type {
 } from '../types/database'
 import { SQUAD_LABELS, PATHWAY_LABELS, ASSET_TYPE_LABELS } from '../components/submit/types'
 import { resendSubmission } from '../lib/resendSubmission'
+import { runScrubReplies } from '../lib/scrubReplies'
 
 const N8N_TRIAGE_PROXY = '/api/webhook/reply-triage'
 
@@ -481,6 +482,8 @@ function SubmissionCard({
   onResend,
   onArchive,
   onRestore,
+  onRefreshReplies,
+  refreshingReplies,
 }: {
   enriched: EnrichedSubmission
   allSubmissions: EnrichedSubmission[]
@@ -489,6 +492,8 @@ function SubmissionCard({
   onResend: (id: string) => Promise<void>
   onArchive: (id: string) => Promise<void>
   onRestore: (id: string) => Promise<void>
+  onRefreshReplies: (id: string) => Promise<void>
+  refreshingReplies: boolean
 }) {
   const [resending, setResending] = useState(false)
   const [archiving, setArchiving] = useState(false)
@@ -756,6 +761,27 @@ function SubmissionCard({
         </div>
       )}
 
+      {/* Per-submission "Refresh replies" — bypasses the daily cron so
+          staff can pull the latest partner activity right now. Hidden
+          on archived rows + on rows that never made it to ClickUp. */}
+      {!archived && submission.clickup_message_id && (
+        <div className="border-t border-lavender">
+          <button
+            type="button"
+            onClick={() => onRefreshReplies(submission.id)}
+            disabled={refreshingReplies}
+            className="w-full flex items-center justify-between px-4 py-2 text-[11px] font-semibold text-purple-gray hover:bg-lavender-tint/50 transition-colors disabled:opacity-60"
+            title="Pull the latest partner replies from ClickUp"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <MessageSquare size={11} />
+              {refreshingReplies ? 'Pulling latest replies…' : 'Refresh replies from ClickUp'}
+            </span>
+            <span className="text-[10px] text-purple-gray/60">{refreshingReplies ? '' : '↻'}</span>
+          </button>
+        </div>
+      )}
+
       {/* Rendered message (collapsible) ─────────────────────────────────── */}
       <div className="border-t border-lavender">
         <button
@@ -870,6 +896,55 @@ export default function AccountLogPage() {
       setWebhookWarning(result.error)
     }
     await reload()
+  }
+
+  // ── Refresh replies (manual ClickUp scrub) ────────────────────────────────
+  // Sidesteps the daily cron — staff can pull the latest replies on a
+  // single submission, or every active submission for the partner, the
+  // moment they want them. Same scrub logic the cron runs.
+  const [scrubbingId, setScrubbingId] = useState<string | null>(null)
+  const [scrubbingAll, setScrubbingAll] = useState(false)
+
+  const handleRefreshReplies = async (submissionId: string) => {
+    setScrubbingId(submissionId)
+    try {
+      const result = await runScrubReplies({ submissionId })
+      const fresh = result.partner_replies_inserted
+      if (fresh > 0) {
+        setWebhookWarning(`Pulled ${fresh} new partner reply${fresh === 1 ? '' : 'ies'}.`)
+      } else if (result.replies_inserted > 0) {
+        setWebhookWarning(`Pulled ${result.replies_inserted} new reply${result.replies_inserted === 1 ? '' : 'ies'} (no partner activity).`)
+      } else {
+        setWebhookWarning('No new replies on this thread.')
+      }
+      await reload()
+    } catch (err) {
+      setWebhookWarning(`Refresh failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setScrubbingId(null)
+    }
+  }
+
+  const handleRefreshAllReplies = async () => {
+    if (!partner) return
+    setScrubbingAll(true)
+    try {
+      const result = await runScrubReplies({ member: partner.member })
+      const fresh = result.partner_replies_inserted
+      const totalThreads = result.threads_processed
+      if (fresh > 0) {
+        setWebhookWarning(`Pulled ${fresh} new partner reply${fresh === 1 ? '' : 'ies'} across ${totalThreads} thread${totalThreads === 1 ? '' : 's'}.`)
+      } else if (result.replies_inserted > 0) {
+        setWebhookWarning(`Pulled ${result.replies_inserted} new reply${result.replies_inserted === 1 ? '' : 'ies'} (no partner activity).`)
+      } else {
+        setWebhookWarning(`No new replies across ${totalThreads} thread${totalThreads === 1 ? '' : 's'}.`)
+      }
+      await reload()
+    } catch (err) {
+      setWebhookWarning(`Refresh failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setScrubbingAll(false)
+    }
   }
 
   // ── Archive / restore (soft-delete) ───────────────────────────────────────
@@ -1235,20 +1310,36 @@ export default function AccountLogPage() {
                 <p className="text-xs text-purple-gray">
                   {filteredEnriched.length}{enriched.length !== filteredEnriched.length ? ` of ${enriched.length}` : ''} submission{filteredEnriched.length !== 1 ? 's' : ''} · most recent first
                 </p>
-                {/* Archived toggle — shows up only when at least one
-                    archived row exists, so the affordance is hidden
-                    on partners with a clean log. */}
-                {archivedEnriched.length > 0 && (
-                  <label className="inline-flex items-center gap-1.5 text-xs text-purple-gray cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={showArchived}
-                      onChange={e => setShowArchived(e.target.checked)}
-                      className="accent-deep-plum"
-                    />
-                    Show archived ({archivedEnriched.length})
-                  </label>
-                )}
+                <div className="inline-flex items-center gap-3 flex-wrap">
+                  {/* Bulk-pull every active thread for this partner —
+                      bypasses the daily cron when staff want a fresh
+                      look right now. */}
+                  {activeEnriched.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleRefreshAllReplies}
+                      disabled={scrubbingAll || scrubbingId !== null}
+                      className="inline-flex items-center gap-1 rounded-full border border-lavender bg-white text-xs font-semibold text-deep-plum px-3 py-1 hover:border-primary-purple hover:text-primary-purple transition-colors disabled:opacity-60"
+                      title="Pull new partner replies for every active submission"
+                    >
+                      {scrubbingAll ? 'Refreshing…' : 'Refresh all replies'}
+                    </button>
+                  )}
+                  {/* Archived toggle — shows up only when at least one
+                      archived row exists, so the affordance is hidden
+                      on partners with a clean log. */}
+                  {archivedEnriched.length > 0 && (
+                    <label className="inline-flex items-center gap-1.5 text-xs text-purple-gray cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={showArchived}
+                        onChange={e => setShowArchived(e.target.checked)}
+                        className="accent-deep-plum"
+                      />
+                      Show archived ({archivedEnriched.length})
+                    </label>
+                  )}
+                </div>
               </div>
 
               {filteredEnriched.length === 0 ? (
@@ -1266,6 +1357,8 @@ export default function AccountLogPage() {
                     onResend={handleResend}
                     onArchive={handleArchive}
                     onRestore={handleRestore}
+                    onRefreshReplies={handleRefreshReplies}
+                    refreshingReplies={scrubbingId === e.submission.id}
                   />
                 ))
               )}
