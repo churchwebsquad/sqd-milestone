@@ -3,14 +3,15 @@ import { supabase } from './supabase'
 const DEFAULT_BUCKET = 'submission-attachments'
 const DEFAULT_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf']
 const DEFAULT_MAX_BYTES = 20 * 1024 * 1024    // 20 MB — matches submission-attachments bucket policy (widened in v14)
-const DEFAULT_MAX_DIM = 2000                  // resize larger images down to 2000px max
+const DEFAULT_MAX_DIM = 4000                  // resize larger images down to 4000px max — covers full-page mockups + scroll comps without downsampling
 // Files at or under this size that fit within DEFAULT_MAX_DIM are
-// uploaded verbatim — no canvas re-encode. The earlier 2 MB
-// threshold caught too many staff-prepared files (mockups, hero
-// shots) that were already optimized, putting them through a lossy
-// JPEG re-encode for no real benefit.
-const RESIZE_BYPASS_BYTES = 10 * 1024 * 1024  // 10 MB
-const JPEG_QUALITY = 0.92                     // crisper than the prior 0.85 for the rare files that do need a resize
+// uploaded verbatim — no canvas re-encode. Matches the bucket cap
+// so any file Storage accepts uploads pristine when it's within
+// the dim cap. The earlier 10 MB threshold still caught full-page
+// mockups (1920×4500+) and re-encoded them as JPEG — visibly degrading
+// strategists' design deliverables in chat + portal.
+const RESIZE_BYPASS_BYTES = 20 * 1024 * 1024  // 20 MB (bucket cap)
+const JPEG_QUALITY = 0.95                     // 0.95 is the threshold where JPEG artifacts stop being visible on text + gradients
 
 /** MIME types that cannot be losslessly canvas-resized; uploaded as-is. */
 const NON_RESIZABLE_MIME = new Set<string>([
