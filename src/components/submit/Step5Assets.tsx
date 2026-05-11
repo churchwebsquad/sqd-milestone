@@ -384,7 +384,7 @@ function AttachmentField({ asset, state, memberNumber, onFile, onClear }: Attach
       )}
 
       <p className="text-[11px] text-purple-gray/70 mt-1">
-        JPEG, PNG, WebP, GIF, or PDF · up to 20 MB · images over 4000 px are resized; smaller files upload as-is.
+        JPEG, PNG, WebP, GIF, or PDF · up to 20 MB · files upload verbatim with original quality and metadata preserved.
       </p>
     </div>
   )

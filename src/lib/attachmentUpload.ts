@@ -3,15 +3,12 @@ import { supabase } from './supabase'
 const DEFAULT_BUCKET = 'submission-attachments'
 const DEFAULT_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf']
 const DEFAULT_MAX_BYTES = 20 * 1024 * 1024    // 20 MB — matches submission-attachments bucket policy (widened in v14)
-const DEFAULT_MAX_DIM = 4000                  // resize larger images down to 4000px max — covers full-page mockups + scroll comps without downsampling
-// Files at or under this size that fit within DEFAULT_MAX_DIM are
-// uploaded verbatim — no canvas re-encode. Matches the bucket cap
-// so any file Storage accepts uploads pristine when it's within
-// the dim cap. The earlier 10 MB threshold still caught full-page
-// mockups (1920×4500+) and re-encoded them as JPEG — visibly degrading
-// strategists' design deliverables in chat + portal.
-const RESIZE_BYPASS_BYTES = 20 * 1024 * 1024  // 20 MB (bucket cap)
-const JPEG_QUALITY = 0.95                     // 0.95 is the threshold where JPEG artifacts stop being visible on text + gradients
+// Only used by the overflow fallback — almost no files hit it now.
+// Any file under DEFAULT_MAX_BYTES is uploaded verbatim, regardless
+// of pixel dimensions. We resize only when the file genuinely won't
+// fit in the bucket.
+const DEFAULT_MAX_DIM = 4000
+const JPEG_QUALITY = 0.95
 
 /** MIME types that cannot be losslessly canvas-resized; uploaded as-is. */
 const NON_RESIZABLE_MIME = new Set<string>([
@@ -73,26 +70,39 @@ function validate(file: File, opts: Required<Pick<UploadOptions, 'allowedMime' |
 }
 
 /**
- * Resize a raster image to fit within maxDim × maxDim. Returns a Blob ready
- * to upload. Non-resizable types (GIF, SVG, MP4, fonts) are passed through.
+ * Returns the upload-ready blob. The fast path (the only one almost any
+ * real submission hits) is "ship the file verbatim" — we avoid loading
+ * the file into an `<img>` element entirely. That sidesteps a real
+ * browser quirk: PNGs saved at high DPI (e.g. 300 ppi from Photoshop)
+ * have a `pHYs` chunk that causes Chrome/Safari to report a *scaled*
+ * `naturalWidth` rather than the raw pixel count. The previous canvas
+ * path read that scaled value, falsely tripped the dim cap, and
+ * downsampled + JPEG-re-encoded files that should never have been
+ * touched.
+ *
+ * The resize fallback runs only when the file is larger than the bucket
+ * cap. Almost no submission hits this in practice.
  */
-function resize(file: File, maxDim: number): Promise<{ blob: Blob; mime: string }> {
+function resize(file: File, maxDim: number, maxBytes: number): Promise<{ blob: Blob; mime: string }> {
+  // Non-rasterizable types (GIF/SVG/PDF/fonts/MP4) — always verbatim.
   if (NON_RESIZABLE_MIME.has(file.type)) {
     return Promise.resolve({ blob: file, mime: file.type })
   }
+  // Fits the bucket → ship verbatim. No canvas, no metadata strip,
+  // no DPI reset, no browser dimension quirks.
+  if (file.size <= maxBytes) {
+    return Promise.resolve({ blob: file, mime: file.type })
+  }
+  // Overflow fallback: file is over the bucket cap. Resize to fit.
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file)
     const img = new Image()
     img.onload = () => {
       URL.revokeObjectURL(url)
-      const longest = Math.max(img.width, img.height)
-      if (longest <= maxDim && file.size < RESIZE_BYPASS_BYTES) {
-        resolve({ blob: file, mime: file.type })
-        return
-      }
+      const longest = Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height)
       const scale = Math.min(1, maxDim / longest)
-      const w = Math.round(img.width * scale)
-      const h = Math.round(img.height * scale)
+      const w = Math.round((img.naturalWidth || img.width) * scale)
+      const h = Math.round((img.naturalHeight || img.height) * scale)
       const canvas = document.createElement('canvas')
       canvas.width = w
       canvas.height = h
@@ -102,9 +112,6 @@ function resize(file: File, maxDim: number): Promise<{ blob: Blob; mime: string 
         return
       }
       ctx.drawImage(img, 0, 0, w, h)
-      // Preserve the source format when the browser can encode it
-      // losslessly (PNG) or when the partner deliberately delivered
-      // WebP (don't downgrade to JPEG just because we resized).
       const outMime = file.type === 'image/png' ? 'image/png'
         : file.type === 'image/webp' ? 'image/webp'
         : 'image/jpeg'
@@ -169,8 +176,13 @@ export async function uploadAttachment(
   validate(file, { allowedMime, maxBytes })
   onProgress?.(10)
 
-  const { blob, mime } = await resize(file, maxDim)
+  const { blob, mime } = await resize(file, maxDim, maxBytes)
   onProgress?.(50)
+
+  const bypassed = blob === file
+  console.log(
+    `[attachmentUpload] ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB, ${file.type}) → ${bypassed ? 'verbatim' : 'resized to ' + (blob.size / 1024 / 1024).toFixed(2) + ' MB'}`,
+  )
 
   if (blob.size > maxBytes) {
     throw new AttachmentError(
