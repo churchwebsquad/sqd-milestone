@@ -104,6 +104,7 @@ export default async function handler(req: any, res: any) {
   // ── Input ───────────────────────────────────────────────────────────
   const projectId = typeof req.body?.projectId === 'string' ? req.body.projectId : null
   const redoContext = typeof req.body?.redoContext === 'string' ? req.body.redoContext.trim() : ''
+  const mock = req.body?.mock === true
   if (!projectId) return res.status(400).json({ error: 'projectId required' })
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
@@ -115,6 +116,42 @@ export default async function handler(req: any, res: any) {
     .eq('id', projectId)
     .maybeSingle()
   if (projErr || !project) return res.status(404).json({ error: projErr?.message ?? 'Project not found' })
+
+  // ── Mock short-circuit ──────────────────────────────────────────────
+  // Bypass intake pre-flight + Anthropic. Lets strategists test the UI
+  // flow downstream of Stage 1 (Stage 2/3/4/5, roadmap auto-fill, etc.)
+  // without burning credits or needing complete intake.
+  if (mock) {
+    const cannedExtraction = buildMockExtraction(project)
+    const { error: writeErr } = await sb
+      .from('strategy_web_projects')
+      .update({
+        roadmap_state: {
+          ...(project.roadmap_state ?? {}),
+          stage_1: {
+            ...cannedExtraction,
+            _meta: {
+              model: 'mock',
+              usage: { input_tokens: 0, output_tokens: 0 },
+              extracted_at: new Date().toISOString(),
+              redo_context: null,
+              files_loaded: [],
+              mocked: true,
+            },
+          },
+        },
+        roadmap_stage: 'strategy_done',
+      })
+      .eq('id', projectId)
+    if (writeErr) return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
+    return res.status(200).json({
+      ok: true,
+      extraction: cannedExtraction,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      files_loaded: [],
+      mock: true,
+    })
+  }
 
   // ── Load intake from DB ─────────────────────────────────────────────
   const member = project.member as number
@@ -258,6 +295,8 @@ export default async function handler(req: any, res: any) {
 
   if (writeErr) {
     console.error('[extract-strategy] DB write error:', writeErr.message)
+    // Roll back stage so the project isn't stuck in `extracting_strategy`
+    await sb.from('strategy_web_projects').update({ roadmap_stage: 'ready' }).eq('id', projectId)
     return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
   }
 
@@ -526,4 +565,81 @@ const EXTRACTION_TOOL = {
       },
     },
   },
+}
+
+// ── Mock extraction (used when ?mock=true) ────────────────────────────
+
+function buildMockExtraction(project: any): Record<string, unknown> {
+  return {
+    audience: {
+      summary: `${project.name ?? 'This church'} reaches a multi-generational community with notable growth among young families. The website needs to speak to long-tenured members and first-time visitors in the same breath.`,
+      primary_segments: ['Young families with school-age kids', 'Long-tenured members', 'Spiritually curious first-time visitors'],
+      age_distribution: 'Roughly balanced 20–65, with a recent uptick in 25–40.',
+      geographic_reach: 'Primarily local within a 15-mile radius, with a steady online audience across the region.',
+      online_vs_in_person: 'Online viewers tend to be exploring before they visit. In-person attendees are more committed to weekly rhythms.',
+    },
+    voice_characteristics: {
+      top_attributes: ['Grace-Filled', 'Honest', 'Welcoming'],
+      description: 'A voice that meets people where they are without flinching from hard truths. Plain language, no church-jargon, no performative warmth.',
+      tone_examples_do: [
+        'You belong here, even before you believe.',
+        'Real questions. Honest answers.',
+        'Sunday is a starting line, not a finish.',
+        'Come hungry. Stay messy.',
+      ],
+      tone_examples_dont: [
+        'Embark on a transformative spiritual journey.',
+        'Unlock your potential through community.',
+        'A vibrant, dynamic, life-changing experience.',
+        'Delve into the tapestry of faith.',
+      ],
+    },
+    personas: [
+      {
+        name: 'Jordan Reynolds',
+        archetype: 'The Spiritually Curious Skeptic',
+        description: 'Mid-30s, professional, attends sporadically. Burned by past church experiences but still asking the big questions.',
+        goals: 'Find honest answers without being preached at. Build a few genuine friendships.',
+        challenges: 'Distrusts institutional language. Allergic to performative warmth.',
+        motivations: 'Wants belonging that does not require pretending.',
+        message: 'You can ask the hard questions here. No one will rush you toward an answer you have not earned.',
+      },
+      {
+        name: 'Maria Chen',
+        archetype: 'The Young-Family Anchor',
+        description: 'Early 30s, two kids under 8. Looking for a place where her kids thrive AND she gets adult community.',
+        goals: 'Find a church that takes her kids seriously and gives her room to grow as an adult.',
+        challenges: 'Tired of churches that treat parents as drop-off labor.',
+        motivations: 'Wants her family to grow up rooted, not performative.',
+        message: 'Your kids will be loved here. So will you. Both matter equally.',
+      },
+    ],
+    x_factor: {
+      top_attribute: 'Honest Welcome',
+      messaging_focus: 'Lean into the "you belong before you believe" framing. Every page should hint at this — the homepage banner, the giving page, even the events list. Visitors who have been hurt by other churches should feel the difference in the first 8 seconds.',
+    },
+    project_goals: {
+      identity: 'Anchor the brand refresh online. Carry the new wordmark, color system, and voice into every page header and CTA.',
+      connection: 'Make first-time visit and small-group sign-up the easiest paths on the site. Two clicks max.',
+      growth: 'Drive online attendees toward an in-person next step. Sermon archive should funnel toward Groups and Serve.',
+    },
+    sitemap_signals: {
+      sermon_blog_requested: true,
+      sermons_display_mode: 'wordpress_managed',
+      events_display_mode: 'chms_embed',
+      groups_display_mode: 'wordpress_managed',
+      recommended_pages: ['Home', 'About', 'New Here', 'Sermons', 'Groups', 'Events', 'Serve', 'Give', 'Contact'],
+      tech_flags: ['Requires ACF Setup (sermon blog)', 'Requires PCO Integration (events embed)'],
+    },
+    sources_used: {
+      strategy_brief: '(Mock run — extraction did not read source files.)',
+      am_handoff: '(Mock run.)',
+      discovery_questionnaire: '(Mock run.)',
+      brand_handoff: '(Mock run.)',
+      content_collection: '(Mock run.)',
+      conflicts_resolved: [
+        '(Mock run — no real conflicts encountered.)',
+      ],
+    },
+  }
 }

@@ -38,6 +38,9 @@ export interface ExtractStrategyError {
 export async function extractStrategy(
   projectId: string,
   redoContext?: string,
+  /** When true, server returns a canned extraction without calling Anthropic.
+   *  Used for end-to-end UI testing of Stage 1 → 2 → 3 flow without burning credits. */
+  mock = false,
 ): Promise<{ result?: ExtractStrategyResult; error?: ExtractStrategyError }> {
   const { data: sessionData } = await supabase.auth.getSession()
   const token = sessionData?.session?.access_token
@@ -49,7 +52,7 @@ export async function extractStrategy(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ projectId, redoContext: redoContext ?? '' }),
+    body: JSON.stringify({ projectId, redoContext: redoContext ?? '', mock }),
   })
 
   const contentType = res.headers.get('content-type') ?? ''

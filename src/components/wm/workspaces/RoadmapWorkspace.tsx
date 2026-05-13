@@ -118,15 +118,11 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
     if (!error) { setDirty(false); await onChange() }
   }
 
-  const handleBegin = async () => {
-    console.log('[Stage 1] handleBegin fired, project.id =', project.id)
+  const handleBegin = async (mock = false) => {
     setBeginning(true)
     setAgentError(null)
     try {
-      console.log('[Stage 1] calling extractStrategy…')
-      const { result, error } = await extractStrategy(project.id)
-      console.log('[Stage 1] extractStrategy returned', { hasResult: !!result, hasError: !!error })
-      if (error) console.log('[Stage 1] error contents:', error)
+      const { result, error } = await extractStrategy(project.id, undefined, mock)
       if (error) {
         setAgentError(error)
         await onChange()  // re-read in case the server reset roadmap_stage
@@ -135,7 +131,7 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
       if (result) await onChange()
     } catch (e) {
       setAgentError({
-        error: `Couldn't reach the extraction endpoint. ${e instanceof Error ? e.message : String(e)}. If running locally, the /api/* routes require \`vercel dev\` (plain \`vite\` doesn't serve them).`,
+        error: `Couldn't reach the extraction endpoint. ${e instanceof Error ? e.message : String(e)}.`,
       })
     } finally {
       setBeginning(false)
@@ -282,15 +278,26 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
                       : 'Discovery questionnaire, strategy brief, and brand handoff must be received before AI can run.'}
                   </p>
                 </div>
-                <WMButton
-                  variant="primary"
-                  onClick={handleBegin}
-                  disabled={!intakeReady || beginning}
-                  loading={beginning}
-                  iconLeft={<Sparkles size={13} />}
-                >
-                  {beginning ? 'Extracting strategy…' : 'Begin content strategy'}
-                </WMButton>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <WMButton
+                    variant="primary"
+                    onClick={() => handleBegin(false)}
+                    disabled={!intakeReady || beginning}
+                    loading={beginning}
+                    iconLeft={<Sparkles size={13} />}
+                  >
+                    {beginning ? 'Extracting strategy…' : 'Begin content strategy'}
+                  </WMButton>
+                  <WMButton
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleBegin(true)}
+                    disabled={beginning}
+                    title="Skip Anthropic and seed Stage 1 with canned data. Lets you test Stages 2-5 without burning API credits."
+                  >
+                    Mock run
+                  </WMButton>
+                </div>
               </div>
             )}
 
