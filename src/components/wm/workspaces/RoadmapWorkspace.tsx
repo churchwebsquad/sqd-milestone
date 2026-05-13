@@ -381,7 +381,6 @@ function StageCard({ stage, currentStage }: { stage: StageDef; currentStage: WMR
               <WMButton variant="primary" size="sm" iconRight={<ArrowRight size={11} />}>
                 Approve & continue
               </WMButton>
-              <WMButton variant="secondary" size="sm">View output</WMButton>
               <WMButton variant="ghost" size="sm" iconLeft={<RotateCw size={11} />}>
                 Redo with changes
               </WMButton>

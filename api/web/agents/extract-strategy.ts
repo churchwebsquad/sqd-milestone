@@ -128,6 +128,16 @@ export default async function handler(req: any, res: any) {
   // without burning credits or needing complete intake.
   if (mock) {
     const cannedExtraction = buildMockExtraction(project)
+    // Same auto-fill behavior as the real path, so mock runs fully exercise the UI.
+    const existingProps = (project.roadmap_properties ?? {}) as Record<string, string>
+    const derivedProps = deriveRoadmapProperties(cannedExtraction, null, project)
+    const mergedProps: Record<string, string> = { ...existingProps }
+    for (const [k, v] of Object.entries(derivedProps)) {
+      if (v && !mergedProps[k]) mergedProps[k] = v
+    }
+    const derivedOpening = deriveOpeningParagraph(cannedExtraction)
+    const openingToWrite = project.roadmap_opening_paragraph || derivedOpening || null
+
     const { error: writeErr } = await sb
       .from('strategy_web_projects')
       .update({
@@ -146,6 +156,8 @@ export default async function handler(req: any, res: any) {
           },
         },
         roadmap_stage: 'strategy_done',
+        roadmap_opening_paragraph: openingToWrite,
+        roadmap_properties: mergedProps,
       })
       .eq('id', projectId)
     if (writeErr) return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
@@ -298,11 +310,26 @@ export default async function handler(req: any, res: any) {
     },
   }
 
+  // Auto-fill the partner-facing roadmap deliverable from the extraction.
+  // Strategists can edit these afterward; we only fill empty fields so
+  // we don't clobber anything the strategist has already typed.
+  const existingProps = (project.roadmap_properties ?? {}) as Record<string, string>
+  const derivedProps = deriveRoadmapProperties(toolResult, brandGuide, project)
+  const mergedProps: Record<string, string> = { ...existingProps }
+  for (const [k, v] of Object.entries(derivedProps)) {
+    if (v && !mergedProps[k]) mergedProps[k] = v
+  }
+
+  const derivedOpening = deriveOpeningParagraph(toolResult)
+  const openingToWrite = project.roadmap_opening_paragraph || derivedOpening || null
+
   const { error: writeErr } = await sb
     .from('strategy_web_projects')
     .update({
       roadmap_state: { ...(project.roadmap_state ?? {}), ...roadmapStatePatch },
       roadmap_stage: 'strategy_done',
+      roadmap_opening_paragraph: openingToWrite,
+      roadmap_properties: mergedProps,
     })
     .eq('id', projectId)
 
@@ -579,6 +606,53 @@ const EXTRACTION_TOOL = {
       },
     },
   },
+}
+
+// ── Auto-fill the roadmap deliverable from Stage 1 extraction ────────
+
+function deriveRoadmapProperties(
+  extraction: Record<string, unknown>,
+  brandGuide: any,
+  project: any,
+): Record<string, string> {
+  const audience = (extraction.audience ?? {}) as Record<string, any>
+  const voice    = (extraction.voice_characteristics ?? {}) as Record<string, any>
+  const xFactor  = (extraction.x_factor ?? {}) as Record<string, any>
+  const goals    = (extraction.project_goals ?? {}) as Record<string, any>
+
+  const goalsLine = [
+    goals.identity   && `Identity: ${goals.identity}`,
+    goals.connection && `Connection: ${goals.connection}`,
+    goals.growth     && `Growth: ${goals.growth}`,
+  ].filter(Boolean).join(' · ')
+
+  return {
+    primary_goals:     goalsLine,
+    tone:              Array.isArray(voice.top_attributes) ? voice.top_attributes.join(' · ') : '',
+    target_audience:   String(audience.summary ?? ''),
+    x_factor:          String(xFactor.top_attribute ?? ''),
+    brand_style_tags:  Array.isArray(brandGuide?.style_tags) ? brandGuide.style_tags.join(' · ') : '',
+    engagement_type:   project.kind ? String(project.kind).replace(/_/g, ' ') : '',
+  }
+}
+
+function deriveOpeningParagraph(extraction: Record<string, unknown>): string {
+  const audience = (extraction.audience ?? {}) as Record<string, any>
+  const xFactor  = (extraction.x_factor ?? {}) as Record<string, any>
+  const goals    = (extraction.project_goals ?? {}) as Record<string, any>
+
+  const parts: string[] = []
+  if (audience.summary) parts.push(String(audience.summary))
+  if (xFactor.messaging_focus) parts.push(String(xFactor.messaging_focus))
+  if (goals.identity || goals.connection || goals.growth) {
+    const goalSentence = [
+      goals.identity   && goals.identity,
+      goals.connection && goals.connection,
+      goals.growth     && goals.growth,
+    ].filter(Boolean).join(' ')
+    if (goalSentence) parts.push(goalSentence)
+  }
+  return parts.join('\n\n')
 }
 
 // ── Mock extraction (used when ?mock=true) ────────────────────────────
