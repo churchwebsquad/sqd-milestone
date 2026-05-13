@@ -33,9 +33,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { createClient } from '@supabase/supabase-js'
-import Anthropic from '@anthropic-ai/sdk'
+import { generateText, jsonSchema, tool } from 'ai'
 
-const MODEL = 'claude-opus-4-7'
+// Vercel AI Gateway routes by `provider/model` slug. The gateway auths
+// via AI_GATEWAY_API_KEY locally and VERCEL_OIDC_TOKEN on Vercel deploys
+// — the AI SDK picks whichever is present, so no provider client setup.
+const MODEL = 'anthropic/claude-opus-4-7'
 const MAX_OUTPUT_TOKENS = 8000
 
 // File formats we can feed Claude without an external parser
@@ -80,12 +83,14 @@ export default async function handler(req: any, res: any) {
   const supabaseUrl = process.env.VITE_SUPABASE_URL
   const anonKey = process.env.VITE_SUPABASE_ANON_KEY
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  const anthropicKey = process.env.ANTHROPIC_API_KEY
+  // AI Gateway accepts either an explicit API key (local dev) or the
+  // Vercel-managed OIDC token (production deploys auto-inject). Either is fine.
+  const gatewayKey = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN
   const missing: string[] = []
   if (!supabaseUrl) missing.push('VITE_SUPABASE_URL')
   if (!anonKey) missing.push('VITE_SUPABASE_ANON_KEY')
   if (!serviceRoleKey) missing.push('SUPABASE_SERVICE_ROLE_KEY')
-  if (!anthropicKey) missing.push('ANTHROPIC_API_KEY')
+  if (!gatewayKey) missing.push('AI_GATEWAY_API_KEY (or VERCEL_OIDC_TOKEN on Vercel)')
   if (missing.length) {
     return res.status(500).json({ error: `Missing required environment variables: ${missing.join(', ')}` })
   }
@@ -245,30 +250,38 @@ export default async function handler(req: any, res: any) {
     redoContext,
   })
 
-  // ── Call Claude ─────────────────────────────────────────────────────
-  const anthropic = new Anthropic({ apiKey: anthropicKey })
+  // ── Call model via AI Gateway ───────────────────────────────────────
   let toolResult: Record<string, unknown> | null = null
   let usage: { input_tokens?: number; output_tokens?: number } = {}
   try {
-    const response = await anthropic.messages.create({
+    const result = await generateText({
       model: MODEL,
-      max_tokens: MAX_OUTPUT_TOKENS,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
       system: systemPrompt,
-      tools: [EXTRACTION_TOOL],
-      tool_choice: { type: 'tool', name: 'submit_strategy_extraction' },
       messages: [{ role: 'user', content: userContent as any }],
+      tools: {
+        submit_strategy_extraction: tool({
+          description: EXTRACTION_TOOL.description,
+          inputSchema: jsonSchema(EXTRACTION_TOOL.input_schema as any),
+        }),
+      },
+      toolChoice: { type: 'tool', toolName: 'submit_strategy_extraction' },
     })
-    usage = response.usage as any
-    const toolUse = response.content.find((b: any) => b.type === 'tool_use') as any
-    if (!toolUse) {
-      throw new Error('Claude did not return a tool_use block')
+    // AI SDK normalizes usage. Re-shape to the keys downstream code expects.
+    usage = {
+      input_tokens: result.usage?.inputTokens,
+      output_tokens: result.usage?.outputTokens,
     }
-    toolResult = toolUse.input as Record<string, unknown>
+    const toolCall = result.toolCalls?.[0]
+    if (!toolCall || toolCall.toolName !== 'submit_strategy_extraction') {
+      throw new Error('Model did not return the expected tool call')
+    }
+    toolResult = toolCall.input as Record<string, unknown>
   } catch (err: any) {
     // Restore stage so user can retry
     await sb.from('strategy_web_projects').update({ roadmap_stage: 'ready' }).eq('id', projectId)
-    console.error('[extract-strategy] anthropic error:', err?.message)
-    return res.status(502).json({ error: `Claude API error: ${err?.message ?? 'unknown'}` })
+    console.error('[extract-strategy] gateway error:', err?.message)
+    return res.status(502).json({ error: `AI Gateway error: ${err?.message ?? 'unknown'}` })
   }
 
   // ── Persist + advance stage ─────────────────────────────────────────
@@ -457,8 +470,9 @@ function appendCategoryFiles(blocks: unknown[], files: PreflightFile[], category
       })
     } else if (f.base64) {
       blocks.push({
-        type: 'document',
-        source: { type: 'base64', media_type: 'application/pdf', data: f.base64 },
+        type: 'file',
+        data: f.base64,
+        mediaType: 'application/pdf',
       })
       blocks.push({ type: 'text', text: `(↑ ${prefix}: ${f.filename})` })
     }
