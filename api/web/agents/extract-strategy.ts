@@ -288,7 +288,18 @@ export default async function handler(req: any, res: any) {
     if (!toolCall || toolCall.toolName !== 'submit_strategy_extraction') {
       throw new Error('Model did not return the expected tool call')
     }
-    toolResult = toolCall.input as Record<string, unknown>
+    let raw = toolCall.input as Record<string, unknown>
+    // Some models wrap the output under a redundant top-level key derived
+    // from the tool name (e.g. { strategy: { audience, voice_characteristics, ... } }).
+    // Unwrap so downstream code can read fields at the expected path.
+    if (
+      raw && typeof raw === 'object'
+      && Object.keys(raw).length === 1
+      && raw.strategy && typeof raw.strategy === 'object'
+    ) {
+      raw = raw.strategy as Record<string, unknown>
+    }
+    toolResult = raw
   } catch (err: any) {
     // Restore stage so user can retry
     await sb.from('strategy_web_projects').update({ roadmap_stage: 'ready' }).eq('id', projectId)
