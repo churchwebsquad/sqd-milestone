@@ -1,0 +1,21 @@
+-- v32_freehand_sections.sql
+--
+-- Allow web_sections.content_template_id to be NULL for user-authored
+-- freehand sections. Users get a "Add freehand section" affordance in
+-- the Pages workspace that creates a blank TipTap-only block — useful
+-- when the right Brixies template doesn't exist yet, or for one-off
+-- copy that doesn't belong on a structured template.
+--
+-- AI agents MUST NEVER create rows with a null content_template_id.
+-- This is enforced at the application layer (PagesWorkspace UI is
+-- user-only; copywriter agent contracts require template_id). The
+-- distinction matters: a template-less section can't flow into
+-- downstream tools (Design Manager template approval, Dev Manager
+-- ACF export, Figma plugin slot map) — it's strictly a Content
+-- Manager authoring escape hatch.
+--
+-- Freehand sections store their body as { body: "<html>" } in
+-- field_values. The Pages workspace renders a single TipTap editor
+-- when content_template_id is null.
+
+ALTER TABLE web_sections ALTER COLUMN content_template_id DROP NOT NULL;

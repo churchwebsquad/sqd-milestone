@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import {
   Send, FileText, LayoutDashboard, User, LogOut, Menu, X,
   Building2, Sparkles, Search, CalendarDays, Palette,
-  ChevronDown, Target, Library,
+  ChevronDown, Target, Library, Globe,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
@@ -51,6 +51,10 @@ const NAV_STRUCTURE: NavEntry[] = [
     collapsible: true,
     items: [
       { kind: 'item', to: '/branding', label: 'Brand Handoffs', icon: Palette, end: false },
+      { kind: 'subheading', label: 'Web' },
+      // Master surface for every website project. Each project rolls
+      // up Intake / Content / Design / Dev / Reviews — see /web/[id].
+      { kind: 'item', to: '/web', label: 'Website Manager', icon: Globe, end: false },
       { kind: 'subheading', label: 'Social' },
       // Prompt Settings used to be a sibling — it's now nested under the
       // SRP Generator (the only tool that consumes it).

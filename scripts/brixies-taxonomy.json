@@ -1,0 +1,617 @@
+{
+  "_doc": "Source-of-truth classification for every Brixies data-layer the parser encounters. The import script (scripts/import-brixies-catalog.mjs) consumes this file. Edit by hand as new families land — scripts/inventory-brixies-layers.mjs surfaces any layer name the taxonomy hasn't classified yet.\n\nv2 (2026-05-13) covers the full 18-family Brixies HTML drop. Bedrock-pass design decisions:\n\n  - Section kind enum: content | chrome | functional | media | embed | component | post_template (see `kinds`).\n  - Embed blocks are a first-class page block type — NOT a Brixies template. Strategist or AI inserts via the page composer; renders as a tagged placeholder card. See `embed_block_categories`.\n  - Card palette: 2-4 Card N variants chosen per project at brand-design phase, amendable at content phase. Listings and feature sections reference 'from_palette' as their item shape rather than hardcoding a Card N id. See `card_palette`.\n  - Post template auto-pair: when a listing template (Team/Blog/Career/Event/Sermon) is placed on a page AND the display mode is 'wordpress' (Option 3 of the sermons-events-groups rule), the paired single-* template auto-adds a detail page to the sitemap. Options 1 (archive link) and 2 (ChMS embed) do not trigger auto-pair. See `post_template_pairs`.\n  - Heading levels (H1-H6) preserved as a `level` property on the heading slot so the writing rules' 'one H1 per page' invariant can be enforced. See `heading_levels`.",
+
+  "_meta": {
+    "version": "2.2",
+    "regenerated_after_full_library_drop": "2026-05-13",
+    "covers_families": 18,
+    "covers_layers": 634,
+    "inventory_report": "reports/brixies-vocabulary-2026-05-13.md",
+    "coverage_target": "≥98% post-v2.2; remaining unmapped layers route to 'unknown text slot' fallback for surfacing in the discovery report.",
+    "notes": [
+      "Brixies inconsistently outputs `Feature Section` (caps) and `Feature section` (lower) for the same family. Parser must treat family detection AND group-container detection as case-insensitive (see parser_config).",
+      "59 standalone Card N templates (Card 100, Card 124, etc.) live as `component`-kind entries, not section variants. Consumed by sections that need repeating-item shapes, drawn from the project's card_palette.",
+      "Single Event / Single Team / Single Post are `post_template`-kind. They auto-pair with their listing-template counterparts only when display mode = 'wordpress'.",
+      "Content Sections export was re-saved 2026-05-13 because the original Brixies file was missing the parent wrapper layer name — re-run the inventory if upstream Brixies fixes the export.",
+      "STRUCTURAL POSTURE: templates are classified by their structural parts (layout, slot/group shape) and NOT by their original family's use-case. A 'pricing card' layout can be repurposed for a staff callout or event highlight — the Content Manager filters by structure, not by family. Avoid scoping wrappers / containers to specific families in the taxonomy.",
+      "Inventory's family detection over-eagerly flagged false section roots (Frame N, Image N, Service N, Rectangle N, Button Group N). These are now constrained by `families_allowed` — the parser only treats a `<Family> N` layer as a section root if Family is in that allow-list."
+    ]
+  },
+
+  "parser_config": {
+    "_doc": "Behavior flags consumed by the parser. Allows us to adjust matching strictness without re-touching individual rules.",
+    "group_container_match_case_insensitive": true,
+    "family_root_match_case_insensitive": true,
+    "section_kind_match_case_insensitive": true,
+    "scoped_key_match_case_insensitive": true
+  },
+
+  "ignored_layer_patterns": {
+    "_doc": "Layer names the parser skips entirely — neither slot, nor wrapper, nor decoration, nor group. Used for Brixies-internal artifacts: placeholder SVG wrappers (Logoipsum logos), lorem-ipsum text values accidentally authored as `data-layer` attributes by the designer, and Brixies design tokens that have no semantic value in the output schema. Logged once at inventory time; silently dropped at import time.\n\nGrouped by reason:\n  - Brixies placeholder wrappers: Logoipsum, circle-play-solid, logo-N\n  - Lorem ipsum text placeholders\n  - Menu-link label placeholders (HOME, ABOUT US, BLOG, etc.) — actual nav authoring happens in the sitemap editor, not at section-import time. Parser surfaces these to the sitemap editor with the source template id so the user can wire label+url pairs there.\n  - Sign-in / Register UI (out of scope for church sites in current phase)\n  - Date subcomponents (Year, Month & Year, Day date/week alone) — composed at render time from a single Date slot (see slot config).\n  - First/Second/Third/Fourth link generic enumerators\n  - Phone / address placeholder values — see global_site_snippets for the merge-field resolution path",
+    "patterns": [
+      "^Logoipsum( square)?( \\d+)?$",
+      "^logo-\\d+$",
+      "^circle-play-solid( \\d+)?$",
+      "^Lorem ipsum.*$",
+      "^Calle Lorem ipsum.*$",
+      "^\\+\\d[\\d\\s-]+$",
+      "^HOME$", "^ABOUT US$", "^Home$", "^About [Uu]s$",
+      "^BLOG$", "^Blog$",
+      "^PAGES$", "^Pages$", "^Other pages$",
+      "^PROJECT$", "^Projects$",
+      "^SERVICES$", "^Services$",
+      "^TEAM$", "^Team$",
+      "^GET A QUOTE$", "^Get a quote$",
+      "^(First|Second|Third|Fourth) link$",
+      "^Menu name$",
+      "^Log in$", "^Sign in$", "^Register$", "^Register button$",
+      "^Service \\d+$", "^SERVICE \\d+$",
+      "^SOCIAL MEDIA$", "^LEGAL$",
+      "^Calendar$", "^Shop$", "^Schedule$", "^Job Hiring$", "^For companies$",
+      "^Twitter$", "^Twitter \\(X\\)$",
+      "^Subscribe( description)?$",
+      "^Email( Heading)?$", "^Link email$",
+      "^Menu column( \\d+)?$",
+      "^Social Link( \\d+)?$",
+      "^Year$", "^Month & Year$",
+      "^Placeholder imagen$",
+      "^Count$"
+    ]
+  },
+
+  "kinds": {
+    "_doc": "Top-level section-type enum. `section_kind_rules` maps section root layer names to one of these values; the catalog's `kind` column stores it; the Content Manager's 'Add Section' picker filters by it.",
+
+    "values": ["content", "chrome", "functional", "media", "embed", "component", "post_template"],
+
+    "descriptions": {
+      "content":       "Hand-authored body sections — Hero, Feature, FAQ, Intro, Process, Timeline, Blog (when authored), CTA, Banner.",
+      "chrome":        "Site frame, not page-specific — Header, Footer, Megamenu, Offcanvas, top-of-page banner bars.",
+      "functional":    "Interactive UI primitives — Filter, Search, Pagination, Sort, Category Filter, Tag Filter.",
+      "media":         "Video / audio / gallery-led sections — Gallery Section, sermon player, hero with video bg.",
+      "embed":         "First-class page block type — NOT a Brixies template. See embed_block_categories.",
+      "component":     "Reusable card library (the 59 Card N variants). Not orderable as a page section on its own; consumed by other sections via the project's card_palette.",
+      "post_template": "Single-entity detail pages — Single Event, Single Team, Single Post, Single Career, Single Sermon. Auto-pair to a listing template under Option 3 (Managed in WordPress)."
+    }
+  },
+
+  "embed_block_categories": {
+    "_doc": "First-class page block type. Not a Brixies section. Strategist or AI inserts via the page composer; the wireframe renderer shows a tagged placeholder card (category + title + what's-included). At build time, the developer replaces the placeholder with the actual iframe / feed / widget code.\n\nThe AI copywriter does NOT draft body content for embed blocks — only the `title` and `whats_included` fields. The placeholder is a deferred-content marker.",
+
+    "enum": [
+      "event",
+      "forms",
+      "giving",
+      "groups",
+      "instagram",
+      "maps",
+      "prayer",
+      "sermon",
+      "youtube_playlist"
+    ],
+
+    "category_notes": {
+      "event":           "Single event registrations, full month-view calendars, or featured upcoming events. Source typically Church Center / PCO Registrations / TicketSpice.",
+      "forms":           "Contact, prayer-request, newsletter signup, volunteer interest. Mailchimp, ConvertKit, Tally, embedded ChMS forms.",
+      "giving":          "Tithely, Pushpay, Subsplash giving widgets.",
+      "groups":          "PCO Groups feed, Church Center group browser.",
+      "instagram":       "Instagram feed grid widgets (Smash Balloon, EmbedSocial).",
+      "maps":            "Google / Mapbox embed for service location, campus map.",
+      "prayer":          "Embedded prayer-wall, prayer-request form distinct from generic contact form.",
+      "sermon":          "Sermon archive widgets — Subsplash, Church Center, ChurchPlugins. May overlap with youtube_playlist when YouTube is the source.",
+      "youtube_playlist": "Full YouTube playlist embed for any purpose (sermons, testimonies, kids content). Distinct from latest-sermons because it's a full archive view."
+    },
+
+    "fields": {
+      "category":        { "type": "enum", "enum_ref": "embed_block_categories.enum", "required": true },
+      "title":           { "type": "text", "required": true, "max_chars": 60, "description": "Section heading shown above the placeholder (e.g., 'Latest Sermons')." },
+      "whats_included":  { "type": "richtext", "required": true, "max_chars": 300, "description": "What content shows up here at build time (e.g., 'The 3 most recent sermon videos with title, date, watch button')." },
+      "source_url":      { "type": "url", "required": false, "description": "Link to existing content if client already has it elsewhere (YouTube channel, current site page)." },
+      "embed_code":      { "type": "longtext", "required": false, "description": "Raw <iframe> or widget code if client supplied it directly." },
+      "source_notes":    { "type": "richtext", "required": false, "description": "Developer notes — e.g., 'pull from current site footer once dev access granted', 'awaiting Tithely API key from finance team'." }
+    }
+  },
+
+  "card_palette": {
+    "_doc": "Project-level cohesion mechanism. A `web_projects.card_palette` field holds 2-4 Card N template ids — the visual card shapes used across the entire site. Listings and feature sections that need a repeating-item shape reference 'from_palette' rather than hardcoding a Card N id; the renderer + Figma plugin + WordPress importer all read the project's palette to know which card to render in any given slot.\n\nNet effect: visual cohesion across the site (the same 2-4 card shapes recur everywhere) without sections being locked to one specific card variant.",
+
+    "min_size": 2,
+    "max_size": 4,
+    "chosen_at_phase": "brand_design",
+    "amendable_at_phases": ["content"],
+    "schema_location": "web_projects.card_palette (jsonb array of Card N template ids, length 2-4)",
+
+    "amendment_trigger": "If a section's content needs don't fit any palette card during content phase, the strategist can add a new card to the palette (up to the 4-card cap) or swap one out. Triggered by an explicit 'Expand palette' action in the Content Manager; not automatic."
+  },
+
+  "post_template_pairs": {
+    "_doc": "Listing template family -> paired single-* template family. When a listing template is placed on a page AND the display_mode is 'wordpress' (Option 3 of the sermons-events-groups rule), the paired single-* template auto-adds a detail page to the sitemap with a slug pattern like `/<entity>/[slug]`.\n\nOptions 1 (archive link) and 2 (ChMS embed) do NOT trigger auto-pair because the detail view is hosted externally (YouTube, Church Center, etc.) — no detail page needed on our site.\n\nStrategist can manually remove the auto-added detail page if it isn't wanted; it's a default-on convenience, not a hard requirement.",
+
+    "pairs": {
+      "Team Section":   { "single": "Single Team Section",   "url_pattern": "/team/[slug]" },
+      "Blog Section":   { "single": "Single Post Section",   "url_pattern": "/blog/[slug]" },
+      "Career Section": { "single": "Single Career Section", "url_pattern": "/careers/[slug]" },
+      "Event listing":  { "single": "Single Event Section",  "url_pattern": "/events/[slug]" },
+      "Sermon listing": { "single": "Single Sermon Section", "url_pattern": "/sermons/[slug]" }
+    },
+
+    "trigger_condition": "listing_template_present AND display_mode === 'wordpress'"
+  },
+
+  "chrome_auto_populated_fields": {
+    "_doc": "Footer / header slots that are auto-populated from project-level metadata rather than authored per-page. Strategist doesn't see these in the section editor — they're filled at build time from `web_projects` fields. Keeps cookie disclosures, credit lines, and legal notices consistent across every page without the strategist having to copy them.\n\nAdd a new entry here when a layer that recurs across chrome families is truly chrome-level rather than per-page authored.",
+    "fields": {
+      "Cookies policy": { "source": "web_projects.cookies_policy_text", "type": "richtext", "label": "Cookies policy disclaimer" },
+      "Credit text":    { "source": "web_projects.credit_text",         "type": "text",     "label": "Footer credit line" },
+      "Privacy policy": { "source": "web_projects.privacy_policy_text", "type": "richtext", "label": "Privacy policy disclaimer" },
+      "Legal notice":   { "source": "web_projects.legal_notice_text",   "type": "richtext", "label": "Legal notice / disclaimer" },
+      "Term and conditions": { "source": "web_projects.terms_text",     "type": "richtext", "label": "Terms and conditions" }
+    }
+  },
+
+  "global_site_snippets": {
+    "_doc": "Project-level data points that resolve via merge field tokens in copy. Available everywhere body content is authored. The AI copywriter inserts these tokens where intake confirms a real value exists (e.g. an address block on a Contact section). The renderer substitutes the merge field with the project's value at build time.\n\nDistinct from `chrome_auto_populated_fields`:\n  - chrome_auto_populated_fields = chrome-only slots (footer cookies, legal). Strategist never sees them.\n  - global_site_snippets = merge fields available IN ANY body slot. Strategist + AI copywriter can reference them.\n\nDistinct from `embed_block_categories`:\n  - embed = third-party widget placeholder (sermon archive, Instagram feed). Rendered as a placeholder block.\n  - global_site_snippets = inline text values (church name, phone, address). Substituted into authored copy.\n\nBrixies placeholder values that resemble snippet content (e.g. '+31 987 654 321', 'Calle Lorem ipsum N° 158 Av. Roma Spagna') are matched by `placeholder_resolution_patterns` below. Matching layers are dropped at parse time; the AI copywriter is expected to insert the merge token in the slot when intake indicates the value is set on the project.",
+
+    "merge_fields": {
+      "{{church_name}}":            { "type": "text",  "source": "web_projects.church_name",            "label": "Church name" },
+      "{{church_short_name}}":      { "type": "text",  "source": "web_projects.church_short_name",      "label": "Church short / common name" },
+      "{{church_address}}":         { "type": "text",  "source": "web_projects.address",                "label": "Church street address" },
+      "{{church_city_state}}":      { "type": "text",  "source": "web_projects.city_state",             "label": "City, state" },
+      "{{church_phone}}":           { "type": "phone", "source": "web_projects.phone",                  "label": "Phone number" },
+      "{{church_email}}":           { "type": "email", "source": "web_projects.email",                  "label": "General contact email" },
+      "{{primary_service_time}}":   { "type": "text",  "source": "web_projects.primary_service_time",   "label": "Primary service time" },
+      "{{all_service_times}}":      { "type": "text",  "source": "web_projects.all_service_times",      "label": "All service times" },
+      "{{denomination}}":           { "type": "text",  "source": "web_projects.denomination",           "label": "Denomination / tradition" },
+      "{{pastor_name}}":            { "type": "text",  "source": "web_projects.pastor_name",            "label": "Lead pastor name" },
+      "{{social_facebook_url}}":    { "type": "url",   "source": "web_projects.social_facebook_url",    "label": "Facebook URL" },
+      "{{social_instagram_url}}":   { "type": "url",   "source": "web_projects.social_instagram_url",   "label": "Instagram URL" },
+      "{{social_youtube_url}}":     { "type": "url",   "source": "web_projects.social_youtube_url",     "label": "YouTube URL" },
+      "{{social_tiktok_url}}":      { "type": "url",   "source": "web_projects.social_tiktok_url",      "label": "TikTok URL" },
+      "{{social_twitter_url}}":     { "type": "url",   "source": "web_projects.social_twitter_url",     "label": "X / Twitter URL" },
+      "{{social_linkedin_url}}":    { "type": "url",   "source": "web_projects.social_linkedin_url",    "label": "LinkedIn URL" },
+      "{{current_year}}":           { "type": "text",  "source": "system",                              "label": "Current year (for copyright)" }
+    },
+
+    "placeholder_resolution_patterns": [
+      { "pattern": "^\\+\\d[\\d\\s-]+$",          "resolves_to": "{{church_phone}}",   "note": "Brixies phone placeholder (e.g. '+31 987 654 321')." },
+      { "pattern": "^Calle Lorem ipsum.*$",        "resolves_to": "{{church_address}}", "note": "Brixies Italian/Spanish address placeholder." }
+    ]
+  },
+
+  "families_allowed": {
+    "_doc": "Allow-list of real Brixies section-root family names. The parser only treats a `<Family> N` layer as a section root if Family appears here (case-insensitive). Constrains the inventory's over-eager family detection that flags Frame / Image / Service / Rectangle / Button Group as false roots.\n\nFamily names are CANONICAL — `Feature Section` covers both `Feature Section N` and `Feature section N` (case-insensitive match per parser_config).\n\nAdd entries when a new Brixies family ships.",
+    "families": [
+      "Banner Section",
+      "Blog Section",
+      "Card",
+      "Career Section",
+      "Category Filter",
+      "Content Section",
+      "CTA Section",
+      "FAQ Section",
+      "Feature Section",
+      "Filter",
+      "Footer",
+      "Gallery Section",
+      "Header",
+      "Hero Section",
+      "Intro Section",
+      "Link Page",
+      "Megamenu Section",
+      "Offcanvas",
+      "Process Section",
+      "Single Career Section",
+      "Single Event Section",
+      "Single Post Section",
+      "Single Sermon Section",
+      "Single Team Section",
+      "Social Proof",
+      "Team Section",
+      "Timeline Section"
+    ]
+  },
+
+  "chrome_designation": {
+    "_doc": "Header / Footer / Megamenu / Offcanvas templates ship at `kind: 'chrome'` and live in the catalog like any other template. Per-project, the user designates which chrome templates apply via the sitemap editor:\n\n  - PRIMARY HEADER (one per project) — auto-renders on every page above the page content.\n  - PRIMARY FOOTER (one per project) — auto-renders on every page below the page content.\n  - MEGAMENU SECTIONS (zero or more) — alternative nav variants. Render only in the style-guide-for-dev export, not on actual pages.\n  - OFFCANVAS SECTIONS (zero or more) — same as Megamenu — style-guide reference for dev only.\n\nWhen a Header / Footer template is parsed, the strategist authors nav items in the sitemap editor (label + URL pairs per the writing-rules 'every CTA carries its URL' rule). Brixies placeholder labels (HOME, ABOUT US, BLOG) are ignored at parse time; the sitemap editor surfaces fresh nav entry rows.\n\nSchema implications (for v28 migration):\n  - web_projects.primary_header_template_id (uuid, fk to web_content_templates, nullable)\n  - web_projects.primary_footer_template_id (uuid, fk to web_content_templates, nullable)\n  - web_projects.megamenu_template_ids (uuid[], optional)\n  - web_projects.offcanvas_template_ids (uuid[], optional)\n  - web_projects.nav_items (jsonb) — authored array of { label, url, parent_id? }",
+
+    "rendering_rules": {
+      "primary_header": "every page",
+      "primary_footer": "every page",
+      "megamenu":       "style_guide_for_dev_only",
+      "offcanvas":      "style_guide_for_dev_only"
+    }
+  },
+
+  "heading_levels": {
+    "_doc": "Brixies labels heading slots with explicit levels: `Heading`, `Heading H2`, `Heading H3`, etc. The parser must preserve the level as a property on the slot so the writing rules' 'one H1 per page' invariant can be enforced.\n\nA bare `Heading` defaults to level 2 inside sections; the level-1 H1 belongs to the page's hero. Hero templates override the default to level 1 on their root heading.",
+
+    "level_map": {
+      "Heading":    2,
+      "Heading H1": 1,
+      "Heading H2": 2,
+      "Heading H3": 3,
+      "Heading H4": 4,
+      "Heading H5": 5,
+      "Heading H6": 6
+    },
+
+    "default_level": 2,
+    "hero_h1_override": true
+  },
+
+  "slots": {
+    "_doc": "data-layer name → slot field schema. A slot is a single fixed position in the layout — the strategist authors one value. Only entries here render with typed inputs in the editor; everything else falls through to the structural / decoration / unknown classifier.\n\nGrouped logically below: core text, headings-by-level, descriptions, images, dates, authors, taxonomies/tags, content, counters, social, post-detail-page slots, form inputs.",
+
+    "Tagline":           { "type": "text",     "max_chars": 60 },
+    "Heading":           { "type": "text",     "required": true, "max_chars": 100, "heading_level": 2 },
+    "Heading H1":        { "type": "text",     "required": true, "max_chars": 100, "heading_level": 1 },
+    "Heading H2":        { "type": "text",     "required": true, "max_chars": 100, "heading_level": 2 },
+    "Heading H3":        { "type": "text",     "required": true, "max_chars": 100, "heading_level": 3 },
+    "Heading H4":        { "type": "text",     "required": false, "max_chars": 100, "heading_level": 4 },
+    "Heading H5":        { "type": "text",     "required": false, "max_chars": 100, "heading_level": 5 },
+    "Heading H6":        { "type": "text",     "required": false, "max_chars": 100, "heading_level": 6 },
+
+    "Description":       { "type": "richtext", "max_chars": 400 },
+    "Excerpt":           { "type": "richtext", "max_chars": 200, "description": "Short preview of post/event content, used on listing cards." },
+
+    "Image":             { "type": "image" },
+    "Img":               { "type": "image",    "description": "Alternate name Brixies uses for some image slots." },
+    "Logo":              { "type": "image",    "label": "Logo" },
+    "Featured Image":    { "type": "image",    "label": "Featured image", "description": "Lead image on a detail page (post / event / team)." },
+    "Image caption":     { "type": "text",     "max_chars": 200, "scope": "image" },
+    "Avatar":            { "type": "image",    "label": "Headshot / Avatar" },
+    "Map":               { "type": "map",      "label": "Map location", "description": "Address or lat/long pin for an event venue or church location." },
+
+    "Card heading":      { "type": "text",     "required": true,  "max_chars": 60,  "scope": "card" },
+    "Card description":  { "type": "richtext", "max_chars": 200, "scope": "card" },
+    "Card icon":         { "type": "image",    "scope": "card" },
+    "Card image":        { "type": "image",    "scope": "card" },
+
+    "Date":              { "type": "datetime", "label": "Date", "description": "The single authored date value. Renderer composes Day date / Day week / Month & Year subcomponents from this; strategist doesn't author the parts separately (see ignored_layer_patterns for Year / Month & Year, decorations for Day date / Day week)." },
+    "Date post":         { "type": "datetime", "label": "Publish date", "scope": "post" },
+    "Post date":         { "type": "datetime", "label": "Publish date", "scope": "post" },
+    "Reading time":      { "type": "text",     "label": "Reading time", "max_chars": 20, "scope": "post", "description": "E.g., '4 min read'." },
+    "Time read":         { "type": "text",     "label": "Reading time", "max_chars": 20, "scope": "post" },
+
+    "Author":            { "type": "text",     "label": "Author name", "max_chars": 60, "scope": "author" },
+    "Author name":       { "type": "text",     "label": "Author name", "max_chars": 60, "scope": "author" },
+    "Author bio":        { "type": "richtext", "max_chars": 400, "scope": "author" },
+
+    "Category 1":        { "type": "text",     "label": "Category tag", "max_chars": 30, "scope": "taxonomy" },
+    "Category 2":        { "type": "text",     "label": "Category tag", "max_chars": 30, "scope": "taxonomy" },
+    "Category 3":        { "type": "text",     "label": "Category tag", "max_chars": 30, "scope": "taxonomy" },
+
+    "Content":           { "type": "richtext", "label": "Body content", "scope": "post", "description": "Full body content of a post / event / team detail page. Supports headings, lists, quotes, embedded images." },
+    "Post content":      { "type": "richtext", "label": "Body content", "scope": "post" },
+    "Content with bold": { "type": "richtext", "scope": "post", "description": "Body paragraph with inline bold runs. Renders the same as Content; named separately for designer reference." },
+    "Content with link": { "type": "richtext", "scope": "post", "description": "Body paragraph with inline hyperlinks." },
+
+    "Counter number":    { "type": "text",     "label": "Stat number", "max_chars": 12, "scope": "counter", "description": "The big number on a stat counter card. Allows formatting like '150k+', '2,000', '500+'." },
+    "Counter description": { "type": "richtext", "max_chars": 200, "scope": "counter", "description": "Alt-form description used by some Counter variants. Most Counters use the global `Description` slot for body copy; this entry covers the variants that named it 'Counter description' instead." },
+
+    "Alert":             { "type": "text",     "label": "Alert message", "max_chars": 100, "scope": "alert", "description": "Banner / alert content (e.g., 'Service times updated for the holiday week')." },
+    "Alert info":        { "type": "richtext", "label": "Alert details", "max_chars": 200, "scope": "alert" },
+
+    "Facebook":          { "type": "url",      "label": "Facebook profile URL", "scope": "social" },
+    "Instagram":         { "type": "url",      "label": "Instagram profile URL", "scope": "social" },
+    "Linkedin":          { "type": "url",      "label": "LinkedIn profile URL", "scope": "social" },
+    "Twitter X":         { "type": "url",      "label": "X / Twitter profile URL", "scope": "social" },
+    "Facebook share":    { "type": "cta",      "label": "Share to Facebook", "scope": "share" },
+    "Linkedin share":    { "type": "cta",      "label": "Share to LinkedIn", "scope": "share" },
+
+    "Menu Item":         { "type": "cta",      "label": "Nav link", "scope": "nav", "description": "Header / Megamenu navigation item. Carries both the label text and the destination URL (same shape as a button CTA). Strategist authors both, per the writing rules' 'every CTA carries its destination URL' rule." },
+
+    "Team Name":         { "type": "text",     "label": "Staff name", "max_chars": 60, "scope": "team", "required": true },
+    "Team position":     { "type": "text",     "label": "Role / title", "max_chars": 80, "scope": "team" },
+    "Team description":  { "type": "richtext", "label": "Bio / about", "max_chars": 400, "scope": "team" },
+
+    "Location":          { "type": "text",     "label": "Address or place name", "max_chars": 200, "description": "Street address or venue / place name. Distinct from `Map` (the visual pin). When the value is a church address, the AI copywriter prefers the `{{church_address}}` merge field." },
+
+    "Subheading":        { "type": "text",     "max_chars": 80, "description": "Sub-headline beneath the main heading. Smaller than Heading, more emphatic than Tagline." },
+    "Short description": { "type": "richtext", "max_chars": 200, "description": "Compressed body copy — used on cards / listings / hero variants where space is tight." },
+    "Accent description": { "type": "richtext", "max_chars": 300, "description": "Description with visual accent treatment (often pull-quote style)." },
+
+    "Position":          { "type": "text",     "label": "Role / title", "max_chars": 80, "scope": "team", "description": "Alt-name for Team position. Some Brixies templates label this slot 'Position' instead of 'Team position'." },
+
+    "Tag":               { "type": "text",     "label": "Tag / label", "max_chars": 30, "scope": "taxonomy", "description": "Generic tag chip — category, status, theme. May appear in card grids, post archives, filter rows." },
+    "Tag primary":       { "type": "text",     "label": "Primary tag",       "max_chars": 30, "scope": "taxonomy" },
+    "Tag primary light": { "type": "text",     "label": "Primary tag (light)", "max_chars": 30, "scope": "taxonomy" },
+
+    "Twitter share":     { "type": "cta",      "label": "Share to X / Twitter", "scope": "share" },
+    "Tiktok":            { "type": "url",      "label": "TikTok profile URL", "scope": "social" },
+    "Youtube":           { "type": "url",      "label": "YouTube channel URL", "scope": "social" },
+
+    "Buttons":           { "type": "cta",      "label": "CTA" },
+    "Button":            { "type": "cta",      "label": "CTA" },
+    "Contact":           { "type": "text",     "label": "Button label", "max_chars": 30, "scope": "button" },
+    "View all":          { "type": "cta",      "label": "'View all' link", "description": "Link to the full archive (e.g., 'View all posts')." },
+
+    "Input search":      { "type": "form-input", "control": "text",     "label": "Search input" },
+    "Input Select":      { "type": "form-input", "control": "select",   "label": "Select input" },
+    "Input Select sort": { "type": "form-input", "control": "select",   "label": "Sort input" },
+    "Checkbox":          { "type": "form-input", "control": "checkbox", "label": "Checkbox" },
+    "Checkbox info":     { "type": "form-input", "control": "checkbox", "label": "Checkbox label" },
+    "Input checkbox":    { "type": "form-input", "control": "checkbox", "label": "Checkbox input" },
+
+    "Value":             { "type": "text",     "label": "Value", "max_chars": 20, "description": "Alt-naming for a counter value or stat number when the template doesn't use 'Counter number'." },
+
+    "Video link":        { "type": "cta",      "label": "Video link CTA", "description": "URL + label for a play-video button — typically opens an embedded player or modal." },
+
+    "Breadcrumbs":       { "type": "text",     "label": "Breadcrumb trail", "scope": "post", "description": "E.g., 'Home / Events / Easter Sunday'. Auto-generated from the page hierarchy in most cases; this slot allows manual override." },
+    "Breadcrumbs link":  { "type": "url",      "scope": "breadcrumb" }
+  },
+
+  "group_container_hints": {
+    "_doc": "Layer names known to be card / repeating-group containers. The parser detects groups structurally (2+ siblings of the same data-layer at the same depth) — this list is a fallback for single-instance card-shaped containers that should be treated as groups even when only one is in the source. Add entries when a new family ships a card variant that's only shown once in the starter template.",
+
+    "containers": [
+      "Card",
+      "Card item",
+      "Card 01", "Card 02", "Card 03", "Card 04", "Card 05", "Card 06",
+      "Card bento",
+      "Card slider",
+      "Card blog",
+      "Card post",
+      "Card preview (REPLACE THIS)",
+      "Card wrapper",
+      "Feature element",
+      "Tab",
+      "Tab content",
+      "Element timeline",
+      "Active element",
+      "Accordion item",
+      "Column item",
+      "List Item",
+      "List Element",
+      "Item list",
+      "Gallery Element",
+      "Slide",
+      "Counter",
+      "Process step",
+      "Step",
+      "Step element",
+      "Share element",
+      "Taxonomy element",
+      "Menu Item"
+    ],
+    "placeholder_markers": [
+      "(REPLACE THIS)",
+      "(replace this)",
+      "(REPLACE)",
+      "(placeholder)"
+    ]
+  },
+
+  "decorations": {
+    "_doc": "Layer-name patterns (regex strings, case-insensitive) for decorative SVG / icons / shapes. These are visual decoration the strategist never authors — silently skipped by the parser. Add new patterns when the discovery report surfaces them.",
+
+    "patterns": [
+      "^Vector( \\d+| \\(.+\\))?$",
+      "^Vector \\(Stroke\\)$",
+      "^Ellipse( \\d+)?$",
+      "^Line( \\d+)?$",
+      "^Line wrapper$",
+      "^Rectangle( \\d+)?$",
+      "^Path[_ ]?\\d*$",
+      "^Union$",
+      "^Subtract$",
+      "^Icon$",
+      "^Icon close$",
+      "^Icon card$",
+      "^Icon wrapper$",
+      "^Icon play$",
+      "^Icon check$",
+      "^Icon (left|right|up|down)$",
+      "^Close icon$",
+      "^Ico wrapper$",
+      "^Menu toggle$",
+      "^Arrow( left| right)?$",
+      "^Arrows container$",
+      "^Divider$",
+      "^Mask gradient( top| bot| left| right| reference)?$",
+      "^Radius (top|botton|bottom) (left|right)$",
+      "^Background$",
+      "^Day date$",
+      "^Day week$",
+      "^[a-z][a-z0-9-]+:[a-z0-9-]+$",
+      "^nav-arrow-(down|up|left|right)$",
+      "^\\d+$"
+    ]
+  },
+
+  "wrappers": {
+    "_doc": "Layer-name patterns for layout wrappers. These are not authored, not decorated — purely structural. Children of a wrapper still get walked. Add patterns when the discovery report surfaces a new wrapper.",
+
+    "patterns": [
+      "^Container( .+)?$",
+      "^Content( container)?$",
+      "^Frame( \\d+)?$",
+      "^Inner /",
+      "^Inner contain[a-z]*$",
+      "^Inner container( .+)?$",
+      "^Wrapper",
+      "^Heading container$",
+      "^Heading wrapper$",
+      "^Tagline wrapper$",
+      "^Tagline container$",
+      "^Description wrapper$",
+      "^Card info container$",
+      "^Card bento info container$",
+      "^Card slider$",
+      "^Card wrapper$",
+      "^Card container$",
+      "^Head container$",
+      "^Header placeholder$",
+      "^Overlay offcanvas$",
+      "^Filter container$",
+      "^Filter wrapper$",
+      "^Category Select$",
+      "^Tag select$",
+      "^Sort$",
+      "^Active list$",
+      "^Grid$",
+      "^Grid container$",
+      "^Grid rows$",
+      "^Row [Gg]rid$",
+      "^Slider$",
+      "^Heading Info( \\d+)?$",
+      "^Background ",
+      "^Tab( button)?$",
+      "^Tab heading container$",
+      "^Tab Heading$",
+      "^Read more$",
+      "^Learn more$",
+      "^Features list$",
+      "^Feature list$",
+      "^Feature container$",
+      "^Button container$",
+      "^Button wrapper$",
+      "^Button icon( left| right)?$",
+      "^Content info$",
+      "^Timeline$",
+      "^List$",
+      "^List features$",
+      "^Taxonomy (container|list|info)$",
+      "^Tag taxonomy$",
+      "^Row [Ll]ist$",
+      "^Column list$",
+      "^Image wrapper$",
+      "^Image figure container$",
+      "^Image content$",
+      "^Container (left|right|top|bottom|images|tag|info|heading|buttons|top)$",
+      "^Author container$",
+      "^Info author container$",
+      "^Avatar author$",
+      "^Date (container|info|heading)$",
+      "^Day wrapper$",
+      "^Info$",
+      "^Info inner container$",
+      "^Info wrapper$",
+      "^Metadata( inner container)?$",
+      "^Share container$",
+      "^Heading share$",
+      "^Quote (container|info)$",
+      "^Counters? container$",
+      "^Counter contain$",
+      "^Counter info$",
+      "^Counter (current|total|wrapper)$",
+      "^Counters Grid$",
+      "^Count list$",
+      "^Stat (container|element|list)$",
+      "^Slider( wrapper)?$",
+      "^Controls$",
+      "^Step wrapper$",
+      "^Process step$",
+      "^Process$",
+      "^Progress$",
+      "^Accordion( Head| wrapper| container| left| right)?$",
+      "^Head accordion$",
+      "^Item$",
+      "^Item (feature|Info|list enabled|list back|list front|link|list cta)$",
+      "^Card cta$",
+      "^Card item wrapper$",
+      "^Card (info|container info|post)$",
+      "^Social (wrapper|List|Networks container)$",
+      "^Contact list$",
+      "^Menu$",
+      "^Menu (wrapper|list|column|tab list|element|item dropdown)$",
+      "^Megamenu$",
+      "^Inner containc$",
+      "^Contianer info$",
+      "^Container (left|right|top|bottom|images|tag|info|heading|buttons|head|post|avatar|cards|contact|image|wrapper|bot images)$",
+      "^Buttons container$",
+      "^Date wrapper$",
+      "^Logo wrapper$",
+      "^Image (wrapper|Grid|container|background|link|list|Avatar)$",
+      "^Avatar (wrapper|image)$",
+      "^Grid (List|images|row|post)$",
+      "^Gallery list$",
+      "^List (filter|items|items pricing|wrapper)$",
+      "^Tab content( container)?$",
+      "^Taxonomy( wrapper|container| list| info| name)?$",
+      "^Tag taxonomy$",
+      "^Sort container$",
+      "^Row (container|images)$",
+      "^Info container$",
+      "^Legal links$",
+      "^Feed$",
+      "^Gallery$",
+      "^Social proof$",
+      "^List item (back|front)$",
+      "^Way inner wrapper$",
+      "^Tag container$",
+      "^Menu container$",
+      "^Logo container$",
+      "^Contact container$",
+      "^Video wrapper$",
+      "^CTA container$",
+      "^Form wrapper$",
+      "^Form register$",
+      "^Form$",
+      "^Image \\d+ container$",
+      "^Containger images$",
+      "^Column Grid$",
+      "^Counter list$",
+      "^Social$",
+      "^Button Group( \\d+)?$",
+      "^Image \\d+$",
+      "^Botton container$",
+      "^Form container$",
+      "^Row container menu$",
+      "^Row menu$",
+      "^Banner container$",
+      "^Certifications? container$",
+      "^Certification logos$",
+      "^List contact$",
+      "^input form$"
+    ]
+  },
+
+  "section_kind_rules": {
+    "_doc": "Maps a section root layer name to a kind value (see `kinds`). Rules are evaluated top-down; first match wins. Case-insensitive matching is REQUIRED — Brixies inconsistently outputs e.g. `Feature Section` vs `Feature section`. Add new rules as families land.",
+
+    "case_insensitive": true,
+
+    "rules": [
+      { "pattern": "^Card( \\d+)?$",                                                                         "kind": "component"     },
+      { "pattern": "^(Single Event|Single Team|Single Post|Single Career|Single Sermon) Section( \\d+)?$",   "kind": "post_template" },
+      { "pattern": "^(Header|Footer|Offcanvas|Navigation|Megamenu Section|Banner Section)( \\d+)?$",         "kind": "chrome"        },
+      { "pattern": "^(Category Filter|Tag Filter|Search|Sort|Pagination|Filter)( \\d+)?$",                   "kind": "functional"    },
+      { "pattern": ".*",                                                                                      "kind": "content"       }
+    ],
+
+    "kind_notes": {
+      "embed": "NOT routed via section_kind_rules — embed blocks are not Brixies sections. See embed_block_categories for the page-block flow.",
+      "media_pending": "No families currently route to `media`. Reserved for future video-player / audio-player templates whose primary content is media. Gallery Sections route to `content` (a Gallery is authored body content, not a media-led layout).",
+      "ui_labels": "Display labels are localized in the UI layer — `chrome` shows as 'Global' (since chrome sections render on every page) and `functional` shows as 'Filter'. Schema values stay canonical."
+    }
+  },
+
+  "scoped_key_rules": {
+    "_doc": "When a slot layer (e.g. Heading) appears under one of these parents, the emitted key is suffixed with the parent's slug instead of using the bare slot key. Prevents Heading-as-filter-label from clobbering Heading-as-section-H1. Parser still applies its own structural detection — these are the named exceptions where scoping is most useful.",
+
+    "scope_under": [
+      "Filter wrapper",
+      "Active element",
+      "Card preview (REPLACE THIS)",
+      "Card",
+      "Card item",
+      "Card blog",
+      "Element timeline",
+      "Feature element",
+      "List Item",
+      "List Element",
+      "Counter",
+      "Process step",
+      "Step element",
+      "Accordion item",
+      "Column item",
+      "Slide",
+      "Taxonomy element",
+      "Author container",
+      "Quote container",
+      "Share container",
+      "Menu Item"
+    ]
+  }
+}

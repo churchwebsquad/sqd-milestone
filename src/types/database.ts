@@ -856,6 +856,356 @@ export interface StrategyDiscoveryQuestionnaire {
   [key: string]: unknown
 }
 
+/** Anchors a Website Manager engagement for a partner. Each row is
+ *  one website project — most churches have a single active project
+ *  at a time, but the explicit `web_project_id` allows multiples
+ *  (e.g., a 2026 redesign + a later micro-site) without losing the
+ *  history.
+ *
+ *  Phase 1 of the Web Manager build only consumes the basics; later
+ *  phases attach Brixies content templates, pages, and per-tool
+ *  outputs to this `id`. */
+export type WebProjectKind = 'redesign' | 'audit' | 'new_build' | string
+export type WebProjectPhase = 'intake' | 'content' | 'design' | 'dev' | 'review' | 'launched' | string
+
+export interface StrategyWebProject {
+  id: string
+  member: number
+  name: string
+  kind: WebProjectKind
+  current_phase: WebProjectPhase
+  archived: boolean
+  created_at: string
+  updated_at: string
+  created_by_employee_id: string | null
+
+  // ── Card palette (2–4 Card N template ids chosen at brand-design phase) ──
+  card_palette: string[]
+
+  // ── Chrome designation (primary header/footer + alt nav references) ──
+  primary_header_template_id: string | null
+  primary_footer_template_id: string | null
+  megamenu_template_ids: string[]
+  offcanvas_template_ids: string[]
+  nav_items: unknown[]                  // jsonb — authored nav structure
+
+  // ── Chrome auto-populated fields (footer legal blocks) ──
+  cookies_policy_text:  string | null
+  privacy_policy_text:  string | null
+  credit_text:          string | null
+  legal_notice_text:    string | null
+  terms_text:           string | null
+
+  // ── Global site snippets (merge fields available in body copy) ──
+  church_name:          string | null
+  church_short_name:    string | null
+  address:              string | null
+  city_state:           string | null
+  phone:                string | null
+  email:                string | null
+  primary_service_time: string | null
+  all_service_times:    string | null
+  denomination:         string | null
+  pastor_name:          string | null
+  social_facebook_url:  string | null
+  social_instagram_url: string | null
+  social_youtube_url:   string | null
+  social_tiktok_url:    string | null
+  social_twitter_url:   string | null
+  social_linkedin_url:  string | null
+
+  // ── Intake — optional URLs paired with file uploads (v29) ──
+  strategy_brief_notion_url:  string | null
+  external_brand_guide_url:   string | null
+
+  // ── Content Manager — Roadmap deliverable + AI pipeline state (v30) ──
+  roadmap_opening_paragraph:  string | null
+  roadmap_properties:         Record<string, unknown>
+  roadmap_milestone_overview: string | null
+  roadmap_internal_flags:     Record<string, unknown>
+  roadmap_stage:              WMRoadmapStage
+  roadmap_state:              Record<string, unknown>
+  project_writing_rules:      string | null
+  denominational_filter:      string | null
+  personas:                   WebPersona[]
+
+  [key: string]: unknown
+}
+
+/** AI pipeline stages from intake → all pages drafted. */
+export type WMRoadmapStage =
+  | 'pre_intake'
+  | 'ready'
+  | 'extracting_strategy'  | 'strategy_done'
+  | 'drafting_sitemap'     | 'sitemap_done'
+  | 'drafting_journey'     | 'journey_done'
+  | 'drafting_roadmap'     | 'roadmap_done'
+  | 'drafting_pages'       | 'all_done'
+
+/** Per-project persona pulled from the strategy brief at Stage 1.
+ *  Editable per-project. Not global. */
+export interface WebPersona {
+  id: string
+  name: string                    // 'Jordan'
+  archetype: string               // 'The Gritty Builder'
+  description: string
+  goals?: string
+  challenges?: string
+  motivations?: string
+  message?: string                // Direct address to this persona
+}
+
+/** Project-scoped reusable snippet. Text-expander style; rendered as
+ *  `{{token}}` in body copy and resolved at render. Separate from the
+ *  17 global merge fields on strategy_web_projects. */
+export interface WebProjectSnippet {
+  id: string
+  web_project_id: string
+  token: string
+  label: string
+  expansion: string
+  description: string | null
+  tags: string[]
+  source: 'manual' | 'ai_suggested' | 'extracted_from_intake'
+  used_count: number
+  archived: boolean
+  created_at: string
+  updated_at: string
+  created_by_employee_id: string | null
+}
+
+/** AI chat / interaction message persisted per project. */
+export interface WebAIMessage {
+  id: string
+  web_project_id: string
+  thread_key: string            // 'roadmap' | 'page:<slug>' | 'section:<id>' | 'global'
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+/** AI's pending proposal — surfaces in the Assistant Rail's Ideas tab. */
+export interface WebAIIdea {
+  id: string
+  web_project_id: string
+  scope: string                 // 'global' | 'page:<slug>' | 'section:<id>' | 'sitemap'
+  category: 'add_page' | 'add_section' | 'rewrite' | 'snippet' | 'reorder' | 'other'
+  title: string
+  proposal: Record<string, unknown>
+  status: 'pending' | 'accepted' | 'dismissed' | 'snoozed'
+  reason: string | null
+  created_at: string
+  updated_at: string
+  resolved_at: string | null
+  resolved_by_employee_id: string | null
+}
+
+/** Categories of files uploaded during Intake. Each maps to a section
+ *  on the Intake page; some categories also have alternate sources
+ *  (Discovery questionnaire is normally in strategy_discovery_questionnaire,
+ *  but a supplemental file can be uploaded when it isn't). */
+export type WebIntakeCategory =
+  | 'strategy_brief'
+  | 'content_collection'
+  | 'discovery_questionnaire_supplemental'
+  | 'am_handoff_supplemental'
+
+export interface WebIntakeDocument {
+  id: string
+  web_project_id: string
+  category: WebIntakeCategory
+  filename: string
+  storage_path: string
+  storage_url: string
+  file_size_bytes: number | null
+  mime_type: string | null
+  notes: string | null
+  uploaded_at: string
+  uploaded_by_employee_id: string | null
+  archived: boolean
+  [key: string]: unknown
+}
+
+/** Section-type enum (v28 bedrock).
+ *  - content       — hand-authored body sections
+ *  - chrome        — Header / Footer / Megamenu / Offcanvas / Banner
+ *  - functional    — Filter / Search / Pagination / Sort
+ *  - media         — video / audio / gallery-led sections
+ *  - embed         — first-class page block (NOT a Brixies template); see WebEmbedBlock
+ *  - component     — reusable card library (the 59 Card N variants)
+ *  - post_template — Single Event/Team/Post/Career/Sermon Section detail pages */
+export type WebTemplateKind =
+  | 'content'
+  | 'chrome'
+  | 'functional'
+  | 'media'
+  | 'embed'
+  | 'component'
+  | 'post_template'
+
+/** Field-type vocabulary the Content Manager editor knows how to render.
+ *  Expanded for the v28 slot/group model. */
+export type WebFieldType =
+  | 'text'
+  | 'richtext'
+  | 'cta'
+  | 'image'
+  | 'url'
+  | 'email'
+  | 'phone'
+  | 'datetime'
+  | 'form-input'
+  | 'map'
+  | 'boolean'
+
+/** A single slot in a template's `fields` array. Slots are leaf nodes
+ *  the strategist authors directly. */
+export interface WebSlotDef {
+  kind: 'slot'
+  key: string
+  layer_name: string
+  type: WebFieldType
+  label?: string
+  required?: boolean
+  optional?: boolean
+  max_chars?: number
+  scope?: string
+  heading_level?: 1 | 2 | 3 | 4 | 5 | 6
+  default_value?: string
+  source?: string                  // global_site_snippet, project metadata column, etc.
+  auto_populated?: boolean
+  unmapped?: boolean               // taxonomy fallback marker
+  control?: 'text' | 'select' | 'checkbox'
+  description?: string
+}
+
+/** A repeating group in a template's `fields` array. `item_schema` is
+ *  the recursive shape of each instance. `default_count` is how many
+ *  instances the Brixies starter template ships; strategists can add
+ *  or remove items freely. */
+export interface WebGroupDef {
+  kind: 'group'
+  key: string
+  layer_name: string
+  default_count: number
+  item_schema: WebFieldDef[]
+  // Component / section reference markers — emitted when the group's
+  // item shape comes from the project's card palette or a referenced
+  // chrome template rather than authored content.
+  item_template_ref?: 'from_palette' | 'section_ref'
+  referenced_template_id?: string
+  referenced_family?: string
+  referenced_kind?: WebTemplateKind
+  // Set when Brixies inconsistently numbered the sibling instances
+  // (`List Element 1`, `List Element 5`, etc.) and the parser
+  // structurally grouped them via stripped-form matching.
+  numbered_sibling_variants?: boolean
+  // Single-instance group container that the parser detected via
+  // group_container_hints rather than 2+ siblings.
+  single_instance_hint?: boolean
+}
+
+export type WebFieldDef = WebSlotDef | WebGroupDef
+
+/** One entry in the global Brixies catalog. Same row drives AI
+ *  generation, the wireframe renderer, the Figma plugin, and the
+ *  WordPress / ACF import — one schema, four downstream consumers. */
+export interface WebContentTemplate {
+  id: string
+  layer_name: string
+  family: string
+  variant: string | null
+  kind: WebTemplateKind
+  preview_image_url: string | null
+  source_html: string
+  fields: WebFieldDef[]
+  // For listing templates (Team Section, Blog Section, etc.) — the
+  // canonical family name of the paired single-* detail page. Auto-
+  // pair fires only when the project's display mode for that listing
+  // is 'wordpress' (Option 3 of the sermons-events-groups rule).
+  paired_post_template: string | null
+  paired_url_pattern: string | null
+  is_published: boolean
+  created_at: string
+  updated_at: string
+  [key: string]: unknown
+}
+
+/** A single page on a web project. The 'global' phase is an implicit
+ *  per-project page that holds chrome (header/footer) and functional
+ *  (filter/search) sections — strategist doesn't manually create it. */
+export interface WebPage {
+  id: string
+  web_project_id: string
+  name: string
+  slug: string
+  phase: 'global' | '1' | '2' | 'nav-only' | string
+  user_journey_step: number | null
+  sort_order: number
+  archived: boolean
+  created_at: string
+  updated_at: string
+  // ── Content Manager workflow status (v30) ──
+  content_status: 'draft' | 'in_review' | 'approved' | 'archived'
+  ai_drafted_at: string | null
+  ai_drafted_by_stage: string | null
+  edited_since_ai: boolean
+  [key: string]: unknown
+}
+
+/** One section instance on a page, bound to a content template. The
+ *  typed `field_values` object matches the template's `fields` —
+ *  slot values are scalar, group values are arrays of items matching
+ *  the group's `item_schema`. */
+export interface WebSection {
+  id: string
+  web_page_id: string
+  /** Brixies content template binding. NULL for user-authored freehand
+   *  sections (a TipTap-only body block with no structured slots).
+   *  AI agents MUST always set this; freehand is strictly user-facing. */
+  content_template_id: string | null
+  field_values: Record<string, unknown>
+  sort_order: number
+  content_status: 'draft' | 'in_review' | 'approved' | string
+  notes: string | null
+  created_at: string
+  updated_at: string
+  [key: string]: unknown
+}
+
+/** First-class embed block — NOT a Brixies template. Renders as a
+ *  tagged placeholder card in the wireframe (category + title +
+ *  what's-included). The developer replaces the placeholder with the
+ *  actual iframe / feed / widget code at build time. */
+export type WebEmbedCategory =
+  | 'event'
+  | 'forms'
+  | 'giving'
+  | 'groups'
+  | 'instagram'
+  | 'maps'
+  | 'prayer'
+  | 'sermon'
+  | 'youtube_playlist'
+
+export interface WebEmbedBlock {
+  id: string
+  web_project_id: string
+  web_page_id: string | null
+  category: WebEmbedCategory
+  title: string
+  whats_included: string | null
+  source_url: string | null
+  embed_code: string | null
+  source_notes: string | null
+  sort_order: number
+  archived: boolean
+  created_at: string
+  updated_at: string
+  [key: string]: unknown
+}
+
 /** A file attached to a Discovery Questionnaire (logo, brand guide,
  *  or the generated submission PDF). Stored in the private
  *  'discovery-questionnaire' Supabase Storage bucket. */
@@ -1229,6 +1579,60 @@ export interface Database {
         Row: StrategyDiscoveryQuestionnaireFile
         Insert: Partial<StrategyDiscoveryQuestionnaireFile>
         Update: Partial<StrategyDiscoveryQuestionnaireFile>
+        Relationships: []
+      }
+      strategy_web_projects: {
+        Row: StrategyWebProject
+        Insert: Partial<StrategyWebProject>
+        Update: Partial<StrategyWebProject>
+        Relationships: []
+      }
+      web_content_templates: {
+        Row: WebContentTemplate
+        Insert: Partial<WebContentTemplate>
+        Update: Partial<WebContentTemplate>
+        Relationships: []
+      }
+      web_pages: {
+        Row: WebPage
+        Insert: Partial<WebPage>
+        Update: Partial<WebPage>
+        Relationships: []
+      }
+      web_sections: {
+        Row: WebSection
+        Insert: Partial<WebSection>
+        Update: Partial<WebSection>
+        Relationships: []
+      }
+      web_embed_blocks: {
+        Row: WebEmbedBlock
+        Insert: Partial<WebEmbedBlock>
+        Update: Partial<WebEmbedBlock>
+        Relationships: []
+      }
+      web_intake_documents: {
+        Row: WebIntakeDocument
+        Insert: Partial<WebIntakeDocument>
+        Update: Partial<WebIntakeDocument>
+        Relationships: []
+      }
+      web_project_snippets: {
+        Row: WebProjectSnippet
+        Insert: Partial<WebProjectSnippet>
+        Update: Partial<WebProjectSnippet>
+        Relationships: []
+      }
+      web_ai_messages: {
+        Row: WebAIMessage
+        Insert: Partial<WebAIMessage>
+        Update: Partial<WebAIMessage>
+        Relationships: []
+      }
+      web_ai_ideas: {
+        Row: WebAIIdea
+        Insert: Partial<WebAIIdea>
+        Update: Partial<WebAIIdea>
         Relationships: []
       }
     }

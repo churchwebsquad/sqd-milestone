@@ -1,7 +1,7 @@
 {
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/(.*)", "destination": "/" }
+    { "source": "/((?!api|src|@vite|@react-refresh|@id|@fs|node_modules|assets|brand|fonts|.*\\.[a-z0-9]+$).*)", "destination": "/" }
   ],
   "crons": [
     { "path": "/api/cron/scrub-replies", "schedule": "0 19 * * 1-5" }

@@ -3,7 +3,12 @@
     "allow": [
       "Bash(npm create *)",
       "Bash(npm install *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "Bash(python3)",
+      "mcp__claude_ai_Supabase__execute_sql",
+      "Bash(grep -oh 'data-layer=\"[A-Z][^\"]*\"' \"/Users/ashleyfox/Documents/Claude/Projects/Web 2.0/Brixies/_HTML/Filter/Filter.html\" | sort -u | head -20)",
+      "Read(//Users/ashleyfox/Documents/Claude/Projects/Web 2.0/Brixies/_HTML/Filter/**)"
     ]
   }
 }

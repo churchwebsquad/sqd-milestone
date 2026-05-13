@@ -6,6 +6,14 @@ import ComingSoonPage from './components/ComingSoonPage'
 import ChurchesDashboardPage from './pages/ChurchesDashboardPage'
 import ChurchDetailPage from './pages/ChurchDetailPage'
 import DiscoveryBriefPage from './pages/DiscoveryBriefPage'
+import WebProjectsPage from './pages/web/WebProjectsPage'
+import WebProjectPage from './pages/web/WebProjectPage'
+import WebTemplatesPage from './pages/web/WebTemplatesPage'
+import WebIntakePage from './pages/web/WebIntakePage'
+import WebContentManagerPage from './pages/web/WebContentManagerPage'
+import WebDesignManagerPage from './pages/web/WebDesignManagerPage'
+import WebDevManagerPage from './pages/web/WebDevManagerPage'
+import WebReviewConsolePage from './pages/web/WebReviewConsolePage'
 import CopyReviewAdminPage from './pages/CopyReviewAdminPage'
 import BrandGuideEditorPage from './pages/BrandGuideEditorPage'
 import IntelAuditToolPage from './pages/IntelAuditToolPage'
@@ -96,6 +104,18 @@ export default function App() {
             {/* Internal brand handoff — staff-only search + per-church doc */}
             <Route path="/branding" element={<BrandingIndexPage />} />
             <Route path="/branding/:token" element={<BrandHandoffPage />} />
+
+            {/* Website Manager — projects list + per-project hub.
+                The five tool routes (intake/content/design/dev/reviews)
+                are stubs in Phase 1; each fills in over Phase 3+. */}
+            <Route path="/web" element={<WebProjectsPage />} />
+            <Route path="/web/templates" element={<WebTemplatesPage />} />
+            <Route path="/web/:projectId" element={<WebProjectPage />} />
+            <Route path="/web/:projectId/intake" element={<WebIntakePage />} />
+            <Route path="/web/:projectId/content" element={<WebContentManagerPage />} />
+            <Route path="/web/:projectId/design" element={<WebDesignManagerPage />} />
+            <Route path="/web/:projectId/dev" element={<WebDevManagerPage />} />
+            <Route path="/web/:projectId/reviews" element={<WebReviewConsolePage />} />
 
             {/* All In Journey Milestones */}
             <Route path="/pathway" element={<ComingSoonPage title="Pathway Viewer" />} />
