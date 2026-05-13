@@ -139,6 +139,8 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
   }
 
   const stage = project.roadmap_stage
+  const stage1 = (project.roadmap_state as { stage_1?: Record<string, unknown> } | null)?.stage_1
+  const hasExtraction = !!stage1 && Object.keys(stage1).some(k => k !== '_meta')
 
   return (
     <div className="p-6 md:p-8">
@@ -201,6 +203,12 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
                 ))}
               </div>
             </div>
+
+            {/* Rich extraction sections — folded inline once Stage 1 has run.
+                Read-only displays of the AI's structured output. */}
+            {hasExtraction && stage1 && (
+              <ExtractionSections data={stage1} viewMode={view} />
+            )}
 
             {/* Milestone overview */}
             <div>
@@ -301,21 +309,12 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
               </div>
             )}
 
-            {/* Stage cards */}
+            {/* Stage cards — no inline output. Stage 1's extraction is folded
+                into the Web Roadmap card above, so this section stays slim
+                (status + actions only). */}
             <div className="space-y-3">
               {STAGES.map(s => (
-                <div key={s.num}>
-                  <StageCard stage={s} currentStage={stage} />
-                  {/* Show Stage 1 extraction once available */}
-                  {s.num === 1
-                    && (stage === 'strategy_done' || STAGE_ORDER.indexOf(stage) > STAGE_ORDER.indexOf('strategy_done'))
-                    && (project.roadmap_state as Record<string, unknown>)?.stage_1
-                    && (
-                      <Stage1ExtractionView
-                        data={(project.roadmap_state as { stage_1: Record<string, unknown> }).stage_1}
-                      />
-                    )}
-                </div>
+                <StageCard key={s.num} stage={s} currentStage={stage} />
               ))}
             </div>
           </WMCard>
@@ -524,31 +523,40 @@ function ReadOnlyBlock({ value, small }: { value: string; small?: boolean }) {
   )
 }
 
-// ── Stage 1 extraction view (read-only for Phase C-1) ─────────────────
+// ── Extraction sections (folded into the Web Roadmap card) ────────────
+//
+// Read-only displays of the rich AI output that doesn't fit in the
+// single-line "strategy properties" grid above: audience breakdown,
+// voice do/don't lists, personas, x-factor messaging, project goals
+// split, sitemap signals (staff only), sources used + conflicts
+// resolved (staff only).
 
-function Stage1ExtractionView({ data }: { data: Record<string, unknown> }) {
-  const audience          = data.audience          as Record<string, unknown> | undefined
-  const voice             = data.voice_characteristics as Record<string, unknown> | undefined
-  const personas          = data.personas          as Array<Record<string, unknown>> | undefined
-  const xFactor           = data.x_factor          as Record<string, unknown> | undefined
-  const goals             = data.project_goals     as Record<string, unknown> | undefined
-  const sitemapSignals    = data.sitemap_signals   as Record<string, unknown> | undefined
-  const sources           = data.sources_used      as Record<string, unknown> | undefined
-  const meta              = data._meta             as Record<string, unknown> | undefined
+function ExtractionSections({
+  data, viewMode,
+}: { data: Record<string, unknown>; viewMode: ViewMode }) {
+  const audience       = data.audience            as Record<string, unknown> | undefined
+  const voice          = data.voice_characteristics as Record<string, unknown> | undefined
+  const personas       = data.personas             as Array<Record<string, unknown>> | undefined
+  const xFactor        = data.x_factor             as Record<string, unknown> | undefined
+  const goals          = data.project_goals        as Record<string, unknown> | undefined
+  const sitemapSignals = data.sitemap_signals      as Record<string, unknown> | undefined
+  const sources        = data.sources_used         as Record<string, unknown> | undefined
+  const meta           = data._meta                as Record<string, unknown> | undefined
+
+  const isStaff = viewMode === 'staff'
 
   return (
-    <div className="mt-2 ml-9 mb-1 rounded-md border border-wm-ai-border bg-wm-ai-bg/40 p-4 space-y-4">
+    <div className="space-y-5 pt-2 border-t border-wm-border">
       <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">
-        <Sparkles size={11} /> Strategy extraction
+        <Sparkles size={11} /> AI extraction
         {meta?.extracted_at && (
           <span className="text-wm-text-subtle font-normal normal-case">· {new Date(meta.extracted_at as string).toLocaleString()}</span>
         )}
       </div>
 
-      {/* Audience */}
+      {/* Audience details */}
       {audience && (
-        <ExtractionSection title="Audience">
-          {audience.summary && <p className="text-sm text-wm-text leading-relaxed">{String(audience.summary)}</p>}
+        <ExtractionSection title="Audience details">
           <KVGrid pairs={[
             ['Primary segments', formatList(audience.primary_segments)],
             ['Age distribution', String(audience.age_distribution ?? '')],
@@ -558,19 +566,12 @@ function Stage1ExtractionView({ data }: { data: Record<string, unknown> }) {
         </ExtractionSection>
       )}
 
-      {/* Voice */}
+      {/* Voice details */}
       {voice && (
-        <ExtractionSection title="Voice characteristics">
-          {voice.top_attributes && (
-            <div className="flex items-center gap-1.5 flex-wrap mb-2">
-              {(voice.top_attributes as string[]).map((a, i) => (
-                <span key={i} className="text-[11px] font-semibold text-wm-accent-strong bg-wm-ai-bg border border-wm-ai-border rounded-full px-2 py-0.5">{a}</span>
-              ))}
-            </div>
-          )}
-          {voice.description && <p className="text-sm text-wm-text leading-relaxed">{String(voice.description)}</p>}
+        <ExtractionSection title="Voice guidance">
+          {voice.description && <p className="text-sm text-wm-text leading-relaxed mb-3">{String(voice.description)}</p>}
           {(voice.tone_examples_do || voice.tone_examples_dont) && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {voice.tone_examples_do && (
                 <ExampleList tone="success" label="Do" items={voice.tone_examples_do as string[]} />
               )}
@@ -600,21 +601,18 @@ function Stage1ExtractionView({ data }: { data: Record<string, unknown> }) {
         </ExtractionSection>
       )}
 
-      {/* X-factor */}
-      {xFactor && (
-        <ExtractionSection title="X-factor">
-          {xFactor.top_attribute && (
-            <p className="text-[16px] font-bold text-wm-text mb-1">{String(xFactor.top_attribute)}</p>
-          )}
-          {xFactor.messaging_focus && (
-            <p className="text-sm text-wm-text-muted leading-relaxed">{String(xFactor.messaging_focus)}</p>
-          )}
+      {/* X-factor messaging focus (the top_attribute is already in the
+          editable Strategy properties grid above — only the longer
+          messaging focus needs surfacing here) */}
+      {xFactor?.messaging_focus && (
+        <ExtractionSection title="X-factor messaging">
+          <p className="text-sm text-wm-text-muted leading-relaxed">{String(xFactor.messaging_focus)}</p>
         </ExtractionSection>
       )}
 
-      {/* Project goals */}
+      {/* Project goals split into Identity / Connection / Growth */}
       {goals && (
-        <ExtractionSection title="Project goals">
+        <ExtractionSection title="Project goals (detail)">
           <KVGrid pairs={[
             ['Identity',  String(goals.identity ?? '')],
             ['Connection', String(goals.connection ?? '')],
@@ -623,9 +621,9 @@ function Stage1ExtractionView({ data }: { data: Record<string, unknown> }) {
         </ExtractionSection>
       )}
 
-      {/* Sitemap signals */}
-      {sitemapSignals && (
-        <ExtractionSection title="Sitemap signals (feed Stage 2)">
+      {/* Sitemap signals — staff only (feeds Stage 2) */}
+      {isStaff && sitemapSignals && (
+        <ExtractionSection title="Sitemap signals (feeds Stage 2)">
           <KVGrid pairs={[
             ['Sermon blog requested', sitemapSignals.sermon_blog_requested ? 'Yes' : 'No'],
             ['Sermons display mode',  formatDisplayMode(sitemapSignals.sermons_display_mode as string)],
@@ -637,8 +635,8 @@ function Stage1ExtractionView({ data }: { data: Record<string, unknown> }) {
         </ExtractionSection>
       )}
 
-      {/* Sources */}
-      {sources && (
+      {/* Sources used + conflicts — staff only */}
+      {isStaff && sources && (
         <ExtractionSection title="Sources used">
           <KVGrid pairs={[
             ['Strategy brief',          String(sources.strategy_brief ?? '—')],
@@ -660,7 +658,8 @@ function Stage1ExtractionView({ data }: { data: Record<string, unknown> }) {
         </ExtractionSection>
       )}
 
-      {meta && (
+      {/* Provenance footer — staff only */}
+      {isStaff && meta && (
         <div className="text-[10px] text-wm-text-subtle pt-2 border-t border-wm-border">
           Model: <code>{String(meta.model)}</code>
           {meta.usage && typeof meta.usage === 'object' && (
