@@ -60,7 +60,7 @@ export async function fetchIntakeStatus(
       .order('uploaded_at', { ascending: false }),
     supabase
       .from('strategy_account_progress')
-      .select('member, handoff_web_form, updated_at')
+      .select('member, handoff_web_form')
       .eq('member', member)
       .maybeSingle(),
     supabase
@@ -91,7 +91,7 @@ export async function fetchIntakeStatus(
     key: 'am_handoff',
     is_hard_stop: false,
     received: dbHandoffPresent || amSupplemental.length > 0,
-    received_at: (accountRes.data as { updated_at?: string } | null)?.updated_at ?? amSupplemental[0]?.uploaded_at ?? null,
+    received_at: amSupplemental[0]?.uploaded_at ?? null,
     source_url: null,
     source_label: dbHandoffPresent ? 'AM web-handoff form' : (amSupplemental.length > 0 ? 'Supplemental upload' : null),
     uploaded_files: amSupplemental,
