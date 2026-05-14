@@ -220,6 +220,16 @@ export default async function handler(req: any, res: any) {
         }),
       },
       toolChoice: { type: 'tool', toolName: 'submit_sitemap' },
+      // Extended thinking: give Opus a reasoning budget before emitting.
+      // For voice-critical decisions (nav vocabulary, categorization),
+      // this is the closest thing to "make the model actually think
+      // before pattern-matching." 5K thinking tokens adds ~30s of
+      // latency but materially improves instruction following.
+      providerOptions: {
+        anthropic: {
+          thinking: { type: 'enabled', budgetTokens: 5000 },
+        } as any,
+      },
     })
     usage = {
       input_tokens: result.usage?.inputTokens,
@@ -241,9 +251,10 @@ export default async function handler(req: any, res: any) {
 
     // Post-emit integrity audit. Catches model failure modes the prompt
     // alone can't enforce: dropped pages on a redo, empty coverage audit,
-    // orphaned pages, duplicate slugs. Surface in cs_flags so the
-    // strategist sees what went wrong without losing the draft.
-    raw = applyIntegrityAudit(raw, previousStage2, !!redoContext)
+    // orphaned pages, duplicate slugs, voice-contradicting labels.
+    // Surfaces in cs_flags so the strategist sees what went wrong without
+    // losing the draft.
+    raw = applyIntegrityAudit(raw, previousStage2, !!redoContext, stage1)
 
     toolResult = raw
   } catch (err: any) {
@@ -304,6 +315,43 @@ function buildSystemPrompt(): string {
 4. **No duplicate slugs in pages[] or in nav.** Two entries with the same slug (e.g. both pointing to /visit) = failure. Each page has exactly one slug, and that slug appears exactly once in the nav.
 
 5. **Required pages can't disappear.** Homepage, Plan a Visit / Sundays, Sermons / Messages, Give — these four are mandatory Phase 1. Missing any of them = failure.
+
+# DO NOT REPEAT THESE FAILURE MODES — actual past mistakes
+
+These are real failure modes from prior runs. The pattern is: pattern-matching nav vocabulary without actually checking it against the church's voice. Read carefully.
+
+**Failure mode 1: "Watch" dropdown for a church whose voice says "you don't watch."**
+
+Stage 1's voice for one church included this tone example:
+> "This isn't a church you watch. It's a church you build with."
+
+The model emitted: \`Watch\` as a header_nav dropdown, with children { Messages, Blog, Events }.
+
+This is THREE failures stacked:
+- "Watch" directly contradicts a quoted voice example. The church explicitly says "isn't a church you watch." Using "Watch" as a top-level nav label is voice violation.
+- "Blog" can't be watched. Categorical error — Blog is a reading surface, not a video surface. Don't nest content types you can't perform the parent verb on.
+- "Events" can't be watched. Same — events are attended, not watched.
+
+Correct approach for that church:
+- "Messages" as a standalone top-level page (sermon archive). NOT under a "Watch" or "Listen" parent.
+- "Events" under "Community" or as standalone (FOMO signal in AM handoff).
+- "Blog" / "Sermon Blog" in footer or under About.
+
+**Failure mode 2: Generic "Ministries" page consolidating distinct audiences.**
+
+When the church serves Kids + Teens + Adults + Care as distinct audiences, the model has consolidated them into a single generic "Ministries" page. This drops audience context. Each group has different parent concerns, different content needs.
+
+Correct: separate Kids, Teens, Adults, Care pages. Group them under a "Community" or "Ministries" dropdown — but the dropdown contains DISTINCT PAGES, not one generic page.
+
+**Failure mode 3: Voice-contradicting label even after strategist objected.**
+
+Strategist's prior redo explicitly called out: "Listen" contradicts the voice 'you build with.' Model swapped "Listen" → "Watch" — same failure with a different verb. The lesson is broader: the voice claim "you don't [verb]" rules out THAT VERB AND ALL ITS PASSIVE COUSINS as nav labels.
+
+# The check that prevents these failures
+
+Before you pick any nav vocabulary, walk Stage 1's voice tone_examples_do. Look for sentences shaped like "X isn't Y" or "not Z" or "doesn't [verb]". Those are HARD constraints on nav vocabulary. If "this isn't a church you watch" is in tone_examples_do, then "Watch" is banned as a nav label, full stop. Same for any synonyms ("View", "Stream") that imply the same passive consumption.
+
+This is the work the model has historically skipped. Don't skip it.
 
 You receive Stage 1's strategic foundation (audience, voice, personas, x-factor, project goals, sitemap signals, sources) plus the original intake sources, and you propose a LEAN strategic sitemap.
 
@@ -718,7 +766,7 @@ const SITEMAP_TOOL = {
   description: 'Submit the proposed strategic sitemap for this church website project.',
   input_schema: {
     type: 'object' as const,
-    required: ['nav_strategy', 'nav_voice_register', 'nav_pattern', 'phase_summary', 'pages', 'header_nav', 'footer_nav', 'content_coverage_audit', 'sources_used'],
+    required: ['nav_strategy', 'nav_voice_register', 'nav_pattern', 'voice_audit', 'phase_summary', 'pages', 'header_nav', 'footer_nav', 'content_coverage_audit', 'sources_used'],
     properties: {
       nav_strategy: {
         type: 'string',
@@ -731,6 +779,38 @@ const SITEMAP_TOOL = {
       nav_pattern: {
         type: 'string',
         enum: ['flat', 'grouped_dropdowns', 'thematic_groups', 'thematic_verbs', 'offcanvas', 'megamenu'],
+      },
+      voice_audit: {
+        type: 'object',
+        description: 'REQUIRED reasoning trace. Forces explicit justification of nav vocabulary against Stage 1 voice. Skipping this = failure.',
+        required: ['banned_terms', 'header_label_checks'],
+        properties: {
+          banned_terms: {
+            type: 'array',
+            description: 'Words/phrases Stage 1 voice rules out as nav labels. Extracted from tone_examples_do statements like "this isn\'t a church you watch" → "watch" is banned. Include synonyms (Watch / View / Stream). At least 1 entry if voice has any "isn\'t / doesn\'t / not" pattern.',
+            items: {
+              type: 'object',
+              required: ['term', 'source'],
+              properties: {
+                term: { type: 'string', description: 'The banned word/phrase, e.g. "Watch".' },
+                source: { type: 'string', description: 'The Stage 1 quote that bans it, e.g. "This isn\'t a church you watch."' },
+              },
+            },
+          },
+          header_label_checks: {
+            type: 'array',
+            description: 'For EVERY header_nav top-level item (page or group), one row justifying the label against Stage 1.',
+            items: {
+              type: 'object',
+              required: ['label', 'voice_justification', 'passes_ban_check'],
+              properties: {
+                label: { type: 'string', description: 'The header_nav item label as you emitted it.' },
+                voice_justification: { type: 'string', description: 'Which Stage 1 voice attribute or x_factor supports this label. If you can\'t justify it, change the label before emitting.' },
+                passes_ban_check: { type: 'boolean', description: 'true if this label is NOT in banned_terms and doesn\'t contradict any tone_examples_do statement. If false, change the label.' },
+              },
+            },
+          },
+        },
       },
       phase_summary: {
         type: 'object',
@@ -907,11 +987,60 @@ function applyIntegrityAudit(
   raw: Record<string, unknown>,
   previousStage2: Record<string, unknown> | null | undefined,
   isRedo: boolean,
+  stage1: Record<string, unknown>,
 ): Record<string, unknown> {
   const violations: string[] = []
 
   const pages = Array.isArray(raw.pages) ? raw.pages as Array<Record<string, unknown>> : []
   const pageSlugs = new Set(pages.map(p => String(p.slug ?? '')).filter(Boolean))
+
+  // 0. Voice-contradicting nav labels. Extract "isn't a church you X"
+  // / "not a Y" / "doesn't Z" patterns from tone_examples_do and ban
+  // those verbs/nouns as nav labels.
+  const voiceChar = stage1.voice_characteristics as Record<string, unknown> | undefined
+  const toneDo = Array.isArray(voiceChar?.tone_examples_do) ? voiceChar!.tone_examples_do as string[] : []
+  const bannedTerms = new Set<string>()
+  const banContext: Record<string, string> = {}
+  for (const example of toneDo) {
+    // Match patterns like "isn't a church you watch", "not a place to listen", "doesn't preach"
+    const patterns = [
+      /isn't a (?:church|place) (?:you |where (?:you )?)?(\w+)/gi,
+      /not a (?:church|place) (?:you |where (?:you )?)?(\w+)/gi,
+      /doesn't (?:just )?(\w+)/gi,
+      /this isn't [\w\s]*?(?:you |to )(\w+)/gi,
+    ]
+    for (const rx of patterns) {
+      let m: RegExpExecArray | null
+      while ((m = rx.exec(example)) !== null) {
+        const verb = m[1].toLowerCase()
+        if (verb.length > 2 && !COMMON_WORDS.has(verb)) {
+          bannedTerms.add(verb)
+          banContext[verb] = example
+        }
+      }
+    }
+  }
+  // Synonym groups — if "watch" is banned, also catch "view" / "stream" / "listen-passive"
+  const synonymGroups: Record<string, string[]> = {
+    watch: ['view', 'stream', 'tune'],
+    listen: ['hear'],
+  }
+  for (const banned of [...bannedTerms]) {
+    if (synonymGroups[banned]) {
+      for (const syn of synonymGroups[banned]) {
+        bannedTerms.add(syn)
+        banContext[syn] = `Synonym of "${banned}" — ${banContext[banned]}`
+      }
+    }
+  }
+  if (bannedTerms.size > 0) {
+    const headerLabels = collectLabels(raw.header_nav as Array<Record<string, unknown>> | undefined)
+    const violatingLabels = headerLabels.filter(l => bannedTerms.has(l.toLowerCase()))
+    if (violatingLabels.length > 0) {
+      const offenders = violatingLabels.map(l => `"${l}" (banned by: ${banContext[l.toLowerCase()] ?? '?'})`).join('; ')
+      violations.push(`Nav label(s) contradict Stage 1 voice: ${offenders}. The voice tone_examples_do explicitly rules these terms out.`)
+    }
+  }
 
   // 1. Dropped pages on a redo
   if (isRedo && previousStage2) {
@@ -978,6 +1107,27 @@ function applyIntegrityAudit(
       hard_blockers: [...violations.map(v => `[Auto-detected] ${v}`), ...existingBlockers],
     },
   }
+}
+
+// Words that show up in "isn't a church you ___" patterns but aren't real
+// constraints — skip them.
+const COMMON_WORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'be', 'to', 'of',
+  'in', 'on', 'at', 'by', 'for', 'with', 'as', 'into', 'just', 'about',
+])
+
+function collectLabels(items: Array<Record<string, unknown>> | undefined): string[] {
+  if (!Array.isArray(items)) return []
+  const out: string[] = []
+  for (const it of items) {
+    if (it.label && typeof it.label === 'string') out.push(it.label)
+    if (Array.isArray(it.children)) {
+      for (const child of it.children as Array<Record<string, unknown>>) {
+        if (child.label && typeof child.label === 'string') out.push(child.label)
+      }
+    }
+  }
+  return out
 }
 
 function collectSlugs(items: Array<Record<string, unknown>> | undefined): string[] {
