@@ -79,23 +79,16 @@ export default function WebContentManagerPage() {
 
   useEffect(() => { void loadProject() }, [projectId])
 
-  // Poll while an agent is running. Vercel serverless functions hold the
-  // request connection but the browser doesn't know when the DB write
-  // lands — without polling, the strategist would have to manually
-  // refresh and risk losing their place.
+  // Always poll while the project page is open. The previous "poll only
+  // when drafting_*" gate failed because the client doesn't know the
+  // server-side stage flipped until it polls — chicken-and-egg. A 5s
+  // interval is lightweight (one row read) and catches every state
+  // transition (agent start, agent finish, DB write).
   useEffect(() => {
-    if (!project) return
-    const isAgentRunning = (
-      project.roadmap_stage === 'extracting_strategy' ||
-      project.roadmap_stage === 'drafting_sitemap' ||
-      project.roadmap_stage === 'drafting_journey' ||
-      project.roadmap_stage === 'drafting_roadmap' ||
-      project.roadmap_stage === 'drafting_pages'
-    )
-    if (!isAgentRunning) return
+    if (!projectId) return
     const interval = setInterval(() => { void loadProject(true) }, 5000)
     return () => clearInterval(interval)
-  }, [project?.roadmap_stage, projectId])
+  }, [projectId])
 
   if (loading) {
     return (

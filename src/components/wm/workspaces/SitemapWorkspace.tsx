@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   GitBranch, Eye, Edit3, Plus, Archive,
-  Layout, FileText, MoreHorizontal, Sparkles, CheckCircle2, RotateCw, ChevronDown, ChevronRight,
+  Layout, FileText, MoreHorizontal, Sparkles, CheckCircle2, RotateCw, ChevronDown, ChevronRight, Loader2,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { WMSegmentedToggle } from '../SegmentedToggle'
@@ -539,7 +539,31 @@ function SitemapProposalBanner({
   const [redoing, setRedoing] = useState(false)
   const [redoMsg, setRedoMsg] = useState<string | null>(null)
 
-  if (!hasData) return null
+  // Show a dedicated banner while the agent is mid-flight. Two signals:
+  // local redoing state (this component's fetch is open) OR project
+  // roadmap_stage shows the agent is drafting. Either flips the UI.
+  const agentRunning = redoing || project.roadmap_stage === 'drafting_sitemap'
+
+  if (!hasData && !agentRunning) return null
+
+  if (agentRunning) {
+    return (
+      <WMCard padding="loose" className="mb-5 border-wm-ai-border bg-wm-ai-bg/40">
+        <div className="flex items-center gap-3">
+          <Loader2 size={16} className="text-wm-accent-strong animate-spin shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-semibold text-wm-text">
+              {redoing ? 'Refining sitemap proposal…' : 'AI drafting sitemap…'}
+            </p>
+            <p className="text-[12px] text-wm-text-muted mt-0.5">
+              Opus is reading your previous proposal + feedback and applying changes.
+              This usually takes 60–180s. You can leave this tab — progress is auto-saved.
+            </p>
+          </div>
+        </div>
+      </WMCard>
+    )
+  }
 
   const handleCommit = async () => {
     if (!confirm('Create web_pages records from the AI proposal? Existing pages with the same slug will be skipped.')) return

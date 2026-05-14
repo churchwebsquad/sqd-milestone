@@ -238,6 +238,13 @@ export default async function handler(req: any, res: any) {
     ) {
       raw = raw.sitemap as Record<string, unknown>
     }
+
+    // Post-emit integrity audit. Catches model failure modes the prompt
+    // alone can't enforce: dropped pages on a redo, empty coverage audit,
+    // orphaned pages, duplicate slugs. Surface in cs_flags so the
+    // strategist sees what went wrong without losing the draft.
+    raw = applyIntegrityAudit(raw, previousStage2, !!redoContext)
+
     toolResult = raw
   } catch (err: any) {
     // Roll back so user can retry
@@ -284,7 +291,21 @@ export default async function handler(req: any, res: any) {
 // ── System prompt ─────────────────────────────────────────────────────
 
 function buildSystemPrompt(): string {
-  return `You are the Sitemap Architect for Church Media Squad's Content Manager pipeline. Stage 2 of 5. You receive Stage 1's strategic foundation (audience, voice, personas, x-factor, project goals, sitemap signals, sources) plus the original intake sources, and you propose a LEAN strategic sitemap.
+  return `You are the Sitemap Architect for Church Media Squad's Content Manager pipeline. Stage 2 of 5.
+
+# CORE INVARIANTS — VIOLATING THESE IS FAILURE
+
+1. **Preservation on redo (most important).** When a "Previous proposal" block is included in user input, that proposal is LOCKED. Every page, slug, nav item, dropdown, footer section, vocabulary decision, AEO keyword, and audit row from the previous proposal MUST appear in your new output EXACTLY as before, unless the strategist's feedback explicitly names it for change. Test: walk every page in your output and ask "did the feedback name this for change?" If no, the page MUST match the previous proposal byte-for-byte. Dropping, renaming, consolidating, or moving any unmentioned item = failure.
+
+2. **content_coverage_audit must be populated and exhaustive.** Empty array = failure. Every ministry name, service time, program, staff role, event series, external platform from the content collection gets one row.
+
+3. **Every page must appear in header_nav OR footer_nav.** Orphaning a page = failure. Walk every page in pages[] and verify it shows up in one of the two nav structures.
+
+4. **No duplicate slugs in pages[] or in nav.** Two entries with the same slug (e.g. both pointing to /visit) = failure. Each page has exactly one slug, and that slug appears exactly once in the nav.
+
+5. **Required pages can't disappear.** Homepage, Plan a Visit / Sundays, Sermons / Messages, Give — these four are mandatory Phase 1. Missing any of them = failure.
+
+You receive Stage 1's strategic foundation (audience, voice, personas, x-factor, project goals, sitemap signals, sources) plus the original intake sources, and you propose a LEAN strategic sitemap.
 
 # Scope (important)
 Your output is the SITEMAP only:
@@ -866,6 +887,124 @@ const SITEMAP_TOOL = {
       },
     },
   },
+}
+
+// ── Post-emit integrity audit ────────────────────────────────────────
+
+/**
+ * Run sanity checks on the model's output. Surfaces violations in
+ * cs_flags.hard_blockers so the strategist sees what the model failed
+ * to enforce, without losing the partial draft.
+ *
+ * Checks:
+ *  - Redo: previous pages that vanished without being named in redo
+ *  - Empty coverage audit
+ *  - Pages orphaned from both header_nav and footer_nav
+ *  - Duplicate slugs
+ *  - Mandatory Phase 1 pages missing
+ */
+function applyIntegrityAudit(
+  raw: Record<string, unknown>,
+  previousStage2: Record<string, unknown> | null | undefined,
+  isRedo: boolean,
+): Record<string, unknown> {
+  const violations: string[] = []
+
+  const pages = Array.isArray(raw.pages) ? raw.pages as Array<Record<string, unknown>> : []
+  const pageSlugs = new Set(pages.map(p => String(p.slug ?? '')).filter(Boolean))
+
+  // 1. Dropped pages on a redo
+  if (isRedo && previousStage2) {
+    const prevPages = Array.isArray(previousStage2.pages) ? previousStage2.pages as Array<Record<string, unknown>> : []
+    const dropped = prevPages
+      .map(p => ({ slug: String(p.slug ?? ''), name: String(p.name ?? '') }))
+      .filter(p => p.slug && !pageSlugs.has(p.slug))
+    if (dropped.length > 0) {
+      violations.push(
+        `Pages from the previous proposal that the redo dropped without being mentioned in the strategist's feedback: ${dropped.map(p => `${p.name} (${p.slug})`).join(', ')}. Verify these were intentional removals — if not, redo with feedback that preserves them.`,
+      )
+    }
+  }
+
+  // 2. Empty coverage audit
+  const audit = Array.isArray(raw.content_coverage_audit) ? raw.content_coverage_audit as Array<unknown> : []
+  if (audit.length === 0) {
+    violations.push('content_coverage_audit is empty. The agent skipped the required audit pass — content collection items may have been dropped silently.')
+  }
+
+  // 3. Orphaned pages (not in header or footer)
+  const headerSlugs = collectSlugs(raw.header_nav as Array<Record<string, unknown>> | undefined)
+  const footerSlugs = collectFooterSlugs(raw.footer_nav as Array<Record<string, unknown>> | undefined)
+  const navSlugs = new Set([...headerSlugs, ...footerSlugs])
+  const orphans = pages.filter(p => p.slug && !navSlugs.has(String(p.slug))).map(p => `${p.name} (${p.slug})`)
+  if (orphans.length > 0) {
+    violations.push(`Pages not reachable from header_nav or footer_nav: ${orphans.join(', ')}. Every page must have a nav home.`)
+  }
+
+  // 4. Duplicate slugs in pages
+  const slugCounts = new Map<string, number>()
+  pages.forEach(p => {
+    const s = String(p.slug ?? '')
+    if (s) slugCounts.set(s, (slugCounts.get(s) ?? 0) + 1)
+  })
+  const dupes = Array.from(slugCounts.entries()).filter(([, count]) => count > 1)
+  if (dupes.length > 0) {
+    violations.push(`Duplicate slugs in pages[]: ${dupes.map(([s, n]) => `/${s} (×${n})`).join(', ')}.`)
+  }
+
+  // 5. Mandatory Phase 1 pages — match by likely name patterns
+  const checkPage = (patterns: RegExp[], required: string) => {
+    const found = pages.some(p => {
+      const name = String(p.name ?? '').toLowerCase()
+      const slug = String(p.slug ?? '').toLowerCase()
+      return patterns.some(rx => rx.test(name) || rx.test(slug))
+    })
+    if (!found) violations.push(`Mandatory Phase 1 page missing: ${required}.`)
+  }
+  checkPage([/^home$|homepage/], 'Homepage')
+  checkPage([/visit|sunday|first.?time|new.?here/], 'Plan a Visit / Sundays equivalent')
+  checkPage([/sermon|message|listen|watch/], 'Sermons / Messages equivalent')
+  checkPage([/give|generosity|tith/], 'Give / Generosity equivalent')
+
+  if (violations.length === 0) return raw
+
+  // Inject violations into cs_flags.hard_blockers so the strategist sees them
+  const existingFlags = raw.cs_flags as Record<string, unknown> | undefined
+  const existingBlockers = Array.isArray(existingFlags?.hard_blockers) ? existingFlags!.hard_blockers as string[] : []
+  return {
+    ...raw,
+    cs_flags: {
+      ...(existingFlags ?? {}),
+      hard_blockers: [...violations.map(v => `[Auto-detected] ${v}`), ...existingBlockers],
+    },
+  }
+}
+
+function collectSlugs(items: Array<Record<string, unknown>> | undefined): string[] {
+  if (!Array.isArray(items)) return []
+  const out: string[] = []
+  for (const it of items) {
+    if (it.slug && typeof it.slug === 'string') out.push(it.slug)
+    if (Array.isArray(it.children)) {
+      for (const child of it.children as Array<Record<string, unknown>>) {
+        if (child.slug && typeof child.slug === 'string') out.push(child.slug)
+      }
+    }
+  }
+  return out
+}
+
+function collectFooterSlugs(sections: Array<Record<string, unknown>> | undefined): string[] {
+  if (!Array.isArray(sections)) return []
+  const out: string[] = []
+  for (const section of sections) {
+    if (Array.isArray(section.items)) {
+      for (const item of section.items as Array<Record<string, unknown>>) {
+        if (item.slug && typeof item.slug === 'string') out.push(item.slug)
+      }
+    }
+  }
+  return out
 }
 
 // ── Mock sitemap (used when ?mock=true) ──────────────────────────────
