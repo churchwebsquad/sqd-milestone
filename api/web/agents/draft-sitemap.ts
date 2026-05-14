@@ -220,16 +220,10 @@ export default async function handler(req: any, res: any) {
         }),
       },
       toolChoice: { type: 'tool', toolName: 'submit_sitemap' },
-      // Extended thinking: give Opus a reasoning budget before emitting.
-      // For voice-critical decisions (nav vocabulary, categorization),
-      // this is the closest thing to "make the model actually think
-      // before pattern-matching." 5K thinking tokens adds ~30s of
-      // latency but materially improves instruction following.
-      providerOptions: {
-        anthropic: {
-          thinking: { type: 'enabled', budgetTokens: 5000 },
-        } as any,
-      },
+      // Note: extended thinking (providerOptions.anthropic.thinking)
+      // is incompatible with forced tool_choice: 'tool'. The voice_audit
+      // required field + post-emit integrity audit are the substitute
+      // reasoning forcing mechanisms.
     })
     usage = {
       input_tokens: result.usage?.inputTokens,
