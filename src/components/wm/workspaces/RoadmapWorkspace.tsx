@@ -140,6 +140,72 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
     }
   }
 
+  /** Clear a stage's output and revert roadmap_stage to the previous gate.
+   *  No agent call — just rolls the project state back. */
+  const handleRollback = async (stageNum: number) => {
+    const prevDoneKey = STAGE_PREV_DONE[stageNum] // e.g. stage 2 → 'strategy_done', stage 1 → 'ready'
+    const stateKey = `stage_${stageNum}` as const
+    if (!confirm(`Roll back to "${prevDoneKey}"? Stage ${stageNum}'s AI output will be cleared.`)) return
+    setAdvancing(true)
+    setAgentError(null)
+    try {
+      const newState = { ...(project.roadmap_state as Record<string, unknown> ?? {}) }
+      delete newState[stateKey]
+      await supabase
+        .from('strategy_web_projects')
+        .update({ roadmap_stage: prevDoneKey, roadmap_state: newState })
+        .eq('id', project.id)
+      await onChange()
+    } finally {
+      setAdvancing(false)
+    }
+  }
+
+  /** Clear a stage's output and re-fire the agent fresh. */
+  const handleRerun = async (stageNum: number, redoContext?: string) => {
+    const stateKey = `stage_${stageNum}` as const
+    const prevDoneKey = STAGE_PREV_DONE[stageNum]
+    setAdvancing(true)
+    setAgentError(null)
+    try {
+      // Clear stale output + roll back to previous gate so the agent's
+      // pre-flight + stage-flip logic works clean.
+      const newState = { ...(project.roadmap_state as Record<string, unknown> ?? {}) }
+      delete newState[stateKey]
+      await supabase
+        .from('strategy_web_projects')
+        .update({ roadmap_stage: prevDoneKey, roadmap_state: newState })
+        .eq('id', project.id)
+      await onChange()
+
+      // Re-fire the appropriate agent
+      if (stageNum === 1) {
+        const { error } = await extractStrategy(project.id, redoContext)
+        if (error) { setAgentError(error); await onChange(); return }
+      } else if (stageNum === 2) {
+        const { error } = await draftSitemap(project.id, redoContext)
+        if (error) { setAgentError(error); await onChange(); return }
+      }
+      await onChange()
+    } catch (e) {
+      setAgentError({
+        error: `Couldn't re-run stage ${stageNum}. ${e instanceof Error ? e.message : String(e)}.`,
+      })
+    } finally {
+      setAdvancing(false)
+    }
+  }
+
+  /** Open a simple prompt for redo context, then call handleRerun. */
+  const handleRedoWithChanges = async (stageNum: number) => {
+    const context = window.prompt(
+      `What should differ when Stage ${stageNum} re-runs? Be specific. ` +
+      `(Leave blank to cancel.)`,
+    )
+    if (!context || !context.trim()) return
+    await handleRerun(stageNum, context.trim())
+  }
+
   /** Approve Stage N and immediately kick off Stage N+1. */
   const handleAdvance = async (fromStage: WMRoadmapStage, mock = false) => {
     setAdvancing(true)
@@ -356,9 +422,9 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
               </div>
             )}
 
-            {/* Stage cards — no inline output. Stage N's structured output is
-                folded into the Web Roadmap card above (Stage 1 today; Stage
-                2's sitemap section landing next). */}
+            {/* Stage cards — slim status + actions. Stage N's structured
+                output lives in its workspace tab (Stage 1 in Roadmap card
+                above; Stage 2 in the Sitemap & Strategy tab). */}
             <div className="space-y-3">
               {STAGES.map(s => (
                 <StageCard
@@ -368,6 +434,9 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
                   advancing={advancing}
                   onApprove={() => handleAdvance(s.doneKey)}
                   onApproveMock={() => handleAdvance(s.doneKey, true)}
+                  onRerun={() => handleRerun(s.num)}
+                  onRedoWithChanges={() => handleRedoWithChanges(s.num)}
+                  onRollback={() => handleRollback(s.num)}
                 />
               ))}
             </div>
@@ -381,6 +450,16 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
 // ── Stage card ────────────────────────────────────────────────────────
 
 type StageState = 'locked' | 'pending' | 'running' | 'awaiting' | 'done'
+
+// For each stage number, the roadmap_stage value to revert to when
+// rolling back / re-running. Stage 1's "before" state is 'ready'.
+const STAGE_PREV_DONE: Record<number, WMRoadmapStage> = {
+  1: 'ready',
+  2: 'strategy_done',
+  3: 'sitemap_done',
+  4: 'journey_done',
+  5: 'roadmap_done',
+}
 
 const STAGE_ORDER: WMRoadmapStage[] = [
   'pre_intake', 'ready',
@@ -403,13 +482,17 @@ function stageState(stage: StageDef, current: WMRoadmapStage): StageState {
 }
 
 function StageCard({
-  stage, currentStage, advancing, onApprove, onApproveMock,
+  stage, currentStage, advancing,
+  onApprove, onApproveMock, onRerun, onRedoWithChanges, onRollback,
 }: {
   stage: StageDef
   currentStage: WMRoadmapStage
   advancing: boolean
   onApprove: () => void
   onApproveMock: () => void
+  onRerun: () => void
+  onRedoWithChanges: () => void
+  onRollback: () => void
 }) {
   const state = stageState(stage, currentStage)
   const meta = STAGE_STATE_META[state]
@@ -417,6 +500,8 @@ function StageCard({
   // Only the next stage (4 of 5) has a downstream agent to kick off.
   // Stage 5 approval just locks the project; no continuation.
   const hasNextStage = stage.num < 5
+  // Stage 1 and 2 have built agents — others can't yet be re-run.
+  const hasAgent = stage.num <= 2
 
   return (
     <div
@@ -440,6 +525,7 @@ function StageCard({
             </WMStatusPill>
           </div>
           <p className="text-[12px] text-wm-text-muted leading-snug">{stage.description}</p>
+
           {state === 'awaiting' && (
             <div className="mt-3 flex items-center gap-2 flex-wrap">
               <WMButton
@@ -463,8 +549,55 @@ function StageCard({
                   Approve (mock next)
                 </WMButton>
               )}
-              <WMButton variant="ghost" size="sm" iconLeft={<RotateCw size={11} />} disabled={advancing}>
-                Redo with changes
+              {hasAgent && (
+                <>
+                  <WMButton
+                    variant="ghost"
+                    size="sm"
+                    iconLeft={<RotateCw size={11} />}
+                    onClick={onRedoWithChanges}
+                    disabled={advancing}
+                    title="Provide feedback and re-run this stage's agent."
+                  >
+                    Redo with changes
+                  </WMButton>
+                  <WMButton
+                    variant="ghost"
+                    size="sm"
+                    onClick={onRerun}
+                    disabled={advancing}
+                    title="Re-run this stage fresh (no feedback). Useful when output looks empty or broken."
+                  >
+                    Re-run
+                  </WMButton>
+                </>
+              )}
+              <WMButton
+                variant="ghost"
+                size="sm"
+                onClick={onRollback}
+                disabled={advancing}
+                title="Roll back to the previous stage so you can revise inputs."
+                className="text-wm-text-subtle"
+              >
+                Roll back
+              </WMButton>
+            </div>
+          )}
+
+          {/* Done state — let the user revisit if needed */}
+          {state === 'done' && hasAgent && (
+            <div className="mt-2 flex items-center gap-2 flex-wrap">
+              <WMButton
+                variant="ghost"
+                size="sm"
+                iconLeft={<RotateCw size={11} />}
+                onClick={onRedoWithChanges}
+                disabled={advancing}
+                title="Re-run with feedback. Resets downstream stages."
+                className="text-wm-text-subtle hover:text-wm-text"
+              >
+                Revisit (redo)
               </WMButton>
             </div>
           )}
