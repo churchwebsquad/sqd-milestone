@@ -502,6 +502,14 @@ function StageCard({
   const hasNextStage = stage.num < 5
   // Stage 1 and 2 have built agents — others can't yet be re-run.
   const hasAgent = stage.num <= 2
+  // What "Approve & continue" actually triggers next.
+  const NEXT_LABEL: Record<number, string> = {
+    1: 'fire Sitemap (Stage 2)',
+    2: 'commit pages',
+    3: 'fire Per-Page Roadmap (Stage 4)',
+    4: 'fire Copywriter (Stage 5)',
+  }
+  const nextHint = hasNextStage ? NEXT_LABEL[stage.num] : 'lock the project'
 
   return (
     <div
@@ -527,7 +535,11 @@ function StageCard({
           <p className="text-[12px] text-wm-text-muted leading-snug">{stage.description}</p>
 
           {state === 'awaiting' && (
-            <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <div className="mt-3">
+              <p className="text-[11px] text-wm-text-subtle italic mb-2">
+                Approving will {nextHint}.
+              </p>
+              <div className="flex items-center gap-2 flex-wrap">
               <WMButton
                 variant="primary"
                 size="sm"
@@ -535,8 +547,9 @@ function StageCard({
                 onClick={onApprove}
                 loading={advancing}
                 disabled={advancing}
+                title={`Click to approve Stage ${stage.num} and ${nextHint}.`}
               >
-                {hasNextStage ? 'Approve & continue' : 'Approve & lock'}
+                Approve & {hasNextStage ? 'continue' : 'lock'}
               </WMButton>
               {hasNextStage && (
                 <WMButton
@@ -582,6 +595,7 @@ function StageCard({
               >
                 Roll back
               </WMButton>
+              </div>
             </div>
           )}
 
