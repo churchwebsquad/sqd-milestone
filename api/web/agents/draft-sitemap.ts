@@ -24,8 +24,11 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
 
-const MODEL = 'anthropic/claude-opus-4-7'
-const MAX_OUTPUT_TOKENS = 12000  // larger than Stage 1 — page outlines are verbose
+// Sonnet 4.6 handles Stage 2's structured derivative work at ~5× lower cost
+// than Opus, and supports a far higher output ceiling — page outlines × 13+
+// pages packed Opus into truncation on the first run.
+const MODEL = 'anthropic/claude-sonnet-4-6'
+const MAX_OUTPUT_TOKENS = 20000
 
 const TEXT_FORMATS = new Set([
   'text/plain', 'text/markdown', 'text/x-markdown', 'text/csv',

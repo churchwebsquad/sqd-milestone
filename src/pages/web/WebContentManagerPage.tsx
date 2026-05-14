@@ -119,7 +119,7 @@ export default function WebContentManagerPage() {
       onRailToggle={setRailOpen}
     >
       {activeTab === 'roadmap'    && <RoadmapWorkspace project={project} onChange={loadProject} />}
-      {activeTab === 'sitemap'    && <SitemapWorkspace project={project} />}
+      {activeTab === 'sitemap'    && <SitemapWorkspace project={project} onChange={loadProject} />}
       {activeTab === 'pages'      && <PagesWorkspace project={project} />}
       {activeTab === 'snippets'   && <SnippetsWorkspace project={project} onChange={loadProject} />}
       {activeTab === 'voice'      && <VoiceWorkspace project={project} />}

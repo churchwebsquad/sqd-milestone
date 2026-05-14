@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   GitBranch, Eye, Edit3, Plus, Archive,
-  Layout, FileText, MoreHorizontal,
+  Layout, FileText, MoreHorizontal, Sparkles, CheckCircle2, RotateCw, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { WMSegmentedToggle } from '../SegmentedToggle'
@@ -24,10 +24,13 @@ import { WMIconButton } from '../IconButton'
 import { WMStatusPill } from '../StatusPill'
 import type { WMStatusTone } from '../StatusPill'
 import { WMCatalogSidePanel } from '../CatalogSidePanel'
+import { Stage2SitemapView } from '../Stage2SitemapView'
+import { commitSitemapToPages } from '../../../lib/webSitemap'
 import type { StrategyWebProject, WebPage, WebContentTemplate, WebTemplateKind } from '../../../types/database'
 
 interface Props {
   project: StrategyWebProject
+  onChange?: () => Promise<void>
 }
 
 type ViewMode = 'author' | 'preview'
@@ -41,7 +44,7 @@ const PHASES: Array<{ key: string; label: string; description: string }> = [
   { key: 'nav-only', label: 'Nav-only', description: 'Surfaces in navigation but no authored page yet' },
 ]
 
-export function SitemapWorkspace({ project }: Props) {
+export function SitemapWorkspace({ project, onChange }: Props) {
   const navigate = useNavigate()
   const [view, setView] = useState<ViewMode>('author')
   const [pages, setPages] = useState<WebPage[]>([])
@@ -127,6 +130,16 @@ export function SitemapWorkspace({ project }: Props) {
 
         {view === 'author' ? (
           <>
+            {/* Stage 2 proposal banner — surfaces when stage_2 exists,
+                whether or not pages have been committed yet. */}
+            <SitemapProposalBanner
+              project={project}
+              onCommitted={async () => {
+                await load()
+                if (onChange) await onChange()
+              }}
+            />
+
             {/* Chrome designation */}
             <ChromeDesignationRow
               project={project}
@@ -470,27 +483,132 @@ function toSlug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)
 }
 
-// ── Content strategy preview (placeholder for Phase A) ───────────────
+// ── Content strategy preview — renders the full Stage 2 proposal ─────
 
 function ContentStrategyPreview({ project }: { project: StrategyWebProject }) {
-  const hasData = project.roadmap_stage === 'sitemap_done' || project.roadmap_stage === 'all_done'
+  const stage2 = (project.roadmap_state as { stage_2?: Record<string, unknown> } | null)?.stage_2
+  const hasData = !!stage2 && Object.keys(stage2).some(k => k !== '_meta')
+
   if (!hasData) {
     return (
       <WMCard padding="loose">
         <div className="text-center py-8">
           <GitBranch size={28} className="text-wm-text-subtle mx-auto mb-3" />
-          <h3 className="text-[15px] font-semibold text-wm-text mb-1">Content Strategy Document</h3>
+          <h3 className="text-[15px] font-semibold text-wm-text mb-1">Sitemap proposal</h3>
           <p className="text-[12px] text-wm-text-muted max-w-md mx-auto">
-            The polished 5-section deliverable for the partner's Review 1 approval. The AI Sitemap
-            agent populates this at Stage 2 of the strategy pipeline (Phase C).
+            The AI Sitemap agent populates this at Stage 2 of the pipeline. Approve Stage 1
+            on the Roadmap tab to kick it off.
           </p>
         </div>
       </WMCard>
     )
   }
+
   return (
     <WMCard padding="loose">
-      <p className="text-[12px] text-wm-text-muted">Real preview lands in Phase C.</p>
+      <Stage2SitemapView data={stage2!} viewMode="preview" />
+    </WMCard>
+  )
+}
+
+// ── Stage 2 proposal banner (author mode) ────────────────────────────
+
+function SitemapProposalBanner({
+  project, onCommitted,
+}: {
+  project: StrategyWebProject
+  onCommitted: () => void | Promise<void>
+}) {
+  const stage2 = (project.roadmap_state as { stage_2?: Record<string, unknown> } | null)?.stage_2
+  const hasData = !!stage2 && Object.keys(stage2).some(k => k !== '_meta')
+  const meta = stage2?._meta as Record<string, unknown> | undefined
+  const committedAt = meta?.committed_at as string | undefined
+  const phaseSummary = stage2?.phase_summary as Record<string, unknown> | undefined
+  const totalPages = phaseSummary?.total as number | undefined
+
+  const [expanded, setExpanded] = useState(false)
+  const [committing, setCommitting] = useState(false)
+  const [commitMsg, setCommitMsg] = useState<string | null>(null)
+
+  if (!hasData) return null
+
+  const handleCommit = async () => {
+    if (!confirm('Create web_pages records from the AI proposal? Existing pages with the same slug will be skipped.')) return
+    setCommitting(true)
+    setCommitMsg(null)
+    const { result, error } = await commitSitemapToPages(project.id)
+    setCommitting(false)
+    if (error) {
+      setCommitMsg(`Error: ${error.error}`)
+      return
+    }
+    if (result) {
+      setCommitMsg(`Created ${result.created} page${result.created === 1 ? '' : 's'}${result.skipped ? ` · skipped ${result.skipped} duplicate slug${result.skipped === 1 ? '' : 's'}` : ''}.`)
+      await onCommitted()
+    }
+  }
+
+  const alreadyCommitted = !!committedAt
+
+  return (
+    <WMCard padding="loose" className="mb-5 border-wm-ai-border bg-wm-ai-bg/40">
+      <div className="flex items-start gap-3 flex-wrap">
+        <Sparkles size={18} className="text-wm-accent-strong shrink-0 mt-0.5" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-[13px] font-semibold text-wm-text">
+              Sitemap proposal{totalPages ? ` · ${totalPages} pages` : ''}
+            </p>
+            {alreadyCommitted && (
+              <WMStatusPill tone="success" size="sm" icon={<CheckCircle2 size={10} />}>
+                Committed
+              </WMStatusPill>
+            )}
+            {!alreadyCommitted && (
+              <WMStatusPill tone="ai" size="sm">Awaiting approval</WMStatusPill>
+            )}
+          </div>
+          <p className="text-[12px] text-wm-text-muted mt-0.5">
+            {alreadyCommitted
+              ? `Committed to web pages ${new Date(committedAt!).toLocaleString()}. Proposal stays available for reference.`
+              : 'Review the full proposal, then commit the pages so they appear in the tree below and the Pages tab.'}
+          </p>
+          {commitMsg && (
+            <p className="text-[12px] mt-2 text-wm-accent-strong">{commitMsg}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <WMButton
+            variant="ghost"
+            size="sm"
+            iconLeft={expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            onClick={() => setExpanded(o => !o)}
+          >
+            {expanded ? 'Hide proposal' : 'View proposal'}
+          </WMButton>
+          {!alreadyCommitted && (
+            <>
+              <WMButton
+                variant="primary"
+                size="sm"
+                onClick={handleCommit}
+                loading={committing}
+                disabled={committing}
+              >
+                Approve &amp; commit pages
+              </WMButton>
+              <WMButton variant="ghost" size="sm" iconLeft={<RotateCw size={11} />} disabled>
+                Redo with changes
+              </WMButton>
+            </>
+          )}
+        </div>
+      </div>
+      {expanded && (
+        <div className="mt-5 pt-5 border-t border-wm-border">
+          <Stage2SitemapView data={stage2!} viewMode="author" />
+        </div>
+      )}
     </WMCard>
   )
 }
