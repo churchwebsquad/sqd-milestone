@@ -25,7 +25,9 @@ import { WMStatusPill } from '../StatusPill'
 import type { WMStatusTone } from '../StatusPill'
 import { WMCatalogSidePanel } from '../CatalogSidePanel'
 import { Stage2SitemapView } from '../Stage2SitemapView'
+import { RedoModal } from '../RedoModal'
 import { commitSitemapToPages } from '../../../lib/webSitemap'
+import { draftSitemap } from '../../../lib/webAgents'
 import type { StrategyWebProject, WebPage, WebContentTemplate, WebTemplateKind } from '../../../types/database'
 
 interface Props {
@@ -136,6 +138,9 @@ export function SitemapWorkspace({ project, onChange }: Props) {
               project={project}
               onCommitted={async () => {
                 await load()
+                if (onChange) await onChange()
+              }}
+              onRefreshed={async () => {
                 if (onChange) await onChange()
               }}
             />
@@ -514,10 +519,11 @@ function ContentStrategyPreview({ project }: { project: StrategyWebProject }) {
 // ── Stage 2 proposal banner (author mode) ────────────────────────────
 
 function SitemapProposalBanner({
-  project, onCommitted,
+  project, onCommitted, onRefreshed,
 }: {
   project: StrategyWebProject
   onCommitted: () => void | Promise<void>
+  onRefreshed: () => void | Promise<void>
 }) {
   const stage2 = (project.roadmap_state as { stage_2?: Record<string, unknown> } | null)?.stage_2
   const hasData = !!stage2 && Object.keys(stage2).some(k => k !== '_meta')
@@ -529,6 +535,9 @@ function SitemapProposalBanner({
   const [expanded, setExpanded] = useState(false)
   const [committing, setCommitting] = useState(false)
   const [commitMsg, setCommitMsg] = useState<string | null>(null)
+  const [redoOpen, setRedoOpen] = useState(false)
+  const [redoing, setRedoing] = useState(false)
+  const [redoMsg, setRedoMsg] = useState<string | null>(null)
 
   if (!hasData) return null
 
@@ -549,6 +558,27 @@ function SitemapProposalBanner({
   }
 
   const alreadyCommitted = !!committedAt
+
+  const handleRedo = async (context: string) => {
+    setRedoOpen(false)
+    setRedoing(true)
+    setRedoMsg(null)
+    try {
+      const { result, error } = await draftSitemap(project.id, context)
+      if (error) {
+        setRedoMsg(`Error: ${error.error}`)
+        return
+      }
+      if (result) {
+        setRedoMsg('Proposal refined.')
+        await onRefreshed()
+      }
+    } catch (e) {
+      setRedoMsg(`Error: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setRedoing(false)
+    }
+  }
 
   return (
     <WMCard padding="loose" className="mb-5 border-wm-ai-border bg-wm-ai-bg/40">
@@ -597,17 +627,35 @@ function SitemapProposalBanner({
               >
                 Approve &amp; commit pages
               </WMButton>
-              <WMButton variant="ghost" size="sm" iconLeft={<RotateCw size={11} />} disabled>
+              <WMButton
+                variant="ghost"
+                size="sm"
+                iconLeft={<RotateCw size={11} />}
+                onClick={() => setRedoOpen(true)}
+                disabled={redoing}
+              >
                 Redo with changes
               </WMButton>
             </>
           )}
         </div>
       </div>
+      {redoMsg && (
+        <p className="text-[12px] mt-3 text-wm-accent-strong">{redoMsg}</p>
+      )}
       {expanded && (
         <div className="mt-5 pt-5 border-t border-wm-border">
           <Stage2SitemapView data={stage2!} viewMode="author" />
         </div>
+      )}
+      {redoOpen && (
+        <RedoModal
+          stageNum={2}
+          stageTitle="Sitemap"
+          loading={redoing}
+          onClose={() => setRedoOpen(false)}
+          onSubmit={handleRedo}
+        />
       )}
     </WMCard>
   )

@@ -34,6 +34,7 @@ import { WMSegmentedToggle } from '../SegmentedToggle'
 import { WMButton } from '../Button'
 import { WMCard } from '../Card'
 import { WMStatusPill } from '../StatusPill'
+import { RedoModal } from '../RedoModal'
 import type { StrategyWebProject, WMRoadmapStage } from '../../../types/database'
 
 interface Props {
@@ -207,21 +208,14 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
     }
   }
 
-  /** Refine the existing stage output with strategist feedback. Does NOT
-   *  pre-clear the stage — the endpoint reads the previous output and
-   *  refines instead of rewriting from scratch. */
+  /** Refine the existing stage output with strategist feedback. Doesn't
+   *  pre-flip roadmap_stage — the endpoint owns its own transitions
+   *  (drafting_*  → done). stage_N output stays in DB so the endpoint
+   *  reads it as refinement context. */
   const handleRedoWithChanges = async (stageNum: number, redoContext: string) => {
-    const prevDoneKey = STAGE_PREV_DONE[stageNum]
     setAdvancing(true)
     setAgentError(null)
     try {
-      // Roll back the stage gate (so the agent's drafting_* flip works
-      // cleanly) but PRESERVE stage_N output so the endpoint can read it.
-      await supabase
-        .from('strategy_web_projects')
-        .update({ roadmap_stage: prevDoneKey })
-        .eq('id', project.id)
-      await onChange()
       if (stageNum === 1) {
         const { error } = await extractStrategy(project.id, redoContext)
         if (error) { setAgentError(error); await onChange(); return }
@@ -1046,91 +1040,6 @@ function Stage2Pointer({ projectId, phaseCount }: { projectId: string; phaseCoun
     </a>
   )
 }
-
-// ── Redo modal ───────────────────────────────────────────────────────
-//
-// The agent reads the previous stage_N output from the DB on a redo, so
-// it refines instead of rewriting. This modal collects the strategist's
-// free-text feedback that becomes the `redoContext` in the prompt.
-
-function RedoModal({
-  stageNum, stageTitle, loading, onClose, onSubmit,
-}: {
-  stageNum: number
-  stageTitle: string
-  loading: boolean
-  onClose: () => void
-  onSubmit: (context: string) => void | Promise<void>
-}) {
-  const [text, setText] = useState('')
-  const canSubmit = text.trim().length > 0 && !loading
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-wm-text/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-2xl rounded-lg bg-wm-bg-elevated border border-wm-border shadow-xl flex flex-col max-h-[85vh]">
-        <div className="flex items-center justify-between gap-3 p-5 border-b border-wm-border shrink-0">
-          <div>
-            <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
-              <RotateCw size={11} />
-              <p className="text-[10px] font-bold uppercase tracking-widest">Redo Stage {stageNum}</p>
-            </div>
-            <h2 className="text-[18px] font-semibold text-wm-text">Refine the {stageTitle} proposal</h2>
-            <p className="text-[12px] text-wm-text-muted mt-1 max-w-lg">
-              The agent will read your previous proposal and apply your feedback. It keeps what's working
-              and only changes what you call out. Be specific — call out exact labels, groupings, or pages.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={loading}
-            className="text-wm-text-subtle hover:text-wm-text transition-colors text-[20px] leading-none p-1"
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
-
-        <div className="p-5 overflow-y-auto flex-1">
-          <textarea
-            value={text}
-            onChange={e => setText(e.target.value)}
-            placeholder={REDO_PLACEHOLDER}
-            disabled={loading}
-            className="w-full min-h-[260px] rounded-md bg-wm-bg border border-wm-border px-3 py-2.5 text-sm text-wm-text placeholder-wm-text-subtle outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20 leading-relaxed"
-          />
-          <p className="text-[11px] text-wm-text-subtle mt-2">
-            {text.trim().length} characters · paste a full critique or short bullet points — both work.
-          </p>
-        </div>
-
-        <div className="flex items-center justify-end gap-2 p-5 border-t border-wm-border shrink-0">
-          <WMButton variant="ghost" size="sm" onClick={onClose} disabled={loading}>
-            Cancel
-          </WMButton>
-          <WMButton
-            variant="primary"
-            size="sm"
-            iconRight={<ArrowRight size={11} />}
-            disabled={!canSubmit}
-            loading={loading}
-            onClick={() => { if (canSubmit) void onSubmit(text.trim()) }}
-          >
-            Submit redo
-          </WMButton>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-const REDO_PLACEHOLDER = `Examples of useful feedback:
-- Move Events out from under Next Steps — they're current state, not commitment. Put them under Community or top-level.
-- Rename the "Next Steps" dropdown to "Grow" so it aligns with the footer section. Use "Grow Tracks" as the actual page label.
-- "Listen" contradicts the voice — switch to "Messages".
-- Add a Stories page under Community. We need a home for life-change testimonies.
-
-When the feedback is silent on something (e.g. you don't mention Give), the agent will keep that part as-is.`
 
 // ── Stuck-state recovery banner ──────────────────────────────────────
 
