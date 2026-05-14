@@ -57,6 +57,15 @@ export interface ScrubResult {
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
+/** Thrown when ClickUp says the message no longer exists. Caller marks
+ *  the submission so we stop trying that thread on future scrubs. */
+class ClickUpMessageGoneError extends Error {
+  constructor(messageId: string) {
+    super(`ClickUp message ${messageId} no longer exists (404)`)
+    this.name = 'ClickUpMessageGoneError'
+  }
+}
+
 async function fetchAllReplies(
   teamId: string,
   messageId: string,
@@ -70,6 +79,9 @@ async function fetchAllReplies(
     )
     if (cursor) url.searchParams.set('cursor', cursor)
     const res = await fetch(url.toString(), { headers: { Authorization: token } })
+    if (res.status === 404) {
+      throw new ClickUpMessageGoneError(messageId)
+    }
     if (!res.ok) {
       const text = await res.text()
       throw new Error(`ClickUp ${res.status}: ${text}`)
@@ -246,9 +258,27 @@ export async function scrubReplies(
         else console.warn(`[scrubReplies] status update failed (sub ${subId}):`, updateErr.message)
       }
     } catch (err) {
-      console.error(`[scrubReplies] error for thread ${rootMessageId}:`,
-        err instanceof Error ? err.message : String(err))
-      errors++
+      // ClickUp 404 on the parent message = it was deleted. Clear the
+      // submission's clickup_message_id so we never poll this thread
+      // again. Don't count it as an error — the cleanup is the action.
+      if (err instanceof ClickUpMessageGoneError) {
+        const submissionIds = chain.map(c => c.id)
+        const { error: clearErr } = await supabase
+          .from('strategy_milestone_submissions')
+          .update({ clickup_message_id: null })
+          .in('id', submissionIds)
+          .eq('clickup_message_id', rootMessageId)
+        if (clearErr) {
+          console.warn(`[scrubReplies] failed to clear stale message ${rootMessageId}:`, clearErr.message)
+          errors++
+        } else {
+          console.log(`[scrubReplies] auto-cleared stale ClickUp message ${rootMessageId} (submissions: ${submissionIds.join(', ')})`)
+        }
+      } else {
+        console.error(`[scrubReplies] error for thread ${rootMessageId}:`,
+          err instanceof Error ? err.message : String(err))
+        errors++
+      }
     }
 
     if (perThreadDelayMs > 0) await delay(perThreadDelayMs)
