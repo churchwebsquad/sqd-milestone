@@ -357,13 +357,29 @@ a) **Never label a dropdown parent with the same word as one of its children.**
 
 b) **Don't create a dropdown for fewer than 3 meaningful children.** If you have 2 or fewer children, make the parent a flat page and let the child concepts live inline as sections. Dropdowns are for scannable groupings, not for showing off.
 
-c) **Semantic categorization — groupings must be coherent, not arbitrary.**
-   Common categorization failures to avoid:
-   ❌ Events under "Next Steps" → Events are events, not discipleship steps. Put Events under "Community" / "What's Happening" / standalone.
-   ❌ Stories / testimonies under "Next Steps" → Stories belong under "About" / "Community" / "Stories" / standalone.
+c) **Semantic categorization — distinguish current-state from commitment pathway.**
+
+   Pages serve two distinct purposes that frequently get confused:
+
+   **Commitment pathway** (labels: "Next Steps", "Pathway", "Grow", "Get Connected"):
+   - Grow Tracks, Baptism, Membership, Serve / Volunteer, Join a Group
+   - Mental model: "I'm here. What's deeper?"
+
+   **Current state** (labels: "Community", "What's Happening", "Life"):
+   - Events, Stories / Testimonies, News, Recent baptisms, Life-change highlights
+   - Mental model: "What's alive at this church right now?"
+
+   These do not belong in the same dropdown:
+   ❌ Events under "Next Steps" → Events are current state, not commitment depth. A first-time visitor looking for "Kingdom Women Conference" isn't taking a next step, they're browsing what's alive at the church. Put Events under "Community" / "What's Happening" / standalone.
+   ❌ Stories / testimonies under "Next Steps" → Stories are proof of community + life change, not commitment pathway. They belong under "Community" / "Stories" / "About".
+
+   Special signal: if AM handoff or content collection emphasizes FOMO as a strategy lever (curated clips, healthy in-person attendance, life-change stories driving visitors in), promote Events and Stories to higher nav prominence — top-level or under "Community" — not buried under "Next Steps".
+
+   Other common categorization failures:
    ❌ Teens grouped under "Kids" → Teens and kids are distinct audiences. Group as "Kids & Students" or "Generations" or as separate items.
    ❌ Blog under "Sermons" → Sermon blog can live there if labeled clearly, but a general blog belongs elsewhere or footer.
    ❌ "Membership" as primary nav → Almost always footer or About-page section.
+
    Every grouping must pass: "If a visitor asked 'why are these together?', would the answer be obvious?"
 
 d) **Voice-match audit (CRITICAL).** Before submitting, audit EVERY nav label against Stage 1's voice_characteristics.top_attributes and the X-factor. A label that contradicts the voice is a failure even if it's grammatical.
@@ -385,11 +401,22 @@ f) **Match the voice register on vocabulary when goal supports it.** If Stage 1'
    - "Get Involved" → "Serve" or "Build With Us"
    But the bolder name MUST pass rules (d) and (e). If voice says bold but goal says visitor-clarity, visitor-clarity wins.
 
-g) **Visitor language wins over insider language.** Visitor searches for "find a church" not "I'm New." Visitor types "kids ministry" not "next gen." When in doubt, pick the term a visitor would type into Google.
+f.5) **Partner vocabulary alignment — use their terms inside dropdowns.** When the church has a specific term for a concept (e.g., "Grow Tracks" for discipleship, "Disciples Serve" for volunteering, "ECC Littles" for the youngest kids), use THEIR term as the page label inside a dropdown. Don't use the generic concept name as both parent and child.
 
-h) **Avoid generic dropdowns like "Resources" or "More."** They hide content instead of organizing it. If you can't name a grouping with specific intent, the pages shouldn't be grouped.
+   Example for Evangel (whose discipleship pathway is called "Grow Tracks"):
+   ❌ "Next Steps" dropdown containing { "Grow Tracks & Baptism" } → clunky pairing; the child label fights the parent label by repeating the next-step concept. Also: if the page lives at /next-steps, the parent dropdown and child slug collapse into the same idea.
+   ✅ "Grow" dropdown containing { "Grow Tracks", "Baptism", "Serve" } → uses partner vocabulary, aligns with their footer "Grow" section.
+   ✅ "Next Steps" dropdown containing { "Get Baptized", "Join a Grow Track", "Find Your Place" } → action-oriented children that don't duplicate the parent concept.
 
-i) **Every page must be in EITHER the header OR the footer.** No page may be unaccounted for in the nav structure. If a page isn't in the primary header nav, it must appear in footer_nav (with a section like "Connect" / "Resources" / "About"). This includes: Contact, Privacy Policy, Share Your Story (if not primary), Sermon Blog (if not primary), Membership, Job openings, Newsletter signup, etc. The strategist should never have to ask "where does X live?" — the answer is always visible in header_nav or footer_nav.
+   The principle: the dropdown PARENT names the destination type, the child labels name specific actions or partner-terminology pages.
+
+g) **Footer / header vocabulary coherence.** If you create a footer section called "Grow" (containing pathway pages), don't use a different word in the header for the same concept. Pick ONE term per concept and use it consistently across header_nav and footer_nav. Same rule for "Community", "About", "Connect", "Watch", etc. Inconsistency makes the strategist's job harder when they reconcile the two trees.
+
+h) **Visitor language wins over insider language.** Visitor searches for "find a church" not "I'm New." Visitor types "kids ministry" not "next gen." When in doubt, pick the term a visitor would type into Google.
+
+i) **Avoid generic dropdowns like "Resources" or "More."** They hide content instead of organizing it. If you can't name a grouping with specific intent, the pages shouldn't be grouped.
+
+j) **Every page must be in EITHER the header OR the footer.** No page may be unaccounted for in the nav structure. If a page isn't in the primary header nav, it must appear in footer_nav (with a section like "Connect" / "Resources" / "About"). This includes: Contact, Privacy Policy, Share Your Story (if not primary), Sermon Blog (if not primary), Membership, Job openings, Newsletter signup, etc. The strategist should never have to ask "where does X live?" — the answer is always visible in header_nav or footer_nav.
 
 **6. Density signals:**
 - high = enough unique content for a robust page
