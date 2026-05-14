@@ -386,6 +386,20 @@ c) **Semantic categorization — distinguish current-state from commitment pathw
 
    Every grouping must pass: "If a visitor asked 'why are these together?', would the answer be obvious?"
 
+   **Audience-specific pages stay distinct.** Each age group / audience served has its own page with its own context:
+   - Kids ministry → its own page
+   - Teens / Students → its own page
+   - Young Adults → its own page (if church serves them)
+   - Men's ministry → its own page (if church serves them)
+   - Women's ministry → its own page (if church serves them)
+   - Adults / Marrieds → its own page
+   - Care / Counseling / Recovery → its own page (or combined if related)
+
+   ❌ Consolidating Kids + Teens + Adults + Care into a generic "Ministries" page → drops the distinct audience context. Each group has different content needs, different parent concerns, different next steps.
+   ✅ Keep them as separate pages, group them under a "Ministries" or "Community" dropdown in the nav.
+
+   Only consolidate when content density is genuinely thin AND the audiences overlap (e.g. "Men's" and "Women's" combined into "Adults" only when each has fewer than ~3 sections of unique content). Default is separate pages.
+
 d) **Voice-match audit (CRITICAL).** Before submitting, audit EVERY nav label against Stage 1's voice_characteristics.top_attributes and the X-factor. A label that contradicts the voice is a failure even if it's grammatical.
    Examples:
    ❌ "Listen" when Stage 1 voice says "This isn't a church you watch. It's a church you build with." → passive verb directly contradicts the active voice. Use "Messages" or "Sermons" instead.
@@ -493,6 +507,18 @@ If you find yourself unable to account for something, add it to
 \`cs_flags.soft_assumptions\` for the strategist to verify. Dropping
 content silently is the failure mode this audit prevents.
 
+**content_coverage_audit is REQUIRED. Empty or missing array = failure.** Walk the content collection systematically:
+- Every ministry name (ECC Littles, ECC Kids, ECC Teens, ECC Women, ECC Men, ECC Marrieds, Celebrate Recovery, Healing Rooms, Care Team, Life Groups, etc.)
+- Every program (Grow Tracks, baptism process, Disciples Serve volunteer track)
+- Every service time and special service mentioned
+- Every staff person / role mentioned
+- Every event series or type (First Fridays, Kingdom Women Conference, etc.)
+- Every external platform (YouTube, Pressable, Mailchimp, Clover, Apple Podcast)
+- Every giving method / payment platform
+- Address, phone, contact details
+
+Each gets one row in content_coverage_audit. The audit is how the strategist verifies you haven't dropped anything.
+
 # CS flags
 
 - hard_blockers: copy cannot be written without resolving. Specific page + what's missing.
@@ -596,14 +622,14 @@ ${guide.voice_overview ?? '(none)'}`,
     void _
     blocks.push({
       type: 'text',
-      text: `# Previous proposal (refine, don't rewrite)\n\nThis is the sitemap you proposed last time. The strategist's feedback follows. Your job is to KEEP what's working and apply the requested changes — not start over. Preserve specific page names, dropdowns, footer sections, and rationales that aren't called out as needing change.\n\n\`\`\`json\n${JSON.stringify(prevWithoutMeta, null, 2)}\n\`\`\``,
+      text: `# Previous proposal (LOCKED — refine only what feedback names)\n\nThis is your previous proposal. It is the LOCKED BASELINE. The strategist's feedback follows in the next block.\n\n\`\`\`json\n${JSON.stringify(prevWithoutMeta, null, 2)}\n\`\`\``,
     })
   }
 
   if (inputs.redoContext) {
     blocks.push({
       type: 'text',
-      text: `# Strategist's redo feedback\n\n${inputs.redoContext}\n\nApply this feedback to the previous proposal above. Make exactly the changes requested — don't introduce other restructuring unless the feedback implies it. When the feedback is silent on a part of the proposal, keep that part.`,
+      text: `# Strategist's redo feedback\n\n${inputs.redoContext}\n\n# How to apply this feedback (read carefully)\n\n**The previous proposal is LOCKED except for the specific items the feedback names.**\n\nWhat that means concretely:\n\n1. **Page list:** Do not add, remove, rename, or consolidate any page unless the feedback explicitly says to. If the feedback mentions Events and Grow Tracks, only those change. Every other page (and its slug, name, parent, density, content_sources) stays IDENTICAL to the previous proposal — copy them through verbatim.\n\n2. **Nav structure:** Do not move, rename, or restructure any nav item, dropdown parent, or dropdown child unless the feedback names it. Header_nav and footer_nav stay byte-for-byte identical except where the feedback explicitly requests change.\n\n3. **Coverage audit, vocabulary decisions, AEO keywords, sources_used, cs_flags:** Carry forward verbatim from the previous proposal unless the feedback names them. If the previous proposal had a content_coverage_audit, COPY IT — do not regenerate it from scratch.\n\n4. **No "while I'm in here" improvements.** If you notice something you'd change but the strategist didn't mention, leave it. The strategist will request it in a future redo if they want it changed.\n\n5. **Test:** After drafting, walk every page in your output and ask "did the feedback explicitly name this for change?" If no, the page must match the previous proposal exactly. If you find yourself consolidating, renaming, or dropping a page that wasn't in the feedback — STOP and copy the previous version.\n\nThis is the most important rule of redo. Overstepping breaks the strategist's trust. The previous proposal had decisions you made for reasons — preserve them unless told otherwise.`,
     })
   }
 
