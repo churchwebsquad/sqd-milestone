@@ -357,16 +357,39 @@ a) **Never label a dropdown parent with the same word as one of its children.**
 
 b) **Don't create a dropdown for fewer than 3 meaningful children.** If you have 2 or fewer children, make the parent a flat page and let the child concepts live inline as sections. Dropdowns are for scannable groupings, not for showing off.
 
-c) **Match the voice register when naming nav items.** If Stage 1's top_attributes include words like "Bold", "Grit", "Direct", default to bolder vocabulary:
+c) **Semantic categorization — groupings must be coherent, not arbitrary.**
+   Common categorization failures to avoid:
+   ❌ Events under "Next Steps" → Events are events, not discipleship steps. Put Events under "Community" / "What's Happening" / standalone.
+   ❌ Stories / testimonies under "Next Steps" → Stories belong under "About" / "Community" / "Stories" / standalone.
+   ❌ Teens grouped under "Kids" → Teens and kids are distinct audiences. Group as "Kids & Students" or "Generations" or as separate items.
+   ❌ Blog under "Sermons" → Sermon blog can live there if labeled clearly, but a general blog belongs elsewhere or footer.
+   ❌ "Membership" as primary nav → Almost always footer or About-page section.
+   Every grouping must pass: "If a visitor asked 'why are these together?', would the answer be obvious?"
+
+d) **Voice-match audit (CRITICAL).** Before submitting, audit EVERY nav label against Stage 1's voice_characteristics.top_attributes and the X-factor. A label that contradicts the voice is a failure even if it's grammatical.
+   Examples:
+   ❌ "Listen" when Stage 1 voice says "This isn't a church you watch. It's a church you build with." → passive verb directly contradicts the active voice. Use "Messages" or "Sermons" instead.
+   ❌ Generic "About" when X-factor is "Relational Community" → Use "Our Church" or "Community" or "Who We Are" to honor the X-factor.
+   ❌ "Get Involved" when voice is "Grit / Direct" → too soft. Use "Serve" or "Build With Us".
+   The X-factor (from x_factor.top_attribute) should be a nav vocabulary driver. If X-factor is "Relational Community", "Community" is the natural dropdown label. If X-factor is "Honest Welcome", that shapes the visit page name.
+
+e) **Goal-match audit.** If discovery_questionnaire or project_goals include "help first-time visitors find information easily" (or similar), then INSIDER LANGUAGE in primary nav is a failure:
+   ❌ "ECC Kids" (insider branding) in nav → use "Kids" / "Children". Insider branding goes on the page, not in nav.
+   ❌ "Our Story" / "What We Believe" when goal is visitor-clarity → use "About" / "Beliefs" or even more concrete like "Find a Church" / "First Time".
+   When the partner's stated goal is visitor accessibility, default nav names beat clever insider names.
+
+f) **Match the voice register on vocabulary when goal supports it.** If Stage 1's top_attributes include words like "Bold", "Grit", "Direct" AND the goal is NOT pure visitor-clarity, push to:
    - "About" → "Who We Are" or "The Story"
-   - "Sermons" → "Listen" or "Messages"
+   - "Sermons" → "Messages" (use partner vocabulary if they call them "Messages")
    - "Plan a Visit" → "Sundays" or "First Time"
-   - "Contact" → "Get in Touch" or stay "Contact"
-   If voice is formal/traditional, stay with default names. The rule: if voice supports something better, default names are a fail.
+   - "Get Involved" → "Serve" or "Build With Us"
+   But the bolder name MUST pass rules (d) and (e). If voice says bold but goal says visitor-clarity, visitor-clarity wins.
 
-d) **Visitor language wins over insider language.** Visitor searches for "find a church" not "I'm New." Visitor types "kids ministry" not "next gen." When in doubt, pick the term a visitor would type into Google.
+g) **Visitor language wins over insider language.** Visitor searches for "find a church" not "I'm New." Visitor types "kids ministry" not "next gen." When in doubt, pick the term a visitor would type into Google.
 
-e) **Avoid generic dropdowns like "Resources" or "More."** They hide content instead of organizing it. If you can't name a grouping with specific intent, the pages shouldn't be grouped.
+h) **Avoid generic dropdowns like "Resources" or "More."** They hide content instead of organizing it. If you can't name a grouping with specific intent, the pages shouldn't be grouped.
+
+i) **Every page must be in EITHER the header OR the footer.** No page may be unaccounted for in the nav structure. If a page isn't in the primary header nav, it must appear in footer_nav (with a section like "Connect" / "Resources" / "About"). This includes: Contact, Privacy Policy, Share Your Story (if not primary), Sermon Blog (if not primary), Membership, Job openings, Newsletter signup, etc. The strategist should never have to ask "where does X live?" — the answer is always visible in header_nav or footer_nav.
 
 **6. Density signals:**
 - high = enough unique content for a robust page
@@ -542,7 +565,23 @@ ${guide.voice_overview ?? '(none)'}`,
 
   blocks.push({
     type: 'text',
-    text: 'Now propose the LEAN sitemap via the submit_sitemap tool. Pages get one sentence of strategic_purpose + one of rationale + density label. No hero, sections, or CTAs — Stage 4 handles those per page. Phase 1 = 6 pages (target). Total ≤ 20. Vocabulary fits voice. Density-driven nesting. Flag every assumption.',
+    text: `Now propose the LEAN sitemap via the submit_sitemap tool.
+
+Before submitting, run these audits in your head and revise until you pass each:
+
+1. **Voice contradiction check.** Look at Stage 1's voice top_attributes and tone_examples_do. Does every nav label in header_nav and footer_nav honor that voice? If voice is participatory, no passive labels like "Listen" / "Watch". If voice is bold, no soft labels like "Get Involved".
+
+2. **Goal contradiction check.** Look at the partner's stated primary goal. If it's about visitor accessibility / clarity, scrub insider language out of header_nav. Insider terms (ECC Kids, internal program names) belong on the page body, not in nav.
+
+3. **X-factor leverage.** Is the X-factor reflected in nav vocabulary? If X-factor is "Relational Community", "Community" as a dropdown label is the natural move. If you didn't use it, justify in nav_strategy.
+
+4. **Categorization sanity.** Walk every group and ask "would a visitor expect THIS child to live under THIS parent?". Events under Next Steps fails. Stories under Next Steps fails. Teens under Kids fails.
+
+5. **Coverage check.** Every page must appear in header_nav OR footer_nav. Every concrete content collection item must appear in content_coverage_audit with a status. Nothing dropped silently.
+
+6. **No duplicate parent labels.** No dropdown labeled the same word as one of its children.
+
+Phase 1 = 6 pages (target). Total ≤ 20. Density-driven nesting. Flag every assumption.`,
   })
 
   return blocks
@@ -588,7 +627,7 @@ const SITEMAP_TOOL = {
   description: 'Submit the proposed strategic sitemap for this church website project.',
   input_schema: {
     type: 'object' as const,
-    required: ['nav_strategy', 'nav_voice_register', 'nav_pattern', 'phase_summary', 'pages', 'nav_items', 'sources_used'],
+    required: ['nav_strategy', 'nav_voice_register', 'nav_pattern', 'phase_summary', 'pages', 'header_nav', 'footer_nav', 'content_coverage_audit', 'sources_used'],
     properties: {
       nav_strategy: {
         type: 'string',
@@ -632,9 +671,9 @@ const SITEMAP_TOOL = {
           },
         },
       },
-      nav_items: {
+      header_nav: {
         type: 'array',
-        description: 'The actual nav tree. Items can be pages (kind="page") or groupings (kind="group") with children.',
+        description: 'The primary header navigation tree. Items can be pages (kind="page") or groupings (kind="group") with children. Max 6 top-level items.',
         items: {
           type: 'object',
           required: ['label', 'kind'],
@@ -653,6 +692,29 @@ const SITEMAP_TOOL = {
                   kind: { type: 'string', enum: ['page', 'group'] },
                   slug: { type: 'string' },
                   rationale: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+      },
+      footer_nav: {
+        type: 'array',
+        description: 'Footer navigation — required. Group pages into sections like "Connect" / "About" / "Resources". Every page not in header_nav MUST appear here. Includes utility (Contact, Privacy), secondary content (Blog, Share Your Story), tertiary (Membership, Jobs).',
+        items: {
+          type: 'object',
+          required: ['section_label', 'items'],
+          properties: {
+            section_label: { type: 'string', description: 'E.g., "Connect", "About", "Resources".' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['label'],
+                properties: {
+                  label: { type: 'string' },
+                  slug: { type: 'string', description: 'For internal pages. Omit for external links.' },
+                  url: { type: 'string', description: 'For external links (e.g., social media).' },
                 },
               },
             },
@@ -759,12 +821,21 @@ function buildMockSitemap(project: any, _stage1: Record<string, unknown>): Recor
       { name: 'About',   slug: 'about',   phase: '1', page_type: 'content', strategic_purpose: 'Tell the church story and introduce the team.', rationale: 'Chosen as Phase 1 because trust-building is primary goal.', density: 'high', content_sources: ['Strategy Brief', 'Content Collection'] },
       { name: 'Kids',    slug: 'kids',    phase: '1', page_type: 'content', strategic_purpose: 'Reassure parents and pre-register for kids ministry.', rationale: 'Chosen as Phase 1 because families are explicit target.', density: 'high', content_sources: ['Content Collection'] },
     ],
-    nav_items: [
-      { label: 'Sundays', kind: 'page', slug: 'sundays' },
-      { label: 'Listen', kind: 'page', slug: 'listen' },
-      { label: 'About', kind: 'page', slug: 'about' },
-      { label: 'Kids', kind: 'page', slug: 'kids' },
+    header_nav: [
+      { label: 'Sundays',   kind: 'page', slug: 'sundays' },
+      { label: 'Messages',  kind: 'page', slug: 'messages' },
+      { label: 'Community', kind: 'group', children: [
+        { label: 'About', kind: 'page', slug: 'about' },
+        { label: 'Kids',  kind: 'page', slug: 'kids' },
+      ]},
       { label: 'Give', kind: 'page', slug: 'give' },
+    ],
+    footer_nav: [
+      { section_label: 'Connect', items: [{ label: 'Contact', slug: 'contact' }, { label: 'Share Your Story', slug: 'share-your-story' }] },
+      { section_label: 'About',   items: [{ label: 'Our Beliefs', slug: 'beliefs' }] },
+    ],
+    content_coverage_audit: [
+      { content_item: '(Mock run — full audit lands on real runs.)', status: 'placed', landed_on: 'home' },
     ],
     absorbed_content: [
       { content_item: 'Apple Podcast', absorbed_into: null, rationale: 'Mock — Strategy Brief said don\'t promote.' },

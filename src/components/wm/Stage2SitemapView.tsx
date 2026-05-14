@@ -24,7 +24,10 @@ export function Stage2SitemapView({
   const navPattern    = data.nav_pattern         as string | undefined
   const phaseSummary  = data.phase_summary       as Record<string, unknown> | undefined
   const pages         = data.pages               as Array<Record<string, unknown>> | undefined
-  const navItems      = data.nav_items           as Array<Record<string, unknown>> | undefined
+  // header_nav is the canonical name; nav_items is the legacy field for
+  // earlier runs (Sonnet-era output). Render either.
+  const headerNav     = (data.header_nav ?? data.nav_items) as Array<Record<string, unknown>> | undefined
+  const footerNav     = data.footer_nav          as Array<Record<string, unknown>> | undefined
   const absorbed      = data.absorbed_content    as Array<Record<string, unknown>> | undefined
   const coverageAudit = data.content_coverage_audit as Array<Record<string, unknown>> | undefined
   const vocabulary    = data.vocabulary_decisions as Array<Record<string, unknown>> | undefined
@@ -89,10 +92,37 @@ export function Stage2SitemapView({
         </Section>
       )}
 
-      {navItems && navItems.length > 0 && (
-        <Section title="Primary navigation">
+      {headerNav && headerNav.length > 0 && (
+        <Section title="Header navigation">
           <div className="rounded-md bg-wm-bg-elevated border border-wm-border p-3">
-            <NavTree items={navItems} />
+            <NavTree items={headerNav} />
+          </div>
+        </Section>
+      )}
+
+      {footerNav && footerNav.length > 0 && (
+        <Section title="Footer navigation">
+          <div className="rounded-md bg-wm-bg-elevated border border-wm-border p-3 space-y-3">
+            {footerNav.map((section, i) => {
+              const items = Array.isArray(section.items) ? section.items as Array<Record<string, unknown>> : []
+              return (
+                <div key={i}>
+                  <p className="text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">
+                    {String(section.section_label ?? '')}
+                  </p>
+                  <ul className="space-y-0.5">
+                    {items.map((it, j) => (
+                      <li key={j} className="text-[13px] text-wm-text flex items-baseline gap-2">
+                        <span className="text-wm-accent-strong">·</span>
+                        <span>{String(it.label ?? '')}</span>
+                        {it.slug && <code className="text-[11px] text-wm-text-subtle">/{String(it.slug)}</code>}
+                        {it.url && <span className="text-[11px] text-wm-text-subtle">({String(it.url)})</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )
+            })}
           </div>
         </Section>
       )}
