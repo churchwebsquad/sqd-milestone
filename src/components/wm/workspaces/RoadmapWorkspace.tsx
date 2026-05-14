@@ -233,34 +233,65 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
     }
   }
 
-  /** Approve Stage N and immediately kick off Stage N+1. */
-  const handleAdvance = async (fromStage: WMRoadmapStage, mock = false) => {
+  /** Mark a stage approved (sticky marker on roadmap_state.stage_N._meta.approved_at)
+   *  and kick off the next agent if applicable. */
+  const markStageApprovedAndAdvance = async (stageNum: number, mock = false) => {
     setAdvancing(true)
     setAgentError(null)
     try {
-      if (fromStage === 'strategy_done') {
+      // Set approved_at marker on this stage
+      const state = (project.roadmap_state as Record<string, unknown> | null) ?? {}
+      const stageKey = `stage_${stageNum}` as const
+      const stageData = (state[stageKey] as Record<string, unknown> | undefined) ?? {}
+      const stageMeta = (stageData._meta as Record<string, unknown> | undefined) ?? {}
+      const newMeta = { ...stageMeta, approved_at: new Date().toISOString() }
+      const newStageData = { ...stageData, _meta: newMeta }
+      const newState = { ...state, [stageKey]: newStageData }
+      await supabase
+        .from('strategy_web_projects')
+        .update({ roadmap_state: newState })
+        .eq('id', project.id)
+      await onChange()
+
+      // Fire the next stage if applicable
+      if (stageNum === 1) {
         const { result, error } = await draftSitemap(project.id, undefined, mock)
-        if (error) {
-          setAgentError(error)
-          await onChange()
-          return
-        }
+        if (error) { setAgentError(error); await onChange(); return }
         if (result) await onChange()
-      } else if (fromStage === 'sitemap_done') {
-        // Stage 2 approval = commit the proposed pages to web_pages.
-        // Stage 3 (User Journey) will fire from here once built.
+      } else if (stageNum === 2) {
+        // Stage 2 approval = commit pages to web_pages.
+        // The commit helper sets _meta.committed_at separately.
         const { result, error } = await commitSitemapToPages(project.id)
-        if (error) {
-          setAgentError({ error: error.error })
-          return
-        }
+        if (error) { setAgentError({ error: error.error }); return }
         void result
         await onChange()
       }
-      // Stage 3+ wires here later (drafting_journey, drafting_roadmap, drafting_pages)
+      // Stage 3+ wires here later
     } catch (e) {
       setAgentError({
         error: `Couldn't advance the pipeline. ${e instanceof Error ? e.message : String(e)}.`,
+      })
+    } finally {
+      setAdvancing(false)
+    }
+  }
+
+  /** Fire a stage's agent from a "ready" state (stage has no output yet). */
+  const handleRunStage = async (stageNum: number, mock = false) => {
+    setAdvancing(true)
+    setAgentError(null)
+    try {
+      if (stageNum === 1) {
+        const { error } = await extractStrategy(project.id, undefined, mock)
+        if (error) { setAgentError(error); await onChange(); return }
+      } else if (stageNum === 2) {
+        const { error } = await draftSitemap(project.id, undefined, mock)
+        if (error) { setAgentError(error); await onChange(); return }
+      }
+      await onChange()
+    } catch (e) {
+      setAgentError({
+        error: `Couldn't run stage ${stageNum}. ${e instanceof Error ? e.message : String(e)}.`,
       })
     } finally {
       setAdvancing(false)
@@ -476,10 +507,11 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
                 <StageCard
                   key={s.num}
                   stage={s}
-                  currentStage={stage}
+                  project={project}
                   advancing={advancing}
-                  onApprove={() => handleAdvance(s.doneKey)}
-                  onApproveMock={() => handleAdvance(s.doneKey, true)}
+                  onApprove={() => markStageApprovedAndAdvance(s.num)}
+                  onApproveMock={() => markStageApprovedAndAdvance(s.num, true)}
+                  onRun={() => handleRunStage(s.num)}
                   onRerun={() => handleRerun(s.num)}
                   onRedoWithChanges={() => setRedoOpen(s.num)}
                   onRollback={() => handleRollback(s.num)}
@@ -509,7 +541,7 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
 
 // ── Stage card ────────────────────────────────────────────────────────
 
-type StageState = 'locked' | 'pending' | 'running' | 'awaiting' | 'done'
+type StageState = 'locked' | 'pending' | 'ready' | 'running' | 'awaiting' | 'done'
 
 // For each stage number, the roadmap_stage value to revert to when
 // rolling back / re-running. Stage 1's "before" state is 'ready'.
@@ -530,31 +562,68 @@ const STAGE_ORDER: WMRoadmapStage[] = [
   'drafting_pages',      'all_done',
 ]
 
-function stageState(stage: StageDef, current: WMRoadmapStage): StageState {
-  const currentIdx  = STAGE_ORDER.indexOf(current)
-  const runningIdx  = STAGE_ORDER.indexOf(stage.key)
-  const doneIdx     = STAGE_ORDER.indexOf(stage.doneKey)
-  if (currentIdx < runningIdx) return 'locked'
-  if (currentIdx === runningIdx) return 'running'
-  if (currentIdx === doneIdx)    return 'awaiting'
-  if (currentIdx > doneIdx)      return 'done'
-  return 'locked'
+/**
+ * Approval is sticky: once a stage is approved, it stays approved
+ * across downstream re-runs. Approval markers live in
+ * `roadmap_state.stage_N._meta`:
+ *   - Stage 1 / 3 / 4: approved_at (set when user clicks Approve)
+ *   - Stage 2: committed_at (set when pages are committed to web_pages)
+ *
+ * The visible state machine becomes:
+ *   - locked   : previous stage not approved yet
+ *   - ready    : previous stage approved, no output yet for this stage
+ *   - running  : agent currently in flight for this stage
+ *   - awaiting : output exists, no approval marker yet
+ *   - done     : approval marker present (sticky — survives Stage N+1 reruns)
+ */
+function isStageApproved(stageNum: number, project: StrategyWebProject): boolean {
+  const state = (project.roadmap_state as Record<string, unknown> | null) ?? {}
+  const stageData = state[`stage_${stageNum}`] as Record<string, unknown> | undefined
+  const meta = stageData?._meta as Record<string, unknown> | undefined
+  // Stage 2's "approval" is the commit-to-web_pages action
+  return !!(meta?.approved_at || meta?.committed_at)
+}
+
+function hasStageOutput(stageNum: number, project: StrategyWebProject): boolean {
+  const state = (project.roadmap_state as Record<string, unknown> | null) ?? {}
+  const stageData = state[`stage_${stageNum}`] as Record<string, unknown> | undefined
+  return !!stageData && Object.keys(stageData).some(k => k !== '_meta')
+}
+
+function stageState(stage: StageDef, project: StrategyWebProject): StageState {
+  // Currently running takes precedence over everything
+  if (project.roadmap_stage === stage.key) return 'running'
+
+  // Approval marker is sticky — Stage 1 stays "done" even when
+  // Stage 2 is being redone.
+  if (isStageApproved(stage.num, project)) return 'done'
+
+  // Output exists but not yet approved → user needs to review
+  if (hasStageOutput(stage.num, project)) return 'awaiting'
+
+  // No output yet — locked unless the previous stage is approved
+  if (stage.num === 1) {
+    // Stage 1 unlocks on intake readiness — that gate is shown elsewhere
+    return project.roadmap_stage === 'pre_intake' ? 'locked' : 'ready'
+  }
+  return isStageApproved(stage.num - 1, project) ? 'ready' : 'locked'
 }
 
 function StageCard({
-  stage, currentStage, advancing,
-  onApprove, onApproveMock, onRerun, onRedoWithChanges, onRollback,
+  stage, project, advancing,
+  onApprove, onApproveMock, onRun, onRerun, onRedoWithChanges, onRollback,
 }: {
   stage: StageDef
-  currentStage: WMRoadmapStage
+  project: StrategyWebProject
   advancing: boolean
   onApprove: () => void
   onApproveMock: () => void
+  onRun: () => void
   onRerun: () => void
   onRedoWithChanges: () => void
   onRollback: () => void
 }) {
-  const state = stageState(stage, currentStage)
+  const state = stageState(stage, project)
   const meta = STAGE_STATE_META[state]
   const Icon = meta.icon
   // Only the next stage (4 of 5) has a downstream agent to kick off.
@@ -659,6 +728,22 @@ function StageCard({
             </div>
           )}
 
+          {/* Ready to run — Stage 1+ approved, this stage has no output yet */}
+          {state === 'ready' && hasAgent && stage.num > 1 && (
+            <div className="mt-3 flex items-center gap-2 flex-wrap">
+              <WMButton
+                variant="primary"
+                size="sm"
+                iconLeft={<Sparkles size={11} />}
+                onClick={onRun}
+                disabled={advancing}
+                loading={advancing}
+              >
+                Run {stage.title}
+              </WMButton>
+            </div>
+          )}
+
           {/* Done state — let the user revisit if needed */}
           {state === 'done' && hasAgent && (
             <div className="mt-2 flex items-center gap-2 flex-wrap">
@@ -697,6 +782,11 @@ const STAGE_STATE_META: Record<StageState, {
     containerClass: 'bg-wm-bg-elevated border-wm-border',
     numClass: 'bg-wm-bg-hover text-wm-text-muted',
     pillTone: 'neutral', pillLabel: 'Not started', icon: AlertCircle,
+  },
+  ready: {
+    containerClass: 'bg-wm-bg-elevated border-wm-ai-border',
+    numClass: 'bg-wm-accent text-white',
+    pillTone: 'ai', pillLabel: 'Ready to run', icon: Sparkles,
   },
   running: {
     containerClass: 'bg-wm-ai-bg border-wm-ai-border animate-wm-pulse-accent',
