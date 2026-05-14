@@ -23,7 +23,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { createClient } from '@supabase/supabase-js'
-import { scrubReplies, fetchTeamId, type ActiveSubmission } from '../_lib/scrubReplies'
+// `.js` extension on the relative import is required by Vercel's
+// nodejs24.x runtime (strict ESM resolution). The source file is `.ts`;
+// TypeScript compiles it to `.js`, which is what gets imported at runtime.
+import { scrubReplies, fetchTeamId, type ActiveSubmission } from '../_lib/scrubReplies.js'
 
 // Legacy-compatible runtime config — works across all Vercel Function
 // runtimes (newer ones also accept `export const maxDuration = 60`).
