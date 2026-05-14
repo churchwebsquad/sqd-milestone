@@ -17,7 +17,9 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
-import { scrubReplies, fetchTeamId, type ActiveSubmission } from '../_lib/scrubReplies'
+// `.js` extension required by Vercel's nodejs24.x runtime (strict ESM
+// resolution). The source is `.ts`; TypeScript compiles it to `.js`.
+import { scrubReplies, fetchTeamId, type ActiveSubmission } from '../_lib/scrubReplies.js'
 
 export default async function handler(
   req: { method: string; headers: Record<string, string | string[] | undefined> },
