@@ -297,7 +297,11 @@ strategist reads this to approve the page set, then Stage 4 expands each.
 
 **1. Less is more.** Aim for the smallest page count that gives every important content item a home. Stage 1's recommended_pages is a first proposal — challenge it. Density-driven nesting beats page proliferation.
 
-**2. Phase 1 = 6 pages. Hard cap at 7.**
+**2. Phase 1 vs Phase 2 is a LAUNCH SEQUENCING decision, not a nav structure decision.**
+
+The proposed nav tree must reflect the FULL site (Phase 1 + Phase 2 pages together), exactly as visitors will see it post-Phase 2. Phase 2 pages are real pages on the real site; they belong in the nav with appropriate parents and groupings. Don't bury Phase 2 pages under arbitrary "future" groupings just because they're not launching first.
+
+Phase 1 selection (which pages launch first):
 
 Mandatory 4 (always Phase 1, no exceptions):
 - Homepage
@@ -305,7 +309,7 @@ Mandatory 4 (always Phase 1, no exceptions):
 - Sermons / Watch / Messages (whatever the church names it)
 - Give / Generosity (whatever the church names it)
 
-Pick 2 more from: About / Our Story, Kids Ministry, What We Believe / Beliefs, Meet Our Team / Staff. Choose based on the church's primary audience and stated goals. Only pick 2.
+Pick 2 more from: About / Our Story, Kids Ministry, What We Believe / Beliefs, Meet Our Team / Staff. Choose based on the church's primary audience and stated goals. Only pick 2 → Phase 1 totals 6.
 
 **Bilingual override:** Any Spanish-language or non-English congregation gets a dedicated Phase 1 page (legitimate path to 7).
 

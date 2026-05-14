@@ -64,9 +64,9 @@ export default function WebContentManagerPage() {
   const [error, setError] = useState<string | null>(null)
   const [railOpen, setRailOpen] = useState(true)
 
-  const loadProject = async () => {
+  const loadProject = async (silent = false) => {
     if (!projectId) return
-    setLoading(true)
+    if (!silent) setLoading(true)
     const { data, error: err } = await supabase
       .from('strategy_web_projects')
       .select('*')
@@ -74,10 +74,28 @@ export default function WebContentManagerPage() {
       .maybeSingle()
     if (err || !data) setError(err?.message ?? 'Project not found')
     else setProject(data as StrategyWebProject)
-    setLoading(false)
+    if (!silent) setLoading(false)
   }
 
   useEffect(() => { void loadProject() }, [projectId])
+
+  // Poll while an agent is running. Vercel serverless functions hold the
+  // request connection but the browser doesn't know when the DB write
+  // lands — without polling, the strategist would have to manually
+  // refresh and risk losing their place.
+  useEffect(() => {
+    if (!project) return
+    const isAgentRunning = (
+      project.roadmap_stage === 'extracting_strategy' ||
+      project.roadmap_stage === 'drafting_sitemap' ||
+      project.roadmap_stage === 'drafting_journey' ||
+      project.roadmap_stage === 'drafting_roadmap' ||
+      project.roadmap_stage === 'drafting_pages'
+    )
+    if (!isAgentRunning) return
+    const interval = setInterval(() => { void loadProject(true) }, 5000)
+    return () => clearInterval(interval)
+  }, [project?.roadmap_stage, projectId])
 
   if (loading) {
     return (

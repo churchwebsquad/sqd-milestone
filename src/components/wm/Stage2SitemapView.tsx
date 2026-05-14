@@ -33,9 +33,39 @@ export function Stage2SitemapView({
   const meta          = data._meta               as Record<string, unknown> | undefined
 
   const isStaff = viewMode === 'staff' || viewMode === 'author'
-  const phase1Pages  = pages?.filter(p => p.phase === '1') ?? []
-  const phase2Pages  = pages?.filter(p => p.phase === '2') ?? []
-  const navOnlyPages = pages?.filter(p => p.phase === 'nav-only') ?? []
+
+  // Order pages as a sitemap tree: root pages first (in original order),
+  // children grouped right under their parent. Phase is a launch-sequencing
+  // tag, not a structural division.
+  const orderedPages = (() => {
+    if (!pages) return []
+    const roots = pages.filter(p => !p.parent_slug || p.parent_slug === null)
+    const childrenBySlug: Record<string, Array<Record<string, unknown>>> = {}
+    pages.forEach(p => {
+      if (p.parent_slug && typeof p.parent_slug === 'string') {
+        const key = p.parent_slug
+        if (!childrenBySlug[key]) childrenBySlug[key] = []
+        childrenBySlug[key].push(p)
+      }
+    })
+    const out: Array<{ page: Record<string, unknown>; depth: number }> = []
+    const visit = (p: Record<string, unknown>, depth: number) => {
+      out.push({ page: p, depth })
+      const slug = p.slug as string | undefined
+      if (slug && childrenBySlug[slug]) {
+        childrenBySlug[slug].forEach(c => visit(c, depth + 1))
+      }
+    }
+    roots.forEach(r => visit(r, 0))
+    // Any orphans (children with no matched parent) — append at the end
+    pages.forEach(p => {
+      if (!out.find(o => o.page === p)) out.push({ page: p, depth: 0 })
+    })
+    return out
+  })()
+
+  const phase1Count = pages?.filter(p => p.phase === '1').length ?? 0
+  const totalCount  = pages?.length ?? 0
 
   return (
     <div className="space-y-5">
@@ -67,38 +97,24 @@ export function Stage2SitemapView({
       )}
 
       {phaseSummary && (
-        <Section title="Phase summary">
-          <KVGrid pairs={[
-            ['Phase 1 pages', String(phaseSummary.phase_1_count ?? '')],
-            ['Phase 2 pages', String(phaseSummary.phase_2_count ?? '')],
-            ['Total',         String(phaseSummary.total ?? '')],
-          ]} />
+        <Section title="Launch sequencing">
+          <p className="text-[12px] text-wm-text-muted leading-relaxed mb-2">
+            {phase1Count} of {totalCount} pages recommended for Phase 1 launch. The rest ship after.
+          </p>
           {phaseSummary.rationale && (
-            <p className="text-[12px] text-wm-text-muted leading-relaxed mt-2">{String(phaseSummary.rationale)}</p>
+            <p className="text-[12px] text-wm-text-muted leading-relaxed">{String(phaseSummary.rationale)}</p>
           )}
         </Section>
       )}
 
-      {phase1Pages.length > 0 && (
-        <Section title={`Phase 1 pages · ${phase1Pages.length}`}>
+      {orderedPages.length > 0 && (
+        <Section title={`Sitemap · ${totalCount} ${totalCount === 1 ? 'page' : 'pages'}`}>
           <div className="space-y-2">
-            {phase1Pages.map((p, i) => <PageCard key={i} page={p} />)}
-          </div>
-        </Section>
-      )}
-
-      {phase2Pages.length > 0 && (
-        <Section title={`Phase 2 pages · ${phase2Pages.length}`}>
-          <div className="space-y-2">
-            {phase2Pages.map((p, i) => <PageCard key={i} page={p} />)}
-          </div>
-        </Section>
-      )}
-
-      {navOnlyPages.length > 0 && (
-        <Section title={`Nav-only · ${navOnlyPages.length}`}>
-          <div className="space-y-2">
-            {navOnlyPages.map((p, i) => <PageCard key={i} page={p} compact />)}
+            {orderedPages.map(({ page, depth }, i) => (
+              <div key={i} style={{ marginLeft: `${depth * 16}px` }}>
+                <PageCard page={page} />
+              </div>
+            ))}
           </div>
         </Section>
       )}
@@ -251,19 +267,38 @@ function PageCard({ page, compact = false }: { page: Record<string, unknown>; co
   const contentSources = Array.isArray(page.content_sources)
     ? (page.content_sources as string[])
     : []
+  const phase = page.phase as string | undefined
+  const isPhase1 = phase === '1'
 
   return (
-    <div className="rounded-md bg-wm-bg-elevated border border-wm-border p-3">
+    <div className={[
+      'rounded-md border p-3 transition-colors',
+      isPhase1
+        ? 'bg-wm-ai-bg/30 border-wm-ai-border'
+        : 'bg-wm-bg-elevated border-wm-border',
+    ].join(' ')}>
       <div className="flex items-baseline gap-2 flex-wrap">
         <h4 className="text-[14px] font-semibold text-wm-text">{String(page.name ?? '')}</h4>
         <code className="text-[11px] text-wm-text-subtle">/{String(page.slug ?? '')}</code>
-        {page.density && (
+        {phase && (
           <span className={[
             'text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded',
-            page.density === 'high'   ? 'bg-wm-success-bg text-wm-success' :
-            page.density === 'medium' ? 'bg-wm-warning-bg text-wm-warning' :
-                                         'bg-wm-danger-bg text-wm-danger',
-          ].join(' ')}>{String(page.density)}</span>
+            isPhase1
+              ? 'bg-wm-accent text-white'
+              : phase === '2'
+                ? 'bg-wm-bg-hover text-wm-text-muted'
+                : 'bg-wm-bg-hover text-wm-text-subtle',
+          ].join(' ')}>
+            {phase === '1' ? 'Phase 1' : phase === '2' ? 'Phase 2' : phase === 'nav-only' ? 'Nav only' : phase}
+          </span>
+        )}
+        {page.density && (
+          <span className={[
+            'text-[10px] uppercase tracking-widest font-medium px-1.5 py-0.5 rounded text-wm-text-subtle',
+            page.density === 'high'   ? 'text-wm-success' :
+            page.density === 'medium' ? 'text-wm-warning' :
+                                         'text-wm-danger',
+          ].join(' ')}>{String(page.density)} density</span>
         )}
       </div>
       {page.strategic_purpose && (
