@@ -25,9 +25,24 @@
 import { createClient } from '@supabase/supabase-js'
 import { scrubReplies, fetchTeamId, type ActiveSubmission } from '../_lib/scrubReplies'
 
-export const maxDuration = 60 // ClickUp times out if we don't respond fast enough
+// Legacy-compatible runtime config — works across all Vercel Function
+// runtimes (newer ones also accept `export const maxDuration = 60`).
+export const config = {
+  maxDuration: 60,
+}
 
 export default async function handler(req: any, res: any) {
+  try {
+    return await runHandler(req, res)
+  } catch (err: any) {
+    console.error('[clickup-chat-message] unhandled error:', err?.message, err?.stack)
+    return res.status(500).json({
+      error: `Unhandled exception: ${err?.message ?? 'unknown'}`,
+    })
+  }
+}
+
+async function runHandler(req: any, res: any) {
   if (req.method !== 'POST' && req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
