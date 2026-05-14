@@ -29,12 +29,15 @@ import { generateText, jsonSchema, tool } from 'ai'
 // cold-start runs. Opt into the Pro 300s ceiling so the agent has room.
 export const maxDuration = 300
 
-// Sonnet 4.6 handles Stage 2's structured derivative work at ~5× lower
-// cost than Opus. Stage 2 is now LEAN — page list + nav + vocabulary
-// only, no per-page outlines. Outlines come in Stage 4 (one call per
-// page) for accuracy + observable progress.
-const MODEL = 'anthropic/claude-sonnet-4-6'
-const MAX_OUTPUT_TOKENS = 10000
+// Stage 2 makes voice-critical decisions (nav structure, page naming
+// vocabulary) AND must rigorously account for every fact in the content
+// collection. That's the same shape as Stage 1 (foundational synthesis) —
+// Opus 4.7 handles it noticeably better than Sonnet on early testing
+// (Sonnet emitted duplicate-label nav structures like "About > About,
+// Beliefs" that Opus catches as malformed). With the lean schema (~5K
+// output target) Opus has plenty of headroom under its output cap.
+const MODEL = 'anthropic/claude-opus-4-7'
+const MAX_OUTPUT_TOKENS = 12000
 
 const TEXT_FORMATS = new Set([
   'text/plain', 'text/markdown', 'text/x-markdown', 'text/csv',
@@ -344,6 +347,27 @@ Default conservative: flat or grouped_dropdowns. Reserve thematic patterns for c
 
 Primary nav max 6 items.
 
+**Nav structure rules — these are non-negotiable:**
+
+a) **Never label a dropdown parent with the same word as one of its children.**
+   ❌ "About" dropdown containing { About, Beliefs, Our Team } — duplicates the parent word as a child page.
+   ✅ "About" as a STANDALONE PAGE that links inline to Beliefs / Our Team within its content.
+   ✅ "Who We Are" (or "Our Church", or "The Story") as a dropdown PARENT label containing { About / Story, Beliefs, Team }.
+   The parent label must describe the grouping, not duplicate a child.
+
+b) **Don't create a dropdown for fewer than 3 meaningful children.** If you have 2 or fewer children, make the parent a flat page and let the child concepts live inline as sections. Dropdowns are for scannable groupings, not for showing off.
+
+c) **Match the voice register when naming nav items.** If Stage 1's top_attributes include words like "Bold", "Grit", "Direct", default to bolder vocabulary:
+   - "About" → "Who We Are" or "The Story"
+   - "Sermons" → "Listen" or "Messages"
+   - "Plan a Visit" → "Sundays" or "First Time"
+   - "Contact" → "Get in Touch" or stay "Contact"
+   If voice is formal/traditional, stay with default names. The rule: if voice supports something better, default names are a fail.
+
+d) **Visitor language wins over insider language.** Visitor searches for "find a church" not "I'm New." Visitor types "kids ministry" not "next gen." When in doubt, pick the term a visitor would type into Google.
+
+e) **Avoid generic dropdowns like "Resources" or "More."** They hide content instead of organizing it. If you can't name a grouping with specific intent, the pages shouldn't be grouped.
+
 **6. Density signals:**
 - high = enough unique content for a robust page
 - medium = adequate; may need section work
@@ -394,6 +418,26 @@ in Stage 4 per-page.
 - Every page traces to a source. Speculative pages → cs_flags.soft_assumptions.
 - Use partner vocabulary (e.g., "Disciples Serve" if that's their volunteer term, "Messages" if that's their sermon term).
 - Vocabulary decisions explained in vocabulary_decisions.
+
+# Coverage audit (CRITICAL — do not skip)
+
+Before submitting, walk through the content collection and list every
+concrete content item — every ministry name, every service time, every
+program, every staff role, every event type, every external platform
+mentioned. For each, populate \`content_coverage_audit\` with:
+
+- \`content_item\`: the name as it appears in the content collection
+- \`landed_on\`: the slug of the page where it lives, OR a parent page +
+  section if nested, OR \`null\` if dropped/absorbed
+- \`status\`: \`'placed'\` (got a page), \`'nested'\` (lives as section on
+  another page), \`'navonly'\` (in nav but no built page), or \`'dropped'\`
+  (intentionally not included — strategy brief said so, or duplicate)
+- \`note\` (optional): rationale for nested/dropped status
+
+Every named item in the content collection must appear in this audit.
+If you find yourself unable to account for something, add it to
+\`cs_flags.soft_assumptions\` for the strategist to verify. Dropping
+content silently is the failure mode this audit prevents.
 
 # CS flags
 
@@ -625,6 +669,24 @@ const SITEMAP_TOOL = {
             content_item: { type: 'string', description: 'What the content collection called this thing.' },
             absorbed_into: { type: ['string', 'null'], description: 'Slug of the page that absorbs it; null if dropped.' },
             rationale: { type: 'string' },
+          },
+        },
+      },
+      content_coverage_audit: {
+        type: 'array',
+        description: 'Required. Every concrete content item in the content collection, with its destination. The strategist uses this to verify nothing got silently dropped.',
+        items: {
+          type: 'object',
+          required: ['content_item', 'status'],
+          properties: {
+            content_item: { type: 'string', description: 'Name as it appears in the content collection.' },
+            landed_on: { type: ['string', 'null'], description: 'Page slug where it lives, or null if dropped.' },
+            status: {
+              type: 'string',
+              enum: ['placed', 'nested', 'navonly', 'dropped'],
+              description: 'placed = got a page; nested = section of another page; navonly = nav link only; dropped = intentionally excluded.',
+            },
+            note: { type: 'string', description: 'Why nested or dropped, when relevant.' },
           },
         },
       },

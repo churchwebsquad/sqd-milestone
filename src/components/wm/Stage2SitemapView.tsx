@@ -26,6 +26,7 @@ export function Stage2SitemapView({
   const pages         = data.pages               as Array<Record<string, unknown>> | undefined
   const navItems      = data.nav_items           as Array<Record<string, unknown>> | undefined
   const absorbed      = data.absorbed_content    as Array<Record<string, unknown>> | undefined
+  const coverageAudit = data.content_coverage_audit as Array<Record<string, unknown>> | undefined
   const vocabulary    = data.vocabulary_decisions as Array<Record<string, unknown>> | undefined
   const aeo           = data.aeo_keywords        as Record<string, unknown> | undefined
   const csFlags       = data.cs_flags            as Record<string, unknown> | undefined
@@ -116,6 +117,37 @@ export function Stage2SitemapView({
               </div>
             ))}
           </div>
+        </Section>
+      )}
+
+      {isStaff && coverageAudit && coverageAudit.length > 0 && (
+        <Section title={`Content coverage audit · ${coverageAudit.length} items`}>
+          <p className="text-[11px] text-wm-text-muted leading-relaxed mb-2">
+            Every concrete item from the content collection, with its destination.
+            Verify nothing got dropped silently.
+          </p>
+          <ul className="space-y-1">
+            {coverageAudit.map((c, i) => {
+              const status = String(c.status ?? '')
+              const statusClass = status === 'placed'   ? 'text-wm-success'
+                                : status === 'nested'   ? 'text-wm-accent-strong'
+                                : status === 'navonly'  ? 'text-wm-warning'
+                                : status === 'dropped'  ? 'text-wm-danger'
+                                                        : 'text-wm-text-subtle'
+              return (
+                <li key={i} className="text-[12px] text-wm-text leading-snug">
+                  <span className="font-medium">{String(c.content_item ?? '')}</span>
+                  {c.landed_on
+                    ? <> → <code className="text-wm-accent-strong">/{String(c.landed_on)}</code></>
+                    : null}
+                  <span className={['ml-1.5 text-[10px] uppercase tracking-widest font-bold', statusClass].join(' ')}>
+                    {status}
+                  </span>
+                  {c.note && <span className="text-wm-text-muted"> · {String(c.note)}</span>}
+                </li>
+              )
+            })}
+          </ul>
         </Section>
       )}
 
