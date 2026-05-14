@@ -24,6 +24,11 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
 
+// Vercel serverless functions default to a short timeout (10s Hobby / 60s
+// Pro). Stage 2's full intake + 20K output ceiling can exceed that on
+// cold-start runs. Opt into the Pro 300s ceiling so the agent has room.
+export const maxDuration = 300
+
 // Sonnet 4.6 handles Stage 2's structured derivative work at ~5× lower cost
 // than Opus, and supports a far higher output ceiling — page outlines × 13+
 // pages packed Opus into truncation on the first run.

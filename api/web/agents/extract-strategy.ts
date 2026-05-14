@@ -38,6 +38,9 @@ import { generateText, jsonSchema, tool } from 'ai'
 // Vercel AI Gateway routes by `provider/model` slug. The gateway auths
 // via AI_GATEWAY_API_KEY locally and VERCEL_OIDC_TOKEN on Vercel deploys
 // — the AI SDK picks whichever is present, so no provider client setup.
+// Pro plan ceiling — Opus + multimodal PDFs + full intake can run long.
+export const maxDuration = 300
+
 const MODEL = 'anthropic/claude-opus-4-7'
 const MAX_OUTPUT_TOKENS = 8000
 
