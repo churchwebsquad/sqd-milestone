@@ -140,6 +140,19 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
     }
   }
 
+  // Detect stuck "drafting_*" states. Vercel can kill a serverless function
+  // externally without our catch block firing, leaving roadmap_stage stuck
+  // at e.g. 'drafting_sitemap' with no stage_N output and no rollback.
+  // If a running state persists past STUCK_THRESHOLD_MS, surface a recovery
+  // banner so the strategist can reset instead of waiting forever.
+  const STUCK_THRESHOLD_MS = 6 * 60 * 1000 // 6 min (max 5 min run + 1 min slack)
+  const isStuckRunning = (() => {
+    const runningStates: WMRoadmapStage[] = ['extracting_strategy', 'drafting_sitemap', 'drafting_journey', 'drafting_roadmap', 'drafting_pages']
+    if (!runningStates.includes(project.roadmap_stage)) return false
+    const updatedAt = project.updated_at ? new Date(project.updated_at).getTime() : 0
+    return updatedAt > 0 && (Date.now() - updatedAt) > STUCK_THRESHOLD_MS
+  })()
+
   /** Clear a stage's output and revert roadmap_stage to the previous gate.
    *  No agent call — just rolls the project state back. */
   const handleRollback = async (stageNum: number) => {
@@ -382,6 +395,25 @@ export function RoadmapWorkspace({ project, onChange }: Props) {
 
             {/* Agent error from pre-flight or Claude */}
             {agentError && <AgentErrorBanner error={agentError} onDismiss={() => setAgentError(null)} />}
+
+            {/* Stuck-state recovery banner */}
+            {isStuckRunning && (
+              <StuckStateBanner
+                stage={project.roadmap_stage}
+                updatedAt={project.updated_at}
+                onReset={async () => {
+                  // Find which stage is stuck and roll back to its previous gate
+                  const stageNum =
+                    project.roadmap_stage === 'extracting_strategy' ? 1 :
+                    project.roadmap_stage === 'drafting_sitemap'    ? 2 :
+                    project.roadmap_stage === 'drafting_journey'    ? 3 :
+                    project.roadmap_stage === 'drafting_roadmap'    ? 4 :
+                    project.roadmap_stage === 'drafting_pages'      ? 5 : 0
+                  if (stageNum > 0) await handleRollback(stageNum)
+                }}
+                advancing={advancing}
+              />
+            )}
 
             {/* Begin CTA — only when intake ready + stage = ready/pre_intake */}
             {(stage === 'pre_intake' || stage === 'ready') && (
@@ -978,6 +1010,41 @@ function Stage2Pointer({ projectId, phaseCount }: { projectId: string; phaseCoun
         <ArrowRight size={14} className="text-wm-accent-strong shrink-0" />
       </div>
     </a>
+  )
+}
+
+// ── Stuck-state recovery banner ──────────────────────────────────────
+
+function StuckStateBanner({
+  stage, updatedAt, onReset, advancing,
+}: {
+  stage: WMRoadmapStage
+  updatedAt: string | null
+  onReset: () => void | Promise<void>
+  advancing: boolean
+}) {
+  const minutes = updatedAt
+    ? Math.round((Date.now() - new Date(updatedAt).getTime()) / 60000)
+    : 0
+  return (
+    <div className="mb-5 rounded-md border border-wm-warning/30 bg-wm-warning-bg p-4">
+      <div className="flex items-start gap-3">
+        <AlertCircle size={14} className="text-wm-warning shrink-0 mt-0.5" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-semibold text-wm-text">
+            This stage appears stuck
+          </p>
+          <p className="text-[12px] text-wm-text-muted mt-0.5">
+            <code>{stage}</code> hasn't updated in {minutes} min. The serverless function
+            probably hit the 5-minute timeout without rolling back cleanly. Reset to the
+            previous stage to retry.
+          </p>
+        </div>
+        <WMButton variant="primary" size="sm" onClick={onReset} loading={advancing} disabled={advancing}>
+          Reset stage
+        </WMButton>
+      </div>
+    </div>
   )
 }
 

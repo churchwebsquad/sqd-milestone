@@ -248,9 +248,9 @@ function NavTree({ items, depth = 0 }: { items: Array<Record<string, unknown>>; 
 }
 
 function PageCard({ page, compact = false }: { page: Record<string, unknown>; compact?: boolean }) {
-  const sections = Array.isArray(page.sections) ? page.sections as Array<Record<string, unknown>> : []
-  const hero = page.hero as Record<string, unknown> | undefined
-  const cta = hero?.primary_cta as Record<string, unknown> | undefined
+  const contentSources = Array.isArray(page.content_sources)
+    ? (page.content_sources as string[])
+    : []
 
   return (
     <div className="rounded-md bg-wm-bg-elevated border border-wm-border p-3">
@@ -272,29 +272,10 @@ function PageCard({ page, compact = false }: { page: Record<string, unknown>; co
       {!compact && page.rationale && (
         <p className="text-[12px] text-wm-text-muted mt-1 leading-snug">{String(page.rationale)}</p>
       )}
-      {!compact && hero?.headline_direction && (
-        <div className="mt-2 pl-3 border-l-2 border-wm-accent/30">
-          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Hero direction</p>
-          <p className="text-[12px] text-wm-text">{String(hero.headline_direction)}</p>
-          {cta?.label && (
-            <p className="text-[11px] text-wm-accent-strong mt-1">→ {String(cta.label)}</p>
-          )}
-        </div>
-      )}
-      {!compact && sections.length > 0 && (
-        <details className="mt-2">
-          <summary className="text-[11px] text-wm-text-muted cursor-pointer hover:text-wm-text">
-            {sections.length} section{sections.length === 1 ? '' : 's'}
-          </summary>
-          <ul className="mt-1.5 space-y-1 pl-3">
-            {sections.map((s, i) => (
-              <li key={i} className="text-[12px] text-wm-text">
-                <span className="font-medium">{String(s.name ?? '')}</span>
-                {s.contains && <span className="text-wm-text-muted"> — {String(s.contains)}</span>}
-              </li>
-            ))}
-          </ul>
-        </details>
+      {!compact && contentSources.length > 0 && (
+        <p className="text-[11px] text-wm-text-subtle mt-1.5">
+          Sources: {contentSources.join(' · ')}
+        </p>
       )}
     </div>
   )

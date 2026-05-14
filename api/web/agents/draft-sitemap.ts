@@ -29,11 +29,12 @@ import { generateText, jsonSchema, tool } from 'ai'
 // cold-start runs. Opt into the Pro 300s ceiling so the agent has room.
 export const maxDuration = 300
 
-// Sonnet 4.6 handles Stage 2's structured derivative work at ~5× lower cost
-// than Opus, and supports a far higher output ceiling — page outlines × 13+
-// pages packed Opus into truncation on the first run.
+// Sonnet 4.6 handles Stage 2's structured derivative work at ~5× lower
+// cost than Opus. Stage 2 is now LEAN — page list + nav + vocabulary
+// only, no per-page outlines. Outlines come in Stage 4 (one call per
+// page) for accuracy + observable progress.
 const MODEL = 'anthropic/claude-sonnet-4-6'
-const MAX_OUTPUT_TOKENS = 20000
+const MAX_OUTPUT_TOKENS = 10000
 
 const TEXT_FORMATS = new Set([
   'text/plain', 'text/markdown', 'text/x-markdown', 'text/csv',
@@ -276,7 +277,21 @@ export default async function handler(req: any, res: any) {
 // ── System prompt ─────────────────────────────────────────────────────
 
 function buildSystemPrompt(): string {
-  return `You are the Sitemap Architect for Church Media Squad's Content Manager pipeline. Stage 2 of 5. You receive Stage 1's strategic foundation (audience, voice, personas, x-factor, project goals, sitemap signals, sources) plus the original intake sources, and you propose a strategic sitemap.
+  return `You are the Sitemap Architect for Church Media Squad's Content Manager pipeline. Stage 2 of 5. You receive Stage 1's strategic foundation (audience, voice, personas, x-factor, project goals, sitemap signals, sources) plus the original intake sources, and you propose a LEAN strategic sitemap.
+
+# Scope (important)
+Your output is the SITEMAP only:
+- The page list (which pages, what phase, what they're for)
+- The navigation structure
+- Vocabulary decisions (why "Sundays" instead of "Plan a Visit", etc.)
+- AEO/GEO keyword targets
+- CS flags (blockers, assumptions, design notes)
+
+You do NOT write page outlines (hero headlines, section structure, CTAs).
+That's Stage 4's job, one page at a time, with prompt caching and full
+attention budget per page. Keep your per-page output tight: one sentence
+of strategic_purpose + one sentence of rationale + density label. The
+strategist reads this to approve the page set, then Stage 4 expands each.
 
 # Core principles
 
@@ -352,20 +367,22 @@ Provide aeo_keywords:
 
 Ground in church's actual location + denomination + audience. "Church near me" is not useful. Specific local terms are.
 
-# Page outlines
+# Per-page fields (lean)
 
 Every page in pages[] needs:
-- name, slug, nav_label, phase, parent_slug, page_type
-- strategic_purpose (one sentence)
-- rationale (why exists, why named this way)
-- content_sources (which intake source(s))
-- density
-- hero: { headline_direction, subheadline_direction, primary_cta: { label, destination } }
-- sections: array of { name, contains, content_source, aeo_note? }
-- primary_action, secondary_action
+- name (display name, e.g., "Plan a Visit", "Sundays")
+- slug (URL slug, e.g., "plan-a-visit")
+- nav_label (what shows in nav; often same as name)
+- phase ('1' | '2' | 'nav-only' | 'global')
+- parent_slug (null for top-level; parent slug for nested)
+- page_type ('content' | 'chrome' | 'functional')
+- strategic_purpose (ONE sentence: what this page does for the visitor)
+- rationale (ONE sentence: why this page exists, why named this way)
+- content_sources (short list — which intake source(s) feed this page)
+- density ('high' | 'medium' | 'low')
 
-Phase 1 outlines: detailed enough to begin copywriting in Stage 5.
-Phase 2 outlines: lighter blueprints.
+Do NOT emit hero direction, sections, or page-level CTAs. Those come
+in Stage 4 per-page.
 
 # Strategic discipline
 
@@ -477,7 +494,7 @@ ${guide.voice_overview ?? '(none)'}`,
 
   blocks.push({
     type: 'text',
-    text: 'Now propose the strategic sitemap via the submit_sitemap tool. Phase 1 = 6 pages (target). Total ≤ 20. Vocabulary fits voice. Density-driven nesting. Flag every assumption.',
+    text: 'Now propose the LEAN sitemap via the submit_sitemap tool. Pages get one sentence of strategic_purpose + one of rationale + density label. No hero, sections, or CTAs — Stage 4 handles those per page. Phase 1 = 6 pages (target). Total ≤ 20. Vocabulary fits voice. Density-driven nesting. Flag every assumption.',
   })
 
   return blocks
@@ -549,7 +566,7 @@ const SITEMAP_TOOL = {
       },
       pages: {
         type: 'array',
-        description: 'Every page in the sitemap. Phase 1 outlines should be detailed enough to begin copywriting.',
+        description: 'Every page in the sitemap. LEAN — no hero, sections, or CTAs. Those come in Stage 4 per-page.',
         items: {
           type: 'object',
           required: ['name', 'slug', 'phase', 'page_type', 'strategic_purpose', 'rationale', 'density'],
@@ -560,39 +577,10 @@ const SITEMAP_TOOL = {
             phase: { type: 'string', enum: ['1', '2', 'nav-only', 'global'] },
             parent_slug: { type: ['string', 'null'], description: 'Null for top-level; parent slug for nested.' },
             page_type: { type: 'string', enum: ['content', 'chrome', 'functional'] },
-            strategic_purpose: { type: 'string', description: 'One sentence: what this page does for the visitor.' },
-            rationale: { type: 'string', description: 'Why exists, why named this way.' },
-            content_sources: { type: 'array', items: { type: 'string' } },
+            strategic_purpose: { type: 'string', description: 'ONE sentence: what this page does for the visitor.' },
+            rationale: { type: 'string', description: 'ONE sentence: why this page exists, why named this way.' },
+            content_sources: { type: 'array', items: { type: 'string' }, description: 'Short list of intake sources that feed this page.' },
             density: { type: 'string', enum: ['high', 'medium', 'low'] },
-            hero: {
-              type: 'object',
-              properties: {
-                headline_direction: { type: 'string' },
-                subheadline_direction: { type: 'string' },
-                primary_cta: {
-                  type: 'object',
-                  properties: {
-                    label: { type: 'string' },
-                    destination: { type: 'string', description: 'Slug or URL where the CTA leads.' },
-                  },
-                },
-              },
-            },
-            sections: {
-              type: 'array',
-              items: {
-                type: 'object',
-                required: ['name', 'contains'],
-                properties: {
-                  name: { type: 'string' },
-                  contains: { type: 'string', description: 'What this section is about.' },
-                  content_source: { type: 'string', description: 'Which intake source.' },
-                  aeo_note: { type: 'string', description: 'AEO/GEO consideration if applicable.' },
-                },
-              },
-            },
-            primary_action: { type: 'string', description: 'The one thing the visitor should do on this page.' },
-            secondary_action: { type: 'string' },
           },
         },
       },
@@ -698,12 +686,12 @@ function buildMockSitemap(project: any, _stage1: Record<string, unknown>): Recor
       rationale: 'Phase 1 covers the mandatory four plus About + Kids per audience priorities. Phase 2 nests Care, Outreach, and Discipleship pages. Ministry sub-pages collapsed into a single Adults page.',
     },
     pages: [
-      { name: 'Home', slug: 'home', phase: '1', page_type: 'content', strategic_purpose: 'Mock', rationale: 'Mock', density: 'high', primary_action: 'Plan your visit' },
-      { name: 'Sundays', slug: 'sundays', phase: '1', page_type: 'content', strategic_purpose: 'Mock', rationale: 'Replaces "Plan a Visit" to match voice', density: 'high', primary_action: 'Plan your first Sunday' },
-      { name: 'Listen', slug: 'listen', phase: '1', page_type: 'content', strategic_purpose: 'Mock', rationale: 'Replaces "Sermons" — voice fit', density: 'high', primary_action: 'Watch the latest message' },
-      { name: 'Give', slug: 'give', phase: '1', page_type: 'content', strategic_purpose: 'Mock', rationale: 'Mock', density: 'high', primary_action: 'Give now' },
-      { name: 'About', slug: 'about', phase: '1', page_type: 'content', strategic_purpose: 'Mock', rationale: 'Mock', density: 'high', primary_action: 'Meet the team' },
-      { name: 'Kids', slug: 'kids', phase: '1', page_type: 'content', strategic_purpose: 'Mock', rationale: 'Mock', density: 'high', primary_action: 'Pre-register' },
+      { name: 'Home',    slug: 'home',    phase: '1', page_type: 'content', strategic_purpose: 'Welcome visitors and route them to their next step.', rationale: 'Always Phase 1. Anchors the brand refresh online.', density: 'high', content_sources: ['Strategy Brief', 'Content Collection'] },
+      { name: 'Sundays', slug: 'sundays', phase: '1', page_type: 'content', strategic_purpose: 'Help first-time visitors plan their first Sunday.', rationale: 'Replaces "Plan a Visit" — bolder voice fit.', density: 'high', content_sources: ['Content Collection'] },
+      { name: 'Listen',  slug: 'listen',  phase: '1', page_type: 'content', strategic_purpose: 'Surface the most recent message and curated clips.', rationale: 'Replaces "Sermons" — voice fit.', density: 'high', content_sources: ['AM Handoff', 'Content Collection'] },
+      { name: 'Give',    slug: 'give',    phase: '1', page_type: 'content', strategic_purpose: 'Make giving frictionless and trust-building.', rationale: 'Mandatory Phase 1 across every project.', density: 'high', content_sources: ['Content Collection'] },
+      { name: 'About',   slug: 'about',   phase: '1', page_type: 'content', strategic_purpose: 'Tell the church story and introduce the team.', rationale: 'Chosen as Phase 1 because trust-building is primary goal.', density: 'high', content_sources: ['Strategy Brief', 'Content Collection'] },
+      { name: 'Kids',    slug: 'kids',    phase: '1', page_type: 'content', strategic_purpose: 'Reassure parents and pre-register for kids ministry.', rationale: 'Chosen as Phase 1 because families are explicit target.', density: 'high', content_sources: ['Content Collection'] },
     ],
     nav_items: [
       { label: 'Sundays', kind: 'page', slug: 'sundays' },
