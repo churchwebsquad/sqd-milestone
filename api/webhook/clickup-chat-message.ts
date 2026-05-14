@@ -37,8 +37,14 @@ export default async function handler(req: any, res: any) {
   const supabaseUrl = process.env.VITE_SUPABASE_URL
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   const clickupToken = process.env.CLICKUP_MILESTONE_API_TOKEN
-  if (!webhookSecret || !supabaseUrl || !serviceRoleKey || !clickupToken) {
-    return res.status(500).json({ error: 'Missing required environment variables' })
+  const missing: string[] = []
+  if (!webhookSecret) missing.push('CLICKUP_WEBHOOK_SECRET')
+  if (!supabaseUrl) missing.push('VITE_SUPABASE_URL')
+  if (!serviceRoleKey) missing.push('SUPABASE_SERVICE_ROLE_KEY')
+  if (!clickupToken) missing.push('CLICKUP_MILESTONE_API_TOKEN')
+  if (missing.length) {
+    console.error('[clickup-chat-message] missing env vars:', missing.join(', '))
+    return res.status(500).json({ error: `Missing required environment variables: ${missing.join(', ')}` })
   }
 
   const authHeader = Array.isArray(req.headers['authorization'])
