@@ -76,3 +76,66 @@ export async function extractStrategy(
   const result = await res.json() as ExtractStrategyResult
   return { result }
 }
+
+// ── Stage 2 — Sitemap ────────────────────────────────────────────────
+
+export interface DraftSitemapResult {
+  ok: true
+  sitemap: Record<string, unknown>
+  usage?: { input_tokens?: number; output_tokens?: number }
+  files_loaded?: Array<{ category: string; filename: string }>
+  mock?: boolean
+}
+
+export interface DraftSitemapError {
+  error: string
+  files_failed?: Array<{ category: string; filename: string; mime_type: string | null; error: string }>
+}
+
+/**
+ * Stage 2 — Sitemap.
+ *
+ * Reads `roadmap_state.stage_1` + intake and proposes a strategic
+ * sitemap with page outlines, nav structure, vocabulary decisions, and
+ * AEO/GEO keyword targets. Writes to `roadmap_state.stage_2` and flips
+ * `roadmap_stage` to `sitemap_done`.
+ */
+export async function draftSitemap(
+  projectId: string,
+  redoContext?: string,
+  mock = false,
+): Promise<{ result?: DraftSitemapResult; error?: DraftSitemapError }> {
+  const { data: sessionData } = await supabase.auth.getSession()
+  const token = sessionData?.session?.access_token
+  if (!token) return { error: { error: 'Not signed in.' } }
+
+  const res = await fetch('/api/web/agents/draft-sitemap', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ projectId, redoContext: redoContext ?? '', mock }),
+  })
+
+  const contentType = res.headers.get('content-type') ?? ''
+  const isJson = contentType.includes('application/json')
+
+  if (!res.ok) {
+    let body: DraftSitemapError
+    if (isJson) {
+      try { body = await res.json() }
+      catch { body = { error: `HTTP ${res.status}` } }
+    } else {
+      body = { error: `HTTP ${res.status} — endpoint returned ${contentType || 'no content-type'}.` }
+    }
+    return { error: body }
+  }
+
+  if (!isJson) {
+    return { error: { error: `Endpoint returned ${contentType || 'no content-type'} instead of JSON.` } }
+  }
+
+  const result = await res.json() as DraftSitemapResult
+  return { result }
+}

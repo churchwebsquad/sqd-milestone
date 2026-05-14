@@ -8,7 +8,10 @@
       "Bash(python3)",
       "mcp__claude_ai_Supabase__execute_sql",
       "Bash(grep -oh 'data-layer=\"[A-Z][^\"]*\"' \"/Users/ashleyfox/Documents/Claude/Projects/Web 2.0/Brixies/_HTML/Filter/Filter.html\" | sort -u | head -20)",
-      "Read(//Users/ashleyfox/Documents/Claude/Projects/Web 2.0/Brixies/_HTML/Filter/**)"
+      "Read(//Users/ashleyfox/Documents/Claude/Projects/Web 2.0/Brixies/_HTML/Filter/**)",
+      "Bash(cp src/types/database.ts /tmp/database.ts.bak)",
+      "Bash(perl -i -pe 's/^\\\\s*\\\\[key: string\\\\]: unknown\\\\s*\\\\n//gm' src/types/database.ts)",
+      "Read(//tmp/**)"
     ]
   }
 }
