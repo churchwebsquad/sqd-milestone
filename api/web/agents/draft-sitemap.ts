@@ -105,10 +105,14 @@ export default async function handler(req: any, res: any) {
     .maybeSingle()
   if (projErr || !project) return res.status(404).json({ error: projErr?.message ?? 'Project not found' })
 
-  const stage1 = (project.roadmap_state as { stage_1?: Record<string, unknown> } | null)?.stage_1
+  const roadmapState = project.roadmap_state as { stage_1?: Record<string, unknown>; stage_2?: Record<string, unknown> } | null
+  const stage1 = roadmapState?.stage_1
   if (!stage1) {
     return res.status(400).json({ error: 'Stage 1 extraction must be complete before Stage 2 can run.' })
   }
+  // If a redo is happening and a previous proposal exists, include it as
+  // context so the model refines rather than rewriting from scratch.
+  const previousStage2 = redoContext ? roadmapState?.stage_2 : null
 
   // ── Mock short-circuit ──────────────────────────────────────────────
   if (mock) {
@@ -197,7 +201,7 @@ export default async function handler(req: any, res: any) {
   const systemPrompt = buildSystemPrompt()
   const userContent = buildUserContent({
     project, churchName, accountHandoff, brandGuide, discoveryQuestionnaire, stage1,
-    filesLoaded, redoContext,
+    filesLoaded, redoContext, previousStage2,
   })
 
   // ── Call model via AI Gateway ───────────────────────────────────────
@@ -522,6 +526,9 @@ interface UserContentInputs {
   stage1: Record<string, unknown>
   filesLoaded: PreflightFile[]
   redoContext: string
+  /** Previous Stage 2 proposal — only set on redo. When present, the
+   *  model refines that proposal rather than rewriting from scratch. */
+  previousStage2: Record<string, unknown> | null | undefined
 }
 
 function buildUserContent(inputs: UserContentInputs): unknown[] {
@@ -583,10 +590,20 @@ ${guide.voice_overview ?? '(none)'}`,
   blocks.push({ type: 'text', text: '# Source: Content Collection (drives page list + density decisions)' })
   appendCategoryFiles(blocks, inputs.filesLoaded, 'content_collection', 'Content Collection file')
 
+  if (inputs.previousStage2) {
+    // Strip _meta before sharing back to the model — it's bookkeeping
+    const { _meta: _, ...prevWithoutMeta } = inputs.previousStage2 as { _meta?: unknown; [k: string]: unknown }
+    void _
+    blocks.push({
+      type: 'text',
+      text: `# Previous proposal (refine, don't rewrite)\n\nThis is the sitemap you proposed last time. The strategist's feedback follows. Your job is to KEEP what's working and apply the requested changes — not start over. Preserve specific page names, dropdowns, footer sections, and rationales that aren't called out as needing change.\n\n\`\`\`json\n${JSON.stringify(prevWithoutMeta, null, 2)}\n\`\`\``,
+    })
+  }
+
   if (inputs.redoContext) {
     blocks.push({
       type: 'text',
-      text: `# Redo context (strategist's feedback)\n\n${inputs.redoContext}\n\nApply this feedback when proposing.`,
+      text: `# Strategist's redo feedback\n\n${inputs.redoContext}\n\nApply this feedback to the previous proposal above. Make exactly the changes requested — don't introduce other restructuring unless the feedback implies it. When the feedback is silent on a part of the proposal, keep that part.`,
     })
   }
 

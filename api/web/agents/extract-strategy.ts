@@ -254,6 +254,12 @@ export default async function handler(req: any, res: any) {
     missing_sources: [],
   }
 
+  // If a redo is happening and a previous extraction exists, include it
+  // as context so the model refines rather than rewriting from scratch.
+  const previousStage1 = redoContext
+    ? (project.roadmap_state as { stage_1?: Record<string, unknown> } | null)?.stage_1
+    : null
+
   // ── Mark stage as extracting ────────────────────────────────────────
   await sb.from('strategy_web_projects').update({ roadmap_stage: 'extracting_strategy' }).eq('id', projectId)
 
@@ -262,7 +268,7 @@ export default async function handler(req: any, res: any) {
   const userContent = buildUserContent({
     project, accountHandoff, brandGuide, discoveryQuestionnaire,
     filesLoaded: preflight.files_loaded,
-    redoContext,
+    redoContext, previousStage1,
   })
 
   // ── Call model via AI Gateway ───────────────────────────────────────
@@ -414,6 +420,8 @@ interface UserContentInputs {
   discoveryQuestionnaire: any
   filesLoaded: PreflightFile[]
   redoContext: string
+  /** Previous Stage 1 extraction — only set on redo. */
+  previousStage1?: Record<string, unknown> | null
 }
 
 function buildUserContent(inputs: UserContentInputs): unknown[] {
@@ -481,10 +489,19 @@ ${guide.handoff_notes ?? '(none)'}`,
   appendCategoryFiles(blocks, inputs.filesLoaded, 'content_collection', 'Content Collection file')
 
   // Optional redo context
+  if (inputs.previousStage1) {
+    const { _meta: _, ...prevWithoutMeta } = inputs.previousStage1 as { _meta?: unknown; [k: string]: unknown }
+    void _
+    blocks.push({
+      type: 'text',
+      text: `# Previous extraction (refine, don't rewrite)\n\nThis is the extraction you produced last time. The strategist's feedback follows. KEEP what's working — preserve specific voice attributes, personas, x-factor framing, and source citations that aren't called out as needing change. Apply only the requested changes.\n\n\`\`\`json\n${JSON.stringify(prevWithoutMeta, null, 2)}\n\`\`\``,
+    })
+  }
+
   if (inputs.redoContext) {
     blocks.push({
       type: 'text',
-      text: `# Redo context (strategist's feedback on the previous extraction)\n\n${inputs.redoContext}\n\nApply this feedback when synthesizing.`,
+      text: `# Strategist's redo feedback\n\n${inputs.redoContext}\n\nApply this feedback to the previous extraction above. Make exactly the changes requested — don't introduce other restructuring unless the feedback implies it. When the feedback is silent on a part of the output, keep that part as-is.`,
     })
   }
 
