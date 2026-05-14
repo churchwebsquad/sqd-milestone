@@ -33,7 +33,7 @@ import { SnippetsWorkspace } from '../../components/wm/workspaces/SnippetsWorksp
 import { VoiceWorkspace } from '../../components/wm/workspaces/VoiceWorkspace'
 import { HeuristicsWorkspace } from '../../components/wm/workspaces/HeuristicsWorkspace'
 import { RollupWorkspace } from '../../components/wm/workspaces/RollupWorkspace'
-import type { StrategyWebProject, WMRoadmapStage } from '../../types/database'
+import type { StrategyWebProject } from '../../types/database'
 
 type TabKey =
   | 'roadmap'
@@ -113,7 +113,7 @@ export default function WebContentManagerPage() {
     setParams(next, { replace: true })
   }
 
-  const aiStatus = deriveAIStatus(project.roadmap_stage, project.name)
+  const aiStatus = deriveAIStatus(project)
 
   return (
     <WebManagerShell
@@ -142,33 +142,38 @@ export default function WebContentManagerPage() {
 
 // ── AI status derivation ────────────────────────────────────────────
 
-function deriveAIStatus(stage: WMRoadmapStage, projectName: string): WMAIStatusBadgeProps {
-  switch (stage) {
-    case 'pre_intake':
-      return { state: 'idle', message: 'Awaiting intake' }
-    case 'ready':
-      return { state: 'idle', message: 'Ready to begin' }
-    case 'extracting_strategy':
-      return { state: 'extracting', message: 'Extracting strategy' }
-    case 'strategy_done':
-      return { state: 'awaiting', message: 'Awaiting your approval — Strategy' }
-    case 'drafting_sitemap':
-      return { state: 'drafting', message: 'Drafting sitemap' }
-    case 'sitemap_done':
-      return { state: 'awaiting', message: 'Awaiting your approval — Sitemap' }
-    case 'drafting_journey':
-      return { state: 'drafting', message: 'Drafting user journey' }
-    case 'journey_done':
-      return { state: 'awaiting', message: 'Awaiting your approval — Journey' }
-    case 'drafting_roadmap':
-      return { state: 'drafting', message: 'Drafting web roadmap' }
-    case 'roadmap_done':
-      return { state: 'awaiting', message: 'Awaiting your approval — Roadmap' }
-    case 'drafting_pages':
-      return { state: 'drafting', message: 'Drafting pages' }
-    case 'all_done':
-      return { state: 'done', message: 'All pages drafted' }
-    default:
-      return { state: 'idle' }
+/**
+ * The top-of-shell AI status pill. Reads both `roadmap_stage` (for
+ * the currently-running state) AND the sticky approval markers on
+ * `roadmap_state.stage_N._meta` so it stays consistent with the
+ * Roadmap workspace's stage cards. Walks the pipeline to find the
+ * topmost stage that hasn't been approved — that's the focus.
+ */
+function deriveAIStatus(project: StrategyWebProject): WMAIStatusBadgeProps {
+  // Currently running takes precedence
+  const stage = project.roadmap_stage
+  if (stage === 'extracting_strategy') return { state: 'extracting', message: 'Extracting strategy' }
+  if (stage === 'drafting_sitemap')    return { state: 'drafting', message: 'Drafting sitemap' }
+  if (stage === 'drafting_journey')    return { state: 'drafting', message: 'Drafting user journey' }
+  if (stage === 'drafting_roadmap')    return { state: 'drafting', message: 'Drafting web roadmap' }
+  if (stage === 'drafting_pages')      return { state: 'drafting', message: 'Drafting pages' }
+  if (stage === 'pre_intake')          return { state: 'idle', message: 'Awaiting intake' }
+
+  // Find the topmost unapproved stage with output → "awaiting your approval"
+  // OR topmost unapproved stage WITHOUT output → "ready to run"
+  const state = (project.roadmap_state as Record<string, unknown> | null) ?? {}
+  const stageNames: Record<number, string> = { 1: 'Strategy', 2: 'Sitemap', 3: 'Journey', 4: 'Roadmap', 5: 'Pages' }
+  for (let n = 1; n <= 5; n++) {
+    const stageData = state[`stage_${n}`] as Record<string, unknown> | undefined
+    const meta = stageData?._meta as Record<string, unknown> | undefined
+    const approved = !!(meta?.approved_at || meta?.committed_at)
+    const hasOutput = !!stageData && Object.keys(stageData).some(k => k !== '_meta')
+
+    if (approved) continue  // sticky-approved, look at next stage
+    if (hasOutput) return { state: 'awaiting', message: `Awaiting your approval — ${stageNames[n]}` }
+    // No output for this stage. If we got here, the previous stage IS approved.
+    return { state: 'idle', message: `Ready to run — ${stageNames[n]}` }
   }
+  // Everything approved through Stage 5
+  return { state: 'done', message: 'All pages drafted' }
 }
