@@ -3,8 +3,8 @@
  *
  * Verification checklist for the foundational inputs Content Manager
  * relies on. Three hard stops (Discovery Questionnaire, Strategy
- * Brief, Brand Handoff) gate the Continue button; AM Handoff +
- * Content Collection are optional.
+ * Brief, Content Collection) gate the Continue button; AM Handoff
+ * and Brand Handoff are optional.
  *
  * Most categories source from existing Supabase tables (joined on
  * member). The two-and-a-half that need uploads (Strategy Brief,
@@ -54,9 +54,9 @@ const ROW_META: Record<RowKey, {
   brand_handoff: {
     title: 'Brand Handoff',
     description: 'The Brand Squad\'s official handoff for this partner.',
-    hardStop: true,
+    hardStop: false,
     uploadCategory: null,
-    emptyHint: 'Brand Squad hasn\'t published a brand handoff yet. Optionally paste an external brand guide URL below.',
+    emptyHint: 'Brand Squad hasn\'t published a brand handoff yet. Optional — workflow can proceed without it.',
   },
   am_handoff: {
     title: 'AM Handoff',
@@ -68,9 +68,9 @@ const ROW_META: Record<RowKey, {
   content_collection: {
     title: 'Content Collection',
     description: 'ContentSnare exports, supporting docs, photo libraries, ministry one-pagers.',
-    hardStop: false,
+    hardStop: true,
     uploadCategory: 'content_collection',
-    emptyHint: 'Optional but strongly recommended — feeds the AI copywriter with real church data.',
+    emptyHint: 'Required. Every downstream stage references real church content — Stage 2 (sitemap), Stage 4 (page outlines), Stage 5 (copy) all pull from here.',
   },
 }
 

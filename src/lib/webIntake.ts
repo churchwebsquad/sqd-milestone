@@ -8,8 +8,8 @@
  * page can render against.
  *
  * Hard stops (gate Content Manager): discovery_questionnaire,
- * strategy_brief, brand_handoff.
- * Optional: am_handoff, content_collection.
+ * strategy_brief, content_collection.
+ * Optional: am_handoff, brand_handoff.
  * Phase 2: site_crawl.
  */
 
@@ -126,7 +126,7 @@ export async function fetchIntakeStatus(
   const brandRow = brandRes.data as { id: string; last_updated_at: string | null; slug?: string | null } | null
   const brand_handoff: IntakeRowStatus = {
     key: 'brand_handoff',
-    is_hard_stop: true,
+    is_hard_stop: false,
     received: brandRow != null,
     received_at: brandRow?.last_updated_at ?? null,
     source_url: brandRow?.slug ? `/library/brand/${brandRow.slug}` : null,
@@ -134,11 +134,13 @@ export async function fetchIntakeStatus(
     uploaded_files: [],
   }
 
-  // Content collection — uploaded files (optional)
+  // Content collection — uploaded files (hard stop — Stage 2+ can't run
+  // without the partner's actual content to organize). Previously optional;
+  // promoted to required because every downstream stage references it.
   const content = docsByCategory('content_collection')
   const content_collection: IntakeRowStatus = {
     key: 'content_collection',
-    is_hard_stop: false,
+    is_hard_stop: true,
     received: content.length > 0,
     received_at: content[0]?.uploaded_at ?? null,
     source_url: null,
@@ -146,7 +148,7 @@ export async function fetchIntakeStatus(
     uploaded_files: content,
   }
 
-  const hardStops = [discovery_questionnaire, strategy_brief, brand_handoff]
+  const hardStops = [discovery_questionnaire, strategy_brief, content_collection]
   const hard_stops_complete = hardStops.filter(s => s.received).length
 
   return {
