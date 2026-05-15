@@ -253,23 +253,43 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
           {/* Validation report */}
           {report && brief && (
             <div className="space-y-3">
-              {/* Status pill */}
-              <div className={[
-                'rounded-md border p-3 flex items-center gap-2',
-                report.valid ? 'border-wm-success/30 bg-wm-success-bg' : 'border-wm-danger/30 bg-wm-danger-bg',
-              ].join(' ')}>
-                {report.valid
-                  ? <CheckCircle2 size={14} className="text-wm-success shrink-0" />
-                  : <AlertCircle size={14} className="text-wm-danger shrink-0" />}
-                <p className={[
-                  'text-[13px] font-semibold',
-                  report.valid ? 'text-wm-success' : 'text-wm-danger',
-                ].join(' ')}>
-                  {report.valid
-                    ? `Ready to import — "${brief.page_title}" (/${brief.page_slug})`
-                    : `Cannot import — ${report.issues.filter(i => i.severity === 'error').length} error(s) must be resolved`}
-                </p>
-              </div>
+              {/* Status pill — warnings don't block import; only true errors do */}
+              {(() => {
+                const warningCount = report.issues.filter(i => i.severity === 'warning').length
+                if (!report.valid) {
+                  return (
+                    <div className="rounded-md border border-wm-danger/30 bg-wm-danger-bg p-3 flex items-center gap-2">
+                      <AlertCircle size={14} className="text-wm-danger shrink-0" />
+                      <p className="text-[13px] font-semibold text-wm-danger">
+                        Cannot import — {report.issues.filter(i => i.severity === 'error').length} error(s) must be resolved
+                      </p>
+                    </div>
+                  )
+                }
+                if (warningCount > 0) {
+                  return (
+                    <div className="rounded-md border border-wm-warning/30 bg-wm-warning-bg p-3 flex items-center gap-2">
+                      <AlertCircle size={14} className="text-wm-warning shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] font-semibold text-wm-text">
+                          Ready to import with {warningCount} warning{warningCount === 1 ? '' : 's'} — "{brief.page_title}" (/{brief.page_slug})
+                        </p>
+                        <p className="text-[12px] text-wm-text-muted">
+                          Page will import. Warnings stay flagged so they're addressable after — they don't block the import itself.
+                        </p>
+                      </div>
+                    </div>
+                  )
+                }
+                return (
+                  <div className="rounded-md border border-wm-success/30 bg-wm-success-bg p-3 flex items-center gap-2">
+                    <CheckCircle2 size={14} className="text-wm-success shrink-0" />
+                    <p className="text-[13px] font-semibold text-wm-success">
+                      Ready to import — "{brief.page_title}" (/{brief.page_slug})
+                    </p>
+                  </div>
+                )
+              })()}
 
               {/* Issues list */}
               {report.issues.length > 0 && (
@@ -300,23 +320,31 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
                 <div className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
                   <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-2">
                     Snippets · {report.snippets_referenced.length} referenced
-                    {report.snippets_missing.length > 0 && (
-                      <span className="text-wm-danger ml-1">· {report.snippets_missing.length} missing</span>
+                    {report.snippets_resolvable_via_proposed.length > 0 && (
+                      <span className="text-wm-accent-strong ml-1">· {report.snippets_resolvable_via_proposed.length} will resolve on import</span>
+                    )}
+                    {report.snippets_unresolved.length > 0 && (
+                      <span className="text-wm-warning ml-1">· {report.snippets_unresolved.length} unresolved</span>
                     )}
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {report.snippets_referenced.map(t => {
-                      const missing = report.snippets_missing.includes(t)
+                      const willResolve = report.snippets_resolvable_via_proposed.includes(t)
+                      const unresolved = report.snippets_unresolved.includes(t)
+                      let cls = 'bg-wm-bg-hover text-wm-text-muted'  // known/in-library default
+                      let title = 'Resolves from project snippet library'
+                      if (willResolve) {
+                        cls = 'bg-wm-ai-bg text-wm-accent-strong border border-wm-ai-border'
+                        title = "Cowork proposed this snippet — it'll be added on import (if checkbox is on) and resolve correctly"
+                      } else if (unresolved) {
+                        cls = 'bg-wm-warning-bg text-wm-warning border border-wm-warning/30'
+                        title = 'Not in library and no proposed-new entry — will render as a literal {{token}} until you add the snippet manually'
+                      }
                       return (
                         <code
                           key={t}
-                          className={[
-                            'text-[11px] px-1.5 py-0.5 rounded',
-                            missing
-                              ? 'bg-wm-danger-bg text-wm-danger border border-wm-danger/30'
-                              : 'bg-wm-bg-hover text-wm-text-muted',
-                          ].join(' ')}
-                          title={missing ? 'Not in snippet library yet' : 'Resolves'}
+                          className={['text-[11px] px-1.5 py-0.5 rounded', cls].join(' ')}
+                          title={title}
                         >
                           {`{{${t}}}`}
                         </code>

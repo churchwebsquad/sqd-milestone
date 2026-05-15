@@ -86,11 +86,18 @@ export interface BriefValidationReport {
   issues: ValidationIssue[]
   /** {{tokens}} the brief uses */
   snippets_referenced: string[]
-  /** Tokens the brief uses but the project's snippet library doesn't have */
+  /** Tokens referenced but not in the project's snippet library yet */
   snippets_missing: string[]
-  /** Proposed-new snippets that haven't been added to the library yet */
+  /** Subset of snippets_missing that cowork proposed as new snippets —
+   *  these resolve automatically when "add on import" is checked. */
+  snippets_resolvable_via_proposed: string[]
+  /** Subset of snippets_missing with no proposed-new entry — these need
+   *  the strategist to add them manually after import (or fix the brief). */
+  snippets_unresolved: string[]
+  /** Proposed-new snippets to optionally add to the library */
   snippets_to_add: Array<{ key: string; value: string; rationale?: string }>
-  /** [NEEDS INPUT: ...] placeholders detected — block publishing */
+  /** [NEEDS INPUT: ...] placeholders detected — non-blocking, must
+   *  be resolved before publish */
   needs_input: Array<{ scope: string; label: string }>
   /** content_assignments vs section content_items coverage gaps */
   coverage_orphans: string[]
@@ -120,6 +127,17 @@ export async function validateBrief(
   const { referenced, missing, needs_input } = scanForTokensAndInputs(brief, knownTokens)
   const snippets_to_add = brief.snippets_proposed_new ?? []
 
+  // Tokens cowork proposed as new — these resolve on import (with the
+  // "add to library" checkbox on). Strip the {{ }} wrapper if present.
+  const proposedTokens = new Set(
+    snippets_to_add
+      .map(s => (s.key ?? '').replace(/^\{\{|\}\}$/g, '').trim())
+      .filter(Boolean),
+  )
+
+  const snippets_resolvable_via_proposed = missing.filter(t => proposedTokens.has(t))
+  const snippets_unresolved = missing.filter(t => !proposedTokens.has(t))
+
   // Coverage check — every content_assignments item should appear in
   // at least one section's content_items.
   const masterAssignments = new Set((brief.content_assignments ?? []).map(s => s.trim()))
@@ -147,18 +165,25 @@ export async function validateBrief(
     })
   }
 
-  if (missing.length > 0) {
+  if (snippets_resolvable_via_proposed.length > 0) {
     issues.push({
-      severity: 'error',
+      severity: 'info',
       scope: 'snippets',
-      message: `${missing.length} unknown snippet token(s) — add to library or fix the brief`,
+      message: `${snippets_resolvable_via_proposed.length} missing snippet(s) will resolve when imported (cowork proposed them)`,
+    })
+  }
+  if (snippets_unresolved.length > 0) {
+    issues.push({
+      severity: 'warning',
+      scope: 'snippets',
+      message: `${snippets_unresolved.length} missing snippet(s) — page will import, but {{tokens}} render as literals until you add the snippet to the library or fix the brief`,
     })
   }
   if (needs_input.length > 0) {
     issues.push({
       severity: 'warning',
       scope: 'needs_input',
-      message: `${needs_input.length} [NEEDS INPUT: ...] placeholder(s) — must be resolved before publish`,
+      message: `${needs_input.length} [NEEDS INPUT: ...] placeholder(s) — non-blocking, but must be resolved before the page goes live`,
     })
   }
 
@@ -167,6 +192,8 @@ export async function validateBrief(
     issues,
     snippets_referenced: [...referenced],
     snippets_missing: missing,
+    snippets_resolvable_via_proposed,
+    snippets_unresolved,
     snippets_to_add,
     needs_input,
     coverage_orphans,
