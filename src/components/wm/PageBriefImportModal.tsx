@@ -29,6 +29,72 @@ interface Props {
   onImported: (result: ImportResult) => void | Promise<void>
 }
 
+/**
+ * Strip // line comments and /* block comments * / from a JSON-ish string,
+ * plus any trailing commas before }/]. Respects string boundaries so
+ * comment-shaped substrings inside string values are preserved.
+ *
+ * Cowork's brief output is annotated with // headers and inline
+ * commentary; this lets the strategist paste verbatim.
+ */
+function stripJsonComments(input: string): string {
+  let out = ''
+  let i = 0
+  let inString = false
+  let stringQuote: string | null = null
+
+  while (i < input.length) {
+    const ch = input[i]
+    const next = input[i + 1]
+
+    // Inside a string — pass through, handle escapes
+    if (inString) {
+      out += ch
+      if (ch === '\\' && next != null) {
+        out += next
+        i += 2
+        continue
+      }
+      if (ch === stringQuote) {
+        inString = false
+        stringQuote = null
+      }
+      i++
+      continue
+    }
+
+    // Entering a string
+    if (ch === '"' || ch === "'") {
+      inString = true
+      stringQuote = ch
+      out += ch
+      i++
+      continue
+    }
+
+    // Line comment: //... until newline
+    if (ch === '/' && next === '/') {
+      i += 2
+      while (i < input.length && input[i] !== '\n') i++
+      continue  // leave the newline to be emitted on next iteration
+    }
+
+    // Block comment: /* ... */
+    if (ch === '/' && next === '*') {
+      i += 2
+      while (i < input.length && !(input[i] === '*' && input[i + 1] === '/')) i++
+      i += 2  // skip closing */
+      continue
+    }
+
+    out += ch
+    i++
+  }
+
+  // Strip trailing commas before } or ]
+  return out.replace(/,(\s*[}\]])/g, '$1')
+}
+
 const PLACEHOLDER = `Paste a cowork-produced page brief JSON here. Example shape:
 
 {
@@ -76,7 +142,11 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
     setBrief(null)
     let parsed: PageBrief
     try {
-      parsed = JSON.parse(jsonText) as PageBrief
+      // Cowork includes // line and /* block */ comments as human-readable
+      // annotations in the brief output. Standard JSON.parse rejects those.
+      // Strip comments + trailing commas before parsing so the strategist
+      // can paste the brief verbatim without manual cleanup.
+      parsed = JSON.parse(stripJsonComments(jsonText)) as PageBrief
     } catch (e) {
       setParseError(e instanceof Error ? e.message : 'Invalid JSON')
       return
