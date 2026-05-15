@@ -32,7 +32,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FileText, Loader2, ChevronDown, ChevronRight, Plus, Trash2,
-  Sparkles, RotateCw, Eye, GripVertical, MoreHorizontal,
+  Sparkles, RotateCw, Eye, GripVertical, MoreHorizontal, Upload,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { loadEditorSnippets } from '../../../lib/webSnippets'
@@ -45,6 +45,7 @@ import { WMRichTextEditor } from '../RichTextEditor'
 import type { WMSnippetOption } from '../RichTextEditor'
 import { WMCatalogSidePanel } from '../CatalogSidePanel'
 import { WMAIAttribution } from '../AIAttribution'
+import { PageBriefImportModal } from '../PageBriefImportModal'
 import type {
   StrategyWebProject, WebPage, WebSection, WebContentTemplate,
   WebFieldDef, WebSlotDef, WebGroupDef, WebTemplateKind,
@@ -74,6 +75,7 @@ export function PagesWorkspace({ project }: Props) {
   const [loading, setLoading] = useState(true)
   const [activePage, setActivePage] = useState<WebPage | null>(null)
   const [snippets, setSnippets] = useState<readonly WMSnippetOption[]>([])
+  const [importOpen, setImportOpen] = useState(false)
 
   const activePageId = params.get('page')
 
@@ -126,6 +128,18 @@ export function PagesWorkspace({ project }: Props) {
       <div className="flex min-h-[calc(100vh-120px)]">
         {/* Page list (left) */}
         <aside className="w-72 shrink-0 border-r border-wm-border bg-wm-bg-elevated overflow-y-auto">
+          {/* Import action — always available */}
+          <div className="p-3 border-b border-wm-border sticky top-0 bg-wm-bg-elevated z-10">
+            <WMButton
+              variant="secondary"
+              size="sm"
+              iconLeft={<Upload size={11} />}
+              onClick={() => setImportOpen(true)}
+              className="w-full"
+            >
+              Import from brief
+            </WMButton>
+          </div>
           <PageList
             pages={pages}
             loading={loading}
@@ -146,10 +160,24 @@ export function PagesWorkspace({ project }: Props) {
               onArchived={() => { clearSelection(); void loadPages() }}
             />
           ) : (
-            <EmptyEditor pageCount={pages.length} />
+            <EmptyEditor pageCount={pages.length} onImport={() => setImportOpen(true)} />
           )}
         </main>
       </div>
+
+      <PageBriefImportModal
+        project={project}
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={async (result) => {
+          await loadPages()
+          setImportOpen(false)
+          // Navigate to the newly imported / updated page
+          const next = new URLSearchParams(params)
+          next.set('page', result.page_id)
+          setParams(next, { replace: true })
+        }}
+      />
     </SnippetsContext.Provider>
   )
 }
@@ -242,7 +270,7 @@ function PageList({
 
 // ── Empty state ───────────────────────────────────────────────────────
 
-function EmptyEditor({ pageCount }: { pageCount: number }) {
+function EmptyEditor({ pageCount, onImport }: { pageCount: number; onImport: () => void }) {
   return (
     <div className="h-full grid place-items-center p-10">
       <div className="text-center max-w-md">
@@ -250,11 +278,19 @@ function EmptyEditor({ pageCount }: { pageCount: number }) {
         <h2 className="text-[15px] font-semibold text-wm-text mb-1">
           {pageCount > 0 ? 'Pick a page to begin' : 'No pages yet'}
         </h2>
-        <p className="text-[12px] text-wm-text-muted">
+        <p className="text-[12px] text-wm-text-muted mb-4">
           {pageCount > 0
-            ? 'Pages appear in the left panel grouped by phase. Once the AI copywriter ships in Phase C, drafted pages will be ready for review when you arrive.'
-            : 'Use the Sitemap & Strategy tab to add pages first, then come back here to author them.'}
+            ? 'Pages appear in the left panel grouped by phase. Import a page brief from cowork or pick one to start editing.'
+            : 'Import a page brief from cowork, or add pages manually from the Sitemap & Strategy tab.'}
         </p>
+        <WMButton
+          variant="primary"
+          size="sm"
+          iconLeft={<Upload size={11} />}
+          onClick={onImport}
+        >
+          Import page brief
+        </WMButton>
       </div>
     </div>
   )
