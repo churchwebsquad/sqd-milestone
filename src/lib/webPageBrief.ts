@@ -321,6 +321,7 @@ export async function importBrief(
       web_page_id: pageId,
       content_template_id: null,  // freehand
       field_values: { body: heroBody },
+      notes: 'Imported hero block from page brief',
       sort_order: order++,
     })
   }
@@ -331,6 +332,9 @@ export async function importBrief(
       web_page_id: pageId,
       content_template_id: null,
       field_values: { body },
+      // Stash the brief-side context here so the strategist can see
+      // cowork's intent without it polluting the rendered copy.
+      notes: buildSectionNotes(section),
       sort_order: order++,
     })
   }
@@ -412,7 +416,9 @@ function renderCTA(cta: BriefCTA | undefined, snippets: Map<string, string>): st
 
 function renderHero(hero: BriefHero, snippets: Map<string, string>): string {
   const parts: string[] = []
-  parts.push('<p><em>Hero</em></p>')
+  // Tagline (eyebrow) + H1 + body + CTAs only — no meta annotations.
+  // The "this is the hero" labeling belongs on the section header, not
+  // in the rendered copy.
   if (hero.tagline) parts.push(`<p><strong>${escapeHtml(resolveSnippets(hero.tagline, snippets))}</strong></p>`)
   if (hero.h1) parts.push(`<h1>${escapeHtml(resolveSnippets(hero.h1, snippets))}</h1>`)
   if (hero.body) parts.push(`<p>${escapeHtml(resolveSnippets(hero.body, snippets))}</p>`)
@@ -425,13 +431,8 @@ function renderSection(section: BriefSection, snippets: Map<string, string>): st
   const parts: string[] = []
   const fields = (section.fields ?? {}) as Record<string, unknown>
 
-  // Label the section with its purpose
-  if (section.purpose) {
-    parts.push(`<p><em>Section · ${escapeHtml(section.purpose)}</em></p>`)
-  }
-  if (section.suggested_template_family) {
-    parts.push(`<p><em>Suggested template family: <strong>${escapeHtml(section.suggested_template_family)}</strong></em></p>`)
-  }
+  // Body copy only — section purpose + suggested_template_family + voice_notes
+  // live on the section's `notes` field, not in the rendered body.
 
   // Heading
   const h = typeof fields.h === 'string' ? fields.h : ''
@@ -445,11 +446,12 @@ function renderSection(section: BriefSection, snippets: Map<string, string>): st
     parts.push(`<p>${escapeHtml(resolveSnippets(text, snippets))}</p>`)
   }
 
-  // Secondary line (overflow for some Brixies templates — will get
-  // template-fit handling in Step 2)
+  // Secondary line — Brixies-template-overflow content. Renders as a
+  // plain paragraph for now; Step 2's overflow panel will offer the
+  // strategist a proper resolution (different template, move, drop, etc.)
   const secondary = typeof fields.secondary === 'string' ? fields.secondary : ''
   if (secondary) {
-    parts.push(`<p><em>Secondary: ${escapeHtml(resolveSnippets(secondary, snippets))}</em></p>`)
+    parts.push(`<p>${escapeHtml(resolveSnippets(secondary, snippets))}</p>`)
   }
 
   // Steps (Process Sections shape)
@@ -485,6 +487,26 @@ function renderSection(section: BriefSection, snippets: Map<string, string>): st
   if (secondaryCta) parts.push(renderCTA(secondaryCta, snippets))
 
   return parts.join('\n')
+}
+
+/**
+ * Pack brief-side context for a section into a single readable string
+ * stored on `web_sections.notes`. Keeps cowork's intent accessible
+ * without leaking it into the rendered body copy. The Pages workspace
+ * can surface this as a sidebar / dropdown / hover later.
+ */
+function buildSectionNotes(section: BriefSection): string {
+  const lines: string[] = []
+  if (section.section_id) lines.push(`Section ID: ${section.section_id}`)
+  if (section.purpose) lines.push(`Purpose: ${section.purpose}`)
+  if (section.suggested_template_family) {
+    lines.push(`Suggested template family: ${section.suggested_template_family}`)
+  }
+  if (Array.isArray(section.content_items) && section.content_items.length > 0) {
+    lines.push(`Content items: ${section.content_items.join(' · ')}`)
+  }
+  if (section.voice_notes) lines.push(`Voice notes: ${section.voice_notes}`)
+  return lines.join('\n')
 }
 
 // Re-export for the modal to render unresolved-snippet chips, etc.
