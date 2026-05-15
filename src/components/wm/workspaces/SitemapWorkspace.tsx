@@ -26,6 +26,7 @@ import type { WMStatusTone } from '../StatusPill'
 import { WMCatalogSidePanel } from '../CatalogSidePanel'
 import { Stage2SitemapView } from '../Stage2SitemapView'
 import { RedoModal } from '../RedoModal'
+import { ConfirmDialog } from '../ConfirmDialog'
 import { commitSitemapToPages } from '../../../lib/webSitemap'
 import { draftSitemap } from '../../../lib/webAgents'
 import type { StrategyWebProject, WebPage, WebContentTemplate, WebTemplateKind } from '../../../types/database'
@@ -54,6 +55,17 @@ export function SitemapWorkspace({ project, onChange }: Props) {
   const [loading, setLoading] = useState(true)
   const [picker, setPicker] = useState<ChromeSlot | null>(null)
   const [addPageOpen, setAddPageOpen] = useState<string | null>(null) // phase key or null
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  // Single-page archive confirm OR bulk archive confirm:
+  //   - { kind: 'single', id, name } → archive one
+  //   - { kind: 'bulk' }              → archive everything in selectedIds
+  //   - null                          → closed
+  const [archiveConfirm, setArchiveConfirm] = useState<
+    | { kind: 'single'; id: string; name: string }
+    | { kind: 'bulk' }
+    | null
+  >(null)
+  const [archiving, setArchiving] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -103,10 +115,46 @@ export function SitemapWorkspace({ project, onChange }: Props) {
     await load()
   }
 
-  const archivePage = async (id: string) => {
-    if (!confirm('Archive this page?')) return
-    await supabase.from('web_pages').update({ archived: true }).eq('id', id)
-    await load()
+  const togglePageSelection = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const clearSelection = () => setSelectedIds(new Set())
+
+  /** Promotes archive intent to a custom confirm modal — never relies on
+   *  window.confirm(), which Chrome can suppress site-wide. */
+  const requestArchive = (id: string) => {
+    const page = pages.find(p => p.id === id)
+    if (!page) return
+    setArchiveConfirm({ kind: 'single', id, name: page.name })
+  }
+
+  const requestBulkArchive = () => {
+    if (selectedIds.size === 0) return
+    setArchiveConfirm({ kind: 'bulk' })
+  }
+
+  const executeArchive = async () => {
+    setArchiving(true)
+    try {
+      const idsToArchive: string[] = archiveConfirm?.kind === 'bulk'
+        ? [...selectedIds]
+        : archiveConfirm?.kind === 'single'
+          ? [archiveConfirm.id]
+          : []
+      if (idsToArchive.length === 0) return
+      await supabase.from('web_pages').update({ archived: true }).in('id', idsToArchive)
+      clearSelection()
+      setArchiveConfirm(null)
+      await load()
+    } finally {
+      setArchiving(false)
+    }
   }
 
   return (
@@ -152,6 +200,15 @@ export function SitemapWorkspace({ project, onChange }: Props) {
               onOpenPicker={setPicker}
             />
 
+            {/* Bulk selection toolbar — visible when 1+ pages checked */}
+            {selectedIds.size > 0 && (
+              <BulkSelectionToolbar
+                count={selectedIds.size}
+                onArchive={requestBulkArchive}
+                onClear={clearSelection}
+              />
+            )}
+
             {/* Page tree */}
             <div className="space-y-5">
               {PHASES.map(phase => {
@@ -162,9 +219,12 @@ export function SitemapWorkspace({ project, onChange }: Props) {
                     phase={phase}
                     pages={phasePages}
                     loading={loading}
+                    selectedIds={selectedIds}
+                    selectionActive={selectedIds.size > 0}
                     onAddPage={() => setAddPageOpen(phase.key)}
                     onOpenPage={(id) => navigate(`/web/${project.id}/content?tab=pages&page=${id}`)}
-                    onArchivePage={(id) => void archivePage(id)}
+                    onArchivePage={requestArchive}
+                    onToggleSelection={togglePageSelection}
                   />
                 )
               })}
@@ -220,6 +280,41 @@ export function SitemapWorkspace({ project, onChange }: Props) {
           onCreated={async () => { setAddPageOpen(null); await load() }}
         />
       )}
+
+      {/* Archive confirmation — custom modal, never blocked by browser */}
+      <ConfirmDialog
+        open={archiveConfirm !== null}
+        title={
+          archiveConfirm?.kind === 'bulk'
+            ? `Archive ${selectedIds.size} page${selectedIds.size === 1 ? '' : 's'}?`
+            : `Archive "${archiveConfirm?.kind === 'single' ? archiveConfirm.name : ''}"?`
+        }
+        body={
+          archiveConfirm?.kind === 'bulk' ? (
+            <div>
+              <p className="mb-2">These pages will be archived:</p>
+              <ul className="space-y-0.5 text-wm-text">
+                {[...selectedIds].map(id => {
+                  const p = pages.find(x => x.id === id)
+                  return p ? <li key={id}>· {p.name} <code className="text-wm-text-subtle text-[11px]">/{p.slug}</code></li> : null
+                })}
+              </ul>
+              <p className="mt-3">Archived pages disappear from the tree but stay in the database. Re-running Stage 2's commit won't bring them back automatically.</p>
+            </div>
+          ) : (
+            'Archived pages disappear from the tree but stay in the database. You can restore manually from Supabase if needed.'
+          )
+        }
+        confirmLabel={
+          archiveConfirm?.kind === 'bulk'
+            ? `Archive ${selectedIds.size} page${selectedIds.size === 1 ? '' : 's'}`
+            : 'Archive page'
+        }
+        destructive
+        loading={archiving}
+        onConfirm={executeArchive}
+        onCancel={() => { if (!archiving) setArchiveConfirm(null) }}
+      />
     </div>
   )
 }
@@ -318,14 +413,18 @@ function ChromeSlotCard({
 // ── Phase group ──────────────────────────────────────────────────────
 
 function PhaseGroup({
-  phase, pages, loading, onAddPage, onOpenPage, onArchivePage,
+  phase, pages, loading, selectedIds, selectionActive,
+  onAddPage, onOpenPage, onArchivePage, onToggleSelection,
 }: {
   phase: { key: string; label: string; description: string }
   pages: WebPage[]
   loading: boolean
+  selectedIds: Set<string>
+  selectionActive: boolean
   onAddPage: () => void
   onOpenPage: (id: string) => void
   onArchivePage: (id: string) => void
+  onToggleSelection: (id: string) => void
 }) {
   return (
     <div>
@@ -355,7 +454,17 @@ function PhaseGroup({
         </button>
       ) : (
         <div className="space-y-1.5">
-          {pages.map(p => <PageRow key={p.id} page={p} onOpen={() => onOpenPage(p.id)} onArchive={() => onArchivePage(p.id)} />)}
+          {pages.map(p => (
+            <PageRow
+              key={p.id}
+              page={p}
+              selected={selectedIds.has(p.id)}
+              selectionActive={selectionActive}
+              onOpen={() => onOpenPage(p.id)}
+              onArchive={() => onArchivePage(p.id)}
+              onToggleSelection={() => onToggleSelection(p.id)}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -363,11 +472,15 @@ function PhaseGroup({
 }
 
 function PageRow({
-  page, onOpen, onArchive,
+  page, selected, selectionActive,
+  onOpen, onArchive, onToggleSelection,
 }: {
   page: WebPage
+  selected: boolean
+  selectionActive: boolean
   onOpen: () => void
   onArchive: () => void
+  onToggleSelection: () => void
 }) {
   const statusTone: WMStatusTone =
     page.content_status === 'approved'  ? 'success' :
@@ -376,7 +489,26 @@ function PageRow({
     'neutral'
 
   return (
-    <div className="group flex items-center gap-3 px-3 py-2.5 rounded-md bg-wm-bg-elevated border border-wm-border hover:border-wm-border-focus transition-colors">
+    <div className={[
+      'group flex items-center gap-3 px-3 py-2.5 rounded-md border transition-colors',
+      selected
+        ? 'bg-wm-ai-bg/40 border-wm-ai-border'
+        : 'bg-wm-bg-elevated border-wm-border hover:border-wm-border-focus',
+    ].join(' ')}>
+      {/* Selection checkbox — always visible once anything is selected,
+          hover-reveal otherwise so it doesn't clutter the default state */}
+      <label className={[
+        'shrink-0 cursor-pointer flex items-center justify-center w-4 h-4 transition-opacity',
+        selectionActive || selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+      ].join(' ')}>
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelection}
+          className="accent-wm-accent cursor-pointer"
+          aria-label={`Select ${page.name}`}
+        />
+      </label>
       <FileText size={14} className="text-wm-text-subtle shrink-0" />
       <button
         type="button"
@@ -396,6 +528,32 @@ function PageRow({
       <WMIconButton label="More actions" size="sm" className="opacity-0 group-hover:opacity-100 transition-opacity">
         <MoreHorizontal size={13} />
       </WMIconButton>
+    </div>
+  )
+}
+
+// ── Bulk selection toolbar ───────────────────────────────────────────
+
+function BulkSelectionToolbar({
+  count, onArchive, onClear,
+}: {
+  count: number
+  onArchive: () => void
+  onClear: () => void
+}) {
+  return (
+    <div className="mb-4 rounded-md border border-wm-ai-border bg-wm-ai-bg/40 p-3 flex items-center justify-between gap-3 flex-wrap">
+      <p className="text-[13px] font-semibold text-wm-text">
+        {count} page{count === 1 ? '' : 's'} selected
+      </p>
+      <div className="flex items-center gap-2">
+        <WMButton variant="ghost" size="sm" onClick={onClear}>
+          Clear selection
+        </WMButton>
+        <WMButton variant="danger" size="sm" iconLeft={<Archive size={11} />} onClick={onArchive}>
+          Archive selected
+        </WMButton>
+      </div>
     </div>
   )
 }
