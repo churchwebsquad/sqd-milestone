@@ -309,7 +309,9 @@ export async function importBrief(
   // Render each section as a freehand block. Step 2 swaps in Brixies
   // template fitting; for MVP every section is freehand-with-resolved-body.
   const snippetOptions = await loadEditorSnippets(project)
-  const snippetMap = new Map(snippetOptions.map(o => [o.token, o.resolvedValue]))
+  const snippetMap = new Map<string, { value: string; label?: string }>(
+    snippetOptions.map(o => [o.token, { value: o.resolvedValue, label: o.label }]),
+  )
 
   const sections = brief.sections ?? []
   let order = 0
@@ -390,15 +392,10 @@ function scanForTokensAndInputs(
   return { referenced, missing, needs_input }
 }
 
-// ── Section rendering (MVP — freehand HTML) ──────────────────────────
+// ── Section rendering (MVP — freehand HTML with snippet chips) ───────
 
-function resolveSnippets(text: string, snippets: Map<string, string>): string {
-  return text.replace(SNIPPET_RX, (full, token) => {
-    const v = snippets.get(token)
-    if (v == null) return full  // leave unresolved as literal — validator already flagged it
-    return v
-  })
-}
+type SnippetEntry = { value: string; label?: string }
+type SnippetMap = Map<string, SnippetEntry>
 
 function escapeHtml(s: string): string {
   return s
@@ -407,27 +404,96 @@ function escapeHtml(s: string): string {
     .replace(/>/g, '&gt;')
 }
 
-function renderCTA(cta: BriefCTA | undefined, snippets: Map<string, string>): string {
+function escapeAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+/**
+ * Replace {{token}} markers with SnippetNode-compatible chip HTML.
+ * The TipTap editor parses these into snippet atoms preserving the
+ * link to the snippet library. When a snippet has no value (empty
+ * or missing), the chip renders as a visible "{{token}}" placeholder
+ * via SnippetNode's fallback, so the strategist sees exactly which
+ * snippet still needs filling.
+ *
+ * Use only for BODY content. URL/href/target values need plain-text
+ * resolution — use resolveSnippetsPlain for those.
+ */
+function resolveSnippetsAsChips(text: string, snippets: SnippetMap): string {
+  // First escape the surrounding HTML, then re-inject chips for tokens.
+  // Order matters: scan the raw text for tokens, then escape between.
+  let out = ''
+  let last = 0
+  for (const match of text.matchAll(SNIPPET_RX)) {
+    const m = match[0]
+    const token = match[1]
+    const start = match.index ?? 0
+    out += escapeHtml(text.slice(last, start))
+    const entry = snippets.get(token)
+    const value = entry?.value ?? ''
+    const label = entry?.label ?? ''
+    const isEmpty = !value
+    // SnippetNode's renderHTML falls back to "{{token}}" when text is
+    // empty, but to drive a distinct visual ("this needs filling"),
+    // we explicitly include the token text and set data-empty=true.
+    // CSS in index.css styles data-empty chips with a warning color.
+    const displayText = isEmpty ? `{{${token}}}` : value
+    const titleNote = isEmpty
+      ? `Snippet: {{${token}}} (empty — fill in the snippet library so this page resolves automatically)`
+      : `Snippet: {{${token}}}${label ? ` (${label})` : ''}`
+    const attrs = [
+      `data-snippet="${escapeAttr(token)}"`,
+      'class="wm-snippet"',
+      isEmpty ? 'data-empty="true"' : '',
+      label ? `data-snippet-label="${escapeAttr(label)}"` : '',
+      `title="${escapeAttr(titleNote)}"`,
+    ].filter(Boolean).join(' ')
+    out += `<span ${attrs}>${escapeHtml(displayText)}</span>`
+    last = start + m.length
+  }
+  out += escapeHtml(text.slice(last))
+  return out
+}
+
+/**
+ * Resolve {{token}} markers as plain text — for URL targets, attribute
+ * values, anything that can't carry inline HTML. Empty/missing snippets
+ * fall back to the literal "{{token}}" string so URLs don't silently
+ * resolve to nothing.
+ */
+function resolveSnippetsPlain(text: string, snippets: SnippetMap): string {
+  return text.replace(SNIPPET_RX, (full, token) => {
+    const entry = snippets.get(token)
+    if (!entry || !entry.value) return full // keep literal so it's recoverable
+    return entry.value
+  })
+}
+
+function renderCTA(cta: BriefCTA | undefined, snippets: SnippetMap): string {
   if (!cta?.label) return ''
-  const label = escapeHtml(resolveSnippets(cta.label, snippets))
-  const target = cta.target ? escapeHtml(resolveSnippets(cta.target, snippets)) : '#'
+  // Label uses chips (it's display copy). Target stays plain (it's a URL).
+  const label = resolveSnippetsAsChips(cta.label, snippets)
+  const target = cta.target ? escapeAttr(resolveSnippetsPlain(cta.target, snippets)) : '#'
   return `<p><a href="${target}"><strong>${label} →</strong></a></p>`
 }
 
-function renderHero(hero: BriefHero, snippets: Map<string, string>): string {
+function renderHero(hero: BriefHero, snippets: SnippetMap): string {
   const parts: string[] = []
   // Tagline (eyebrow) + H1 + body + CTAs only — no meta annotations.
-  // The "this is the hero" labeling belongs on the section header, not
-  // in the rendered copy.
-  if (hero.tagline) parts.push(`<p><strong>${escapeHtml(resolveSnippets(hero.tagline, snippets))}</strong></p>`)
-  if (hero.h1) parts.push(`<h1>${escapeHtml(resolveSnippets(hero.h1, snippets))}</h1>`)
-  if (hero.body) parts.push(`<p>${escapeHtml(resolveSnippets(hero.body, snippets))}</p>`)
+  // resolveSnippetsAsChips already escapes the surrounding HTML.
+  if (hero.tagline) parts.push(`<p><strong>${resolveSnippetsAsChips(hero.tagline, snippets)}</strong></p>`)
+  if (hero.h1) parts.push(`<h1>${resolveSnippetsAsChips(hero.h1, snippets)}</h1>`)
+  if (hero.body) parts.push(`<p>${resolveSnippetsAsChips(hero.body, snippets)}</p>`)
   if (hero.primary_cta) parts.push(renderCTA(hero.primary_cta, snippets))
   if (hero.secondary_cta) parts.push(renderCTA(hero.secondary_cta, snippets))
   return parts.join('\n')
 }
 
-function renderSection(section: BriefSection, snippets: Map<string, string>): string {
+function renderSection(section: BriefSection, snippets: SnippetMap): string {
   const parts: string[] = []
   const fields = (section.fields ?? {}) as Record<string, unknown>
 
@@ -436,14 +502,14 @@ function renderSection(section: BriefSection, snippets: Map<string, string>): st
 
   // Heading
   const h = typeof fields.h === 'string' ? fields.h : ''
-  if (h) parts.push(`<h2>${escapeHtml(resolveSnippets(h, snippets))}</h2>`)
+  if (h) parts.push(`<h2>${resolveSnippetsAsChips(h, snippets)}</h2>`)
 
   // Intro / description / body — different briefs use different field names
   const intro = typeof fields.intro === 'string' ? fields.intro : ''
   const body = typeof fields.body === 'string' ? fields.body : ''
   const desc = typeof fields.d === 'string' ? fields.d : ''
   for (const text of [intro, body, desc].filter(Boolean)) {
-    parts.push(`<p>${escapeHtml(resolveSnippets(text, snippets))}</p>`)
+    parts.push(`<p>${resolveSnippetsAsChips(text, snippets)}</p>`)
   }
 
   // Secondary line — Brixies-template-overflow content. Renders as a
@@ -451,7 +517,7 @@ function renderSection(section: BriefSection, snippets: Map<string, string>): st
   // strategist a proper resolution (different template, move, drop, etc.)
   const secondary = typeof fields.secondary === 'string' ? fields.secondary : ''
   if (secondary) {
-    parts.push(`<p>${escapeHtml(resolveSnippets(secondary, snippets))}</p>`)
+    parts.push(`<p>${resolveSnippetsAsChips(secondary, snippets)}</p>`)
   }
 
   // Steps (Process Sections shape)
@@ -460,8 +526,8 @@ function renderSection(section: BriefSection, snippets: Map<string, string>): st
     for (const step of steps as Array<Record<string, unknown>>) {
       const h3 = typeof step.h3 === 'string' ? step.h3 : ''
       const stepBody = typeof step.body === 'string' ? step.body : ''
-      if (h3) parts.push(`<h3>${escapeHtml(resolveSnippets(h3, snippets))}</h3>`)
-      if (stepBody) parts.push(`<p>${escapeHtml(resolveSnippets(stepBody, snippets))}</p>`)
+      if (h3) parts.push(`<h3>${resolveSnippetsAsChips(h3, snippets)}</h3>`)
+      if (stepBody) parts.push(`<p>${resolveSnippetsAsChips(stepBody, snippets)}</p>`)
       const ctaInline = step.cta_inline as BriefCTA | undefined
       if (ctaInline) parts.push(renderCTA(ctaInline, snippets))
     }
@@ -473,8 +539,8 @@ function renderSection(section: BriefSection, snippets: Map<string, string>): st
     for (const faq of faqs as Array<Record<string, unknown>>) {
       const q = typeof faq.q === 'string' ? faq.q : ''
       const a = typeof faq.a === 'string' ? faq.a : ''
-      if (q) parts.push(`<p><strong>${escapeHtml(resolveSnippets(q, snippets))}</strong></p>`)
-      if (a) parts.push(`<p>${escapeHtml(resolveSnippets(a, snippets))}</p>`)
+      if (q) parts.push(`<p><strong>${resolveSnippetsAsChips(q, snippets)}</strong></p>`)
+      if (a) parts.push(`<p>${resolveSnippetsAsChips(a, snippets)}</p>`)
     }
   }
 
@@ -487,6 +553,54 @@ function renderSection(section: BriefSection, snippets: Map<string, string>): st
   if (secondaryCta) parts.push(renderCTA(secondaryCta, snippets))
 
   return parts.join('\n')
+}
+
+// ── Snippet chip auto-refresh (called from PagesWorkspace at load) ───
+
+/**
+ * Walk an HTML body (saved from a prior import or edit) and refresh
+ * every snippet chip's inner text + data-empty attribute against the
+ * current snippet library. Idempotent.
+ *
+ * Why this exists: chips bake their resolved value into the HTML when
+ * stored. When a strategist later fills in a previously-empty snippet
+ * in the library, existing pages reference the OLD (empty) value
+ * unless we refresh. This function is called when each section's body
+ * is loaded for display so the chips always reflect the current
+ * library state without requiring a re-import.
+ */
+export function refreshSnippetChips(
+  html: string,
+  snippets: ReadonlyArray<WMSnippetOption>,
+): string {
+  if (!html || !html.includes('data-snippet')) return html
+  const map = new Map<string, WMSnippetOption>(snippets.map(s => [s.token, s]))
+  // DOMParser available in the browser; the importer runs server-side
+  // but this refresh runs on the client at load time.
+  if (typeof DOMParser === 'undefined') return html
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(`<div>${html}</div>`, 'text/html')
+  const chips = doc.querySelectorAll('span[data-snippet]')
+  chips.forEach((chip) => {
+    const token = chip.getAttribute('data-snippet')
+    if (!token) return
+    const entry = map.get(token)
+    const value = entry?.resolvedValue ?? ''
+    const isEmpty = !value
+    chip.textContent = isEmpty ? `{{${token}}}` : value
+    if (isEmpty) chip.setAttribute('data-empty', 'true')
+    else chip.removeAttribute('data-empty')
+    if (entry?.label) chip.setAttribute('data-snippet-label', entry.label)
+    chip.setAttribute(
+      'title',
+      isEmpty
+        ? `Snippet: {{${token}}} (empty — fill in the snippet library so this page resolves automatically)`
+        : `Snippet: {{${token}}}${entry?.label ? ` (${entry.label})` : ''}`,
+    )
+    chip.setAttribute('class', 'wm-snippet')
+  })
+  // Strip the wrapper div we added.
+  return doc.body.firstElementChild?.innerHTML ?? html
 }
 
 /**

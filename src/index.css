@@ -225,6 +225,16 @@
     outline: 2px solid var(--color-wm-accent);
     outline-offset: 1px;
   }
+  /* Empty snippet — the snippet exists in the library but has no value,
+     OR the token isn't in the library at all. Either way it reads as
+     "fix me" with the warning palette so the strategist can spot
+     unresolved tokens at a glance. */
+  .wm-theme .wm-snippet[data-empty="true"] {
+    background: var(--color-wm-warning-bg);
+    color: var(--color-wm-warning);
+    border-color: color-mix(in srgb, var(--color-wm-warning) 30%, transparent);
+    font-style: italic;
+  }
   .wm-theme .ProseMirror strong { font-weight: 700; }
   .wm-theme .ProseMirror em     { font-style: italic; }
   /* Placeholder (empty-state text) */

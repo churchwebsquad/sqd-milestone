@@ -46,6 +46,7 @@ import type { WMSnippetOption } from '../RichTextEditor'
 import { WMCatalogSidePanel } from '../CatalogSidePanel'
 import { WMAIAttribution } from '../AIAttribution'
 import { PageBriefImportModal } from '../PageBriefImportModal'
+import { refreshSnippetChips } from '../../../lib/webPageBrief'
 import type {
   StrategyWebProject, WebPage, WebSection, WebContentTemplate,
   WebFieldDef, WebSlotDef, WebGroupDef, WebTemplateKind,
@@ -650,16 +651,25 @@ function FreehandBody({
   )
 }
 
-/** RichTextEditor wrapper that auto-supplies snippets from context. */
+/** RichTextEditor wrapper that auto-supplies snippets from context and
+ *  refreshes any existing snippet chips against the current library
+ *  before passing the HTML to TipTap. This is the "page inherits the
+ *  filled content once the snippet is fixed" behavior — every load
+ *  re-resolves stale chips. */
 function RichTextWithSnippets(props: {
   value: string
   onChange: (v: string) => void
   placeholder?: string
 }) {
   const snippets = useEditorSnippets()
+  // Memo because refreshSnippetChips parses + walks DOM — cheap but not free.
+  const refreshedValue = useMemo(
+    () => refreshSnippetChips(props.value, snippets),
+    [props.value, snippets],
+  )
   return (
     <WMRichTextEditor
-      value={props.value}
+      value={refreshedValue}
       onChange={props.onChange}
       placeholder={props.placeholder}
       headingLevels={[2, 3, 4, 5]}
