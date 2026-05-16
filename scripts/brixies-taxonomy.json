@@ -575,7 +575,7 @@
     "rules": [
       { "pattern": "^Card( \\d+)?$",                                                                         "kind": "component"     },
       { "pattern": "^(Single Event|Single Team|Single Post|Single Career|Single Sermon) Section( \\d+)?$",   "kind": "post_template" },
-      { "pattern": "^(Header|Footer|Offcanvas|Navigation|Megamenu Section|Banner Section)( \\d+)?$",         "kind": "chrome"        },
+      { "pattern": "^(Header|Footer|Offcanvas|Navigation|Megamenu Section)( \\d+)?$",                          "kind": "chrome"        },
       { "pattern": "^(Category Filter|Tag Filter|Search|Sort|Pagination|Filter)( \\d+)?$",                   "kind": "functional"    },
       { "pattern": ".*",                                                                                      "kind": "content"       }
     ],

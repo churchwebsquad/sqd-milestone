@@ -33,17 +33,20 @@ export interface BindMappingResult {
 // ── Key normalization / synonyms ────────────────────────────────────
 
 /** Cowork (and Brixies) use a handful of canonical names per concept.
- *  Each canonical key here lists every variant that should match it. */
+ *  Each canonical key here lists every variant that should match it.
+ *  CTA / buttons / cards are intentionally merged (singular + plural,
+ *  brief variants like primary_cta / secondary_cta / cta_inline) so a
+ *  template's `buttons` group matches a brief's `primary_cta` + `cta`,
+ *  and a template's `cards` group matches `items` / `features`. */
 const SYNONYM_GROUPS: string[][] = [
-  ['heading', 'h1', 'h2', 'h3', 'title', 'headline'],
+  ['heading', 'h', 'h1', 'h2', 'h3', 'title', 'headline'],
   ['tagline', 'eyebrow', 'kicker', 'overline', 'pretitle'],
-  ['body', 'description', 'copy', 'text', 'paragraph', 'subtext', 'subheading', 'subhead'],
+  ['body', 'd', 'description', 'copy', 'text', 'paragraph', 'subtext', 'subheading', 'subhead', 'intro'],
   ['image', 'hero_image', 'photo', 'illustration', 'picture'],
   ['images', 'photos', 'gallery'],
-  ['cta', 'button', 'link', 'action'],
-  ['ctas', 'buttons', 'links', 'actions'],
-  ['cards', 'items', 'features', 'tiles', 'blocks'],
-  ['events', 'list', 'rows'],
+  ['cta', 'ctas', 'button', 'buttons', 'link', 'links', 'action', 'actions', 'primary_cta', 'secondary_cta', 'cta_inline'],
+  ['cards', 'card', 'items', 'item', 'features', 'feature', 'tiles', 'tile', 'blocks', 'block', 'list', 'rows'],
+  ['events', 'event'],
   ['quote', 'testimonial'],
   ['author', 'author_name', 'name', 'attribution'],
 ]
@@ -57,15 +60,35 @@ function normalizeKey(k: string): string {
 const SYNONYM_INDEX: Map<string, string> = (() => {
   const m = new Map<string, string>()
   for (const group of SYNONYM_GROUPS) {
-    const canonical = normalizeKey(group[0])
-    for (const variant of group) m.set(normalizeKey(variant), canonical)
+    const canonicalKey = normalizeKey(group[0])
+    for (const variant of group) m.set(normalizeKey(variant), canonicalKey)
   }
   return m
 })()
 
+/** Map a key (potentially scope-suffixed/prefixed like `heading_card` or
+ *  `primary_cta`) to its canonical concept. Tries:
+ *    1. Direct synonym lookup on the normalized key.
+ *    2. Strip trailing scope segments (heading_card → heading).
+ *    3. Strip leading scope segments (primary_cta → cta).
+ *  Falls back to the normalized key when nothing matches. */
 function canonical(k: string): string {
   const n = normalizeKey(k)
-  return SYNONYM_INDEX.get(n) ?? n
+  if (SYNONYM_INDEX.has(n)) return SYNONYM_INDEX.get(n)!
+  const parts = k.toLowerCase().split(/[_\s-]+/).filter(Boolean)
+  if (parts.length > 1) {
+    // Suffix-strip (drop from the right): heading_card, buttons_card.
+    for (let cut = 1; cut < parts.length; cut++) {
+      const candidate = normalizeKey(parts.slice(0, parts.length - cut).join(''))
+      if (SYNONYM_INDEX.has(candidate)) return SYNONYM_INDEX.get(candidate)!
+    }
+    // Prefix-strip (drop from the left): primary_cta, secondary_cta.
+    for (let cut = 1; cut < parts.length; cut++) {
+      const candidate = normalizeKey(parts.slice(cut).join(''))
+      if (SYNONYM_INDEX.has(candidate)) return SYNONYM_INDEX.get(candidate)!
+    }
+  }
+  return n
 }
 
 /** Two keys "match" if their canonical forms agree. */
@@ -167,12 +190,35 @@ function asGroupItems(briefValue: unknown): Record<string, unknown>[] {
   return []
 }
 
+/** True when an object looks like a CTA value — has a `label` and either
+ *  a `target` or `url`. Used by mapItemFields to auto-route the whole
+ *  briefItem into a single cta-typed slot when the item schema models a
+ *  CTA as a single slot rather than label/url field pairs. */
+function looksLikeCta(v: unknown): v is { label: string; url?: string; target?: string } {
+  if (typeof v !== 'object' || v === null) return false
+  const obj = v as Record<string, unknown>
+  return typeof obj.label === 'string'
+    && (typeof obj.url === 'string' || typeof obj.target === 'string')
+}
+
 function mapItemFields(
   itemSchema: WebFieldDef[],
   briefItem: Record<string, unknown>,
   pathPrefix: string,
   result: { matched: string[]; missing: string[]; unmatched: string[] },
 ): Record<string, unknown> {
+  // Special case: a single CTA-shape briefItem ({label, target}) routed
+  // into a schema whose single slot is type='cta' — bind the whole item
+  // to that slot. This is the buttons-group flow: each item in the brief
+  // is a CTA object, and Brixies models each card's button as one
+  // type='cta' slot rather than separate label/url field pairs.
+  const ctaSlot = itemSchema.find(
+    (f): f is WebSlotDef => f.kind === 'slot' && f.type === 'cta'
+  )
+  if (ctaSlot && looksLikeCta(briefItem) && itemSchema.length === 1) {
+    return { [ctaSlot.key]: coerceForSlot(ctaSlot, briefItem) }
+  }
+
   const out: Record<string, unknown> = {}
   const usedBriefKeys = new Set<string>()
 
@@ -180,6 +226,14 @@ function mapItemFields(
     const briefKey = findMatchingBriefKey(field.key, briefItem, usedBriefKeys)
     const slotPath = `${pathPrefix}.${field.key}`
     if (briefKey == null) {
+      // For cta-typed slots, also accept the whole briefItem when it
+      // looks like a CTA — even when the item_schema has other slots
+      // (some Brixies templates pair a cta slot with a label scope text).
+      if (field.kind === 'slot' && field.type === 'cta' && looksLikeCta(briefItem)) {
+        out[field.key] = coerceForSlot(field, briefItem)
+        result.matched.push(slotPath)
+        continue
+      }
       result.missing.push(slotPath)
       continue
     }
@@ -237,22 +291,58 @@ export function mapBriefToTemplate(
   const out: Record<string, unknown> = {}
 
   for (const field of template.fields) {
-    const briefKey = findMatchingBriefKey(field.key, briefFields, usedKeys)
-    if (briefKey == null) {
+    if (field.kind === 'slot') {
+      const briefKey = findMatchingBriefKey(field.key, briefFields, usedKeys)
+      if (briefKey == null) {
+        tracker.missing.push(field.key)
+        continue
+      }
+      usedKeys.add(briefKey)
+      out[field.key] = coerceForSlot(field, briefFields[briefKey])
+      tracker.matched.push(field.key)
+      continue
+    }
+    // Group: first try a single matching brief key whose value is an
+    // array. If that's absent OR not an array, collect every unused
+    // brief key whose canonical matches the group's canonical and
+    // treat each as one item. This handles the common paired shape
+    // `primary_cta` + `secondary_cta` → template `buttons` group.
+    const directKey = findMatchingBriefKey(field.key, briefFields, usedKeys)
+    let items: Record<string, unknown>[] = []
+    if (directKey != null && Array.isArray(briefFields[directKey])) {
+      usedKeys.add(directKey)
+      items = asGroupItems(briefFields[directKey])
+    } else {
+      const groupCanon = canonical(field.key)
+      const matched: string[] = []
+      for (const k of Object.keys(briefFields)) {
+        if (usedKeys.has(k)) continue
+        if (canonical(k) === groupCanon) matched.push(k)
+      }
+      if (matched.length > 0) {
+        for (const k of matched) {
+          usedKeys.add(k)
+          const v = briefFields[k]
+          if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+            items.push(v as Record<string, unknown>)
+          } else if (Array.isArray(v)) {
+            items.push(...asGroupItems(v))
+          }
+        }
+      } else if (directKey != null) {
+        // Single non-array match → wrap as one item.
+        usedKeys.add(directKey)
+        items = asGroupItems(briefFields[directKey])
+      }
+    }
+    if (items.length === 0) {
       tracker.missing.push(field.key)
       continue
     }
-    usedKeys.add(briefKey)
-    if (field.kind === 'slot') {
-      out[field.key] = coerceForSlot(field, briefFields[briefKey])
-      tracker.matched.push(field.key)
-    } else {
-      const items = asGroupItems(briefFields[briefKey])
-      const mappedItems = items.map((item, i) =>
-        mapItemFields(field.item_schema, item, `${field.key}[${i}]`, tracker))
-      out[field.key] = mappedItems
-      tracker.matched.push(field.key)
-    }
+    const mappedItems = items.map((item, i) =>
+      mapItemFields(field.item_schema, item, `${field.key}[${i}]`, tracker))
+    out[field.key] = mappedItems
+    tracker.matched.push(field.key)
   }
 
   // Brief keys not consumed at the section level — surface as unmatched.
@@ -294,6 +384,12 @@ interface ParsedBody {
   subBlocks: ParsedSubBlock[]
   /** Which tag was used as the sub-block boundary (h2 / h3 / null). */
   splitTag: 'h2' | 'h3' | null
+  /** Section-level CTAs — button-shaped `<p><a>label</a></p>` blocks
+   *  pulled out of the intro region. The brief importer renders
+   *  primary/secondary CTAs in exactly this shape, so detecting them
+   *  lets the bind flow recover URLs even when the field key matching
+   *  doesn't find them on the brief object. */
+  sectionCtas: Array<{ label: string; url: string }>
 }
 
 /** Parse a freehand body into a section-shape: optional heading +
@@ -308,6 +404,7 @@ function parseBodyForBlocks(html: string): ParsedBody {
     intro: { html: '', text: '' },
     subBlocks: [],
     splitTag: null,
+    sectionCtas: [],
   }
   if (typeof window === 'undefined' || !html) return empty
   const doc = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html')
@@ -375,8 +472,33 @@ function parseBodyForBlocks(html: string): ParsedBody {
   }
   if (current) blocks.push(current)
 
-  const introHtml = introNodes.map(n => n.outerHTML).join('')
-  const introText = introNodes.map(n => (n.textContent ?? '').trim()).filter(Boolean).join('\n\n')
+  // Pull section-level CTAs out of intro nodes — a `<p>` whose only
+  // meaningful child is an anchor (i.e. the link IS the whole paragraph)
+  // reads as a button. Inline links inside prose stay in the body.
+  const sectionCtas: Array<{ label: string; url: string }> = []
+  const introBodyNodes: Element[] = []
+  for (const n of introNodes) {
+    if (n.tagName.toLowerCase() === 'p') {
+      const anchors = n.querySelectorAll('a')
+      if (anchors.length === 1) {
+        const a = anchors[0]
+        const pText = (n.textContent ?? '').trim()
+        const aText = (a.textContent ?? '').trim()
+        // Anchor text consumes (effectively) the whole paragraph → button.
+        if (aText && pText && (aText.length / pText.length) >= 0.8) {
+          sectionCtas.push({
+            label: aText.replace(/\s*[→›>]+\s*$/, '').trim(),
+            url: a.getAttribute('href') ?? '',
+          })
+          continue
+        }
+      }
+    }
+    introBodyNodes.push(n)
+  }
+
+  const introHtml = introBodyNodes.map(n => n.outerHTML).join('')
+  const introText = introBodyNodes.map(n => (n.textContent ?? '').trim()).filter(Boolean).join('\n\n')
 
   const subBlocks: ParsedSubBlock[] = blocks.map(b => {
     const headingText = b.headingEl.textContent?.trim() ?? ''
@@ -407,6 +529,7 @@ function parseBodyForBlocks(html: string): ParsedBody {
     intro: { html: introHtml, text: introText },
     subBlocks,
     splitTag,
+    sectionCtas,
   }
   return result
 }
@@ -476,6 +599,19 @@ export function mapHtmlBodyToTemplate(
       break
     }
   }
+  // CTA group target (buttons / ctas / actions / links) — separate
+  // from the card-shaped group so a Hero with both `cards` and
+  // `buttons` groups gets each filled from the right source.
+  let ctaGroupKey: string | null = null
+  for (const field of template.fields) {
+    if (field.kind === 'group' && canonical(field.key) === 'cta') {
+      ctaGroupKey = field.key
+      break
+    }
+  }
+
+  // Pop CTAs as we route them so each section CTA only fires once.
+  const ctaQueue = [...parsed.sectionCtas]
 
   for (const field of template.fields) {
     if (field.kind === 'group') {
@@ -483,6 +619,16 @@ export function mapHtmlBodyToTemplate(
         const items = blocksToGroupItems(field, parsed.subBlocks)
         out[field.key] = items
         matched.push(field.key)
+      }
+      if (field.key === ctaGroupKey && ctaQueue.length > 0) {
+        const ctaSlot = field.item_schema.find(
+          (f): f is WebSlotDef => f.kind === 'slot' && f.type === 'cta'
+        )
+        if (ctaSlot) {
+          const take = ctaQueue.splice(0, ctaQueue.length)
+          out[field.key] = take.map(c => ({ [ctaSlot.key]: c }))
+          matched.push(field.key)
+        }
       }
       continue
     }
@@ -509,6 +655,14 @@ export function mapHtmlBodyToTemplate(
         matched.push(field.key)
         continue
       }
+    }
+    // Top-level CTA slot (type='cta') — pull from the section-level
+    // CTA queue. Most Brixies content sections model their main CTA
+    // this way rather than as a group.
+    if (field.type === 'cta' && ctaQueue.length > 0) {
+      out[field.key] = ctaQueue.shift()
+      matched.push(field.key)
+      continue
     }
   }
 
