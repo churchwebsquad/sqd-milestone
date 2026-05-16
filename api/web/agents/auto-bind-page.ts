@@ -28,25 +28,34 @@ import { generateText, jsonSchema, tool } from 'ai'
 export const maxDuration = 120
 
 const MODEL = 'anthropic/claude-haiku-4-5'
-const MAX_OUTPUT_TOKENS = 4000
+const MAX_OUTPUT_TOKENS = 6000
 
 interface SectionInput {
   /** Brief section id — round-tripped back in the response. */
   section_id: string
-  /** Family hint from the brief (e.g. "Hero Section", "Feature Section"). */
-  family: string
+  /** Family hint from the brief (e.g. "Hero Section", "Feature Section").
+   *  Treat as a HINT, not a constraint — the candidate pool intentionally
+   *  includes templates from other families so the AI can override a
+   *  misclassified hint. */
+  brief_suggested_family: string
   /** Slim brief context — heading, prose summary, structure flags. */
   context: Record<string, unknown>
-  /** Pre-filtered candidate templates for this section. Caller picks
-   *  these by family substring match + (optionally) curated library
-   *  hits at the top of the array. */
+  /** Pre-filtered candidate templates for this section. Includes:
+   *    - Project's curated-library picks (is_site_pick=true)
+   *    - Brief's suggested family (is_brief_family=true)
+   *    - Content fallback families (Feature/Content/Intro/CTA) so the
+   *      AI can override when the brief's family is wrong for the
+   *      content shape. */
   candidates: Array<{
     id: string
     family: string
+    family_usage: string    // role description for this family
     layer_name: string
     kind: string
     fields_summary: string  // human-readable shape, e.g. "tagline + heading + 4-card grid + 2 CTAs"
     is_site_pick: boolean   // bound in the project's curated library
+    is_brief_family: boolean // matches the brief's suggested_family
+    is_narrow_use: boolean   // narrow-use family — only pick if content matches role
   }>
 }
 
@@ -101,16 +110,39 @@ export default async function handler(req: any, res: any) {
     `You are a Brixies template-routing expert for Church Media Squad's Content Manager. ` +
     `You're given a page brief with multiple sections and a list of candidate Brixies template variants for each section. ` +
     `Your job: pick the single best-fit template id for every section.\n\n` +
-    `Decision criteria, in order:\n` +
-    `  1. Site library preference — if a candidate has is_site_pick=true, prefer it ` +
-    `unless its shape is a clear mismatch for the section's content.\n` +
-    `  2. Content-shape fit — does the variant's slot/group shape match the brief's ` +
-    `content? A text-only section ('heading + body') needs a no-cards variant. A ` +
-    `4-step process needs a 4-step variant (or closest available).\n` +
-    `  3. Information density — match the variant's visual weight to the content ` +
-    `density. Sparse prose → spacious variant. Multi-card content → card-grid variant.\n` +
-    `  4. Page balance — don't pick three identical heavy variants in a row; vary ` +
+
+    `EACH CANDIDATE HAS METADATA YOU MUST CONSIDER:\n` +
+    `  - family_usage: what this Brixies family is actually used for. This is authoritative — ` +
+    `the brief's suggested_template_family is just a hint and is sometimes wrong.\n` +
+    `  - is_brief_family: candidate matches the brief's family hint.\n` +
+    `  - is_site_pick: candidate is in the project's curated Brixies library (Global Elements).\n` +
+    `  - is_narrow_use: this family has a SPECIFIC narrow role (Banner = scrolling marquee, ` +
+    `Footer/Header/Megamenu = chrome, Filter = functional). Do NOT pick narrow-use ` +
+    `templates for ordinary content sections, even if the brief's suggested_template_family ` +
+    `points at them.\n` +
+    `  - fields_summary: structural shape (slots + groups + default item counts).\n\n` +
+
+    `DECISION CRITERIA, in priority order:\n` +
+    `  1. FAMILY APPROPRIATENESS (highest priority). Match the section's content to the ` +
+    `family's intended role. If the brief says "Banner Sections" but the content has ` +
+    `multi-paragraph body + CTA, PICK A NON-BANNER candidate (Feature/Content/CTA). ` +
+    `Banner is a scrolling accent, not a body holder.\n` +
+    `  2. Site library preference — when a candidate is BOTH is_site_pick=true AND its ` +
+    `family is appropriate for the content, prefer it.\n` +
+    `  3. Content-shape fit — does the variant's slot/group shape match the brief's ` +
+    `content? A text-only section needs a no-cards variant. A 4-step process needs a ` +
+    `4-step variant. A section with 1 CTA fits a 1-button variant best.\n` +
+    `  4. Information density — match the variant's visual weight to content density. ` +
+    `Sparse prose → spacious variant. Multi-card content → card-grid variant.\n` +
+    `  5. Page balance — don't pick three identical heavy variants in a row; vary ` +
     `rhythm across the page where the content allows.\n\n` +
+
+    `OVERRIDES: if the brief's suggested_template_family is structurally wrong for ` +
+    `the content (e.g. Banner for paragraph content, Card for full sections), prefer a ` +
+    `candidate from the content-fallback pool (Feature Section, Content Section, Intro ` +
+    `Section, CTA Section). Mention the override in the rationale so the strategist ` +
+    `knows the brief's hint was set aside.\n\n` +
+
     `Return picks via the submit_picks tool. Always include every section_id in the input. ` +
     `Rationale should be one short sentence — what made this variant win.`
 

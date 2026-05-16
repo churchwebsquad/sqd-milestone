@@ -18,6 +18,7 @@ import type {
   WebContentTemplate, WebFieldDef, WebSlotDef, WebGroupDef,
 } from '../types/database'
 import { sectionId as briefSectionId, sectionFields as briefSectionFields } from './webPageBrief'
+import { isNarrowUseFamily } from './webBrixiesFamilies'
 import type { PageBrief, BriefSection } from './webPageBrief'
 
 export interface BindMappingResult {
@@ -840,6 +841,16 @@ export function rankVariantsByBrief(
     // from edging out a tight fit when brief is sparse.
     const slotDelta = Math.abs(slots.length - briefSlotCount)
     score -= Math.min(slotDelta, 5)
+
+    // Heavy penalty for narrow-use families (Banner = marquee, Filter =
+    // functional, Card = component, etc.) so the deterministic-fallback
+    // path doesn't pick them for ordinary content sections. The AI prompt
+    // also instructs against this, but we want the fallback to be safe
+    // too.
+    if (isNarrowUseFamily(tpl.family)) {
+      score -= 20
+      reasons.push(`Narrow-use family — penalized`)
+    }
 
     return {
       template: tpl,

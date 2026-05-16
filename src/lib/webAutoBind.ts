@@ -22,6 +22,9 @@ import {
   composeBind, rankVariantsByBrief, extractSectionIdFromNotes,
 } from './webBindTemplate'
 import { sectionId, sectionFamily, sectionFields } from './webPageBrief'
+import {
+  familyUsage, isNarrowUseFamily, CONTENT_FALLBACK_FAMILIES,
+} from './webBrixiesFamilies'
 import type { BriefSection, BriefHero, PageBrief } from './webPageBrief'
 import type {
   WebContentTemplate, WebSlotDef, WebGroupDef,
@@ -258,8 +261,23 @@ export async function autoBindPageSections(
     const curatedIds = conceptId ? (curatedLibrary[conceptId] ?? []) : []
     const curatedCandidates = catalog.filter(t => curatedIds.includes(t.id))
 
-    // Catalog fallback — every template matching the family.
-    const catalogCandidates = catalog.filter(t => familyMatches(t.family, family))
+    // Catalog candidates — start with the brief's suggested family, then
+    // ALWAYS widen the pool with the content-fallback families (Feature,
+    // Content, Intro, CTA) so the AI can override a misclassified hint.
+    // When the brief's family is narrow-use (Banner Section, etc.), we
+    // STILL include those candidates but the agent prompt tells the AI
+    // not to pick them for paragraph content. Final dedup by id.
+    const primaryFamilyCandidates = catalog.filter(t => familyMatches(t.family, family))
+    const fallbackCandidates = catalog.filter(t =>
+      CONTENT_FALLBACK_FAMILIES.some(f => familyMatches(t.family, f))
+    )
+    const seenIds = new Set<string>()
+    const catalogCandidates: WebContentTemplate[] = []
+    for (const t of [...primaryFamilyCandidates, ...fallbackCandidates]) {
+      if (seenIds.has(t.id)) continue
+      seenIds.add(t.id)
+      catalogCandidates.push(t)
+    }
 
     if (curatedCandidates.length === 0 && catalogCandidates.length === 0) {
       bindings.push({
@@ -394,24 +412,40 @@ async function callAutoBindAgent(
   const token = sessionData.session?.access_token
   if (!token) return []
 
-  // Cap candidates per section for prompt size — top 10 of each pool
-  // (curated then catalog), deduped. The deterministic ranking already
-  // surfaces the best fits at the head of each list.
+  // Cap candidates per section for prompt size — top 5 curated, top 8
+  // from the brief's suggested family, top 6 from content-fallback
+  // families combined. Deduped. The deterministic ranking already
+  // surfaces the best structural fits at the head of each list.
   const sections = plans.map(plan => {
     const curatedIds = new Set(plan.curatedRanked.slice(0, 5).map(t => t.id))
-    const catalogTrimmed = plan.catalogRanked.filter(t => !curatedIds.has(t.id)).slice(0, 8)
-    const merged = [...plan.curatedRanked.slice(0, 5), ...catalogTrimmed]
+    const briefFamilyTrimmed = plan.catalogRanked
+      .filter(t => !curatedIds.has(t.id))
+      .filter(t => familyMatches(t.family, plan.family))
+      .slice(0, 8)
+    const briefFamilyIds = new Set(briefFamilyTrimmed.map(t => t.id))
+    const fallbackTrimmed = plan.catalogRanked
+      .filter(t => !curatedIds.has(t.id) && !briefFamilyIds.has(t.id))
+      .filter(t => CONTENT_FALLBACK_FAMILIES.some(f => familyMatches(t.family, f)))
+      .slice(0, 6)
+    const merged = [
+      ...plan.curatedRanked.slice(0, 5),
+      ...briefFamilyTrimmed,
+      ...fallbackTrimmed,
+    ]
     return {
       section_id: sectionId(plan.briefSection) || plan.sectionLabel,
-      family: plan.family,
+      brief_suggested_family: plan.family,
       context: summarizeBriefSection(plan.briefSection),
       candidates: merged.map(t => ({
         id: t.id,
         family: t.family,
+        family_usage: familyUsage(t.family),
         layer_name: t.layer_name,
         kind: t.kind,
         fields_summary: summarizeTemplateShape(t),
         is_site_pick: curatedIds.has(t.id),
+        is_brief_family: familyMatches(t.family, plan.family),
+        is_narrow_use: isNarrowUseFamily(t.family),
       })),
     }
   })
