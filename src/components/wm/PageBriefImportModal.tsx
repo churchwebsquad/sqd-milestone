@@ -175,8 +175,16 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
       }
       if (result) {
         await onImported(result)
+        const bindParts: string[] = []
+        if (result.auto_bind) {
+          const { curated_used, catalog_used, unbound } = result.auto_bind
+          if (curated_used > 0) bindParts.push(`${curated_used} from site library`)
+          if (catalog_used > 0) bindParts.push(`${catalog_used} from catalog`)
+          if (unbound > 0) bindParts.push(`${unbound} stayed freehand`)
+        }
+        const bindSummary = bindParts.length > 0 ? ` · auto-bind: ${bindParts.join(', ')}` : ''
         setImportMsg(
-          `${result.created ? 'Created' : 'Updated'} "${brief.page_title}" · ${result.sections_created} section${result.sections_created === 1 ? '' : 's'}${result.sections_replaced ? ` (replaced ${result.sections_replaced})` : ''}${result.snippets_added ? ` · added ${result.snippets_added} snippet${result.snippets_added === 1 ? '' : 's'}` : ''}.`,
+          `${result.created ? 'Created' : 'Updated'} "${brief.page_title}" · ${result.sections_created} section${result.sections_created === 1 ? '' : 's'}${result.sections_replaced ? ` (replaced ${result.sections_replaced})` : ''}${result.snippets_added ? ` · added ${result.snippets_added} snippet${result.snippets_added === 1 ? '' : 's'}` : ''}${bindSummary}.`,
         )
       }
     } finally {

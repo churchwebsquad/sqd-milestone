@@ -206,6 +206,10 @@ export interface ImportResult {
   sections_created: number
   sections_replaced: number
   snippets_added: number
+  /** Auto-bind summary produced by autoBindPageSections() after the
+   *  freehand sections are inserted. Null when the import did not
+   *  attempt auto-bind (no brief sections, e.g.). */
+  auto_bind: import('./webAutoBind').PageAutoBindResult | null
 }
 
 /**
@@ -341,6 +345,24 @@ export async function importBrief(
     })
   }
 
+  // Auto-bind: upgrade every freshly-inserted freehand section to a
+  // Brixies template binding. Curated library wins; global catalog
+  // ranking is the fallback. Field values fill in from the brief's
+  // structured `fields` + body HTML via composeBind.
+  let auto_bind: import('./webAutoBind').PageAutoBindResult | null = null
+  if (order > 0) {
+    const { autoBindPageSections } = await import('./webAutoBind')
+    try {
+      auto_bind = await autoBindPageSections(pageId, brief, project)
+    } catch (e) {
+      // Auto-bind failures should not fail the whole import — the
+      // sections are still on the page as freehand and can be bound
+      // manually from the page editor.
+      console.error('[importBrief] auto-bind failed:', e)
+      auto_bind = null
+    }
+  }
+
   return {
     result: {
       page_id: pageId,
@@ -348,6 +370,7 @@ export async function importBrief(
       sections_created: order,
       sections_replaced: existingSectionCount ?? 0,
       snippets_added,
+      auto_bind,
     },
   }
 }
