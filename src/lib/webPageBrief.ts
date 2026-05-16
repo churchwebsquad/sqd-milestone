@@ -623,5 +623,20 @@ function buildSectionNotes(section: BriefSection): string {
   return lines.join('\n')
 }
 
+/**
+ * Pull the brief-side "Suggested template family: …" hint out of a
+ * web_sections.notes blob. The importer stashes it via buildSectionNotes;
+ * the Pages workspace uses it to pre-filter the catalog when the
+ * strategist binds a freehand section to a Brixies template.
+ *
+ * Returns null if the notes don't carry a suggested family (e.g.
+ * sections authored without a brief).
+ */
+export function extractSuggestedFamily(notes: string | null | undefined): string | null {
+  if (!notes) return null
+  const match = notes.match(/^\s*Suggested template family:\s*(.+)$/im)
+  return match ? match[1].trim() : null
+}
+
 // Re-export for the modal to render unresolved-snippet chips, etc.
 export type { WMSnippetOption }

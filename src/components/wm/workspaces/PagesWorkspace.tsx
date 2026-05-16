@@ -46,7 +46,11 @@ import type { WMSnippetOption } from '../RichTextEditor'
 import { WMCatalogSidePanel } from '../CatalogSidePanel'
 import { WMAIAttribution } from '../AIAttribution'
 import { PageBriefImportModal } from '../PageBriefImportModal'
-import { refreshSnippetChips } from '../../../lib/webPageBrief'
+import { refreshSnippetChips, extractSuggestedFamily, type PageBrief } from '../../../lib/webPageBrief'
+import {
+  composeBind, findBriefSection, extractSectionIdFromNotes,
+  rankVariantsByBrief, type RankedVariant,
+} from '../../../lib/webBindTemplate'
 import type {
   StrategyWebProject, WebPage, WebSection, WebContentTemplate,
   WebFieldDef, WebSlotDef, WebGroupDef, WebTemplateKind,
@@ -297,6 +301,53 @@ function EmptyEditor({ pageCount, onImport }: { pageCount: number; onImport: () 
   )
 }
 
+/** Best-effort HTML serialization of a section's field_values when
+ *  unbinding to freehand and there's no overflow stash to fall back on.
+ *  Walks the template's slots in order, emitting headings for heading-
+ *  shaped slots and paragraphs for the rest. Groups serialize as nested
+ *  lists. Lossy by design — the brief→template flow is the round-trip,
+ *  this is just rescue copy. */
+function serializeFieldValuesToHtml(
+  values: Record<string, unknown>,
+  template: WebContentTemplate | null | undefined,
+): string {
+  if (!template) {
+    const body = typeof values.body === 'string' ? values.body : ''
+    return body
+  }
+  const parts: string[] = []
+  for (const field of template.fields) {
+    if (field.kind === 'slot') {
+      const v = values[field.key]
+      if (v == null || v === '') continue
+      if (field.type === 'richtext' && typeof v === 'string') {
+        parts.push(v)
+      } else if (field.type === 'cta' && typeof v === 'object' && v !== null) {
+        const obj = v as { label?: string; url?: string }
+        if (obj.label) parts.push(`<p><a href="${obj.url ?? '#'}">${obj.label}</a></p>`)
+      } else if (typeof v === 'string') {
+        const level = field.heading_level
+        if (level) parts.push(`<h${level}>${v}</h${level}>`)
+        else parts.push(`<p>${v}</p>`)
+      }
+    } else {
+      const items = Array.isArray(values[field.key]) ? values[field.key] as Record<string, unknown>[] : []
+      if (items.length === 0) continue
+      parts.push(`<p><strong>${field.key.replace(/_/g, ' ')}:</strong></p>`)
+      parts.push('<ul>')
+      for (const item of items) {
+        const summary = Object.entries(item)
+          .filter(([, val]) => typeof val === 'string' && val !== '')
+          .map(([, val]) => val as string)
+          .join(' — ')
+        if (summary) parts.push(`<li>${summary}</li>`)
+      }
+      parts.push('</ul>')
+    }
+  }
+  return parts.join('')
+}
+
 // ── Page editor (right pane) ──────────────────────────────────────────
 
 function PageEditor({
@@ -316,6 +367,17 @@ function PageEditor({
   const [templates, setTemplates] = useState<Record<string, WebContentTemplate>>({})
   const [loadingSections, setLoadingSections] = useState(true)
   const [pickerOpen, setPickerOpen] = useState(false)
+  // Bind-to-template flow: when set, opens the catalog panel pre-filtered
+  // by the brief-suggested family and routes the pick into bindSection().
+  const [bindingSection, setBindingSection] = useState<WebSection | null>(null)
+  // Cached ranking for the open bind panel — both the deterministic
+  // baseline (computed when the panel opens) and the AI re-rank (filled
+  // on demand by the "Suggest with AI" button).
+  const [bindRanking, setBindRanking] = useState<RankedVariant[]>([])
+  const [bindAIRankingInFlight, setBindAIRankingInFlight] = useState(false)
+  // Page brief, loaded once per page. Drives the brief→slot auto-fill on
+  // bind. Lookups are by `Section ID: <id>` on web_sections.notes.
+  const pageBrief = (page.brief as PageBrief | null | undefined) ?? null
 
   useEffect(() => {
     setTitleDraft(page.name); setSlugDraft(page.slug); setTitleDirty(false)
@@ -345,6 +407,32 @@ function PageEditor({
     setLoadingSections(false)
   }
   useEffect(() => { void loadSections() }, [page.id])
+
+  // When the bind panel opens, compute the deterministic ranking of
+  // candidate templates against the brief section's content shape. This
+  // hydrates the panel with a sensible default ordering before the user
+  // clicks "Suggest with AI". Reset to [] when the panel closes.
+  useEffect(() => {
+    if (bindingSection == null) {
+      setBindRanking([])
+      return
+    }
+    const family = extractSuggestedFamily(bindingSection.notes)
+    const briefSectionId = extractSectionIdFromNotes(bindingSection.notes)
+    const briefSection = findBriefSection(pageBrief, briefSectionId)
+    let cancelled = false
+    void (async () => {
+      let q = supabase
+        .from('web_content_templates')
+        .select('*')
+      if (family) q = q.ilike('family', family)
+      const { data } = await q
+      if (cancelled) return
+      const candidates = (data ?? []) as WebContentTemplate[]
+      setBindRanking(rankVariantsByBrief(briefSection, candidates))
+    })()
+    return () => { cancelled = true }
+  }, [bindingSection, pageBrief])
 
   const saveTitleSlug = async () => {
     setSavingTitle(true)
@@ -410,6 +498,140 @@ function PageEditor({
     await supabase.from('web_sections').delete().eq('id', sectionId)
     await loadSections()
     void markEdited()
+  }
+
+  /** Bind a freehand section to a Brixies template.
+   *  Two sources fill the slots:
+   *    1. The page brief's `fields` object (if cowork's brief includes
+   *       this section — looked up by `Section ID:` in section.notes).
+   *    2. Heuristic mapping from the freehand body HTML (h1 → heading,
+   *       <p> → body, etc.) for anything the brief didn't cover.
+   *  The original freehand body is always stashed under `__overflow_html`
+   *  so the strategist can verify nothing was dropped, route remaining
+   *  copy manually, then clear the overflow when satisfied. */
+  const bindSection = async (sectionId: string, templateId: string) => {
+    const section = sections.find(s => s.id === sectionId)
+    if (!section) return
+    const { data: tplRow } = await supabase
+      .from('web_content_templates')
+      .select('*')
+      .eq('id', templateId)
+      .maybeSingle()
+    if (!tplRow) return
+    const template = tplRow as WebContentTemplate
+
+    const currentValues = (section.field_values ?? {}) as FieldValues
+    const overflowHtml =
+      typeof currentValues.__overflow_html === 'string'
+        ? currentValues.__overflow_html
+        : (typeof currentValues.body === 'string' ? currentValues.body : '')
+
+    // Find the brief section by ID (notes carries "Section ID: <id>" from
+    // the importer). When binding a hand-added section, briefSection is null
+    // and only the body heuristic runs.
+    const briefSectionId = extractSectionIdFromNotes(section.notes)
+    const briefSection = findBriefSection(pageBrief, briefSectionId)
+
+    const composed = composeBind(briefSection, overflowHtml, template)
+    const nextValues: FieldValues = { ...composed.field_values }
+    if (overflowHtml) nextValues.__overflow_html = overflowHtml
+    // Stash the source report so we can render a "what mapped" badge on
+    // the section header right after binding. Hidden from field iteration
+    // by the underscore prefix.
+    if (composed.source_report.unmatched_brief_keys.length > 0
+        || composed.source_report.missing_slots.length > 0) {
+      nextValues.__bind_report = composed.source_report
+    }
+
+    await updateSection(sectionId, {
+      content_template_id: templateId,
+      field_values: nextValues,
+    })
+    await loadSections()
+  }
+
+  /** Unbind a template-bound section back to freehand. Restores the
+   *  overflow stash as the new freehand body so all the brief content is
+   *  immediately editable again. If no overflow exists (rare — strategist
+   *  cleared it), serialize the current slot values to HTML as a best-
+   *  effort body. */
+  const unbindSection = async (sectionId: string) => {
+    const section = sections.find(s => s.id === sectionId)
+    if (!section) return
+    const values = (section.field_values ?? {}) as FieldValues
+    let body =
+      typeof values.__overflow_html === 'string' ? values.__overflow_html : ''
+    if (!body) {
+      body = serializeFieldValuesToHtml(values, templates[section.content_template_id ?? ''])
+    }
+    await updateSection(sectionId, {
+      content_template_id: null,
+      field_values: { body },
+    })
+    await loadSections()
+  }
+
+  /** Re-rank the bind panel's candidates using the AI suggest endpoint.
+   *  The deterministic ranking is already populated by the bindingSection
+   *  effect; this overlays the AI-refined order + per-card rationale on
+   *  top so the strategist sees voice/intent-aware suggestions. */
+  const aiRankBindCandidates = async () => {
+    if (!bindingSection || bindRanking.length === 0) return
+    const briefSectionId = extractSectionIdFromNotes(bindingSection.notes)
+    const briefSection = findBriefSection(pageBrief, briefSectionId)
+    if (!briefSection) return  // no brief → nothing for AI to weigh on
+    setBindAIRankingInFlight(true)
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
+      if (!token) return
+      const resp = await fetch('/api/web/agents/suggest-template-variant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          briefSection,
+          candidates: bindRanking.map(r => ({
+            id: r.template.id,
+            family: r.template.family,
+            layer_name: r.template.layer_name,
+            kind: r.template.kind,
+            fields: r.template.fields.map(f => f.kind === 'slot'
+              ? { kind: f.kind, key: f.key }
+              : { kind: f.kind, key: f.key, default_count: f.default_count }),
+          })),
+          pageContext: `Page: ${page.name} (${page.slug}). Brief purpose: ${briefSection.purpose ?? '(none)'}.`,
+        }),
+      })
+      if (!resp.ok) {
+        console.error('[suggest-variant] non-200', await resp.text())
+        return
+      }
+      const { ranking } = await resp.json() as {
+        ranking: Array<{ template_id: string; rationale: string }>
+      }
+      const byId = new Map(bindRanking.map(r => [r.template.id, r.template]))
+      setBindRanking(ranking
+        .map((r, i) => {
+          const tpl = byId.get(r.template_id)
+          if (!tpl) return null
+          return { template: tpl, score: ranking.length - i, rationale: r.rationale }
+        })
+        .filter((r): r is RankedVariant => r !== null))
+    } finally {
+      setBindAIRankingInFlight(false)
+    }
+  }
+
+  /** Clear the overflow stash once the strategist has finished routing the
+   *  freehand copy into slot fields. */
+  const clearOverflow = async (sectionId: string) => {
+    const section = sections.find(s => s.id === sectionId)
+    if (!section) return
+    const currentValues = (section.field_values ?? {}) as FieldValues
+    if (!('__overflow_html' in currentValues)) return
+    const { __overflow_html: _drop, ...rest } = currentValues
+    void _drop
+    await updateSection(sectionId, { field_values: rest })
   }
 
   return (
@@ -488,6 +710,9 @@ function PageEditor({
               template={section.content_template_id ? templates[section.content_template_id] : null}
               onChange={(patch) => void updateSection(section.id, patch)}
               onRemove={() => void archiveSection(section.id)}
+              onBindRequest={() => setBindingSection(section)}
+              onUnbindRequest={() => void unbindSection(section.id)}
+              onClearOverflow={() => void clearOverflow(section.id)}
             />
           ))
         )}
@@ -514,7 +739,7 @@ function PageEditor({
         )}
       </div>
 
-      {/* Catalog picker */}
+      {/* Catalog picker — add a new section */}
       <WMCatalogSidePanel
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
@@ -524,6 +749,39 @@ function PageEditor({
         mode="single"
         onSelect={async (ids) => { if (ids[0]) await addSection(ids[0]) }}
       />
+
+      {/* Catalog picker — bind a freehand section to a Brixies template.
+          Pre-filtered by the brief-suggested family when present so the
+          strategist lands on the right variants immediately. Ranked by
+          structural fit; AI re-rank available when a brief is present. */}
+      <WMCatalogSidePanel
+        open={bindingSection !== null}
+        onClose={() => setBindingSection(null)}
+        title="Bind to Brixies template"
+        subtitle={bindingSection
+          ? (extractSuggestedFamily(bindingSection.notes) ?? page.name)
+          : page.name}
+        kindFilter={['content', 'media', 'post_template'] as readonly WebTemplateKind[]}
+        familyFilter={bindingSection && extractSuggestedFamily(bindingSection.notes)
+          ? [extractSuggestedFamily(bindingSection.notes)!]
+          : undefined}
+        mode="single"
+        rankedIds={bindRanking.map(r => r.template.id)}
+        cardSubtitles={Object.fromEntries(bindRanking.map(r => [r.template.id, r.rationale]))}
+        onRequestAIRank={
+          // Only offer AI ranking when there's a brief to weigh on.
+          (bindingSection && findBriefSection(pageBrief, extractSectionIdFromNotes(bindingSection.notes)))
+            ? aiRankBindCandidates
+            : undefined
+        }
+        aiRanking={bindAIRankingInFlight}
+        onSelect={async (ids) => {
+          if (bindingSection && ids[0]) {
+            await bindSection(bindingSection.id, ids[0])
+            setBindingSection(null)
+          }
+        }}
+      />
     </div>
   )
 }
@@ -531,16 +789,25 @@ function PageEditor({
 // ── Section block ─────────────────────────────────────────────────────
 
 function SectionBlock({
-  section, template, onChange, onRemove,
+  section, template, onChange, onRemove, onBindRequest, onUnbindRequest, onClearOverflow,
 }: {
   section: WebSection
   template: WebContentTemplate | null | undefined
   onChange: (patch: Partial<WebSection>) => void
   onRemove: () => void
+  onBindRequest: () => void
+  onUnbindRequest: () => void
+  onClearOverflow: () => void
 }) {
   const [open, setOpen] = useState(true)
+  const [actionsOpen, setActionsOpen] = useState(false)
   const values = (section.field_values ?? {}) as FieldValues
   const isFreehand = section.content_template_id == null
+  const suggestedFamily = extractSuggestedFamily(section.notes)
+  const overflowHtml = typeof values.__overflow_html === 'string' ? values.__overflow_html : null
+  const bindReport = values.__bind_report as
+    | { matched_from_brief: string[]; matched_from_body: string[]; missing_slots: string[]; unmatched_brief_keys: string[] }
+    | undefined
 
   const setValue = (key: string, v: unknown) => {
     onChange({ field_values: { ...values, [key]: v } })
@@ -588,9 +855,31 @@ function SectionBlock({
               <Sparkles size={13} />
             </WMIconButton>
           )}
-          <WMIconButton label="Section actions" size="sm">
-            <MoreHorizontal size={13} />
-          </WMIconButton>
+          <div className="relative">
+            <WMIconButton
+              label="Section actions"
+              size="sm"
+              onClick={() => setActionsOpen(o => !o)}
+            >
+              <MoreHorizontal size={13} />
+            </WMIconButton>
+            {actionsOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setActionsOpen(false)} />
+                <div className="absolute right-0 mt-1 w-48 rounded-md border border-wm-border bg-wm-bg-elevated shadow-lg z-20 py-1 animate-wm-slide-in-up">
+                  {!isFreehand && (
+                    <button
+                      type="button"
+                      onClick={() => { setActionsOpen(false); onUnbindRequest() }}
+                      className="w-full text-left px-3 py-1.5 text-[12px] text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text"
+                    >
+                      Unbind to freehand
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
           <WMIconButton label="Remove section" size="sm" onClick={onRemove}>
             <Trash2 size={13} />
           </WMIconButton>
@@ -604,21 +893,93 @@ function SectionBlock({
             <FreehandBody
               value={typeof values.body === 'string' ? values.body : ''}
               onChange={(v) => setValue('body', v)}
+              suggestedFamily={suggestedFamily}
+              onBindRequest={onBindRequest}
             />
-          ) : template!.fields.length === 0 ? (
-            <p className="text-[12px] text-wm-text-subtle italic">This template has no editable fields.</p>
           ) : (
-            template!.fields.map((f, i) => (
-              <FieldRow
-                key={f.key + '-' + i}
-                field={f}
-                value={values[f.key]}
-                onChange={(v) => setValue(f.key, v)}
-              />
-            ))
+            <>
+              {bindReport && <BindReportBadge report={bindReport} />}
+              {overflowHtml && (
+                <OverflowPanel html={overflowHtml} onClear={onClearOverflow} />
+              )}
+              {template!.fields.length === 0 ? (
+                <p className="text-[12px] text-wm-text-subtle italic">This template has no editable fields.</p>
+              ) : (
+                template!.fields.map((f, i) => (
+                  <FieldRow
+                    key={f.key + '-' + i}
+                    field={f}
+                    value={values[f.key]}
+                    onChange={(v) => setValue(f.key, v)}
+                  />
+                ))
+              )}
+            </>
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+/** Bind report — surfaces what the auto-mapping did when a freehand
+ *  section was bound to a template. Strategist sees at a glance which
+ *  slots came from the brief vs body heuristics, and what didn't land. */
+function BindReportBadge({
+  report,
+}: {
+  report: { matched_from_brief: string[]; matched_from_body: string[]; missing_slots: string[]; unmatched_brief_keys: string[] }
+}) {
+  const briefCount = report.matched_from_brief.length
+  const bodyCount = report.matched_from_body.length
+  const missing = report.missing_slots
+  const unmatched = report.unmatched_brief_keys
+  return (
+    <div className="rounded-md border border-wm-info/30 bg-wm-info-bg/60 p-3">
+      <p className="text-[11px] uppercase tracking-widest font-bold text-wm-info">Auto-fill summary</p>
+      <ul className="mt-1 space-y-0.5 text-[12px] text-wm-text">
+        {briefCount > 0 && <li>{briefCount} slot{briefCount === 1 ? '' : 's'} from page brief</li>}
+        {bodyCount > 0 && <li>{bodyCount} slot{bodyCount === 1 ? '' : 's'} from body heuristics</li>}
+        {missing.length > 0 && (
+          <li className="text-wm-text-muted">
+            {missing.length} slot{missing.length === 1 ? '' : 's'} still empty: <span className="font-mono text-[11px]">{missing.slice(0, 6).join(', ')}{missing.length > 6 ? '…' : ''}</span>
+          </li>
+        )}
+        {unmatched.length > 0 && (
+          <li className="text-wm-warning">
+            {unmatched.length} brief field{unmatched.length === 1 ? '' : 's'} unmapped: <span className="font-mono text-[11px]">{unmatched.slice(0, 6).join(', ')}{unmatched.length > 6 ? '…' : ''}</span> — check the overflow panel.
+          </li>
+        )}
+      </ul>
+    </div>
+  )
+}
+
+/** Overflow panel — the freehand body that was stashed when a section was
+ *  bound to a template. Renders read-only as a reference so the strategist
+ *  can route copy into the slot fields below, then clears the stash. */
+function OverflowPanel({ html, onClear }: { html: string; onClear: () => void }) {
+  return (
+    <div className="rounded-md border border-wm-warning/40 bg-wm-warning-bg/60 p-3">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="min-w-0">
+          <p className="text-[11px] uppercase tracking-widest font-bold text-wm-warning">
+            Overflow content
+          </p>
+          <p className="text-[11px] text-wm-text-muted mt-0.5">
+            Original freehand copy — route the pieces into the fields below, then clear.
+          </p>
+        </div>
+        <WMButton variant="ghost" size="sm" onClick={onClear}>
+          Clear
+        </WMButton>
+      </div>
+      <div
+        className="wm-theme prose-sm max-w-none text-[13px] text-wm-text bg-wm-bg-elevated rounded p-2 border border-wm-border max-h-64 overflow-auto"
+        // The stash is HTML produced by our own brief renderer / TipTap.
+        // No untrusted input pathway lands here — strategist-authored only.
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
     </div>
   )
 }
@@ -627,26 +988,55 @@ function SectionBlock({
  *  `field_values.body` (HTML). User-facing only; AI agents always bind
  *  sections to a template. */
 function FreehandBody({
-  value, onChange,
+  value, onChange, suggestedFamily, onBindRequest,
 }: {
   value: string
   onChange: (v: string) => void
+  suggestedFamily: string | null
+  onBindRequest: () => void
 }) {
   return (
-    <div>
-      <div className="flex items-center justify-between gap-2 mb-1">
-        <label className="text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle">
-          Body
-        </label>
-        <span className="text-[10px] text-wm-text-subtle italic">
-          Freehand · no template binding · won't flow to Design / Dev exports until tied to a template
-        </span>
+    <div className="space-y-3">
+      {/* Bind CTA — prominent when a brief-suggested family is present,
+          quieter when the section is purely strategist-authored. */}
+      <div className={[
+        'rounded-md border p-3 flex items-center gap-3 flex-wrap',
+        suggestedFamily
+          ? 'border-wm-accent/40 bg-wm-accent-tint'
+          : 'border-dashed border-wm-border bg-wm-bg',
+      ].join(' ')}>
+        <div className="min-w-0 flex-1">
+          <p className="text-[12px] font-semibold text-wm-text">
+            {suggestedFamily
+              ? `Suggested template family: ${suggestedFamily}`
+              : 'Freehand section — bind to a Brixies template to flow into Design and Dev exports.'}
+          </p>
+          {suggestedFamily && (
+            <p className="text-[11px] text-wm-text-muted mt-0.5">
+              From the page brief. Bind to pick a variant; the freehand copy below is stashed as overflow so nothing is lost.
+            </p>
+          )}
+        </div>
+        <WMButton variant="primary" size="sm" onClick={onBindRequest}>
+          Bind to template
+        </WMButton>
       </div>
-      <RichTextWithSnippets
-        value={value}
-        onChange={onChange}
-        placeholder="Start writing — headings, lists, bold, italic, links, inline code all supported."
-      />
+
+      <div>
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <label className="text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle">
+            Body
+          </label>
+          <span className="text-[10px] text-wm-text-subtle italic">
+            Freehand · won't flow to Design / Dev exports until bound
+          </span>
+        </div>
+        <RichTextWithSnippets
+          value={value}
+          onChange={onChange}
+          placeholder="Start writing — headings, lists, bold, italic, links, inline code all supported."
+        />
+      </div>
     </div>
   )
 }

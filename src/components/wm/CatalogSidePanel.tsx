@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Search, Check } from 'lucide-react'
+import { Search, Check, Sparkles } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { WMFlyoutPanel } from './FlyoutPanel'
 import { WMButton } from './Button'
@@ -41,6 +41,25 @@ export interface WMCatalogSidePanelProps {
 
   /** Called on pick (single) or save (multi) */
   onSelect: (ids: string[]) => void | Promise<void>
+
+  /** Optional ranked ordering. When provided, visible templates are
+   *  sorted by appearance in this array (ids not present sink to the
+   *  bottom). Use with rankVariantsByBrief() from webBindTemplate.ts
+   *  to surface best-fit variants first. */
+  rankedIds?: readonly string[]
+
+  /** Optional subtitle to show under each template card — used to
+   *  surface the AI / deterministic rationale for the rank. Keyed by
+   *  template id. */
+  cardSubtitles?: Record<string, string>
+
+  /** Optional AI re-rank button. When present, the panel renders a
+   *  "Suggest with AI" button in its header; the host wires it to the
+   *  /api/web/agents/suggest-template-variant endpoint and pipes the
+   *  returned ordering back via `rankedIds`. */
+  onRequestAIRank?: () => void | Promise<void>
+  /** Set while the AI re-rank is in flight — disables the button. */
+  aiRanking?: boolean
 }
 
 export function WMCatalogSidePanel({
@@ -48,6 +67,7 @@ export function WMCatalogSidePanel({
   kindFilter, familyFilter,
   mode, selectedIds = [], maxSelections,
   onSelect,
+  rankedIds, cardSubtitles, onRequestAIRank, aiRanking,
 }: WMCatalogSidePanelProps) {
   const [rows, setRows] = useState<WebContentTemplate[]>([])
   const [loading, setLoading] = useState(false)
@@ -76,7 +96,7 @@ export function WMCatalogSidePanel({
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return rows.filter(r => {
+    const filtered = rows.filter(r => {
       if (kindFilter && kindFilter.length > 0 && !kindFilter.includes(r.kind)) return false
       if (familyFilter && familyFilter.length > 0) {
         const fam = r.family.toLowerCase()
@@ -85,7 +105,18 @@ export function WMCatalogSidePanel({
       if (!q) return true
       return `${r.family} ${r.layer_name} ${r.id}`.toLowerCase().includes(q)
     })
-  }, [rows, query, kindFilter, familyFilter])
+    // Apply optional ranking — keep ids in `rankedIds` order, then
+    // append everything else in the original (family, layer_name) order.
+    if (rankedIds && rankedIds.length > 0) {
+      const order = new Map(rankedIds.map((id, idx) => [id, idx]))
+      return [...filtered].sort((a, b) => {
+        const ai = order.has(a.id) ? order.get(a.id)! : Number.MAX_SAFE_INTEGER
+        const bi = order.has(b.id) ? order.get(b.id)! : Number.MAX_SAFE_INTEGER
+        return ai - bi
+      })
+    }
+    return filtered
+  }, [rows, query, kindFilter, familyFilter, rankedIds])
 
   const handleCardClick = async (id: string) => {
     if (mode === 'single') {
@@ -140,9 +171,25 @@ export function WMCatalogSidePanel({
             className="w-full h-9 pl-9 pr-3 rounded-md bg-wm-bg border border-wm-border text-[13px] text-wm-text placeholder-wm-text-subtle outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20"
           />
         </div>
-        <p className="text-[11px] text-wm-text-subtle mt-2">
-          {loading ? 'Loading…' : `${visible.length} of ${rows.length} templates`}
-        </p>
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <p className="text-[11px] text-wm-text-subtle">
+            {loading ? 'Loading…' : `${visible.length} of ${rows.length} templates`}
+            {rankedIds && rankedIds.length > 0 && !loading && (
+              <span className="ml-1 text-wm-accent-strong">· ranked</span>
+            )}
+          </p>
+          {onRequestAIRank && (
+            <WMButton
+              variant="ghost"
+              size="sm"
+              iconLeft={<Sparkles size={11} />}
+              loading={aiRanking}
+              onClick={() => void onRequestAIRank()}
+            >
+              {aiRanking ? 'Ranking…' : 'Suggest with AI'}
+            </WMButton>
+          )}
+        </div>
       </div>
 
       <div className="p-4">
@@ -190,6 +237,11 @@ export function WMCatalogSidePanel({
                       <p className="text-[10px] text-wm-text-subtle truncate">{t.family}</p>
                       <WMStatusPill tone="neutral" size="sm">{t.kind}</WMStatusPill>
                     </div>
+                    {cardSubtitles?.[t.id] && (
+                      <p className="text-[10px] text-wm-accent-strong italic mt-1.5 line-clamp-2" title={cardSubtitles[t.id]}>
+                        {cardSubtitles[t.id]}
+                      </p>
+                    )}
                   </div>
                 </button>
               )
