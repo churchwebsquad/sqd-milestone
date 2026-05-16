@@ -32,7 +32,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FileText, Loader2, ChevronDown, ChevronRight, Plus, Trash2,
-  Sparkles, RotateCw, Eye, GripVertical, MoreHorizontal, Upload, Archive,
+  Sparkles, RotateCw, Eye, Edit3, GripVertical, MoreHorizontal, Upload, Archive,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { loadEditorSnippets } from '../../../lib/webSnippets'
