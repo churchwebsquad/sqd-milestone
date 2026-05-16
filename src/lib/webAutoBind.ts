@@ -21,9 +21,11 @@ import { LIBRARY_CONCEPTS, parseCuratedLibrary } from './webCuratedLibrary'
 import {
   composeBind, rankVariantsByBrief, extractSectionIdFromNotes,
 } from './webBindTemplate'
+import { sectionId, sectionFamily, sectionFields } from './webPageBrief'
 import type { BriefSection, BriefHero, PageBrief } from './webPageBrief'
 import type {
-  WebContentTemplate, WebSection, StrategyWebProject,
+  WebContentTemplate, WebSlotDef, WebGroupDef,
+  WebSection, StrategyWebProject,
 } from '../types/database'
 
 export interface SectionAutoBindResult {
@@ -57,14 +59,70 @@ function familyMatches(a: string, b: string): boolean {
   return na === nb || na.includes(nb) || nb.includes(na)
 }
 
+/** Build a short human-readable shape string for a template — for the
+ *  AI prompt, e.g. "tagline + heading + body + 4-card grid + 2 CTAs". */
+function summarizeTemplateShape(template: WebContentTemplate): string {
+  const parts: string[] = []
+  const slots: string[] = []
+  const groups: string[] = []
+  for (const f of template.fields) {
+    if (f.kind === 'slot') {
+      const s = f as WebSlotDef
+      slots.push(s.key)
+    } else {
+      const g = f as WebGroupDef
+      groups.push(`${g.default_count}-${g.key}`)
+    }
+  }
+  if (slots.length > 0) parts.push(slots.join(' + '))
+  if (groups.length > 0) parts.push(groups.join(', '))
+  return parts.join(' · ') || '(no fields)'
+}
+
+/** Slim brief context for the AI prompt — heading + first paragraph of
+ *  body + structure flags (has steps? card count? cta count?). Keeps
+ *  the per-section payload tight. */
+function summarizeBriefSection(s: BriefSection): Record<string, unknown> {
+  const fields = sectionFields(s)
+  const heading = typeof fields.h === 'string' ? fields.h
+    : typeof fields.heading === 'string' ? fields.heading
+    : typeof fields.h1 === 'string' ? fields.h1
+    : ''
+  const body = typeof fields.content === 'string' ? fields.content
+    : typeof fields.body === 'string' ? fields.body
+    : typeof fields.description === 'string' ? fields.description
+    : ''
+  const intro = typeof fields.intro === 'string' ? fields.intro : ''
+  const stepCount = Array.isArray(fields.steps) ? fields.steps.length : 0
+  const cardCount = Array.isArray(fields.cards) ? fields.cards.length
+    : Array.isArray(fields.items) ? fields.items.length : 0
+  const ctaCount = [fields.cta, fields.primary_cta, fields.secondary_cta]
+    .filter(v => typeof v === 'object' && v !== null).length
+
+  // First ~200 chars of body for prose density signal.
+  const bodyPreview = (body || intro).slice(0, 200)
+  return {
+    heading,
+    body_preview: bodyPreview,
+    has_intro: !!intro,
+    step_count: stepCount,
+    card_count: cardCount,
+    cta_count: ctaCount,
+    purpose: s.purpose,
+    voice_notes: s.voice_notes,
+  }
+}
+
 /** Convert a BriefHero into a synthetic BriefSection so the same
  *  scoring + binding path works for both. */
 function heroAsBriefSection(hero: BriefHero): BriefSection {
+  // Hero gets fields as top-level flat keys (cowork's shape) — tagline,
+  // h1, body, primary_cta, secondary_cta.
   return {
     section_id: '__hero__',
-    suggested_template_family: 'Hero Section',
+    template_family: 'Hero Section',
     purpose: 'Hero block',
-    fields: hero as unknown as Record<string, unknown>,
+    ...(hero as unknown as Record<string, unknown>),
   }
 }
 
@@ -77,7 +135,7 @@ function pickConceptForBriefSection(
   pageSlug: string,
   briefPhase: string,
 ): string | null {
-  const family = briefSection.suggested_template_family ?? ''
+  const family = sectionFamily(briefSection)
   if (!family) return null
   const matching = LIBRARY_CONCEPTS.filter(c =>
     c.familyFilter?.some(f => familyMatches(f, family))
@@ -103,9 +161,22 @@ function pickConceptForBriefSection(
   return matching[0].id
 }
 
+interface SectionPlan {
+  webSection: WebSection
+  briefSection: BriefSection
+  sectionLabel: string
+  family: string
+  /** Candidates from the project's curated library, ranked. */
+  curatedRanked: WebContentTemplate[]
+  /** Catalog-wide candidates filtered by family, ranked. */
+  catalogRanked: WebContentTemplate[]
+}
+
 /** Auto-bind every just-imported freehand section on a page. Idempotent
  *  per page — re-running re-applies bindings to anything currently
- *  freehand and doesn't disturb sections that already have a template. */
+ *  freehand and doesn't disturb sections that already have a template.
+ *  Calls the bulk AI endpoint to refine variant choice; falls back to
+ *  the deterministic ranker if the AI call fails. */
 export async function autoBindPageSections(
   pageId: string,
   brief: PageBrief,
@@ -130,6 +201,8 @@ export async function autoBindPageSections(
   const pageSlug = brief.page_slug ?? ''
   const briefPhase = brief.phase ?? '1'
 
+  // ── Pass 1: build a plan for every freehand section ────────────────
+  const plans: SectionPlan[] = []
   const bindings: SectionAutoBindResult[] = []
 
   for (const webSection of sections) {
@@ -144,7 +217,7 @@ export async function autoBindPageSections(
     const sectionLabel = (() => {
       const briefId = extractSectionIdFromNotes(webSection.notes)
       if (briefId) {
-        briefSection = briefSections.find(s => s.section_id === briefId) ?? null
+        briefSection = briefSections.find(s => sectionId(s) === briefId) ?? null
         return briefId
       }
       if (webSection.notes === 'Imported hero block from page brief' && brief.hero) {
@@ -166,7 +239,7 @@ export async function autoBindPageSections(
       continue
     }
 
-    const family = briefSection.suggested_template_family ?? ''
+    const family = sectionFamily(briefSection)
     if (!family) {
       bindings.push({
         web_section_id: webSection.id,
@@ -188,32 +261,7 @@ export async function autoBindPageSections(
     // Catalog fallback — every template matching the family.
     const catalogCandidates = catalog.filter(t => familyMatches(t.family, family))
 
-    let chosen:
-      | { template: WebContentTemplate; source: 'curated' | 'catalog'; rationale: string }
-      | null = null
-
-    if (curatedCandidates.length > 0) {
-      const ranked = rankVariantsByBrief(briefSection, curatedCandidates)
-      if (ranked.length > 0) {
-        chosen = {
-          template: ranked[0].template,
-          source: 'curated',
-          rationale: `Site library · ${ranked[0].rationale}`,
-        }
-      }
-    }
-    if (!chosen && catalogCandidates.length > 0) {
-      const ranked = rankVariantsByBrief(briefSection, catalogCandidates)
-      if (ranked.length > 0) {
-        chosen = {
-          template: ranked[0].template,
-          source: 'catalog',
-          rationale: `Catalog · ${ranked[0].rationale}`,
-        }
-      }
-    }
-
-    if (!chosen) {
+    if (curatedCandidates.length === 0 && catalogCandidates.length === 0) {
       bindings.push({
         web_section_id: webSection.id,
         section_label: sectionLabel,
@@ -225,13 +273,70 @@ export async function autoBindPageSections(
       continue
     }
 
+    plans.push({
+      webSection,
+      briefSection,
+      sectionLabel,
+      family,
+      curatedRanked: rankVariantsByBrief(briefSection, curatedCandidates).map(r => r.template),
+      catalogRanked: rankVariantsByBrief(briefSection, catalogCandidates).map(r => r.template),
+    })
+  }
+
+  // ── Pass 2: bulk AI variant picker (one call, all sections) ────────
+  const aiPicks = await callAutoBindAgent(plans, brief)
+
+  // ── Pass 3: apply picks (AI when available, else deterministic top) ─
+  for (const plan of plans) {
+    // AI's pick wins; else top of curated-then-catalog ranking.
+    const aiPick = aiPicks.find(p => p.section_id === sectionId(plan.briefSection) || p.section_id === plan.sectionLabel)
+    const curatedIds = new Set(plan.curatedRanked.map(t => t.id))
+
+    let chosenTemplate: WebContentTemplate | null = null
+    let source: 'curated' | 'catalog' = 'catalog'
+    let rationale = ''
+
+    if (aiPick) {
+      const combined = [...plan.curatedRanked, ...plan.catalogRanked]
+      const tpl = combined.find(t => t.id === aiPick.template_id)
+      if (tpl) {
+        chosenTemplate = tpl
+        source = curatedIds.has(tpl.id) ? 'curated' : 'catalog'
+        rationale = `${source === 'curated' ? 'Site library · ' : ''}${aiPick.rationale}`
+      }
+    }
+    if (!chosenTemplate) {
+      // Fallback: deterministic top of curated, else catalog.
+      if (plan.curatedRanked.length > 0) {
+        chosenTemplate = plan.curatedRanked[0]
+        source = 'curated'
+        rationale = 'Site library · top-ranked fit (AI unavailable)'
+      } else if (plan.catalogRanked.length > 0) {
+        chosenTemplate = plan.catalogRanked[0]
+        source = 'catalog'
+        rationale = 'Catalog top-ranked fit (AI unavailable)'
+      }
+    }
+
+    if (!chosenTemplate) {
+      bindings.push({
+        web_section_id: plan.webSection.id,
+        section_label: plan.sectionLabel,
+        template_id: null,
+        template_layer_name: null,
+        source: 'none',
+        rationale: 'No candidates after ranking',
+      })
+      continue
+    }
+
     // Resolve field_values from brief + body HTML using the same
     // composeBind path as the manual bind flow. The freehand body
     // becomes __overflow_html so the strategist can verify nothing
     // was dropped and clear it when satisfied.
-    const currentValues = (webSection.field_values ?? {}) as Record<string, unknown>
+    const currentValues = (plan.webSection.field_values ?? {}) as Record<string, unknown>
     const overflowHtml = typeof currentValues.body === 'string' ? currentValues.body : ''
-    const composed = composeBind(briefSection, overflowHtml, chosen.template)
+    const composed = composeBind(plan.briefSection, overflowHtml, chosenTemplate)
     const nextValues: Record<string, unknown> = { ...composed.field_values }
     if (overflowHtml) nextValues.__overflow_html = overflowHtml
     if (composed.source_report.missing_slots.length > 0
@@ -242,14 +347,14 @@ export async function autoBindPageSections(
     const { error: updateErr } = await supabase
       .from('web_sections')
       .update({
-        content_template_id: chosen.template.id,
+        content_template_id: chosenTemplate.id,
         field_values: nextValues,
       } as never)
-      .eq('id', webSection.id)
+      .eq('id', plan.webSection.id)
     if (updateErr) {
       bindings.push({
-        web_section_id: webSection.id,
-        section_label: sectionLabel,
+        web_section_id: plan.webSection.id,
+        section_label: plan.sectionLabel,
         template_id: null,
         template_layer_name: null,
         source: 'none',
@@ -259,12 +364,12 @@ export async function autoBindPageSections(
     }
 
     bindings.push({
-      web_section_id: webSection.id,
-      section_label: sectionLabel,
-      template_id: chosen.template.id,
-      template_layer_name: chosen.template.layer_name,
-      source: chosen.source,
-      rationale: chosen.rationale,
+      web_section_id: plan.webSection.id,
+      section_label: plan.sectionLabel,
+      template_id: chosenTemplate.id,
+      template_layer_name: chosenTemplate.layer_name,
+      source,
+      rationale,
     })
   }
 
@@ -273,5 +378,64 @@ export async function autoBindPageSections(
     curated_used: bindings.filter(b => b.source === 'curated').length,
     catalog_used: bindings.filter(b => b.source === 'catalog').length,
     unbound: bindings.filter(b => b.source === 'none').length,
+  }
+}
+
+/** Call the bulk auto-bind agent with one round-trip for the whole page.
+ *  Returns [] on failure — the caller falls back to deterministic top
+ *  picks so the import never blocks on AI availability. */
+async function callAutoBindAgent(
+  plans: SectionPlan[],
+  brief: PageBrief,
+): Promise<Array<{ section_id: string; template_id: string; rationale: string }>> {
+  if (plans.length === 0) return []
+  const { data: sessionData } = await supabase.auth.getSession()
+  const token = sessionData.session?.access_token
+  if (!token) return []
+
+  // Cap candidates per section for prompt size — top 10 of each pool
+  // (curated then catalog), deduped. The deterministic ranking already
+  // surfaces the best fits at the head of each list.
+  const sections = plans.map(plan => {
+    const curatedIds = new Set(plan.curatedRanked.slice(0, 5).map(t => t.id))
+    const catalogTrimmed = plan.catalogRanked.filter(t => !curatedIds.has(t.id)).slice(0, 8)
+    const merged = [...plan.curatedRanked.slice(0, 5), ...catalogTrimmed]
+    return {
+      section_id: sectionId(plan.briefSection) || plan.sectionLabel,
+      family: plan.family,
+      context: summarizeBriefSection(plan.briefSection),
+      candidates: merged.map(t => ({
+        id: t.id,
+        family: t.family,
+        layer_name: t.layer_name,
+        kind: t.kind,
+        fields_summary: summarizeTemplateShape(t),
+        is_site_pick: curatedIds.has(t.id),
+      })),
+    }
+  })
+
+  const pageContext =
+    `Page: ${brief.page_title ?? ''} (slug: ${brief.page_slug ?? ''}). ` +
+    `Purpose: ${brief.page_purpose ?? '(none)'}. ` +
+    `Persona: ${brief.primary_persona ?? '(none)'}.`
+
+  try {
+    const resp = await fetch('/api/web/agents/auto-bind-page', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ pageContext, sections }),
+    })
+    if (!resp.ok) {
+      console.warn('[auto-bind] non-200', resp.status, await resp.text())
+      return []
+    }
+    const data = await resp.json() as {
+      picks?: Array<{ section_id: string; template_id: string; rationale: string }>
+    }
+    return Array.isArray(data.picks) ? data.picks : []
+  } catch (e) {
+    console.warn('[auto-bind] fetch failed:', e)
+    return []
   }
 }

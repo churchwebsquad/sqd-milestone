@@ -17,6 +17,7 @@
 import type {
   WebContentTemplate, WebFieldDef, WebSlotDef, WebGroupDef,
 } from '../types/database'
+import { sectionId as briefSectionId, sectionFields as briefSectionFields } from './webPageBrief'
 import type { PageBrief, BriefSection } from './webPageBrief'
 
 export interface BindMappingResult {
@@ -41,11 +42,12 @@ export interface BindMappingResult {
 const SYNONYM_GROUPS: string[][] = [
   ['heading', 'h', 'h1', 'h2', 'h3', 'title', 'headline'],
   ['tagline', 'eyebrow', 'kicker', 'overline', 'pretitle'],
-  ['body', 'd', 'description', 'copy', 'text', 'paragraph', 'subtext', 'subheading', 'subhead', 'intro'],
+  ['body', 'content', 'd', 'description', 'copy', 'text', 'paragraph', 'subtext', 'subheading', 'subhead', 'intro', 'closer'],
   ['image', 'hero_image', 'photo', 'illustration', 'picture'],
   ['images', 'photos', 'gallery'],
-  ['cta', 'ctas', 'button', 'buttons', 'link', 'links', 'action', 'actions', 'primary_cta', 'secondary_cta', 'cta_inline'],
+  ['cta', 'ctas', 'button', 'buttons', 'link', 'links', 'action', 'actions', 'primary_cta', 'secondary_cta', 'cta_inline', 'inline_cta'],
   ['cards', 'card', 'items', 'item', 'features', 'feature', 'tiles', 'tile', 'blocks', 'block', 'list', 'rows'],
+  ['steps', 'step', 'process_steps'],
   ['events', 'event'],
   ['quote', 'testimonial'],
   ['author', 'author_name', 'name', 'attribution'],
@@ -102,11 +104,11 @@ function keysMatch(a: string, b: string): boolean {
  *  stored brief, or null. */
 export function findBriefSection(
   brief: PageBrief | null | undefined,
-  sectionId: string | null | undefined,
+  targetId: string | null | undefined,
 ): BriefSection | null {
-  if (!brief || !sectionId) return null
+  if (!brief || !targetId) return null
   const sections = Array.isArray(brief.sections) ? brief.sections : []
-  return sections.find(s => s.section_id === sectionId) ?? null
+  return sections.find(s => briefSectionId(s) === targetId) ?? null
 }
 
 /** Pull the `Section ID: <id>` line out of a web_sections.notes blob. */
@@ -281,10 +283,7 @@ export function mapBriefToTemplate(
   briefSection: BriefSection | null,
   template: WebContentTemplate,
 ): BindMappingResult {
-  const briefFields =
-    briefSection && typeof briefSection.fields === 'object' && briefSection.fields !== null
-      ? briefSection.fields as Record<string, unknown>
-      : {}
+  const briefFields = briefSection ? briefSectionFields(briefSection) : {}
 
   const tracker = { matched: [] as string[], missing: [] as string[], unmatched: [] as string[] }
   const usedKeys = new Set<string>()
@@ -697,9 +696,7 @@ export function rankVariantsByBrief(
   briefSection: BriefSection | null,
   candidates: WebContentTemplate[],
 ): RankedVariant[] {
-  const briefFields = briefSection?.fields && typeof briefSection.fields === 'object'
-    ? briefSection.fields as Record<string, unknown>
-    : {}
+  const briefFields = briefSection ? briefSectionFields(briefSection) : {}
   const briefKeys = Object.keys(briefFields)
   const briefGroups: Array<{ key: string; count: number }> = []
   for (const [k, v] of Object.entries(briefFields)) {

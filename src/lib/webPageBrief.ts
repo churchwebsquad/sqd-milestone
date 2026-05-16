@@ -51,14 +51,76 @@ export interface BriefHero {
   [k: string]: unknown
 }
 
+/** A section in the brief. Two shapes are tolerated:
+ *
+ *   1. Cowork's flat shape (preferred going forward):
+ *      { id, template_family, h, content, intro, steps, closer,
+ *        cta, primary_cta, ... }
+ *
+ *   2. Legacy nested shape (kept for backwards-compatibility):
+ *      { section_id, suggested_template_family, fields: { … } }
+ *
+ *  Use the `sectionId()`, `sectionFamily()`, `sectionFields()`
+ *  accessors instead of reading these directly — they handle both.
+ */
 export interface BriefSection {
-  section_id: string
-  purpose?: string
+  // Identifier — either key is accepted
+  section_id?: string
+  id?: string
+  // Template family hint — either key is accepted
   suggested_template_family?: string
+  template_family?: string
+
+  purpose?: string
   content_items?: string[]
   voice_notes?: string
+  // When present, fields are nested here (legacy shape). Otherwise the
+  // top-level keys (h, content, intro, steps, closer, cta, etc.) are
+  // treated as the field bag — sectionFields() does the unification.
   fields?: Record<string, unknown>
+
   [k: string]: unknown
+}
+
+/** Meta keys never treated as content fields by sectionFields(). */
+const BRIEF_SECTION_META_KEYS: ReadonlySet<string> = new Set([
+  'id', 'section_id',
+  'template_family', 'suggested_template_family',
+  'purpose', 'voice_notes', 'content_items', 'persona_focus',
+  'fields',
+])
+
+/** Stable section identifier — reads `section_id` or `id`. */
+export function sectionId(s: BriefSection): string {
+  if (typeof s.section_id === 'string' && s.section_id) return s.section_id
+  if (typeof s.id === 'string' && s.id) return s.id
+  return ''
+}
+
+/** Template family hint — reads `suggested_template_family` or
+ *  `template_family`. Empty string when neither is set. */
+export function sectionFamily(s: BriefSection): string {
+  if (typeof s.suggested_template_family === 'string' && s.suggested_template_family) {
+    return s.suggested_template_family
+  }
+  if (typeof s.template_family === 'string' && s.template_family) {
+    return s.template_family
+  }
+  return ''
+}
+
+/** Content fields — either the nested `fields` object (legacy) or every
+ *  non-meta top-level key on the section (cowork's flat shape). */
+export function sectionFields(s: BriefSection): Record<string, unknown> {
+  if (s.fields && typeof s.fields === 'object' && !Array.isArray(s.fields)) {
+    return s.fields as Record<string, unknown>
+  }
+  const out: Record<string, unknown> = {}
+  for (const k of Object.keys(s)) {
+    if (BRIEF_SECTION_META_KEYS.has(k)) continue
+    out[k] = (s as Record<string, unknown>)[k]
+  }
+  return out
 }
 
 export interface BriefCTA {
@@ -516,54 +578,75 @@ function renderHero(hero: BriefHero, snippets: SnippetMap): string {
   return parts.join('\n')
 }
 
+/** First non-empty string value among `obj[keys[i]]`. */
+function firstString(obj: Record<string, unknown>, keys: string[]): string {
+  for (const k of keys) {
+    const v = obj[k]
+    if (typeof v === 'string' && v.trim() !== '') return v
+  }
+  return ''
+}
+
+/** Split brief prose into paragraphs at blank-line boundaries. */
+function renderProseToParas(text: string, snippets: SnippetMap): string[] {
+  return text
+    .split(/\n\s*\n/)
+    .map(p => p.trim())
+    .filter(Boolean)
+    .map(p => `<p>${resolveSnippetsAsChips(p, snippets)}</p>`)
+}
+
 function renderSection(section: BriefSection, snippets: SnippetMap): string {
   const parts: string[] = []
-  const fields = (section.fields ?? {}) as Record<string, unknown>
+  const fields = sectionFields(section)
 
   // Body copy only — section purpose + suggested_template_family + voice_notes
   // live on the section's `notes` field, not in the rendered body.
 
-  // Heading
-  const h = typeof fields.h === 'string' ? fields.h : ''
+  // Heading — 'h' (cowork) or 'heading' (legacy)
+  const h = firstString(fields, ['h', 'heading'])
   if (h) parts.push(`<h2>${resolveSnippetsAsChips(h, snippets)}</h2>`)
 
-  // Intro / description / body — different briefs use different field names
-  const intro = typeof fields.intro === 'string' ? fields.intro : ''
-  const body = typeof fields.body === 'string' ? fields.body : ''
-  const desc = typeof fields.d === 'string' ? fields.d : ''
-  for (const text of [intro, body, desc].filter(Boolean)) {
-    parts.push(`<p>${resolveSnippetsAsChips(text, snippets)}</p>`)
-  }
+  // Intro — Process-shaped sections have a separate `intro` field before
+  // the steps array. Single paragraph.
+  const intro = firstString(fields, ['intro'])
+  if (intro) parts.push(`<p>${resolveSnippetsAsChips(intro, snippets)}</p>`)
 
-  // Secondary line — Brixies-template-overflow content. Renders as a
-  // plain paragraph for now; Step 2's overflow panel will offer the
-  // strategist a proper resolution (different template, move, drop, etc.)
-  const secondary = typeof fields.secondary === 'string' ? fields.secondary : ''
-  if (secondary) {
-    parts.push(`<p>${resolveSnippetsAsChips(secondary, snippets)}</p>`)
-  }
+  // Body — cowork's `content` (multi-paragraph) or legacy `body`/`d`/`description`.
+  // Multi-paragraph bodies split on blank lines.
+  const body = firstString(fields, ['content', 'body', 'description', 'd'])
+  if (body) parts.push(...renderProseToParas(body, snippets))
+
+  // Legacy 'secondary' line (single paragraph).
+  const secondary = firstString(fields, ['secondary'])
+  if (secondary) parts.push(`<p>${resolveSnippetsAsChips(secondary, snippets)}</p>`)
 
   // Steps (Process Sections shape)
   const steps = Array.isArray(fields.steps) ? fields.steps : []
   if (steps.length > 0) {
     for (const step of steps as Array<Record<string, unknown>>) {
-      const h3 = typeof step.h3 === 'string' ? step.h3 : ''
-      const stepBody = typeof step.body === 'string' ? step.body : ''
-      if (h3) parts.push(`<h3>${resolveSnippetsAsChips(h3, snippets)}</h3>`)
-      if (stepBody) parts.push(`<p>${resolveSnippetsAsChips(stepBody, snippets)}</p>`)
-      const ctaInline = step.cta_inline as BriefCTA | undefined
-      if (ctaInline) parts.push(renderCTA(ctaInline, snippets))
+      const sh = firstString(step, ['h3', 'h', 'heading'])
+      const sb = firstString(step, ['content', 'body', 'description', 'd'])
+      if (sh) parts.push(`<h3>${resolveSnippetsAsChips(sh, snippets)}</h3>`)
+      if (sb) parts.push(...renderProseToParas(sb, snippets))
+      // Step CTA — cowork uses 'inline_cta', legacy uses 'cta_inline'. Either flies.
+      const stepCta = (step.inline_cta ?? step.cta_inline ?? step.cta) as BriefCTA | undefined
+      if (stepCta) parts.push(renderCTA(stepCta, snippets))
     }
   }
+
+  // Closer — Process Sections final paragraph after the steps.
+  const closer = firstString(fields, ['closer'])
+  if (closer) parts.push(`<p>${resolveSnippetsAsChips(closer, snippets)}</p>`)
 
   // FAQs (FAQ shape — { q, a })
   const faqs = Array.isArray(fields.faqs) ? fields.faqs : []
   if (faqs.length > 0) {
     for (const faq of faqs as Array<Record<string, unknown>>) {
-      const q = typeof faq.q === 'string' ? faq.q : ''
-      const a = typeof faq.a === 'string' ? faq.a : ''
+      const q = firstString(faq, ['q', 'question'])
+      const a = firstString(faq, ['a', 'answer', 'body', 'content'])
       if (q) parts.push(`<p><strong>${resolveSnippetsAsChips(q, snippets)}</strong></p>`)
-      if (a) parts.push(`<p>${resolveSnippetsAsChips(a, snippets)}</p>`)
+      if (a) parts.push(...renderProseToParas(a, snippets))
     }
   }
 
@@ -634,11 +717,11 @@ export function refreshSnippetChips(
  */
 function buildSectionNotes(section: BriefSection): string {
   const lines: string[] = []
-  if (section.section_id) lines.push(`Section ID: ${section.section_id}`)
+  const id = sectionId(section)
+  if (id) lines.push(`Section ID: ${id}`)
   if (section.purpose) lines.push(`Purpose: ${section.purpose}`)
-  if (section.suggested_template_family) {
-    lines.push(`Suggested template family: ${section.suggested_template_family}`)
-  }
+  const family = sectionFamily(section)
+  if (family) lines.push(`Suggested template family: ${family}`)
   if (Array.isArray(section.content_items) && section.content_items.length > 0) {
     lines.push(`Content items: ${section.content_items.join(' · ')}`)
   }
