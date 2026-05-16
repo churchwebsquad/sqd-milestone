@@ -28,7 +28,7 @@
  *   - Audit engine scans this surface against heuristics
  */
 
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FileText, Loader2, ChevronDown, ChevronRight, Plus, Trash2,
@@ -1290,34 +1290,35 @@ function BrixiesSectionContent({
   onChangeFieldValues: (next: FieldValues) => void
 }) {
   const snippets = useEditorSnippets()
-  // Initial doc HTML derived from field_values. We hold it as local
-  // state so the editor's onUpdate doesn't fight an externally-derived
-  // value on every keystroke.
+  // The doc IS the source of truth once mounted. We initialize ONCE
+  // from field_values; further changes flow editor → values, never the
+  // other way around. Avoids the parent-derives-from-values ping-pong
+  // that was killing cursor position and CTA input focus on every keystroke.
+  //
+  // External writes to field_values (AI redo, etc.) require remounting —
+  // SectionBlock's key is the section id, so changing sections rebuilds.
+  // If an out-of-band write happens to the same section, the strategist
+  // can re-open it to pick up the new content.
   const [docHtml, setDocHtml] = useState<string>(() => fieldValuesToDocHtml(values, template))
 
-  // When the section's field_values change from a different source
-  // (e.g. AI redo writes new slot values), rebuild the doc. We detect
-  // this by comparing the rebuilt HTML to current — match means no
-  // external change.
-  useEffect(() => {
-    const next = fieldValuesToDocHtml(values, template)
-    if (next !== docHtml) {
-      setDocHtml(next)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [values, template.id])
+  // We keep a ref to the latest non-doc values so the change handler
+  // can preserve them without subscribing to values changes via state
+  // (which would re-trigger the editor).
+  const valuesRef = useRef(values)
+  valuesRef.current = values
 
   const handleDocChange = (nextDoc: string) => {
     setDocHtml(nextDoc)
     // Translate the doc back to field_values, preserving group items
-    // and non-doc slots untouched.
+    // and non-doc slots untouched. Read from the ref so we always see
+    // the latest values without re-rendering when they change.
+    const v = valuesRef.current
     const preserved: Record<string, unknown> = {}
     for (const f of template.fields) {
-      if (!isDocHandledField(f)) preserved[f.key] = values[f.key]
+      if (!isDocHandledField(f)) preserved[f.key] = v[f.key]
     }
-    // Special-keys not in the template stay on the values too.
-    for (const k of Object.keys(values)) {
-      if (k.startsWith('__')) preserved[k] = values[k]
+    for (const k of Object.keys(v)) {
+      if (k.startsWith('__')) preserved[k] = v[k]
     }
     const { field_values } = docHtmlToFieldValues(nextDoc, template, preserved)
     onChangeFieldValues(field_values)

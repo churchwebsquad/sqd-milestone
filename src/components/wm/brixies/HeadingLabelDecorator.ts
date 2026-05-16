@@ -37,18 +37,18 @@ export const HeadingLabelDecorator = Extension.create({
             doc.forEach((node, offset) => {
               if (node.type.name !== 'heading') return
               const level = (node.attrs.level as number | undefined) ?? 1
+              // Apply data attrs directly to the heading element so the
+              // CSS `[data-bx-label]::before` pseudo renders the pill
+              // above the heading text. Using Decoration.node (not
+              // .widget) keeps the cursor + click target on the
+              // heading content itself — clicking the line lands on
+              // the heading, not on a sibling widget element.
               decorations.push(
-                Decoration.widget(offset + 1, () => {
-                  const el = document.createElement('span')
-                  el.className = 'brixies-heading-pill'
-                  el.setAttribute('data-bx-label', labelForHeading(level))
-                  el.setAttribute('data-bx-kind', 'heading')
-                  el.contentEditable = 'false'
-                  // The ::before pseudo on data-bx-label is what renders
-                  // the [label] pill — we just need this anchor element
-                  // for the pseudo to attach to.
-                  return el
-                }, { side: -1, marks: [] }),
+                Decoration.node(offset, offset + node.nodeSize, {
+                  'data-bx-label': labelForHeading(level),
+                  'data-bx-kind': 'heading',
+                  class: 'brixies-heading-pill',
+                }),
               )
             })
             return DecorationSet.create(doc, decorations)
