@@ -60,6 +60,47 @@ function isCtaGroup(group: WebGroupDef): boolean {
   return c === 'cta' || c === 'ctas' || c.includes('button') || c.includes('action')
 }
 
+function isCardShapedGroup(group: WebGroupDef): boolean {
+  const c = canonical(group.key)
+  if (isCtaGroup(group)) return false
+  return c.includes('card') || c === 'items' || c === 'features' || c === 'tiles'
+    || c === 'blocks' || c === 'list' || c === 'rows' || c === 'pillars'
+    || c === 'tiers' || c === 'programs' || c === 'members' || c === 'groups'
+    || c === 'classes' || c === 'events' || c === 'steps' || c === 'doctrines'
+    || c === 'values' || c === 'routing'
+}
+
+function isImageSlot(slot: WebSlotDef): boolean {
+  return slot.type === 'image'
+}
+
+function findCardHeadingKey(itemSchema: ReadonlyArray<{ kind: 'slot' | 'group'; key: string } & Record<string, unknown>>): string | null {
+  for (const f of itemSchema) {
+    if (f.kind !== 'slot') continue
+    const c = canonical(f.key)
+    if (c.includes('heading') || c === 'h' || c.includes('title') || c.includes('name')
+        || c.includes('label')) return f.key
+  }
+  return null
+}
+function findCardBodyKey(itemSchema: ReadonlyArray<{ kind: 'slot' | 'group'; key: string; type?: string } & Record<string, unknown>>): string | null {
+  for (const f of itemSchema) {
+    if (f.kind !== 'slot') continue
+    if (f.type === 'richtext') return f.key
+    const c = canonical(f.key)
+    if (c.includes('body') || c.includes('description') || c.includes('content')) return f.key
+  }
+  return null
+}
+function findCardCtaKey(itemSchema: ReadonlyArray<{ kind: 'slot' | 'group'; key: string; type?: string; scope?: string } & Record<string, unknown>>): string | null {
+  for (const f of itemSchema) {
+    if (f.kind !== 'slot') continue
+    if (f.type === 'cta') return f.key
+    if (f.type === 'text' && f.scope === 'button') return f.key
+  }
+  return null
+}
+
 // ── field_values → doc HTML (LOAD) ────────────────────────────────────
 
 /** Build the initial doc HTML from a bound section's field_values. The
@@ -100,6 +141,15 @@ export function fieldValuesToDocHtml(
     parts.push(v)
   }
 
+  // Image slots (top-level only — card-internal images render inside the card).
+  for (const f of template.fields) {
+    if (f.kind !== 'slot' || !isImageSlot(f)) continue
+    const v = values[f.key]
+    if (typeof v === 'string' && v.trim() !== '') {
+      parts.push(renderImageNode(v))
+    }
+  }
+
   // Top-level CTAs and buttons group items.
   for (const f of template.fields) {
     if (f.kind === 'slot' && isCtaSlot(f)) {
@@ -110,7 +160,6 @@ export function fieldValuesToDocHtml(
     } else if (f.kind === 'group' && isCtaGroup(f)) {
       const items = Array.isArray(values[f.key]) ? values[f.key] as Array<Record<string, unknown>> : []
       for (const item of items) {
-        // Try cta-slot first, then button-label-text slot + paired url.
         const ctaSlot = f.item_schema.find((s): s is WebSlotDef =>
           s.kind === 'slot' && isCtaSlot(s)
         )
@@ -131,11 +180,49 @@ export function fieldValuesToDocHtml(
     }
   }
 
-  // Anything else gets surfaced as a freehand-style note at the bottom
-  // (image URLs, datetimes, etc. that the doc doesn't yet model).
-  // Phase 2 brings these into the doc as proper nodes.
+  // Card-shaped groups — render the first one as a Card Grid block.
+  for (const f of template.fields) {
+    if (f.kind !== 'group' || !isCardShapedGroup(f)) continue
+    const items = Array.isArray(values[f.key]) ? values[f.key] as Array<Record<string, unknown>> : []
+    if (items.length === 0) continue
+    const headingKey = findCardHeadingKey(f.item_schema as never)
+    const bodyKey = findCardBodyKey(f.item_schema as never)
+    const ctaKey = findCardCtaKey(f.item_schema as never)
+    const cardHtml = items.map(item => {
+      const inner: string[] = []
+      if (headingKey && typeof item[headingKey] === 'string' && item[headingKey] !== '') {
+        inner.push(`<h3>${escapeHtml(item[headingKey] as string)}</h3>`)
+      }
+      if (bodyKey) {
+        const bv = item[bodyKey]
+        if (typeof bv === 'string' && bv.trim() !== '') {
+          // Body might be richtext (already HTML) or plain text.
+          if (/<[a-z][^>]*>/i.test(bv)) inner.push(bv)
+          else inner.push(`<p>${escapeHtml(bv)}</p>`)
+        }
+      }
+      if (ctaKey) {
+        const cv = item[ctaKey]
+        if (typeof cv === 'object' && cv !== null) {
+          const cta = cv as { label?: string; url?: string }
+          inner.push(renderCtaNode(cta.label ?? '', cta.url ?? ''))
+        } else if (typeof cv === 'string' && cv !== '') {
+          const url = (item.__cta_url as string | undefined) ?? ''
+          inner.push(renderCtaNode(cv, url))
+        }
+      }
+      if (inner.length === 0) inner.push('<p></p>')
+      return `<div data-bx-card data-bx-label="CARD" data-bx-kind="group" class="brixies-card">${inner.join('')}</div>`
+    }).join('')
+    parts.push(`<div data-bx-card-grid data-bx-label="CARD GRID" data-bx-kind="group" class="brixies-card-grid">${cardHtml}</div>`)
+    break  // Only the first card-shaped group is doc-handled for now.
+  }
 
   return parts.join('') || '<p></p>'
+}
+
+function renderImageNode(src: string): string {
+  return `<div data-bx-image data-bx-label="IMAGE" data-bx-kind="image" data-src="${escapeAttr(src)}" class="brixies-image"></div>`
 }
 
 function renderCtaNode(label: string, url: string): string {
@@ -186,6 +273,8 @@ export function docHtmlToFieldValues(
   const headingsByLevel = new Map<number, string>()
   const bodyParts: string[] = []
   const ctas: Array<{ label: string; url: string }> = []
+  const images: string[] = []
+  const cardGrids: Element[] = []
 
   for (const el of Array.from(root.children)) {
     const tag = el.tagName.toLowerCase()
@@ -196,6 +285,11 @@ export function docHtmlToFieldValues(
         label: el.getAttribute('data-label') ?? '',
         url: el.getAttribute('data-url') ?? '',
       })
+    } else if (tag === 'div' && el.hasAttribute('data-bx-image')) {
+      const src = el.getAttribute('data-src') ?? ''
+      if (src) images.push(src)
+    } else if (tag === 'div' && el.hasAttribute('data-bx-card-grid')) {
+      cardGrids.push(el)
     } else if (/^h[1-6]$/.test(tag)) {
       const level = Number(tag.slice(1))
       headingsByLevel.set(level, (el.textContent ?? '').trim())
@@ -292,6 +386,68 @@ export function docHtmlToFieldValues(
 
   // Any unmapped CTAs.
   for (const cta of ctaQueue) unmapped.push({ kind: 'cta', ...cta })
+
+  // Images — write the first image to the template's first image slot.
+  if (images.length > 0) {
+    for (const f of template.fields) {
+      if (f.kind === 'slot' && isImageSlot(f)) {
+        out[f.key] = images[0]
+        break
+      }
+    }
+  }
+
+  // Card grids — first grid in the doc maps to the template's first
+  // card-shaped group. Walk each card's children, extract heading /
+  // paragraphs / cta, stuff them into the corresponding item-schema slots.
+  if (cardGrids.length > 0) {
+    const grid = cardGrids[0]
+    const cardEls = Array.from(grid.children).filter(c =>
+      c.tagName.toLowerCase() === 'div' && c.hasAttribute('data-bx-card')
+    )
+    const targetGroup = template.fields.find((f): f is WebGroupDef =>
+      f.kind === 'group' && isCardShapedGroup(f)
+    )
+    if (targetGroup) {
+      const headingKey = findCardHeadingKey(targetGroup.item_schema as never)
+      const bodyKey = findCardBodyKey(targetGroup.item_schema as never)
+      const ctaKey = findCardCtaKey(targetGroup.item_schema as never)
+      const items: Record<string, unknown>[] = cardEls.map(card => {
+        const item: Record<string, unknown> = {}
+        const inner: string[] = []
+        let headingText = ''
+        let cardCta: { label: string; url: string } | null = null
+        for (const child of Array.from(card.children)) {
+          const t = child.tagName.toLowerCase()
+          if (/^h[1-6]$/.test(t) && !headingText) {
+            headingText = (child.textContent ?? '').trim()
+          } else if (t === 'div' && child.hasAttribute('data-bx-cta') && !cardCta) {
+            cardCta = {
+              label: child.getAttribute('data-label') ?? '',
+              url: child.getAttribute('data-url') ?? '',
+            }
+          } else if (t === 'p' || t === 'ul' || t === 'ol') {
+            inner.push(child.outerHTML)
+          }
+        }
+        if (headingKey && headingText) item[headingKey] = headingText
+        if (bodyKey && inner.length > 0) item[bodyKey] = inner.join('')
+        if (ctaKey && cardCta) {
+          // If the card's cta slot is type='cta', store the full object;
+          // if it's a button-label text slot, store just the label.
+          const ctaSlot = targetGroup.item_schema.find(s => s.kind === 'slot' && s.key === ctaKey) as WebSlotDef | undefined
+          if (ctaSlot?.type === 'cta') {
+            item[ctaKey] = cardCta
+          } else {
+            item[ctaKey] = cardCta.label
+            if (cardCta.url) item.__cta_url = cardCta.url
+          }
+        }
+        return item
+      })
+      out[targetGroup.key] = items
+    }
+  }
 
   return { field_values: out, unmapped }
 }

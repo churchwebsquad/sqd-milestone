@@ -366,4 +366,72 @@
      applied to the heading element itself (HeadingLabelDecorator). The
      generic `[data-bx-label]::before` rule above renders the pill —
      no per-tag override needed. */
+
+  /* Card Grid container — outlined region with a [CARD GRID] pill at
+     top, holding 1+ Card children. */
+  .wm-theme .ProseMirror .brixies-card-grid {
+    display: block;
+    margin: 1em 0;
+    padding: 0.6em 0.8em 0.8em;
+    background: var(--color-wm-bg);
+    border: 1px solid var(--color-wm-border);
+    border-radius: 8px;
+  }
+  /* Card child — left-border-accented column with [CARD] pill above. */
+  .wm-theme .ProseMirror .brixies-card {
+    display: block;
+    margin: 0.5em 0 0.5em 0.4em;
+    padding: 0.3em 0.6em;
+    border-left: 2px solid var(--color-wm-border);
+  }
+  .wm-theme .ProseMirror .brixies-card:hover {
+    border-left-color: color-mix(in srgb, var(--color-wm-accent) 50%, transparent);
+  }
+  /* Image block — URL row with thumbnail or placeholder icon. */
+  .wm-theme .ProseMirror .brixies-image {
+    display: block;
+    margin: 1em 0;
+    padding: 0.5em 0.6em;
+    background: rgb(248 250 252);
+    border: 1px solid var(--color-wm-border);
+    border-radius: 6px;
+  }
+  .wm-theme .ProseMirror .brixies-image-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+  }
+  .wm-theme .ProseMirror .brixies-image-thumb {
+    width: 56px;
+    height: 40px;
+    object-fit: cover;
+    border-radius: 4px;
+    border: 1px solid var(--color-wm-border);
+  }
+  .wm-theme .ProseMirror .brixies-image-placeholder {
+    width: 56px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    background: var(--color-wm-bg-hover);
+    border: 1px dashed var(--color-wm-border);
+    border-radius: 4px;
+    color: var(--color-wm-text-subtle);
+  }
+  .wm-theme .ProseMirror .brixies-image-url {
+    flex: 1;
+    border: none;
+    background: transparent;
+    outline: none;
+    font: inherit;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.85em;
+    color: var(--color-wm-text-muted);
+    padding: 0.1em 0.2em;
+  }
+  .wm-theme .ProseMirror .brixies-image-url:focus {
+    background: rgb(255 255 255);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-wm-accent) 20%, transparent);
+    border-radius: 3px;
+  }
 }

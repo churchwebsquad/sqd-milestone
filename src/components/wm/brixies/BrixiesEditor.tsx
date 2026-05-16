@@ -31,11 +31,13 @@ import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
 import {
   Bold, Italic, Link as LinkIcon, List, ListOrdered, Heading1, Heading2, Heading3,
-  Type, Braces, MousePointerClick, Tag,
+  Type, Braces, MousePointerClick, Tag, LayoutGrid, Image as ImageIcon,
 } from 'lucide-react'
 import { SnippetNode } from '../SnippetNode'
 import { TaglineNode } from './TaglineNode'
 import { BrixiesCtaNode } from './BrixiesCtaNode'
+import { BrixiesImageNode } from './BrixiesImageNode'
+import { BrixiesCardGrid, BrixiesCard } from './BrixiesCardGrid'
 import { HeadingLabelDecorator } from './HeadingLabelDecorator'
 import type { WMSnippetOption } from '../RichTextEditor'
 
@@ -69,6 +71,9 @@ export function BrixiesEditor({
       SnippetNode,
       TaglineNode,
       BrixiesCtaNode,
+      BrixiesImageNode,
+      BrixiesCardGrid,
+      BrixiesCard,
       HeadingLabelDecorator,
     ],
     content: value,
@@ -176,6 +181,20 @@ function Toolbar({
             icon={<MousePointerClick size={13} />}
             label="CTA"
             text="CTA"
+          />
+          <ToolbarBtn
+            editor={editor}
+            cmd={() => editor.chain().focus().insertCardGrid({ count: 3 }).run()}
+            icon={<LayoutGrid size={13} />}
+            label="Card Grid"
+            text="Card Grid"
+          />
+          <ToolbarBtn
+            editor={editor}
+            cmd={() => editor.chain().focus().insertBrixiesImage().run()}
+            icon={<ImageIcon size={13} />}
+            label="Image"
+            text="Image"
           />
           {snippets && snippets.length > 0 && (
             <SnippetMenu editor={editor} snippets={snippets} />

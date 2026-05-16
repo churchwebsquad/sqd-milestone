@@ -1256,21 +1256,46 @@ function SectionBlock({
 
 /** Detect whether a template field is "doc-handled" — represented in
  *  the Brixies TipTap editor rather than the form-row stack below it.
- *  Tagline / heading / richtext body / CTA slots + the buttons group
- *  all flow through the editor; cards / accordions / other groups
- *  + non-text slots (image / datetime / boolean) stay as form rows. */
-function isDocHandledField(field: WebFieldDef): boolean {
+ *  Tagline / heading / richtext body / CTA / image slots + CTA-shaped
+ *  groups + the first card-shaped group flow through the editor;
+ *  everything else (additional groups, datetime, boolean) stays as
+ *  form rows. */
+function isDocHandledField(field: WebFieldDef, template: WebContentTemplate): boolean {
   if (field.kind === 'slot') {
     const c = field.key.toLowerCase().replace(/[_\s-]+/g, '')
     if (field.heading_level || c === 'h' || c.includes('heading') || c.includes('title')) return true
     if (c.includes('tagline') || c.includes('eyebrow') || c.includes('kicker')) return true
     if (field.type === 'richtext') return true
     if (field.type === 'cta') return true
+    if (field.type === 'image') return true
     return false
   }
-  // CTA-shaped group → handled by the editor as a stream of CTA nodes.
+  // CTA-shaped group → handled as a stream of CTA nodes.
   const c = field.key.toLowerCase().replace(/[_\s-]+/g, '')
-  return c === 'cta' || c === 'ctas' || c.includes('button') || c.includes('action')
+  const isCta = c === 'cta' || c === 'ctas' || c.includes('button') || c.includes('action')
+  if (isCta) return true
+  // First card-shaped group on the template → handled as a Card Grid
+  // node. Additional card-shaped groups (rare) still render as form
+  // rows below.
+  const isCardShape = c.includes('card') || c === 'items' || c === 'features'
+    || c === 'tiles' || c === 'blocks' || c === 'list' || c === 'rows'
+    || c === 'pillars' || c === 'tiers' || c === 'programs'
+    || c === 'members' || c === 'groups' || c === 'classes'
+    || c === 'events' || c === 'steps' || c === 'doctrines'
+    || c === 'values' || c === 'routing'
+  if (!isCardShape) return false
+  const firstCardGroup = template.fields.find(f => {
+    if (f.kind !== 'group') return false
+    const fc = f.key.toLowerCase().replace(/[_\s-]+/g, '')
+    if (fc === 'cta' || fc === 'ctas' || fc.includes('button') || fc.includes('action')) return false
+    return fc.includes('card') || fc === 'items' || fc === 'features'
+      || fc === 'tiles' || fc === 'blocks' || fc === 'list' || fc === 'rows'
+      || fc === 'pillars' || fc === 'tiers' || fc === 'programs'
+      || fc === 'members' || fc === 'groups' || fc === 'classes'
+      || fc === 'events' || fc === 'steps' || fc === 'doctrines'
+      || fc === 'values' || fc === 'routing'
+  })
+  return firstCardGroup?.key === field.key
 }
 
 /** The Brixies-aware content surface for a bound section. One TipTap
@@ -1315,7 +1340,7 @@ function BrixiesSectionContent({
     const v = valuesRef.current
     const preserved: Record<string, unknown> = {}
     for (const f of template.fields) {
-      if (!isDocHandledField(f)) preserved[f.key] = v[f.key]
+      if (!isDocHandledField(f, template)) preserved[f.key] = v[f.key]
     }
     for (const k of Object.keys(v)) {
       if (k.startsWith('__')) preserved[k] = v[k]
@@ -1325,9 +1350,9 @@ function BrixiesSectionContent({
   }
 
   // Doc-handled fields are rendered by the editor; everything else
-  // (groups like Card Grid, plus image/datetime/etc. slots) renders as
-  // form rows below.
-  const remainingFields = template.fields.filter(f => !isDocHandledField(f))
+  // (additional groups, datetime/boolean slots, secondary cards groups)
+  // renders as form rows below under "Other fields".
+  const remainingFields = template.fields.filter(f => !isDocHandledField(f, template))
 
   return (
     <div className="space-y-4">
@@ -1420,9 +1445,10 @@ function OverflowPanel({ html, onClear }: { html: string; onClear: () => void })
   )
 }
 
-/** Freehand body — single TipTap richtext editor. Stored as
- *  `field_values.body` (HTML). User-facing only; AI agents always bind
- *  sections to a template. */
+/** Freehand body — same Brixies-aware TipTap editor used for bound
+ *  sections. No template means no slot mapping; the doc HTML is saved
+ *  as-is to `field_values.body`. AI agents always bind sections to a
+ *  template, so freehand is the manual-authoring path. */
 function FreehandBody({
   value, onChange, suggestedFamily, onBindRequest,
 }: {
@@ -1431,6 +1457,7 @@ function FreehandBody({
   suggestedFamily: string | null
   onBindRequest: () => void
 }) {
+  const snippets = useEditorSnippets()
   return (
     <div className="space-y-3">
       {/* Bind CTA — prominent when a brief-suggested family is present,
@@ -1449,7 +1476,7 @@ function FreehandBody({
           </p>
           {suggestedFamily && (
             <p className="text-[11px] text-wm-text-muted mt-0.5">
-              From the page brief. Bind to pick a variant; the freehand copy below is stashed as overflow so nothing is lost.
+              From the page brief. Bind to pick a variant; the freehand copy below is preserved.
             </p>
           )}
         </div>
@@ -1458,21 +1485,12 @@ function FreehandBody({
         </WMButton>
       </div>
 
-      <div>
-        <div className="flex items-center justify-between gap-2 mb-1">
-          <label className="text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle">
-            Body
-          </label>
-          <span className="text-[10px] text-wm-text-subtle italic">
-            Freehand · won't flow to Design / Dev exports until bound
-          </span>
-        </div>
-        <RichTextWithSnippets
-          value={value}
-          onChange={onChange}
-          placeholder="Start writing — headings, lists, bold, italic, links, inline code all supported."
-        />
-      </div>
+      <BrixiesEditor
+        value={value}
+        onChange={onChange}
+        snippets={snippets}
+        placeholder="Start writing — use the Brixies block toolbar to add tagline, headings, CTAs, card grids, images."
+      />
     </div>
   )
 }
