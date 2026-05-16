@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Search, Check, Sparkles } from 'lucide-react'
+import { Search, Check, Sparkles, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { WMFlyoutPanel } from './FlyoutPanel'
 import { WMButton } from './Button'
@@ -74,10 +74,16 @@ export function WMCatalogSidePanel({
   const [query, setQuery] = useState('')
   const [draftSelection, setDraftSelection] = useState<string[]>([...selectedIds])
   const [saving, setSaving] = useState(false)
+  // Whether the optional family filter is currently active. Starts on
+  // whenever `familyFilter` is supplied; strategist can toggle off via
+  // the chip in the header to browse the full catalog.
+  const [familyFilterActive, setFamilyFilterActive] = useState(true)
 
   useEffect(() => {
     if (!open) return
     setDraftSelection([...selectedIds])
+    // Re-enable family filter every time the panel opens.
+    setFamilyFilterActive(true)
     let cancelled = false
     setLoading(true)
     void (async () => {
@@ -94,13 +100,22 @@ export function WMCatalogSidePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
+  /** Normalize a family name for tolerant comparison — strip punctuation
+   *  and case so "Hero Section" matches "Hero", "hero-section",
+   *  "Hero Sections", etc. */
+  const normalizeFamily = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '')
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
     const filtered = rows.filter(r => {
       if (kindFilter && kindFilter.length > 0 && !kindFilter.includes(r.kind)) return false
-      if (familyFilter && familyFilter.length > 0) {
-        const fam = r.family.toLowerCase()
-        if (!familyFilter.some(f => f.toLowerCase() === fam)) return false
+      if (familyFilterActive && familyFilter && familyFilter.length > 0) {
+        const fam = normalizeFamily(r.family)
+        const matches = familyFilter.some(f => {
+          const target = normalizeFamily(f)
+          return fam === target || fam.includes(target) || target.includes(fam)
+        })
+        if (!matches) return false
       }
       if (!q) return true
       return `${r.family} ${r.layer_name} ${r.id}`.toLowerCase().includes(q)
@@ -116,7 +131,7 @@ export function WMCatalogSidePanel({
       })
     }
     return filtered
-  }, [rows, query, kindFilter, familyFilter, rankedIds])
+  }, [rows, query, kindFilter, familyFilter, familyFilterActive, rankedIds])
 
   const handleCardClick = async (id: string) => {
     if (mode === 'single') {
@@ -171,6 +186,33 @@ export function WMCatalogSidePanel({
             className="w-full h-9 pl-9 pr-3 rounded-md bg-wm-bg border border-wm-border text-[13px] text-wm-text placeholder-wm-text-subtle outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20"
           />
         </div>
+        {/* Active family-filter chip — toggle off to browse the full catalog
+            when the suggested family doesn't match anything in the DB. */}
+        {familyFilter && familyFilter.length > 0 && (
+          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Family:</span>
+            {familyFilter.map(f => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setFamilyFilterActive(v => !v)}
+                className={[
+                  'inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] transition-colors',
+                  familyFilterActive
+                    ? 'bg-wm-accent-tint text-wm-accent-strong border border-wm-accent/30'
+                    : 'bg-wm-bg-hover text-wm-text-muted border border-wm-border line-through',
+                ].join(' ')}
+                title={familyFilterActive ? 'Click to show all families' : 'Click to re-apply family filter'}
+              >
+                {f}
+                {familyFilterActive && <X size={10} />}
+              </button>
+            ))}
+            {!familyFilterActive && (
+              <span className="text-[10px] text-wm-text-subtle italic">showing all families</span>
+            )}
+          </div>
+        )}
         <div className="mt-2 flex items-center justify-between gap-2">
           <p className="text-[11px] text-wm-text-subtle">
             {loading ? 'Loading…' : `${visible.length} of ${rows.length} templates`}
@@ -202,6 +244,13 @@ export function WMCatalogSidePanel({
         ) : visible.length === 0 ? (
           <div className="text-center py-10 text-sm text-wm-text-muted">
             No templates match these filters.
+            {familyFilterActive && familyFilter && familyFilter.length > 0 && (
+              <div className="mt-3">
+                <WMButton variant="secondary" size="sm" onClick={() => setFamilyFilterActive(false)}>
+                  Show all families
+                </WMButton>
+              </div>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">

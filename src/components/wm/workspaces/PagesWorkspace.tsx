@@ -412,6 +412,12 @@ function PageEditor({
   // candidate templates against the brief section's content shape. This
   // hydrates the panel with a sensible default ordering before the user
   // clicks "Suggest with AI". Reset to [] when the panel closes.
+  //
+  // We load templates broadly (substring-match on family when present,
+  // otherwise everything) so the ranking covers anything the catalog
+  // panel might show — the panel's own family filter is tolerant in the
+  // same way, so the two stay in sync even when the brief's family name
+  // doesn't exactly equal the DB family name ("Hero" vs "Hero Section").
   useEffect(() => {
     if (bindingSection == null) {
       setBindRanking([])
@@ -425,10 +431,16 @@ function PageEditor({
       let q = supabase
         .from('web_content_templates')
         .select('*')
-      if (family) q = q.ilike('family', family)
+      if (family) q = q.ilike('family', `%${family}%`)
       const { data } = await q
       if (cancelled) return
-      const candidates = (data ?? []) as WebContentTemplate[]
+      let candidates = (data ?? []) as WebContentTemplate[]
+      // Fallback — if the family substring matched nothing, rank against
+      // the full catalog so the panel still gets a useful ordering.
+      if (candidates.length === 0) {
+        const { data: all } = await supabase.from('web_content_templates').select('*')
+        candidates = (all ?? []) as WebContentTemplate[]
+      }
       setBindRanking(rankVariantsByBrief(briefSection, candidates))
     })()
     return () => { cancelled = true }
