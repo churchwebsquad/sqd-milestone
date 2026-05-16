@@ -270,10 +270,191 @@ export function mapBriefToTemplate(
 
 // ── Body HTML → template slots (fallback) ───────────────────────────
 
+interface ParsedSubBlock {
+  heading: string
+  /** All non-heading content between this heading and the next, as HTML. */
+  bodyHtml: string
+  /** Same content, stripped to plain text. */
+  bodyText: string
+  /** First link found in the block (if any) — routed to a cta slot. */
+  cta: { label: string; url: string } | null
+  /** First image src found in the block (if any) — routed to an image slot. */
+  imageUrl: string | null
+}
+
+interface ParsedBody {
+  /** The section's own heading (top-level h1, or the first h2 when there
+   *  are no h2-shaped sub-blocks). */
+  sectionHeading: string | null
+  /** Any non-section, non-sub-block heading that reads as a tagline. */
+  tagline: string | null
+  /** Content above the first sub-block — section intro / body copy. */
+  intro: { html: string; text: string }
+  /** Parallel sub-blocks detected at h2 or h3 level. */
+  subBlocks: ParsedSubBlock[]
+  /** Which tag was used as the sub-block boundary (h2 / h3 / null). */
+  splitTag: 'h2' | 'h3' | null
+}
+
+/** Parse a freehand body into a section-shape: optional heading +
+ *  optional tagline + intro body + N parallel sub-blocks. The sub-blocks
+ *  are detected by repetition: if there are ≥2 h2s (or ≥2 h3s), those are
+ *  card-shaped boundaries, and the content between them becomes each
+ *  card's body. */
+function parseBodyForBlocks(html: string): ParsedBody {
+  const empty: ParsedBody = {
+    sectionHeading: null,
+    tagline: null,
+    intro: { html: '', text: '' },
+    subBlocks: [],
+    splitTag: null,
+  }
+  if (typeof window === 'undefined' || !html) return empty
+  const doc = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html')
+  const root = doc.body.firstElementChild
+  if (!root) return empty
+  const children = Array.from(root.children)
+
+  // Count headings at each level. Sub-blocks need 2+ siblings of the same
+  // heading level to read as parallel.
+  let h2Count = 0
+  let h3Count = 0
+  for (const el of children) {
+    const tag = el.tagName.toLowerCase()
+    if (tag === 'h2') h2Count++
+    else if (tag === 'h3') h3Count++
+  }
+  // Pick the split tag — prefer h2 (the natural sub-block level); fall
+  // back to h3 only when there are no h2s.
+  let splitTag: 'h2' | 'h3' | null = null
+  if (h2Count >= 2) splitTag = 'h2'
+  else if (h3Count >= 2 && h2Count === 0) splitTag = 'h3'
+
+  const sectionHeading: string | null = null
+  let tagline: string | null = null
+  const introNodes: Element[] = []
+  const blocks: { headingEl: Element; bodyEls: Element[] }[] = []
+
+  // Walk children, splitting at the chosen split tag.
+  let current: { headingEl: Element; bodyEls: Element[] } | null = null
+  let pickedSectionH1 = false
+  let pickedSectionFallback = false
+  let result: ParsedBody = empty
+
+  for (const el of children) {
+    const tag = el.tagName.toLowerCase()
+    if (splitTag && tag === splitTag) {
+      // Sub-block boundary.
+      if (current) blocks.push(current)
+      current = { headingEl: el, bodyEls: [] }
+      continue
+    }
+    if (current) {
+      current.bodyEls.push(el)
+    } else {
+      // Pre-block content — section heading, tagline, intro.
+      if (tag === 'h1' && !pickedSectionH1) {
+        ;(result as { sectionHeading: string | null }).sectionHeading = el.textContent?.trim() ?? null
+        pickedSectionH1 = true
+        continue
+      }
+      // If we don't split on h2 (only one h2 in the doc), treat that h2 as
+      // the section heading when no h1 was found.
+      if (splitTag !== 'h2' && tag === 'h2' && !pickedSectionH1 && !pickedSectionFallback) {
+        ;(result as { sectionHeading: string | null }).sectionHeading = el.textContent?.trim() ?? null
+        pickedSectionFallback = true
+        continue
+      }
+      // Smaller heading before any sub-block reads as a tagline.
+      if (tag === 'h3' || tag === 'h4' || tag === 'h5' || tag === 'h6') {
+        if (tagline == null) tagline = el.textContent?.trim() ?? null
+        continue
+      }
+      introNodes.push(el)
+    }
+  }
+  if (current) blocks.push(current)
+
+  const introHtml = introNodes.map(n => n.outerHTML).join('')
+  const introText = introNodes.map(n => (n.textContent ?? '').trim()).filter(Boolean).join('\n\n')
+
+  const subBlocks: ParsedSubBlock[] = blocks.map(b => {
+    const headingText = b.headingEl.textContent?.trim() ?? ''
+    const bodyHtml = b.bodyEls.map(n => n.outerHTML).join('')
+    const bodyText = b.bodyEls.map(n => (n.textContent ?? '').trim()).filter(Boolean).join('\n\n')
+    // First anchor inside the body becomes the CTA.
+    let cta: { label: string; url: string } | null = null
+    for (const n of b.bodyEls) {
+      const a = n.tagName.toLowerCase() === 'a' ? n : n.querySelector?.('a')
+      if (a) {
+        const url = a.getAttribute('href') ?? ''
+        const label = (a.textContent ?? '').trim()
+        if (label) { cta = { label, url } ; break }
+      }
+    }
+    // First image src becomes the image slot.
+    let imageUrl: string | null = null
+    for (const n of b.bodyEls) {
+      const img = n.tagName.toLowerCase() === 'img' ? n : n.querySelector?.('img')
+      if (img) { imageUrl = img.getAttribute('src') ?? null; if (imageUrl) break }
+    }
+    return { heading: headingText, bodyHtml, bodyText, cta, imageUrl }
+  })
+
+  result = {
+    ...result,
+    tagline,
+    intro: { html: introHtml, text: introText },
+    subBlocks,
+    splitTag,
+  }
+  return result
+}
+
+/** Whether a group is shaped like a card list — used to decide if we
+ *  route detected sub-blocks into it. */
+function isCardShapedGroup(group: WebGroupDef): boolean {
+  const c = canonical(group.key)
+  return c === 'cards' || c === 'events' || c === 'tiles'
+    || c === 'items' || c === 'features' || c === 'blocks'
+    || c === 'list'
+}
+
+/** Fill a group's items from parsed sub-blocks — heading → heading slot,
+ *  body → body slot, link → cta slot, image → image slot. Any item-schema
+ *  field that can't be filled stays empty. */
+function blocksToGroupItems(
+  group: WebGroupDef,
+  blocks: ParsedSubBlock[],
+): Record<string, unknown>[] {
+  return blocks.map(block => {
+    const item: Record<string, unknown> = {}
+    for (const field of group.item_schema) {
+      if (field.kind !== 'slot') continue
+      const c = canonical(field.key)
+      if (c === 'heading') {
+        item[field.key] = block.heading
+      } else if (c === 'body') {
+        if (field.type === 'richtext') item[field.key] = block.bodyHtml
+        else item[field.key] = block.bodyText
+      } else if (c === 'tagline') {
+        // Some templates have a per-card tagline above the heading —
+        // we don't carry one from the body parser, leave empty.
+      } else if (c === 'cta' && field.type === 'cta' && block.cta) {
+        item[field.key] = block.cta
+      } else if (c === 'image' && field.type === 'image' && block.imageUrl) {
+        item[field.key] = block.imageUrl
+      }
+    }
+    return item
+  })
+}
+
 /** Parse a freehand HTML body and pull straightforward chunks into
- *  template slots. Heuristics, not magic — works best on simple
- *  text/richtext slots; groups are left untouched (the brief path
- *  handles those, or the strategist routes manually). */
+ *  template slots. Detects parallel `<h2/h3>+<p>` patterns and routes
+ *  them into a card-shaped group (cards/items/features/blocks/events/
+ *  tiles/list) when the template defines one. Single slots (heading,
+ *  tagline, body) are filled from the pre-block intro content. */
 export function mapHtmlBodyToTemplate(
   html: string,
   template: WebContentTemplate,
@@ -281,70 +462,57 @@ export function mapHtmlBodyToTemplate(
   if (typeof window === 'undefined' || !html) {
     return { field_values: {}, matched_slots: [] }
   }
-  const doc = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html')
-  const root = doc.body.firstElementChild
-  if (!root) return { field_values: {}, matched_slots: [] }
-
-  const children = Array.from(root.children)
-  const segments = {
-    h1: [] as string[],
-    h2: [] as string[],
-    h3plus: [] as string[],
-    p: [] as string[],
-    listHtml: [] as string[],
-  }
-  for (const el of children) {
-    const tag = el.tagName.toLowerCase()
-    if (tag === 'h1') segments.h1.push(el.textContent ?? '')
-    else if (tag === 'h2') segments.h2.push(el.textContent ?? '')
-    else if (tag === 'h3' || tag === 'h4' || tag === 'h5' || tag === 'h6') {
-      segments.h3plus.push(el.textContent ?? '')
-    } else if (tag === 'p') segments.p.push(el.outerHTML)
-    else if (tag === 'ul' || tag === 'ol') segments.listHtml.push(el.outerHTML)
-  }
-
+  const parsed = parseBodyForBlocks(html)
   const out: Record<string, unknown> = {}
   const matched: string[] = []
 
-  const consumeFirst = (arr: string[]): string | null => arr.length ? arr.shift()! : null
+  // Find the first card-shaped group in the template (if any). We only
+  // route blocks into one group — multi-group templates are rare and
+  // would need explicit brief routing anyway.
+  let cardGroupKey: string | null = null
+  for (const field of template.fields) {
+    if (field.kind === 'group' && isCardShapedGroup(field)) {
+      cardGroupKey = field.key
+      break
+    }
+  }
 
   for (const field of template.fields) {
-    if (field.kind !== 'slot') continue  // groups: brief-path territory
+    if (field.kind === 'group') {
+      if (field.key === cardGroupKey && parsed.subBlocks.length >= 2) {
+        const items = blocksToGroupItems(field, parsed.subBlocks)
+        out[field.key] = items
+        matched.push(field.key)
+      }
+      continue
+    }
     const key = canonical(field.key)
 
-    // Heading-shaped slots
-    if (key === 'heading') {
-      const v = consumeFirst(segments.h1) ?? consumeFirst(segments.h2)
-      if (v) { out[field.key] = v; matched.push(field.key); continue }
+    if (key === 'heading' && parsed.sectionHeading) {
+      out[field.key] = parsed.sectionHeading
+      matched.push(field.key)
+      continue
     }
-    if (key === 'tagline') {
-      const v = consumeFirst(segments.h2) ?? consumeFirst(segments.h3plus)
-      if (v) { out[field.key] = v; matched.push(field.key); continue }
+    if (key === 'tagline' && parsed.tagline) {
+      out[field.key] = parsed.tagline
+      matched.push(field.key)
+      continue
     }
     if (key === 'body') {
-      if (field.type === 'richtext') {
-        const parts = segments.p.splice(0)
-        const lists = segments.listHtml.splice(0)
-        const joined = [...parts, ...lists].join('')
-        if (joined) { out[field.key] = joined; matched.push(field.key); continue }
-      } else {
-        const v = consumeFirst(segments.p)
-        if (v) {
-          const t = stripTags(v)
-          out[field.key] = t; matched.push(field.key); continue
-        }
+      if (field.type === 'richtext' && parsed.intro.html) {
+        out[field.key] = parsed.intro.html
+        matched.push(field.key)
+        continue
+      }
+      if (field.type !== 'richtext' && parsed.intro.text) {
+        out[field.key] = parsed.intro.text
+        matched.push(field.key)
+        continue
       }
     }
   }
 
   return { field_values: out, matched_slots: matched }
-}
-
-function stripTags(html: string): string {
-  if (typeof window === 'undefined') return html
-  const div = document.createElement('div')
-  div.innerHTML = html
-  return div.textContent?.trim() ?? ''
 }
 
 // ── Combined binding flow ───────────────────────────────────────────
