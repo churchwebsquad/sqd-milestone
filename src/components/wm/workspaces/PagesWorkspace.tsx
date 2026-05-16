@@ -51,6 +51,8 @@ import { SitemapProposalBanner } from '../SitemapProposalBanner'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { PagePreview } from '../PagePreview'
 import { WMSegmentedToggle } from '../SegmentedToggle'
+import { BrixiesEditor } from '../brixies/BrixiesEditor'
+import { fieldValuesToDocHtml, docHtmlToFieldValues } from '../../../lib/webBrixiesDoc'
 import { refreshSnippetChips, extractSuggestedFamily, type PageBrief } from '../../../lib/webPageBrief'
 import {
   composeBind, findBriefSection, extractSectionIdFromNotes,
@@ -1238,17 +1240,117 @@ function SectionBlock({
               {template!.fields.length === 0 ? (
                 <p className="text-[12px] text-wm-text-subtle italic">This template has no editable fields.</p>
               ) : (
-                template!.fields.map((f, i) => (
-                  <FieldRow
-                    key={f.key + '-' + i}
-                    field={f}
-                    value={values[f.key]}
-                    onChange={(v) => setValue(f.key, v)}
-                  />
-                ))
+                <BrixiesSectionContent
+                  values={values}
+                  template={template!}
+                  onChangeFieldValues={(next) => onChange({ field_values: next })}
+                />
               )}
             </>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Detect whether a template field is "doc-handled" — represented in
+ *  the Brixies TipTap editor rather than the form-row stack below it.
+ *  Tagline / heading / richtext body / CTA slots + the buttons group
+ *  all flow through the editor; cards / accordions / other groups
+ *  + non-text slots (image / datetime / boolean) stay as form rows. */
+function isDocHandledField(field: WebFieldDef): boolean {
+  if (field.kind === 'slot') {
+    const c = field.key.toLowerCase().replace(/[_\s-]+/g, '')
+    if (field.heading_level || c === 'h' || c.includes('heading') || c.includes('title')) return true
+    if (c.includes('tagline') || c.includes('eyebrow') || c.includes('kicker')) return true
+    if (field.type === 'richtext') return true
+    if (field.type === 'cta') return true
+    return false
+  }
+  // CTA-shaped group → handled by the editor as a stream of CTA nodes.
+  const c = field.key.toLowerCase().replace(/[_\s-]+/g, '')
+  return c === 'cta' || c === 'ctas' || c.includes('button') || c.includes('action')
+}
+
+/** The Brixies-aware content surface for a bound section. One TipTap
+ *  editor handles the doc-shaped slots (tagline + heading + body + CTAs);
+ *  any remaining slots / groups render as form rows below.
+ *
+ *  Round-trip: field_values → doc HTML on first mount, then editor
+ *  changes drive doc state; on each change docHtmlToFieldValues stuffs
+ *  the new doc back into the template's slots and the section row is
+ *  patched. Group items (cards) stay in field_values and are edited
+ *  via the form rows below — they're preserved across doc edits. */
+function BrixiesSectionContent({
+  values, template, onChangeFieldValues,
+}: {
+  values: FieldValues
+  template: WebContentTemplate
+  onChangeFieldValues: (next: FieldValues) => void
+}) {
+  const snippets = useEditorSnippets()
+  // Initial doc HTML derived from field_values. We hold it as local
+  // state so the editor's onUpdate doesn't fight an externally-derived
+  // value on every keystroke.
+  const [docHtml, setDocHtml] = useState<string>(() => fieldValuesToDocHtml(values, template))
+
+  // When the section's field_values change from a different source
+  // (e.g. AI redo writes new slot values), rebuild the doc. We detect
+  // this by comparing the rebuilt HTML to current — match means no
+  // external change.
+  useEffect(() => {
+    const next = fieldValuesToDocHtml(values, template)
+    if (next !== docHtml) {
+      setDocHtml(next)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [values, template.id])
+
+  const handleDocChange = (nextDoc: string) => {
+    setDocHtml(nextDoc)
+    // Translate the doc back to field_values, preserving group items
+    // and non-doc slots untouched.
+    const preserved: Record<string, unknown> = {}
+    for (const f of template.fields) {
+      if (!isDocHandledField(f)) preserved[f.key] = values[f.key]
+    }
+    // Special-keys not in the template stay on the values too.
+    for (const k of Object.keys(values)) {
+      if (k.startsWith('__')) preserved[k] = values[k]
+    }
+    const { field_values } = docHtmlToFieldValues(nextDoc, template, preserved)
+    onChangeFieldValues(field_values)
+  }
+
+  // Doc-handled fields are rendered by the editor; everything else
+  // (groups like Card Grid, plus image/datetime/etc. slots) renders as
+  // form rows below.
+  const remainingFields = template.fields.filter(f => !isDocHandledField(f))
+
+  return (
+    <div className="space-y-4">
+      <BrixiesEditor
+        value={docHtml}
+        onChange={handleDocChange}
+        snippets={snippets}
+        placeholder="Start writing the section content…"
+      />
+      {remainingFields.length > 0 && (
+        <div className="space-y-3 pt-2 border-t border-wm-border/60">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
+            Other fields
+          </p>
+          {remainingFields.map((f, i) => (
+            <FieldRow
+              key={f.key + '-' + i}
+              field={f}
+              value={values[f.key]}
+              onChange={(v) => {
+                onChangeFieldValues({ ...values, [f.key]: v })
+              }}
+            />
+          ))}
         </div>
       )}
     </div>

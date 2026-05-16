@@ -245,4 +245,122 @@
     pointer-events: none;
     height: 0;
   }
+
+  /* ── Brixies block-label pills ──────────────────────────────────
+     Each Brixies-aware block (tagline, heading, body, CTA, image,
+     card grid) renders with a small bracketed pill label above it,
+     inline within the TipTap editor. The pill is a `::before`
+     pseudo-element driven by data-attributes on the node element.
+     Notion-style document feel — labels are visible scaffolding
+     without breaking the flowing-doc read. */
+  .wm-theme .ProseMirror [data-bx-label]::before {
+    content: '[' attr(data-bx-label) ']';
+    display: inline-block;
+    margin-bottom: 0.3em;
+    padding: 0.1em 0.4em;
+    border: 1px solid;
+    border-radius: 4px;
+    font-family: var(--font-sans);
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    line-height: 1;
+    text-transform: uppercase;
+    user-select: none;
+    pointer-events: none;
+  }
+  .wm-theme .ProseMirror [data-bx-kind='heading']::before {
+    color: var(--color-wm-accent-strong);
+    background: var(--color-wm-accent-tint);
+    border-color: color-mix(in srgb, var(--color-wm-accent) 30%, transparent);
+  }
+  .wm-theme .ProseMirror [data-bx-kind='tagline']::before {
+    color: var(--color-wm-text-muted);
+    background: var(--color-wm-bg-hover);
+    border-color: var(--color-wm-border);
+  }
+  .wm-theme .ProseMirror [data-bx-kind='body']::before {
+    color: var(--color-wm-text-muted);
+    background: var(--color-wm-bg-hover);
+    border-color: var(--color-wm-border);
+  }
+  .wm-theme .ProseMirror [data-bx-kind='cta']::before {
+    color: rgb(4 120 87);
+    background: rgb(236 253 245);
+    border-color: rgb(167 243 208);
+  }
+  .wm-theme .ProseMirror [data-bx-kind='image']::before {
+    color: var(--color-wm-text-muted);
+    background: var(--color-wm-bg-hover);
+    border-color: var(--color-wm-border);
+  }
+  .wm-theme .ProseMirror [data-bx-kind='group']::before {
+    color: var(--color-wm-accent-strong);
+    background: var(--color-wm-accent-tint);
+    border-color: color-mix(in srgb, var(--color-wm-accent) 30%, transparent);
+  }
+
+  /* Block-level wrappers — render below the pill, structured. */
+  .wm-theme .ProseMirror .brixies-tagline {
+    display: block;
+    margin: 0.5em 0 1em;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--color-wm-text);
+  }
+  .wm-theme .ProseMirror .brixies-cta {
+    display: block;
+    margin: 1em 0;
+    padding: 0.4em 0.6em;
+    background: rgb(248 250 252);
+    border: 1px solid var(--color-wm-border);
+    border-radius: 6px;
+    font-size: 0.875rem;
+  }
+  .wm-theme .ProseMirror .brixies-cta-fields {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4em;
+    flex-wrap: wrap;
+  }
+  .wm-theme .ProseMirror .brixies-cta input {
+    border: none;
+    background: transparent;
+    outline: none;
+    font: inherit;
+    color: var(--color-wm-text);
+    padding: 0.1em 0.2em;
+  }
+  .wm-theme .ProseMirror .brixies-cta input:focus {
+    background: rgb(255 255 255);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-wm-accent) 20%, transparent);
+    border-radius: 3px;
+  }
+  .wm-theme .ProseMirror .brixies-cta .brixies-cta-label {
+    font-weight: 600;
+    min-width: 8em;
+    flex: 1;
+  }
+  .wm-theme .ProseMirror .brixies-cta .brixies-cta-arrow {
+    color: var(--color-wm-text-subtle);
+  }
+  .wm-theme .ProseMirror .brixies-cta .brixies-cta-url {
+    color: var(--color-wm-text-muted);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.85em;
+    min-width: 8em;
+    flex: 1;
+  }
+  /* Heading-level pill labels driven by the HeadingLabelDecorator */
+  .wm-theme .ProseMirror h1::before,
+  .wm-theme .ProseMirror h2::before,
+  .wm-theme .ProseMirror h3::before,
+  .wm-theme .ProseMirror h4::before,
+  .wm-theme .ProseMirror h5::before {
+    /* Heading pills are emitted via inline decoration widgets so this
+       :before fallback isn't used — kept here as a no-op safety net so
+       custom heading-decoration classes never trample the editor. */
+    content: none;
+  }
 }
