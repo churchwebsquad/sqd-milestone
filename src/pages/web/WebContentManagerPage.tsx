@@ -132,7 +132,7 @@ export default function WebContentManagerPage() {
     >
       {activeTab === 'roadmap'    && <RoadmapWorkspace project={project} onChange={loadProject} />}
       {activeTab === 'global'     && <GlobalElementsWorkspace project={project} onChange={loadProject} />}
-      {activeTab === 'pages'      && <PagesWorkspace project={project} />}
+      {activeTab === 'pages'      && <PagesWorkspace project={project} onChange={loadProject} />}
       {activeTab === 'snippets'   && <SnippetsWorkspace project={project} onChange={loadProject} />}
       {activeTab === 'voice'      && <VoiceWorkspace project={project} />}
       {activeTab === 'heuristics' && <HeuristicsWorkspace project={project} />}

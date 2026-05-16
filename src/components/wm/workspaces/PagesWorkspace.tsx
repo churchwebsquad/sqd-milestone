@@ -32,7 +32,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FileText, Loader2, ChevronDown, ChevronRight, Plus, Trash2,
-  Sparkles, RotateCw, Eye, GripVertical, MoreHorizontal, Upload,
+  Sparkles, RotateCw, Eye, GripVertical, MoreHorizontal, Upload, Archive,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { loadEditorSnippets } from '../../../lib/webSnippets'
@@ -46,6 +46,9 @@ import type { WMSnippetOption } from '../RichTextEditor'
 import { WMCatalogSidePanel } from '../CatalogSidePanel'
 import { WMAIAttribution } from '../AIAttribution'
 import { PageBriefImportModal } from '../PageBriefImportModal'
+import { AddPageModal } from '../AddPageModal'
+import { SitemapProposalBanner } from '../SitemapProposalBanner'
+import { ConfirmDialog } from '../ConfirmDialog'
 import { refreshSnippetChips, extractSuggestedFamily, type PageBrief } from '../../../lib/webPageBrief'
 import {
   composeBind, findBriefSection, extractSectionIdFromNotes,
@@ -58,6 +61,10 @@ import type {
 
 interface Props {
   project: StrategyWebProject
+  /** Refresh the project row from the host — used after the Stage 2
+   *  proposal commits new pages so the top-level project state (and
+   *  the proposal banner's _meta.committed_at) updates. */
+  onChange?: () => Promise<void>
 }
 
 type FieldValues = Record<string, unknown>
@@ -74,13 +81,26 @@ const STATUS_TONES: Record<WebPage['content_status'], WMStatusTone> = {
   archived:  'neutral',
 }
 
-export function PagesWorkspace({ project }: Props) {
+export function PagesWorkspace({ project, onChange }: Props) {
   const [params, setParams] = useSearchParams()
   const [pages, setPages] = useState<WebPage[]>([])
   const [loading, setLoading] = useState(true)
   const [activePage, setActivePage] = useState<WebPage | null>(null)
   const [snippets, setSnippets] = useState<readonly WMSnippetOption[]>([])
   const [importOpen, setImportOpen] = useState(false)
+  // Add Page modal — opened from the left panel per phase. The state
+  // holds the target phase key so the modal pre-fills it.
+  const [addPageInPhase, setAddPageInPhase] = useState<string | null>(null)
+  // Bulk selection for archive — left panel checkboxes (hover-reveal
+  // by default, persistent once anything is selected).
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  // Archive confirmation modal (single or bulk).
+  const [archiveConfirm, setArchiveConfirm] = useState<
+    | { kind: 'single'; id: string; name: string }
+    | { kind: 'bulk' }
+    | null
+  >(null)
+  const [archiving, setArchiving] = useState(false)
 
   const activePageId = params.get('page')
 
@@ -122,17 +142,60 @@ export function PagesWorkspace({ project }: Props) {
     setParams(next, { replace: true })
   }
 
-  const clearSelection = () => {
+  const clearActivePageSelection = () => {
     const next = new URLSearchParams(params)
     next.delete('page')
     setParams(next, { replace: true })
+  }
+
+  const togglePageSelection = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  const clearBulkSelection = () => setSelectedIds(new Set())
+
+  const requestArchive = (id: string) => {
+    const page = pages.find(p => p.id === id)
+    if (!page) return
+    setArchiveConfirm({ kind: 'single', id, name: page.name })
+  }
+
+  const requestBulkArchive = () => {
+    if (selectedIds.size === 0) return
+    setArchiveConfirm({ kind: 'bulk' })
+  }
+
+  const executeArchive = async () => {
+    setArchiving(true)
+    try {
+      const idsToArchive: string[] = archiveConfirm?.kind === 'bulk'
+        ? [...selectedIds]
+        : archiveConfirm?.kind === 'single'
+          ? [archiveConfirm.id]
+          : []
+      if (idsToArchive.length === 0) return
+      await supabase.from('web_pages').update({ archived: true }).in('id', idsToArchive)
+      // If the active page got archived, drop it from the URL.
+      if (activePage && idsToArchive.includes(activePage.id)) {
+        clearActivePageSelection()
+      }
+      clearBulkSelection()
+      setArchiveConfirm(null)
+      await loadPages()
+    } finally {
+      setArchiving(false)
+    }
   }
 
   return (
     <SnippetsContext.Provider value={snippets}>
       <div className="flex min-h-[calc(100vh-120px)]">
         {/* Page list (left) */}
-        <aside className="w-72 shrink-0 border-r border-wm-border bg-wm-bg-elevated overflow-y-auto">
+        <aside className="w-72 shrink-0 border-r border-wm-border bg-wm-bg-elevated overflow-y-auto flex flex-col">
           {/* Import action — always available */}
           <div className="p-3 border-b border-wm-border sticky top-0 bg-wm-bg-elevated z-10">
             <WMButton
@@ -145,16 +208,48 @@ export function PagesWorkspace({ project }: Props) {
               Import from brief
             </WMButton>
           </div>
+          {/* Bulk selection toolbar — visible only with 1+ checked */}
+          {selectedIds.size > 0 && (
+            <div className="p-3 border-b border-wm-border bg-wm-ai-bg/40 flex items-center justify-between gap-2">
+              <span className="text-[12px] font-semibold text-wm-text">
+                {selectedIds.size} selected
+              </span>
+              <div className="flex items-center gap-1">
+                <WMIconButton label="Clear selection" size="sm" onClick={clearBulkSelection}>
+                  <Trash2 size={11} />
+                </WMIconButton>
+                <WMButton variant="danger" size="sm" iconLeft={<Archive size={11} />} onClick={requestBulkArchive}>
+                  Archive
+                </WMButton>
+              </div>
+            </div>
+          )}
           <PageList
             pages={pages}
             loading={loading}
             activeId={activePage?.id ?? null}
+            selectedIds={selectedIds}
             onSelect={selectPage}
+            onToggleSelection={togglePageSelection}
+            onArchive={requestArchive}
+            onAddPageInPhase={(phase) => setAddPageInPhase(phase)}
           />
         </aside>
 
         {/* Active page editor (right) */}
         <main className="flex-1 min-w-0 overflow-y-auto">
+          <div className="px-6 md:px-10 pt-6 max-w-4xl mx-auto">
+            <SitemapProposalBanner
+              project={project}
+              onCommitted={async () => {
+                await loadPages()
+                if (onChange) await onChange()
+              }}
+              onRefreshed={async () => {
+                if (onChange) await onChange()
+              }}
+            />
+          </div>
           {activePage ? (
             <PageEditor
               page={activePage}
@@ -162,10 +257,14 @@ export function PagesWorkspace({ project }: Props) {
               onPageChange={async () => {
                 await loadPages()
               }}
-              onArchived={() => { clearSelection(); void loadPages() }}
+              onArchived={() => { clearActivePageSelection(); void loadPages() }}
             />
           ) : (
-            <EmptyEditor pageCount={pages.length} onImport={() => setImportOpen(true)} />
+            <EmptyEditor
+              pageCount={pages.length}
+              onImport={() => setImportOpen(true)}
+              onAddPage={() => setAddPageInPhase('1')}
+            />
           )}
         </main>
       </div>
@@ -177,11 +276,54 @@ export function PagesWorkspace({ project }: Props) {
         onImported={async (result) => {
           await loadPages()
           setImportOpen(false)
-          // Navigate to the newly imported / updated page
           const next = new URLSearchParams(params)
           next.set('page', result.page_id)
           setParams(next, { replace: true })
         }}
+      />
+
+      {addPageInPhase && (
+        <AddPageModal
+          projectId={project.id}
+          phase={addPageInPhase}
+          existingPages={pages}
+          onClose={() => setAddPageInPhase(null)}
+          onCreated={async () => { setAddPageInPhase(null); await loadPages() }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={archiveConfirm !== null}
+        title={
+          archiveConfirm?.kind === 'bulk'
+            ? `Archive ${selectedIds.size} page${selectedIds.size === 1 ? '' : 's'}?`
+            : `Archive "${archiveConfirm?.kind === 'single' ? archiveConfirm.name : ''}"?`
+        }
+        body={
+          archiveConfirm?.kind === 'bulk' ? (
+            <div>
+              <p className="mb-2">These pages will be archived:</p>
+              <ul className="space-y-0.5 text-wm-text">
+                {[...selectedIds].map(id => {
+                  const p = pages.find(x => x.id === id)
+                  return p ? <li key={id}>· {p.name} <code className="text-wm-text-subtle text-[11px]">/{p.slug}</code></li> : null
+                })}
+              </ul>
+              <p className="mt-3">Archived pages disappear from the tree but stay in the database. Re-running Stage 2's commit won't bring them back automatically.</p>
+            </div>
+          ) : (
+            'Archived pages disappear from the tree but stay in the database. You can restore manually from Supabase if needed.'
+          )
+        }
+        confirmLabel={
+          archiveConfirm?.kind === 'bulk'
+            ? `Archive ${selectedIds.size} page${selectedIds.size === 1 ? '' : 's'}`
+            : 'Archive page'
+        }
+        destructive
+        loading={archiving}
+        onConfirm={executeArchive}
+        onCancel={() => { if (!archiving) setArchiveConfirm(null) }}
       />
     </SnippetsContext.Provider>
   )
@@ -190,12 +332,17 @@ export function PagesWorkspace({ project }: Props) {
 // ── Page list ─────────────────────────────────────────────────────────
 
 function PageList({
-  pages, loading, activeId, onSelect,
+  pages, loading, activeId, selectedIds,
+  onSelect, onToggleSelection, onArchive, onAddPageInPhase,
 }: {
   pages: WebPage[]
   loading: boolean
   activeId: string | null
+  selectedIds: Set<string>
   onSelect: (id: string) => void
+  onToggleSelection: (id: string) => void
+  onArchive: (id: string) => void
+  onAddPageInPhase: (phase: string) => void
 }) {
   const byPhase = useMemo(() => {
     const m = new Map<string, WebPage[]>()
@@ -214,6 +361,8 @@ function PageList({
     { key: 'nav-only', label: 'Nav-only' },
   ]
 
+  const selectionActive = selectedIds.size > 0
+
   if (loading) {
     return (
       <div className="p-4 space-y-2">
@@ -224,48 +373,88 @@ function PageList({
     )
   }
 
-  if (pages.length === 0) {
-    return (
-      <div className="p-6 text-center text-[12px] text-wm-text-muted">
-        No pages yet. Add a page from the <strong className="text-wm-text">Sitemap & Strategy</strong> tab.
-      </div>
-    )
-  }
-
   return (
-    <div className="py-3">
+    <div className="py-3 flex-1">
       {PHASES.map(phase => {
         const list = byPhase.get(phase.key) ?? []
-        if (list.length === 0) return null
         return (
           <div key={phase.key} className="mb-4">
-            <p className="px-4 mb-1 text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
-              {phase.label} · {list.length}
-            </p>
-            <div className="space-y-0.5">
-              {list.map(p => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => onSelect(p.id)}
-                  className={[
-                    'w-full text-left px-4 py-2 flex items-center gap-2 border-l-2 transition-colors',
-                    p.id === activeId
-                      ? 'bg-wm-bg-selected border-wm-accent'
-                      : 'border-transparent hover:bg-wm-bg-hover',
-                  ].join(' ')}
-                >
-                  <FileText size={13} className="text-wm-text-subtle shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-medium text-wm-text truncate">{p.name}</p>
-                    <p className="text-[10px] text-wm-text-subtle truncate">/{p.slug}</p>
-                  </div>
-                  <WMStatusPill tone={STATUS_TONES[p.content_status]} size="sm">
-                    {p.content_status === 'in_review' ? 'review' : p.content_status}
-                  </WMStatusPill>
-                </button>
-              ))}
+            <div className="px-4 mb-1 flex items-center justify-between gap-2">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
+                {phase.label}{list.length > 0 ? ` · ${list.length}` : ''}
+              </p>
+              <button
+                type="button"
+                onClick={() => onAddPageInPhase(phase.key)}
+                className="text-wm-text-subtle hover:text-wm-accent-strong transition-colors"
+                title={`Add page to ${phase.label}`}
+              >
+                <Plus size={12} />
+              </button>
             </div>
+            {list.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => onAddPageInPhase(phase.key)}
+                className="mx-3 block w-[calc(100%-1.5rem)] rounded-md border border-dashed border-wm-border bg-wm-bg p-2.5 text-[11px] text-wm-text-muted hover:border-wm-border-focus hover:text-wm-text transition-colors"
+              >
+                + Add a page
+              </button>
+            ) : (
+              <div className="space-y-0.5">
+                {list.map(p => {
+                  const isSelected = selectedIds.has(p.id)
+                  return (
+                    <div
+                      key={p.id}
+                      className={[
+                        'group relative flex items-center border-l-2 transition-colors',
+                        p.id === activeId
+                          ? 'bg-wm-bg-selected border-wm-accent'
+                          : isSelected
+                            ? 'bg-wm-ai-bg/30 border-transparent'
+                            : 'border-transparent hover:bg-wm-bg-hover',
+                      ].join(' ')}
+                    >
+                      <label className={[
+                        'shrink-0 pl-3 py-2 cursor-pointer flex items-center justify-center transition-opacity',
+                        selectionActive || isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                      ].join(' ')}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => onToggleSelection(p.id)}
+                          className="accent-wm-accent cursor-pointer"
+                          aria-label={`Select ${p.name}`}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => onSelect(p.id)}
+                        className="min-w-0 flex-1 text-left px-2 py-2 flex items-center gap-2"
+                      >
+                        <FileText size={13} className="text-wm-text-subtle shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[13px] font-medium text-wm-text truncate">{p.name}</p>
+                          <p className="text-[10px] text-wm-text-subtle truncate">/{p.slug}</p>
+                        </div>
+                        <WMStatusPill tone={STATUS_TONES[p.content_status]} size="sm">
+                          {p.content_status === 'in_review' ? 'review' : p.content_status}
+                        </WMStatusPill>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onArchive(p.id) }}
+                        className="shrink-0 pr-2 py-2 text-wm-text-subtle hover:text-wm-danger opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Archive page"
+                      >
+                        <Archive size={12} />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )
       })}
@@ -275,9 +464,15 @@ function PageList({
 
 // ── Empty state ───────────────────────────────────────────────────────
 
-function EmptyEditor({ pageCount, onImport }: { pageCount: number; onImport: () => void }) {
+function EmptyEditor({
+  pageCount, onImport, onAddPage,
+}: {
+  pageCount: number
+  onImport: () => void
+  onAddPage: () => void
+}) {
   return (
-    <div className="h-full grid place-items-center p-10">
+    <div className="grid place-items-center px-10 py-16">
       <div className="text-center max-w-md">
         <FileText size={32} className="text-wm-text-subtle mx-auto mb-3" />
         <h2 className="text-[15px] font-semibold text-wm-text mb-1">
@@ -286,16 +481,26 @@ function EmptyEditor({ pageCount, onImport }: { pageCount: number; onImport: () 
         <p className="text-[12px] text-wm-text-muted mb-4">
           {pageCount > 0
             ? 'Pages appear in the left panel grouped by phase. Import a page brief from cowork or pick one to start editing.'
-            : 'Import a page brief from cowork, or add pages manually from the Sitemap & Strategy tab.'}
+            : 'Import a page brief from cowork, or add the first page directly.'}
         </p>
-        <WMButton
-          variant="primary"
-          size="sm"
-          iconLeft={<Upload size={11} />}
-          onClick={onImport}
-        >
-          Import page brief
-        </WMButton>
+        <div className="flex items-center justify-center gap-2">
+          <WMButton
+            variant="primary"
+            size="sm"
+            iconLeft={<Upload size={11} />}
+            onClick={onImport}
+          >
+            Import page brief
+          </WMButton>
+          <WMButton
+            variant="secondary"
+            size="sm"
+            iconLeft={<Plus size={11} />}
+            onClick={onAddPage}
+          >
+            Add a page
+          </WMButton>
+        </div>
       </div>
     </div>
   )

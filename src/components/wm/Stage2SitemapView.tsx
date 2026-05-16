@@ -7,8 +7,10 @@
  * keyword targets, CS flags, sources used, provenance footer.
  *
  * Used by:
- *   - SitemapWorkspace (canonical home — shows before approval as
- *     the proposal, after approval real `web_pages` records take over)
+ *   - SitemapProposalBanner (in the Pages workspace) — expanded
+ *     "View proposal" view that lets the strategist eyeball Stage 2
+ *     before committing pages. After commit, real `web_pages` records
+ *     take over and the banner stays as historical reference.
  *   - Future: a partner-facing export view
  */
 
