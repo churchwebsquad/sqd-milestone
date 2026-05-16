@@ -203,22 +203,55 @@ function looksLikeCta(v: unknown): v is { label: string; url?: string; target?: 
     && (typeof obj.url === 'string' || typeof obj.target === 'string')
 }
 
+/** Brixies models button labels as a single text slot with scope='button'
+ *  (no URL field — URLs go in Bricks/WP later). Detect those so we can
+ *  route a brief CTA's label into them. */
+function isButtonLabelSlot(slot: WebSlotDef): boolean {
+  if (slot.type !== 'text') return false
+  if (slot.scope === 'button') return true
+  const labelText = (slot.label ?? '').toLowerCase()
+  const layerName = (slot.layer_name ?? '').toLowerCase()
+  return /button|cta/.test(labelText) || /^buttons?$/.test(layerName)
+}
+
+/** Pull the label out of a CTA-shaped value. */
+function ctaLabel(v: { label: string }): string {
+  return typeof v.label === 'string' ? v.label : ''
+}
+
 function mapItemFields(
   itemSchema: WebFieldDef[],
   briefItem: Record<string, unknown>,
   pathPrefix: string,
   result: { matched: string[]; missing: string[]; unmatched: string[] },
 ): Record<string, unknown> {
-  // Special case: a single CTA-shape briefItem ({label, target}) routed
+  // Special case A: a single CTA-shape briefItem ({label, target}) routed
   // into a schema whose single slot is type='cta' — bind the whole item
-  // to that slot. This is the buttons-group flow: each item in the brief
-  // is a CTA object, and Brixies models each card's button as one
-  // type='cta' slot rather than separate label/url field pairs.
+  // to that slot. This is the buttons-group flow when Brixies modeled the
+  // button as one type='cta' slot.
   const ctaSlot = itemSchema.find(
     (f): f is WebSlotDef => f.kind === 'slot' && f.type === 'cta'
   )
   if (ctaSlot && looksLikeCta(briefItem) && itemSchema.length === 1) {
     return { [ctaSlot.key]: coerceForSlot(ctaSlot, briefItem) }
+  }
+
+  // Special case B: CTA-shape briefItem + button-label text slot. Brixies
+  // mostly models buttons as a single text slot (scope='button') with no
+  // URL field — URLs go in Bricks at build time. Route the label; stash
+  // the URL on __cta_url so the strategist can see what URL was intended.
+  if (looksLikeCta(briefItem)) {
+    const buttonSlot = itemSchema.find((f): f is WebSlotDef =>
+      f.kind === 'slot' && isButtonLabelSlot(f)
+    )
+    if (buttonSlot && itemSchema.length === 1) {
+      const url = (briefItem.url ?? briefItem.target ?? '') as string
+      const out: Record<string, unknown> = {
+        [buttonSlot.key]: ctaLabel(briefItem),
+      }
+      if (url) out.__cta_url = url
+      return out
+    }
   }
 
   const out: Record<string, unknown> = {}
@@ -678,6 +711,75 @@ export interface ComposedBindResult {
     missing_slots: string[]
     unmatched_brief_keys: string[]
   }
+  /** HTML residual — the freehand body with any content that landed in
+   *  a slot already filtered out. Empty when nothing's left over. Stashed
+   *  as `__overflow_html` so the strategist sees ONLY what didn't bind,
+   *  not the full body that's already duplicated in slots. */
+  residual_html: string
+}
+
+/** Collect every plain-text fragment present in a field_values map so the
+ *  residual computer can subtract them from the freehand body. Recurses
+ *  through groups + items. */
+function collectSlotTexts(values: Record<string, unknown>): Set<string> {
+  const out = new Set<string>()
+  if (typeof window === 'undefined') return out
+  const stripHtml = (s: string): string => {
+    const div = document.createElement('div')
+    div.innerHTML = s
+    return (div.textContent ?? '').replace(/\s+/g, ' ').trim()
+  }
+  const walk = (v: unknown): void => {
+    if (typeof v === 'string') {
+      const t = stripHtml(v)
+      if (t.length > 3) out.add(t)
+    } else if (Array.isArray(v)) {
+      v.forEach(walk)
+    } else if (typeof v === 'object' && v !== null) {
+      const obj = v as Record<string, unknown>
+      // CTA values: { label, url } — index label alone for matching.
+      if (typeof obj.label === 'string') {
+        const t = stripHtml(obj.label)
+        if (t.length > 1) out.add(t)
+      }
+      Object.values(obj).forEach(walk)
+    }
+  }
+  Object.values(values).forEach(walk)
+  return out
+}
+
+/** Compute the residual HTML — freehand body with elements already
+ *  routed into slots filtered out. Top-level element is kept when its
+ *  normalized text doesn't substring-match any slot text. */
+function computeResidualHtml(freehandHtml: string, fieldValues: Record<string, unknown>): string {
+  if (typeof window === 'undefined' || !freehandHtml) return ''
+  const slotTexts = collectSlotTexts(fieldValues)
+  if (slotTexts.size === 0) return freehandHtml
+
+  const doc = new DOMParser().parseFromString(`<div>${freehandHtml}</div>`, 'text/html')
+  const root = doc.body.firstElementChild
+  if (!root) return ''
+
+  const remaining: Element[] = []
+  for (const el of Array.from(root.children)) {
+    const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+    if (!text) { remaining.push(el); continue }
+    let redundant = false
+    for (const slotText of slotTexts) {
+      // Element is "redundant" when its text is a substring of any slot
+      // value (or vice versa, when slot value is the whole element).
+      if (slotText.includes(text) || text.includes(slotText)) {
+        // Close-length check guards against false positives where a
+        // short word matches a long body slot.
+        const longer = Math.max(slotText.length, text.length)
+        const shorter = Math.min(slotText.length, text.length)
+        if (shorter / longer >= 0.5) { redundant = true; break }
+      }
+    }
+    if (!redundant) remaining.push(el)
+  }
+  return remaining.map(el => el.outerHTML).join('')
 }
 
 // ── Variant ranking ─────────────────────────────────────────────────
@@ -784,5 +886,6 @@ export function composeBind(
       missing_slots: stillMissing,
       unmatched_brief_keys: fromBrief.unmatched_brief_keys,
     },
+    residual_html: computeResidualHtml(freehandBodyHtml, merged),
   }
 }

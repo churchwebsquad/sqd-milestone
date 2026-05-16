@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Search, Check, Sparkles, X } from 'lucide-react'
+import { Search, Check, Sparkles, X, Star } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { WMFlyoutPanel } from './FlyoutPanel'
 import { WMButton } from './Button'
@@ -48,6 +48,11 @@ export interface WMCatalogSidePanelProps {
    *  to surface best-fit variants first. */
   rankedIds?: readonly string[]
 
+  /** Template ids that are already in the project's curated library
+   *  (Global Elements bindings). Rendered with a small ★ Site library
+   *  badge so the strategist can spot site picks at a glance. */
+  siteLibraryIds?: ReadonlySet<string>
+
   /** Optional subtitle to show under each template card — used to
    *  surface the AI / deterministic rationale for the rank. Keyed by
    *  template id. */
@@ -67,7 +72,7 @@ export function WMCatalogSidePanel({
   kindFilter, familyFilter,
   mode, selectedIds = [], maxSelections,
   onSelect,
-  rankedIds, cardSubtitles, onRequestAIRank, aiRanking,
+  rankedIds, siteLibraryIds, cardSubtitles, onRequestAIRank, aiRanking,
 }: WMCatalogSidePanelProps) {
   const [rows, setRows] = useState<WebContentTemplate[]>([])
   const [loading, setLoading] = useState(false)
@@ -256,16 +261,19 @@ export function WMCatalogSidePanel({
           <div className="grid grid-cols-2 gap-3">
             {visible.map(t => {
               const isSelected = draftSelection.includes(t.id)
+              const isSiteLibrary = !!siteLibraryIds?.has(t.id)
               return (
                 <button
                   key={t.id}
                   type="button"
                   onClick={() => void handleCardClick(t.id)}
                   className={[
-                    'group text-left rounded-md overflow-hidden border bg-wm-bg-elevated transition-all',
+                    'group text-left rounded-md overflow-hidden border bg-wm-bg-elevated transition-all relative',
                     isSelected
                       ? 'border-wm-accent ring-2 ring-wm-accent/30'
-                      : 'border-wm-border hover:border-wm-border-focus hover:shadow-sm',
+                      : isSiteLibrary
+                        ? 'border-wm-accent/40 hover:border-wm-accent hover:shadow-sm'
+                        : 'border-wm-border hover:border-wm-border-focus hover:shadow-sm',
                   ].join(' ')}
                 >
                   <div className="relative aspect-[4/3] bg-wm-bg-hover">
@@ -273,6 +281,14 @@ export function WMCatalogSidePanel({
                       <img src={t.preview_image_url} alt="" className="w-full h-full object-cover" loading="lazy" />
                     ) : (
                       <div className="absolute inset-0 grid place-items-center text-[10px] text-wm-text-subtle">no preview</div>
+                    )}
+                    {isSiteLibrary && !isSelected && (
+                      <span
+                        title="In the project's Global Elements library"
+                        className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-wm-accent text-white text-[9px] font-bold uppercase tracking-wide shadow-sm"
+                      >
+                        <Star size={9} className="fill-white" /> Site
+                      </span>
                     )}
                     {isSelected && (
                       <span className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-wm-accent text-white inline-flex items-center justify-center">

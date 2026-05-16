@@ -49,11 +49,14 @@ import { PageBriefImportModal } from '../PageBriefImportModal'
 import { AddPageModal } from '../AddPageModal'
 import { SitemapProposalBanner } from '../SitemapProposalBanner'
 import { ConfirmDialog } from '../ConfirmDialog'
+import { PagePreview } from '../PagePreview'
+import { WMSegmentedToggle } from '../SegmentedToggle'
 import { refreshSnippetChips, extractSuggestedFamily, type PageBrief } from '../../../lib/webPageBrief'
 import {
   composeBind, findBriefSection, extractSectionIdFromNotes,
   rankVariantsByBrief, type RankedVariant,
 } from '../../../lib/webBindTemplate'
+import { parseCuratedLibrary } from '../../../lib/webCuratedLibrary'
 import type {
   StrategyWebProject, WebPage, WebSection, WebContentTemplate,
   WebFieldDef, WebSlotDef, WebGroupDef, WebTemplateKind,
@@ -572,6 +575,8 @@ function PageEditor({
   const [templates, setTemplates] = useState<Record<string, WebContentTemplate>>({})
   const [loadingSections, setLoadingSections] = useState(true)
   const [pickerOpen, setPickerOpen] = useState(false)
+  // Edit ↔ Preview mode for the page editor body.
+  const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit')
   // Bind-to-template flow: when set, opens the catalog panel pre-filtered
   // by the brief-suggested family and routes the pick into bindSection().
   const [bindingSection, setBindingSection] = useState<WebSection | null>(null)
@@ -583,6 +588,13 @@ function PageEditor({
   // Page brief, loaded once per page. Drives the brief→slot auto-fill on
   // bind. Lookups are by `Section ID: <id>` on web_sections.notes.
   const pageBrief = (page.brief as PageBrief | null | undefined) ?? null
+
+  // Flatten the project's curated library into a Set of template ids
+  // so the catalog picker can badge them as "Site library" picks.
+  const siteLibraryIds = useMemo(() => {
+    const lib = parseCuratedLibrary(project.curated_library)
+    return new Set<string>(Object.values(lib).flat())
+  }, [project.curated_library])
 
   useEffect(() => {
     setTitleDraft(page.name); setSlugDraft(page.slug); setTitleDirty(false)
@@ -738,10 +750,27 @@ function PageEditor({
     const template = tplRow as WebContentTemplate
 
     const currentValues = (section.field_values ?? {}) as FieldValues
-    const overflowHtml =
-      typeof currentValues.__overflow_html === 'string'
+    // Source HTML for re-binding:
+    //   - Freehand section: body field
+    //   - Already-bound section (Change template): serialize current
+    //     slot values + any existing residual back to HTML, so the new
+    //     bind has everything to work with.
+    let sourceHtml =
+      typeof currentValues.body === 'string' && section.content_template_id == null
+        ? currentValues.body
+        : ''
+    if (!sourceHtml && section.content_template_id != null) {
+      const currentTpl = templates[section.content_template_id]
+      sourceHtml = serializeFieldValuesToHtml(currentValues, currentTpl)
+      const existingResidual = typeof currentValues.__overflow_html === 'string'
         ? currentValues.__overflow_html
-        : (typeof currentValues.body === 'string' ? currentValues.body : '')
+        : ''
+      if (existingResidual) sourceHtml += existingResidual
+    } else if (!sourceHtml) {
+      sourceHtml = typeof currentValues.__overflow_html === 'string'
+        ? currentValues.__overflow_html
+        : ''
+    }
 
     // Find the brief section by ID (notes carries "Section ID: <id>" from
     // the importer). When binding a hand-added section, briefSection is null
@@ -749,12 +778,15 @@ function PageEditor({
     const briefSectionId = extractSectionIdFromNotes(section.notes)
     const briefSection = findBriefSection(pageBrief, briefSectionId)
 
-    const composed = composeBind(briefSection, overflowHtml, template)
+    const composed = composeBind(briefSection, sourceHtml, template)
     const nextValues: FieldValues = { ...composed.field_values }
-    if (overflowHtml) nextValues.__overflow_html = overflowHtml
-    // Stash the source report so we can render a "what mapped" badge on
-    // the section header right after binding. Hidden from field iteration
-    // by the underscore prefix.
+    // Stash ONLY the residual — chunks of the freehand body that didn't
+    // get routed into any slot. If everything mapped, residual is empty
+    // and no overflow panel renders. Keeps the editor from showing the
+    // same prose twice (slot + overflow).
+    if (composed.residual_html) nextValues.__overflow_html = composed.residual_html
+    // Stash the source report for the "what mapped" badge on the section
+    // header. Hidden from field iteration by the underscore prefix.
     if (composed.source_report.unmatched_brief_keys.length > 0
         || composed.source_report.missing_slots.length > 0) {
       nextValues.__bind_report = composed.source_report
@@ -869,7 +901,15 @@ function PageEditor({
             )}
             <span className="text-[11px] text-wm-text-subtle">Phase {page.phase}</span>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
+            <WMSegmentedToggle
+              options={[
+                { key: 'edit',    label: 'Edit',    icon: <Edit3 size={11} /> },
+                { key: 'preview', label: 'Preview', icon: <Eye size={11} /> },
+              ]}
+              active={viewMode}
+              onChange={setViewMode}
+            />
             <StatusMenu current={page.content_status} onChange={setStatus} />
             <WMIconButton label="More page actions" onClick={archivePage}>
               <MoreHorizontal size={14} />
@@ -897,7 +937,23 @@ function PageEditor({
         </div>
       </header>
 
-      {/* Section blocks */}
+      {/* Preview mode — JPG-stacked low-fi wireframe. Click any thumb to
+          jump back to the Edit view scrolled to that section (Phase v2:
+          render brixies source_html with live copy in iframes). */}
+      {viewMode === 'preview' ? (
+        <PagePreview
+          sections={sections}
+          templates={templates}
+          onSelectSection={(id) => {
+            setViewMode('edit')
+            queueMicrotask(() => {
+              document.getElementById(`section-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            })
+          }}
+        />
+      ) : (
+
+      /* Section blocks */
       <div className="space-y-3">
         {loadingSections ? (
           Array.from({ length: 2 }).map((_, i) => (
@@ -955,6 +1011,7 @@ function PageEditor({
           </div>
         )}
       </div>
+      )}
 
       {/* Catalog picker — add a new section */}
       <WMCatalogSidePanel
@@ -963,6 +1020,7 @@ function PageEditor({
         title="Add a section"
         subtitle={page.name}
         kindFilter={['content', 'media', 'post_template'] as readonly WebTemplateKind[]}
+        siteLibraryIds={siteLibraryIds}
         mode="single"
         onSelect={async (ids) => { if (ids[0]) await addSection(ids[0]) }}
       />
@@ -984,6 +1042,7 @@ function PageEditor({
           : undefined}
         mode="single"
         rankedIds={bindRanking.map(r => r.template.id)}
+        siteLibraryIds={siteLibraryIds}
         cardSubtitles={Object.fromEntries(bindRanking.map(r => [r.template.id, r.rationale]))}
         onRequestAIRank={
           // Only offer AI ranking when there's a brief to weigh on.
@@ -1047,10 +1106,13 @@ function SectionBlock({
   const headerKind   = isFreehand ? 'freehand' : template!.kind
 
   return (
-    <div className={[
-      'rounded-lg border bg-wm-bg-elevated overflow-hidden',
-      isFreehand ? 'border-wm-border border-dashed' : 'border-wm-border',
-    ].join(' ')}>
+    <div
+      id={`section-${section.id}`}
+      className={[
+        'rounded-lg border bg-wm-bg-elevated overflow-hidden scroll-mt-6',
+        isFreehand ? 'border-wm-border border-dashed' : 'border-wm-border',
+      ].join(' ')}
+    >
       {/* Block header */}
       <div className="px-4 py-2.5 flex items-center gap-2 border-b border-wm-border bg-wm-bg-elevated">
         <GripVertical size={13} className="text-wm-text-subtle cursor-grab" />
@@ -1085,13 +1147,22 @@ function SectionBlock({
                 <div className="fixed inset-0 z-10" onClick={() => setActionsOpen(false)} />
                 <div className="absolute right-0 mt-1 w-48 rounded-md border border-wm-border bg-wm-bg-elevated shadow-lg z-20 py-1 animate-wm-slide-in-up">
                   {!isFreehand && (
-                    <button
-                      type="button"
-                      onClick={() => { setActionsOpen(false); onUnbindRequest() }}
-                      className="w-full text-left px-3 py-1.5 text-[12px] text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text"
-                    >
-                      Unbind to freehand
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => { setActionsOpen(false); onBindRequest() }}
+                        className="w-full text-left px-3 py-1.5 text-[12px] text-wm-text hover:bg-wm-bg-hover font-semibold"
+                      >
+                        Change template…
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setActionsOpen(false); onUnbindRequest() }}
+                        className="w-full text-left px-3 py-1.5 text-[12px] text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text"
+                      >
+                        Unbind to freehand
+                      </button>
+                    </>
                   )}
                 </div>
               </>

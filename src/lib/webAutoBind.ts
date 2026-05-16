@@ -331,14 +331,15 @@ export async function autoBindPageSections(
     }
 
     // Resolve field_values from brief + body HTML using the same
-    // composeBind path as the manual bind flow. The freehand body
-    // becomes __overflow_html so the strategist can verify nothing
-    // was dropped and clear it when satisfied.
+    // composeBind path as the manual bind flow. Only the residual
+    // (chunks of the freehand body that didn't make it into any slot)
+    // gets stashed as __overflow_html — if everything mapped cleanly,
+    // no overflow panel renders.
     const currentValues = (plan.webSection.field_values ?? {}) as Record<string, unknown>
-    const overflowHtml = typeof currentValues.body === 'string' ? currentValues.body : ''
-    const composed = composeBind(plan.briefSection, overflowHtml, chosenTemplate)
+    const sourceHtml = typeof currentValues.body === 'string' ? currentValues.body : ''
+    const composed = composeBind(plan.briefSection, sourceHtml, chosenTemplate)
     const nextValues: Record<string, unknown> = { ...composed.field_values }
-    if (overflowHtml) nextValues.__overflow_html = overflowHtml
+    if (composed.residual_html) nextValues.__overflow_html = composed.residual_html
     if (composed.source_report.missing_slots.length > 0
         || composed.source_report.unmatched_brief_keys.length > 0) {
       nextValues.__bind_report = composed.source_report
