@@ -82,15 +82,72 @@ function summarizeTemplateShape(template: WebContentTemplate): string {
   return parts.join(' · ') || '(no fields)'
 }
 
-/** Slim brief context for the AI prompt — heading + first paragraph of
- *  body + structure flags (has steps? card count? cta count?). Keeps
- *  the per-section payload tight. */
+/** Walk a template's fields (recursively into groups) and emit boolean
+ *  structural flags the AI uses to match against the brief's needs. */
+function summarizeTemplateStructure(template: WebContentTemplate): Record<string, unknown> {
+  let hasTagline = false
+  let hasHeading = false
+  let hasBody = false
+  let hasImage = false
+  let ctaSlotCount = 0
+  let cardGroupCount = 0
+  let largestCardGroupSize = 0
+  let hasStepGroup = false
+  let stepGroupSize = 0
+  const visit = (fields: ReadonlyArray<WebSlotDef | WebGroupDef>) => {
+    for (const f of fields) {
+      if (f.kind === 'slot') {
+        const c = (s: string) => s.toLowerCase().replace(/[_\s-]+/g, '')
+        const key = c(f.key)
+        if (key.includes('tagline') || key.includes('eyebrow')) hasTagline = true
+        if (key.includes('heading') || key === 'h' || key.includes('title')) hasHeading = true
+        if (key.includes('body') || key.includes('description') || key.includes('content')) hasBody = true
+        if (f.type === 'image') hasImage = true
+        if (f.type === 'cta' || (f.type === 'text' && f.scope === 'button')) ctaSlotCount++
+      } else {
+        const groupCanon = f.key.toLowerCase().replace(/[_\s-]+/g, '')
+        if (/^(cards?|items?|features?|tiles?|blocks?)$/.test(groupCanon)
+            || groupCanon.includes('card')) {
+          cardGroupCount++
+          largestCardGroupSize = Math.max(largestCardGroupSize, f.default_count)
+        }
+        if (groupCanon.includes('step') || groupCanon.includes('process')) {
+          hasStepGroup = true
+          stepGroupSize = Math.max(stepGroupSize, f.default_count)
+        }
+        if (groupCanon.includes('button') || groupCanon.includes('cta')) {
+          ctaSlotCount += f.default_count
+        }
+        visit(f.item_schema as ReadonlyArray<WebSlotDef | WebGroupDef>)
+      }
+    }
+  }
+  visit(template.fields as ReadonlyArray<WebSlotDef | WebGroupDef>)
+  return {
+    has_tagline: hasTagline,
+    has_heading: hasHeading,
+    has_body: hasBody,
+    has_image: hasImage,
+    cta_count: ctaSlotCount,
+    card_group_count: cardGroupCount,
+    largest_card_group: largestCardGroupSize,
+    has_step_group: hasStepGroup,
+    step_group_size: stepGroupSize,
+  }
+}
+
+/** Slim brief context for the AI prompt — heading + body preview +
+ *  structural presence flags (tagline / image / cta count / step count /
+ *  card count). The structural flags are critical for variant pick
+ *  quality: when the brief has a tagline, the AI MUST pick a variant
+ *  with a tagline slot, or the tagline ends up as overflow. */
 function summarizeBriefSection(s: BriefSection): Record<string, unknown> {
   const fields = sectionFields(s)
   const heading = typeof fields.h === 'string' ? fields.h
     : typeof fields.heading === 'string' ? fields.heading
     : typeof fields.h1 === 'string' ? fields.h1
     : ''
+  const tagline = typeof fields.tagline === 'string' ? fields.tagline : ''
   const body = typeof fields.content === 'string' ? fields.content
     : typeof fields.body === 'string' ? fields.body
     : typeof fields.description === 'string' ? fields.description
@@ -98,16 +155,32 @@ function summarizeBriefSection(s: BriefSection): Record<string, unknown> {
   const intro = typeof fields.intro === 'string' ? fields.intro : ''
   const stepCount = Array.isArray(fields.steps) ? fields.steps.length : 0
   const cardCount = Array.isArray(fields.cards) ? fields.cards.length
-    : Array.isArray(fields.items) ? fields.items.length : 0
-  const ctaCount = [fields.cta, fields.primary_cta, fields.secondary_cta]
+    : Array.isArray(fields.items) ? fields.items.length
+    : Array.isArray(fields.pillars) ? fields.pillars.length
+    : Array.isArray(fields.tiers) ? fields.tiers.length
+    : Array.isArray(fields.programs) ? fields.programs.length
+    : Array.isArray(fields.classes) ? fields.classes.length
+    : Array.isArray(fields.members) ? fields.members.length
+    : 0
+  // CTA count: hero/section-level CTAs + any nested step inline_ctas
+  const sectionCtas = [fields.cta, fields.primary_cta, fields.secondary_cta]
     .filter(v => typeof v === 'object' && v !== null).length
+  const stepCtas = Array.isArray(fields.steps)
+    ? (fields.steps as Array<Record<string, unknown>>).filter(s => s.inline_cta || s.cta_inline || s.cta).length
+    : 0
+  const ctaCount = sectionCtas + stepCtas
+  const hasImage = typeof fields.image === 'string' && fields.image !== ''
 
-  // First ~200 chars of body for prose density signal.
-  const bodyPreview = (body || intro).slice(0, 200)
+  // Longer body preview for prose density signal — 400 chars.
+  const bodyPreview = (body || intro).slice(0, 400)
   return {
     heading,
+    tagline: tagline || null,
+    has_tagline: tagline !== '',
     body_preview: bodyPreview,
+    body_length_chars: (body || intro).length,
     has_intro: !!intro,
+    has_image: hasImage,
     step_count: stepCount,
     card_count: cardCount,
     cta_count: ctaCount,
@@ -443,6 +516,7 @@ async function callAutoBindAgent(
         layer_name: t.layer_name,
         kind: t.kind,
         fields_summary: summarizeTemplateShape(t),
+        structure: summarizeTemplateStructure(t),
         is_site_pick: curatedIds.has(t.id),
         is_brief_family: familyMatches(t.family, plan.family),
         is_narrow_use: isNarrowUseFamily(t.family),

@@ -53,6 +53,7 @@ interface SectionInput {
     layer_name: string
     kind: string
     fields_summary: string  // human-readable shape, e.g. "tagline + heading + 4-card grid + 2 CTAs"
+    structure: Record<string, unknown>  // boolean+numeric flags: has_tagline, has_image, cta_count, card_group_count, largest_card_group, has_step_group, step_group_size
     is_site_pick: boolean   // bound in the project's curated library
     is_brief_family: boolean // matches the brief's suggested_family
     is_narrow_use: boolean   // narrow-use family — only pick if content matches role
@@ -122,29 +123,51 @@ export default async function handler(req: any, res: any) {
     `points at them.\n` +
     `  - fields_summary: structural shape (slots + groups + default item counts).\n\n` +
 
-    `DECISION CRITERIA, in priority order:\n` +
-    `  1. FAMILY APPROPRIATENESS (highest priority). Match the section's content to the ` +
-    `family's intended role. If the brief says "Banner Sections" but the content has ` +
-    `multi-paragraph body + CTA, PICK A NON-BANNER candidate (Feature/Content/CTA). ` +
-    `Banner is a scrolling accent, not a body holder.\n` +
-    `  2. Site library preference — when a candidate is BOTH is_site_pick=true AND its ` +
-    `family is appropriate for the content, prefer it.\n` +
-    `  3. Content-shape fit — does the variant's slot/group shape match the brief's ` +
-    `content? A text-only section needs a no-cards variant. A 4-step process needs a ` +
-    `4-step variant. A section with 1 CTA fits a 1-button variant best.\n` +
-    `  4. Information density — match the variant's visual weight to content density. ` +
-    `Sparse prose → spacious variant. Multi-card content → card-grid variant.\n` +
-    `  5. Page balance — don't pick three identical heavy variants in a row; vary ` +
-    `rhythm across the page where the content allows.\n\n` +
+    `DECISION CRITERIA, in priority order:\n\n` +
 
-    `OVERRIDES: if the brief's suggested_template_family is structurally wrong for ` +
-    `the content (e.g. Banner for paragraph content, Card for full sections), prefer a ` +
-    `candidate from the content-fallback pool (Feature Section, Content Section, Intro ` +
-    `Section, CTA Section). Mention the override in the rationale so the strategist ` +
-    `knows the brief's hint was set aside.\n\n` +
+    `  1. STRUCTURAL FIT (HARD CONSTRAINTS — apply first).\n` +
+    `       The candidate's structure.* flags MUST be compatible with the section's ` +
+    `context.has_*/count fields. Specifically:\n` +
+    `         - If context.has_tagline=true, the candidate MUST have structure.has_tagline=true. ` +
+    `Picking a no-tagline variant when the brief has a tagline means the tagline becomes ` +
+    `overflow — that's a bind failure.\n` +
+    `         - If context.cta_count >= 1, the candidate's structure.cta_count should be >= 1. ` +
+    `(Greater is OK; less means CTAs become overflow.)\n` +
+    `         - If context.step_count >= 2, prefer candidates with structure.has_step_group=true ` +
+    `whose structure.step_group_size is close to context.step_count.\n` +
+    `         - If context.card_count >= 2, prefer candidates with structure.card_group_count >= 1 ` +
+    `whose structure.largest_card_group is close to context.card_count.\n` +
+    `         - If context.card_count = 0 and context.step_count = 0, prefer card_group_count=0 ` +
+    `(no empty groups in the editor).\n` +
+    `         - If context.has_image=true, prefer structure.has_image=true.\n` +
+    `       VIOLATIONS ARE A BIG DEAL. A bind that drops a tagline / drops a CTA / drops half ` +
+    `the cards forces the strategist to manually paste them in. Always reject those candidates ` +
+    `unless absolutely no alternative exists.\n\n` +
+
+    `  2. FAMILY APPROPRIATENESS. Match the section's content to the family's intended role. ` +
+    `If the brief says "Banner Sections" but the content has multi-paragraph body + CTA, ` +
+    `PICK A NON-BANNER candidate (Feature/Content/CTA). Banner is a scrolling accent, not a ` +
+    `body holder. Use is_narrow_use=true as the avoid-for-content flag.\n\n` +
+
+    `  3. SITE LIBRARY PREFERENCE. When TWO candidates BOTH satisfy criterion 1 (structural fit) ` +
+    `AND criterion 2 (family appropriateness), prefer is_site_pick=true. Do NOT pick a site ` +
+    `library candidate over a structurally-mismatched candidate — structure wins first.\n\n` +
+
+    `  4. INFORMATION DENSITY. Match visual weight to prose length. Sparse prose ` +
+    `(body_length_chars < 200) → spacious variant. Dense content → tight variant.\n\n` +
+
+    `  5. PAGE BALANCE. Don't pick three identical heavy variants in a row; vary rhythm ` +
+    `across the page where the content allows.\n\n` +
+
+    `OVERRIDES: if the brief's suggested_template_family is structurally wrong for the content ` +
+    `(e.g. Banner for paragraph content, Card for full sections), prefer a candidate from the ` +
+    `content-fallback pool (Feature Section, Content Section, Intro Section, CTA Section). ` +
+    `Mention the override in the rationale so the strategist knows the brief's hint was set ` +
+    `aside.\n\n` +
 
     `Return picks via the submit_picks tool. Always include every section_id in the input. ` +
-    `Rationale should be one short sentence — what made this variant win.`
+    `Rationale should be one short sentence — what made this variant win. When you override ` +
+    `the brief's family hint, say so. When you pick from the site library, say "Site library:".`
 
   const userContent =
     `Page context:\n${pageContext || '(none)'}\n\n` +

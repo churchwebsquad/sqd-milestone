@@ -658,7 +658,16 @@ function PageEditor({
         const { data: all } = await supabase.from('web_content_templates').select('*')
         candidates = (all ?? []) as WebContentTemplate[]
       }
-      setBindRanking(rankVariantsByBrief(briefSection, candidates))
+      // Rank, then force site-library picks to the head of the list so
+      // they're always visible first when binding.
+      const ranked = rankVariantsByBrief(briefSection, candidates)
+      const sitePicks: RankedVariant[] = []
+      const rest: RankedVariant[] = []
+      for (const r of ranked) {
+        if (siteLibraryIds.has(r.template.id)) sitePicks.push(r)
+        else rest.push(r)
+      }
+      setBindRanking([...sitePicks, ...rest])
     })()
     return () => { cancelled = true }
   }, [bindingSection, pageBrief])
@@ -1085,6 +1094,15 @@ function SectionBlock({
     | { matched_from_brief: string[]; matched_from_body: string[]; missing_slots: string[]; unmatched_brief_keys: string[] }
     | undefined
 
+  // Bind quality — green = fully mapped, yellow = some overflow / missing
+  // slots, red = freehand or major unmapped content. Drives the dot at
+  // the section header so the strategist can scan for what needs review.
+  const bindQuality: 'good' | 'partial' | 'attention' =
+    isFreehand ? 'attention'
+    : !bindReport ? 'good'
+    : (bindReport.unmatched_brief_keys.length > 0 || bindReport.missing_slots.length > 1) ? 'partial'
+    : 'good'
+
   const setValue = (key: string, v: unknown) => {
     onChange({ field_values: { ...values, [key]: v } })
   }
@@ -1116,6 +1134,19 @@ function SectionBlock({
       {/* Block header */}
       <div className="px-4 py-2.5 flex items-center gap-2 border-b border-wm-border bg-wm-bg-elevated">
         <GripVertical size={13} className="text-wm-text-subtle cursor-grab" />
+        <span
+          className={[
+            'shrink-0 w-2 h-2 rounded-full',
+            bindQuality === 'good' ? 'bg-wm-success'
+            : bindQuality === 'partial' ? 'bg-wm-warning'
+            : 'bg-wm-text-subtle',
+          ].join(' ')}
+          title={
+            bindQuality === 'good' ? 'Bound cleanly — no overflow'
+            : bindQuality === 'partial' ? 'Bound with overflow or missing slots'
+            : 'Freehand — needs a template'
+          }
+        />
         <button
           type="button"
           onClick={() => setOpen(o => !o)}
@@ -1366,6 +1397,13 @@ function FieldRow({
   onChange: (v: unknown) => void
 }) {
   if (field.kind === 'group') return <GroupRow group={field} value={value} onChange={onChange} />
+  // Hide empty optional image slots — they clutter the editor when the
+  // brief had no image and the strategist isn't ready to source one.
+  // Required image slots and slots that already have a value still render.
+  if (field.type === 'image' && !field.required) {
+    const stringVal = typeof value === 'string' ? value : ''
+    if (!stringVal) return null
+  }
   return <SlotRow slot={field} value={value} onChange={onChange} />
 }
 

@@ -274,6 +274,67 @@ export interface ImportResult {
   auto_bind: import('./webAutoBind').PageAutoBindResult | null
 }
 
+/** Multi-page bundle — cowork can emit several pages in one payload
+ *  wrapped under `pages: [...]`. Top-level `phase` (and any other
+ *  meta fields) act as defaults inherited by each child page when the
+ *  child doesn't set its own. */
+export interface PageBriefBundle {
+  member_id?: string
+  site?: string
+  phase?: string
+  pages: PageBrief[]
+  [k: string]: unknown
+}
+
+/** True when the parsed JSON looks like a multi-page bundle. */
+export function isPageBriefBundle(parsed: unknown): parsed is PageBriefBundle {
+  return typeof parsed === 'object'
+    && parsed !== null
+    && Array.isArray((parsed as PageBriefBundle).pages)
+    && (parsed as PageBriefBundle).pages.length > 0
+}
+
+export interface BundleImportResult {
+  results: Array<{ page_slug: string; page_title: string; result?: ImportResult; error?: string }>
+  total: number
+  succeeded: number
+  failed: number
+}
+
+/** Import every page in a multi-page bundle sequentially. Inherits the
+ *  bundle's top-level phase when a page doesn't set its own. Failures
+ *  in one page don't stop the rest. */
+export async function importBundle(
+  bundle: PageBriefBundle,
+  project: StrategyWebProject,
+  options: { addProposedSnippets?: boolean } = {},
+  onProgress?: (done: number, total: number, currentPageTitle: string) => void,
+): Promise<BundleImportResult> {
+  const results: BundleImportResult['results'] = []
+  const total = bundle.pages.length
+  for (let i = 0; i < total; i++) {
+    const page = { ...bundle.pages[i] }
+    // Inherit bundle-level phase when the page doesn't carry one.
+    if (!page.phase && bundle.phase) page.phase = bundle.phase
+    onProgress?.(i, total, page.page_title ?? page.page_slug ?? `Page ${i + 1}`)
+    const { result, error } = await importBrief(page, project, options)
+    results.push({
+      page_slug: page.page_slug ?? '',
+      page_title: page.page_title ?? '',
+      result,
+      error,
+    })
+  }
+  onProgress?.(total, total, '')
+  const succeeded = results.filter(r => r.result && !r.error).length
+  return {
+    results,
+    total,
+    succeeded,
+    failed: total - succeeded,
+  }
+}
+
 /**
  * Import a brief. Creates the web_pages row if a page with this slug
  * doesn't exist on the project; updates the brief if it does.
@@ -281,12 +342,14 @@ export interface ImportResult {
  * will add section-level merge).
  */
 export async function importBrief(
-  brief: PageBrief,
+  briefIn: PageBrief,
   project: StrategyWebProject,
   options: {
     addProposedSnippets?: boolean
   } = {},
 ): Promise<{ result?: ImportResult; error?: string }> {
+  // Working copy of the brief — the auto-tokenize pass below mutates it.
+  let brief: PageBrief = briefIn
   // Find existing page
   const { data: existingPage } = await supabase
     .from('web_pages')
@@ -372,12 +435,19 @@ export async function importBrief(
     .eq('web_page_id', pageId)
   await supabase.from('web_sections').delete().eq('web_page_id', pageId)
 
-  // Render each section as a freehand block. Step 2 swaps in Brixies
-  // template fitting; for MVP every section is freehand-with-resolved-body.
+  // Load snippet map first so we can both tokenize the brief AND resolve
+  // chips when rendering.
   const snippetOptions = await loadEditorSnippets(project)
   const snippetMap = new Map<string, { value: string; label?: string }>(
     snippetOptions.map(o => [o.token, { value: o.resolvedValue, label: o.label }]),
   )
+
+  // Auto-tokenize: scan brief for the project's known snippet values and
+  // promote them to {{tokens}}. Lets cowork emit literal "Riverwood" /
+  // "Sundays at 7:45..." everywhere and we promote them so the chip
+  // system handles re-resolution.
+  const tokenized = tokenizeKnownSnippets(brief, snippetMap)
+  brief = tokenized.brief
 
   const sections = brief.sections ?? []
   let order = 0
@@ -585,6 +655,87 @@ function firstString(obj: Record<string, unknown>, keys: string[]): string {
     if (typeof v === 'string' && v.trim() !== '') return v
   }
   return ''
+}
+
+/** Walk every string in a brief and replace occurrences of the project's
+ *  known snippet values with their corresponding {{token}}. Lets cowork
+ *  emit literal "Riverwood" everywhere; we promote it to {{church_short_name}}
+ *  at import so the snippet chip system handles re-resolution downstream.
+ *
+ *  Skip rules:
+ *    - Values shorter than 3 chars (avoid matching "we", "us", etc.)
+ *    - Values that are already inside {{tokens}} or `<a href>` URLs
+ *    - URL target / href / mailto fields — only body text gets rewritten
+ *
+ *  Done as a pre-import pass on the brief object so the rendered HTML
+ *  has tokens in place when renderSection runs. */
+export function tokenizeKnownSnippets(
+  brief: PageBrief,
+  snippetMap: ReadonlyMap<string, { value: string; label?: string }>,
+): { brief: PageBrief; replacements: number } {
+  // Build value → token list, sorted longest first so we don't replace
+  // "Riverwood" inside "Riverwood Chapel" prematurely.
+  const tokensByValue: Array<{ token: string; value: string; valueRx: RegExp }> = []
+  for (const [token, entry] of snippetMap.entries()) {
+    const v = entry.value?.trim()
+    if (!v || v.length < 3) continue
+    // Word-boundary on both sides when value starts/ends with alphanumeric;
+    // for values like "Sundays at 7:45" the boundary is on whichever side
+    // is alphanumeric.
+    const escaped = v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const startBoundary = /^[a-z0-9]/i.test(v) ? '\\b' : '(?<![a-z0-9])'
+    const endBoundary = /[a-z0-9]$/i.test(v) ? '\\b' : '(?![a-z0-9])'
+    tokensByValue.push({
+      token,
+      value: v,
+      valueRx: new RegExp(`${startBoundary}${escaped}${endBoundary}`, 'g'),
+    })
+  }
+  tokensByValue.sort((a, b) => b.value.length - a.value.length)
+
+  if (tokensByValue.length === 0) {
+    return { brief, replacements: 0 }
+  }
+
+  // Don't touch already-tokenized regions {{xxx}} OR URL-y strings —
+  // we identify those upstream and skip them. Body fields only.
+  const URL_KEYS = new Set(['target', 'url', 'href', 'src'])
+
+  let replacements = 0
+  const walk = (val: unknown, parentKey: string): unknown => {
+    if (typeof val === 'string') {
+      if (URL_KEYS.has(parentKey)) return val
+      let next = val
+      for (const { token, valueRx } of tokensByValue) {
+        // Split around existing {{tokens}} to avoid touching them.
+        const segments = next.split(/(\{\{[a-z0-9_-]+\}\})/gi)
+        for (let i = 0; i < segments.length; i++) {
+          if (i % 2 === 1) continue // odd index = token capture
+          const before = segments[i]
+          const after = before.replace(valueRx, () => {
+            replacements++
+            return `{{${token}}}`
+          })
+          segments[i] = after
+        }
+        next = segments.join('')
+      }
+      return next
+    }
+    if (Array.isArray(val)) {
+      return val.map(v => walk(v, parentKey))
+    }
+    if (typeof val === 'object' && val !== null) {
+      const out: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+        out[k] = walk(v, k)
+      }
+      return out
+    }
+    return val
+  }
+  const updated = walk(brief, '') as PageBrief
+  return { brief: updated, replacements }
 }
 
 /** Split brief prose into paragraphs at blank-line boundaries. */

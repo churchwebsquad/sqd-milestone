@@ -16,6 +16,9 @@ import { WMButton } from './Button'
 import {
   validateBrief,
   importBrief,
+  importBundle,
+  isPageBriefBundle,
+  type PageBriefBundle,
   type PageBrief,
   type BriefValidationReport,
   type ImportResult,
@@ -120,11 +123,14 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
   const [jsonText, setJsonText] = useState('')
   const [parseError, setParseError] = useState<string | null>(null)
   const [brief, setBrief] = useState<PageBrief | null>(null)
+  const [bundle, setBundle] = useState<PageBriefBundle | null>(null)
   const [report, setReport] = useState<BriefValidationReport | null>(null)
   const [validating, setValidating] = useState(false)
   const [importing, setImporting] = useState(false)
   const [addSnippets, setAddSnippets] = useState(true)
   const [importMsg, setImportMsg] = useState<string | null>(null)
+  // Multi-page progress — current page index / total / current title.
+  const [bundleProgress, setBundleProgress] = useState<{ done: number; total: number; current: string } | null>(null)
 
   if (!open) return null
 
@@ -132,29 +138,39 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
     setJsonText('')
     setParseError(null)
     setBrief(null)
+    setBundle(null)
     setReport(null)
     setImportMsg(null)
+    setBundleProgress(null)
   }
 
   const handleValidate = async () => {
     setParseError(null)
     setReport(null)
     setBrief(null)
-    let parsed: PageBrief
+    setBundle(null)
+    let parsed: unknown
     try {
       // Cowork includes // line and /* block */ comments as human-readable
       // annotations in the brief output. Standard JSON.parse rejects those.
       // Strip comments + trailing commas before parsing so the strategist
       // can paste the brief verbatim without manual cleanup.
-      parsed = JSON.parse(stripJsonComments(jsonText)) as PageBrief
+      parsed = JSON.parse(stripJsonComments(jsonText))
     } catch (e) {
       setParseError(e instanceof Error ? e.message : 'Invalid JSON')
       return
     }
-    setBrief(parsed)
+    // Multi-page bundle? Skip validation (heavy for N pages) and route
+    // straight to bulk import.
+    if (isPageBriefBundle(parsed)) {
+      setBundle(parsed)
+      return
+    }
+    const single = parsed as PageBrief
+    setBrief(single)
     setValidating(true)
     try {
-      const r = await validateBrief(parsed, project)
+      const r = await validateBrief(single, project)
       setReport(r)
     } finally {
       setValidating(false)
@@ -189,6 +205,51 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
       }
     } finally {
       setImporting(false)
+    }
+  }
+
+  /** Bulk-import every page in a multi-page bundle. Progress streams via
+   *  bundleProgress; final message aggregates per-page outcomes. */
+  const handleBundleImport = async () => {
+    if (!bundle) return
+    setImporting(true)
+    setImportMsg(null)
+    setBundleProgress({ done: 0, total: bundle.pages.length, current: '' })
+    try {
+      const bundleResult = await importBundle(
+        bundle, project,
+        { addProposedSnippets: addSnippets },
+        (done, total, current) => setBundleProgress({ done, total, current }),
+      )
+      // Surface the LAST successful page back to the host so the editor
+      // navigates to something useful when the modal closes.
+      const lastOk = [...bundleResult.results].reverse().find(r => r.result)
+      if (lastOk?.result) await onImported(lastOk.result)
+      const totals = bundleResult.results.reduce(
+        (acc, r) => {
+          if (r.result?.auto_bind) {
+            acc.curated += r.result.auto_bind.curated_used
+            acc.catalog += r.result.auto_bind.catalog_used
+            acc.unbound += r.result.auto_bind.unbound
+          }
+          if (r.result) acc.sections += r.result.sections_created
+          if (r.result) acc.snippets += r.result.snippets_added
+          return acc
+        },
+        { curated: 0, catalog: 0, unbound: 0, sections: 0, snippets: 0 },
+      )
+      const failedList = bundleResult.results
+        .filter(r => r.error)
+        .map(r => `${r.page_title || r.page_slug}: ${r.error}`)
+        .join(' · ')
+      setImportMsg(
+        `${bundleResult.succeeded}/${bundleResult.total} pages imported · ${totals.sections} sections · ${totals.snippets} snippets · ` +
+        `auto-bind: ${totals.curated} site, ${totals.catalog} catalog, ${totals.unbound} freehand.` +
+        (failedList ? `\nFailed: ${failedList}` : ''),
+      )
+    } finally {
+      setImporting(false)
+      setBundleProgress(null)
     }
   }
 
@@ -433,7 +494,55 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
               'rounded-md border p-3',
               importMsg.startsWith('Error') ? 'border-wm-danger/30 bg-wm-danger-bg' : 'border-wm-success/30 bg-wm-success-bg',
             ].join(' ')}>
-              <p className="text-[13px] text-wm-text">{importMsg}</p>
+              <p className="text-[13px] text-wm-text whitespace-pre-wrap">{importMsg}</p>
+            </div>
+          )}
+
+          {/* Bundle preview — multi-page payload, list the pages so the
+              strategist can confirm before bulk-importing. */}
+          {bundle && (
+            <div className="mt-4 rounded-md border border-wm-accent/30 bg-wm-accent-tint p-3">
+              <p className="text-[11px] uppercase tracking-widest font-bold text-wm-accent-strong mb-2">
+                Multi-page bundle · {bundle.pages.length} page{bundle.pages.length === 1 ? '' : 's'}
+              </p>
+              <ul className="space-y-0.5 text-[12px] text-wm-text max-h-56 overflow-auto">
+                {bundle.pages.map((p, i) => (
+                  <li key={i} className="flex items-baseline gap-2">
+                    <span className="text-wm-text-subtle font-mono text-[10px]">/{p.page_slug ?? ''}</span>
+                    <span className="font-semibold">{p.page_title ?? `(untitled page ${i + 1})`}</span>
+                    {p.sections && (
+                      <span className="text-wm-text-subtle text-[11px]">
+                        · {(p.sections as unknown[]).length} sections
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-[11px] text-wm-text-muted mt-2">
+                Importing the bundle runs auto-bind on every section, page by page. Existing pages with
+                matching slugs will be updated (sections replaced); new slugs create new pages.
+              </p>
+            </div>
+          )}
+
+          {/* Bundle progress bar — visible while bulk import is in flight. */}
+          {bundleProgress && (
+            <div className="mt-4 rounded-md border border-wm-border bg-wm-bg-elevated p-3">
+              <div className="flex items-center justify-between mb-2 text-[12px]">
+                <span className="text-wm-text">
+                  Importing page {bundleProgress.done} of {bundleProgress.total}
+                  {bundleProgress.current && ` · ${bundleProgress.current}`}
+                </span>
+                <span className="text-wm-text-subtle text-[11px]">
+                  {Math.round((bundleProgress.done / Math.max(bundleProgress.total, 1)) * 100)}%
+                </span>
+              </div>
+              <div className="h-1.5 rounded-full bg-wm-bg-hover overflow-hidden">
+                <div
+                  className="h-full bg-wm-accent transition-all"
+                  style={{ width: `${(bundleProgress.done / Math.max(bundleProgress.total, 1)) * 100}%` }}
+                />
+              </div>
             </div>
           )}
         </div>
@@ -454,6 +563,19 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
               onClick={handleImport}
             >
               Import page
+            </WMButton>
+          )}
+          {bundle && (
+            <WMButton
+              variant="primary"
+              size="sm"
+              iconLeft={<Sparkles size={11} />}
+              iconRight={<ArrowRight size={11} />}
+              disabled={importing}
+              loading={importing}
+              onClick={handleBundleImport}
+            >
+              Import {bundle.pages.length} page{bundle.pages.length === 1 ? '' : 's'}
             </WMButton>
           )}
         </div>

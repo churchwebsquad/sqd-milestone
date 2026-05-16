@@ -272,23 +272,25 @@ export function WMCatalogSidePanel({
                     isSelected
                       ? 'border-wm-accent ring-2 ring-wm-accent/30'
                       : isSiteLibrary
-                        ? 'border-wm-accent/40 hover:border-wm-accent hover:shadow-sm'
+                        ? 'border-wm-accent ring-1 ring-wm-accent/20 hover:shadow-md'
                         : 'border-wm-border hover:border-wm-border-focus hover:shadow-sm',
                   ].join(' ')}
                 >
+                  {/* Site library banner — full-width strip at the top of the
+                      card so curated picks are unmistakable. */}
+                  {isSiteLibrary && (
+                    <div
+                      title="In the project's Global Elements library"
+                      className="bg-wm-accent text-white px-2.5 py-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest"
+                    >
+                      <Star size={10} className="fill-white" /> Site library
+                    </div>
+                  )}
                   <div className="relative aspect-[4/3] bg-wm-bg-hover">
                     {t.preview_image_url ? (
                       <img src={t.preview_image_url} alt="" className="w-full h-full object-cover" loading="lazy" />
                     ) : (
                       <div className="absolute inset-0 grid place-items-center text-[10px] text-wm-text-subtle">no preview</div>
-                    )}
-                    {isSiteLibrary && !isSelected && (
-                      <span
-                        title="In the project's Global Elements library"
-                        className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-wm-accent text-white text-[9px] font-bold uppercase tracking-wide shadow-sm"
-                      >
-                        <Star size={9} className="fill-white" /> Site
-                      </span>
                     )}
                     {isSelected && (
                       <span className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-wm-accent text-white inline-flex items-center justify-center">

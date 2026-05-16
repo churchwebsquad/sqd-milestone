@@ -807,11 +807,40 @@ export function rankVariantsByBrief(
   }
   const briefSlotCount = briefKeys.length - briefGroups.length
 
+  // Structural signals from the brief (presence / count) — used to apply
+  // hard penalties when a candidate is structurally missing what the
+  // brief needs (e.g. no tagline slot when the brief has a tagline).
+  const briefHasTagline = typeof briefFields.tagline === 'string' && briefFields.tagline !== ''
+  const briefSectionCtaCount = [briefFields.cta, briefFields.primary_cta, briefFields.secondary_cta]
+    .filter(v => typeof v === 'object' && v !== null).length
+  const stepCtaCount = Array.isArray(briefFields.steps)
+    ? (briefFields.steps as Array<Record<string, unknown>>)
+      .filter(s => s.inline_cta || s.cta_inline || s.cta).length
+    : 0
+  const briefCtaCount = briefSectionCtaCount + stepCtaCount
+  const briefStepCount = Array.isArray(briefFields.steps) ? (briefFields.steps as unknown[]).length : 0
+  const briefCardCount = Array.isArray(briefFields.cards) ? briefFields.cards.length
+    : Array.isArray(briefFields.items) ? briefFields.items.length
+    : Array.isArray(briefFields.pillars) ? briefFields.pillars.length
+    : Array.isArray(briefFields.tiers) ? briefFields.tiers.length
+    : 0
+
   return candidates.map(tpl => {
     const slots = tpl.fields.filter(f => f.kind === 'slot') as WebSlotDef[]
     const groups = tpl.fields.filter(f => f.kind === 'group') as WebGroupDef[]
 
-    // Score = mapped brief keys + group-count fit − unmapped-on-each-side penalty.
+    // Detect template-side structural slots / groups for the hard checks.
+    const tplHasTagline = slots.some(s => /tagline|eyebrow|kicker/i.test(s.key))
+    const tplCtaSlotCount = slots.filter(s => s.type === 'cta'
+        || (s.type === 'text' && s.scope === 'button')).length
+    const tplCtaGroupTotal = groups
+      .filter(g => /button|cta|action/i.test(g.key))
+      .reduce((sum, g) => sum + g.default_count, 0)
+    const tplCtaCount = tplCtaSlotCount + tplCtaGroupTotal
+    const tplStepGroup = groups.find(g => /step|process/i.test(g.key))
+    const tplCardGroup = groups.find(g => /^(cards?|items?|features?|tiles?|blocks?)$/i.test(g.key)
+        || g.key.toLowerCase().includes('card'))
+
     let score = 0
     const reasons: string[] = []
 
@@ -828,7 +857,6 @@ export function rankVariantsByBrief(
     for (const group of groups) {
       const briefGroup = briefGroups.find(bg => keysMatch(bg.key, group.key))
       if (briefGroup) {
-        // Closer to default_count = better.
         const delta = Math.abs(group.default_count - briefGroup.count)
         groupBonus += Math.max(0, 5 - delta)
         if (delta === 0) reasons.push(`${group.key} group fits ${briefGroup.count} items exactly`)
@@ -837,16 +865,34 @@ export function rankVariantsByBrief(
     }
     score += groupBonus
 
-    // Light penalty for slot-count divergence — keeps over-large templates
-    // from edging out a tight fit when brief is sparse.
+    // ── Hard structural penalties (mirrors the AI prompt criterion 1) ──
+    // These prevent the deterministic fallback from picking variants that
+    // would force overflow / dropped content.
+
+    if (briefHasTagline && !tplHasTagline) {
+      score -= 12
+      reasons.push('No tagline slot (brief has one)')
+    }
+    if (briefCtaCount > 0 && tplCtaCount < briefCtaCount) {
+      score -= 6 * (briefCtaCount - tplCtaCount)
+      reasons.push(`Only ${tplCtaCount} CTA slot${tplCtaCount === 1 ? '' : 's'} (brief has ${briefCtaCount})`)
+    }
+    if (briefStepCount >= 2) {
+      if (!tplStepGroup) {
+        score -= 10
+        reasons.push('No step group (brief has steps)')
+      } else {
+        score -= Math.min(Math.abs(tplStepGroup.default_count - briefStepCount), 4)
+      }
+    }
+    if (briefCardCount >= 2 && !tplCardGroup) {
+      score -= 8
+      reasons.push('No card group (brief has cards)')
+    }
+
     const slotDelta = Math.abs(slots.length - briefSlotCount)
     score -= Math.min(slotDelta, 5)
 
-    // Heavy penalty for narrow-use families (Banner = marquee, Filter =
-    // functional, Card = component, etc.) so the deterministic-fallback
-    // path doesn't pick them for ordinary content sections. The AI prompt
-    // also instructs against this, but we want the fallback to be safe
-    // too.
     if (isNarrowUseFamily(tpl.family)) {
       score -= 20
       reasons.push(`Narrow-use family — penalized`)
