@@ -4,30 +4,31 @@
  * The strategist's primary workspace. Hosts seven views via the
  * WebManagerShell's tabbed surface:
  *
- *   Roadmap      — Web Roadmap deliverable + AI pipeline orchestration
- *   Sitemap & Strategy — page tree + client-facing Content Strategy doc
- *   Pages        — per-page section editor (TipTap, Phase B)
- *   Snippets     — global merge fields + custom snippets
- *   Voice        — read-only brand voice rollup
- *   Heuristics   — writing rules (global + project) + denominational filter + personas
- *   Rollup       — editable structured extract from intake
+ *   Roadmap         — Web Roadmap deliverable + AI pipeline orchestration
+ *   Global Elements — curated Brixies palette (Header/Footer, Heroes, Cards, …)
+ *   Pages           — per-page section editor (TipTap, Phase B)
+ *   Snippets        — global merge fields + custom snippets
+ *   Voice           — read-only brand voice rollup
+ *   Heuristics      — writing rules (global + project) + denominational filter + personas
+ *   Rollup          — editable structured extract from intake
  *
- * Phase A scope: shell + Sitemap/Snippets functional + Voice/Heuristics/
- * Rollup read-only displays. Page editor (Phase B) and AI agents (Phase C)
- * still placeholder.
+ * The old Sitemap tab was consolidated — page tree management moves into
+ * the Pages workspace left panel (Phase 2 of the restructure) and chrome
+ * designation moves into Global Elements alongside the broader site
+ * palette (Phase 1, done).
  */
 
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import {
-  Compass, GitBranch, FileText, Tag, Mic, BookOpen, Layers, Loader2,
+  Compass, LayoutGrid, FileText, Tag, Mic, BookOpen, Layers, Loader2,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { WebManagerShell } from '../../components/wm'
 import type { WMTabItem, WMAIStatusBadgeProps } from '../../components/wm'
 import { AssistantRail } from '../../components/wm/AssistantRail'
 import { RoadmapWorkspace } from '../../components/wm/workspaces/RoadmapWorkspace'
-import { SitemapWorkspace } from '../../components/wm/workspaces/SitemapWorkspace'
+import { GlobalElementsWorkspace } from '../../components/wm/workspaces/GlobalElementsWorkspace'
 import { PagesWorkspace } from '../../components/wm/workspaces/PagesWorkspace'
 import { SnippetsWorkspace } from '../../components/wm/workspaces/SnippetsWorkspace'
 import { VoiceWorkspace } from '../../components/wm/workspaces/VoiceWorkspace'
@@ -37,7 +38,7 @@ import type { StrategyWebProject } from '../../types/database'
 
 type TabKey =
   | 'roadmap'
-  | 'sitemap'
+  | 'global'
   | 'pages'
   | 'snippets'
   | 'voice'
@@ -45,13 +46,13 @@ type TabKey =
   | 'rollup'
 
 const TABS: readonly WMTabItem<TabKey>[] = [
-  { key: 'roadmap',    label: 'Roadmap',            icon: <Compass   size={13} /> },
-  { key: 'sitemap',    label: 'Sitemap & Strategy', icon: <GitBranch size={13} /> },
-  { key: 'pages',      label: 'Pages',              icon: <FileText  size={13} /> },
-  { key: 'snippets',   label: 'Snippets',           icon: <Tag       size={13} /> },
-  { key: 'voice',      label: 'Voice',              icon: <Mic       size={13} /> },
-  { key: 'heuristics', label: 'Heuristics',         icon: <BookOpen  size={13} /> },
-  { key: 'rollup',     label: 'Rollup',             icon: <Layers    size={13} /> },
+  { key: 'roadmap',    label: 'Roadmap',         icon: <Compass    size={13} /> },
+  { key: 'global',     label: 'Global Elements', icon: <LayoutGrid size={13} /> },
+  { key: 'pages',      label: 'Pages',           icon: <FileText   size={13} /> },
+  { key: 'snippets',   label: 'Snippets',        icon: <Tag        size={13} /> },
+  { key: 'voice',      label: 'Voice',           icon: <Mic        size={13} /> },
+  { key: 'heuristics', label: 'Heuristics',      icon: <BookOpen   size={13} /> },
+  { key: 'rollup',     label: 'Rollup',          icon: <Layers     size={13} /> },
 ]
 
 export default function WebContentManagerPage() {
@@ -130,7 +131,7 @@ export default function WebContentManagerPage() {
       onRailToggle={setRailOpen}
     >
       {activeTab === 'roadmap'    && <RoadmapWorkspace project={project} onChange={loadProject} />}
-      {activeTab === 'sitemap'    && <SitemapWorkspace project={project} onChange={loadProject} />}
+      {activeTab === 'global'     && <GlobalElementsWorkspace project={project} onChange={loadProject} />}
       {activeTab === 'pages'      && <PagesWorkspace project={project} />}
       {activeTab === 'snippets'   && <SnippetsWorkspace project={project} onChange={loadProject} />}
       {activeTab === 'voice'      && <VoiceWorkspace project={project} />}

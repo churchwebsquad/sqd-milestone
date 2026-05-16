@@ -889,6 +889,10 @@ export interface StrategyWebProject {
   offcanvas_template_ids: string[]
   nav_items: unknown[]                  // jsonb — authored nav structure
 
+  // ── Curated Brixies library (v34) — concept_id → [template_id, …] ──
+  // Drives the Global Elements workspace and the AI auto-bind pass.
+  curated_library: Record<string, string[]>
+
   // ── Chrome auto-populated fields (footer legal blocks) ──
   cookies_policy_text:  string | null
   privacy_policy_text:  string | null
