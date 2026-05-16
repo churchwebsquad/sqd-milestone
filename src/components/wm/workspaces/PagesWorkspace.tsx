@@ -963,7 +963,7 @@ function PageEditor({
       ) : (
 
       /* Section blocks */
-      <div className="space-y-3">
+      <div className="space-y-6">
         {loadingSections ? (
           Array.from({ length: 2 }).map((_, i) => (
             <div key={i} className="h-24 rounded-lg bg-wm-bg-hover animate-pulse" />
@@ -1127,13 +1127,25 @@ function SectionBlock({
     <div
       id={`section-${section.id}`}
       className={[
-        'rounded-lg border bg-wm-bg-elevated overflow-hidden scroll-mt-6',
-        isFreehand ? 'border-wm-border border-dashed' : 'border-wm-border',
+        'group/section relative scroll-mt-6 transition-colors',
+        // Document-style — no enclosing card, just a left border accent
+        // on hover/focus to keep the page reading like prose, not forms.
+        'border-l-2 pl-4 py-2',
+        isFreehand
+          ? 'border-wm-warning/40 hover:border-wm-warning'
+          : bindQuality === 'good'
+            ? 'border-wm-success/40 hover:border-wm-success'
+            : bindQuality === 'partial'
+              ? 'border-wm-warning/40 hover:border-wm-warning'
+              : 'border-wm-border hover:border-wm-border-strong',
       ].join(' ')}
     >
-      {/* Block header */}
-      <div className="px-4 py-2.5 flex items-center gap-2 border-b border-wm-border bg-wm-bg-elevated">
-        <GripVertical size={13} className="text-wm-text-subtle cursor-grab" />
+      {/* Block header — compact toolbar with the bind-quality dot,
+          section title, and action affordances. Background blends with
+          the main editor canvas so individual sections feel like
+          consecutive paragraphs of one doc, not separate cards. */}
+      <div className="flex items-center gap-2 mb-2 -ml-1">
+        <GripVertical size={13} className="text-wm-text-subtle cursor-grab shrink-0 opacity-0 group-hover/section:opacity-100 transition-opacity" />
         <span
           className={[
             'shrink-0 w-2 h-2 rounded-full',
@@ -1150,16 +1162,18 @@ function SectionBlock({
         <button
           type="button"
           onClick={() => setOpen(o => !o)}
-          className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-wm-text hover:text-wm-accent-strong transition-colors min-w-0"
+          className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle hover:text-wm-accent-strong transition-colors min-w-0"
         >
-          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
           <span className="truncate">{headerLabel}</span>
         </button>
         {headerFamily && (
-          <span className="text-[10px] uppercase tracking-wide text-wm-text-subtle">{headerFamily}</span>
+          <span className="text-[9px] tracking-wide text-wm-text-subtle italic">· {headerFamily}</span>
         )}
-        <WMStatusPill tone={isFreehand ? 'warning' : 'neutral'} size="sm">{headerKind}</WMStatusPill>
-        <div className="ml-auto flex items-center gap-0.5">
+        {isFreehand && (
+          <WMStatusPill tone="warning" size="sm">{headerKind}</WMStatusPill>
+        )}
+        <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover/section:opacity-100 transition-opacity">
           {!isFreehand && (
             <WMIconButton label="Redo with AI" size="sm">
               <Sparkles size={13} />
@@ -1207,7 +1221,7 @@ function SectionBlock({
 
       {/* Block body */}
       {open && (
-        <div className="px-4 py-4 space-y-4">
+        <div className="space-y-4">
           {isFreehand ? (
             <FreehandBody
               value={typeof values.body === 'string' ? values.body : ''}
@@ -1407,6 +1421,56 @@ function FieldRow({
   return <SlotRow slot={field} value={value} onChange={onChange} />
 }
 
+/** Classify a slot into a label "kind" for color coding. Mirrors the
+ *  squad-os web-hub pattern: heading=accent, cta=teal, quote=indigo,
+ *  placeholder/unmapped=amber, etc. */
+function slotLabelKind(slot: WebSlotDef): 'heading' | 'subhead' | 'body' | 'cta' | 'image' | 'tagline' | 'other' {
+  if (slot.heading_level === 1) return 'heading'
+  if (slot.heading_level && slot.heading_level >= 2) return 'subhead'
+  const k = slot.key.toLowerCase().replace(/[_\s-]+/g, '')
+  if (k.includes('tagline') || k.includes('eyebrow') || k.includes('kicker')) return 'tagline'
+  if (slot.type === 'cta' || (slot.type === 'text' && slot.scope === 'button')) return 'cta'
+  if (slot.type === 'image') return 'image'
+  if (slot.type === 'richtext' || k.includes('body') || k.includes('content') || k.includes('description')) return 'body'
+  if (k.includes('heading') || k === 'h' || k.includes('title')) return 'heading'
+  return 'other'
+}
+
+const LABEL_KIND_TONES: Record<ReturnType<typeof slotLabelKind>, string> = {
+  heading:  'text-wm-accent-strong  bg-wm-accent-tint    border-wm-accent/30',
+  subhead:  'text-wm-accent-strong  bg-wm-accent-tint    border-wm-accent/20',
+  tagline:  'text-wm-text-muted     bg-wm-bg-hover       border-wm-border',
+  body:     'text-wm-text-muted     bg-wm-bg-hover       border-wm-border',
+  cta:      'text-emerald-700       bg-emerald-50        border-emerald-200',
+  image:    'text-wm-text-muted     bg-wm-bg-hover       border-wm-border',
+  other:    'text-wm-text-muted     bg-wm-bg-hover       border-wm-border',
+}
+
+/** Small bracketed pill label rendered above each slot value. Borrows
+ *  the squad-os web-hub aesthetic — [H1 HEADLINE], [SUB-HEADLINE],
+ *  [PRIMARY CTA BUTTON], color-coded by kind. */
+function SlotLabel({ slot, override }: { slot: WebSlotDef; override?: string }) {
+  const kind = slotLabelKind(slot)
+  // Display text — explicit override first, then a friendly form of the
+  // slot's label / key with heading_level adornment.
+  const base = override ?? slot.label ?? slot.key.replace(/_/g, ' ')
+  let display = base.toUpperCase()
+  if (slot.heading_level && !/H\d/.test(display)) {
+    display = `H${slot.heading_level} ${display}`
+  }
+  if (slot.required && !display.includes('*')) display = `${display} *`
+  return (
+    <span
+      className={[
+        'inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] font-bold tracking-[0.07em]',
+        LABEL_KIND_TONES[kind],
+      ].join(' ')}
+    >
+      [{display}]
+    </span>
+  )
+}
+
 function SlotRow({
   slot, value, onChange,
 }: {
@@ -1414,10 +1478,19 @@ function SlotRow({
   value: unknown
   onChange: (v: unknown) => void
 }) {
-  const labelText = (slot.label ?? slot.key.replace(/_/g, ' ')) + (slot.required ? ' *' : '')
-
   const renderField = () => {
     const stringVal = typeof value === 'string' ? value : ''
+    // Borderless input with focus-only chrome — keeps the editor reading
+    // like a document, not a stack of form boxes.
+    const borderlessClass =
+      'w-full bg-transparent text-wm-text outline-none px-0 py-1 ' +
+      'border-b border-transparent hover:border-wm-border focus:border-wm-accent ' +
+      'transition-colors'
+
+    // Heading-shaped text slots get larger type so they read like the
+    // headlines they are.
+    const isHeading = slot.heading_level === 1
+    const isSubhead = slot.heading_level === 2 || slotLabelKind(slot) === 'subhead'
 
     switch (slot.type) {
       case 'text':
@@ -1432,7 +1505,12 @@ function SlotRow({
             maxLength={slot.max_chars}
             onChange={e => onChange(e.target.value)}
             placeholder={slot.description ?? ''}
-            className="w-full h-9 rounded-md bg-wm-bg border border-wm-border px-3 text-sm text-wm-text outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20"
+            className={[
+              borderlessClass,
+              isHeading ? 'text-2xl font-bold leading-tight'
+                : isSubhead ? 'text-lg font-semibold leading-snug'
+                : 'text-[14px]',
+            ].join(' ')}
           />
         )
       }
@@ -1449,21 +1527,25 @@ function SlotRow({
       case 'cta': {
         const ctaVal = (typeof value === 'object' && value !== null) ? value as { label?: string; url?: string } : { label: '', url: '' }
         return (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          // Inline "Label (link to /target)" — borrows the web-hub format
+          // so the page reads like a doc. Both fields are inline-editable.
+          <div className="flex items-baseline gap-1.5 flex-wrap text-[14px] text-wm-text">
             <input
               type="text"
               value={ctaVal.label ?? ''}
               onChange={e => onChange({ ...ctaVal, label: e.target.value })}
               placeholder="Button label"
-              className="h-9 rounded-md bg-wm-bg border border-wm-border px-3 text-sm text-wm-text outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20"
+              className={`${borderlessClass} font-semibold min-w-[160px] flex-1`}
             />
+            <span className="text-wm-text-subtle">(link to</span>
             <input
               type="url"
               value={ctaVal.url ?? ''}
               onChange={e => onChange({ ...ctaVal, url: e.target.value })}
-              placeholder="https:// or /route"
-              className="h-9 rounded-md bg-wm-bg border border-wm-border px-3 text-sm text-wm-text outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20"
+              placeholder="/route"
+              className={`${borderlessClass} text-wm-text-muted font-mono text-[12px] min-w-[120px] flex-1`}
             />
+            <span className="text-wm-text-subtle">)</span>
           </div>
         )
       }
@@ -1474,8 +1556,8 @@ function SlotRow({
             type="url"
             value={stringVal}
             onChange={e => onChange(e.target.value)}
-            placeholder="Image URL — uploads land in Phase C"
-            className="w-full h-9 rounded-md bg-wm-bg border border-wm-border px-3 text-sm text-wm-text outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20"
+            placeholder="Image URL"
+            className={`${borderlessClass} text-[13px] font-mono text-wm-text-muted`}
           />
         )
 
@@ -1485,7 +1567,7 @@ function SlotRow({
             type="datetime-local"
             value={stringVal}
             onChange={e => onChange(e.target.value)}
-            className="h-9 rounded-md bg-wm-bg border border-wm-border px-3 text-sm text-wm-text outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20"
+            className={`${borderlessClass} text-[13px]`}
           />
         )
 
@@ -1509,36 +1591,29 @@ function SlotRow({
             value={stringVal}
             onChange={e => onChange(e.target.value)}
             placeholder={`(${slot.type})`}
-            className="w-full h-9 rounded-md bg-wm-bg border border-wm-border px-3 text-sm text-wm-text-muted outline-none italic"
+            className={`${borderlessClass} italic text-wm-text-muted text-[13px]`}
           />
         )
     }
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between gap-2 mb-1">
-        <label className="text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle">
-          {labelText}
-        </label>
-        <div className="flex items-center gap-1.5">
-          {slot.heading_level && (
-            <span className="text-[10px] text-wm-text-subtle">H{slot.heading_level}</span>
-          )}
-          {slot.scope && (
-            <span className="text-[10px] text-wm-text-subtle italic">{slot.scope}</span>
-          )}
-          {slot.unmapped && (
-            <WMStatusPill tone="warning" size="sm">unmapped</WMStatusPill>
-          )}
-          {slot.auto_populated && (
-            <WMStatusPill tone="ai" size="sm">auto</WMStatusPill>
-          )}
-        </div>
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-2">
+        <SlotLabel slot={slot} />
+        {(slot.unmapped || slot.auto_populated) && (
+          <div className="flex items-center gap-1.5">
+            {slot.unmapped && <WMStatusPill tone="warning" size="sm">unmapped</WMStatusPill>}
+            {slot.auto_populated && <WMStatusPill tone="ai" size="sm">auto</WMStatusPill>}
+          </div>
+        )}
       </div>
       {renderField()}
-      {slot.max_chars && typeof value === 'string' && (
-        <p className="text-[10px] text-wm-text-subtle text-right mt-1">
+      {slot.max_chars && typeof value === 'string' && value.length > slot.max_chars * 0.7 && (
+        <p className={[
+          'text-[10px] text-right',
+          value.length > slot.max_chars ? 'text-wm-danger font-semibold' : 'text-wm-text-subtle',
+        ].join(' ')}>
           {value.length} / {slot.max_chars}
         </p>
       )}
@@ -1566,34 +1641,41 @@ function GroupRow({
   const addItem = () => onChange([...items, {}])
   const removeItem = (idx: number) => onChange(items.filter((_, i) => i !== idx))
 
+  const groupLabel = group.key.replace(/_/g, ' ').toUpperCase()
   return (
-    <div className="rounded-md border border-wm-border bg-wm-bg p-3">
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div>
-          <p className="text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle">
-            {group.key.replace(/_/g, ' ')} <span className="text-wm-text-subtle">· group · default {group.default_count}</span>
-          </p>
-          {group.item_template_ref === 'from_palette' && (
-            <p className="text-[10px] text-wm-text-subtle italic mt-0.5">Items use the project's card palette at render</p>
-          )}
-        </div>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-wm-border bg-wm-bg-hover text-[9px] font-bold tracking-[0.07em] text-wm-text-muted">
+          [{groupLabel}]
+        </span>
         <WMButton variant="ghost" size="sm" iconLeft={<Plus size={11} />} onClick={addItem}>
           Add item
         </WMButton>
       </div>
+      {group.item_template_ref === 'from_palette' && (
+        <p className="text-[10px] text-wm-text-subtle italic">Items use the project's card palette at render</p>
+      )}
 
-      <div className="space-y-2">
+      {/* Items render as a flowing stack of indented sub-fields. No
+          boxed cards per item — the [Item N] pill label is enough to
+          separate them visually. */}
+      <div className="space-y-3">
         {items.map((item, idx) => (
-          <div key={idx} className="rounded-md bg-wm-bg-elevated border border-wm-border p-3">
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <span className="text-[10px] uppercase tracking-wide font-bold text-wm-text-subtle">
-                Item {idx + 1}
+          <div key={idx} className="group relative pl-3 border-l-2 border-wm-border hover:border-wm-accent/40 transition-colors">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-wm-border bg-wm-bg-elevated text-[9px] font-bold tracking-[0.07em] text-wm-text-subtle">
+                [{groupLabel} · ITEM {idx + 1}]
               </span>
-              <WMIconButton label="Remove item" size="sm" onClick={() => removeItem(idx)}>
+              <WMIconButton
+                label="Remove item"
+                size="sm"
+                onClick={() => removeItem(idx)}
+                className="opacity-0 group-hover:opacity-100 transition-opacity"
+              >
                 <Trash2 size={11} />
               </WMIconButton>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-2">
               {group.item_schema.map((f, i) => (
                 <FieldRow
                   key={f.key + '-' + i}
