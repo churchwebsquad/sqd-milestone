@@ -24,16 +24,42 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 
 async function fetchStaffProfile(email: string): Promise<Employee | null> {
   const normalizedEmail = email.toLowerCase().trim()
+  // Tolerate duplicate rows on the same email (HR sync occasionally
+  // leaves both a legal-name + preferred-name row, or a current row
+  // alongside a "No Longer Employed" historical row). .maybeSingle()
+  // errors on 2+ matches with a 406 and the user ends up seeing
+  // "wasn't found in the staff directory."
+  //
+  // Fetch all matches, then pick:
+  //   1. Active / Full-time row wins over NULL status
+  //   2. NULL status wins over "No Longer Employed"
+  //   3. Tiebreak: most recently updated
   const { data, error } = await supabase
     .from('employees')
     .select('*')
     .ilike('email', normalizedEmail)
-    .maybeSingle()
   if (error) {
     console.error('[fetchStaffProfile] employees query error:', error)
     throw error
   }
-  return data as Employee | null
+  const rows = (data ?? []) as Employee[]
+  if (rows.length === 0) return null
+  if (rows.length === 1) return rows[0]
+  const statusRank = (s: unknown): number => {
+    if (typeof s !== 'string') return 1
+    const t = s.toLowerCase()
+    if (t.includes('no longer')) return 2
+    return 0  // Full-time / Active / anything else with content
+  }
+  const sorted = [...rows].sort((a, b) => {
+    const sa = statusRank((a as { status?: unknown }).status)
+    const sb = statusRank((b as { status?: unknown }).status)
+    if (sa !== sb) return sa - sb
+    const aUpd = (a as { updated_at?: string }).updated_at ?? ''
+    const bUpd = (b as { updated_at?: string }).updated_at ?? ''
+    return bUpd.localeCompare(aUpd)
+  })
+  return sorted[0]
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
