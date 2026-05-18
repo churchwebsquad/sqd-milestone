@@ -484,13 +484,328 @@
     border-radius: 3px;
   }
 
-  /* ── Brixies layout canvas — schema-driven structural editor ──────
-     Replaces the prior attempt to inline-render Brixies's source_html
-     (which was a frozen 1512px Figma export with fixed pixel widths
-     that broke when constrained). The canvas now renders a clean
-     Tailwind layout from the template's slot/group schema; styles
-     below scope just the EditableSlot inputs that live INSIDE this
-     canvas. */
+  /* ── Brixies layout canvas — field-faithful editor (v3) ──────────
+     The canvas renders a clean Tailwind layout from the template's
+     slot/group schema in declaration order. Styles below scope the
+     editable slots, group containers, and the Extras zone for
+     freehand additions. */
+
+  .bx-canvas {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 8px;
+    background: var(--color-wm-bg-elevated);
+    border: 1px solid var(--color-wm-border);
+    overflow: hidden;
+  }
+  .bx-canvas-fields {
+    padding: 1.5rem 1.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  /* Per-field wrappers — typography that matches the slot type. */
+  .bx-field {
+    color: var(--color-wm-text);
+  }
+  .bx-h1 {
+    font-size: 1.875rem;
+    font-weight: 700;
+    line-height: 1.15;
+    color: var(--color-wm-text);
+  }
+  .bx-h2 {
+    font-size: 1.375rem;
+    font-weight: 600;
+    line-height: 1.25;
+    color: var(--color-wm-text);
+  }
+  .bx-h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--color-wm-text);
+  }
+  .bx-tagline {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--color-wm-accent-strong);
+  }
+  .bx-body {
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: var(--color-wm-text);
+  }
+  .bx-text-line {
+    font-size: 0.9375rem;
+    color: var(--color-wm-text);
+  }
+  .bx-field-compact {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    font-size: 0.8125rem;
+    color: var(--color-wm-text-muted);
+  }
+  .bx-field-label {
+    color: var(--color-wm-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.6875rem;
+    font-weight: 600;
+  }
+  .bx-group-label {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-wm-text-subtle);
+    margin-bottom: 0.6em;
+  }
+
+  /* CTA row — wraps button items in a horizontal flow. */
+  .bx-cta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: center;
+  }
+  .bx-cta-button {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.4em;
+    padding: 0.55em 1.1em;
+    border-radius: 9999px;
+    background: var(--color-wm-text);
+    color: var(--color-wm-bg-elevated);
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+  .bx-cta-button:nth-child(n+2) {
+    background: transparent;
+    color: var(--color-wm-text);
+    border: 1px solid var(--color-wm-border-strong);
+  }
+  .bx-cta-button .bx-cta-label,
+  .bx-cta-button .bx-cta-url {
+    background: transparent;
+    border: none;
+    outline: none;
+    font: inherit;
+    color: inherit;
+    padding: 0;
+  }
+  .bx-cta-button .bx-cta-label {
+    min-width: 6em;
+  }
+  .bx-cta-button .bx-cta-arrow {
+    opacity: 0.7;
+  }
+  .bx-cta-button .bx-cta-url {
+    opacity: 0.6;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.75em;
+    min-width: 5em;
+  }
+  .bx-cta-button .bx-cta-label:focus,
+  .bx-cta-button .bx-cta-url:focus {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-wm-accent) 30%, transparent);
+  }
+
+  /* Card grid + card item */
+  .bx-card-grid-wrap {
+    display: block;
+  }
+  .bx-card {
+    position: relative;
+    background: var(--color-wm-bg);
+    border: 1px solid var(--color-wm-border);
+    border-radius: 8px;
+    padding: 1rem 1rem 1.1rem;
+    transition: box-shadow 120ms ease, border-color 120ms ease;
+  }
+  .bx-card:hover {
+    border-color: var(--color-wm-border-strong);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  }
+  .bx-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .bx-card-remove {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    display: grid;
+    place-items: center;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-wm-text-subtle);
+    border: 1px solid transparent;
+    cursor: pointer;
+    opacity: 0;
+    font-size: 1rem;
+    line-height: 1;
+    transition: opacity 120ms, background 120ms, color 120ms;
+  }
+  .bx-card:hover .bx-card-remove {
+    opacity: 1;
+  }
+  .bx-card-remove:hover {
+    background: var(--color-wm-danger-bg);
+    color: var(--color-wm-danger);
+    border-color: color-mix(in srgb, var(--color-wm-danger) 30%, transparent);
+  }
+  .bx-group-add-card {
+    border: 1px dashed var(--color-wm-border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--color-wm-text-muted);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    min-height: 8rem;
+    cursor: pointer;
+    transition: background 120ms, color 120ms, border-color 120ms;
+  }
+  .bx-group-add-card:hover {
+    background: var(--color-wm-accent-tint);
+    color: var(--color-wm-accent-strong);
+    border-color: var(--color-wm-accent);
+  }
+  .bx-group-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    padding: 0.45em 0.8em;
+    background: transparent;
+    color: var(--color-wm-text-muted);
+    border: 1px dashed var(--color-wm-border);
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 120ms, color 120ms, border-color 120ms;
+  }
+  .bx-group-add:hover {
+    background: var(--color-wm-accent-tint);
+    color: var(--color-wm-accent-strong);
+    border-color: var(--color-wm-accent);
+  }
+
+  /* Step list */
+  .bx-step-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+  .bx-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.85rem;
+    position: relative;
+  }
+  .bx-step-number {
+    width: 1.85rem;
+    height: 1.85rem;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    background: var(--color-wm-accent-tint);
+    color: var(--color-wm-accent-strong);
+    font-weight: 700;
+    font-size: 0.8125rem;
+    display: grid;
+    place-items: center;
+  }
+  .bx-step-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  /* Extras zone — freehand additions outside the template structure. */
+  .bx-extras {
+    border-top: 1px dashed var(--color-wm-warning);
+    background: color-mix(in srgb, var(--color-wm-warning-bg) 60%, transparent);
+    padding: 1rem 1.75rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .bx-extras-header {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--color-wm-warning);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .bx-extras-header span {
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--color-wm-text-muted);
+  }
+  .bx-extras-label {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--color-wm-text-muted);
+    margin-bottom: 0.4em;
+  }
+  .bx-extras-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4em;
+  }
+
+  /* Rich text host (TipTap inside an EditableSlot) — ensure the bubble
+     menu sits above the editor and the editor itself wraps cleanly. */
+  .bx-richtext-host {
+    position: relative;
+  }
+  .bx-bubble {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.2rem 0.3rem;
+    background: var(--color-wm-bg-elevated);
+    border: 1px solid var(--color-wm-border);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  }
+  .bx-bubble-divider {
+    display: inline-block;
+    width: 1px;
+    height: 1rem;
+    background: var(--color-wm-border);
+    margin: 0 0.2rem;
+  }
+
+  /* ── Preview iframe wrap ────────────────────────────────────────── */
+  .bx-preview-section-wrap {
+    width: 100%;
+    overflow: hidden;
+    background: white;
+  }
+  .bx-preview-section-inner {
+    width: 100%;
+    overflow: hidden;
+    position: relative;
+  }
+  .bx-preview-iframe {
+    border: 0;
+    display: block;
+    pointer-events: none;     /* read-only preview */
+    background: white;
+  }
 
   /* Inline-editable text slot — borderless, inherits the surrounding
      typography (so editing an H1 looks like an H1). Hover hint +

@@ -53,6 +53,9 @@ import { BrixiesEditor } from '../brixies/BrixiesEditor'
 import { BrixiesLayoutCanvas } from '../brixies/BrixiesLayoutCanvas'
 import { SectionToolbar } from '../brixies/SectionToolbar'
 import { SectionHeader } from '../brixies/SectionHeader'
+import { SnippetFocusProvider } from '../brixies/SnippetFocusContext'
+import { PagePreview } from '../PagePreview'
+import { WMSegmentedToggle } from '../SegmentedToggle'
 import { fieldValuesToDocHtml, docHtmlToFieldValues } from '../../../lib/webBrixiesDoc'
 import { refreshSnippetChips, extractSuggestedFamily, type PageBrief } from '../../../lib/webPageBrief'
 import {
@@ -578,6 +581,10 @@ function PageEditor({
   const [templates, setTemplates] = useState<Record<string, WebContentTemplate>>({})
   const [loadingSections, setLoadingSections] = useState(true)
   const [pickerOpen, setPickerOpen] = useState(false)
+  // Edit ↔ Preview mode for the page editor body. Edit is the live-
+  // assembly canvas; Preview renders the full page via the bound
+  // templates' source_html with current copy substituted (iframe).
+  const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit')
   // Bind-to-template flow: when set, opens the catalog panel pre-filtered
   // by the brief-suggested family and routes the pick into bindSection().
   const [bindingSection, setBindingSection] = useState<WebSection | null>(null)
@@ -916,6 +923,14 @@ function PageEditor({
             <span className="text-[11px] text-wm-text-subtle">Phase {page.phase}</span>
           </div>
           <div className="flex items-center gap-2">
+            <WMSegmentedToggle
+              options={[
+                { key: 'edit',    label: 'Edit',    icon: <Edit3 size={11} /> },
+                { key: 'preview', label: 'Preview', icon: <Eye   size={11} /> },
+              ]}
+              active={viewMode}
+              onChange={setViewMode}
+            />
             <StatusMenu current={page.content_status} onChange={setStatus} />
             <WMIconButton label="More page actions" onClick={archivePage}>
               <MoreHorizontal size={14} />
@@ -943,9 +958,21 @@ function PageEditor({
         </div>
       </header>
 
-      {/* Sections — each is a live-assembled Brixies layout (bound)
-          or a freehand TipTap editor. No separate preview mode; the
-          editor IS the layout. */}
+      {/* Preview mode — stacked Brixies live renders with current copy.
+          Click any section to drop back into Edit mode scrolled to it. */}
+      {viewMode === 'preview' ? (
+        <PagePreview
+          sections={sections}
+          templates={templates}
+          onSelectSection={(id) => {
+            setViewMode('edit')
+            queueMicrotask(() => {
+              document.getElementById(`section-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            })
+          }}
+        />
+      ) : (
+      <SnippetFocusProvider>
       <div className="space-y-6">
         {loadingSections ? (
           Array.from({ length: 2 }).map((_, i) => (
@@ -1003,6 +1030,8 @@ function PageEditor({
           </div>
         )}
       </div>
+      </SnippetFocusProvider>
+      )}
 
       {/* Catalog picker — add a new section */}
       <WMCatalogSidePanel

@@ -1,52 +1,43 @@
 /**
- * Inline-editable slot renderers for the Brixies live-assembly editor.
+ * Inline-editable slot renderers for the Brixies layout canvas.
  *
- * One small component per slot type:
+ * v3 changes from v2:
+ *   - RichTextSlot fully restored — Bold / Italic / Link / Bullet
+ *     list / Ordered list available via TipTap's BubbleMenu (text
+ *     selection) AND via the section-level popup bar (slot focus).
+ *   - All slots register with SnippetFocusContext on focus so the
+ *     section's Snippet picker knows where to insert.
+ *   - TextSlot inherits typography from its wrapper so an H1 input
+ *     reads as an H1.
  *
- *   - text / url / email / phone — borderless input that inherits the
- *     wrapper's typography (so an editable H1 reads as an H1).
- *   - richtext — small TipTap editor with bold / italic / link / list /
- *     snippet, no headings (those are their own slots).
- *   - cta — single-line "label → /route" with both fields inline-edit.
- *   - image — non-editable grey placeholder; section-header chip
- *     surfaces the count expectation.
- *   - form-input — non-editable "[Search input]" / "[Email input]"
- *     pill placeholder.
- *
- * Each component renders INSIDE the original Brixies element (passed
- * through as `wrapper`), so layout positioning + Brixies inline styles
- * stay intact. The wrapper's text content is replaced; everything else
- * (padding, flex, colors) is preserved.
+ * Each slot type is its own component, dispatched by `slot.type` /
+ * `slot.heading_level` from the public `<EditableSlot>` entry.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
+import { BubbleMenu } from '@tiptap/react/menus'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
+import {
+  Bold, Italic, Link as LinkIcon, List, ListOrdered, Image as ImageIcon, Trash2,
+} from 'lucide-react'
 import { SnippetNode } from '../SnippetNode'
+import { useSnippetFocus } from './SnippetFocusContext'
 import type { WebSlotDef } from '../../../types/database'
-import type { WMSnippetOption } from '../RichTextEditor'
-import { ImageIcon, Trash2 } from 'lucide-react'
 
 interface CommonProps {
   slot: WebSlotDef
   value: unknown
   onChange: (v: unknown) => void
-  /** When true, render a small × delete affordance (used for group
-   *  items — cards, buttons — so the user can drop them in place). */
+  /** When the slot lives inside a group item, this remove handler
+   *  lets the popup bar / corner control drop the item. */
   onRemoveItem?: () => void
-  snippets?: readonly WMSnippetOption[]
 }
 
 export function EditableSlot(props: CommonProps) {
   const { slot } = props
   switch (slot.type) {
-    case 'text':
-    case 'url':
-    case 'email':
-    case 'phone':
-    case 'datetime':
-      return <TextSlot {...props} />
     case 'richtext':
       return <RichTextSlot {...props} />
     case 'cta':
@@ -57,14 +48,21 @@ export function EditableSlot(props: CommonProps) {
       return <FormInputSlot {...props} />
     case 'boolean':
       return <BooleanSlot {...props} />
+    case 'datetime':
+    case 'url':
+    case 'email':
+    case 'phone':
+    case 'text':
     default:
       return <TextSlot {...props} />
   }
 }
 
-/** Inline text input that visually inherits the wrapper's typography. */
+// ── Text slot ───────────────────────────────────────────────────────
+
 function TextSlot({ slot, value, onChange }: CommonProps) {
   const text = typeof value === 'string' ? value : ''
+  const focus = useSnippetFocus()
   const inputType = slot.type === 'url' ? 'url'
     : slot.type === 'email' ? 'email'
     : slot.type === 'phone' ? 'tel'
@@ -76,6 +74,8 @@ function TextSlot({ slot, value, onChange }: CommonProps) {
       value={text}
       maxLength={slot.max_chars}
       onChange={e => onChange(e.target.value)}
+      onFocus={e => focus.registerInput(slot.key, e.target)}
+      onBlur={() => focus.clear(slot.key)}
       placeholder={slot.description ?? slot.label ?? slot.key.replace(/_/g, ' ')}
       className="bx-slot bx-slot-text"
       data-bx-slot-key={slot.key}
@@ -83,9 +83,13 @@ function TextSlot({ slot, value, onChange }: CommonProps) {
   )
 }
 
-/** Inline TipTap for richtext slots — body / description. */
-function RichTextSlot({ slot, value, onChange, snippets }: CommonProps) {
+// ── Rich text slot ──────────────────────────────────────────────────
+
+function RichTextSlot({ slot, value, onChange }: CommonProps) {
   const html = typeof value === 'string' ? value : ''
+  const focus = useSnippetFocus()
+  const rootRef = useRef<HTMLDivElement | null>(null)
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -102,11 +106,13 @@ function RichTextSlot({ slot, value, onChange, snippets }: CommonProps) {
     ],
     content: html,
     onUpdate: ({ editor: ed }) => onChange(ed.getHTML()),
+    onFocus: ({ editor: ed }) => focus.registerEditor(slot.key, ed, rootRef.current),
+    onBlur: () => focus.clear(slot.key),
     editorProps: { attributes: { class: 'bx-slot bx-slot-richtext' } },
   })
 
-  // External value updates (rebind, AI rewrite) need to push into the
-  // editor without echoing back via onUpdate.
+  // External value updates need to land without echoing back through
+  // onUpdate.
   useEffect(() => {
     if (!editor) return
     const current = editor.getHTML()
@@ -114,24 +120,94 @@ function RichTextSlot({ slot, value, onChange, snippets }: CommonProps) {
     editor.commands.setContent(html, { emitUpdate: false })
   }, [editor, html])
 
-  // Track snippets so the chip auto-resolve stays current — handled by
-  // a separate refresh pass at editor mount.
-  void snippets
-
-  return <EditorContent editor={editor} />
+  return (
+    <div ref={rootRef} className="bx-richtext-host" data-bx-slot-key={slot.key}>
+      <EditorContent editor={editor} />
+      {editor && (
+        <BubbleMenu editor={editor} options={{ placement: 'top' }}>
+          <div className="bx-bubble">
+            <BubbleBtn
+              active={editor.isActive('bold')}
+              onClick={() => editor.chain().focus().toggleBold().run()}
+              icon={<Bold size={12} />}
+              label="Bold"
+            />
+            <BubbleBtn
+              active={editor.isActive('italic')}
+              onClick={() => editor.chain().focus().toggleItalic().run()}
+              icon={<Italic size={12} />}
+              label="Italic"
+            />
+            <BubbleBtn
+              active={editor.isActive('link')}
+              onClick={() => {
+                const prev = editor.getAttributes('link').href as string | undefined
+                const url = window.prompt('URL', prev ?? '')
+                if (url == null) return
+                if (url === '') editor.chain().focus().unsetLink().run()
+                else editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
+              }}
+              icon={<LinkIcon size={12} />}
+              label="Link"
+            />
+            <span className="bx-bubble-divider" />
+            <BubbleBtn
+              active={editor.isActive('bulletList')}
+              onClick={() => editor.chain().focus().toggleBulletList().run()}
+              icon={<List size={12} />}
+              label="Bullet list"
+            />
+            <BubbleBtn
+              active={editor.isActive('orderedList')}
+              onClick={() => editor.chain().focus().toggleOrderedList().run()}
+              icon={<ListOrdered size={12} />}
+              label="Numbered list"
+            />
+          </div>
+        </BubbleMenu>
+      )}
+    </div>
+  )
 }
 
-/** Single-line "label → /route" with both inline-editable. */
+function BubbleBtn({
+  active, onClick, icon, label,
+}: {
+  active?: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      onMouseDown={e => { e.preventDefault(); onClick() }}
+      title={label}
+      className={[
+        'inline-flex items-center justify-center w-7 h-7 rounded transition-colors',
+        active
+          ? 'bg-wm-accent text-white'
+          : 'text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text',
+      ].join(' ')}
+    >{icon}</button>
+  )
+}
+
+// ── CTA slot ────────────────────────────────────────────────────────
+
 function CtaSlot({ slot, value, onChange, onRemoveItem }: CommonProps) {
   const cta = (typeof value === 'object' && value !== null)
     ? value as { label?: string; url?: string }
     : { label: '', url: '' }
+  const focus = useSnippetFocus()
   return (
     <span className="bx-slot bx-slot-cta" data-bx-slot-key={slot.key}>
       <input
         type="text"
         value={cta.label ?? ''}
         onChange={e => onChange({ ...cta, label: e.target.value })}
+        onFocus={e => focus.registerInput(slot.key, e.target)}
+        onBlur={() => focus.clear(slot.key)}
         placeholder="Button label"
         className="bx-cta-label"
       />
@@ -140,6 +216,8 @@ function CtaSlot({ slot, value, onChange, onRemoveItem }: CommonProps) {
         type="url"
         value={cta.url ?? ''}
         onChange={e => onChange({ ...cta, url: e.target.value })}
+        onFocus={e => focus.registerInput(`${slot.key}__url`, e.target)}
+        onBlur={() => focus.clear(`${slot.key}__url`)}
         placeholder="/route"
         className="bx-cta-url"
       />
@@ -155,17 +233,23 @@ function CtaSlot({ slot, value, onChange, onRemoveItem }: CommonProps) {
   )
 }
 
-/** Non-editable grey placeholder. Image presence is template-driven —
- *  authoring/upload happens in a separate Assets step. */
+// ── Image slot ──────────────────────────────────────────────────────
+
 function ImageSlot({ slot }: CommonProps) {
   return (
-    <span className="bx-slot bx-slot-image" data-bx-slot-key={slot.key} title={`${slot.label ?? slot.key} (image)`}>
+    <span
+      className="bx-slot bx-slot-image"
+      data-bx-slot-key={slot.key}
+      title={`${slot.label ?? slot.key} (image placeholder)`}
+    >
       <ImageIcon size={14} />
+      <span className="bx-slot-image-label">{slot.label ?? slot.key}</span>
     </span>
   )
 }
 
-/** Pill placeholder — "Search input" / "Email input" — not editable. */
+// ── Form-input slot ─────────────────────────────────────────────────
+
 function FormInputSlot({ slot }: CommonProps) {
   return (
     <span className="bx-slot bx-slot-forminput" data-bx-slot-key={slot.key}>
@@ -174,21 +258,15 @@ function FormInputSlot({ slot }: CommonProps) {
   )
 }
 
-/** Small toggle for boolean slots. */
+// ── Boolean slot ────────────────────────────────────────────────────
+
 function BooleanSlot({ slot, value, onChange }: CommonProps) {
-  const [draft, setDraft] = useState<boolean>(value === true)
-  // Reflect external changes.
-  const lastValueRef = useRef<unknown>(value)
-  if (lastValueRef.current !== value) {
-    lastValueRef.current = value
-    if ((value === true) !== draft) setDraft(value === true)
-  }
   return (
     <label className="bx-slot bx-slot-boolean" data-bx-slot-key={slot.key}>
       <input
         type="checkbox"
-        checked={draft}
-        onChange={e => { setDraft(e.target.checked); onChange(e.target.checked) }}
+        checked={value === true}
+        onChange={e => onChange(e.target.checked)}
       />
       <span>{slot.description ?? slot.label ?? slot.key}</span>
     </label>

@@ -42,6 +42,9 @@ export function SectionHeader({
   const presence = summarizeSlotPresence(template, values)
   const overLimit = findOverLimitSlots(template, values)
 
+  // Build a one-glance slot summary string for the subtitle.
+  const slotSummary = buildSlotSummary(template)
+
   return (
     <div className="flex items-center gap-2 mb-2 -ml-1 flex-wrap">
       <span
@@ -57,6 +60,25 @@ export function SectionHeader({
           : 'Freehand — needs a template'
         }
       />
+      {/* Template preview thumbnail — instant visual context. Click
+          opens the Change Template panel. */}
+      {template.preview_image_url ? (
+        <button
+          type="button"
+          onClick={onBindRequest}
+          className="shrink-0 h-6 w-9 rounded-sm overflow-hidden border border-wm-border bg-wm-bg hover:border-wm-accent transition-colors"
+          title="Change template…"
+        >
+          <img
+            src={template.preview_image_url}
+            alt=""
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+        </button>
+      ) : (
+        <div className="shrink-0 h-6 w-9 rounded-sm border border-wm-border bg-wm-bg-hover" />
+      )}
       <button
         type="button"
         onClick={onToggleOpen}
@@ -66,6 +88,9 @@ export function SectionHeader({
         <span className="truncate">{template.layer_name}</span>
       </button>
       <span className="text-[9px] tracking-wide text-wm-text-subtle italic">· {template.family}</span>
+      {slotSummary && (
+        <span className="text-[10px] text-wm-text-subtle truncate min-w-0">· {slotSummary}</span>
+      )}
 
       {/* Slot presence chips */}
       {presence.images.expected > 0 && (
@@ -157,4 +182,33 @@ export function SectionHeader({
       </div>
     </div>
   )
+}
+
+/** Build a one-glance summary string of the template's slots + groups,
+ *  e.g. "Tagline + H1 + body + 2 buttons + image · 4 cards". */
+function buildSlotSummary(template: WebContentTemplate): string {
+  const slots: string[] = []
+  const groups: string[] = []
+  for (const f of template.fields) {
+    if (f.kind === 'slot') {
+      const c = f.key.toLowerCase().replace(/[_\s-]+/g, '')
+      if (c.includes('tagline') || c.includes('eyebrow') || c.includes('kicker')) slots.push('tagline')
+      else if (f.heading_level === 1) slots.push('H1')
+      else if (f.heading_level === 2) slots.push('H2')
+      else if (f.heading_level && f.heading_level >= 3) slots.push(`H${f.heading_level}`)
+      else if (f.type === 'richtext' || c.includes('body') || c.includes('description')) slots.push('body')
+      else if (f.type === 'image') slots.push('image')
+      else if (f.type === 'cta') slots.push('cta')
+    } else {
+      const c = f.key.toLowerCase().replace(/[_\s-]+/g, '')
+      const isCta = c === 'cta' || c === 'ctas' || c.includes('button')
+      const isStep = c.includes('step') || c.includes('process')
+      if (isCta) groups.push(`${f.default_count} buttons`)
+      else if (isStep) groups.push(`${f.default_count} steps`)
+      else groups.push(`${f.default_count} ${f.key.replace(/_/g, ' ')}`)
+    }
+  }
+  const slotPart = slots.join(' + ')
+  const groupPart = groups.join(', ')
+  return [slotPart, groupPart].filter(Boolean).join(' · ')
 }

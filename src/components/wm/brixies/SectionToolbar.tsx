@@ -1,24 +1,23 @@
 /**
- * Brixies-block insert toolbar for a bound section.
+ * Section toolbar — Brixies-block inserts.
  *
- * Each button operates directly on `field_values`:
- *   - Tagline — focuses the tagline slot if it exists; tooltip if not.
- *   - CTA — appends to the section's first CTA group or fills the
- *     first empty cta slot.
- *   - Card — appends to the section's first card-shaped group.
- *   - Image — informational popover; doesn't insert (image presence
- *     is template-driven).
- *   - Snippet — opens the project snippet picker; the picker inserts
- *     into the focused EditableSlot's TipTap editor (richtext slots
- *     only). Text slots accept a token via plain-text insertion.
- *
- * Buttons disable gracefully when the bound template has no matching
- * slot/group ("This template has no tagline slot").
+ * v3:
+ *   - CTA and Card buttons are ALWAYS enabled. When the template has
+ *     a matching slot/group, the click appends to it. When it
+ *     doesn't, the click appends to field_values.__extra_ctas /
+ *     __extra_cards (freehand extras, rendered in the canvas's
+ *     Extras zone with a warning border).
+ *   - Snippet picker routes via the SnippetFocusContext — inserts
+ *     into whichever slot is focused (TipTap chip for richtext,
+ *     {{token}} literal for text inputs).
+ *   - Tagline still gates on the template having a tagline slot.
+ *   - Image is informational only (count popover).
  */
 import { useState } from 'react'
 import {
   Tag, MousePointerClick, LayoutGrid, Image as ImageIcon, Braces,
 } from 'lucide-react'
+import { useSnippetFocus } from './SnippetFocusContext'
 import type { WebContentTemplate, WebFieldDef, WebGroupDef, WebSlotDef } from '../../../types/database'
 import type { WMSnippetOption } from '../RichTextEditor'
 
@@ -30,21 +29,15 @@ interface Props {
 }
 
 export function SectionToolbar({ template, values, onChange, snippets }: Props) {
+  const focus = useSnippetFocus()
   const taglineSlot = findSlot(template.fields, isTaglineSlot)
   const ctaTarget = findCtaTarget(template.fields)
   const cardGroup = findGroup(template.fields, isCardShapedGroup)
-  const imageCount = countImageSlots(template.fields)
+  const imageInfo = countImageSlots(template.fields, values)
 
   const handleTagline = () => {
     if (!taglineSlot) return
-    // If tagline slot is empty, set a placeholder; otherwise scroll
-    // the existing tagline into focus (handled by the editor's
-    // auto-focus behavior on field render).
-    if (!values[taglineSlot.key]) {
-      onChange({ ...values, [taglineSlot.key]: 'Tagline' })
-    }
-    // Scroll to the slot — relies on data-bx-slot-key on the rendered
-    // input set by EditableSlot.
+    if (!values[taglineSlot.key]) onChange({ ...values, [taglineSlot.key]: 'Tagline' })
     requestAnimationFrame(() => {
       const el = document.querySelector(`[data-bx-slot-key="${taglineSlot.key}"]`) as HTMLElement | null
       el?.focus()
@@ -52,48 +45,56 @@ export function SectionToolbar({ template, values, onChange, snippets }: Props) 
   }
 
   const handleCta = () => {
-    if (!ctaTarget) return
-    if (ctaTarget.kind === 'slot') {
-      // Fill the slot if empty; else no-op.
+    if (ctaTarget?.kind === 'slot') {
+      // Top-level cta slot — fill if empty.
       const existing = values[ctaTarget.field.key]
       if (!existing || typeof existing !== 'object') {
         onChange({ ...values, [ctaTarget.field.key]: { label: 'Button label', url: '/' } })
       }
-    } else {
-      // Append to the group.
+      return
+    }
+    if (ctaTarget?.kind === 'group') {
       const arr = Array.isArray(values[ctaTarget.field.key])
         ? [...(values[ctaTarget.field.key] as Array<Record<string, unknown>>)]
         : []
-      // Find the cta-typed slot or button-label-text slot in item_schema.
       const ctaSlot = ctaTarget.field.item_schema.find((f): f is WebSlotDef =>
         f.kind === 'slot' && f.type === 'cta')
       const labelSlot = ctaTarget.field.item_schema.find((f): f is WebSlotDef =>
         f.kind === 'slot' && f.type === 'text'
         && (f.scope === 'button' || /button|cta/i.test(f.label ?? '') || /button/i.test(f.layer_name ?? '')))
       const newItem: Record<string, unknown> = {}
-      if (ctaSlot) {
-        newItem[ctaSlot.key] = { label: 'Button label', url: '/' }
-      } else if (labelSlot) {
-        newItem[labelSlot.key] = 'Button label'
-        newItem.__cta_url = '/'
-      }
+      if (ctaSlot) newItem[ctaSlot.key] = { label: 'Button label', url: '/' }
+      else if (labelSlot) { newItem[labelSlot.key] = 'Button label'; newItem.__cta_url = '/' }
       arr.push(newItem)
       onChange({ ...values, [ctaTarget.field.key]: arr })
+      return
     }
+    // No native CTA slot — append to __extra_ctas.
+    const arr = Array.isArray(values.__extra_ctas)
+      ? [...(values.__extra_ctas as Array<{ label?: string; url?: string }>)]
+      : []
+    arr.push({ label: 'Button label', url: '/' })
+    onChange({ ...values, __extra_ctas: arr })
   }
 
   const handleCard = () => {
-    if (!cardGroup) return
-    const arr = Array.isArray(values[cardGroup.key])
-      ? [...(values[cardGroup.key] as Array<Record<string, unknown>>)]
+    if (cardGroup) {
+      const arr = Array.isArray(values[cardGroup.key])
+        ? [...(values[cardGroup.key] as Array<Record<string, unknown>>)]
+        : []
+      arr.push({})
+      onChange({ ...values, [cardGroup.key]: arr })
+      return
+    }
+    // No native card group — append to __extra_cards.
+    const arr = Array.isArray(values.__extra_cards)
+      ? [...(values.__extra_cards as Array<Record<string, unknown>>)]
       : []
     arr.push({})
-    onChange({ ...values, [cardGroup.key]: arr })
+    onChange({ ...values, __extra_cards: arr })
   }
 
   const [imageInfoOpen, setImageInfoOpen] = useState(false)
-  const handleImage = () => setImageInfoOpen(o => !o)
-
   const [snippetOpen, setSnippetOpen] = useState(false)
 
   return (
@@ -112,24 +113,25 @@ export function SectionToolbar({ template, values, onChange, snippets }: Props) 
       <ToolbarBtn
         icon={<MousePointerClick size={12} />}
         text="CTA"
-        title={ctaTarget ? 'Add a CTA' : 'No CTA slot or group on this template'}
-        disabled={!ctaTarget}
+        title={ctaTarget ? 'Add a CTA' : 'Add a freehand CTA (no native slot on this template)'}
+        disabled={false}
         onClick={handleCta}
       />
       <ToolbarBtn
         icon={<LayoutGrid size={12} />}
         text="Card"
-        title={cardGroup ? `Add a ${cardGroup.key.replace(/_/g, ' ')} item` : 'No card-shaped group on this template'}
-        disabled={!cardGroup}
+        title={cardGroup ? `Add a ${cardGroup.key.replace(/_/g, ' ')} item` : 'Add a freehand card (no native card group on this template)'}
+        disabled={false}
         onClick={handleCard}
       />
+
       <div className="relative">
         <ToolbarBtn
           icon={<ImageIcon size={12} />}
-          text={`Image (${imageCount.filled}/${imageCount.expected})`}
-          title={`${imageCount.expected} image slot${imageCount.expected === 1 ? '' : 's'} expected by this template`}
+          text={`Image (${imageInfo.filled}/${imageInfo.expected})`}
+          title={`${imageInfo.expected} image slot${imageInfo.expected === 1 ? '' : 's'} on this template`}
           disabled={false}
-          onClick={handleImage}
+          onClick={() => setImageInfoOpen(o => !o)}
         />
         {imageInfoOpen && (
           <>
@@ -137,12 +139,12 @@ export function SectionToolbar({ template, values, onChange, snippets }: Props) 
             <div className="absolute left-0 mt-1 w-72 rounded-md border border-wm-border bg-wm-bg-elevated shadow-lg z-20 p-3 text-[12px] text-wm-text">
               <p className="font-semibold mb-1">Images on this layout</p>
               <p className="text-wm-text-muted">
-                This template expects <span className="font-semibold text-wm-text">{imageCount.expected}</span> image
-                {imageCount.expected === 1 ? '' : 's'}.
-                Currently filled: <span className="font-semibold text-wm-text">{imageCount.filled}</span>.
+                This template expects <span className="font-semibold text-wm-text">{imageInfo.expected}</span> image
+                {imageInfo.expected === 1 ? '' : 's'}.
+                Currently filled: <span className="font-semibold text-wm-text">{imageInfo.filled}</span>.
               </p>
               <p className="text-wm-text-muted mt-2 text-[11px]">
-                Image upload happens in the Assets step (not yet implemented). For now the layout shows grey placeholders.
+                Image upload happens in the Assets step. The layout shows grey placeholders here.
               </p>
             </div>
           </>
@@ -154,36 +156,29 @@ export function SectionToolbar({ template, values, onChange, snippets }: Props) 
           <ToolbarBtn
             icon={<Braces size={12} />}
             text="Snippet"
-            title="Insert a snippet token"
+            title="Insert a snippet token into the focused slot"
             disabled={false}
             onClick={() => setSnippetOpen(o => !o)}
           />
           {snippetOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setSnippetOpen(false)} />
-              <div className="absolute left-0 mt-1 w-64 max-h-64 overflow-auto rounded-md border border-wm-border bg-wm-bg-elevated shadow-lg z-20 py-1">
+              <div className="absolute left-0 mt-1 w-64 max-h-72 overflow-auto rounded-md border border-wm-border bg-wm-bg-elevated shadow-lg z-20 py-1">
+                {!focus.focused && (
+                  <p className="px-3 py-1.5 text-[11px] text-wm-text-subtle italic">
+                    Click into a slot first, then pick a snippet.
+                  </p>
+                )}
                 {snippets.map(s => (
                   <button
                     key={s.token}
                     type="button"
+                    disabled={!focus.focused}
                     onClick={() => {
-                      // Insert the literal {{token}} at the document's
-                      // active text input/textarea, or copy to clipboard
-                      // as a fallback. The richtext slot's TipTap will
-                      // recognize and chip-ify on the next refresh pass.
-                      const active = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null
-                      const literal = `{{${s.token}}}`
-                      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
-                        const start = active.selectionStart ?? active.value.length
-                        const end = active.selectionEnd ?? active.value.length
-                        active.value = active.value.slice(0, start) + literal + active.value.slice(end)
-                        active.dispatchEvent(new Event('input', { bubbles: true }))
-                      } else {
-                        void navigator.clipboard?.writeText(literal)
-                      }
+                      focus.insertSnippet(s)
                       setSnippetOpen(false)
                     }}
-                    className="block w-full text-left px-3 py-1.5 text-[12px] hover:bg-wm-bg-hover"
+                    className="block w-full text-left px-3 py-1.5 text-[12px] hover:bg-wm-bg-hover disabled:opacity-40 disabled:hover:bg-transparent"
                   >
                     <span className="font-mono text-wm-accent-strong">{`{{${s.token}}}`}</span>
                     <span className="ml-2 text-wm-text-muted truncate inline-block max-w-[140px] align-middle">
@@ -249,17 +244,17 @@ function isTaglineSlot(s: WebSlotDef): boolean {
 function isCardShapedGroup(g: WebGroupDef): boolean {
   const c = g.key.toLowerCase().replace(/[_\s-]+/g, '')
   if (c === 'cta' || c === 'ctas' || c.includes('button') || c.includes('action')) return false
+  if (c.includes('step') || c.includes('process')) return false
   return c.includes('card') || c === 'items' || c === 'features' || c === 'tiles'
     || c === 'blocks' || c === 'pillars' || c === 'tiers' || c === 'programs'
     || c === 'members' || c === 'groups' || c === 'classes' || c === 'events'
-    || c === 'steps' || c === 'doctrines' || c === 'values'
+    || c === 'doctrines' || c === 'values' || c === 'list' || c === 'rows'
 }
 function findCtaTarget(fields: ReadonlyArray<WebFieldDef>):
   | { kind: 'slot'; field: WebSlotDef }
   | { kind: 'group'; field: WebGroupDef }
   | null
 {
-  // Prefer a CTA-shaped group; fall back to a single CTA slot.
   for (const f of fields) {
     if (f.kind !== 'group') continue
     const c = f.key.toLowerCase().replace(/[_\s-]+/g, '')
@@ -272,16 +267,24 @@ function findCtaTarget(fields: ReadonlyArray<WebFieldDef>):
   }
   return null
 }
-function countImageSlots(fields: ReadonlyArray<WebFieldDef>): { expected: number; filled: number } {
-  // No values param wired — the toolbar shows just the count of image
-  // slots in the template; the section header has the filled count.
+function countImageSlots(
+  fields: ReadonlyArray<WebFieldDef>,
+  values: Record<string, unknown>,
+): { expected: number; filled: number } {
   let expected = 0
-  const walk = (fs: ReadonlyArray<WebFieldDef>) => {
+  let filled = 0
+  const walk = (fs: ReadonlyArray<WebFieldDef>, vals: Record<string, unknown>) => {
     for (const f of fs) {
-      if (f.kind === 'slot' && f.type === 'image') expected++
-      if (f.kind === 'group') walk(f.item_schema)
+      if (f.kind === 'slot' && f.type === 'image') {
+        expected++
+        if (typeof vals[f.key] === 'string' && vals[f.key] !== '') filled++
+      }
+      if (f.kind === 'group') {
+        const arr = Array.isArray(vals[f.key]) ? vals[f.key] as Array<Record<string, unknown>> : []
+        for (const item of arr) walk(f.item_schema, item)
+      }
     }
   }
-  walk(fields)
-  return { expected, filled: 0 }
+  walk(fields, values)
+  return { expected, filled }
 }
