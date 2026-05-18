@@ -56,7 +56,7 @@ import { fieldValuesToDocHtml, docHtmlToFieldValues } from '../../../lib/webBrix
 import { refreshSnippetChips, extractSuggestedFamily, type PageBrief } from '../../../lib/webPageBrief'
 import {
   composeBind, findBriefSection, extractSectionIdFromNotes,
-  rankVariantsByBrief, type RankedVariant,
+  rankVariantsByBrief, type RankedVariant, type ComposedBindResult,
 } from '../../../lib/webBindTemplate'
 import { parseCuratedLibrary } from '../../../lib/webCuratedLibrary'
 import type {
@@ -758,50 +758,54 @@ function PageEditor({
       .eq('id', templateId)
       .maybeSingle()
     if (!tplRow) return
-    const template = tplRow as WebContentTemplate
+    const newTemplate = tplRow as WebContentTemplate
 
     const currentValues = (section.field_values ?? {}) as FieldValues
-    // Source HTML for re-binding:
-    //   - Freehand section: body field
-    //   - Already-bound section (Change template): serialize current
-    //     slot values + any existing residual back to HTML, so the new
-    //     bind has everything to work with.
-    let sourceHtml =
-      typeof currentValues.body === 'string' && section.content_template_id == null
+    const oldTemplate = section.content_template_id ? templates[section.content_template_id] : null
+
+    let nextValues: FieldValues
+    let overflowHtml = ''
+    let bindReport: ComposedBindResult['source_report'] | null = null
+
+    if (oldTemplate) {
+      // Re-bind from a bound section. Convert the current values to a
+      // proper Brixies doc HTML using the OLD template's slot schema,
+      // then parse the doc back into the NEW template's slots. This
+      // preserves structured content (tagline / headings / body / CTAs /
+      // cards / images) across template swaps without falling back to
+      // the rescue serializer that emits group data as literal
+      // "buttons:" bullet lists.
+      const oldDocHtml = fieldValuesToDocHtml(currentValues, oldTemplate)
+      const { field_values } = docHtmlToFieldValues(oldDocHtml, newTemplate, {})
+      nextValues = field_values
+      // Carry the prior overflow forward — it's still the strategist's
+      // safety net for anything they're routing in.
+      const priorOverflow = typeof currentValues.__overflow_html === 'string'
+        ? currentValues.__overflow_html
+        : ''
+      if (priorOverflow) overflowHtml = priorOverflow
+    } else {
+      // Initial bind from a freehand section. Use the body HTML
+      // (which IS the Brixies doc HTML for freehand) + composeBind
+      // to fill the new template's slots from the brief if available.
+      const sourceHtml = typeof currentValues.body === 'string'
         ? currentValues.body
-        : ''
-    if (!sourceHtml && section.content_template_id != null) {
-      const currentTpl = templates[section.content_template_id]
-      sourceHtml = serializeFieldValuesToHtml(currentValues, currentTpl)
-      const existingResidual = typeof currentValues.__overflow_html === 'string'
-        ? currentValues.__overflow_html
-        : ''
-      if (existingResidual) sourceHtml += existingResidual
-    } else if (!sourceHtml) {
-      sourceHtml = typeof currentValues.__overflow_html === 'string'
-        ? currentValues.__overflow_html
-        : ''
+        : (typeof currentValues.__overflow_html === 'string' ? currentValues.__overflow_html : '')
+
+      const briefSectionId = extractSectionIdFromNotes(section.notes)
+      const briefSection = findBriefSection(pageBrief, briefSectionId)
+
+      const composed = composeBind(briefSection, sourceHtml, newTemplate)
+      nextValues = { ...composed.field_values }
+      if (composed.residual_html) overflowHtml = composed.residual_html
+      if (composed.source_report.unmatched_brief_keys.length > 0
+          || composed.source_report.missing_slots.length > 0) {
+        bindReport = composed.source_report
+      }
     }
 
-    // Find the brief section by ID (notes carries "Section ID: <id>" from
-    // the importer). When binding a hand-added section, briefSection is null
-    // and only the body heuristic runs.
-    const briefSectionId = extractSectionIdFromNotes(section.notes)
-    const briefSection = findBriefSection(pageBrief, briefSectionId)
-
-    const composed = composeBind(briefSection, sourceHtml, template)
-    const nextValues: FieldValues = { ...composed.field_values }
-    // Stash ONLY the residual — chunks of the freehand body that didn't
-    // get routed into any slot. If everything mapped, residual is empty
-    // and no overflow panel renders. Keeps the editor from showing the
-    // same prose twice (slot + overflow).
-    if (composed.residual_html) nextValues.__overflow_html = composed.residual_html
-    // Stash the source report for the "what mapped" badge on the section
-    // header. Hidden from field iteration by the underscore prefix.
-    if (composed.source_report.unmatched_brief_keys.length > 0
-        || composed.source_report.missing_slots.length > 0) {
-      nextValues.__bind_report = composed.source_report
-    }
+    if (overflowHtml) nextValues.__overflow_html = overflowHtml
+    if (bindReport) nextValues.__bind_report = bindReport
 
     await updateSection(sectionId, {
       content_template_id: templateId,
@@ -1240,7 +1244,13 @@ function SectionBlock({
               {template!.fields.length === 0 ? (
                 <p className="text-[12px] text-wm-text-subtle italic">This template has no editable fields.</p>
               ) : (
+                // Key includes the template id so swapping templates
+                // remounts the editor — the lazy initializer rebuilds
+                // docHtml from the new template's slot shape, and the
+                // valuesRef resets. Without this, the editor would show
+                // the OLD doc against the NEW template.
                 <BrixiesSectionContent
+                  key={`${section.id}-${section.content_template_id}`}
                   values={values}
                   template={template!}
                   onChangeFieldValues={(next) => onChange({ field_values: next })}
