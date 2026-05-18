@@ -49,9 +49,10 @@ import { PageBriefImportModal } from '../PageBriefImportModal'
 import { AddPageModal } from '../AddPageModal'
 import { SitemapProposalBanner } from '../SitemapProposalBanner'
 import { ConfirmDialog } from '../ConfirmDialog'
-import { PagePreview } from '../PagePreview'
-import { WMSegmentedToggle } from '../SegmentedToggle'
 import { BrixiesEditor } from '../brixies/BrixiesEditor'
+import { BrixiesLayoutEditor } from '../brixies/BrixiesLayoutEditor'
+import { SectionToolbar } from '../brixies/SectionToolbar'
+import { SectionHeader } from '../brixies/SectionHeader'
 import { fieldValuesToDocHtml, docHtmlToFieldValues } from '../../../lib/webBrixiesDoc'
 import { refreshSnippetChips, extractSuggestedFamily, type PageBrief } from '../../../lib/webPageBrief'
 import {
@@ -577,8 +578,6 @@ function PageEditor({
   const [templates, setTemplates] = useState<Record<string, WebContentTemplate>>({})
   const [loadingSections, setLoadingSections] = useState(true)
   const [pickerOpen, setPickerOpen] = useState(false)
-  // Edit ↔ Preview mode for the page editor body.
-  const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit')
   // Bind-to-template flow: when set, opens the catalog panel pre-filtered
   // by the brief-suggested family and routes the pick into bindSection().
   const [bindingSection, setBindingSection] = useState<WebSection | null>(null)
@@ -917,14 +916,6 @@ function PageEditor({
             <span className="text-[11px] text-wm-text-subtle">Phase {page.phase}</span>
           </div>
           <div className="flex items-center gap-2">
-            <WMSegmentedToggle
-              options={[
-                { key: 'edit',    label: 'Edit',    icon: <Edit3 size={11} /> },
-                { key: 'preview', label: 'Preview', icon: <Eye size={11} /> },
-              ]}
-              active={viewMode}
-              onChange={setViewMode}
-            />
             <StatusMenu current={page.content_status} onChange={setStatus} />
             <WMIconButton label="More page actions" onClick={archivePage}>
               <MoreHorizontal size={14} />
@@ -952,23 +943,9 @@ function PageEditor({
         </div>
       </header>
 
-      {/* Preview mode — JPG-stacked low-fi wireframe. Click any thumb to
-          jump back to the Edit view scrolled to that section (Phase v2:
-          render brixies source_html with live copy in iframes). */}
-      {viewMode === 'preview' ? (
-        <PagePreview
-          sections={sections}
-          templates={templates}
-          onSelectSection={(id) => {
-            setViewMode('edit')
-            queueMicrotask(() => {
-              document.getElementById(`section-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-            })
-          }}
-        />
-      ) : (
-
-      /* Section blocks */
+      {/* Sections — each is a live-assembled Brixies layout (bound)
+          or a freehand TipTap editor. No separate preview mode; the
+          editor IS the layout. */}
       <div className="space-y-6">
         {loadingSections ? (
           Array.from({ length: 2 }).map((_, i) => (
@@ -1026,7 +1003,6 @@ function PageEditor({
           </div>
         )}
       </div>
-      )}
 
       {/* Catalog picker — add a new section */}
       <WMCatalogSidePanel
@@ -1091,7 +1067,6 @@ function SectionBlock({
   onClearOverflow: () => void
 }) {
   const [open, setOpen] = useState(true)
-  const [actionsOpen, setActionsOpen] = useState(false)
   const values = (section.field_values ?? {}) as FieldValues
   const isFreehand = section.content_template_id == null
   const suggestedFamily = extractSuggestedFamily(section.notes)
@@ -1129,13 +1104,15 @@ function SectionBlock({
   const headerFamily = isFreehand ? null : template!.family
   const headerKind   = isFreehand ? 'freehand' : template!.kind
 
+  // Read snippets for the toolbar (bound) AND for richtext slot
+  // chip insertion via context.
+  const snippets = useEditorSnippets()
+
   return (
     <div
       id={`section-${section.id}`}
       className={[
         'group/section relative scroll-mt-6 transition-colors',
-        // Document-style — no enclosing card, just a left border accent
-        // on hover/focus to keep the page reading like prose, not forms.
         'border-l-2 pl-4 py-2',
         isFreehand
           ? 'border-wm-warning/40 hover:border-wm-warning'
@@ -1146,119 +1123,87 @@ function SectionBlock({
               : 'border-wm-border hover:border-wm-border-strong',
       ].join(' ')}
     >
-      {/* Block header — compact toolbar with the bind-quality dot,
-          section title, and action affordances. Background blends with
-          the main editor canvas so individual sections feel like
-          consecutive paragraphs of one doc, not separate cards. */}
-      <div className="flex items-center gap-2 mb-2 -ml-1">
-        <GripVertical size={13} className="text-wm-text-subtle cursor-grab shrink-0 opacity-0 group-hover/section:opacity-100 transition-opacity" />
-        <span
-          className={[
-            'shrink-0 w-2 h-2 rounded-full',
-            bindQuality === 'good' ? 'bg-wm-success'
-            : bindQuality === 'partial' ? 'bg-wm-warning'
-            : 'bg-wm-text-subtle',
-          ].join(' ')}
-          title={
-            bindQuality === 'good' ? 'Bound cleanly — no overflow'
-            : bindQuality === 'partial' ? 'Bound with overflow or missing slots'
-            : 'Freehand — needs a template'
-          }
-        />
-        <button
-          type="button"
-          onClick={() => setOpen(o => !o)}
-          className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle hover:text-wm-accent-strong transition-colors min-w-0"
-        >
-          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-          <span className="truncate">{headerLabel}</span>
-        </button>
-        {headerFamily && (
-          <span className="text-[9px] tracking-wide text-wm-text-subtle italic">· {headerFamily}</span>
-        )}
-        {isFreehand && (
-          <WMStatusPill tone="warning" size="sm">{headerKind}</WMStatusPill>
-        )}
-        <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover/section:opacity-100 transition-opacity">
-          {!isFreehand && (
-            <WMIconButton label="Redo with AI" size="sm">
-              <Sparkles size={13} />
-            </WMIconButton>
-          )}
-          <div className="relative">
-            <WMIconButton
-              label="Section actions"
-              size="sm"
-              onClick={() => setActionsOpen(o => !o)}
+      {isFreehand ? (
+        <>
+          {/* Freehand inline header — quality dot + name + actions. */}
+          <div className="flex items-center gap-2 mb-2 -ml-1">
+            <GripVertical size={13} className="text-wm-text-subtle cursor-grab shrink-0 opacity-0 group-hover/section:opacity-100 transition-opacity" />
+            <span className="shrink-0 w-2 h-2 rounded-full bg-wm-text-subtle" title="Freehand — needs a template" />
+            <button
+              type="button"
+              onClick={() => setOpen(o => !o)}
+              className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle hover:text-wm-accent-strong transition-colors min-w-0"
             >
-              <MoreHorizontal size={13} />
-            </WMIconButton>
-            {actionsOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setActionsOpen(false)} />
-                <div className="absolute right-0 mt-1 w-48 rounded-md border border-wm-border bg-wm-bg-elevated shadow-lg z-20 py-1 animate-wm-slide-in-up">
-                  {!isFreehand && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => { setActionsOpen(false); onBindRequest() }}
-                        className="w-full text-left px-3 py-1.5 text-[12px] text-wm-text hover:bg-wm-bg-hover font-semibold"
-                      >
-                        Change template…
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setActionsOpen(false); onUnbindRequest() }}
-                        className="w-full text-left px-3 py-1.5 text-[12px] text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text"
-                      >
-                        Unbind to freehand
-                      </button>
-                    </>
-                  )}
-                </div>
-              </>
-            )}
+              {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+              <span className="truncate">Freehand section</span>
+            </button>
+            <WMStatusPill tone="warning" size="sm">freehand</WMStatusPill>
+            <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover/section:opacity-100 transition-opacity">
+              <WMIconButton label="Remove section" size="sm" onClick={onRemove}>
+                <Trash2 size={13} />
+              </WMIconButton>
+            </div>
           </div>
-          <WMIconButton label="Remove section" size="sm" onClick={onRemove}>
-            <Trash2 size={13} />
-          </WMIconButton>
-        </div>
-      </div>
-
-      {/* Block body */}
-      {open && (
-        <div className="space-y-4">
-          {isFreehand ? (
+          {open && (
             <FreehandBody
               value={typeof values.body === 'string' ? values.body : ''}
               onChange={(v) => setValue('body', v)}
               suggestedFamily={suggestedFamily}
               onBindRequest={onBindRequest}
             />
-          ) : (
-            <>
-              {bindReport && <BindReportBadge report={bindReport} />}
-              {overflowHtml && (
-                <OverflowPanel html={overflowHtml} onClear={onClearOverflow} />
-              )}
-              {template!.fields.length === 0 ? (
-                <p className="text-[12px] text-wm-text-subtle italic">This template has no editable fields.</p>
-              ) : (
-                // Key includes the template id so swapping templates
-                // remounts the editor — the lazy initializer rebuilds
-                // docHtml from the new template's slot shape, and the
-                // valuesRef resets. Without this, the editor would show
-                // the OLD doc against the NEW template.
-                <BrixiesSectionContent
-                  key={`${section.id}-${section.content_template_id}`}
-                  values={values}
-                  template={template!}
-                  onChangeFieldValues={(next) => onChange({ field_values: next })}
-                />
-              )}
-            </>
           )}
-        </div>
+        </>
+      ) : (
+        <>
+          {/* Bound section header — quality dot, name, slot count
+              chips, length warning chip, actions menu. */}
+          <SectionHeader
+            template={template!}
+            values={values}
+            open={open}
+            bindQuality={bindQuality}
+            onToggleOpen={() => setOpen(o => !o)}
+            onBindRequest={onBindRequest}
+            onUnbindRequest={onUnbindRequest}
+            onRemove={onRemove}
+          />
+          {open && template!.fields.length === 0 && (
+            <p className="text-[12px] text-wm-text-subtle italic">This template has no editable fields.</p>
+          )}
+          {open && template!.fields.length > 0 && (
+            <div className="space-y-2">
+              <SectionToolbar
+                template={template!}
+                values={values}
+                onChange={(next) => onChange({ field_values: next })}
+                snippets={snippets}
+              />
+              {/* Live-assembly canvas — Brixies source_html rendered as
+                  the editor itself. Key includes the template id so
+                  swapping templates remounts the parsed DOM. */}
+              <BrixiesLayoutEditor
+                key={`${section.id}-${section.content_template_id}`}
+                template={template!}
+                values={values}
+                onChange={(next) => onChange({ field_values: next })}
+                snippets={snippets}
+              />
+            </div>
+          )}
+          {/* Clear-overflow housekeeping — drops the legacy stash if
+              the strategist had one carried over from the prior editor. */}
+          {open && overflowHtml && (
+            <div className="mt-2 text-right">
+              <button
+                type="button"
+                onClick={onClearOverflow}
+                className="text-[10px] text-wm-text-subtle hover:text-wm-danger underline"
+              >
+                Clear legacy overflow ({Math.round(overflowHtml.length / 100) * 100}+ chars)
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
