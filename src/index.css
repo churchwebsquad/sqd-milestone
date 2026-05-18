@@ -484,48 +484,19 @@
     border-radius: 3px;
   }
 
-  /* ── Brixies live-assembly editor ─────────────────────────────────
-     The editor renders Brixies template source_html directly as the
-     authoring surface. The HTML already carries inline styles for
-     Brixies's pixel-faithful layout, but those are baked for the
-     1512px Desktop canvas. We override the outer width + a few inner
-     fixed-pixel widths so the rendered section fits the editor pane.
+  /* ── Brixies layout canvas — schema-driven structural editor ──────
+     Replaces the prior attempt to inline-render Brixies's source_html
+     (which was a frozen 1512px Figma export with fixed pixel widths
+     that broke when constrained). The canvas now renders a clean
+     Tailwind layout from the template's slot/group schema; styles
+     below scope just the EditableSlot inputs that live INSIDE this
+     canvas. */
 
-     Editable slots replace text content INSIDE the original Brixies
-     elements, so positioning + colors + typography stay intact. */
-
-  .bx-live-canvas {
-    width: 100%;
-    max-width: 100%;
-    overflow: hidden;
-    background: var(--color-wm-bg);
-    border-radius: 6px;
-  }
-  .bx-live-canvas > [data-layer] {
-    width: 100% !important;
-    max-width: 100% !important;
-    box-sizing: border-box;
-  }
-  .bx-live-canvas [data-layer] {
-    box-sizing: border-box;
-  }
-  .bx-live-canvas [data-layer="Container info"],
-  .bx-live-canvas [data-layer="Container"],
-  .bx-live-canvas .Container,
-  .bx-live-canvas .ContainerInfo {
-    max-width: 100% !important;
-    width: 100% !important;
-    flex-wrap: wrap;
-  }
-  .bx-live-canvas img[data-layer] {
-    max-width: 100% !important;
-    height: auto !important;
-  }
-
-  /* Inline-editable text slot — borderless, inherits the wrapper's
-     typography (so editing an H1 looks like an H1). Hover underline
-     hints what's editable. */
-  .bx-live-canvas .bx-slot-text {
+  /* Inline-editable text slot — borderless, inherits the surrounding
+     typography (so editing an H1 looks like an H1). Hover hint +
+     focus ring make editable regions obvious without breaking the
+     rendered look. */
+  .bx-canvas .bx-slot-text {
     background: transparent;
     border: none;
     outline: none;
@@ -536,16 +507,16 @@
     border-radius: 3px;
     transition: background 120ms ease, box-shadow 120ms ease;
   }
-  .bx-live-canvas .bx-slot-text:hover {
+  .bx-canvas .bx-slot-text:hover {
     background: rgba(126, 113, 236, 0.06);
   }
-  .bx-live-canvas .bx-slot-text:focus {
+  .bx-canvas .bx-slot-text:focus {
     background: var(--color-wm-bg);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-wm-accent) 25%, transparent);
   }
 
   /* Inline TipTap richtext — same hover/focus treatment as text. */
-  .bx-live-canvas .bx-slot-richtext {
+  .bx-canvas .bx-slot-richtext {
     outline: none;
     color: inherit;
     font: inherit;
@@ -554,28 +525,28 @@
     border-radius: 3px;
     transition: background 120ms ease, box-shadow 120ms ease;
   }
-  .bx-live-canvas .ProseMirror.bx-slot-richtext:hover {
+  .bx-canvas .ProseMirror.bx-slot-richtext:hover {
     background: rgba(126, 113, 236, 0.06);
   }
-  .bx-live-canvas .ProseMirror.bx-slot-richtext:focus {
+  .bx-canvas .ProseMirror.bx-slot-richtext:focus {
     background: var(--color-wm-bg);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-wm-accent) 25%, transparent);
   }
-  .bx-live-canvas .ProseMirror.bx-slot-richtext p {
+  .bx-canvas .ProseMirror.bx-slot-richtext p {
     margin: 0.3em 0;
   }
 
   /* CTA slot — single-line label → /route inline editor. The Brixies
      wrapper (data-layer="Buttons") keeps its rounded-pill styling. */
-  .bx-live-canvas .bx-slot-cta {
+  .bx-canvas .bx-slot-cta {
     display: inline-flex;
     align-items: baseline;
     gap: 0.4em;
     color: inherit;
     font: inherit;
   }
-  .bx-live-canvas .bx-cta-label,
-  .bx-live-canvas .bx-cta-url {
+  .bx-canvas .bx-cta-label,
+  .bx-canvas .bx-cta-url {
     background: transparent;
     border: none;
     outline: none;
@@ -585,25 +556,25 @@
     border-radius: 2px;
     min-width: 4em;
   }
-  .bx-live-canvas .bx-cta-label {
+  .bx-canvas .bx-cta-label {
     font-weight: 600;
   }
-  .bx-live-canvas .bx-cta-url {
+  .bx-canvas .bx-cta-url {
     opacity: 0.7;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 0.85em;
   }
-  .bx-live-canvas .bx-cta-arrow {
+  .bx-canvas .bx-cta-arrow {
     opacity: 0.6;
   }
-  .bx-live-canvas .bx-cta-label:focus,
-  .bx-live-canvas .bx-cta-url:focus {
+  .bx-canvas .bx-cta-label:focus,
+  .bx-canvas .bx-cta-url:focus {
     background: rgba(255, 255, 255, 0.6);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-wm-accent) 25%, transparent);
   }
 
   /* Image slot — non-editable grey placeholder. */
-  .bx-live-canvas .bx-slot-image {
+  .bx-canvas .bx-slot-image {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -616,7 +587,7 @@
   }
 
   /* Form-input slot — pill placeholder. */
-  .bx-live-canvas .bx-slot-forminput {
+  .bx-canvas .bx-slot-forminput {
     display: inline-flex;
     align-items: center;
     padding: 0.2em 0.5em;
@@ -629,7 +600,7 @@
   }
 
   /* Boolean slot. */
-  .bx-live-canvas .bx-slot-boolean {
+  .bx-canvas .bx-slot-boolean {
     display: inline-flex;
     align-items: center;
     gap: 0.4em;
@@ -638,7 +609,7 @@
   }
 
   /* Per-item × — reveals on group-item hover. */
-  .bx-live-canvas .bx-item-remove {
+  .bx-canvas .bx-item-remove {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -653,18 +624,18 @@
     margin-left: 0.4em;
     transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
   }
-  .bx-live-canvas .bx-group-item:hover .bx-item-remove,
-  .bx-live-canvas .bx-slot-cta:hover .bx-item-remove {
+  .bx-canvas .bx-group-item:hover .bx-item-remove,
+  .bx-canvas .bx-slot-cta:hover .bx-item-remove {
     opacity: 1;
   }
-  .bx-live-canvas .bx-item-remove:hover {
+  .bx-canvas .bx-item-remove:hover {
     background: var(--color-wm-danger-bg);
     color: var(--color-wm-danger);
     border-color: color-mix(in srgb, var(--color-wm-danger) 30%, transparent);
   }
 
   /* Add-item affordance — dashed pill appended at the end of a group container. */
-  .bx-live-canvas .bx-group-add {
+  .bx-canvas .bx-group-add {
     display: inline-flex;
     align-items: center;
     gap: 0.35em;
@@ -679,13 +650,13 @@
     user-select: none;
     transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
   }
-  .bx-live-canvas .bx-group-add:hover {
+  .bx-canvas .bx-group-add:hover {
     background: var(--color-wm-accent-tint);
     color: var(--color-wm-accent-strong);
     border-color: var(--color-wm-accent);
   }
   /* Group item wrapper — for hover-revealed × handles. */
-  .bx-live-canvas .bx-group-item {
+  .bx-canvas .bx-group-item {
     position: relative;
   }
 }

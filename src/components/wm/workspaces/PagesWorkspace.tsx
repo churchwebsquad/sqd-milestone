@@ -50,7 +50,7 @@ import { AddPageModal } from '../AddPageModal'
 import { SitemapProposalBanner } from '../SitemapProposalBanner'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { BrixiesEditor } from '../brixies/BrixiesEditor'
-import { BrixiesLayoutEditor } from '../brixies/BrixiesLayoutEditor'
+import { BrixiesLayoutCanvas } from '../brixies/BrixiesLayoutCanvas'
 import { SectionToolbar } from '../brixies/SectionToolbar'
 import { SectionHeader } from '../brixies/SectionHeader'
 import { fieldValuesToDocHtml, docHtmlToFieldValues } from '../../../lib/webBrixiesDoc'
@@ -1178,10 +1178,15 @@ function SectionBlock({
                 onChange={(next) => onChange({ field_values: next })}
                 snippets={snippets}
               />
-              {/* Live-assembly canvas — Brixies source_html rendered as
-                  the editor itself. Key includes the template id so
-                  swapping templates remounts the parsed DOM. */}
-              <BrixiesLayoutEditor
+              {/* Schema-driven layout canvas — renders a clean Tailwind
+                  structural representation of the bound template, with
+                  inline-editable slots and add/remove for groups. The
+                  prior source_html injection approach was thrown out
+                  because Brixies HTML is a 1512px Figma artifact that
+                  doesn't survive being constrained. Key includes the
+                  template id so swapping templates remounts the layout
+                  with the new slot shape. */}
+              <BrixiesLayoutCanvas
                 key={`${section.id}-${section.content_template_id}`}
                 template={template!}
                 values={values}
