@@ -27,6 +27,7 @@ import { supabase } from '../../lib/supabase'
 import { WebManagerShell } from '../../components/wm'
 import type { WMTabItem, WMAIStatusBadgeProps } from '../../components/wm'
 import { AssistantRail } from '../../components/wm/AssistantRail'
+import { SectionEditingProvider } from '../../components/wm/sectioneditor/SectionEditingContext'
 import { RoadmapWorkspace } from '../../components/wm/workspaces/RoadmapWorkspace'
 import { GlobalElementsWorkspace } from '../../components/wm/workspaces/GlobalElementsWorkspace'
 import { PagesWorkspace } from '../../components/wm/workspaces/PagesWorkspace'
@@ -117,27 +118,29 @@ export default function WebContentManagerPage() {
   const aiStatus = deriveAIStatus(project)
 
   return (
-    <WebManagerShell
-      projectId={project.id}
-      projectName={project.name}
-      breadcrumb={[{ label: 'Content Manager' }]}
-      aiStatus={aiStatus}
-      onClickAIStatus={() => setTab('roadmap')}
-      tabs={TABS}
-      activeTab={activeTab}
-      onTabChange={setTab}
-      rail={<AssistantRail projectId={project.id} activeTab={activeTab} />}
-      railOpen={railOpen}
-      onRailToggle={setRailOpen}
-    >
-      {activeTab === 'roadmap'    && <RoadmapWorkspace project={project} onChange={loadProject} />}
-      {activeTab === 'global'     && <GlobalElementsWorkspace project={project} onChange={loadProject} />}
-      {activeTab === 'pages'      && <PagesWorkspace project={project} onChange={loadProject} />}
-      {activeTab === 'snippets'   && <SnippetsWorkspace project={project} onChange={loadProject} />}
-      {activeTab === 'voice'      && <VoiceWorkspace project={project} />}
-      {activeTab === 'heuristics' && <HeuristicsWorkspace project={project} />}
-      {activeTab === 'rollup'     && <RollupWorkspace project={project} />}
-    </WebManagerShell>
+    <SectionEditingProvider>
+      <WebManagerShell
+        projectId={project.id}
+        projectName={project.name}
+        breadcrumb={[{ label: 'Content Manager' }]}
+        aiStatus={aiStatus}
+        onClickAIStatus={() => setTab('roadmap')}
+        tabs={TABS}
+        activeTab={activeTab}
+        onTabChange={setTab}
+        rail={<AssistantRail projectId={project.id} activeTab={activeTab} />}
+        railOpen={railOpen}
+        onRailToggle={setRailOpen}
+      >
+        {activeTab === 'roadmap'    && <RoadmapWorkspace project={project} onChange={loadProject} />}
+        {activeTab === 'global'     && <GlobalElementsWorkspace project={project} onChange={loadProject} />}
+        {activeTab === 'pages'      && <PagesWorkspace project={project} onChange={loadProject} />}
+        {activeTab === 'snippets'   && <SnippetsWorkspace project={project} onChange={loadProject} />}
+        {activeTab === 'voice'      && <VoiceWorkspace project={project} />}
+        {activeTab === 'heuristics' && <HeuristicsWorkspace project={project} />}
+        {activeTab === 'rollup'     && <RollupWorkspace project={project} />}
+      </WebManagerShell>
+    </SectionEditingProvider>
   )
 }
 

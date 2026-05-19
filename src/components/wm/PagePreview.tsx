@@ -1,36 +1,27 @@
 /**
- * Page preview — live Brixies render with current copy.
+ * Full-page Brixies preview — read-only render of every section in the
+ * page via the actual Brixies HTML with current field_values + snippet
+ * tokens substituted in.
  *
- * v3 restoration. Previous v1 of PagePreview was a stack of static
- * preview JPGs of each bound template. v2 deleted it entirely. v3
- * brings back a real preview: for each section, render the bound
- * template's `source_html` with the strategist's current
- * `field_values` substituted in, inside an isolated iframe at the
- * native 1512px Brixies viewport, scaled via CSS transform to fit
- * the editor pane.
- *
- * Read-only. Click any section in the preview → switch back to Edit
- * mode and scroll to that section.
- *
- * Why an iframe: Brixies HTML carries Brixies-specific styling and a
- * lot of inline pixel widths. Isolating in an iframe prevents Brixies
- * styles from bleeding into the app shell and lets us set the iframe
- * to its design width (1512px) and then scale-down externally.
+ * Each section renders in its own iframe at the native 1512px viewport,
+ * scaled via CSS transform to fit the preview pane. Click a section to
+ * pop back into Edit mode scrolled to it.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Image as ImageIcon } from 'lucide-react'
-import { renderSectionToHtml } from '../../lib/webBrixiesRender'
+import { renderSectionToHtml, type SnippetMap } from '../../lib/webBrixiesRender'
 import type { WebContentTemplate, WebSection } from '../../types/database'
 
 interface Props {
   sections: WebSection[]
   templates: Record<string, WebContentTemplate>
+  snippetMap: SnippetMap
   onSelectSection: (id: string) => void
 }
 
 const BRIXIES_VIEWPORT_PX = 1512
 
-export function PagePreview({ sections, templates, onSelectSection }: Props) {
+export function PagePreview({ sections, templates, snippetMap, onSelectSection }: Props) {
   if (sections.length === 0) {
     return (
       <div className="text-center py-16 text-[12px] text-wm-text-muted">
@@ -40,11 +31,11 @@ export function PagePreview({ sections, templates, onSelectSection }: Props) {
   }
 
   return (
-    <div className="max-w-[1200px] mx-auto px-4 pb-12">
+    <div className="max-w-[1280px] mx-auto px-4 pb-12">
       <p className="text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle mb-3 text-center">
         Live preview · Brixies render with current copy
       </p>
-      <div className="space-y-1 rounded-lg overflow-hidden border border-wm-border bg-wm-bg-elevated shadow-sm">
+      <div className="space-y-1 rounded-xl overflow-hidden border border-wm-border bg-wm-bg-elevated shadow-sm">
         {sections.map((section, idx) => {
           const template = section.content_template_id
             ? templates[section.content_template_id]
@@ -63,6 +54,7 @@ export function PagePreview({ sections, templates, onSelectSection }: Props) {
                 <SectionFrame
                   template={template}
                   values={(section.field_values ?? {}) as Record<string, unknown>}
+                  snippetMap={snippetMap}
                 />
               ) : (
                 <FreehandPreview section={section} />
@@ -82,19 +74,21 @@ export function PagePreview({ sections, templates, onSelectSection }: Props) {
 // ── Per-section iframe ───────────────────────────────────────────────
 
 function SectionFrame({
-  template, values,
+  template, values, snippetMap,
 }: {
   template: WebContentTemplate
   values: Record<string, unknown>
+  snippetMap: SnippetMap
 }) {
-  const html = useMemo(() => renderSectionToHtml(template, values), [template, values])
+  const html = useMemo(
+    () => renderSectionToHtml(template, values, snippetMap),
+    [template, values, snippetMap],
+  )
   const containerRef = useRef<HTMLDivElement | null>(null)
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const [scale, setScale] = useState(0.6)
   const [intrinsicHeight, setIntrinsicHeight] = useState(800)
 
-  // Recompute the scale whenever the container's width changes so the
-  // 1512px iframe shrinks to fit.
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -109,8 +103,6 @@ function SectionFrame({
     return () => obs.disconnect()
   }, [])
 
-  // Once the iframe has loaded its content, measure the intrinsic
-  // height so we can size the wrapper to match the scaled render.
   useEffect(() => {
     const iframe = iframeRef.current
     if (!iframe) return
@@ -121,39 +113,31 @@ function SectionFrame({
         const h = doc.body?.scrollHeight ?? doc.documentElement?.scrollHeight ?? 800
         setIntrinsicHeight(Math.max(h, 200))
       } catch {
-        // cross-origin guard — sandboxed iframes from srcdoc are same-origin
-        // by spec, but be defensive.
+        /* sandbox guard */
       }
     }
     iframe.addEventListener('load', measure)
-    // Re-measure after a short delay too — content may include images
-    // that load async and grow the document.
     const t = setTimeout(measure, 250)
     return () => { iframe.removeEventListener('load', measure); clearTimeout(t) }
   }, [html])
 
-  // The iframe is sized to 1512 × intrinsicHeight; the wrapper is sized
-  // to (1512 * scale) × (intrinsicHeight * scale) so the section's
-  // outer container takes the right space in the page flow.
   const wrappedHeight = Math.round(intrinsicHeight * scale)
 
   return (
-    <div ref={containerRef} className="bx-preview-section-wrap">
-      <div className="bx-preview-section-inner" style={{ height: `${wrappedHeight}px` }}>
+    <div ref={containerRef} className="page-edit-iframe-wrap relative bg-white">
+      <div className="page-edit-iframe-inner" style={{ height: `${wrappedHeight}px` }}>
         <iframe
           ref={iframeRef}
           srcDoc={buildIframeDoc(html)}
           title={template.layer_name}
-          className="bx-preview-iframe"
+          className="page-edit-iframe pointer-events-none"
           style={{
             width: `${BRIXIES_VIEWPORT_PX}px`,
             height: `${intrinsicHeight}px`,
             transform: `scale(${scale})`,
             transformOrigin: 'top left',
+            border: 0,
           }}
-          // The iframe content is built from our own trusted catalog
-          // source_html — but sandbox anyway to block any script /
-          // navigation that might have slipped through.
           sandbox=""
         />
       </div>
@@ -161,8 +145,6 @@ function SectionFrame({
   )
 }
 
-/** Wrap the section's substituted HTML in a minimal iframe document
- *  with base styles for typography defaults + image fallback. */
 function buildIframeDoc(html: string): string {
   return `<!doctype html>
 <html>
@@ -170,7 +152,7 @@ function buildIframeDoc(html: string): string {
 <meta charset="utf-8">
 <style>
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; font-family: Inter, system-ui, -apple-system, sans-serif; }
+  html, body { margin: 0; padding: 0; font-family: Inter, system-ui, -apple-system, sans-serif; color: #1a1a2e; background: #fff; }
   body { width: 1512px; }
   img { max-width: 100%; height: auto; }
   a { color: inherit; text-decoration: none; }
@@ -185,10 +167,12 @@ function buildIframeDoc(html: string): string {
 function FreehandPreview({ section }: { section: WebSection }) {
   const values = (section.field_values ?? {}) as Record<string, unknown>
   const body = typeof values.body === 'string' ? values.body : ''
-  // Strip HTML for a single-line preview.
-  const div = typeof document !== 'undefined' ? document.createElement('div') : null
-  if (div) div.innerHTML = body
-  const text = (div?.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 140)
+  const text = useMemo(() => {
+    if (typeof document === 'undefined') return ''
+    const d = document.createElement('div')
+    d.innerHTML = body
+    return (d.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 140)
+  }, [body])
   return (
     <div className="bg-wm-warning-bg/40 border-l-4 border-wm-warning px-6 py-8">
       <div className="flex items-center gap-2 mb-2 text-wm-warning">

@@ -891,7 +891,17 @@ function buildSectionNotes(section: BriefSection): string {
  */
 export function extractSuggestedFamily(notes: string | null | undefined): string | null {
   if (!notes) return null
-  const match = notes.match(/^\s*Suggested template family:\s*(.+)$/im)
+  // v4 wraps notes as JSON `{ name, description, legacy }` — when so,
+  // the brief metadata lives in `legacy`. Otherwise treat raw.
+  let source = notes
+  const trimmed = notes.trim()
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as { legacy?: unknown }
+      if (typeof parsed.legacy === 'string') source = parsed.legacy
+    } catch { /* fall through */ }
+  }
+  const match = source.match(/^\s*Suggested template family:\s*(.+)$/im)
   return match ? match[1].trim() : null
 }
 

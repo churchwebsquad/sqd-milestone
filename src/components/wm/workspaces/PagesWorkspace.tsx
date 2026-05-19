@@ -28,20 +28,18 @@
  *   - Audit engine scans this surface against heuristics
  */
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  FileText, Loader2, ChevronDown, ChevronRight, Plus, Trash2,
-  Sparkles, RotateCw, Eye, Edit3, GripVertical, MoreHorizontal, Upload, Archive,
+  FileText, Loader2, Plus, Trash2, Eye, Edit3, Upload, Archive, MoreHorizontal,
+  ChevronDown,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { loadEditorSnippets } from '../../../lib/webSnippets'
-import { WMCard } from '../Card'
 import { WMButton } from '../Button'
 import { WMIconButton } from '../IconButton'
 import { WMStatusPill } from '../StatusPill'
 import type { WMStatusTone } from '../StatusPill'
-import { WMRichTextEditor } from '../RichTextEditor'
 import type { WMSnippetOption } from '../RichTextEditor'
 import { WMCatalogSidePanel } from '../CatalogSidePanel'
 import { WMAIAttribution } from '../AIAttribution'
@@ -49,23 +47,21 @@ import { PageBriefImportModal } from '../PageBriefImportModal'
 import { AddPageModal } from '../AddPageModal'
 import { SitemapProposalBanner } from '../SitemapProposalBanner'
 import { ConfirmDialog } from '../ConfirmDialog'
-import { BrixiesEditor } from '../brixies/BrixiesEditor'
-import { BrixiesLayoutCanvas } from '../brixies/BrixiesLayoutCanvas'
-import { SectionToolbar } from '../brixies/SectionToolbar'
-import { SectionHeader } from '../brixies/SectionHeader'
-import { SnippetFocusProvider } from '../brixies/SnippetFocusContext'
 import { PagePreview } from '../PagePreview'
 import { WMSegmentedToggle } from '../SegmentedToggle'
+import { SectionList } from '../sectioneditor/SectionList'
+import { useSectionDetailPublisher } from '../sectioneditor/SectionEditingContext'
 import { fieldValuesToDocHtml, docHtmlToFieldValues } from '../../../lib/webBrixiesDoc'
-import { refreshSnippetChips, extractSuggestedFamily, type PageBrief } from '../../../lib/webPageBrief'
+import { extractSuggestedFamily, type PageBrief } from '../../../lib/webPageBrief'
 import {
   composeBind, findBriefSection, extractSectionIdFromNotes,
   rankVariantsByBrief, type RankedVariant, type ComposedBindResult,
 } from '../../../lib/webBindTemplate'
 import { parseCuratedLibrary } from '../../../lib/webCuratedLibrary'
+import type { SnippetMap } from '../../../lib/webBrixiesRender'
 import type {
   StrategyWebProject, WebPage, WebSection, WebContentTemplate,
-  WebFieldDef, WebSlotDef, WebGroupDef, WebTemplateKind,
+  WebTemplateKind,
 } from '../../../types/database'
 
 interface Props {
@@ -203,8 +199,9 @@ export function PagesWorkspace({ project, onChange }: Props) {
   return (
     <SnippetsContext.Provider value={snippets}>
       <div className="flex min-h-[calc(100vh-120px)]">
-        {/* Page list (left) */}
-        <aside className="w-72 shrink-0 border-r border-wm-border bg-wm-bg-elevated overflow-y-auto flex flex-col">
+        {/* Page list (left) — sticky so it stays in view while the
+            editor canvas scrolls. */}
+        <aside className="w-72 shrink-0 border-r border-wm-border bg-wm-bg-elevated overflow-y-auto flex flex-col sticky top-0 self-start max-h-[calc(100vh-120px)]">
           {/* Import action — always available */}
           <div className="p-3 border-b border-wm-border sticky top-0 bg-wm-bg-elevated z-10">
             <WMButton
@@ -585,6 +582,9 @@ function PageEditor({
   // assembly canvas; Preview renders the full page via the bound
   // templates' source_html with current copy substituted (iframe).
   const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit')
+  // The currently-selected section in the canvas — drives the
+  // right-side details panel.
+  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null)
   // Bind-to-template flow: when set, opens the catalog panel pre-filtered
   // by the brief-suggested family and routes the pick into bindSection().
   const [bindingSection, setBindingSection] = useState<WebSection | null>(null)
@@ -904,134 +904,186 @@ function PageEditor({
     await updateSection(sectionId, { field_values: rest })
   }
 
-  return (
-    <div className="px-6 md:px-10 py-6 md:py-8 max-w-4xl mx-auto">
-      {/* Page header */}
-      <header className="mb-6">
-        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-          <div className="flex items-center gap-2 flex-wrap">
-            <WMStatusPill tone={STATUS_TONES[page.content_status]} size="md">
-              {page.content_status === 'in_review' ? 'in review' : page.content_status}
-            </WMStatusPill>
-            {page.ai_drafted_at && (
-              <WMAIAttribution
-                draftedAt={page.ai_drafted_at}
-                muted={page.edited_since_ai}
-                label={page.edited_since_ai ? 'AI draft (edited)' : 'AI draft'}
-              />
-            )}
-            <span className="text-[11px] text-wm-text-subtle">Phase {page.phase}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <WMSegmentedToggle
-              options={[
-                { key: 'edit',    label: 'Edit',    icon: <Edit3 size={11} /> },
-                { key: 'preview', label: 'Preview', icon: <Eye   size={11} /> },
-              ]}
-              active={viewMode}
-              onChange={setViewMode}
-            />
-            <StatusMenu current={page.content_status} onChange={setStatus} />
-            <WMIconButton label="More page actions" onClick={archivePage}>
-              <MoreHorizontal size={14} />
-            </WMIconButton>
-          </div>
-        </div>
+  /** Swap two sections' sort_order to move one up (-1) or down (+1). */
+  const moveSection = async (sectionId: string, dir: -1 | 1) => {
+    const idx = sections.findIndex(s => s.id === sectionId)
+    if (idx < 0) return
+    const targetIdx = idx + dir
+    if (targetIdx < 0 || targetIdx >= sections.length) return
+    const a = sections[idx]
+    const b = sections[targetIdx]
+    // Optimistic swap so the user sees the move immediately.
+    setSections(prev => {
+      const next = [...prev]
+      next[idx] = { ...b, sort_order: a.sort_order }
+      next[targetIdx] = { ...a, sort_order: b.sort_order }
+      return next.sort((x, y) => x.sort_order - y.sort_order)
+    })
+    await Promise.all([
+      supabase.from('web_sections').update({ sort_order: b.sort_order }).eq('id', a.id),
+      supabase.from('web_sections').update({ sort_order: a.sort_order }).eq('id', b.id),
+    ])
+    void markEdited()
+  }
 
+  /** Compute bind quality for the section strip dot. */
+  const bindQualityFor = (section: WebSection): 'good' | 'partial' | 'attention' => {
+    if (!section.content_template_id) return 'attention'
+    const values = (section.field_values ?? {}) as FieldValues
+    const report = values.__bind_report as
+      | { matched_from_brief: string[]; matched_from_body: string[]; missing_slots: string[]; unmatched_brief_keys: string[] }
+      | undefined
+    if (!report) return 'good'
+    return (report.unmatched_brief_keys.length > 0 || report.missing_slots.length > 1) ? 'partial' : 'good'
+  }
+
+  const snippets = useEditorSnippets()
+  const snippetMap = useMemo<SnippetMap>(() => {
+    const m: Record<string, string> = {}
+    for (const s of snippets) m[s.token] = s.resolvedValue
+    return m
+  }, [snippets])
+
+  const selectedSection = selectedSectionId
+    ? sections.find(s => s.id === selectedSectionId) ?? null
+    : null
+  const selectedTemplate = selectedSection?.content_template_id
+    ? (templates[selectedSection.content_template_id] ?? null)
+    : null
+
+  // Auto-clear selection if the selected section was removed.
+  useEffect(() => {
+    if (selectedSectionId && !sections.some(s => s.id === selectedSectionId)) {
+      setSelectedSectionId(null)
+    }
+  }, [sections, selectedSectionId])
+
+  // Publish the active section's data + handlers to the editing
+  // context so the AssistantRail's Section tab renders the panel.
+  const publishDetail = useSectionDetailPublisher()
+  useEffect(() => {
+    if (viewMode !== 'edit' || !selectedSection) {
+      publishDetail(null)
+      return
+    }
+    publishDetail({
+      section: selectedSection,
+      template: selectedTemplate,
+      snippets,
+      onChange: (patch) => void updateSection(selectedSection.id, patch),
+      onClose: () => setSelectedSectionId(null),
+      onChangeVariant: () => setBindingSection(selectedSection),
+      onUnbind: () => void unbindSection(selectedSection.id),
+      onRemove: () => void archiveSection(selectedSection.id),
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSection, selectedTemplate, snippets, viewMode])
+
+  // Always clear on unmount so the rail doesn't stick after navigation.
+  useEffect(() => {
+    return () => publishDetail(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Page-level header — title / slug / status / Edit-Preview toggle.
+  const headerNode = (
+    <header className="mb-5">
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <WMStatusPill tone={STATUS_TONES[page.content_status]} size="md">
+            {page.content_status === 'in_review' ? 'in review' : page.content_status}
+          </WMStatusPill>
+          {page.ai_drafted_at && (
+            <WMAIAttribution
+              draftedAt={page.ai_drafted_at}
+              muted={page.edited_since_ai}
+              label={page.edited_since_ai ? 'AI draft (edited)' : 'AI draft'}
+            />
+          )}
+          <span className="text-[11px] text-wm-text-subtle">Phase {page.phase}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <WMSegmentedToggle
+            options={[
+              { key: 'edit',    label: 'Edit',    icon: <Edit3 size={11} /> },
+              { key: 'preview', label: 'Preview', icon: <Eye   size={11} /> },
+            ]}
+            active={viewMode}
+            onChange={setViewMode}
+          />
+          <StatusMenu current={page.content_status} onChange={setStatus} />
+          <WMIconButton label="More page actions" onClick={archivePage}>
+            <MoreHorizontal size={14} />
+          </WMIconButton>
+        </div>
+      </div>
+
+      <input
+        type="text"
+        value={titleDraft}
+        onChange={e => { setTitleDraft(e.target.value); setTitleDirty(true) }}
+        onBlur={() => { if (titleDirty) void saveTitleSlug() }}
+        className="w-full text-3xl font-bold text-wm-text bg-transparent outline-none focus:bg-wm-bg-hover rounded px-1 -mx-1 py-0.5 transition-colors"
+      />
+      <div className="mt-1 flex items-center gap-1 text-[12px] text-wm-text-subtle">
+        <span>/</span>
         <input
           type="text"
-          value={titleDraft}
-          onChange={e => { setTitleDraft(e.target.value); setTitleDirty(true) }}
+          value={slugDraft}
+          onChange={e => { setSlugDraft(e.target.value); setTitleDirty(true) }}
           onBlur={() => { if (titleDirty) void saveTitleSlug() }}
-          className="w-full text-3xl font-bold text-wm-text bg-transparent outline-none focus:bg-wm-bg-hover rounded px-1 -mx-1 py-0.5 transition-colors"
+          className="bg-transparent outline-none focus:bg-wm-bg-hover rounded px-1 -mx-1 py-0.5 transition-colors text-wm-text-muted min-w-0 flex-1"
         />
-        <div className="mt-1 flex items-center gap-1 text-[12px] text-wm-text-subtle">
-          <span>/</span>
-          <input
-            type="text"
-            value={slugDraft}
-            onChange={e => { setSlugDraft(e.target.value); setTitleDirty(true) }}
-            onBlur={() => { if (titleDirty) void saveTitleSlug() }}
-            className="bg-transparent outline-none focus:bg-wm-bg-hover rounded px-1 -mx-1 py-0.5 transition-colors text-wm-text-muted min-w-0 flex-1"
-          />
-          {savingTitle && <Loader2 size={11} className="animate-spin" />}
-        </div>
-      </header>
-
-      {/* Preview mode — stacked Brixies live renders with current copy.
-          Click any section to drop back into Edit mode scrolled to it. */}
-      {viewMode === 'preview' ? (
-        <PagePreview
-          sections={sections}
-          templates={templates}
-          onSelectSection={(id) => {
-            setViewMode('edit')
-            queueMicrotask(() => {
-              document.getElementById(`section-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-            })
-          }}
-        />
-      ) : (
-      <SnippetFocusProvider>
-      <div className="space-y-6">
-        {loadingSections ? (
-          Array.from({ length: 2 }).map((_, i) => (
-            <div key={i} className="h-24 rounded-lg bg-wm-bg-hover animate-pulse" />
-          ))
-        ) : sections.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-wm-border bg-wm-bg p-8 text-center">
-            <Plus size={20} className="text-wm-text-subtle mx-auto mb-2" />
-            <p className="text-[13px] font-semibold text-wm-text">Add the first section</p>
-            <p className="text-[11px] text-wm-text-muted mt-1 mb-4">
-              In Phase C the AI copywriter pre-drafts every page. For now, add sections manually.
-            </p>
-            <div className="flex items-center justify-center gap-2 flex-wrap">
-              <WMButton variant="primary" size="sm" iconLeft={<Plus size={12} />} onClick={() => setPickerOpen(true)}>
-                From template
-              </WMButton>
-              <WMButton variant="secondary" size="sm" iconLeft={<Plus size={12} />} onClick={() => void addFreehandSection()}>
-                Freehand
-              </WMButton>
-            </div>
-          </div>
-        ) : (
-          sections.map(section => (
-            <SectionBlock
-              key={section.id}
-              section={section}
-              template={section.content_template_id ? templates[section.content_template_id] : null}
-              onChange={(patch) => void updateSection(section.id, patch)}
-              onRemove={() => void archiveSection(section.id)}
-              onBindRequest={() => setBindingSection(section)}
-              onUnbindRequest={() => void unbindSection(section.id)}
-              onClearOverflow={() => void clearOverflow(section.id)}
-            />
-          ))
-        )}
-
-        {/* + Add section between/below */}
-        {sections.length > 0 && (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setPickerOpen(true)}
-              className="flex-1 rounded-md border border-dashed border-wm-border bg-wm-bg py-3 inline-flex items-center justify-center gap-1.5 text-[12px] font-semibold text-wm-text-muted hover:border-wm-border-focus hover:text-wm-text transition-colors"
-            >
-              <Plus size={12} /> Add from template
-            </button>
-            <button
-              type="button"
-              onClick={() => void addFreehandSection()}
-              className="rounded-md border border-dashed border-wm-border bg-wm-bg py-3 px-4 inline-flex items-center gap-1.5 text-[12px] font-semibold text-wm-text-muted hover:border-wm-border-focus hover:text-wm-text transition-colors"
-              title="Add a freehand TipTap-only block — for one-off copy outside the Brixies template set"
-            >
-              <Plus size={12} /> Freehand
-            </button>
-          </div>
-        )}
+        {savingTitle && <Loader2 size={11} className="animate-spin" />}
       </div>
-      </SnippetFocusProvider>
-      )}
+    </header>
+  )
+
+  return (
+    <div className="flex min-h-[calc(100vh-120px)]">
+      {/* Single scrollable canvas — the section details panel lives in
+          the AssistantRail (see SectionEditingContext). */}
+      <div className="flex-1 min-w-0 overflow-y-auto">
+        <div className="px-6 md:px-10 py-6 max-w-4xl mx-auto">
+          {headerNode}
+
+          {viewMode === 'preview' ? (
+            <PagePreview
+              sections={sections}
+              templates={templates}
+              snippetMap={snippetMap}
+              onSelectSection={(id) => {
+                setViewMode('edit')
+                setSelectedSectionId(id)
+                queueMicrotask(() => {
+                  document.getElementById(`section-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                })
+              }}
+            />
+          ) : loadingSections ? (
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-32 rounded-xl bg-wm-bg-hover animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            <SectionList
+              sections={sections}
+              templates={templates}
+              selectedId={selectedSectionId}
+              snippetMap={snippetMap}
+              bindQualityFor={bindQualityFor}
+              onSelect={setSelectedSectionId}
+              onMoveSection={(id, dir) => void moveSection(id, dir)}
+              onChangeVariant={(section) => setBindingSection(section)}
+              onUnbind={(id) => void unbindSection(id)}
+              onRemove={(id) => void archiveSection(id)}
+              onInsertBefore={() => setPickerOpen(true)}
+              onInsertAfter={() => setPickerOpen(true)}
+            />
+          )}
+        </div>
+      </div>
 
       {/* Catalog picker — add a new section */}
       <WMCatalogSidePanel
@@ -1045,14 +1097,11 @@ function PageEditor({
         onSelect={async (ids) => { if (ids[0]) await addSection(ids[0]) }}
       />
 
-      {/* Catalog picker — bind a freehand section to a Brixies template.
-          Pre-filtered by the brief-suggested family when present so the
-          strategist lands on the right variants immediately. Ranked by
-          structural fit; AI re-rank available when a brief is present. */}
+      {/* Catalog picker — bind a section to a Brixies template / change variant. */}
       <WMCatalogSidePanel
         open={bindingSection !== null}
         onClose={() => setBindingSection(null)}
-        title="Bind to Brixies template"
+        title={bindingSection?.content_template_id ? 'Change variant' : 'Bind to Brixies template'}
         subtitle={bindingSection
           ? (extractSuggestedFamily(bindingSection.notes) ?? page.name)
           : page.name}
@@ -1065,7 +1114,6 @@ function PageEditor({
         siteLibraryIds={siteLibraryIds}
         cardSubtitles={Object.fromEntries(bindRanking.map(r => [r.template.id, r.rationale]))}
         onRequestAIRank={
-          // Only offer AI ranking when there's a brief to weigh on.
           (bindingSection && findBriefSection(pageBrief, extractSectionIdFromNotes(bindingSection.notes)))
             ? aiRankBindCandidates
             : undefined
@@ -1078,726 +1126,6 @@ function PageEditor({
           }
         }}
       />
-    </div>
-  )
-}
-
-// ── Section block ─────────────────────────────────────────────────────
-
-function SectionBlock({
-  section, template, onChange, onRemove, onBindRequest, onUnbindRequest, onClearOverflow,
-}: {
-  section: WebSection
-  template: WebContentTemplate | null | undefined
-  onChange: (patch: Partial<WebSection>) => void
-  onRemove: () => void
-  onBindRequest: () => void
-  onUnbindRequest: () => void
-  onClearOverflow: () => void
-}) {
-  const [open, setOpen] = useState(true)
-  const values = (section.field_values ?? {}) as FieldValues
-  const isFreehand = section.content_template_id == null
-  const suggestedFamily = extractSuggestedFamily(section.notes)
-  const overflowHtml = typeof values.__overflow_html === 'string' ? values.__overflow_html : null
-  const bindReport = values.__bind_report as
-    | { matched_from_brief: string[]; matched_from_body: string[]; missing_slots: string[]; unmatched_brief_keys: string[] }
-    | undefined
-
-  // Bind quality — green = fully mapped, yellow = some overflow / missing
-  // slots, red = freehand or major unmapped content. Drives the dot at
-  // the section header so the strategist can scan for what needs review.
-  const bindQuality: 'good' | 'partial' | 'attention' =
-    isFreehand ? 'attention'
-    : !bindReport ? 'good'
-    : (bindReport.unmatched_brief_keys.length > 0 || bindReport.missing_slots.length > 1) ? 'partial'
-    : 'good'
-
-  const setValue = (key: string, v: unknown) => {
-    onChange({ field_values: { ...values, [key]: v } })
-  }
-
-  // Template was referenced but isn't in the catalog — broken state
-  if (!isFreehand && !template) {
-    return (
-      <div className="rounded-lg border border-wm-danger/30 bg-wm-danger-bg p-4">
-        <p className="text-[12px] text-wm-danger">
-          Section's template (id: <code>{section.content_template_id}</code>) not found in the catalog.
-        </p>
-      </div>
-    )
-  }
-
-  // Header content varies for freehand vs template-bound
-  const headerLabel = isFreehand ? 'Freehand section' : template!.layer_name
-  const headerFamily = isFreehand ? null : template!.family
-  const headerKind   = isFreehand ? 'freehand' : template!.kind
-
-  // Read snippets for the toolbar (bound) AND for richtext slot
-  // chip insertion via context.
-  const snippets = useEditorSnippets()
-
-  return (
-    <div
-      id={`section-${section.id}`}
-      className={[
-        'group/section relative scroll-mt-6 transition-colors',
-        'border-l-2 pl-4 py-2',
-        isFreehand
-          ? 'border-wm-warning/40 hover:border-wm-warning'
-          : bindQuality === 'good'
-            ? 'border-wm-success/40 hover:border-wm-success'
-            : bindQuality === 'partial'
-              ? 'border-wm-warning/40 hover:border-wm-warning'
-              : 'border-wm-border hover:border-wm-border-strong',
-      ].join(' ')}
-    >
-      {isFreehand ? (
-        <>
-          {/* Freehand inline header — quality dot + name + actions. */}
-          <div className="flex items-center gap-2 mb-2 -ml-1">
-            <GripVertical size={13} className="text-wm-text-subtle cursor-grab shrink-0 opacity-0 group-hover/section:opacity-100 transition-opacity" />
-            <span className="shrink-0 w-2 h-2 rounded-full bg-wm-text-subtle" title="Freehand — needs a template" />
-            <button
-              type="button"
-              onClick={() => setOpen(o => !o)}
-              className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle hover:text-wm-accent-strong transition-colors min-w-0"
-            >
-              {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-              <span className="truncate">Freehand section</span>
-            </button>
-            <WMStatusPill tone="warning" size="sm">freehand</WMStatusPill>
-            <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover/section:opacity-100 transition-opacity">
-              <WMIconButton label="Remove section" size="sm" onClick={onRemove}>
-                <Trash2 size={13} />
-              </WMIconButton>
-            </div>
-          </div>
-          {open && (
-            <FreehandBody
-              value={typeof values.body === 'string' ? values.body : ''}
-              onChange={(v) => setValue('body', v)}
-              suggestedFamily={suggestedFamily}
-              onBindRequest={onBindRequest}
-            />
-          )}
-        </>
-      ) : (
-        <>
-          {/* Bound section header — quality dot, name, slot count
-              chips, length warning chip, actions menu. */}
-          <SectionHeader
-            template={template!}
-            values={values}
-            open={open}
-            bindQuality={bindQuality}
-            onToggleOpen={() => setOpen(o => !o)}
-            onBindRequest={onBindRequest}
-            onUnbindRequest={onUnbindRequest}
-            onRemove={onRemove}
-          />
-          {open && template!.fields.length === 0 && (
-            <p className="text-[12px] text-wm-text-subtle italic">This template has no editable fields.</p>
-          )}
-          {open && template!.fields.length > 0 && (
-            <div className="space-y-2">
-              <SectionToolbar
-                template={template!}
-                values={values}
-                onChange={(next) => onChange({ field_values: next })}
-                snippets={snippets}
-              />
-              {/* Schema-driven layout canvas — renders a clean Tailwind
-                  structural representation of the bound template, with
-                  inline-editable slots and add/remove for groups. The
-                  prior source_html injection approach was thrown out
-                  because Brixies HTML is a 1512px Figma artifact that
-                  doesn't survive being constrained. Key includes the
-                  template id so swapping templates remounts the layout
-                  with the new slot shape. */}
-              <BrixiesLayoutCanvas
-                key={`${section.id}-${section.content_template_id}`}
-                template={template!}
-                values={values}
-                onChange={(next) => onChange({ field_values: next })}
-                snippets={snippets}
-              />
-            </div>
-          )}
-          {/* Clear-overflow housekeeping — drops the legacy stash if
-              the strategist had one carried over from the prior editor. */}
-          {open && overflowHtml && (
-            <div className="mt-2 text-right">
-              <button
-                type="button"
-                onClick={onClearOverflow}
-                className="text-[10px] text-wm-text-subtle hover:text-wm-danger underline"
-              >
-                Clear legacy overflow ({Math.round(overflowHtml.length / 100) * 100}+ chars)
-              </button>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  )
-}
-
-/** Detect whether a template field is "doc-handled" — represented in
- *  the Brixies TipTap editor rather than the form-row stack below it.
- *  Tagline / heading / richtext body / CTA / image slots + CTA-shaped
- *  groups + the first card-shaped group flow through the editor;
- *  everything else (additional groups, datetime, boolean) stays as
- *  form rows. */
-function isDocHandledField(field: WebFieldDef, template: WebContentTemplate): boolean {
-  if (field.kind === 'slot') {
-    const c = field.key.toLowerCase().replace(/[_\s-]+/g, '')
-    if (field.heading_level || c === 'h' || c.includes('heading') || c.includes('title')) return true
-    if (c.includes('tagline') || c.includes('eyebrow') || c.includes('kicker')) return true
-    if (field.type === 'richtext') return true
-    if (field.type === 'cta') return true
-    if (field.type === 'image') return true
-    return false
-  }
-  // CTA-shaped group → handled as a stream of CTA nodes.
-  const c = field.key.toLowerCase().replace(/[_\s-]+/g, '')
-  const isCta = c === 'cta' || c === 'ctas' || c.includes('button') || c.includes('action')
-  if (isCta) return true
-  // First card-shaped group on the template → handled as a Card Grid
-  // node. Additional card-shaped groups (rare) still render as form
-  // rows below.
-  const isCardShape = c.includes('card') || c === 'items' || c === 'features'
-    || c === 'tiles' || c === 'blocks' || c === 'list' || c === 'rows'
-    || c === 'pillars' || c === 'tiers' || c === 'programs'
-    || c === 'members' || c === 'groups' || c === 'classes'
-    || c === 'events' || c === 'steps' || c === 'doctrines'
-    || c === 'values' || c === 'routing'
-  if (!isCardShape) return false
-  const firstCardGroup = template.fields.find(f => {
-    if (f.kind !== 'group') return false
-    const fc = f.key.toLowerCase().replace(/[_\s-]+/g, '')
-    if (fc === 'cta' || fc === 'ctas' || fc.includes('button') || fc.includes('action')) return false
-    return fc.includes('card') || fc === 'items' || fc === 'features'
-      || fc === 'tiles' || fc === 'blocks' || fc === 'list' || fc === 'rows'
-      || fc === 'pillars' || fc === 'tiers' || fc === 'programs'
-      || fc === 'members' || fc === 'groups' || fc === 'classes'
-      || fc === 'events' || fc === 'steps' || fc === 'doctrines'
-      || fc === 'values' || fc === 'routing'
-  })
-  return firstCardGroup?.key === field.key
-}
-
-/** The Brixies-aware content surface for a bound section. One TipTap
- *  editor handles the doc-shaped slots (tagline + heading + body + CTAs);
- *  any remaining slots / groups render as form rows below.
- *
- *  Round-trip: field_values → doc HTML on first mount, then editor
- *  changes drive doc state; on each change docHtmlToFieldValues stuffs
- *  the new doc back into the template's slots and the section row is
- *  patched. Group items (cards) stay in field_values and are edited
- *  via the form rows below — they're preserved across doc edits. */
-function BrixiesSectionContent({
-  values, template, onChangeFieldValues,
-}: {
-  values: FieldValues
-  template: WebContentTemplate
-  onChangeFieldValues: (next: FieldValues) => void
-}) {
-  const snippets = useEditorSnippets()
-  // The doc IS the source of truth once mounted. We initialize ONCE
-  // from field_values; further changes flow editor → values, never the
-  // other way around. Avoids the parent-derives-from-values ping-pong
-  // that was killing cursor position and CTA input focus on every keystroke.
-  //
-  // External writes to field_values (AI redo, etc.) require remounting —
-  // SectionBlock's key is the section id, so changing sections rebuilds.
-  // If an out-of-band write happens to the same section, the strategist
-  // can re-open it to pick up the new content.
-  const [docHtml, setDocHtml] = useState<string>(() => fieldValuesToDocHtml(values, template))
-
-  // We keep a ref to the latest non-doc values so the change handler
-  // can preserve them without subscribing to values changes via state
-  // (which would re-trigger the editor).
-  const valuesRef = useRef(values)
-  valuesRef.current = values
-
-  const handleDocChange = (nextDoc: string) => {
-    setDocHtml(nextDoc)
-    // Translate the doc back to field_values, preserving group items
-    // and non-doc slots untouched. Read from the ref so we always see
-    // the latest values without re-rendering when they change.
-    const v = valuesRef.current
-    const preserved: Record<string, unknown> = {}
-    for (const f of template.fields) {
-      if (!isDocHandledField(f, template)) preserved[f.key] = v[f.key]
-    }
-    for (const k of Object.keys(v)) {
-      if (k.startsWith('__')) preserved[k] = v[k]
-    }
-    const { field_values } = docHtmlToFieldValues(nextDoc, template, preserved)
-    onChangeFieldValues(field_values)
-  }
-
-  // Doc-handled fields are rendered by the editor; everything else
-  // (additional groups, datetime/boolean slots, secondary cards groups)
-  // renders as form rows below under "Other fields".
-  const remainingFields = template.fields.filter(f => !isDocHandledField(f, template))
-
-  return (
-    <div className="space-y-4">
-      <BrixiesEditor
-        value={docHtml}
-        onChange={handleDocChange}
-        snippets={snippets}
-        placeholder="Start writing the section content…"
-      />
-      {remainingFields.length > 0 && (
-        <div className="space-y-3 pt-2 border-t border-wm-border/60">
-          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
-            Other fields
-          </p>
-          {remainingFields.map((f, i) => (
-            <FieldRow
-              key={f.key + '-' + i}
-              field={f}
-              value={values[f.key]}
-              onChange={(v) => {
-                onChangeFieldValues({ ...values, [f.key]: v })
-              }}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** Bind report — surfaces what the auto-mapping did when a freehand
- *  section was bound to a template. Strategist sees at a glance which
- *  slots came from the brief vs body heuristics, and what didn't land. */
-function BindReportBadge({
-  report,
-}: {
-  report: { matched_from_brief: string[]; matched_from_body: string[]; missing_slots: string[]; unmatched_brief_keys: string[] }
-}) {
-  const briefCount = report.matched_from_brief.length
-  const bodyCount = report.matched_from_body.length
-  const missing = report.missing_slots
-  const unmatched = report.unmatched_brief_keys
-  return (
-    <div className="rounded-md border border-wm-info/30 bg-wm-info-bg/60 p-3">
-      <p className="text-[11px] uppercase tracking-widest font-bold text-wm-info">Auto-fill summary</p>
-      <ul className="mt-1 space-y-0.5 text-[12px] text-wm-text">
-        {briefCount > 0 && <li>{briefCount} slot{briefCount === 1 ? '' : 's'} from page brief</li>}
-        {bodyCount > 0 && <li>{bodyCount} slot{bodyCount === 1 ? '' : 's'} from body heuristics</li>}
-        {missing.length > 0 && (
-          <li className="text-wm-text-muted">
-            {missing.length} slot{missing.length === 1 ? '' : 's'} still empty: <span className="font-mono text-[11px]">{missing.slice(0, 6).join(', ')}{missing.length > 6 ? '…' : ''}</span>
-          </li>
-        )}
-        {unmatched.length > 0 && (
-          <li className="text-wm-warning">
-            {unmatched.length} brief field{unmatched.length === 1 ? '' : 's'} unmapped: <span className="font-mono text-[11px]">{unmatched.slice(0, 6).join(', ')}{unmatched.length > 6 ? '…' : ''}</span> — check the overflow panel.
-          </li>
-        )}
-      </ul>
-    </div>
-  )
-}
-
-/** Overflow panel — the freehand body that was stashed when a section was
- *  bound to a template. Renders read-only as a reference so the strategist
- *  can route copy into the slot fields below, then clears the stash. */
-function OverflowPanel({ html, onClear }: { html: string; onClear: () => void }) {
-  return (
-    <div className="rounded-md border border-wm-warning/40 bg-wm-warning-bg/60 p-3">
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="min-w-0">
-          <p className="text-[11px] uppercase tracking-widest font-bold text-wm-warning">
-            Overflow content
-          </p>
-          <p className="text-[11px] text-wm-text-muted mt-0.5">
-            Original freehand copy — route the pieces into the fields below, then clear.
-          </p>
-        </div>
-        <WMButton variant="ghost" size="sm" onClick={onClear}>
-          Clear
-        </WMButton>
-      </div>
-      <div
-        className="wm-theme prose-sm max-w-none text-[13px] text-wm-text bg-wm-bg-elevated rounded p-2 border border-wm-border max-h-64 overflow-auto"
-        // The stash is HTML produced by our own brief renderer / TipTap.
-        // No untrusted input pathway lands here — strategist-authored only.
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
-    </div>
-  )
-}
-
-/** Freehand body — same Brixies-aware TipTap editor used for bound
- *  sections. No template means no slot mapping; the doc HTML is saved
- *  as-is to `field_values.body`. AI agents always bind sections to a
- *  template, so freehand is the manual-authoring path. */
-function FreehandBody({
-  value, onChange, suggestedFamily, onBindRequest,
-}: {
-  value: string
-  onChange: (v: string) => void
-  suggestedFamily: string | null
-  onBindRequest: () => void
-}) {
-  const snippets = useEditorSnippets()
-  return (
-    <div className="space-y-3">
-      {/* Bind CTA — prominent when a brief-suggested family is present,
-          quieter when the section is purely strategist-authored. */}
-      <div className={[
-        'rounded-md border p-3 flex items-center gap-3 flex-wrap',
-        suggestedFamily
-          ? 'border-wm-accent/40 bg-wm-accent-tint'
-          : 'border-dashed border-wm-border bg-wm-bg',
-      ].join(' ')}>
-        <div className="min-w-0 flex-1">
-          <p className="text-[12px] font-semibold text-wm-text">
-            {suggestedFamily
-              ? `Suggested template family: ${suggestedFamily}`
-              : 'Freehand section — bind to a Brixies template to flow into Design and Dev exports.'}
-          </p>
-          {suggestedFamily && (
-            <p className="text-[11px] text-wm-text-muted mt-0.5">
-              From the page brief. Bind to pick a variant; the freehand copy below is preserved.
-            </p>
-          )}
-        </div>
-        <WMButton variant="primary" size="sm" onClick={onBindRequest}>
-          Bind to template
-        </WMButton>
-      </div>
-
-      <BrixiesEditor
-        value={value}
-        onChange={onChange}
-        snippets={snippets}
-        placeholder="Start writing — use the Brixies block toolbar to add tagline, headings, CTAs, card grids, images."
-      />
-    </div>
-  )
-}
-
-/** RichTextEditor wrapper that auto-supplies snippets from context and
- *  refreshes any existing snippet chips against the current library
- *  before passing the HTML to TipTap. This is the "page inherits the
- *  filled content once the snippet is fixed" behavior — every load
- *  re-resolves stale chips. */
-function RichTextWithSnippets(props: {
-  value: string
-  onChange: (v: string) => void
-  placeholder?: string
-}) {
-  const snippets = useEditorSnippets()
-  // Memo because refreshSnippetChips parses + walks DOM — cheap but not free.
-  const refreshedValue = useMemo(
-    () => refreshSnippetChips(props.value, snippets),
-    [props.value, snippets],
-  )
-  return (
-    <WMRichTextEditor
-      value={refreshedValue}
-      onChange={props.onChange}
-      placeholder={props.placeholder}
-      headingLevels={[2, 3, 4, 5]}
-      snippets={snippets}
-    />
-  )
-}
-
-// ── Field rendering — slot vs group ──────────────────────────────────
-
-function FieldRow({
-  field, value, onChange,
-}: {
-  field: WebFieldDef
-  value: unknown
-  onChange: (v: unknown) => void
-}) {
-  if (field.kind === 'group') return <GroupRow group={field} value={value} onChange={onChange} />
-  // Hide empty optional image slots — they clutter the editor when the
-  // brief had no image and the strategist isn't ready to source one.
-  // Required image slots and slots that already have a value still render.
-  if (field.type === 'image' && !field.required) {
-    const stringVal = typeof value === 'string' ? value : ''
-    if (!stringVal) return null
-  }
-  return <SlotRow slot={field} value={value} onChange={onChange} />
-}
-
-/** Classify a slot into a label "kind" for color coding. Mirrors the
- *  squad-os web-hub pattern: heading=accent, cta=teal, quote=indigo,
- *  placeholder/unmapped=amber, etc. */
-function slotLabelKind(slot: WebSlotDef): 'heading' | 'subhead' | 'body' | 'cta' | 'image' | 'tagline' | 'other' {
-  if (slot.heading_level === 1) return 'heading'
-  if (slot.heading_level && slot.heading_level >= 2) return 'subhead'
-  const k = slot.key.toLowerCase().replace(/[_\s-]+/g, '')
-  if (k.includes('tagline') || k.includes('eyebrow') || k.includes('kicker')) return 'tagline'
-  if (slot.type === 'cta' || (slot.type === 'text' && slot.scope === 'button')) return 'cta'
-  if (slot.type === 'image') return 'image'
-  if (slot.type === 'richtext' || k.includes('body') || k.includes('content') || k.includes('description')) return 'body'
-  if (k.includes('heading') || k === 'h' || k.includes('title')) return 'heading'
-  return 'other'
-}
-
-const LABEL_KIND_TONES: Record<ReturnType<typeof slotLabelKind>, string> = {
-  heading:  'text-wm-accent-strong  bg-wm-accent-tint    border-wm-accent/30',
-  subhead:  'text-wm-accent-strong  bg-wm-accent-tint    border-wm-accent/20',
-  tagline:  'text-wm-text-muted     bg-wm-bg-hover       border-wm-border',
-  body:     'text-wm-text-muted     bg-wm-bg-hover       border-wm-border',
-  cta:      'text-emerald-700       bg-emerald-50        border-emerald-200',
-  image:    'text-wm-text-muted     bg-wm-bg-hover       border-wm-border',
-  other:    'text-wm-text-muted     bg-wm-bg-hover       border-wm-border',
-}
-
-/** Small bracketed pill label rendered above each slot value. Borrows
- *  the squad-os web-hub aesthetic — [H1 HEADLINE], [SUB-HEADLINE],
- *  [PRIMARY CTA BUTTON], color-coded by kind. */
-function SlotLabel({ slot, override }: { slot: WebSlotDef; override?: string }) {
-  const kind = slotLabelKind(slot)
-  // Display text — explicit override first, then a friendly form of the
-  // slot's label / key with heading_level adornment.
-  const base = override ?? slot.label ?? slot.key.replace(/_/g, ' ')
-  let display = base.toUpperCase()
-  if (slot.heading_level && !/H\d/.test(display)) {
-    display = `H${slot.heading_level} ${display}`
-  }
-  if (slot.required && !display.includes('*')) display = `${display} *`
-  return (
-    <span
-      className={[
-        'inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] font-bold tracking-[0.07em]',
-        LABEL_KIND_TONES[kind],
-      ].join(' ')}
-    >
-      [{display}]
-    </span>
-  )
-}
-
-function SlotRow({
-  slot, value, onChange,
-}: {
-  slot: WebSlotDef
-  value: unknown
-  onChange: (v: unknown) => void
-}) {
-  const renderField = () => {
-    const stringVal = typeof value === 'string' ? value : ''
-    // Borderless input with focus-only chrome — keeps the editor reading
-    // like a document, not a stack of form boxes.
-    const borderlessClass =
-      'w-full bg-transparent text-wm-text outline-none px-0 py-1 ' +
-      'border-b border-transparent hover:border-wm-border focus:border-wm-accent ' +
-      'transition-colors'
-
-    // Heading-shaped text slots get larger type so they read like the
-    // headlines they are.
-    const isHeading = slot.heading_level === 1
-    const isSubhead = slot.heading_level === 2 || slotLabelKind(slot) === 'subhead'
-
-    switch (slot.type) {
-      case 'text':
-      case 'url':
-      case 'email':
-      case 'phone': {
-        const inputType = slot.type === 'url' ? 'url' : slot.type === 'email' ? 'email' : slot.type === 'phone' ? 'tel' : 'text'
-        return (
-          <input
-            type={inputType}
-            value={stringVal}
-            maxLength={slot.max_chars}
-            onChange={e => onChange(e.target.value)}
-            placeholder={slot.description ?? ''}
-            className={[
-              borderlessClass,
-              isHeading ? 'text-2xl font-bold leading-tight'
-                : isSubhead ? 'text-lg font-semibold leading-snug'
-                : 'text-[14px]',
-            ].join(' ')}
-          />
-        )
-      }
-
-      case 'richtext':
-        return (
-          <RichTextWithSnippets
-            value={stringVal}
-            onChange={onChange}
-            placeholder={slot.description ?? 'Write…'}
-          />
-        )
-
-      case 'cta': {
-        const ctaVal = (typeof value === 'object' && value !== null) ? value as { label?: string; url?: string } : { label: '', url: '' }
-        return (
-          // Inline "Label (link to /target)" — borrows the web-hub format
-          // so the page reads like a doc. Both fields are inline-editable.
-          <div className="flex items-baseline gap-1.5 flex-wrap text-[14px] text-wm-text">
-            <input
-              type="text"
-              value={ctaVal.label ?? ''}
-              onChange={e => onChange({ ...ctaVal, label: e.target.value })}
-              placeholder="Button label"
-              className={`${borderlessClass} font-semibold min-w-[160px] flex-1`}
-            />
-            <span className="text-wm-text-subtle">(link to</span>
-            <input
-              type="url"
-              value={ctaVal.url ?? ''}
-              onChange={e => onChange({ ...ctaVal, url: e.target.value })}
-              placeholder="/route"
-              className={`${borderlessClass} text-wm-text-muted font-mono text-[12px] min-w-[120px] flex-1`}
-            />
-            <span className="text-wm-text-subtle">)</span>
-          </div>
-        )
-      }
-
-      case 'image':
-        return (
-          <input
-            type="url"
-            value={stringVal}
-            onChange={e => onChange(e.target.value)}
-            placeholder="Image URL"
-            className={`${borderlessClass} text-[13px] font-mono text-wm-text-muted`}
-          />
-        )
-
-      case 'datetime':
-        return (
-          <input
-            type="datetime-local"
-            value={stringVal}
-            onChange={e => onChange(e.target.value)}
-            className={`${borderlessClass} text-[13px]`}
-          />
-        )
-
-      case 'boolean':
-        return (
-          <label className="inline-flex items-center gap-2 text-sm text-wm-text">
-            <input
-              type="checkbox"
-              checked={value === true}
-              onChange={e => onChange(e.target.checked)}
-              className="h-4 w-4 rounded border-wm-border text-wm-accent focus:ring-wm-accent"
-            />
-            {slot.description ?? slot.label ?? slot.key}
-          </label>
-        )
-
-      default:
-        return (
-          <input
-            type="text"
-            value={stringVal}
-            onChange={e => onChange(e.target.value)}
-            placeholder={`(${slot.type})`}
-            className={`${borderlessClass} italic text-wm-text-muted text-[13px]`}
-          />
-        )
-    }
-  }
-
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between gap-2">
-        <SlotLabel slot={slot} />
-        {(slot.unmapped || slot.auto_populated) && (
-          <div className="flex items-center gap-1.5">
-            {slot.unmapped && <WMStatusPill tone="warning" size="sm">unmapped</WMStatusPill>}
-            {slot.auto_populated && <WMStatusPill tone="ai" size="sm">auto</WMStatusPill>}
-          </div>
-        )}
-      </div>
-      {renderField()}
-      {slot.max_chars && typeof value === 'string' && value.length > slot.max_chars * 0.7 && (
-        <p className={[
-          'text-[10px] text-right',
-          value.length > slot.max_chars ? 'text-wm-danger font-semibold' : 'text-wm-text-subtle',
-        ].join(' ')}>
-          {value.length} / {slot.max_chars}
-        </p>
-      )}
-    </div>
-  )
-}
-
-function GroupRow({
-  group, value, onChange,
-}: {
-  group: WebGroupDef
-  value: unknown
-  onChange: (v: unknown) => void
-}) {
-  const items: FieldValues[] = Array.isArray(value)
-    ? value as FieldValues[]
-    : Array.from({ length: group.default_count ?? 1 }, () => ({}))
-
-  const setItem = (idx: number, patch: FieldValues) => {
-    const next = [...items]
-    next[idx] = { ...next[idx], ...patch }
-    onChange(next)
-  }
-
-  const addItem = () => onChange([...items, {}])
-  const removeItem = (idx: number) => onChange(items.filter((_, i) => i !== idx))
-
-  const groupLabel = group.key.replace(/_/g, ' ').toUpperCase()
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-wm-border bg-wm-bg-hover text-[9px] font-bold tracking-[0.07em] text-wm-text-muted">
-          [{groupLabel}]
-        </span>
-        <WMButton variant="ghost" size="sm" iconLeft={<Plus size={11} />} onClick={addItem}>
-          Add item
-        </WMButton>
-      </div>
-      {group.item_template_ref === 'from_palette' && (
-        <p className="text-[10px] text-wm-text-subtle italic">Items use the project's card palette at render</p>
-      )}
-
-      {/* Items render as a flowing stack of indented sub-fields. No
-          boxed cards per item — the [Item N] pill label is enough to
-          separate them visually. */}
-      <div className="space-y-3">
-        {items.map((item, idx) => (
-          <div key={idx} className="group relative pl-3 border-l-2 border-wm-border hover:border-wm-accent/40 transition-colors">
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-wm-border bg-wm-bg-elevated text-[9px] font-bold tracking-[0.07em] text-wm-text-subtle">
-                [{groupLabel} · ITEM {idx + 1}]
-              </span>
-              <WMIconButton
-                label="Remove item"
-                size="sm"
-                onClick={() => removeItem(idx)}
-                className="opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <Trash2 size={11} />
-              </WMIconButton>
-            </div>
-            <div className="space-y-2">
-              {group.item_schema.map((f, i) => (
-                <FieldRow
-                  key={f.key + '-' + i}
-                  field={f}
-                  value={item[f.key]}
-                  onChange={(v) => setItem(idx, { [f.key]: v })}
-                />
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   )
 }

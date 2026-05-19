@@ -112,11 +112,27 @@ export function findBriefSection(
   return sections.find(s => briefSectionId(s) === targetId) ?? null
 }
 
-/** Pull the `Section ID: <id>` line out of a web_sections.notes blob. */
+/** Pull the `Section ID: <id>` line out of a web_sections.notes blob.
+ *  v4 wraps notes as JSON `{ name, description, legacy }` — when so,
+ *  the brief metadata lives in `legacy`. Falls back to raw-text regex. */
 export function extractSectionIdFromNotes(notes: string | null | undefined): string | null {
   if (!notes) return null
-  const m = notes.match(/^\s*Section ID:\s*(.+)$/im)
+  const source = readLegacyText(notes)
+  const m = source.match(/^\s*Section ID:\s*(.+)$/im)
   return m ? m[1].trim() : null
+}
+
+function readLegacyText(notes: string): string {
+  const trimmed = notes.trim()
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (parsed && typeof parsed === 'object' && typeof parsed.legacy === 'string') {
+        return parsed.legacy
+      }
+    } catch { /* fall through */ }
+  }
+  return notes
 }
 
 // ── Brief fields → template field_values ────────────────────────────

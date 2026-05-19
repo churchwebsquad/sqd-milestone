@@ -1,53 +1,52 @@
 /**
  * Brixies live-render — substitute field_values into the template's
- * source_html for the Preview iframe.
+ * source_html for the section iframes and the Preview pane.
  *
- * The Brixies source_html carries `data-layer="X"` attributes on every
- * meaningful element. The template's `fields` schema is keyed by the
- * same layer names (with the importer preserving order). We walk the
- * DOM, find each data-layer that matches a slot or group in the
- * schema, and:
- *
- *   - **slot** → replace the inner text/HTML with the slot's value
- *     from field_values. Image slots set their <img src>. CTA slots
- *     set the inner text + wrap in an <a href>.
+ *   - **slot** → replace the inner text/HTML with the slot's value.
+ *     Image slots set <img src>. CTA slots (and text+button slots
+ *     carrying a `{label, url}` shape) set the inner text and wrap
+ *     in an <a href>.
  *
  *   - **group** → clone the first data-layer child N times (one per
  *     item in field_values[group.key]), recursively populating each
  *     clone's slots with the item's values.
  *
- * The result is the same Brixies HTML the template ships with, just
- * with strategist copy in place of the Brixies sample text. Rendered
- * inside an iframe at the native 1512px viewport (the canvas Brixies
- * designed for), the layout is pixel-faithful.
+ *   - After substitution, all remaining `{{token}}` literals in text
+ *     nodes are resolved against the project's snippet map. Tokens
+ *     with no resolved value are left literal so the strategist can
+ *     spot what's missing.
  *
- * No JS execution risk — we're stringifying a DOM we just built from
- * a known-trusted template source.
+ *   - Stray Brixies aspect-ratio text (e.g. "504 × 378") in unused
+ *     image placeholders is stripped so the rendered iframe doesn't
+ *     show the design tool's empty-state dimensions.
  */
 import type {
   WebContentTemplate, WebFieldDef, WebSlotDef, WebGroupDef,
 } from '../types/database'
 
-/** Build the substituted HTML for a single section. */
+export type SnippetMap = Readonly<Record<string, string>>
+
 export function renderSectionToHtml(
   template: WebContentTemplate,
   values: Record<string, unknown>,
+  snippetMap?: SnippetMap,
 ): string {
   if (typeof window === 'undefined' || !template.source_html) return ''
   const doc = new DOMParser().parseFromString(template.source_html, 'text/html')
   const root = doc.body.firstElementChild
   if (!root) return ''
 
-  // Build a fast lookup: layer_name → field def at the TOP level.
-  // For nested item_schema, we resolve per-group at substitute time.
   const topByLayer = indexByLayer(template.fields)
-
   substituteElement(root, topByLayer, values, /* itemContext */ null)
+
+  if (snippetMap) resolveSnippetsInTree(root, snippetMap)
+  stripAspectRatioText(root)
 
   return root.outerHTML
 }
 
-/** Substitute values into an element and its descendants. */
+// ── Substitution ────────────────────────────────────────────────────
+
 function substituteElement(
   el: Element,
   binding: Map<string, WebFieldDef>,
@@ -57,29 +56,14 @@ function substituteElement(
   const layer = el.getAttribute('data-layer')
   if (layer) {
     const field = lookup(binding, layer)
-    if (field?.kind === 'slot') {
-      applySlot(el, field, values[field.key])
-      return  // slot ends recursion — its content is rewritten
-    }
-    if (field?.kind === 'group') {
-      expandGroup(el, field, values[field.key])
-      return  // group ends recursion — children are now repeated clones
-    }
-    // Also check the item context — when we're inside an item clone,
-    // child data-layer elements bind to the group's item_schema.
+    if (field?.kind === 'slot') { applySlot(el, field, values[field.key]); return }
+    if (field?.kind === 'group') { expandGroup(el, field, values[field.key]); return }
     if (itemContext) {
       const itemField = lookup(itemContext.binding, layer)
-      if (itemField?.kind === 'slot') {
-        applySlot(el, itemField, itemContext.values[itemField.key])
-        return
-      }
-      if (itemField?.kind === 'group') {
-        expandGroup(el, itemField, itemContext.values[itemField.key])
-        return
-      }
+      if (itemField?.kind === 'slot') { applySlot(el, itemField, itemContext.values[itemField.key]); return }
+      if (itemField?.kind === 'group') { expandGroup(el, itemField, itemContext.values[itemField.key]); return }
     }
   }
-  // No binding at this element — recurse into children.
   for (const child of Array.from(el.children)) {
     substituteElement(child, binding, values, itemContext)
   }
@@ -90,8 +74,13 @@ interface ItemContext {
   values: Record<string, unknown>
 }
 
-/** Replace a single element's content with the slot's value. */
 function applySlot(el: Element, slot: WebSlotDef, raw: unknown): void {
+  // A text/url/email/phone slot can carry the unified button shape
+  // `{label, url}` when it's a button-shaped slot. Render as a CTA.
+  if ((slot.type === 'text' || slot.type === 'url' || slot.type === 'email' || slot.type === 'phone')
+      && isCtaShape(raw)) {
+    return applyCta(el, raw as { label?: string; url?: string })
+  }
   switch (slot.type) {
     case 'text':
     case 'url':
@@ -99,104 +88,158 @@ function applySlot(el: Element, slot: WebSlotDef, raw: unknown): void {
     case 'phone':
     case 'datetime': {
       const text = typeof raw === 'string' ? raw : ''
-      // Brixies elements may have multiple styled <span> children for
-      // multi-color heading text (e.g. "Lorem ipsum" + colored span).
-      // Replace inner text outright; the visual styling lives on the
-      // wrapper or first child span.
       setInnerText(el, text)
       return
     }
     case 'richtext': {
       const html = typeof raw === 'string' ? raw : ''
-      // Strip TipTap's wrapping <p>…</p> if it's a single paragraph —
-      // Brixies's Description divs render fine as raw text + line
-      // breaks, and the <p> wrapper would inherit `margin: 1em` from
-      // user-agent defaults.
       el.innerHTML = html || ''
       return
     }
     case 'cta': {
-      const cta = (typeof raw === 'object' && raw !== null)
-        ? raw as { label?: string; url?: string }
-        : { label: '', url: '' }
-      // Brixies's CTA wrapper is a <div data-layer="Buttons"> with a
-      // child <div data-layer="Contact"> holding the label text. We
-      // wrap the existing innerHTML in an <a href> so clicks in the
-      // preview behave like the eventual production link.
-      const inner = el.innerHTML
-      const url = cta.url ?? ''
-      const label = cta.label ?? ''
-      if (label) setInnerText(el, label, inner)
-      if (url) {
-        el.setAttribute('data-href', url)
-        // Wrap with an anchor; preserve all other attributes/styles.
-        const a = el.ownerDocument.createElement('a')
-        a.setAttribute('href', url)
-        a.style.textDecoration = 'none'
-        a.style.color = 'inherit'
-        // Move existing children to anchor, append anchor.
-        while (el.firstChild) a.appendChild(el.firstChild)
-        el.appendChild(a)
-      }
-      return
+      return applyCta(el, isCtaShape(raw) ? raw as { label?: string; url?: string } : { label: '', url: '' })
     }
     case 'image': {
-      const src = typeof raw === 'string' ? raw : ''
-      if (el.tagName.toLowerCase() === 'img' && src) {
-        el.setAttribute('src', src)
-      } else if (src) {
-        // Sometimes images are wrapper divs with a background image.
-        // For v1 we just set data-src; pixel-faithful image rendering
-        // is template-specific and out of scope.
-        el.setAttribute('data-src', src)
-      }
+      applyImage(el, typeof raw === 'string' ? raw : '')
       return
     }
-    case 'form-input':
-    case 'boolean':
-    case 'map':
     default:
-      // No-op — these don't substitute meaningfully into the rendered
-      // preview. The form / map / toggle will surface natively later.
       return
   }
 }
 
-/** Expand a group element: clone its first data-layer child N times,
- *  with each clone bound to one item in field_values[group.key]. */
+function isCtaShape(raw: unknown): boolean {
+  return typeof raw === 'object' && raw !== null
+    && ('label' in raw || 'url' in raw)
+}
+
+function applyCta(el: Element, cta: { label?: string; url?: string }): void {
+  const inner = el.innerHTML
+  const url = cta.url ?? ''
+  const label = cta.label ?? ''
+  if (label) setInnerText(el, label, inner)
+  if (url) {
+    el.setAttribute('data-href', url)
+    const a = el.ownerDocument.createElement('a')
+    a.setAttribute('href', url)
+    a.style.textDecoration = 'none'
+    a.style.color = 'inherit'
+    while (el.firstChild) a.appendChild(el.firstChild)
+    el.appendChild(a)
+  }
+}
+
+function applyImage(el: Element, src: string): void {
+  if (el.tagName.toLowerCase() === 'img') {
+    if (src) el.setAttribute('src', src)
+    return
+  }
+  if (src) el.setAttribute('data-src', src)
+  // Clear the design-tool placeholder text (e.g. "504 × 378") so the
+  // editor preview doesn't show artifact dimensions for empty slots.
+  const placeholderText = (el.textContent ?? '').trim()
+  if (!src && /^\d+\s*[×x]\s*\d+$/i.test(placeholderText)) {
+    el.textContent = ''
+  } else if (!src) {
+    // The placeholder might wrap the dimension text in a span — clear
+    // text nodes that match the pattern, leave structural children.
+    stripAspectRatioText(el)
+  }
+}
+
 function expandGroup(groupEl: Element, group: WebGroupDef, raw: unknown): void {
   const items = Array.isArray(raw) ? raw as Array<Record<string, unknown>> : []
   const count = items.length > 0 ? items.length : group.default_count
   if (count <= 0) {
-    // No items — leave the group container empty.
     while (groupEl.firstChild) groupEl.removeChild(groupEl.firstChild)
     return
   }
-
-  // Find the first data-layer child — that's the item template.
   const children = Array.from(groupEl.children)
   const itemTemplate = children.find(c => c.getAttribute('data-layer'))
-  if (!itemTemplate) return  // Brixies emitted a group container with no
-                             // data-layer child — bail; preview shows empty.
-
+  if (!itemTemplate) return
   const itemBinding = indexByLayer(group.item_schema)
-  const ownerDoc = groupEl.ownerDocument
-
-  // Remove all current children of the group container — we're going
-  // to rebuild from clones of the item template.
   while (groupEl.firstChild) groupEl.removeChild(groupEl.firstChild)
-
   for (let i = 0; i < count; i++) {
     const itemValues = items[i] ?? {}
     const clone = itemTemplate.cloneNode(true) as Element
-    substituteElement(clone, itemBinding, itemValues, {
-      binding: itemBinding,
-      values: itemValues,
-    })
+    substituteElement(clone, itemBinding, itemValues, { binding: itemBinding, values: itemValues })
     groupEl.appendChild(clone)
-    // Adopt into the document if needed — clones share the same
-    // owner doc as the template so this should always be a no-op.
-    void ownerDoc
+  }
+}
+
+// ── Snippet resolution ──────────────────────────────────────────────
+
+/** Replace every `{{token}}` occurrence in text nodes with its resolved
+ *  value. Empty / missing values keep the literal `{{token}}` so the
+ *  strategist can see what's unresolved. */
+function resolveSnippetsInTree(root: Element, snippetMap: SnippetMap): void {
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  const re = /\{\{([\w.]+)\}\}/g
+  let node = walker.nextNode() as Text | null
+  while (node) {
+    const text = node.nodeValue ?? ''
+    if (text.includes('{{')) {
+      const next = text.replace(re, (_, token) => {
+        const v = snippetMap[token]
+        return v ? v : `{{${token}}}`
+      })
+      if (next !== text) node.nodeValue = next
+    }
+    node = walker.nextNode() as Text | null
+  }
+}
+
+// ── Aspect ratio placeholder text ───────────────────────────────────
+
+/** Strip Brixies / Figma image-placeholder dimension labels from the
+ *  rendered output. They show up in three forms:
+ *    1. Bare text nodes like "504 × 378"
+ *    2. Element whose textContent matches the pattern (e.g. a span
+ *       wrapping the dimensions inside a placeholder div)
+ *    3. `<img>` tags with no src — their `alt` text is the dimensions,
+ *       and the browser falls back to rendering alt when src is missing.
+ */
+const ASPECT_RE = /^\s*\d{2,5}\s*[×x*]\s*\d{2,5}\s*$/i
+
+function stripAspectRatioText(root: Element): void {
+  // (1) Text nodes
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  const dropTextNodes: Text[] = []
+  let node = walker.nextNode() as Text | null
+  while (node) {
+    if (ASPECT_RE.test(node.nodeValue ?? '')) dropTextNodes.push(node)
+    node = walker.nextNode() as Text | null
+  }
+  for (const t of dropTextNodes) t.nodeValue = ''
+
+  // (2) Element subtrees whose entire textContent is just a dimension
+  // — covers wrapper divs whose direct child is a styled <span> that
+  // didn't get caught above due to nested whitespace text nodes.
+  const all = root.querySelectorAll('*')
+  for (const el of Array.from(all)) {
+    if (el.tagName.toLowerCase() === 'img') continue
+    if (el.querySelector('img, svg, picture, video')) continue
+    const tc = (el.textContent ?? '').trim()
+    if (tc && ASPECT_RE.test(tc)) {
+      // Only clear if all children are text/inline (no structural
+      // content we'd lose). Spans are fine to clear.
+      const hasStructural = Array.from(el.children).some(c => {
+        const t = c.tagName.toLowerCase()
+        return t !== 'span' && t !== 'b' && t !== 'i' && t !== 'em' && t !== 'strong'
+      })
+      if (!hasStructural) el.textContent = ''
+    }
+  }
+
+  // (3) <img> tags without src — clear alt so browsers don't render
+  // the dimension as a fallback label.
+  const imgs = root.querySelectorAll('img')
+  for (const img of Array.from(imgs)) {
+    const src = img.getAttribute('src')
+    if (!src) {
+      img.setAttribute('alt', '')
+      img.setAttribute('aria-hidden', 'true')
+    }
   }
 }
 
@@ -220,18 +263,11 @@ function lookup(map: Map<string, WebFieldDef>, layerName: string): WebFieldDef |
   return undefined
 }
 
-/** Replace the element's text content while preserving any first-child
- *  <span> styling (Brixies emits styled spans for colored text). If
- *  fallbackHtml is provided, falls back to that when the value is
- *  empty (keeps the Brixies sample text rather than blank-rendering). */
 function setInnerText(el: Element, text: string, fallbackHtml?: string): void {
   if (!text && fallbackHtml) {
     el.innerHTML = fallbackHtml
     return
   }
-  // If the element has a single styled <span> child, replace its text
-  // (preserves the color/font styling). Otherwise replace the whole
-  // textContent.
   const firstSpan = Array.from(el.children).find(c => c.tagName.toLowerCase() === 'span')
   if (firstSpan && el.children.length === 1) {
     firstSpan.textContent = text

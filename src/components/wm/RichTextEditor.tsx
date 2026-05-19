@@ -55,6 +55,15 @@ export interface WMRichTextEditorProps {
    *  carries its current resolved value, which gets baked into the
    *  chip at insert time (rewritten back to {{token}} on export). */
   snippets?: readonly WMSnippetOption[]
+  /** Fires once with the TipTap editor instance after mount, and
+   *  again with null on unmount. Lets parent flows (e.g. the section
+   *  details panel's SnippetFocusContext) register the editor for
+   *  cross-component snippet insertion. */
+  onEditorReady?: (editor: Editor | null) => void
+  /** Hide the persistent top toolbar (formatting still works via
+   *  selection bubble menu + shortcuts). Use inside details panels
+   *  where the panel header surfaces the formatting controls. */
+  hideToolbar?: boolean
 }
 
 export function WMRichTextEditor({
@@ -65,6 +74,8 @@ export function WMRichTextEditor({
   readOnly = false,
   compact = false,
   snippets,
+  onEditorReady,
+  hideToolbar = false,
 }: WMRichTextEditorProps) {
   const editor = useEditor({
     extensions: [
@@ -113,6 +124,12 @@ export function WMRichTextEditor({
   })
 
   useEffect(() => {
+    if (!onEditorReady) return
+    onEditorReady(editor ?? null)
+    return () => onEditorReady(null)
+  }, [editor, onEditorReady])
+
+  useEffect(() => {
     if (!editor) return
     const current = editor.getHTML()
     if (current !== value) {
@@ -136,7 +153,7 @@ export function WMRichTextEditor({
       ].join(' ')}
     >
       {/* Persistent toolbar */}
-      {!readOnly && (
+      {!readOnly && !hideToolbar && (
         <PersistentToolbar
           editor={editor}
           headingLevels={headingLevels}

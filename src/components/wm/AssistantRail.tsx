@@ -17,7 +17,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Tag, BookOpen, Lightbulb, AlertTriangle, RotateCw, Search,
-  Loader2, Plus, X, ArrowRight, Trash2,
+  Loader2, Plus, X, ArrowRight, Trash2, SquarePen,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { runAudit } from '../../lib/webAudit'
@@ -26,8 +26,11 @@ import type { WebAIIdea } from '../../types/database'
 import { WMButton } from './Button'
 import { WMIconButton } from './IconButton'
 import { WMStatusPill } from './StatusPill'
+import { SectionDetailsPanel } from './sectioneditor/SectionDetailsPanel'
+import { SnippetFocusProvider } from './sectioneditor/SnippetFocusContext'
+import { useSectionDetail } from './sectioneditor/SectionEditingContext'
 
-type RailTab = 'snippets' | 'library' | 'ideas' | 'audit'
+type RailTab = 'section' | 'snippets' | 'library' | 'ideas' | 'audit'
 
 interface Props {
   projectId: string
@@ -40,6 +43,24 @@ export function AssistantRail({ projectId, activeTab }: Props) {
   const [counts, setCounts] = useState({ snippets: 0, ideas: 0, audit: 0 })
   const [params] = useSearchParams()
   const activePageId = activeTab === 'pages' ? params.get('page') : null
+
+  const sectionDetail = useSectionDetail()
+  const sectionTabAvailable = activeTab === 'pages' && sectionDetail != null
+
+  // Auto-switch to the Section tab whenever a section is selected, and
+  // back to the previous tab when deselected.
+  const [tabBeforeSection, setTabBeforeSection] = useState<RailTab>('snippets')
+  useEffect(() => {
+    if (sectionTabAvailable) {
+      if (tab !== 'section') {
+        setTabBeforeSection(tab)
+        setTab('section')
+      }
+    } else if (tab === 'section') {
+      setTab(tabBeforeSection)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectionTabAvailable])
 
   // Counts on mount + project change
   const loadCounts = useCallback(async () => {
@@ -63,31 +84,50 @@ export function AssistantRail({ projectId, activeTab }: Props) {
   return (
     <div className="h-full flex flex-col text-sm">
       <div className="flex items-center border-b border-wm-border bg-wm-bg">
+        {sectionTabAvailable && (
+          <RailTabButton tab="section" active={tab} setTab={setTab} icon={<SquarePen size={13} />} label="Section" />
+        )}
         <RailTabButton tab="snippets"  active={tab} setTab={setTab} icon={<Tag size={13} />}            count={counts.snippets} label="Snippets" />
         <RailTabButton tab="library"   active={tab} setTab={setTab} icon={<BookOpen size={13} />}       label="Library" />
         <RailTabButton tab="ideas"     active={tab} setTab={setTab} icon={<Lightbulb size={13} />}      count={counts.ideas} label="Ideas" />
         <RailTabButton tab="audit"     active={tab} setTab={setTab} icon={<AlertTriangle size={13} />}  count={counts.audit} label="Audit" />
       </div>
 
-      <div className="px-3 py-2 border-b border-wm-border space-y-2">
-        <div className="relative">
-          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-wm-text-subtle" />
-          <input
-            type="text"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder={
-              tab === 'snippets' ? 'Search snippets…' :
-              tab === 'library'  ? 'Search library…'  :
-              tab === 'ideas'    ? 'Filter ideas…'    :
-                                   'Filter violations…'
-            }
-            className="w-full h-8 pl-7 pr-2 rounded-md bg-wm-bg-elevated border border-wm-border text-[12px] text-wm-text placeholder-wm-text-subtle outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20"
-          />
+      {tab !== 'section' && (
+        <div className="px-3 py-2 border-b border-wm-border space-y-2">
+          <div className="relative">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-wm-text-subtle" />
+            <input
+              type="text"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder={
+                tab === 'snippets' ? 'Search snippets…' :
+                tab === 'library'  ? 'Search library…'  :
+                tab === 'ideas'    ? 'Filter ideas…'    :
+                                     'Filter violations…'
+              }
+              className="w-full h-8 pl-7 pr-2 rounded-md bg-wm-bg-elevated border border-wm-border text-[12px] text-wm-text placeholder-wm-text-subtle outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20"
+            />
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="flex-1 overflow-y-auto bg-wm-bg-elevated">
+      <div className="flex-1 overflow-y-auto bg-wm-bg-elevated min-h-0">
+        {tab === 'section'  && sectionDetail && (
+          <SnippetFocusProvider>
+            <SectionDetailsPanel
+              section={sectionDetail.section}
+              template={sectionDetail.template}
+              snippets={sectionDetail.snippets}
+              onChange={sectionDetail.onChange}
+              onClose={sectionDetail.onClose}
+              onChangeVariant={sectionDetail.onChangeVariant}
+              onUnbind={sectionDetail.onUnbind}
+              onRemove={sectionDetail.onRemove}
+            />
+          </SnippetFocusProvider>
+        )}
         {tab === 'snippets' && <SnippetsTab projectId={projectId} query={query} />}
         {tab === 'library'  && <LibraryTab />}
         {tab === 'ideas'    && <IdeasTab projectId={projectId} activePageId={activePageId} query={query} onChange={loadCounts} />}

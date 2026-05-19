@@ -135,8 +135,18 @@ export function WMCatalogSidePanel({
         return ai - bi
       })
     }
+    // Fallback ordering when no explicit ranking: pin site-library
+    // picks to the top so the strategist sees the project's curated
+    // variants first.
+    if (siteLibraryIds && siteLibraryIds.size > 0) {
+      return [...filtered].sort((a, b) => {
+        const aLib = siteLibraryIds.has(a.id) ? 0 : 1
+        const bLib = siteLibraryIds.has(b.id) ? 0 : 1
+        return aLib - bLib
+      })
+    }
     return filtered
-  }, [rows, query, kindFilter, familyFilter, familyFilterActive, rankedIds])
+  }, [rows, query, kindFilter, familyFilter, familyFilterActive, rankedIds, siteLibraryIds])
 
   const handleCardClick = async (id: string) => {
     if (mode === 'single') {
