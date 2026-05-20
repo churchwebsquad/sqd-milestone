@@ -26,21 +26,22 @@
  * amend, or dismiss in Site Manager.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
-  ArrowLeft, ChevronRight, FileText, Loader2, MessageSquarePlus, Paperclip,
-  Send, X, Check, ImagePlus, Trash2,
+  ChevronRight, FileText, Loader2, MessageSquarePlus, Paperclip,
+  Send, X, Check, ImagePlus, Trash2, Inbox, PartyPopper, AlertTriangle,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { uploadAttachment } from '../lib/attachmentUpload'
 import { PagePreview } from '../components/wm/PagePreview'
+import { WMRichTextEditor } from '../components/wm/RichTextEditor'
 import { augmentTemplate } from '../lib/webBrixiesSchemaAugment'
 import { loadEditorSnippets } from '../lib/webSnippets'
 import type { SnippetMap } from '../lib/webBrixiesRender'
 import type {
   WebReview, WebPage, WebSection, WebContentTemplate, WebFieldDef,
-  StrategyWebProject,
+  WebReviewComment, StrategyWebProject,
 } from '../types/database'
 
 // ── Local state shapes ─────────────────────────────────────────────
@@ -84,7 +85,15 @@ export default function PortalReviewPage() {
   const [activePageId, setActivePageId] = useState<string | null>(null)
   const [draft, setDraft] = useState<DraftComment | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [recentSubmissions, setRecentSubmissions] = useState(0)
+  /** Every comment the partner has submitted on this review (refreshed
+   *  after each save). Drives the right-side feedback tracker. */
+  const [myComments, setMyComments] = useState<WebReviewComment[]>([])
+  const [finishing, setFinishing] = useState(false)
+  /** Once the partner clicks "Tell the Squad I'm finished", flip to
+   *  done-mode: hide the comment drawer + replace right rail with
+   *  a thank-you panel. The actual review row stays open until staff
+   *  closes it from Site Manager. */
+  const [finishedAt, setFinishedAt] = useState<string | null>(null)
 
   // ── Load on mount ────────────────────────────────────────────────
 
@@ -182,6 +191,21 @@ export default function PortalReviewPage() {
     })()
     return () => { cancelled = true }
   }, [token])
+
+  // Load everything this partner has submitted on the open review.
+  // Anon SELECT on web_review_comments is scoped to open partner
+  // reviews so this works without auth.
+  const loadMyComments = useCallback(async () => {
+    if (!data?.review) return
+    const { data: rows } = await supabase
+      .from('web_review_comments')
+      .select('*')
+      .eq('review_id', data.review.id)
+      .order('created_at', { ascending: false })
+    setMyComments((rows ?? []) as WebReviewComment[])
+  }, [data?.review])
+
+  useEffect(() => { void loadMyComments() }, [loadMyComments])
 
   // ── Render gates ────────────────────────────────────────────────
 
@@ -298,14 +322,36 @@ export default function PortalReviewPage() {
         await supabase.from('web_review_attachments').insert(attachmentRows as never)
       }
 
-      setRecentSubmissions(n => n + 1)
       setDraft(null)
+      await loadMyComments()
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to submit feedback.')
     } finally {
       setSubmitting(false)
     }
   }
+
+  /** Partner explicitly tells the Squad they're done. Writes a
+   *  marker note onto web_reviews.notes so staff can see it in Site
+   *  Manager (we don't close the review here — staff still owns
+   *  the lifecycle). */
+  const markFinished = async () => {
+    if (!data?.review) return
+    setFinishing(true)
+    const stamp = new Date().toISOString()
+    const note = `Partner ${partnerName ?? ''} marked review finished at ${stamp}`.trim()
+    const existing = (data.review.notes ?? '').trim()
+    const merged = existing ? `${existing}\n${note}` : note
+    await supabase
+      .from('web_reviews')
+      .update({ notes: merged } as never)
+      .eq('id', data.review.id)
+    setFinishedAt(stamp)
+    setFinishing(false)
+  }
+
+  const requestedCount = myComments.filter(c => c.kind === 'requested').length
+  const generalCount   = myComments.filter(c => c.kind === 'comment').length
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-lavender-tint/40 via-cream to-cream">
@@ -325,16 +371,16 @@ export default function PortalReviewPage() {
               <p className="text-[10px] uppercase tracking-widest text-purple-gray">Reviewing as</p>
               <p className="text-[13px] font-semibold text-deep-plum">{partnerName}</p>
             </div>
-            {recentSubmissions > 0 && (
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-1">
-                <Check size={11} /> {recentSubmissions} sent
+            {(requestedCount > 0 || generalCount > 0) && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-purple bg-lavender-tint border border-primary-purple/30 rounded-full px-2 py-1">
+                <MessageSquarePlus size={11} /> Feedback Requests: {requestedCount + generalCount}
               </span>
             )}
           </div>
         </div>
       </header>
 
-      <div className="max-w-[1280px] mx-auto px-4 py-6 flex gap-4 items-start">
+      <div className="max-w-[1440px] mx-auto px-4 py-6 flex gap-4 items-start">
         {/* Page nav */}
         <aside className="w-60 shrink-0 sticky top-[88px]">
           <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple mb-2 px-2">
@@ -401,10 +447,31 @@ export default function PortalReviewPage() {
             </div>
           )}
         </main>
+
+        {/* Feedback tracker (right rail). Partner sees a live rollup
+            of everything they've submitted plus the "I'm done" CTA. */}
+        <aside className="w-72 shrink-0 sticky top-[88px]">
+          <FeedbackTracker
+            comments={myComments}
+            pages={data.pages}
+            sectionsByPage={data.sectionsByPage}
+            templates={data.templates}
+            finishedAt={finishedAt}
+            finishing={finishing}
+            onJumpToSection={(pageId, sectionId) => {
+              setActivePageId(pageId)
+              queueMicrotask(() => {
+                document.getElementById(`section-${sectionId}`)
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              })
+            }}
+            onFinish={markFinished}
+          />
+        </aside>
       </div>
 
       {/* Comment drawer */}
-      {draft && (
+      {draft && !finishedAt && (
         <CommentDrawer
           draft={draft}
           setDraft={setDraft}
@@ -412,10 +479,152 @@ export default function PortalReviewPage() {
           onCancel={() => setDraft(null)}
           onSubmit={submit}
           template={draft.section.content_template_id ? data.templates[draft.section.content_template_id] ?? null : null}
+          existingForSection={myComments.filter(c => c.web_section_id === draft.section.id)}
+          snippetMap={data.snippetMap}
         />
       )}
     </div>
   )
+}
+
+// ── Feedback tracker (right rail) ─────────────────────────────────
+
+function FeedbackTracker({
+  comments, pages, sectionsByPage, templates, finishedAt, finishing,
+  onJumpToSection, onFinish,
+}: {
+  comments: WebReviewComment[]
+  pages: WebPage[]
+  sectionsByPage: Record<string, WebSection[]>
+  templates: Record<string, WebContentTemplate>
+  finishedAt: string | null
+  finishing: boolean
+  onJumpToSection: (pageId: string, sectionId: string) => void
+  onFinish: () => Promise<void>
+}) {
+  const pageById = useMemo(() => {
+    const m = new Map<string, WebPage>()
+    for (const p of pages) m.set(p.id, p)
+    return m
+  }, [pages])
+  const sectionById = useMemo(() => {
+    const m = new Map<string, WebSection>()
+    for (const list of Object.values(sectionsByPage)) for (const s of list) m.set(s.id, s)
+    return m
+  }, [sectionsByPage])
+
+  // Group by page in the order they appear in nav.
+  const byPage = useMemo(() => {
+    const groups: Array<{ page: WebPage; items: WebReviewComment[] }> = []
+    for (const p of pages) {
+      const items = comments.filter(c => c.web_page_id === p.id)
+      if (items.length > 0) groups.push({ page: p, items })
+    }
+    return groups
+  }, [comments, pages])
+
+  if (finishedAt) {
+    return (
+      <div className="rounded-2xl bg-white border border-emerald-200 px-4 py-5 text-center shadow-sm">
+        <div className="mx-auto h-10 w-10 rounded-full bg-emerald-50 grid place-items-center text-emerald-600 mb-2">
+          <PartyPopper size={18} />
+        </div>
+        <p className="text-[13px] font-semibold text-deep-plum">Thanks — your Squad will take it from here</p>
+        <p className="text-[11px] text-purple-gray leading-snug mt-1">
+          We've let them know you're finished. They'll review every request and follow up
+          if anything needs clarification.
+        </p>
+        <p className="text-[10px] text-purple-gray/70 mt-2">
+          {comments.length} item{comments.length === 1 ? '' : 's'} submitted
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-2xl bg-white border border-lavender shadow-sm overflow-hidden">
+      <div className="px-3 py-3 border-b border-lavender">
+        <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">Your feedback</p>
+        <p className="text-[13px] font-semibold text-deep-plum">
+          {comments.length === 0
+            ? 'No items yet'
+            : `${comments.length} item${comments.length === 1 ? '' : 's'} saved`}
+        </p>
+      </div>
+      <div className="max-h-[55vh] overflow-y-auto">
+        {byPage.length === 0 ? (
+          <div className="px-3 py-6 text-center text-[12px] text-purple-gray">
+            <Inbox size={16} className="mx-auto text-purple-gray/50 mb-1.5" />
+            Click any section in the preview to leave feedback. Everything you save shows up here.
+          </div>
+        ) : (
+          <ul className="divide-y divide-lavender/60">
+            {byPage.map(({ page, items }) => (
+              <li key={page.id} className="px-3 py-2">
+                <p className="text-[10px] uppercase tracking-widest font-bold text-purple-gray mb-1">
+                  {page.name}
+                </p>
+                <ul className="space-y-1">
+                  {items.map(c => {
+                    const sec = c.web_section_id ? sectionById.get(c.web_section_id) : null
+                    const tpl = sec?.content_template_id ? templates[sec.content_template_id] : null
+                    return (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          onClick={() => c.web_section_id && onJumpToSection(page.id, c.web_section_id)}
+                          className="w-full text-left rounded-md px-2 py-1.5 hover:bg-lavender-tint/40 transition-colors"
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span className={[
+                              'shrink-0 inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5',
+                              c.kind === 'requested' ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                              : c.kind === 'suggested' ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                              : 'bg-lavender-tint text-primary-purple border border-primary-purple/20',
+                            ].join(' ')}>
+                              {c.kind}
+                            </span>
+                            <span className="text-[11px] text-deep-plum font-semibold truncate">
+                              {tpl?.layer_name ?? 'Section'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-purple-gray truncate mt-0.5">
+                            {c.field_key
+                              ? `${c.field_key}${typeof c.suggested_value === 'string' ? ` — ${stripHtml(c.suggested_value)}` : ''}`
+                              : (c.body ?? '')}
+                          </p>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div className="px-3 py-3 border-t border-lavender bg-cream/40 space-y-2">
+        <button
+          type="button"
+          onClick={() => void onFinish()}
+          disabled={finishing || comments.length === 0}
+          className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-deep-plum text-white text-[12px] font-semibold px-4 py-2 hover:bg-primary-purple transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {finishing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+          Tell the Squad you've finished reviewing
+        </button>
+        {comments.length === 0 && (
+          <p className="text-[10px] text-purple-gray text-center italic">
+            Leave at least one piece of feedback before you wrap up.
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function stripHtml(s: string): string {
+  return s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
 }
 
 // ── Pieces ─────────────────────────────────────────────────────────
@@ -448,9 +657,9 @@ function NameCaptureModal({
         className="rounded-2xl bg-white border border-lavender px-6 py-6 max-w-md w-full text-center shadow-sm"
       >
         <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple mb-1">{projectName}</p>
-        <h1 className="text-[20px] font-semibold text-deep-plum mb-1">Welcome to the review</h1>
+        <h1 className="text-[20px] font-semibold text-deep-plum mb-1">Welcome to your website content review</h1>
         <p className="text-[13px] text-purple-gray mb-4">
-          Let us know who's reviewing so your team can credit your feedback.
+          Let us know who's reviewing so your Squad can credit your feedback.
         </p>
         <label className="block text-left mb-4">
           <span className="text-[11px] uppercase tracking-widest font-bold text-purple-gray block mb-1">Your name</span>
@@ -478,6 +687,7 @@ function NameCaptureModal({
 
 function CommentDrawer({
   draft, setDraft, submitting, onCancel, onSubmit, template,
+  existingForSection, snippetMap: _snippetMap,
 }: {
   draft: DraftComment
   setDraft: (d: DraftComment | null) => void
@@ -485,8 +695,9 @@ function CommentDrawer({
   onCancel: () => void
   onSubmit: () => Promise<void>
   template: WebContentTemplate | null
+  existingForSection: WebReviewComment[]
+  snippetMap: SnippetMap
 }) {
-  const [showSpecific, setShowSpecific] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const editableFields = useMemo(() => {
@@ -555,75 +766,109 @@ function CommentDrawer({
         </header>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-          {/* General comment */}
+          {/* Existing per-section feedback — surfaced first so the
+              partner can see what they've already saved before adding
+              more. Avoids the "did my last edit go through?" confusion. */}
+          {existingForSection.length > 0 && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-emerald-700 mb-1">
+                Already saved on this section · {existingForSection.length}
+              </p>
+              <ul className="space-y-1">
+                {existingForSection.map(c => (
+                  <li key={c.id} className="text-[11px] text-deep-plum">
+                    <span className="font-mono text-emerald-700 mr-1">{c.kind}</span>
+                    {c.field_key && <span className="font-mono text-purple-gray mr-1">{c.field_key}</span>}
+                    <span className="text-purple-gray italic">
+                      {c.field_key
+                        ? (typeof c.suggested_value === 'string' ? stripHtml(c.suggested_value) : '')
+                        : (c.body ?? '')}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Specific edits — surfaced first because most partner
+              feedback is per-field. Auto-expanded so it doesn't hide
+              behind a +/− toggle. */}
+          {editableFields.length > 0 && (
+            <div>
+              <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple mb-2">
+                Suggest specific edits
+              </p>
+              <div className="space-y-2.5">
+                {editableFields.map(({ field, current }) => {
+                  const sug = draft.suggestions.find(s => s.field_key === field.key)
+                  const editing = !!sug
+                  return (
+                    <div
+                      key={field.key}
+                      className={[
+                        'rounded-xl border px-3 py-2',
+                        editing ? 'border-primary-purple bg-lavender-tint/30' : 'border-lavender bg-white',
+                      ].join(' ')}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <p className="text-[11px] font-semibold text-deep-plum">{field.layer_name ?? field.key}</p>
+                        <button
+                          type="button"
+                          onClick={() => toggleSuggestion(field, current)}
+                          className="text-[11px] font-semibold text-primary-purple hover:underline"
+                        >
+                          {editing ? 'Cancel edit' : 'Edit this'}
+                        </button>
+                      </div>
+                      {/* Surface the current value as rendered text (not
+                          raw HTML) so the partner sees what readers see. */}
+                      <FieldCurrentPreview
+                        type={field.type as 'text' | 'richtext' | 'cta'}
+                        value={current}
+                      />
+                      {editing && sug && (
+                        field.type === 'richtext' ? (
+                          <div className="mt-2 rounded-md border border-primary-purple/40 bg-white">
+                            <WMRichTextEditor
+                              value={sug.proposed_value}
+                              onChange={(html) => setSuggestionValue(field.key, html)}
+                              placeholder="Type your suggested wording…"
+                              compact
+                            />
+                          </div>
+                        ) : (
+                          <textarea
+                            value={sug.proposed_value}
+                            onChange={(e) => setSuggestionValue(field.key, e.target.value)}
+                            rows={field.type === 'text' ? 2 : 3}
+                            placeholder={field.type === 'cta' ? 'Button label — /route' : 'Type your suggested wording…'}
+                            className="w-full mt-1 rounded-md border border-primary-purple/40 bg-white px-2 py-1.5 text-[12px] text-deep-plum outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/15"
+                            autoFocus
+                          />
+                        )
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* General comment — broad notes that aren't tied to a field. */}
           <div>
             <label className="block">
               <span className="text-[10px] uppercase tracking-widest font-bold text-purple-gray block mb-1">
-                Your feedback
+                Anything else to add?
               </span>
               <textarea
                 value={draft.body}
                 onChange={(e) => setBody(e.target.value)}
-                rows={4}
-                placeholder="Tell the team what you'd like changed about this section."
+                rows={3}
+                placeholder="A general note about this section that isn't tied to a specific field."
                 className="w-full rounded-xl border border-lavender bg-white px-3 py-2 text-[13px] text-deep-plum placeholder-purple-gray/50 outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/15"
               />
             </label>
           </div>
-
-          {/* Specific edits */}
-          {editableFields.length > 0 && (
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowSpecific(s => !s)}
-                className="text-[11px] font-semibold text-primary-purple hover:underline inline-flex items-center gap-1"
-              >
-                {showSpecific ? '−' : '+'} Suggest specific edits
-              </button>
-              {showSpecific && (
-                <div className="mt-2 space-y-2.5">
-                  {editableFields.map(({ field, current }) => {
-                    const sug = draft.suggestions.find(s => s.field_key === field.key)
-                    const editing = !!sug
-                    return (
-                      <div
-                        key={field.key}
-                        className={[
-                          'rounded-xl border px-3 py-2',
-                          editing ? 'border-primary-purple bg-lavender-tint/30' : 'border-lavender bg-white',
-                        ].join(' ')}
-                      >
-                        <div className="flex items-center justify-between gap-2 mb-1">
-                          <p className="text-[11px] font-semibold text-deep-plum">{field.layer_name ?? field.key}</p>
-                          <button
-                            type="button"
-                            onClick={() => toggleSuggestion(field, current)}
-                            className="text-[11px] font-semibold text-primary-purple hover:underline"
-                          >
-                            {editing ? 'Cancel edit' : 'Edit this'}
-                          </button>
-                        </div>
-                        <p className="text-[11px] text-purple-gray italic line-clamp-2 mb-1">
-                          Current: {currentToProposedString(current) || '(empty)'}
-                        </p>
-                        {editing && sug && (
-                          <textarea
-                            value={sug.proposed_value}
-                            onChange={(e) => setSuggestionValue(field.key, e.target.value)}
-                            rows={3}
-                            placeholder="Type your suggested wording…"
-                            className="w-full mt-1 rounded-md border border-primary-purple/40 bg-white px-2 py-1.5 text-[12px] text-deep-plum outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/15"
-                            autoFocus
-                          />
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Attachment */}
           <div>
@@ -679,9 +924,10 @@ function CommentDrawer({
             onClick={() => void onSubmit()}
             disabled={!canSubmit}
             className="inline-flex items-center gap-1.5 rounded-full bg-deep-plum text-white text-[12px] font-semibold px-4 py-1.5 hover:bg-primary-purple transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Save this feedback. You can keep adding more before you tell the Squad you're done."
           >
             {submitting ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-            Send feedback
+            Save feedback
           </button>
         </footer>
       </aside>
@@ -705,8 +951,40 @@ function currentToProposedString(v: unknown): string {
   return String(v)
 }
 
-// Silence unused MessageSquarePlus import — kept for a future
-// "leave a comment" CTA that could surface on hover.
-void MessageSquarePlus
-// Same for ArrowLeft — reserved for an eventual "back to page list" button.
-void ArrowLeft
+/** Read-only preview of a field's current value. Rich text renders as
+ *  parsed HTML; text/cta as plain text. Keeps partners from seeing
+ *  `<p>…</p>` markup that would otherwise leak out of richtext slots. */
+function FieldCurrentPreview({ type, value }: { type: 'text' | 'richtext' | 'cta'; value: unknown }) {
+  if (value == null || value === '') {
+    return <p className="text-[11px] text-purple-gray italic">Current: (empty)</p>
+  }
+  if (type === 'richtext' && typeof value === 'string') {
+    return (
+      <div className="text-[11px] text-purple-gray italic">
+        <span className="not-italic font-mono text-[9px] uppercase tracking-widest text-purple-gray/70 mr-1">Current:</span>
+        <span
+          className="prose prose-sm max-w-none inline align-baseline [&>*]:inline [&>*]:m-0"
+          dangerouslySetInnerHTML={{ __html: value }}
+        />
+      </div>
+    )
+  }
+  if (type === 'cta' && typeof value === 'object' && value !== null) {
+    const obj = value as { label?: unknown; url?: unknown }
+    return (
+      <p className="text-[11px] text-purple-gray italic line-clamp-2">
+        Current: {typeof obj.label === 'string' ? obj.label : '(no label)'}
+        {obj.url ? ` — ${String(obj.url)}` : ''}
+      </p>
+    )
+  }
+  return (
+    <p className="text-[11px] text-purple-gray italic line-clamp-2">
+      Current: {currentToProposedString(value)}
+    </p>
+  )
+}
+
+// Silenced — AlertTriangle/Send reserved for future portal states.
+void AlertTriangle
+void Send

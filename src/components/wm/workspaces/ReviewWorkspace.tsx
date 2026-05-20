@@ -129,10 +129,12 @@ export function ReviewWorkspace({ project }: Props) {
     return list
   }, [state, reviewFilter, pageFilter, kindFilter, statusFilter])
 
-  const jumpToPage = (pageId: string) => {
+  const jumpToPage = (pageId: string, sectionId?: string | null) => {
     const next = new URLSearchParams(window.location.search)
     next.set('tab', 'pages')
     next.set('page', pageId)
+    if (sectionId) next.set('section', sectionId)
+    else next.delete('section')
     setParams(next, { replace: false })
   }
 
@@ -343,7 +345,7 @@ export function ReviewWorkspace({ project }: Props) {
                   const tplId = sec?.content_template_id
                   return tplId ? templates[tplId] : undefined
                 })()}
-                onJumpToPage={() => jumpToPage(c.web_page_id)}
+                onJumpToPage={() => jumpToPage(c.web_page_id, c.web_section_id)}
                 onResolved={load}
               />
             ))}

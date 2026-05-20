@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   GripVertical, MoreHorizontal, Trash2, RotateCw, Archive,
-  ArrowUp, ArrowDown,
+  ArrowUp, ArrowDown, MessageSquare,
 } from 'lucide-react'
 import { renderSectionToHtml, type SnippetMap } from '../../../lib/webBrixiesRender'
 import type { WebContentTemplate, WebSection } from '../../../types/database'
@@ -33,6 +33,14 @@ interface Props {
    *  referenced groups (Feature 82/106/22 et al). */
   cardTemplates?: Record<string, WebContentTemplate>
   bindQuality: 'good' | 'partial' | 'attention'
+  /** Counts of open review comments by kind. Drives the section-strip
+   *  badges + the gold left-edge accent on the card. */
+  reviewCounts?: {
+    open_total:     number
+    open_comments:  number
+    open_suggested: number
+    open_requested: number
+  }
   onSelect: () => void
   onMoveUp: () => void
   onMoveDown: () => void
@@ -43,6 +51,7 @@ interface Props {
 
 export function SectionPreviewCard({
   section, template, index, total, selected, snippetMap, cardTemplates, bindQuality,
+  reviewCounts,
   onSelect, onMoveUp, onMoveDown, onChangeVariant, onUnbind, onRemove,
 }: Props) {
   const html = useMemo(() => {
@@ -55,18 +64,26 @@ export function SectionPreviewCard({
     )
   }, [template, section.field_values, snippetMap, cardTemplates])
 
+  const hasOpenReview = (reviewCounts?.open_total ?? 0) > 0
+
   return (
     <div
       id={`section-${section.id}`}
       onClick={onSelect}
       className={[
-        'group/section cursor-pointer overflow-hidden rounded-xl border-2 transition-all',
+        'group/section cursor-pointer overflow-hidden rounded-xl border-2 transition-all relative',
         selected
           ? 'border-wm-accent shadow-lg shadow-wm-accent/10'
-          : 'border-wm-border/60 hover:border-wm-accent/40 hover:shadow-md',
+          : hasOpenReview
+            ? 'border-amber-300/70 hover:border-amber-400 hover:shadow-md'
+            : 'border-wm-border/60 hover:border-wm-accent/40 hover:shadow-md',
         'bg-wm-bg-elevated',
       ].join(' ')}
     >
+      {/* Left-edge accent strip when this section has open review feedback. */}
+      {hasOpenReview && (
+        <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-400" aria-hidden />
+      )}
       <SectionStrip
         section={section}
         template={template}
@@ -74,6 +91,7 @@ export function SectionPreviewCard({
         total={total}
         bindQuality={bindQuality}
         selected={selected}
+        reviewCounts={reviewCounts}
         onMoveUp={onMoveUp}
         onMoveDown={onMoveDown}
         onChangeVariant={onChangeVariant}
@@ -92,7 +110,7 @@ export function SectionPreviewCard({
 // ── Section strip (thin chrome above iframe) ────────────────────────
 
 function SectionStrip({
-  section: _section, template, index, total, bindQuality, selected,
+  section: _section, template, index, total, bindQuality, selected, reviewCounts,
   onMoveUp, onMoveDown, onChangeVariant, onUnbind, onRemove,
 }: {
   section: WebSection
@@ -101,6 +119,12 @@ function SectionStrip({
   total: number
   bindQuality: 'good' | 'partial' | 'attention'
   selected: boolean
+  reviewCounts?: {
+    open_total:     number
+    open_comments:  number
+    open_suggested: number
+    open_requested: number
+  }
   onMoveUp: () => void
   onMoveDown: () => void
   onChangeVariant: () => void
@@ -144,6 +168,19 @@ function SectionStrip({
       {template?.family && (
         <span className="text-[10px] text-wm-text-subtle italic truncate shrink-0">
           {template.family}
+        </span>
+      )}
+      {reviewCounts && reviewCounts.open_total > 0 && (
+        <span
+          className="ml-2 inline-flex items-center gap-1 shrink-0 rounded-full bg-amber-100 border border-amber-300 text-amber-800 text-[10px] font-bold px-2 py-0.5"
+          title={[
+            reviewCounts.open_requested > 0 && `${reviewCounts.open_requested} requested`,
+            reviewCounts.open_suggested > 0 && `${reviewCounts.open_suggested} suggested`,
+            reviewCounts.open_comments  > 0 && `${reviewCounts.open_comments} comment${reviewCounts.open_comments === 1 ? '' : 's'}`,
+          ].filter(Boolean).join(' · ')}
+        >
+          <MessageSquare size={9} />
+          {reviewCounts.open_total}
         </span>
       )}
       <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover/section:opacity-100 transition-opacity">

@@ -10,6 +10,13 @@ import { SectionPreviewCard } from './SectionPreviewCard'
 import type { SnippetMap } from '../../../lib/webBrixiesRender'
 import type { WebContentTemplate, WebSection } from '../../../types/database'
 
+export interface SectionReviewCounts {
+  open_total:     number
+  open_comments:  number
+  open_suggested: number
+  open_requested: number
+}
+
 interface Props {
   sections: WebSection[]
   templates: Record<string, WebContentTemplate>
@@ -17,6 +24,8 @@ interface Props {
   selectedId: string | null
   snippetMap: SnippetMap
   bindQualityFor: (section: WebSection) => 'good' | 'partial' | 'attention'
+  /** Map of section id → open-review counts for the highlight + badge. */
+  reviewCountsBySection?: Record<string, SectionReviewCounts>
   onSelect: (id: string) => void
   onMoveSection: (id: string, dir: -1 | 1) => void
   onChangeVariant: (section: WebSection) => void
@@ -28,6 +37,7 @@ interface Props {
 
 export function SectionList({
   sections, templates, cardTemplates, selectedId, snippetMap, bindQualityFor,
+  reviewCountsBySection,
   onSelect, onMoveSection, onChangeVariant, onUnbind, onRemove,
   onInsertBefore, onInsertAfter,
 }: Props) {
@@ -64,6 +74,7 @@ export function SectionList({
             selected={section.id === selectedId}
             snippetMap={snippetMap}
             bindQuality={bindQualityFor(section)}
+            reviewCounts={reviewCountsBySection?.[section.id]}
             onSelect={() => onSelect(section.id)}
             onMoveUp={() => onMoveSection(section.id, -1)}
             onMoveDown={() => onMoveSection(section.id, 1)}

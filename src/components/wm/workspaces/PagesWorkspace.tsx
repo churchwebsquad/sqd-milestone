@@ -554,6 +554,11 @@ function PageEditor({
   onPageChange: () => Promise<void>
   onArchived: () => void
 }) {
+  // Deep-link from the Review queue / Feedback rail: ?section=<id>
+  // selects that section once sections finish loading, then clears the
+  // param so it doesn't re-fire on next render.
+  const [deepLinkParams, setDeepLinkParams] = useSearchParams()
+  const sectionDeepLink = deepLinkParams.get('section')
   const [titleDraft, setTitleDraft] = useState(page.name)
   const [slugDraft, setSlugDraft] = useState(page.slug)
   const [titleDirty, setTitleDirty] = useState(false)
@@ -631,6 +636,25 @@ function PageEditor({
     setLoadingSections(false)
   }
   useEffect(() => { void loadSections() }, [page.id])
+
+  // After sections load, honor any ?section= deep link from the
+  // review queue / feedback rail.
+  useEffect(() => {
+    if (!sectionDeepLink) return
+    if (sections.some(s => s.id === sectionDeepLink)) {
+      setSelectedSectionId(sectionDeepLink)
+      queueMicrotask(() => {
+        document.getElementById(`section-${sectionDeepLink}`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
+      // Clear the param so a manual deselect doesn't re-fire on
+      // the next render.
+      const next = new URLSearchParams(window.location.search)
+      next.delete('section')
+      setDeepLinkParams(next, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sections, sectionDeepLink])
 
   // When the bind panel opens, compute the deterministic ranking of
   // candidate templates against the brief section's content shape. This
@@ -985,7 +1009,13 @@ function PageEditor({
       onRemove: () => void archiveSection(selectedSection.id),
       activeInternalReview,
       sectionComments,
-      onCommentsChange: onReviewChange,
+      // After a comment resolves we want both the comment list to
+      // refresh AND the section's field_values to re-read from the
+      // database — Apply / Amend writes to web_sections.field_values,
+      // and the canvas iframe re-renders off the locally-held section.
+      onCommentsChange: async () => {
+        await Promise.all([onReviewChange(), loadSections()])
+      },
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSection, selectedTemplate, snippets, viewMode, cardTemplates, reviewState])
@@ -1062,6 +1092,28 @@ function PageEditor({
   const hasOpenInternal = !!reviewState?.open_reviews.some(r => r.kind === 'internal')
   const hasOpenPartner  = !!reviewState?.has_open_partner
 
+  // Per-section open-comment counts. The SectionList passes these into
+  // SectionPreviewCard for the highlight + badge.
+  const sectionReviewCounts = useMemo(() => {
+    if (!reviewState) return {}
+    const result: Record<string, {
+      open_total: number; open_comments: number;
+      open_suggested: number; open_requested: number;
+    }> = {}
+    for (const c of reviewState.comments) {
+      if (c.status !== 'open' || !c.web_section_id) continue
+      if (c.web_page_id !== page.id) continue
+      const b = result[c.web_section_id] ??= {
+        open_total: 0, open_comments: 0, open_suggested: 0, open_requested: 0,
+      }
+      b.open_total++
+      if (c.kind === 'comment')   b.open_comments++
+      if (c.kind === 'suggested') b.open_suggested++
+      if (c.kind === 'requested') b.open_requested++
+    }
+    return result
+  }, [reviewState, page.id])
+
   return (
     <div className="flex" style={{ minHeight: 'calc(100vh - var(--wm-header-h, 88px))' }}>
       {/* Single scrollable canvas — the section details panel lives in
@@ -1109,6 +1161,7 @@ function PageEditor({
               selectedId={selectedSectionId}
               snippetMap={snippetMap}
               bindQualityFor={bindQualityFor}
+              reviewCountsBySection={sectionReviewCounts}
               onSelect={setSelectedSectionId}
               onMoveSection={(id, dir) => void moveSection(id, dir)}
               onChangeVariant={(section) => setBindingSection(section)}

@@ -9,26 +9,29 @@
  *   Snippets   — global merge fields + project snippets
  *   Voice      — read-only brand voice rollup
  *   Heuristics — writing rules + denominational filter + personas
- *   Ideas      — AI suggestions + manual notes
+ *   Feedback   — rollup of every open review comment, page-grouped,
+ *                click to jump to the section
  *   Audit      — heuristic violations on the active page
  *
  * The rail is context-aware: when the active workspace is `pages`, the
- * Audit tab scans the currently-open page (?page=<id>) and the Ideas
- * tab scopes to that page.
+ * Audit tab scans the currently-open page (?page=<id>) and clicking
+ * a comment in the Feedback tab navigates to the section it targets.
  */
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Tag, BookOpen, Mic, Lightbulb, AlertTriangle, RotateCw, Search,
-  Loader2, Plus, X, ArrowRight, Trash2, SquarePen,
+  Tag, BookOpen, Mic, MessageSquare, AlertTriangle, RotateCw, Search,
+  Loader2, SquarePen, Inbox,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { runAudit } from '../../lib/webAudit'
 import type { AuditFinding, AuditSeverity } from '../../lib/webAudit'
-import type { StrategyWebProject, WebAIIdea } from '../../types/database'
+import type {
+  StrategyWebProject, WebPage, WebReviewComment,
+} from '../../types/database'
+import { loadProjectReviewState } from '../../lib/webReviews'
 import { WMButton } from './Button'
-import { WMIconButton } from './IconButton'
 import { WMStatusPill } from './StatusPill'
 import { SectionDetailsPanel } from './sectioneditor/SectionDetailsPanel'
 import { SnippetFocusProvider } from './sectioneditor/SnippetFocusContext'
@@ -37,7 +40,7 @@ import { SnippetsWorkspace } from './workspaces/SnippetsWorkspace'
 import { VoiceWorkspace } from './workspaces/VoiceWorkspace'
 import { HeuristicsWorkspace } from './workspaces/HeuristicsWorkspace'
 
-type RailTab = 'section' | 'snippets' | 'voice' | 'heuristics' | 'ideas' | 'audit'
+type RailTab = 'section' | 'snippets' | 'voice' | 'heuristics' | 'feedback' | 'audit'
 
 interface Props {
   projectId: string
@@ -53,8 +56,8 @@ interface Props {
 export function AssistantRail({ projectId, activeTab, project, onProjectChange }: Props) {
   const [tab, setTab] = useState<RailTab>('snippets')
   const [query, setQuery] = useState('')
-  const [counts, setCounts] = useState({ snippets: 0, ideas: 0, audit: 0 })
-  const [params] = useSearchParams()
+  const [counts, setCounts] = useState({ snippets: 0, feedback: 0, audit: 0 })
+  const [params, setParams] = useSearchParams()
   const activePageId = activeTab === 'pages' ? params.get('page') : null
 
   const sectionDetail = useSectionDetail()
@@ -75,29 +78,42 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sectionTabAvailable])
 
-  // Counts on mount + project change
+  // Counts on mount + project change. Snippets via direct count;
+  // feedback via the same review-state lib the Review tab uses.
   const loadCounts = useCallback(async () => {
-    const [snip, ideas] = await Promise.all([
+    const [snip, state] = await Promise.all([
       supabase
         .from('web_project_snippets')
         .select('id', { count: 'exact', head: true })
         .eq('web_project_id', projectId)
         .eq('archived', false),
-      supabase
-        .from('web_ai_ideas')
-        .select('id', { count: 'exact', head: true })
-        .eq('web_project_id', projectId)
-        .eq('status', 'pending'),
+      loadProjectReviewState(projectId),
     ])
-    setCounts(c => ({ ...c, snippets: snip.count ?? 0, ideas: ideas.count ?? 0 }))
+    setCounts(c => ({
+      ...c,
+      snippets: snip.count ?? 0,
+      feedback: state.totals.open_total,
+    }))
   }, [projectId])
 
   useEffect(() => { void loadCounts() }, [loadCounts])
 
+  const jumpToSection = useCallback((pageId: string, sectionId: string) => {
+    const next = new URLSearchParams(window.location.search)
+    next.set('tab', 'pages')
+    next.set('page', pageId)
+    setParams(next, { replace: false })
+    queueMicrotask(() => {
+      document.getElementById(`section-${sectionId}`)?.scrollIntoView({
+        behavior: 'smooth', block: 'start',
+      })
+    })
+  }, [setParams])
+
   // Workspaces hosted in the rail (Snippets / Voice / Heuristics)
   // render their own filter UI internally, so the rail's search box
   // only applies to the simple list tabs.
-  const showSearchBox = tab === 'ideas' || tab === 'audit'
+  const showSearchBox = tab === 'feedback' || tab === 'audit'
 
   return (
     <div className="h-full flex flex-col text-sm">
@@ -108,7 +124,7 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
         <RailTabButton tab="snippets"   active={tab} setTab={setTab} icon={<Tag size={13} />}            count={counts.snippets} label="Snippets" />
         <RailTabButton tab="voice"      active={tab} setTab={setTab} icon={<Mic size={13} />}            label="Voice" />
         <RailTabButton tab="heuristics" active={tab} setTab={setTab} icon={<BookOpen size={13} />}       label="Heuristics" />
-        <RailTabButton tab="ideas"      active={tab} setTab={setTab} icon={<Lightbulb size={13} />}      count={counts.ideas} label="Ideas" />
+        <RailTabButton tab="feedback"   active={tab} setTab={setTab} icon={<MessageSquare size={13} />}  count={counts.feedback} label="Feedback" />
         <RailTabButton tab="audit"      active={tab} setTab={setTab} icon={<AlertTriangle size={13} />}  count={counts.audit} label="Audit" />
       </div>
 
@@ -120,7 +136,7 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
               type="text"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder={tab === 'ideas' ? 'Filter ideas…' : 'Filter violations…'}
+              placeholder={tab === 'feedback' ? 'Filter feedback…' : 'Filter violations…'}
               className="w-full h-8 pl-7 pr-2 rounded-md bg-wm-bg-elevated border border-wm-border text-[12px] text-wm-text placeholder-wm-text-subtle outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20"
             />
           </div>
@@ -158,7 +174,7 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
           ? <HeuristicsWorkspace project={project} />
           : <RailUnavailable label="Heuristics" />
         )}
-        {tab === 'ideas' && <IdeasTab projectId={projectId} activePageId={activePageId} query={query} onChange={loadCounts} />}
+        {tab === 'feedback' && <FeedbackTab projectId={projectId} query={query} onJumpToSection={jumpToSection} />}
         {tab === 'audit' && <AuditTab projectId={projectId} activePageId={activePageId} query={query} onCount={n => setCounts(c => ({ ...c, audit: n }))} />}
       </div>
     </div>
@@ -210,149 +226,136 @@ function RailTabButton({
   )
 }
 
-// ── Ideas tab ────────────────────────────────────────────────────────
+// ── Feedback tab — sitemap-grouped rollup of every open review comment.
+// Replaced the prior "Ideas" panel which didn't earn its rail real
+// estate. Clicking a row navigates to the section's page and scrolls.
+// ─────────────────────────────────────────────────────────────────────
 
-function IdeasTab({
-  projectId, activePageId, query, onChange,
+function FeedbackTab({
+  projectId, query, onJumpToSection,
 }: {
   projectId: string
-  activePageId: string | null
   query: string
-  onChange: () => Promise<void>
+  onJumpToSection: (pageId: string, sectionId: string) => void
 }) {
-  const [ideas, setIdeas] = useState<WebAIIdea[]>([])
+  const [comments, setComments] = useState<WebReviewComment[]>([])
+  const [pages, setPages] = useState<WebPage[]>([])
   const [loading, setLoading] = useState(true)
-  const [adding, setAdding] = useState(false)
-  const [draft, setDraft] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
-    const { data } = await supabase
-      .from('web_ai_ideas')
-      .select('*')
+    const state = await loadProjectReviewState(projectId)
+    const open = state.comments.filter(c => c.status === 'open')
+    setComments(open)
+    const { data: pageRows } = await supabase
+      .from('web_pages')
+      .select('id, name, slug, sort_order, web_project_id')
       .eq('web_project_id', projectId)
-      .eq('status', 'pending')
-      .order('created_at', { ascending: false })
-    setIdeas((data ?? []) as WebAIIdea[])
+      .eq('archived', false)
+      .order('sort_order')
+    setPages((pageRows ?? []) as WebPage[])
     setLoading(false)
   }, [projectId])
 
   useEffect(() => { void load() }, [load])
 
-  const addNote = async () => {
-    if (!draft.trim()) return
-    await supabase.from('web_ai_ideas').insert({
-      web_project_id: projectId,
-      scope: activePageId ? `page:${activePageId}` : 'global',
-      category: 'other',
-      title: draft.trim(),
-      proposal: { kind: 'manual_note', body: draft.trim() },
-      status: 'pending',
-    })
-    setDraft('')
-    setAdding(false)
-    await load()
-    await onChange()
-  }
-
-  const resolve = async (id: string, status: 'accepted' | 'dismissed' | 'snoozed') => {
-    await supabase
-      .from('web_ai_ideas')
-      .update({ status, resolved_at: new Date().toISOString() })
-      .eq('id', id)
-    await load()
-    await onChange()
-  }
-
   const q = query.trim().toLowerCase()
-  const visible = q ? ideas.filter(i => i.title.toLowerCase().includes(q)) : ideas
+  const filtered = useMemo(() => {
+    if (!q) return comments
+    return comments.filter(c => {
+      const hay = [
+        c.body, c.field_key,
+        typeof c.suggested_value === 'string' ? c.suggested_value : '',
+        c.author_external_name ?? '',
+      ].filter(Boolean).join(' ').toLowerCase()
+      return hay.includes(q)
+    })
+  }, [comments, q])
+
+  const grouped = useMemo(() => {
+    const groups: Array<{ page: WebPage; items: WebReviewComment[] }> = []
+    for (const p of pages) {
+      const items = filtered.filter(c => c.web_page_id === p.id)
+      if (items.length > 0) groups.push({ page: p, items })
+    }
+    return groups
+  }, [filtered, pages])
+
+  if (loading) {
+    return (
+      <div className="p-3 space-y-1.5">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="h-14 rounded bg-wm-bg-hover animate-pulse" />
+        ))}
+      </div>
+    )
+  }
+
+  if (filtered.length === 0) {
+    return (
+      <div className="p-3">
+        <EmptyState
+          icon={<Inbox size={20} />}
+          title={q ? 'No matches' : 'No open feedback'}
+          body={q
+            ? 'No comments match this filter. Try different keywords.'
+            : 'Start an internal review (or send a partner review link) and feedback will roll up here.'}
+        />
+      </div>
+    )
+  }
 
   return (
-    <div className="p-3 space-y-2">
-      {adding ? (
-        <div className="rounded-md bg-wm-bg border border-wm-accent p-2 space-y-2">
-          <textarea
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            autoFocus
-            rows={3}
-            placeholder="Note an idea or a TODO — AI will see this when Stage 1 runs."
-            className="w-full rounded bg-wm-bg-elevated border border-wm-border px-2 py-1.5 text-[12px] text-wm-text outline-none focus:border-wm-border-focus"
-          />
-          <div className="flex items-center justify-end gap-1">
-            <WMButton variant="ghost" size="sm" onClick={() => { setAdding(false); setDraft('') }}>
-              Cancel
-            </WMButton>
-            <WMButton variant="primary" size="sm" onClick={addNote}>
-              Add note
-            </WMButton>
-          </div>
+    <div className="p-3 space-y-3">
+      {grouped.map(({ page, items }) => (
+        <div key={page.id}>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5 px-1">
+            {page.name} · {items.length}
+          </p>
+          <ul className="space-y-1">
+            {items.map(c => (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  onClick={() => c.web_section_id && onJumpToSection(page.id, c.web_section_id)}
+                  disabled={!c.web_section_id}
+                  className="w-full text-left rounded-md bg-wm-bg-elevated border border-wm-border px-2.5 py-1.5 hover:border-wm-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
+                >
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <KindTag kind={c.kind} />
+                    {c.field_key && <span className="font-mono text-[10px] text-wm-text-subtle">{c.field_key}</span>}
+                    <span className="ml-auto text-[10px] text-wm-text-subtle">
+                      {c.author_kind === 'partner' ? (c.author_external_name ?? 'Partner') : 'Staff'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-wm-text leading-snug line-clamp-2">
+                    {c.body || (typeof c.suggested_value === 'string' ? stripHtml(c.suggested_value) : '(no body)')}
+                  </p>
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setAdding(true)}
-          className="w-full inline-flex items-center justify-center gap-1.5 h-8 rounded-md border border-dashed border-wm-border text-[12px] font-medium text-wm-text-muted hover:border-wm-border-focus hover:text-wm-text transition-colors"
-        >
-          <Plus size={11} /> Add a note
-        </button>
-      )}
-
-      {loading ? (
-        <div className="space-y-1.5">
-          {Array.from({ length: 2 }).map((_, i) => (
-            <div key={i} className="h-12 rounded bg-wm-bg-hover animate-pulse" />
-          ))}
-        </div>
-      ) : visible.length === 0 ? (
-        <EmptyState
-          icon={<Lightbulb size={20} />}
-          title="No ideas yet"
-          body="Add a note manually, or wait for AI suggestions when Stage 1 runs."
-        />
-      ) : (
-        visible.map(idea => (
-          <IdeaCard
-            key={idea.id}
-            idea={idea}
-            onAccept={() => void resolve(idea.id, 'accepted')}
-            onDismiss={() => void resolve(idea.id, 'dismissed')}
-          />
-        ))
-      )}
+      ))}
     </div>
   )
 }
 
-function IdeaCard({
-  idea, onAccept, onDismiss,
-}: {
-  idea: WebAIIdea
-  onAccept: () => void
-  onDismiss: () => void
-}) {
+function KindTag({ kind }: { kind: WebReviewComment['kind'] }) {
+  const cfg = {
+    comment:   { label: 'Comment',   tone: 'bg-lavender-tint text-primary-purple border border-primary-purple/20' },
+    suggested: { label: 'Suggested', tone: 'bg-blue-50 text-blue-700 border border-blue-200' },
+    requested: { label: 'Requested', tone: 'bg-amber-50 text-amber-700 border border-amber-200' },
+  }[kind]
   return (
-    <div className="rounded-md bg-wm-bg-elevated border border-wm-border p-2.5 group">
-      <div className="flex items-start gap-2">
-        <Lightbulb size={11} className="text-wm-accent mt-0.5 shrink-0" />
-        <div className="min-w-0 flex-1">
-          <p className="text-[12px] font-medium text-wm-text leading-snug">{idea.title}</p>
-          {idea.reason && <p className="text-[10px] text-wm-text-subtle mt-1">{idea.reason}</p>}
-          <div className="mt-1.5 flex items-center justify-between gap-1.5">
-            <span className="text-[10px] text-wm-text-subtle">{idea.scope}</span>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              <WMIconButton label="Dismiss" size="sm" onClick={onDismiss}>
-                <X size={11} />
-              </WMIconButton>
-              <WMIconButton label="Accept" size="sm" onClick={onAccept}>
-                <ArrowRight size={11} />
-              </WMIconButton>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <span className={`inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 ${cfg.tone}`}>
+      {cfg.label}
+    </span>
   )
+}
+
+function stripHtml(s: string): string {
+  return s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
 }
 
 // ── Audit tab ─────────────────────────────────────────────────────────
