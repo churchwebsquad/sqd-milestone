@@ -1126,9 +1126,12 @@ function PageEditor({
               hasPartner={hasOpenPartner}
               counts={pageCommentCounts}
               onJumpToReviews={() => {
+                // SPA nav, not window.location.search = ... — full
+                // reloads here were silently dropping unsaved work in
+                // the section editor.
                 const next = new URLSearchParams(window.location.search)
                 next.set('tab', 'review')
-                window.location.search = next.toString()
+                setDeepLinkParams(next, { replace: false })
               }}
             />
           )}

@@ -27,7 +27,7 @@ export default function UpdateAvailableToast() {
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold leading-snug">A new version of the app is ready</p>
         <p className="text-xs text-white/75 mt-0.5">
-          Reload to pick up the latest features and fixes.
+          Save any in-progress work, then reload to pick up the latest features and fixes.
         </p>
         <div className="mt-2 flex items-center gap-2">
           <button
