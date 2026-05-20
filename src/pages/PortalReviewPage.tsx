@@ -541,8 +541,9 @@ function FeedbackTracker({
   onFinish: () => Promise<void>
   onApprove: (finalNote: string) => Promise<void>
 }) {
-  const [showApprove, setShowApprove] = useState(false)
-  const [approvalNote, setApprovalNote] = useState('')
+  // No-feedback approve modal — only triggers when the partner hits
+  // "Complete Review" with zero comments on the project.
+  const [approveModalOpen, setApproveModalOpen] = useState(false)
   const pageById = useMemo(() => {
     const m = new Map<string, WebPage>()
     for (const p of pages) m.set(p.id, p)
@@ -634,6 +635,9 @@ function FeedbackTracker({
                               ? `${c.field_key}${typeof c.suggested_value === 'string' ? ` — ${stripHtml(c.suggested_value)}` : ''}`
                               : (c.body ?? '')}
                           </p>
+                          <p className="text-[10px] text-purple-gray/70 mt-0.5">
+                            {c.author_external_name ?? 'You'} · {fmtPortalDateTime(c.created_at)}
+                          </p>
                         </button>
                       </li>
                     )
@@ -644,69 +648,73 @@ function FeedbackTracker({
           </ul>
         )}
       </div>
-      <div className="px-3 py-3 border-t border-lavender bg-cream/40 space-y-2">
-        {showApprove ? (
-          <div className="space-y-2">
-            <label className="block">
-              <span className="text-[10px] uppercase tracking-widest font-bold text-emerald-700 block mb-1">
-                Any final notes for the Squad? (optional)
-              </span>
-              <textarea
-                value={approvalNote}
-                onChange={(e) => setApprovalNote(e.target.value)}
-                rows={2}
-                placeholder="Anything to flag before we proceed — or leave blank to approve as-is."
-                className="w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-[12px] text-deep-plum placeholder-purple-gray/50 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
-              />
-            </label>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => { setShowApprove(false); setApprovalNote('') }}
-                className="text-[11px] font-semibold text-purple-gray hover:text-deep-plum px-2"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void onApprove(approvalNote)}
-                disabled={finishing}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-full bg-emerald-600 text-white text-[12px] font-semibold px-4 py-2 hover:bg-emerald-700 transition-colors disabled:opacity-40"
-              >
-                {finishing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                Approve site
-              </button>
-            </div>
-          </div>
-        ) : (
-          <>
-            <button
-              type="button"
-              onClick={() => setShowApprove(true)}
-              disabled={finishing}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 text-white text-[12px] font-semibold px-4 py-2 hover:bg-emerald-700 transition-colors disabled:opacity-40"
-              title="Approve the whole site as-is. No per-section feedback required."
-            >
-              {finishing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-              Approve site
-            </button>
-            <button
-              type="button"
-              onClick={() => void onFinish()}
-              disabled={finishing || comments.length === 0}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-deep-plum text-white text-[12px] font-semibold px-4 py-2 hover:bg-primary-purple transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Submit the feedback you've saved so the Squad knows you're done."
-            >
-              {finishing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-              Submit feedback & finish
-            </button>
-            {comments.length === 0 && (
-              <p className="text-[10px] text-purple-gray text-center italic">
-                Leave at least one piece of feedback, or use Approve site if everything looks good.
-              </p>
-            )}
-          </>
-        )}
+      <div className="px-3 py-3 border-t border-lavender bg-cream/40">
+        <button
+          type="button"
+          onClick={() => {
+            if (comments.length === 0) setApproveModalOpen(true)
+            else void onFinish()
+          }}
+          disabled={finishing}
+          className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-deep-plum text-white text-[12px] font-semibold px-4 py-2.5 hover:bg-primary-purple transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {finishing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+          Complete Review & Send Feedback
+        </button>
+      </div>
+
+      {approveModalOpen && (
+        <NoFeedbackApproveModal
+          finishing={finishing}
+          onCancel={() => setApproveModalOpen(false)}
+          onApprove={async () => {
+            await onApprove('')
+            setApproveModalOpen(false)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+/** Surfaced when the partner clicks "Complete Review" without leaving
+ *  any feedback — prompts them to either confirm an as-is approval or
+ *  go back and add feedback. */
+function NoFeedbackApproveModal({
+  finishing, onCancel, onApprove,
+}: {
+  finishing: boolean
+  onCancel: () => void
+  onApprove: () => Promise<void>
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-deep-plum/40 backdrop-blur-[2px] p-4">
+      <div className="max-w-md w-full rounded-2xl bg-white border border-lavender shadow-xl px-5 py-5">
+        <h2 className="text-[16px] font-semibold text-deep-plum mb-2">No feedback yet</h2>
+        <p className="text-[13px] text-purple-gray leading-snug">
+          We noticed you haven't shared any feedback yet, which makes us think we're on
+          the right track. If everything looks good, go ahead and confirm that you'd like
+          to approve these pages as-is so TheSquad can move into the next milestone.
+        </p>
+        <div className="mt-4 flex items-center justify-end gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={finishing}
+            className="text-[12px] font-semibold text-purple-gray hover:text-deep-plum px-3 py-2 disabled:opacity-40"
+          >
+            Go back & add feedback
+          </button>
+          <button
+            type="button"
+            onClick={() => void onApprove()}
+            disabled={finishing}
+            className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 text-white text-[12px] font-semibold px-4 py-2 hover:bg-emerald-700 transition-colors disabled:opacity-40"
+          >
+            {finishing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+            Approve Pages As-Is
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -714,6 +722,14 @@ function FeedbackTracker({
 
 function stripHtml(s: string): string {
   return s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+}
+
+function fmtPortalDateTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    })
+  } catch { return iso }
 }
 
 // ── Pieces ─────────────────────────────────────────────────────────
@@ -860,19 +876,24 @@ function CommentDrawer({
               more. Avoids the "did my last edit go through?" confusion. */}
           {existingForSection.length > 0 && (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-widest font-bold text-emerald-700 mb-1">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-emerald-700 mb-1.5">
                 Already saved on this section · {existingForSection.length}
               </p>
-              <ul className="space-y-1">
+              <ul className="space-y-1.5">
                 {existingForSection.map(c => (
                   <li key={c.id} className="text-[11px] text-deep-plum">
-                    <span className="font-mono text-emerald-700 mr-1">{c.kind}</span>
-                    {c.field_key && <span className="font-mono text-purple-gray mr-1">{c.field_key}</span>}
-                    <span className="text-purple-gray italic">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-mono text-emerald-700">{c.kind}</span>
+                      {c.field_key && <span className="font-mono text-purple-gray">{c.field_key}</span>}
+                      <span className="ml-auto text-[10px] text-purple-gray/70">
+                        {c.author_external_name ?? 'You'} · {fmtPortalDateTime(c.created_at)}
+                      </span>
+                    </div>
+                    <p className="text-purple-gray italic mt-0.5">
                       {c.field_key
                         ? (typeof c.suggested_value === 'string' ? stripHtml(c.suggested_value) : '')
                         : (c.body ?? '')}
-                    </span>
+                    </p>
                   </li>
                 ))}
               </ul>

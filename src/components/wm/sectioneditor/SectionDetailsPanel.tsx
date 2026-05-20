@@ -513,9 +513,12 @@ function ReviewCommentsBlock({
         <ul className="space-y-1.5 mb-3">
           {sectionComments.map(c => (
             <li key={c.id} className="rounded-md border border-wm-border bg-wm-bg px-2.5 py-1.5">
-              <div className="flex items-center gap-1.5 text-[10px] text-wm-text-subtle mb-0.5">
+              <div className="flex items-center gap-1.5 text-[10px] text-wm-text-subtle mb-0.5 flex-wrap">
                 <KindTag kind={c.kind} />
-                {c.field_key && <span className="font-mono">{c.field_key}</span>}
+                <span className="font-semibold text-wm-text">
+                  {c.author_external_name ?? (c.author_kind === 'partner' ? 'Partner' : 'Staff')}
+                </span>
+                {c.field_key && <span className="font-mono opacity-70">{c.field_key}</span>}
                 <span className="ml-auto inline-flex items-center gap-0.5">
                   <Clock size={9} /> {fmtTime(c.created_at)}
                 </span>

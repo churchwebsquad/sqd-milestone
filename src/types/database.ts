@@ -1210,12 +1210,16 @@ export interface WebReview {
   status: 'open' | 'closed'
   started_at: string
   started_by_user_id: string | null
+  /** Display name of the staff member who started the review. Snapshotted
+   *  at start time via employees lookup so the inbox doesn't need a join. */
+  started_by_name: string | null
   /** Captured on first partner-portal visit. Null until then. */
   partner_name: string | null
   /** Opaque token used in /portal/review/<token>. Only set when kind='partner'. */
   partner_token: string | null
   closed_at: string | null
   closed_by_user_id: string | null
+  closed_by_name: string | null
   notes: string | null
   created_at: string
   updated_at: string

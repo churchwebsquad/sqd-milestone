@@ -192,6 +192,20 @@ export interface ReviewMutationResult<T> {
 
 /** Start a new review session on the project. For partner reviews we
  *  generate the opaque token used by the public portal URL. */
+/** Resolve the current user's display name via the employees table.
+ *  Falls back to the auth email when no employee row matches. */
+async function resolveStaffName(email: string | null | undefined): Promise<string | null> {
+  if (!email) return null
+  const { data: emp } = await supabase
+    .from('employees')
+    .select('full_name, name, first_name')
+    .ilike('email', email)
+    .limit(1)
+    .maybeSingle()
+  const e = emp as { full_name?: string | null; name?: string | null; first_name?: string | null } | null
+  return e?.full_name?.trim() || e?.name?.trim() || e?.first_name?.trim() || email
+}
+
 export async function startReview(opts: {
   projectId: string
   kind: 'internal' | 'partner'
@@ -199,6 +213,7 @@ export async function startReview(opts: {
 }): Promise<ReviewMutationResult<WebReview>> {
   const partner_token = opts.kind === 'partner' ? crypto.randomUUID().replace(/-/g, '') : null
   const { data: user } = await supabase.auth.getUser()
+  const starterName = await resolveStaffName(user?.user?.email ?? null)
   const { data, error } = await supabase
     .from('web_reviews')
     .insert({
@@ -206,6 +221,7 @@ export async function startReview(opts: {
       kind:               opts.kind,
       status:             'open',
       started_by_user_id: user?.user?.id ?? null,
+      started_by_name:    starterName,
       partner_token,
       notes:              opts.notes ?? null,
     } as never)
@@ -222,12 +238,14 @@ export async function startReview(opts: {
  *  carry into the next review session. */
 export async function closeReview(reviewId: string): Promise<ReviewMutationResult<null>> {
   const { data: user } = await supabase.auth.getUser()
+  const closerName = await resolveStaffName(user?.user?.email ?? null)
   const { error } = await supabase
     .from('web_reviews')
     .update({
       status:            'closed',
       closed_at:         new Date().toISOString(),
       closed_by_user_id: user?.user?.id ?? null,
+      closed_by_name:    closerName,
     } as never)
     .eq('id', reviewId)
   if (error) {
@@ -259,18 +277,7 @@ export async function resolveComment(opts: {
 }): Promise<boolean> {
   const { data: user } = await supabase.auth.getUser()
   // Snapshot resolver name so the inbox doesn't need a user_id join.
-  let resolverName: string | null = null
-  const email = user?.user?.email ?? null
-  if (email) {
-    const { data: emp } = await supabase
-      .from('employees')
-      .select('full_name, name, first_name')
-      .ilike('email', email)
-      .limit(1)
-      .maybeSingle()
-    const e = emp as { full_name?: string | null; name?: string | null; first_name?: string | null } | null
-    resolverName = e?.full_name?.trim() || e?.name?.trim() || e?.first_name?.trim() || email
-  }
+  const resolverName = await resolveStaffName(user?.user?.email ?? null)
 
   // 1. If this resolution involves a real field write, patch the
   //    section's field_values first. (Doing it before marking the

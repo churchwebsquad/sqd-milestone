@@ -378,10 +378,13 @@ export function ReviewWorkspace({ project }: Props) {
                   <KindBadge kind={r.kind} />
                   <div className="min-w-0 flex-1">
                     <p className="text-[12px] font-semibold text-wm-text truncate">
-                      {r.kind === 'partner' ? `Partner review${r.partner_name ? ` · ${r.partner_name}` : ''}` : 'Internal review'}
+                      {r.kind === 'partner'
+                        ? `Partner review${r.partner_name ? ` · ${r.partner_name}` : ''}`
+                        : (r.started_by_name ? `Internal · ${r.started_by_name}` : 'Internal review')}
                     </p>
                     <p className="text-[10px] text-wm-text-subtle">
-                      Closed {fmtDate(r.closed_at ?? r.updated_at)}
+                      Closed {fmtDateTime(r.closed_at ?? r.updated_at)}
+                      {r.closed_by_name && ` by ${r.closed_by_name}`}
                     </p>
                   </div>
                   <ChevronRight size={13} className="text-wm-text-subtle" />
@@ -452,10 +455,11 @@ function ReviewSessionCard({
             <p className="text-[13px] font-semibold text-wm-text">
               {review.kind === 'partner'
                 ? (review.partner_name ? `Partner · ${review.partner_name}` : 'Partner review')
-                : 'Internal review'}
+                : (review.started_by_name ? `Internal · ${review.started_by_name}` : 'Internal review')}
             </p>
             <p className="text-[11px] text-wm-text-subtle">
-              Started {fmtDate(review.started_at)}
+              Started {fmtDateTime(review.started_at)}
+              {review.kind === 'partner' && review.started_by_name && ` by ${review.started_by_name}`}
             </p>
           </div>
           <WMStatusPill tone={openCount > 0 ? 'warning' : 'success'} size="sm">

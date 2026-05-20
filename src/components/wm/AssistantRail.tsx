@@ -332,16 +332,17 @@ function FeedbackTab({
                   disabled={!c.web_section_id}
                   className="w-full text-left rounded-md bg-wm-bg-elevated border border-wm-border px-2.5 py-1.5 hover:border-wm-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
                 >
-                  <div className="flex items-center gap-1.5 mb-0.5">
+                  <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                     <KindTag kind={c.kind} />
                     {c.field_key && <span className="font-mono text-[10px] text-wm-text-subtle">{c.field_key}</span>}
-                    <span className="ml-auto text-[10px] text-wm-text-subtle">
+                    <span className="ml-auto text-[10px] font-semibold text-wm-text">
                       {c.author_external_name ?? (c.author_kind === 'partner' ? 'Partner' : 'Staff')}
                     </span>
                   </div>
                   <p className="text-[11px] text-wm-text leading-snug line-clamp-2">
                     {c.body || (typeof c.suggested_value === 'string' ? stripHtml(c.suggested_value) : '(no body)')}
                   </p>
+                  <p className="text-[10px] text-wm-text-subtle mt-0.5">{fmtShortDateTime(c.created_at)}</p>
                 </button>
               </li>
             ))}
@@ -382,6 +383,10 @@ function FeedbackTab({
                       <p className="text-[11px] text-wm-text leading-snug line-clamp-2 no-underline">
                         {c.body || (typeof c.suggested_value === 'string' ? stripHtml(c.suggested_value) : '(no body)')}
                       </p>
+                      <p className="text-[10px] text-wm-text-subtle mt-0.5 no-underline">
+                        {fmtShortDateTime(c.created_at)}
+                        {c.resolved_at && ` · resolved ${fmtShortDateTime(c.resolved_at)}`}
+                      </p>
                       {c.resolution_note && (
                         <p className="text-[10px] text-wm-text-subtle italic mt-0.5 no-underline">
                           {c.resolution_note}
@@ -410,6 +415,14 @@ function KindTag({ kind }: { kind: WebReviewComment['kind'] }) {
       {cfg.label}
     </span>
   )
+}
+
+function fmtShortDateTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    })
+  } catch { return iso }
 }
 
 function stripHtml(s: string): string {
