@@ -13,6 +13,7 @@ import type { WebContentTemplate, WebSection } from '../../../types/database'
 interface Props {
   sections: WebSection[]
   templates: Record<string, WebContentTemplate>
+  cardTemplates?: Record<string, WebContentTemplate>
   selectedId: string | null
   snippetMap: SnippetMap
   bindQualityFor: (section: WebSection) => 'good' | 'partial' | 'attention'
@@ -26,7 +27,7 @@ interface Props {
 }
 
 export function SectionList({
-  sections, templates, selectedId, snippetMap, bindQualityFor,
+  sections, templates, cardTemplates, selectedId, snippetMap, bindQualityFor,
   onSelect, onMoveSection, onChangeVariant, onUnbind, onRemove,
   onInsertBefore, onInsertAfter,
 }: Props) {
@@ -57,6 +58,7 @@ export function SectionList({
           <SectionPreviewCard
             section={section}
             template={section.content_template_id ? templates[section.content_template_id] : null}
+            cardTemplates={cardTemplates}
             index={idx}
             total={sections.length}
             selected={section.id === selectedId}

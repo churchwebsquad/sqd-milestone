@@ -16,7 +16,8 @@
  * The editor commits content as HTML on every update.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
 import type { Editor } from '@tiptap/react'
@@ -330,9 +331,36 @@ function SnippetPickerButton({
     else if (e.key === 'Escape') { e.preventDefault(); setOpen(false) }
   }
 
+  const btnRef = useRef<HTMLButtonElement | null>(null)
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
+
+  // Compute fixed-position coords whenever the popover opens or layout
+  // shifts. Anchored to the button; clamped inside the viewport.
+  useLayoutEffect(() => {
+    if (!open) return
+    const recompute = () => {
+      const btn = btnRef.current
+      if (!btn) return
+      const r = btn.getBoundingClientRect()
+      const popoverWidth = 320
+      const popoverHeight = 380
+      const top = Math.min(r.bottom + 4, window.innerHeight - popoverHeight - 8)
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - popoverWidth - 8))
+      setCoords({ top, left })
+    }
+    recompute()
+    window.addEventListener('resize', recompute)
+    window.addEventListener('scroll', recompute, true)
+    return () => {
+      window.removeEventListener('resize', recompute)
+      window.removeEventListener('scroll', recompute, true)
+    }
+  }, [open])
+
   return (
-    <div className="relative">
+    <>
       <button
+        ref={btnRef}
         type="button"
         onMouseDown={e => e.preventDefault()}
         onClick={() => setOpen(o => !o)}
@@ -349,10 +377,13 @@ function SnippetPickerButton({
         <span className="text-[10px] font-semibold">Snippet</span>
       </button>
 
-      {open && (
+      {open && coords && createPortal(
         <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute top-full left-0 mt-1 z-40 w-80 rounded-md border border-wm-border bg-wm-bg-elevated shadow-xl animate-wm-slide-in-up overflow-hidden">
+          <div className="fixed inset-0 z-[999]" onMouseDown={() => setOpen(false)} />
+          <div
+            style={{ position: 'fixed', top: coords.top, left: coords.left, width: 320, zIndex: 1000 }}
+            className="rounded-md border border-wm-border bg-wm-bg-elevated shadow-xl animate-wm-slide-in-up overflow-hidden"
+          >
             <div className="p-2 border-b border-wm-border">
               <div className="relative">
                 <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-wm-text-subtle" />
@@ -387,9 +418,10 @@ function SnippetPickerButton({
               <span>↑↓ navigate · ↵ insert · esc to close</span>
             </div>
           </div>
-        </>
+        </>,
+        document.body,
       )}
-    </div>
+    </>
   )
 }
 

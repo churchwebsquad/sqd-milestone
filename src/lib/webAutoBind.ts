@@ -17,7 +17,7 @@
  * so nothing is lost.
  */
 import { supabase } from './supabase'
-import { LIBRARY_CONCEPTS, parseCuratedLibrary } from './webCuratedLibrary'
+import { LIBRARY_CONCEPTS, parseCuratedLibrary, getEffectiveBindings } from './webCuratedLibrary'
 import {
   composeBind, rankVariantsByBrief, extractSectionIdFromNotes,
 } from './webBindTemplate'
@@ -331,7 +331,7 @@ export async function autoBindPageSections(
     // Curated-library candidates: pick the most-specific concept,
     // then filter the catalog to templates the strategist bound to it.
     const conceptId = pickConceptForBriefSection(briefSection, pageSlug, briefPhase)
-    const curatedIds = conceptId ? (curatedLibrary[conceptId] ?? []) : []
+    const curatedIds = conceptId ? getEffectiveBindings(curatedLibrary, conceptId) : []
     const curatedCandidates = catalog.filter(t => curatedIds.includes(t.id))
 
     // Catalog candidates — start with the brief's suggested family, then

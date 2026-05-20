@@ -52,9 +52,16 @@ export function GlobalElementsWorkspace({ project, onChange }: Props) {
     setLibrary(parseCuratedLibrary(project.curated_library))
   }, [project])
 
-  // Fetch metadata for every template currently bound to any concept.
+  // Fetch metadata for every template currently bound to any concept,
+  // plus any system-level default ids — so defaulted concepts can
+  // render the default template's preview/name without the strategist
+  // having to bind anything.
   useEffect(() => {
-    const allIds = Array.from(new Set(Object.values(library).flat()))
+    const explicitIds = Object.values(library).flat()
+    const defaultIds = LIBRARY_CONCEPTS
+      .map(c => c.defaultTemplateId)
+      .filter((id): id is string => !!id)
+    const allIds = Array.from(new Set([...explicitIds, ...defaultIds]))
     if (allIds.length === 0) {
       setBoundTemplates({})
       return
@@ -198,12 +205,21 @@ function ConceptRow({
   onClear: () => void
 }) {
   const bound = boundIds.length > 0
+  // When nothing is explicitly bound but the concept ships with a
+  // default, render the default's preview/name with a "Default" badge.
+  // The strategist can still click Override to swap it.
+  const showingDefault = !bound && !!concept.defaultTemplateId
+  const defaultTemplate = concept.defaultTemplateId
+    ? boundTemplates[concept.defaultTemplateId]
+    : undefined
   return (
     <div className="px-4 py-4 flex items-start gap-4">
       <div className="mt-0.5 shrink-0">
         {bound
           ? <Check size={14} className="text-wm-success" />
-          : <span className="block w-3.5 h-3.5 rounded-full border-2 border-wm-border" />}
+          : showingDefault
+            ? <Check size={14} className="text-wm-text-subtle" />
+            : <span className="block w-3.5 h-3.5 rounded-full border-2 border-wm-border" />}
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-[13px] font-semibold text-wm-text">{concept.label}</p>
@@ -234,6 +250,24 @@ function ConceptRow({
             })}
           </div>
         )}
+        {showingDefault && (
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <div
+              className="inline-flex items-center gap-2 pr-2.5 rounded-md border border-dashed border-wm-border bg-wm-bg-elevated overflow-hidden opacity-90"
+              title="System default — pick a template to override for this project"
+            >
+              {defaultTemplate?.preview_image_url
+                ? <img src={defaultTemplate.preview_image_url} alt="" className="w-14 h-10 object-cover" loading="lazy" />
+                : <span className="w-14 h-10 bg-wm-bg-hover grid place-items-center text-[9px] text-wm-text-subtle">no preview</span>}
+              <span className="text-[12px] font-semibold text-wm-text truncate max-w-[160px]">
+                {defaultTemplate?.layer_name ?? concept.defaultTemplateId}
+              </span>
+              <span className="text-[9px] uppercase tracking-widest font-bold text-wm-text-subtle border-l border-wm-border pl-1.5 ml-0.5">
+                Default
+              </span>
+            </div>
+          </div>
+        )}
       </div>
       <div className="shrink-0 flex items-center gap-1">
         {bound
@@ -247,11 +281,17 @@ function ConceptRow({
               </WMIconButton>
             </>
           )
-          : (
-            <WMButton variant="primary" size="sm" iconLeft={<Plus size={11} />} onClick={onPick}>
-              Pick template
-            </WMButton>
-          )}
+          : showingDefault
+            ? (
+              <WMButton variant="ghost" size="sm" iconLeft={<Pencil size={11} />} onClick={onPick}>
+                Override
+              </WMButton>
+            )
+            : (
+              <WMButton variant="primary" size="sm" iconLeft={<Plus size={11} />} onClick={onPick}>
+                Pick template
+              </WMButton>
+            )}
       </div>
     </div>
   )

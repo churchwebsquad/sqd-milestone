@@ -46,7 +46,7 @@ export function WMFlyoutPanel({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-[100] flex justify-end" role="dialog" aria-modal="true">
       <div
         className="absolute inset-0 bg-wm-text/30 backdrop-blur-[1px] animate-wm-fade-in"
         onClick={onClose}

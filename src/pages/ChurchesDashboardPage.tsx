@@ -4,7 +4,10 @@ import { ChevronUp, ChevronDown, GitBranch, Search, Table as TableIcon, X } from
 import { supabase } from '../lib/supabase'
 import type { StrategyMilestoneDefinition, StrategyMilestoneSubmission, MilestoneStatus } from '../types/database'
 import type { ChurchGridRow, ChurchSortField } from '../types/churches'
-import { accountStatusSortValue, extractWebPathway, extractBrandPathway, extractPlan, firstAm } from '../types/churches'
+import {
+  accountStatusSortValue, extractWebPathway, extractBrandPathway,
+  extractPlan, firstAm, normalizeWebsitePlatform,
+} from '../types/churches'
 import SocialMediaIcons from '../components/churches/SocialMediaIcons'
 
 // ── Status display ───────────────────────────────────────────────────────────
@@ -54,9 +57,12 @@ function ChurchCard({ row, onClick }: { row: ChurchGridRow; onClick: () => void 
         #{row.member} · {row.css_rep ?? 'No AM'} · {row.plan ?? '—'} · {row.cohort ?? '—'}
       </p>
       <div className="flex items-center justify-between text-xs text-purple-gray">
-        <div className="flex gap-3">
+        <div className="flex gap-3 flex-wrap">
           {row.brand_pathway && <span>Brand: {row.brand_pathway}</span>}
           {row.web_pathway && <span>Web: {row.web_pathway}</span>}
+          {row.current_website_platform && (
+            <span className="font-semibold text-deep-plum/80">{row.current_website_platform}</span>
+          )}
         </div>
         <SocialMediaIcons instagram={row.instagram} facebook={row.facebook} youtube={row.youtube} />
       </div>
@@ -127,7 +133,7 @@ export default function ChurchesDashboardPage() {
         const [progressRes, subRes, defsRes] = await Promise.all([
           supabase
             .from('strategy_account_progress')
-            .select('member, church_name, css_rep, cohort, handoff_brand_form, handoff_web_form')
+            .select('member, church_name, css_rep, cohort, handoff_brand_form, handoff_web_form, current_website_platform')
             .in('member', visibleMembers),
           supabase
             .from('strategy_milestone_submissions')
@@ -147,6 +153,7 @@ export default function ChurchesDashboardPage() {
           cohort: string | null
           handoff_brand_form: Record<string, unknown> | null
           handoff_web_form: Record<string, unknown> | null
+          current_website_platform: string | null
         }[]
         const submissions = (subRes.data ?? []) as Pick<
           StrategyMilestoneSubmission,
@@ -193,6 +200,7 @@ export default function ChurchesDashboardPage() {
             facebook: acct?.facebook ?? null,
             youtube: null,
             web_pathway: extractWebPathway(p.handoff_web_form),
+            current_website_platform: normalizeWebsitePlatform(p.current_website_platform),
             brand_pathway: extractBrandPathway(p.handoff_brand_form),
             web_milestone: web?.step_name ?? null,
             web_milestone_status: web?.status ?? null,
@@ -489,7 +497,14 @@ export default function ChurchesDashboardPage() {
                       <td className="px-3 py-3">
                         <SocialMediaIcons instagram={row.instagram} facebook={row.facebook} youtube={row.youtube} />
                       </td>
-                      <td className="px-3 py-3 text-xs text-purple-gray">{row.web_pathway ?? '—'}</td>
+                      <td className="px-3 py-3 text-xs text-purple-gray">
+                        <div>{row.web_pathway ?? '—'}</div>
+                        {row.current_website_platform && (
+                          <div className="text-[10px] font-semibold text-deep-plum/80 mt-0.5">
+                            {row.current_website_platform}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-3 py-3 text-xs text-purple-gray">{row.brand_pathway ?? '—'}</td>
                       <td className="px-3 py-3 text-xs text-deep-plum truncate max-w-[140px]">{row.web_milestone ?? '—'}</td>
                       <td className="px-3 py-3 text-xs text-deep-plum truncate max-w-[140px]">{row.brand_milestone ?? '—'}</td>

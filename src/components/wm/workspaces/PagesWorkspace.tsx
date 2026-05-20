@@ -45,7 +45,6 @@ import { WMCatalogSidePanel } from '../CatalogSidePanel'
 import { WMAIAttribution } from '../AIAttribution'
 import { PageBriefImportModal } from '../PageBriefImportModal'
 import { AddPageModal } from '../AddPageModal'
-import { SitemapProposalBanner } from '../SitemapProposalBanner'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { PagePreview } from '../PagePreview'
 import { WMSegmentedToggle } from '../SegmentedToggle'
@@ -57,7 +56,8 @@ import {
   composeBind, findBriefSection, extractSectionIdFromNotes,
   rankVariantsByBrief, type RankedVariant, type ComposedBindResult,
 } from '../../../lib/webBindTemplate'
-import { parseCuratedLibrary } from '../../../lib/webCuratedLibrary'
+import { parseCuratedLibrary, getEffectiveLibraryIds } from '../../../lib/webCuratedLibrary'
+import { augmentTemplate } from '../../../lib/webBrixiesSchemaAugment'
 import type { SnippetMap } from '../../../lib/webBrixiesRender'
 import type {
   StrategyWebProject, WebPage, WebSection, WebContentTemplate,
@@ -198,10 +198,13 @@ export function PagesWorkspace({ project, onChange }: Props) {
 
   return (
     <SnippetsContext.Provider value={snippets}>
-      <div className="flex min-h-[calc(100vh-120px)]">
+      <div className="flex" style={{ minHeight: 'calc(100vh - var(--wm-header-h, 88px))' }}>
         {/* Page list (left) — sticky so it stays in view while the
             editor canvas scrolls. */}
-        <aside className="w-72 shrink-0 border-r border-wm-border bg-wm-bg-elevated overflow-y-auto flex flex-col sticky top-0 self-start max-h-[calc(100vh-120px)]">
+        <aside
+          className="w-72 shrink-0 border-r border-wm-border bg-wm-bg-elevated overflow-y-auto flex flex-col sticky self-start"
+          style={{ top: 'var(--wm-header-h, 88px)', height: 'calc(100vh - var(--wm-header-h, 88px))' }}
+        >
           {/* Import action — always available */}
           <div className="p-3 border-b border-wm-border sticky top-0 bg-wm-bg-elevated z-10">
             <WMButton
@@ -244,18 +247,6 @@ export function PagesWorkspace({ project, onChange }: Props) {
 
         {/* Active page editor (right) */}
         <main className="flex-1 min-w-0 overflow-y-auto">
-          <div className="px-6 md:px-10 pt-6 max-w-4xl mx-auto">
-            <SitemapProposalBanner
-              project={project}
-              onCommitted={async () => {
-                await loadPages()
-                if (onChange) await onChange()
-              }}
-              onRefreshed={async () => {
-                if (onChange) await onChange()
-              }}
-            />
-          </div>
           {activePage ? (
             <PageEditor
               page={activePage}
@@ -350,23 +341,6 @@ function PageList({
   onArchive: (id: string) => void
   onAddPageInPhase: (phase: string) => void
 }) {
-  const byPhase = useMemo(() => {
-    const m = new Map<string, WebPage[]>()
-    for (const p of pages) {
-      const k = p.phase
-      if (!m.has(k)) m.set(k, [])
-      m.get(k)!.push(p)
-    }
-    return m
-  }, [pages])
-
-  const PHASES: Array<{ key: string; label: string }> = [
-    { key: 'global',   label: 'Global'   },
-    { key: '1',        label: 'Phase 1'  },
-    { key: '2',        label: 'Phase 2'  },
-    { key: 'nav-only', label: 'Nav-only' },
-  ]
-
   const selectionActive = selectedIds.size > 0
 
   if (loading) {
@@ -381,89 +355,82 @@ function PageList({
 
   return (
     <div className="py-3 flex-1">
-      {PHASES.map(phase => {
-        const list = byPhase.get(phase.key) ?? []
-        return (
-          <div key={phase.key} className="mb-4">
-            <div className="px-4 mb-1 flex items-center justify-between gap-2">
-              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
-                {phase.label}{list.length > 0 ? ` · ${list.length}` : ''}
-              </p>
-              <button
-                type="button"
-                onClick={() => onAddPageInPhase(phase.key)}
-                className="text-wm-text-subtle hover:text-wm-accent-strong transition-colors"
-                title={`Add page to ${phase.label}`}
+      <div className="px-4 mb-2 flex items-center justify-between gap-2">
+        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
+          Pages{pages.length > 0 ? ` · ${pages.length}` : ''}
+        </p>
+        <button
+          type="button"
+          onClick={() => onAddPageInPhase('1')}
+          className="text-wm-text-subtle hover:text-wm-accent-strong transition-colors"
+          title="Add a page"
+        >
+          <Plus size={12} />
+        </button>
+      </div>
+      {pages.length === 0 ? (
+        <button
+          type="button"
+          onClick={() => onAddPageInPhase('1')}
+          className="mx-3 block w-[calc(100%-1.5rem)] rounded-md border border-dashed border-wm-border bg-wm-bg p-2.5 text-[11px] text-wm-text-muted hover:border-wm-border-focus hover:text-wm-text transition-colors"
+        >
+          + Add a page
+        </button>
+      ) : (
+        <div className="space-y-0.5">
+          {pages.map(p => {
+            const isSelected = selectedIds.has(p.id)
+            return (
+              <div
+                key={p.id}
+                className={[
+                  'group relative flex items-center border-l-2 transition-colors',
+                  p.id === activeId
+                    ? 'bg-wm-bg-selected border-wm-accent'
+                    : isSelected
+                      ? 'bg-wm-ai-bg/30 border-transparent'
+                      : 'border-transparent hover:bg-wm-bg-hover',
+                ].join(' ')}
               >
-                <Plus size={12} />
-              </button>
-            </div>
-            {list.length === 0 ? (
-              <button
-                type="button"
-                onClick={() => onAddPageInPhase(phase.key)}
-                className="mx-3 block w-[calc(100%-1.5rem)] rounded-md border border-dashed border-wm-border bg-wm-bg p-2.5 text-[11px] text-wm-text-muted hover:border-wm-border-focus hover:text-wm-text transition-colors"
-              >
-                + Add a page
-              </button>
-            ) : (
-              <div className="space-y-0.5">
-                {list.map(p => {
-                  const isSelected = selectedIds.has(p.id)
-                  return (
-                    <div
-                      key={p.id}
-                      className={[
-                        'group relative flex items-center border-l-2 transition-colors',
-                        p.id === activeId
-                          ? 'bg-wm-bg-selected border-wm-accent'
-                          : isSelected
-                            ? 'bg-wm-ai-bg/30 border-transparent'
-                            : 'border-transparent hover:bg-wm-bg-hover',
-                      ].join(' ')}
-                    >
-                      <label className={[
-                        'shrink-0 pl-3 py-2 cursor-pointer flex items-center justify-center transition-opacity',
-                        selectionActive || isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-                      ].join(' ')}>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => onToggleSelection(p.id)}
-                          className="accent-wm-accent cursor-pointer"
-                          aria-label={`Select ${p.name}`}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => onSelect(p.id)}
-                        className="min-w-0 flex-1 text-left px-2 py-2 flex items-center gap-2"
-                      >
-                        <FileText size={13} className="text-wm-text-subtle shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[13px] font-medium text-wm-text truncate">{p.name}</p>
-                          <p className="text-[10px] text-wm-text-subtle truncate">/{p.slug}</p>
-                        </div>
-                        <WMStatusPill tone={STATUS_TONES[p.content_status]} size="sm">
-                          {p.content_status === 'in_review' ? 'review' : p.content_status}
-                        </WMStatusPill>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); onArchive(p.id) }}
-                        className="shrink-0 pr-2 py-2 text-wm-text-subtle hover:text-wm-danger opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Archive page"
-                      >
-                        <Archive size={12} />
-                      </button>
-                    </div>
-                  )
-                })}
+                <label className={[
+                  'shrink-0 pl-3 py-2 cursor-pointer flex items-center justify-center transition-opacity',
+                  selectionActive || isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                ].join(' ')}>
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => onToggleSelection(p.id)}
+                    className="accent-wm-accent cursor-pointer"
+                    aria-label={`Select ${p.name}`}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => onSelect(p.id)}
+                  className="min-w-0 flex-1 text-left px-2 py-2 flex items-center gap-2"
+                >
+                  <FileText size={13} className="text-wm-text-subtle shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-medium text-wm-text truncate">{p.name}</p>
+                    <p className="text-[10px] text-wm-text-subtle truncate">/{p.slug}</p>
+                  </div>
+                  <WMStatusPill tone={STATUS_TONES[p.content_status]} size="sm">
+                    {p.content_status === 'in_review' ? 'review' : p.content_status}
+                  </WMStatusPill>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onArchive(p.id) }}
+                  className="shrink-0 pr-2 py-2 text-wm-text-subtle hover:text-wm-danger opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Archive page"
+                >
+                  <Archive size={12} />
+                </button>
               </div>
-            )}
-          </div>
-        )
-      })}
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -576,6 +543,10 @@ function PageEditor({
 
   const [sections, setSections] = useState<WebSection[]>([])
   const [templates, setTemplates] = useState<Record<string, WebContentTemplate>>({})
+  // All Card-family templates, loaded once per page. Threaded into
+  // the renderer so palette-referenced groups (Feature 22/82/106 etc.)
+  // can substitute against the chosen Card template's source_html.
+  const [cardTemplates, setCardTemplates] = useState<Record<string, WebContentTemplate>>({})
   const [loadingSections, setLoadingSections] = useState(true)
   const [pickerOpen, setPickerOpen] = useState(false)
   // Edit ↔ Preview mode for the page editor body. Edit is the live-
@@ -601,7 +572,11 @@ function PageEditor({
   // so the catalog picker can badge them as "Site library" picks.
   const siteLibraryIds = useMemo(() => {
     const lib = parseCuratedLibrary(project.curated_library)
-    return new Set<string>(Object.values(lib).flat())
+    // Effective set merges explicit project bindings with the
+    // concept-level defaults, so Feature Section 2 / 82 (and any other
+    // defaulted concept) get the "Site library" badge even before the
+    // strategist visits the Global Elements workspace.
+    return getEffectiveLibraryIds(lib)
   }, [project.curated_library])
 
   useEffect(() => {
@@ -619,15 +594,21 @@ function PageEditor({
     setSections(list)
     const ids = [...new Set(list.map(s => s.content_template_id))]
     if (ids.length > 0) {
-      const { data: tplRows } = await supabase
-        .from('web_content_templates')
-        .select('*')
-        .in('id', ids)
+      const [{ data: tplRows }, { data: cardRows }] = await Promise.all([
+        supabase.from('web_content_templates').select('*').in('id', ids),
+        // Pre-load every Card template — palette-referenced groups
+        // need their source_html + fields available at render time.
+        supabase.from('web_content_templates').select('*').eq('family', 'Card'),
+      ])
       const map: Record<string, WebContentTemplate> = {}
-      for (const t of (tplRows ?? []) as WebContentTemplate[]) map[t.id] = t
+      for (const t of (tplRows ?? []) as WebContentTemplate[]) map[t.id] = augmentTemplate(t)
       setTemplates(map)
+      const cards: Record<string, WebContentTemplate> = {}
+      for (const t of (cardRows ?? []) as WebContentTemplate[]) cards[t.id] = augmentTemplate(t)
+      setCardTemplates(cards)
     } else {
       setTemplates({})
+      setCardTemplates({})
     }
     setLoadingSections(false)
   }
@@ -970,6 +951,7 @@ function PageEditor({
       section: selectedSection,
       template: selectedTemplate,
       snippets,
+      cardTemplates,
       onChange: (patch) => void updateSection(selectedSection.id, patch),
       onClose: () => setSelectedSectionId(null),
       onChangeVariant: () => setBindingSection(selectedSection),
@@ -977,7 +959,7 @@ function PageEditor({
       onRemove: () => void archiveSection(selectedSection.id),
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSection, selectedTemplate, snippets, viewMode])
+  }, [selectedSection, selectedTemplate, snippets, viewMode, cardTemplates])
 
   // Always clear on unmount so the rail doesn't stick after navigation.
   useEffect(() => {
@@ -1012,9 +994,7 @@ function PageEditor({
             onChange={setViewMode}
           />
           <StatusMenu current={page.content_status} onChange={setStatus} />
-          <WMIconButton label="More page actions" onClick={archivePage}>
-            <MoreHorizontal size={14} />
-          </WMIconButton>
+          <PageActionsMenu onArchive={archivePage} />
         </div>
       </div>
 
@@ -1040,7 +1020,7 @@ function PageEditor({
   )
 
   return (
-    <div className="flex min-h-[calc(100vh-120px)]">
+    <div className="flex" style={{ minHeight: 'calc(100vh - var(--wm-header-h, 88px))' }}>
       {/* Single scrollable canvas — the section details panel lives in
           the AssistantRail (see SectionEditingContext). */}
       <div className="flex-1 min-w-0 overflow-y-auto">
@@ -1070,6 +1050,7 @@ function PageEditor({
             <SectionList
               sections={sections}
               templates={templates}
+              cardTemplates={cardTemplates}
               selectedId={selectedSectionId}
               snippetMap={snippetMap}
               bindQualityFor={bindQualityFor}
@@ -1174,6 +1155,34 @@ function StatusMenu({
                 {opt.value === current && <span className="ml-auto text-wm-accent">✓</span>}
               </button>
             ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── Page actions menu ─────────────────────────────────────────────────
+
+function PageActionsMenu({ onArchive }: { onArchive: () => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative">
+      <WMIconButton label="More page actions" onClick={() => setOpen(o => !o)}>
+        <MoreHorizontal size={14} />
+      </WMIconButton>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-1 w-44 rounded-md border border-wm-border bg-wm-bg-elevated shadow-lg z-20 py-1 animate-wm-slide-in-up">
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onArchive() }}
+              className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12px] text-wm-text-muted hover:bg-wm-danger-bg hover:text-wm-danger transition-colors"
+            >
+              <Archive size={11} />
+              Archive page
+            </button>
           </div>
         </>
       )}

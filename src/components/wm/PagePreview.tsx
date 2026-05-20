@@ -106,19 +106,34 @@ function SectionFrame({
   useEffect(() => {
     const iframe = iframeRef.current
     if (!iframe) return
+    let bodyObserver: ResizeObserver | null = null
     const measure = () => {
       try {
         const doc = iframe.contentDocument
         if (!doc) return
         const h = doc.body?.scrollHeight ?? doc.documentElement?.scrollHeight ?? 800
         setIntrinsicHeight(Math.max(h, 200))
-      } catch {
-        /* sandbox guard */
-      }
+      } catch { /* cross-origin guard */ }
     }
-    iframe.addEventListener('load', measure)
-    const t = setTimeout(measure, 250)
-    return () => { iframe.removeEventListener('load', measure); clearTimeout(t) }
+    const onLoad = () => {
+      measure()
+      try {
+        const doc = iframe.contentDocument
+        if (doc?.body) {
+          bodyObserver = new ResizeObserver(() => measure())
+          bodyObserver.observe(doc.body)
+        }
+        const imgs = doc?.querySelectorAll('img') ?? []
+        imgs.forEach(img => img.addEventListener('load', measure, { once: true }))
+      } catch { /* sandboxed */ }
+    }
+    iframe.addEventListener('load', onLoad)
+    const timeouts = [120, 400, 1200, 2500].map(t => setTimeout(measure, t))
+    return () => {
+      iframe.removeEventListener('load', onLoad)
+      bodyObserver?.disconnect()
+      timeouts.forEach(clearTimeout)
+    }
   }, [html])
 
   const wrappedHeight = Math.round(intrinsicHeight * scale)
@@ -138,7 +153,7 @@ function SectionFrame({
             transformOrigin: 'top left',
             border: 0,
           }}
-          sandbox=""
+          sandbox="allow-same-origin"
         />
       </div>
     </div>

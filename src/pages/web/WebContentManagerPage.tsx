@@ -1,65 +1,78 @@
 /**
- * Website Manager — Content Manager.
+ * Website Manager — Site Manager (formerly Content Manager).
  *
- * The strategist's primary workspace. Hosts seven views via the
- * WebManagerShell's tabbed surface:
+ * The strategist's single entry point for a partner project. Tabs at
+ * the top cover every artifact-producing surface; per-project
+ * reference content (writing rules, brand voice, snippets) lives in
+ * the assistant rail on the right.
  *
- *   Roadmap         — Web Roadmap deliverable + AI pipeline orchestration
- *   Global Elements — curated Brixies palette (Header/Footer, Heroes, Cards, …)
- *   Pages           — per-page section editor (TipTap, Phase B)
- *   Snippets        — global merge fields + custom snippets
- *   Voice           — read-only brand voice rollup
- *   Heuristics      — writing rules (global + project) + denominational filter + personas
- *   Rollup          — editable structured extract from intake
+ *   Intake         — foundational inputs checklist (Discovery, Strategy
+ *                    Brief, Brand Handoff, AM Handoff, Content Collection)
+ *   Site Library   — curated Brixies palette (Header / Footer / Heroes /
+ *                    Cards / etc.) — formerly "Global Elements"
+ *   Pages          — per-page section editor
+ *   Design Handoff — design system spec, role anchors, Figma exports +
+ *                    the Style Guide assembler plugin
+ *   Dev Handoff    — ACSS Pro GVM JSON + (future) full handoff document
+ *   Review         — review console
  *
- * The old Sitemap tab was consolidated — page tree management moves into
- * the Pages workspace left panel (Phase 2 of the restructure) and chrome
- * designation moves into Global Elements alongside the broader site
- * palette (Phase 1, done).
+ * Roadmap + Rollup tabs were dropped — they were AI-pipeline workspaces
+ * that weren't being used in the day-to-day flow. Snippets, Voice, and
+ * Heuristics moved to the assistant rail.
  */
 
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import {
-  Compass, LayoutGrid, FileText, Tag, Mic, BookOpen, Layers, Loader2,
+  ClipboardList, LayoutGrid, FileText, Palette, Cog, Eye, Loader2,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { WebManagerShell } from '../../components/wm'
-import type { WMTabItem, WMAIStatusBadgeProps } from '../../components/wm'
+import type { WMTabItem } from '../../components/wm'
 import { AssistantRail } from '../../components/wm/AssistantRail'
 import { SectionEditingProvider } from '../../components/wm/sectioneditor/SectionEditingContext'
-import { RoadmapWorkspace } from '../../components/wm/workspaces/RoadmapWorkspace'
 import { GlobalElementsWorkspace } from '../../components/wm/workspaces/GlobalElementsWorkspace'
 import { PagesWorkspace } from '../../components/wm/workspaces/PagesWorkspace'
-import { SnippetsWorkspace } from '../../components/wm/workspaces/SnippetsWorkspace'
-import { VoiceWorkspace } from '../../components/wm/workspaces/VoiceWorkspace'
-import { HeuristicsWorkspace } from '../../components/wm/workspaces/HeuristicsWorkspace'
-import { RollupWorkspace } from '../../components/wm/workspaces/RollupWorkspace'
+import { DesignWorkspace } from '../../components/wm/workspaces/DesignWorkspace'
+import { DevHandoffWorkspace } from '../../components/wm/workspaces/DevHandoffWorkspace'
+import { IntakeWorkspace } from '../../components/wm/workspaces/IntakeWorkspace'
+import { ReviewWorkspace } from '../../components/wm/workspaces/ReviewWorkspace'
 import type { StrategyWebProject } from '../../types/database'
 
 type TabKey =
-  | 'roadmap'
-  | 'global'
+  | 'intake'
+  | 'library'
   | 'pages'
-  | 'snippets'
-  | 'voice'
-  | 'heuristics'
-  | 'rollup'
+  | 'design'
+  | 'devhandoff'
+  | 'review'
 
 const TABS: readonly WMTabItem<TabKey>[] = [
-  { key: 'roadmap',    label: 'Roadmap',         icon: <Compass    size={13} /> },
-  { key: 'global',     label: 'Global Elements', icon: <LayoutGrid size={13} /> },
-  { key: 'pages',      label: 'Pages',           icon: <FileText   size={13} /> },
-  { key: 'snippets',   label: 'Snippets',        icon: <Tag        size={13} /> },
-  { key: 'voice',      label: 'Voice',           icon: <Mic        size={13} /> },
-  { key: 'heuristics', label: 'Heuristics',      icon: <BookOpen   size={13} /> },
-  { key: 'rollup',     label: 'Rollup',          icon: <Layers     size={13} /> },
+  { key: 'intake',     label: 'Intake',          icon: <ClipboardList size={13} /> },
+  { key: 'library',    label: 'Site Library',    icon: <LayoutGrid    size={13} /> },
+  { key: 'pages',      label: 'Pages',           icon: <FileText      size={13} /> },
+  { key: 'design',     label: 'Design Handoff',  icon: <Palette       size={13} /> },
+  { key: 'devhandoff', label: 'Dev Handoff',     icon: <Cog           size={13} /> },
+  { key: 'review',     label: 'Review',          icon: <Eye           size={13} /> },
 ]
+
+const DEFAULT_TAB: TabKey = 'pages'
 
 export default function WebContentManagerPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const [params, setParams] = useSearchParams()
-  const activeTab = (params.get('tab') as TabKey) || 'roadmap'
+  // Migrate legacy ?tab=… values from the old tab vocabulary so existing
+  // bookmarks don't 404 their tab and silently fall back.
+  const rawTab = params.get('tab')
+  const activeTab: TabKey = (() => {
+    if (!rawTab) return DEFAULT_TAB
+    if (rawTab === 'global') return 'library'           // renamed
+    if (rawTab === 'roadmap' || rawTab === 'rollup' || rawTab === 'snippets' || rawTab === 'voice' || rawTab === 'heuristics') {
+      return DEFAULT_TAB                                // dropped/moved → land on pages
+    }
+    const known: ReadonlyArray<TabKey> = ['intake','library','pages','design','devhandoff','review']
+    return (known as readonly string[]).includes(rawTab) ? (rawTab as TabKey) : DEFAULT_TAB
+  })()
 
   const [project, setProject] = useState<StrategyWebProject | null>(null)
   const [loading, setLoading] = useState(true)
@@ -81,11 +94,9 @@ export default function WebContentManagerPage() {
 
   useEffect(() => { void loadProject() }, [projectId])
 
-  // Always poll while the project page is open. The previous "poll only
-  // when drafting_*" gate failed because the client doesn't know the
-  // server-side stage flipped until it polls — chicken-and-egg. A 5s
-  // interval is lightweight (one row read) and catches every state
-  // transition (agent start, agent finish, DB write).
+  // Poll the project row every 5s while open so the AI status pill +
+  // any externally-mutated jsonb (intake docs, design_system, etc.)
+  // stay current without manual refresh.
   useEffect(() => {
     if (!projectId) return
     const interval = setInterval(() => { void loadProject(true) }, 5000)
@@ -115,69 +126,32 @@ export default function WebContentManagerPage() {
     setParams(next, { replace: true })
   }
 
-  const aiStatus = deriveAIStatus(project)
-
   return (
     <SectionEditingProvider>
       <WebManagerShell
         projectId={project.id}
         projectName={project.name}
-        breadcrumb={[{ label: 'Content Manager' }]}
-        aiStatus={aiStatus}
-        onClickAIStatus={() => setTab('roadmap')}
+        breadcrumb={[{ label: 'Site Manager' }]}
+        aiStatus={null}
         tabs={TABS}
         activeTab={activeTab}
         onTabChange={setTab}
-        rail={<AssistantRail projectId={project.id} activeTab={activeTab} />}
+        rail={<AssistantRail
+          projectId={project.id}
+          activeTab={activeTab}
+          project={project}
+          onProjectChange={loadProject}
+        />}
         railOpen={railOpen}
         onRailToggle={setRailOpen}
       >
-        {activeTab === 'roadmap'    && <RoadmapWorkspace project={project} onChange={loadProject} />}
-        {activeTab === 'global'     && <GlobalElementsWorkspace project={project} onChange={loadProject} />}
+        {activeTab === 'intake'     && <IntakeWorkspace project={project} onChange={loadProject} />}
+        {activeTab === 'library'    && <GlobalElementsWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'pages'      && <PagesWorkspace project={project} onChange={loadProject} />}
-        {activeTab === 'snippets'   && <SnippetsWorkspace project={project} onChange={loadProject} />}
-        {activeTab === 'voice'      && <VoiceWorkspace project={project} />}
-        {activeTab === 'heuristics' && <HeuristicsWorkspace project={project} />}
-        {activeTab === 'rollup'     && <RollupWorkspace project={project} />}
+        {activeTab === 'design'     && <DesignWorkspace project={project} onChange={loadProject} />}
+        {activeTab === 'devhandoff' && <DevHandoffWorkspace project={project} />}
+        {activeTab === 'review'     && <ReviewWorkspace project={project} />}
       </WebManagerShell>
     </SectionEditingProvider>
   )
-}
-
-// ── AI status derivation ────────────────────────────────────────────
-
-/**
- * The top-of-shell AI status pill. Reads both `roadmap_stage` (for
- * the currently-running state) AND the sticky approval markers on
- * `roadmap_state.stage_N._meta` so it stays consistent with the
- * Roadmap workspace's stage cards. Walks the pipeline to find the
- * topmost stage that hasn't been approved — that's the focus.
- */
-function deriveAIStatus(project: StrategyWebProject): WMAIStatusBadgeProps {
-  // Currently running takes precedence
-  const stage = project.roadmap_stage
-  if (stage === 'extracting_strategy') return { state: 'extracting', message: 'Extracting strategy' }
-  if (stage === 'drafting_sitemap')    return { state: 'drafting', message: 'Drafting sitemap' }
-  if (stage === 'drafting_journey')    return { state: 'drafting', message: 'Drafting user journey' }
-  if (stage === 'drafting_roadmap')    return { state: 'drafting', message: 'Drafting web roadmap' }
-  if (stage === 'drafting_pages')      return { state: 'drafting', message: 'Drafting pages' }
-  if (stage === 'pre_intake')          return { state: 'idle', message: 'Awaiting intake' }
-
-  // Find the topmost unapproved stage with output → "awaiting your approval"
-  // OR topmost unapproved stage WITHOUT output → "ready to run"
-  const state = (project.roadmap_state as Record<string, unknown> | null) ?? {}
-  const stageNames: Record<number, string> = { 1: 'Strategy', 2: 'Sitemap', 3: 'Journey', 4: 'Roadmap', 5: 'Pages' }
-  for (let n = 1; n <= 5; n++) {
-    const stageData = state[`stage_${n}`] as Record<string, unknown> | undefined
-    const meta = stageData?._meta as Record<string, unknown> | undefined
-    const approved = !!(meta?.approved_at || meta?.committed_at)
-    const hasOutput = !!stageData && Object.keys(stageData).some(k => k !== '_meta')
-
-    if (approved) continue  // sticky-approved, look at next stage
-    if (hasOutput) return { state: 'awaiting', message: `Awaiting your approval — ${stageNames[n]}` }
-    // No output for this stage. If we got here, the previous stage IS approved.
-    return { state: 'idle', message: `Ready to run — ${stageNames[n]}` }
-  }
-  // Everything approved through Stage 5
-  return { state: 'done', message: 'All pages drafted' }
 }

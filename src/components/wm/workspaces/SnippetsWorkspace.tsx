@@ -17,7 +17,6 @@
 import { useEffect, useState } from 'react'
 import { Tag, Plus, Trash2, Loader2, X } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
-import { WMCard } from '../Card'
 import { WMButton } from '../Button'
 import { WMIconButton } from '../IconButton'
 import { WMStatusPill } from '../StatusPill'
@@ -87,91 +86,82 @@ export function SnippetsWorkspace({ project, onChange }: Props) {
   }
 
   return (
-    <div className="p-6 md:p-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="mb-5">
-          <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
-            <Tag size={13} />
-            <p className="text-[11px] font-bold uppercase tracking-widest">Snippets</p>
+    <div className="p-4">
+      {/* Header — compact for rail render */}
+      <div className="mb-4">
+        <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+          <Tag size={13} />
+          <p className="text-[11px] font-bold uppercase tracking-widest">Snippets</p>
+        </div>
+        <h1 className="text-[16px] font-semibold text-wm-text">Reusable text</h1>
+        <p className="text-[12px] text-wm-text-muted mt-1">
+          Tokens like <code className="text-wm-accent-strong">{'{{phone}}'}</code> resolve
+          anywhere they appear in body copy. Update once, applied everywhere.
+        </p>
+      </div>
+
+      {/* Global merge fields — flat list (no card wrapper, no grid). */}
+      <section className="mb-6">
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <h2 className="text-[12px] font-semibold uppercase tracking-widest text-wm-text-subtle">Global merge fields</h2>
+          <span className="text-[10px] text-wm-text-subtle">{GLOBAL_FIELDS.length + 1} fields</span>
+        </div>
+        <div className="space-y-2">
+          {GLOBAL_FIELDS.map(f => (
+            <GlobalFieldRow
+              key={f.column}
+              field={f}
+              value={(project[f.column] as string | null) ?? ''}
+              onSave={(v) => updateGlobal(f.column, v)}
+            />
+          ))}
+          {/* current_year — system-derived */}
+          <div className="py-1.5">
+            <div className="flex items-center justify-between gap-2 mb-0.5">
+              <p className="text-[11px] font-semibold text-wm-text">Current year</p>
+              <WMStatusPill tone="ai" size="sm">system</WMStatusPill>
+            </div>
+            <code className="text-[10px] text-wm-accent-strong">{'{{current_year}}'}</code>
+            <p className="text-[12px] text-wm-text-muted mt-1">{new Date().getFullYear()}</p>
           </div>
-          <h1 className="text-2xl font-semibold text-wm-text">Reusable text</h1>
-          <p className="text-sm text-wm-text-muted mt-1 max-w-2xl">
-            Merge fields and custom snippets. Tokens like <code className="text-wm-accent-strong">{'{{phone}}'}</code> resolve
-            anywhere they appear in body copy. Update once here, applied everywhere.
-          </p>
+        </div>
+      </section>
+
+      {/* Custom snippets — flat list */}
+      <section>
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <h2 className="text-[12px] font-semibold uppercase tracking-widest text-wm-text-subtle">Custom snippets</h2>
+          <WMButton variant="ghost" size="sm" iconLeft={<Plus size={11} />} onClick={() => setAddOpen(true)}>
+            Add
+          </WMButton>
         </div>
 
-        {/* Global merge fields */}
-        <WMCard padding="loose" className="mb-6">
-          <div className="mb-4 flex items-end justify-between gap-3 flex-wrap">
-            <div>
-              <h2 className="text-[15px] font-semibold text-wm-text">Global merge fields</h2>
-              <p className="text-[12px] text-wm-text-muted">
-                Project-level data. Each saves on blur. Resolves at render — strategist + AI use the token, never the literal value.
-              </p>
-            </div>
-            <span className="text-[11px] text-wm-text-subtle">{GLOBAL_FIELDS.length + 1} fields</span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {GLOBAL_FIELDS.map(f => (
-              <GlobalFieldRow
-                key={f.column}
-                field={f}
-                value={(project[f.column] as string | null) ?? ''}
-                onSave={(v) => updateGlobal(f.column, v)}
-              />
+        {loadingCustoms ? (
+          <div className="space-y-1.5">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="h-12 rounded-md bg-wm-bg-hover animate-pulse" />
             ))}
-            {/* current_year — system-derived */}
-            <div className="border border-wm-border bg-wm-bg rounded-md px-3 py-2">
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <p className="text-[11px] font-semibold text-wm-text">Current year</p>
-                <WMStatusPill tone="ai" size="sm">system</WMStatusPill>
-              </div>
-              <code className="text-[10px] text-wm-accent-strong">{'{{current_year}}'}</code>
-              <p className="text-[12px] text-wm-text-muted mt-1">{new Date().getFullYear()}</p>
-            </div>
           </div>
-        </WMCard>
-
-        {/* Custom snippets */}
-        <WMCard padding="loose">
-          <div className="mb-4 flex items-end justify-between gap-3 flex-wrap">
-            <div>
-              <h2 className="text-[15px] font-semibold text-wm-text">Custom snippets</h2>
-              <p className="text-[12px] text-wm-text-muted">
-                Project-scoped tokens for repeated phrases — taglines, ministry names, recurring CTAs.
-              </p>
-            </div>
-            <WMButton variant="primary" size="sm" iconLeft={<Plus size={12} />} onClick={() => setAddOpen(true)}>
-              Add snippet
-            </WMButton>
+        ) : customs.length === 0 ? (
+          <button
+            type="button"
+            onClick={() => setAddOpen(true)}
+            className="w-full rounded-md border border-dashed border-wm-border bg-wm-bg p-4 text-center hover:border-wm-border-focus transition-colors"
+          >
+            <Tag size={16} className="text-wm-text-subtle mx-auto mb-1.5" />
+            <p className="text-[12px] font-semibold text-wm-text">No custom snippets yet</p>
+            <p className="text-[11px] text-wm-text-muted mt-1 leading-snug">
+              AI will suggest snippets after scanning intake content. You can also add them manually now.
+            </p>
+          </button>
+        ) : (
+          <div className="space-y-1.5">
+            {customs.map(s => (
+              <SnippetRow key={s.id} snippet={s} onArchive={() => void archiveCustom(s.id)} />
+            ))}
           </div>
-
-          {loadingCustoms ? (
-            <div className="space-y-1.5">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="h-14 rounded-md bg-wm-bg-hover animate-pulse" />
-              ))}
-            </div>
-          ) : customs.length === 0 ? (
-            <button
-              type="button"
-              onClick={() => setAddOpen(true)}
-              className="w-full rounded-md border border-dashed border-wm-border bg-wm-bg p-6 text-center hover:border-wm-border-focus transition-colors"
-            >
-              <Tag size={20} className="text-wm-text-subtle mx-auto mb-2" />
-              <p className="text-[12px] font-semibold text-wm-text">No custom snippets yet</p>
-              <p className="text-[11px] text-wm-text-muted mt-1">AI will suggest snippets after scanning intake content. You can also add them manually now.</p>
-            </button>
-          ) : (
-            <div className="space-y-1.5">
-              {customs.map(s => (
-                <SnippetRow key={s.id} snippet={s} onArchive={() => void archiveCustom(s.id)} />
-              ))}
-            </div>
-          )}
-        </WMCard>
-      </div>
+        )}
+      </section>
 
       {addOpen && (
         <AddSnippetModal
@@ -208,19 +198,19 @@ function GlobalFieldRow({
   }
 
   return (
-    <div className="rounded-md bg-wm-bg border border-wm-border px-3 py-2">
-      <div className="flex items-center justify-between gap-2 mb-1">
+    <div className="py-1.5">
+      <div className="flex items-baseline justify-between gap-2 mb-0.5">
         <p className="text-[11px] font-semibold text-wm-text">{field.label}</p>
+        <code className="text-[10px] text-wm-accent-strong">{field.token}</code>
         {saving && <Loader2 size={11} className="animate-spin text-wm-text-subtle" />}
       </div>
-      <code className="text-[10px] text-wm-accent-strong">{field.token}</code>
       <input
         type={field.type ?? 'text'}
         value={draft}
         onChange={e => setDraft(e.target.value)}
         onBlur={commit}
         placeholder={field.placeholder}
-        className="w-full mt-1 h-8 rounded-md bg-wm-bg-elevated border border-wm-border px-2.5 text-sm text-wm-text placeholder-wm-text-subtle outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20"
+        className="w-full h-8 rounded-md bg-wm-bg-elevated border border-wm-border px-2.5 text-[13px] text-wm-text placeholder-wm-text-subtle outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20"
       />
     </div>
   )

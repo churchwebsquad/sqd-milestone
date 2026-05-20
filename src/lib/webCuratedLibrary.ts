@@ -33,6 +33,12 @@ export interface LibraryConcept {
   kindFilter?: readonly WebTemplateKind[]
   /** How many templates the strategist can bind to this concept. */
   maxPicks: number
+  /** System-wide fallback when a project hasn't picked anything. The
+   *  effective bindings (see `getEffectiveBindings`) include this id
+   *  when the project's curated_library has nothing explicit for the
+   *  concept. Surfaces in the Global Elements UI as a "Default" badge
+   *  the strategist can override per project. */
+  defaultTemplateId?: string
 }
 
 export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
@@ -238,6 +244,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Feature Section'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'feature-section-2',
   },
   {
     id: 'feature_card_carousel',
@@ -248,6 +255,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Feature Section'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'feature-section-82',
   },
   {
     id: 'feature_tabbed',
@@ -428,6 +436,35 @@ export const LIBRARY_BY_CATEGORY: Readonly<Record<string, readonly LibraryConcep
 
 /** The stored shape of `strategy_web_projects.curated_library`. */
 export type CuratedLibrary = Record<string, string[]>
+
+/** Concept lookup by id — used by consumers that need to resolve a
+ *  concept's default when its explicit binding is empty. */
+export const LIBRARY_CONCEPT_BY_ID: Readonly<Record<string, LibraryConcept>> = (() => {
+  const out: Record<string, LibraryConcept> = {}
+  for (const c of LIBRARY_CONCEPTS) out[c.id] = c
+  return out
+})()
+
+/** Effective bindings for a concept: explicit project bindings if any,
+ *  otherwise the concept's `defaultTemplateId` if set, otherwise [].
+ *  Use this anywhere "what counts as the site's pick for X" matters —
+ *  catalog badge ranking, AI auto-bind, etc. */
+export function getEffectiveBindings(library: CuratedLibrary, conceptId: string): string[] {
+  const explicit = library[conceptId] ?? []
+  if (explicit.length > 0) return explicit
+  const fallback = LIBRARY_CONCEPT_BY_ID[conceptId]?.defaultTemplateId
+  return fallback ? [fallback] : []
+}
+
+/** Flatten the project's library + system defaults into a single Set
+ *  of template ids — the "site library" pool for catalog picker badges. */
+export function getEffectiveLibraryIds(library: CuratedLibrary): Set<string> {
+  const out = new Set<string>()
+  for (const c of LIBRARY_CONCEPTS) {
+    for (const id of getEffectiveBindings(library, c.id)) out.add(id)
+  }
+  return out
+}
 
 /** Coerce a jsonb value to the typed CuratedLibrary shape, dropping
  *  anything that doesn't look right. Defensive — the column is jsonb

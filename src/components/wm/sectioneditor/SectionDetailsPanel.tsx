@@ -21,17 +21,20 @@ import {
 } from 'lucide-react'
 import { SlotEditor } from './SlotEditor'
 import { GroupEditor } from './GroupEditor'
+import { GridEditor, detectGridChain } from './GridEditor'
 import { SnippetMenu } from './SnippetMenu'
 import { summarizeSlotPresence } from '../../../lib/webBrixiesLayoutParser'
 import type { WMSnippetOption } from '../RichTextEditor'
 import type {
-  WebContentTemplate, WebSection, WebFieldDef,
+  WebContentTemplate, WebSection, WebFieldDef, WebGroupDef,
 } from '../../../types/database'
 
 interface Props {
   section: WebSection
   template: WebContentTemplate | null
   snippets: readonly WMSnippetOption[]
+  /** Card-family templates available to palette-referenced groups. */
+  cardTemplates?: Record<string, WebContentTemplate>
   onChange: (patch: Partial<WebSection>) => void
   onClose: () => void
   onChangeVariant: () => void
@@ -40,14 +43,10 @@ interface Props {
 }
 
 export function SectionDetailsPanel({
-  section, template, snippets,
+  section, template, snippets, cardTemplates,
   onChange, onClose, onChangeVariant, onUnbind, onRemove,
 }: Props) {
   const values = (section.field_values ?? {}) as Record<string, unknown>
-  const meta = parseSectionMeta(section.notes)
-  const setMeta = (next: Partial<typeof meta>) => {
-    onChange({ notes: stringifySectionMeta({ ...meta, ...next }) })
-  }
   const setValue = (key: string, v: unknown) => {
     onChange({ field_values: { ...values, [key]: v } })
   }
@@ -104,40 +103,47 @@ export function SectionDetailsPanel({
 
       {/* Scrollable body */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-5">
-        {/* Section name */}
-        <Section title="Section name">
-          <input
-            type="text"
-            value={meta.name}
-            onChange={e => setMeta({ name: e.target.value })}
-            placeholder={template?.layer_name ?? 'Untitled section'}
-            className="w-full bg-wm-bg-elevated text-wm-text px-3 py-2 rounded-md border border-wm-border outline-none focus:border-wm-accent focus:ring-2 focus:ring-wm-accent/15 text-[13px] font-semibold transition-colors"
-          />
-        </Section>
-
         {/* Field editors */}
         {template && visibleFields.length > 0 && (
           <Section title="Fields" defaultOpen>
             <div className="space-y-3">
-              {visibleFields.map((field, idx) => (
-                field.kind === 'slot' ? (
-                  <SlotEditor
-                    key={field.key + '-' + idx}
-                    slot={field}
-                    value={values[field.key]}
-                    onChange={(v) => setValue(field.key, v)}
-                    snippets={snippets}
-                  />
-                ) : (
+              {visibleFields.map((field, idx) => {
+                if (field.kind === 'slot') {
+                  return (
+                    <SlotEditor
+                      key={field.key + '-' + idx}
+                      slot={field}
+                      value={values[field.key]}
+                      onChange={(v) => setValue(field.key, v)}
+                      snippets={snippets}
+                    />
+                  )
+                }
+                // Group: if it has a recognizable row × col chain,
+                // render as a flat grid instead of nested chevrons.
+                if (detectGridChain(field)) {
+                  return (
+                    <GridEditor
+                      key={field.key + '-' + idx}
+                      group={field}
+                      value={values[field.key]}
+                      onChange={(v) => setValue(field.key, v)}
+                      snippets={snippets}
+                      cardTemplates={cardTemplates}
+                    />
+                  )
+                }
+                return (
                   <GroupEditor
                     key={field.key + '-' + idx}
                     group={field}
                     value={values[field.key]}
                     onChange={(v) => setValue(field.key, v)}
                     snippets={snippets}
+                    cardTemplates={cardTemplates}
                   />
                 )
-              ))}
+              })}
             </div>
           </Section>
         )}
@@ -186,11 +192,45 @@ export function SectionDetailsPanel({
 
 // ── Visibility rules ────────────────────────────────────────────────
 
-/** Hide image slots in the panel — at this stage we just count them
- *  (rendered by the counter chips below). Image upload happens later. */
+/** Hide non-editable fields from the panel — image slots, image
+ *  groups, and groups that are decorative (single-instance with empty
+ *  schema, e.g. Brixies's `Step` element that just shows "Step 01"
+ *  and is auto-numbered by the renderer). */
 function isEditableField(field: WebFieldDef): boolean {
-  if (field.kind === 'slot' && field.type === 'image') return false
-  return true
+  if (field.kind === 'slot') {
+    return field.type !== 'image'
+  }
+  // Group:
+  if (isImageGroup(field)) return false
+  // Palette-referenced groups are always shown (GroupEditor renders a
+  // placeholder pill explaining the referenced template).
+  if (field.item_template_ref) return true
+  const itemSchema = Array.isArray(field.item_schema) ? field.item_schema : []
+  // Decorative single-instance group with no editable slots in its
+  // item_schema. Common pattern: `Step` group with empty item_schema
+  // whose text is "Step 01" — handled entirely by the renderer's
+  // renumberDecorativeSequences pass.
+  if (itemSchema.length === 0 && field.single_instance_hint) return false
+  // Group whose item_schema has no editable content at any depth.
+  if (itemSchema.length === 0) {
+    // Empty multi-instance — surface it so the strategist can see the
+    // count but it won't have edit fields. Could hide entirely; for
+    // now keep visible.
+    return true
+  }
+  const anyEditable = itemSchema.some(f => isEditableField(f))
+  return anyEditable
+}
+
+function isImageGroup(g: WebGroupDef): boolean {
+  const layerLooksImage = /image|photo|picture|graphic|logo/i.test(
+    `${g.layer_name ?? ''} ${g.key}`,
+  )
+  const itemSchema = Array.isArray(g.item_schema) ? g.item_schema : []
+  if (itemSchema.length === 0) return layerLooksImage
+  // Group whose only authored slot is an image.
+  const editable = itemSchema.filter(f => !(f.kind === 'slot' && f.type === 'image'))
+  return editable.length === 0
 }
 
 // ── Better card / cta counters ──────────────────────────────────────
@@ -200,9 +240,7 @@ function countCtas(template: WebContentTemplate, values: Record<string, unknown>
   for (const f of template.fields) {
     if (f.kind === 'slot' && f.type === 'cta') {
       const v = values[f.key]
-      if (v && typeof v === 'object'
-          && typeof (v as { label?: unknown }).label === 'string'
-          && (v as { label: string }).label.trim() !== '') n++
+      if (hasButtonContent(v)) n++
     }
     if (f.kind === 'group') {
       const c = f.key.toLowerCase().replace(/[_\s-]+/g, '')
@@ -210,12 +248,27 @@ function countCtas(template: WebContentTemplate, values: Record<string, unknown>
       if (!isCta) continue
       const items = Array.isArray(values[f.key]) ? values[f.key] as unknown[] : []
       for (const it of items) {
-        if (it && typeof it === 'object'
-            && Object.values(it).some(v => typeof v === 'string' && v.trim() !== '')) n++
+        if (it && typeof it === 'object' && Object.values(it).some(v => hasButtonContent(v) || isNonEmptyString(v))) n++
       }
     }
   }
   return n
+}
+
+/** A value counts as a "filled" CTA when it's either a `{label, url}`
+ *  object with a non-empty label, or a plain non-empty string (the
+ *  legacy text+scope=button shape, when ButtonInput hasn't migrated). */
+function hasButtonContent(v: unknown): boolean {
+  if (typeof v === 'string') return v.trim() !== ''
+  if (v && typeof v === 'object') {
+    const label = (v as { label?: unknown }).label
+    if (typeof label === 'string' && label.trim() !== '') return true
+  }
+  return false
+}
+
+function isNonEmptyString(v: unknown): boolean {
+  return typeof v === 'string' && v.trim() !== ''
 }
 
 function countCards(template: WebContentTemplate, values: Record<string, unknown>): number {
@@ -236,47 +289,12 @@ function countCards(template: WebContentTemplate, values: Record<string, unknown
           n++
         }
         // Recurse into nested groups within the item.
-        walk(f.item_schema, it)
+        if (Array.isArray(f.item_schema)) walk(f.item_schema, it)
       }
     }
   }
   walk(template.fields, values)
   return n
-}
-
-// ── Section name / description JSON encoding in `notes` ─────────────
-
-interface SectionMeta {
-  name: string
-  description: string
-  legacy?: string
-}
-
-function parseSectionMeta(raw: string | null | undefined): SectionMeta {
-  if (!raw) return { name: '', description: '' }
-  const trimmed = raw.trim()
-  if (trimmed.startsWith('{')) {
-    try {
-      const parsed = JSON.parse(trimmed)
-      if (typeof parsed === 'object' && parsed !== null) {
-        return {
-          name: typeof parsed.name === 'string' ? parsed.name : '',
-          description: typeof parsed.description === 'string' ? parsed.description : '',
-          legacy: typeof parsed.legacy === 'string' ? parsed.legacy : undefined,
-        }
-      }
-    } catch { /* fall through */ }
-  }
-  return { name: '', description: '', legacy: raw }
-}
-
-function stringifySectionMeta(meta: SectionMeta): string {
-  const obj: Record<string, string> = {}
-  if (meta.name) obj.name = meta.name
-  if (meta.description) obj.description = meta.description
-  if (meta.legacy) obj.legacy = meta.legacy
-  if (Object.keys(obj).length === 0) return ''
-  return JSON.stringify(obj)
 }
 
 // ── Building-block components ───────────────────────────────────────

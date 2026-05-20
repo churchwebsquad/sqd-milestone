@@ -893,6 +893,12 @@ export interface StrategyWebProject {
   // Drives the Global Elements workspace and the AI auto-bind pass.
   curated_library: Record<string, string[]>
 
+  // ── Design system spec — brand anchors → ACSS / Figma variables ──
+  // Authored in the Design workspace. Shape: see DesignSystemSpec in
+  // src/lib/designSystemSpec.ts. Drives Tokens Studio JSON export and
+  // (downstream) ACSS CSS export. Null until the strategist fills it in.
+  design_system: unknown | null
+
   // ── Chrome auto-populated fields (footer legal blocks) ──
   cookies_policy_text:  string | null
   privacy_policy_text:  string | null
@@ -1130,6 +1136,12 @@ export interface WebContentTemplate {
   // is 'wordpress' (Option 3 of the sermons-events-groups rule).
   paired_post_template: string | null
   paired_url_pattern: string | null
+  /** Figma team-library component key (40-char hex). When present, the
+   *  Style Guide + Page assembler plugin uses
+   *  `figma.importComponentByKeyAsync(key)` to instantiate the design
+   *  from the team library instead of cloning local nodes. Null means
+   *  no Figma component has been bound yet. */
+  figma_component_key: string | null
   is_published: boolean
   created_at: string
   updated_at: string
@@ -1176,6 +1188,77 @@ export interface WebSection {
   created_at: string
   updated_at: string
   [key: string]: unknown
+}
+
+// ── Reviews ──────────────────────────────────────────────────────────
+//
+// Project-scoped review sessions with per-page / per-section /
+// per-field comments and edit proposals. Two kinds: `internal`
+// (staff-only, multiple can be open in parallel) and `partner` (one
+// open at a time; partners access via /portal/review/<token>).
+//
+// Comments distinguish:
+//   • `comment`   — general note, no proposed change
+//   • `suggested` — staff-authored edit (can be overridden / dismissed)
+//   • `requested` — partner-authored edit (must be resolved, dismissal
+//                   requires a resolution_note)
+
+export interface WebReview {
+  id: string
+  web_project_id: string
+  kind: 'internal' | 'partner'
+  status: 'open' | 'closed'
+  started_at: string
+  started_by_user_id: string | null
+  /** Captured on first partner-portal visit. Null until then. */
+  partner_name: string | null
+  /** Opaque token used in /portal/review/<token>. Only set when kind='partner'. */
+  partner_token: string | null
+  closed_at: string | null
+  closed_by_user_id: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type WebReviewCommentKind = 'comment' | 'suggested' | 'requested'
+export type WebReviewCommentStatus = 'open' | 'applied' | 'amended' | 'dismissed'
+
+export interface WebReviewComment {
+  id: string
+  review_id: string
+  web_page_id: string
+  /** Null = page-level general comment. */
+  web_section_id: string | null
+  /** Null when comment is section-level (not pinned to a field). */
+  field_key: string | null
+  author_kind: 'staff' | 'partner'
+  author_user_id: string | null
+  /** Captured for partner authors (name they entered on the portal). */
+  author_external_name: string | null
+  kind: WebReviewCommentKind
+  body: string | null
+  /** Snapshot of the field value at the time the suggestion was created. */
+  original_value: unknown
+  /** Proposed value. Same shape as the underlying slot type. */
+  suggested_value: unknown
+  status: WebReviewCommentStatus
+  resolved_by_user_id: string | null
+  resolved_at: string | null
+  resolution_note: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface WebReviewAttachment {
+  id: string
+  comment_id: string
+  storage_path: string
+  storage_url: string
+  filename: string | null
+  mime_type: string | null
+  file_size_bytes: number | null
+  created_at: string
 }
 
 /** First-class embed block — NOT a Brixies template. Renders as a

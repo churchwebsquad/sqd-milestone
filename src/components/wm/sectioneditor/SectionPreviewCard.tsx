@@ -29,6 +29,9 @@ interface Props {
   total: number
   selected: boolean
   snippetMap: SnippetMap
+  /** Card-family templates keyed by id — passed down for palette-
+   *  referenced groups (Feature 82/106/22 et al). */
+  cardTemplates?: Record<string, WebContentTemplate>
   bindQuality: 'good' | 'partial' | 'attention'
   onSelect: () => void
   onMoveUp: () => void
@@ -39,7 +42,7 @@ interface Props {
 }
 
 export function SectionPreviewCard({
-  section, template, index, total, selected, snippetMap, bindQuality,
+  section, template, index, total, selected, snippetMap, cardTemplates, bindQuality,
   onSelect, onMoveUp, onMoveDown, onChangeVariant, onUnbind, onRemove,
 }: Props) {
   const html = useMemo(() => {
@@ -48,8 +51,9 @@ export function SectionPreviewCard({
       template,
       (section.field_values ?? {}) as Record<string, unknown>,
       snippetMap,
+      cardTemplates,
     )
-  }, [template, section.field_values, snippetMap])
+  }, [template, section.field_values, snippetMap, cardTemplates])
 
   return (
     <div
@@ -248,6 +252,7 @@ function ScaledIframe({ html, title }: { html: string; title: string }) {
   useEffect(() => {
     const iframe = iframeRef.current
     if (!iframe) return
+    let bodyObserver: ResizeObserver | null = null
     const measure = () => {
       try {
         const doc = iframe.contentDocument
@@ -255,12 +260,33 @@ function ScaledIframe({ html, title }: { html: string; title: string }) {
         const h = doc.body?.scrollHeight ?? doc.documentElement?.scrollHeight ?? 800
         setIntrinsicHeight(Math.max(h, 200))
       } catch {
-        // sandbox guard
+        // cross-origin guard — fall through, keep prior height
       }
     }
-    iframe.addEventListener('load', measure)
-    const t = setTimeout(measure, 250)
-    return () => { iframe.removeEventListener('load', measure); clearTimeout(t) }
+    const onLoad = () => {
+      measure()
+      // Re-measure as images load and as Brixies content settles.
+      try {
+        const doc = iframe.contentDocument
+        if (doc?.body) {
+          bodyObserver?.disconnect()
+          bodyObserver = new ResizeObserver(() => measure())
+          bodyObserver.observe(doc.body)
+        }
+        // Also listen to image load events — placeholder swaps don't
+        // always trigger ResizeObserver on the body.
+        const imgs = doc?.querySelectorAll('img') ?? []
+        imgs.forEach(img => img.addEventListener('load', measure, { once: true }))
+      } catch { /* sandboxed — fall back to timeouts */ }
+    }
+    iframe.addEventListener('load', onLoad)
+    // Belt-and-braces: re-measure at a few intervals to catch late changes.
+    const timeouts = [120, 400, 1200, 2500].map(t => setTimeout(measure, t))
+    return () => {
+      iframe.removeEventListener('load', onLoad)
+      bodyObserver?.disconnect()
+      timeouts.forEach(clearTimeout)
+    }
   }, [html])
 
   const wrappedHeight = Math.round(intrinsicHeight * scale)
@@ -280,7 +306,10 @@ function ScaledIframe({ html, title }: { html: string; title: string }) {
             transformOrigin: 'top left',
             border: 0,
           }}
-          sandbox=""
+          // allow-same-origin so we can measure body height as content
+          // settles. Scripts stay disabled — content is our own trusted
+          // Brixies HTML with strategist copy substituted in.
+          sandbox="allow-same-origin"
         />
       </div>
     </div>

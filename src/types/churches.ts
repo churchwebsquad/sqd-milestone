@@ -25,6 +25,10 @@ export interface ChurchGridRow {
   facebook: string | null
   youtube: string | null
   web_pathway: string | null
+  /** Current website builder the partner is running on, captured at intake.
+   *  Sources from `strategy_account_progress.current_website_platform`.
+   *  Lightly normalized for display (e.g. "Wordpress" → "WordPress"). */
+  current_website_platform: string | null
   brand_pathway: string | null
   web_milestone: string | null
   web_milestone_status: MilestoneStatus | null
@@ -113,6 +117,32 @@ export function extractPlan(airtableData: Record<string, unknown> | null): strin
 export function firstAm(cssRep: string | null): string | null {
   if (!cssRep) return null
   return cssRep.split(',')[0].trim() || null
+}
+
+/** Normalize current_website_platform for display. The intake form
+ *  captures free-text variants ("Wordpress" / "WordPress" / "wordpress, Other")
+ *  so we titlecase the canonical platform names and trim the extra
+ *  noise. Returns null when the source is empty. */
+const PLATFORM_CANONICAL: Record<string, string> = {
+  wordpress: 'WordPress',
+  squarespace: 'Squarespace',
+  webflow: 'Webflow',
+  wix: 'Wix',
+  'church co': 'Church Co',
+  churchco: 'Church Co',
+  subsplash: 'Subsplash',
+  shopify: 'Shopify',
+  ghost: 'Ghost',
+}
+
+export function normalizeWebsitePlatform(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  const cleaned = raw.trim()
+  if (!cleaned) return null
+  // Pick the first comma-separated value as the primary platform.
+  const primary = cleaned.split(',')[0].trim()
+  const key = primary.toLowerCase()
+  return PLATFORM_CANONICAL[key] ?? primary
 }
 
 // ── Detail page section IDs ──────────────────────────────────────────────────

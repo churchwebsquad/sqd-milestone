@@ -197,7 +197,7 @@ function ButtonInput({
     return { label: '', url: '' }
   })()
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr] gap-1.5">
+    <div className="space-y-1.5">
       <input
         type="text"
         value={cta.label}
@@ -206,7 +206,7 @@ function ButtonInput({
         onFocus={e => focus.registerInput(slot.key + ':label', e.currentTarget)}
         onBlur={() => focus.clear(slot.key + ':label')}
         placeholder="Button label"
-        className="bg-wm-bg-elevated text-wm-text px-3 py-2 rounded-md border border-wm-border outline-none focus:border-wm-accent focus:ring-2 focus:ring-wm-accent/15 transition-colors text-[13px] font-semibold"
+        className="w-full bg-wm-bg-elevated text-wm-text px-3 py-2 rounded-md border border-wm-border outline-none focus:border-wm-accent focus:ring-2 focus:ring-wm-accent/15 transition-colors text-[13px] font-semibold"
       />
       <div className="relative">
         <Link2 size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-wm-text-subtle pointer-events-none" />

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ChevronDown, ChevronRight, ExternalLink, PartyPopper, Link, Check, Globe, Wrench, Server } from 'lucide-react'
 import type { StrategyAccountProgress, WebsiteSupportAudit, MilestoneStatus } from '../../types/database'
 import type { EnrichedSubmission } from '../../pages/ChurchDetailPage'
-import { extractWebPathway } from '../../types/churches'
+import { extractWebPathway, normalizeWebsitePlatform } from '../../types/churches'
 import { PATHWAY_LABELS, ASSET_TYPE_LABELS } from '../submit/types'
 import EditableField from './EditableField'
 import { SectionHeader, SubSectionLabel, ToolLink } from './ChurchUI'
@@ -117,6 +117,7 @@ function SubmissionCard({ entry, defaultOpen, portalToken, memberId }: { entry: 
 export default function WebSquadSection({ church, submissions, websiteAudits, onSave, editing, portalToken, memberId }: Props) {
   const webPathway = extractWebPathway(church.handoff_web_form as Record<string, unknown> | null)
   const raw = church as Record<string, unknown>
+  const currentPlatform = normalizeWebsitePlatform(raw.current_website_platform as string | null | undefined)
 
   // Launch fields per data mapping
   const websiteLaunched = raw.website_launched as boolean | null ?? false
@@ -136,10 +137,16 @@ export default function WebSquadSection({ church, submissions, websiteAudits, on
     <section id="website-squad" className="bg-white border border-lavender rounded-xl p-5 shadow-sm scroll-mt-6">
       <SectionHeader icon={Globe} title="Website Squad" theme="web" />
 
-      {/* Web Pathway */}
-      <div className="mb-4">
-        <p className="text-[10px] font-bold text-purple-gray uppercase tracking-wide mb-0.5">Web Pathway</p>
-        <p className="text-sm text-deep-plum font-medium">{webPathway ?? <span className="text-purple-gray/50 italic">Not set</span>}</p>
+      {/* Web Pathway + current platform */}
+      <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <p className="text-[10px] font-bold text-purple-gray uppercase tracking-wide mb-0.5">Web Pathway</p>
+          <p className="text-sm text-deep-plum font-medium">{webPathway ?? <span className="text-purple-gray/50 italic">Not set</span>}</p>
+        </div>
+        <div>
+          <p className="text-[10px] font-bold text-purple-gray uppercase tracking-wide mb-0.5">Current Website Builder</p>
+          <p className="text-sm text-deep-plum font-medium">{currentPlatform ?? <span className="text-purple-gray/50 italic">Not set</span>}</p>
+        </div>
       </div>
 
       {/* Milestone progress */}

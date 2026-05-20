@@ -1,14 +1,18 @@
 /**
  * Web Manager — Assistant Rail.
  *
- * Four-tab right-side panel that complements the active workspace:
+ * Right-side panel that complements the active workspace. Hosts the
+ * "everywhere" reference + per-project authoring that doesn't earn
+ * a top-level tab:
  *
- *   Snippets   — reusable text tokens (Phase A — live counts from web_project_snippets)
- *   Library    — read-only reference (Phase A — placeholder cards)
- *   Ideas      — AI suggestions + manual notes (Phase B — manual entry + display; AI populates in Phase C)
- *   Audit      — heuristic violations on the active page (Phase B — runs on demand via Scan)
+ *   Section    — section detail editor (only when a section is selected on Pages)
+ *   Snippets   — global merge fields + project snippets
+ *   Voice      — read-only brand voice rollup
+ *   Heuristics — writing rules + denominational filter + personas
+ *   Ideas      — AI suggestions + manual notes
+ *   Audit      — heuristic violations on the active page
  *
- * The rail is context-aware: when active workspace is `pages`, the
+ * The rail is context-aware: when the active workspace is `pages`, the
  * Audit tab scans the currently-open page (?page=<id>) and the Ideas
  * tab scopes to that page.
  */
@@ -16,28 +20,37 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Tag, BookOpen, Lightbulb, AlertTriangle, RotateCw, Search,
+  Tag, BookOpen, Mic, Lightbulb, AlertTriangle, RotateCw, Search,
   Loader2, Plus, X, ArrowRight, Trash2, SquarePen,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { runAudit } from '../../lib/webAudit'
 import type { AuditFinding, AuditSeverity } from '../../lib/webAudit'
-import type { WebAIIdea } from '../../types/database'
+import type { StrategyWebProject, WebAIIdea } from '../../types/database'
 import { WMButton } from './Button'
 import { WMIconButton } from './IconButton'
 import { WMStatusPill } from './StatusPill'
 import { SectionDetailsPanel } from './sectioneditor/SectionDetailsPanel'
 import { SnippetFocusProvider } from './sectioneditor/SnippetFocusContext'
 import { useSectionDetail } from './sectioneditor/SectionEditingContext'
+import { SnippetsWorkspace } from './workspaces/SnippetsWorkspace'
+import { VoiceWorkspace } from './workspaces/VoiceWorkspace'
+import { HeuristicsWorkspace } from './workspaces/HeuristicsWorkspace'
 
-type RailTab = 'section' | 'snippets' | 'library' | 'ideas' | 'audit'
+type RailTab = 'section' | 'snippets' | 'voice' | 'heuristics' | 'ideas' | 'audit'
 
 interface Props {
   projectId: string
   activeTab: string
+  /** Full project row — required for the Snippets / Voice / Heuristics
+   *  rail tabs which render those workspaces inline. */
+  project?: StrategyWebProject
+  /** Refresh callback fired when a rail-hosted workspace mutates the
+   *  project (e.g. SnippetsWorkspace adds/removes a custom snippet). */
+  onProjectChange?: () => Promise<void>
 }
 
-export function AssistantRail({ projectId, activeTab }: Props) {
+export function AssistantRail({ projectId, activeTab, project, onProjectChange }: Props) {
   const [tab, setTab] = useState<RailTab>('snippets')
   const [query, setQuery] = useState('')
   const [counts, setCounts] = useState({ snippets: 0, ideas: 0, audit: 0 })
@@ -81,19 +94,25 @@ export function AssistantRail({ projectId, activeTab }: Props) {
 
   useEffect(() => { void loadCounts() }, [loadCounts])
 
+  // Workspaces hosted in the rail (Snippets / Voice / Heuristics)
+  // render their own filter UI internally, so the rail's search box
+  // only applies to the simple list tabs.
+  const showSearchBox = tab === 'ideas' || tab === 'audit'
+
   return (
     <div className="h-full flex flex-col text-sm">
       <div className="flex items-center border-b border-wm-border bg-wm-bg">
         {sectionTabAvailable && (
           <RailTabButton tab="section" active={tab} setTab={setTab} icon={<SquarePen size={13} />} label="Section" />
         )}
-        <RailTabButton tab="snippets"  active={tab} setTab={setTab} icon={<Tag size={13} />}            count={counts.snippets} label="Snippets" />
-        <RailTabButton tab="library"   active={tab} setTab={setTab} icon={<BookOpen size={13} />}       label="Library" />
-        <RailTabButton tab="ideas"     active={tab} setTab={setTab} icon={<Lightbulb size={13} />}      count={counts.ideas} label="Ideas" />
-        <RailTabButton tab="audit"     active={tab} setTab={setTab} icon={<AlertTriangle size={13} />}  count={counts.audit} label="Audit" />
+        <RailTabButton tab="snippets"   active={tab} setTab={setTab} icon={<Tag size={13} />}            count={counts.snippets} label="Snippets" />
+        <RailTabButton tab="voice"      active={tab} setTab={setTab} icon={<Mic size={13} />}            label="Voice" />
+        <RailTabButton tab="heuristics" active={tab} setTab={setTab} icon={<BookOpen size={13} />}       label="Heuristics" />
+        <RailTabButton tab="ideas"      active={tab} setTab={setTab} icon={<Lightbulb size={13} />}      count={counts.ideas} label="Ideas" />
+        <RailTabButton tab="audit"      active={tab} setTab={setTab} icon={<AlertTriangle size={13} />}  count={counts.audit} label="Audit" />
       </div>
 
-      {tab !== 'section' && (
+      {showSearchBox && (
         <div className="px-3 py-2 border-b border-wm-border space-y-2">
           <div className="relative">
             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-wm-text-subtle" />
@@ -101,12 +120,7 @@ export function AssistantRail({ projectId, activeTab }: Props) {
               type="text"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder={
-                tab === 'snippets' ? 'Search snippets…' :
-                tab === 'library'  ? 'Search library…'  :
-                tab === 'ideas'    ? 'Filter ideas…'    :
-                                     'Filter violations…'
-              }
+              placeholder={tab === 'ideas' ? 'Filter ideas…' : 'Filter violations…'}
               className="w-full h-8 pl-7 pr-2 rounded-md bg-wm-bg-elevated border border-wm-border text-[12px] text-wm-text placeholder-wm-text-subtle outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20"
             />
           </div>
@@ -114,12 +128,13 @@ export function AssistantRail({ projectId, activeTab }: Props) {
       )}
 
       <div className="flex-1 overflow-y-auto bg-wm-bg-elevated min-h-0">
-        {tab === 'section'  && sectionDetail && (
+        {tab === 'section' && sectionDetail && (
           <SnippetFocusProvider>
             <SectionDetailsPanel
               section={sectionDetail.section}
               template={sectionDetail.template}
               snippets={sectionDetail.snippets}
+              cardTemplates={sectionDetail.cardTemplates}
               onChange={sectionDetail.onChange}
               onClose={sectionDetail.onClose}
               onChangeVariant={sectionDetail.onChangeVariant}
@@ -128,11 +143,29 @@ export function AssistantRail({ projectId, activeTab }: Props) {
             />
           </SnippetFocusProvider>
         )}
-        {tab === 'snippets' && <SnippetsTab projectId={projectId} query={query} />}
-        {tab === 'library'  && <LibraryTab />}
-        {tab === 'ideas'    && <IdeasTab projectId={projectId} activePageId={activePageId} query={query} onChange={loadCounts} />}
-        {tab === 'audit'    && <AuditTab projectId={projectId} activePageId={activePageId} query={query} onCount={n => setCounts(c => ({ ...c, audit: n }))} />}
+        {tab === 'snippets' && (project
+          ? <SnippetsWorkspace project={project} onChange={onProjectChange ?? (async () => { await loadCounts() })} />
+          : <RailUnavailable label="Snippets" />
+        )}
+        {tab === 'voice' && (project
+          ? <VoiceWorkspace project={project} />
+          : <RailUnavailable label="Voice" />
+        )}
+        {tab === 'heuristics' && (project
+          ? <HeuristicsWorkspace project={project} />
+          : <RailUnavailable label="Heuristics" />
+        )}
+        {tab === 'ideas' && <IdeasTab projectId={projectId} activePageId={activePageId} query={query} onChange={loadCounts} />}
+        {tab === 'audit' && <AuditTab projectId={projectId} activePageId={activePageId} query={query} onCount={n => setCounts(c => ({ ...c, audit: n }))} />}
       </div>
+    </div>
+  )
+}
+
+function RailUnavailable({ label }: { label: string }) {
+  return (
+    <div className="p-4 text-[12px] text-wm-text-subtle italic">
+      {label} unavailable — project hasn't loaded yet.
     </div>
   )
 }
@@ -171,50 +204,6 @@ function RailTabButton({
         ].join(' ')}>{count}</span>
       )}
     </button>
-  )
-}
-
-// ── Snippets tab ──────────────────────────────────────────────────────
-
-function SnippetsTab({ projectId: _projectId, query: _query }: { projectId: string; query: string }) {
-  return (
-    <div className="p-3 space-y-2">
-      <EmptyState
-        icon={<Tag size={20} />}
-        title="Snippets show up here"
-        body="The 17 global merge fields plus any custom snippets for this project. AI suggestions appear once Stage 1 runs."
-      />
-    </div>
-  )
-}
-
-// ── Library tab ───────────────────────────────────────────────────────
-
-function LibraryTab() {
-  return (
-    <div className="p-3 space-y-3">
-      <LibrarySection title="Brand Voice">
-        Voice characteristics + tone guidelines pulled from the Brand Squad handoff.
-      </LibrarySection>
-      <LibrarySection title="Writing Rules">
-        Global do/don't rules + project-specific overlays from the strategy brief.
-      </LibrarySection>
-      <LibrarySection title="Denominational Filter">
-        Active filter for this church's theological tradition.
-      </LibrarySection>
-      <LibrarySection title="Personas">
-        Project-specific personas extracted from the strategy brief.
-      </LibrarySection>
-    </div>
-  )
-}
-
-function LibrarySection({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-md bg-wm-bg border border-wm-border p-3">
-      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">{title}</p>
-      <p className="text-[12px] text-wm-text-muted leading-snug">{children}</p>
-    </div>
   )
 }
 

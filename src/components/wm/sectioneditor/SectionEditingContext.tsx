@@ -18,6 +18,9 @@ export interface SectionDetail {
   section: WebSection
   template: WebContentTemplate | null
   snippets: readonly WMSnippetOption[]
+  /** Card-family templates available to palette-referenced groups
+   *  in the section panel (Feature 22/82/106 picker). */
+  cardTemplates?: Record<string, WebContentTemplate>
   onChange:        (patch: Partial<WebSection>) => void
   onChangeVariant: () => void
   onUnbind:        () => void

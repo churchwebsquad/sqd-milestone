@@ -68,8 +68,8 @@ export function WebManagerShell<T extends string>({
 
   return (
     <div className="wm-theme min-h-full bg-wm-bg text-wm-text">
-      {/* ── Header ──────────────────────────────────────────────── */}
-      <header className="bg-wm-bg-elevated border-b border-wm-border">
+      {/* ── Header (sticky) ─────────────────────────────────────── */}
+      <header className="sticky top-0 z-20 bg-wm-bg-elevated border-b border-wm-border">
         <div className="px-4 md:px-6 py-2.5 flex items-center justify-between gap-3 flex-wrap">
           <div className="min-w-0 flex items-center gap-2 text-[12px] text-wm-text-muted">
             <Link to="/web" className="hover:text-wm-text transition-colors">Website Manager</Link>
@@ -110,7 +110,10 @@ export function WebManagerShell<T extends string>({
       <div className="flex">
         <main className="flex-1 min-w-0">{children}</main>
         {hasRail && railOpen && (
-          <aside className="w-[320px] shrink-0 border-l border-wm-border bg-wm-bg-elevated">
+          <aside
+            className="w-[440px] shrink-0 border-l border-wm-border bg-wm-bg-elevated sticky self-start overflow-y-auto"
+            style={{ top: 'var(--wm-header-h, 88px)', height: 'calc(100vh - var(--wm-header-h, 88px))' }}
+          >
             {rail}
           </aside>
         )}

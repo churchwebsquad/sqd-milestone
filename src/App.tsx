@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import AppLayout from './components/AppLayout'
@@ -7,13 +7,8 @@ import ChurchesDashboardPage from './pages/ChurchesDashboardPage'
 import ChurchDetailPage from './pages/ChurchDetailPage'
 import DiscoveryBriefPage from './pages/DiscoveryBriefPage'
 import WebProjectsPage from './pages/web/WebProjectsPage'
-import WebProjectPage from './pages/web/WebProjectPage'
 import WebTemplatesPage from './pages/web/WebTemplatesPage'
-import WebIntakePage from './pages/web/WebIntakePage'
 import WebContentManagerPage from './pages/web/WebContentManagerPage'
-import WebDesignManagerPage from './pages/web/WebDesignManagerPage'
-import WebDevManagerPage from './pages/web/WebDevManagerPage'
-import WebReviewConsolePage from './pages/web/WebReviewConsolePage'
 import CopyReviewAdminPage from './pages/CopyReviewAdminPage'
 import BrandGuideEditorPage from './pages/BrandGuideEditorPage'
 import IntelAuditToolPage from './pages/IntelAuditToolPage'
@@ -105,17 +100,20 @@ export default function App() {
             <Route path="/branding" element={<BrandingIndexPage />} />
             <Route path="/branding/:token" element={<BrandHandoffPage />} />
 
-            {/* Website Manager — projects list + per-project hub.
-                The five tool routes (intake/content/design/dev/reviews)
-                are stubs in Phase 1; each fills in over Phase 3+. */}
+            {/* Website Manager — projects list + per-project Site Manager.
+                Site Manager (formerly Content Manager) now owns every
+                per-project surface via tabs: Intake / Site Library /
+                Pages / Design Handoff / Dev Handoff / Review. Old deep
+                links (/intake, /content, /design, /dev, /reviews) redirect
+                to the corresponding tab on the unified page. */}
             <Route path="/web" element={<WebProjectsPage />} />
             <Route path="/web/templates" element={<WebTemplatesPage />} />
-            <Route path="/web/:projectId" element={<WebProjectPage />} />
-            <Route path="/web/:projectId/intake" element={<WebIntakePage />} />
-            <Route path="/web/:projectId/content" element={<WebContentManagerPage />} />
-            <Route path="/web/:projectId/design" element={<WebDesignManagerPage />} />
-            <Route path="/web/:projectId/dev" element={<WebDevManagerPage />} />
-            <Route path="/web/:projectId/reviews" element={<WebReviewConsolePage />} />
+            <Route path="/web/:projectId" element={<WebContentManagerPage />} />
+            <Route path="/web/:projectId/content"  element={<WebContentManagerPage />} />
+            <Route path="/web/:projectId/intake"   element={<WebTabRedirect tab="intake"     />} />
+            <Route path="/web/:projectId/design"   element={<WebTabRedirect tab="design"     />} />
+            <Route path="/web/:projectId/dev"      element={<WebTabRedirect tab="devhandoff" />} />
+            <Route path="/web/:projectId/reviews"  element={<WebTabRedirect tab="review"     />} />
 
             {/* All In Journey Milestones */}
             <Route path="/pathway" element={<ComingSoonPage title="Pathway Viewer" />} />
@@ -206,4 +204,13 @@ function BrandPortalLanding() {
       </div>
     </div>
   )
+}
+
+/** Redirect from a legacy `/web/:projectId/<tool>` path to the
+ *  equivalent `/web/:projectId?tab=<tab>` on the unified Site Manager.
+ *  Used by App's redirect routes; isn't user-facing. */
+function WebTabRedirect({ tab }: { tab: string }) {
+  const { projectId } = useParams<{ projectId: string }>()
+  if (!projectId) return <Navigate to="/web" replace />
+  return <Navigate to={`/web/${projectId}?tab=${tab}`} replace />
 }

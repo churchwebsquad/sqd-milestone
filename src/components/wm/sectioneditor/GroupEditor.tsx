@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import { SlotEditor } from './SlotEditor'
 import type { WMSnippetOption } from '../RichTextEditor'
-import type { WebGroupDef, WebFieldDef } from '../../../types/database'
+import type { WebGroupDef, WebFieldDef, WebContentTemplate } from '../../../types/database'
 
 interface Props {
   group: WebGroupDef
@@ -23,9 +23,27 @@ interface Props {
   onChange: (v: unknown) => void
   snippets: readonly WMSnippetOption[]
   depth?: number
+  /** Card-family templates for palette-referenced groups. */
+  cardTemplates?: Record<string, WebContentTemplate>
 }
 
-export function GroupEditor({ group, value, onChange, snippets, depth = 0 }: Props) {
+export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardTemplates }: Props) {
+  // Palette-referenced groups (item_template_ref): the user picks
+  // which Card template renders each item; items use the SELECTED
+  // Card's fields as their item_schema.
+  if (group.item_template_ref) {
+    return (
+      <PaletteGroupEditor
+        group={group}
+        value={value}
+        onChange={onChange}
+        snippets={snippets}
+        depth={depth}
+        cardTemplates={cardTemplates ?? {}}
+      />
+    )
+  }
+  const itemSchema = Array.isArray(group.item_schema) ? group.item_schema : []
   const items: Record<string, unknown>[] = Array.isArray(value)
     ? (value as Record<string, unknown>[])
     : []
@@ -48,7 +66,7 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0 }: Pro
 
   const addItem = () => {
     const newIdx = items.length
-    onChange([...items, makeEmptyItem(group.item_schema)])
+    onChange([...items, makeEmptyItem(itemSchema)])
     setExpanded(prev => {
       const next = new Set(prev)
       next.add(newIdx)
@@ -102,6 +120,52 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0 }: Pro
     semantics.kind === 'cta' ? 'text-emerald-700'
     : 'text-wm-accent-strong'
 
+  // Brixies marks some groups as `single_instance_hint: true` — these
+  // are conceptually one-of (e.g. a card group with default_count=1)
+  // and shouldn't expose Add/Remove. The strategist edits the single
+  // item's fields.
+  const isFixed = group.single_instance_hint === true
+
+  // For fixed (single-instance) groups, unwrap: render the one item's
+  // fields directly without the group's card/header. Without this the
+  // user sees a "No items yet — click Add item" hint that has no Add
+  // button (because isFixed hides it), leaving them with no way to
+  // edit the underlying fields. Auto-populating with a single empty
+  // item lets nested editing flow through.
+  if (isFixed) {
+    const single = items[0] ?? {}
+    const setField = (key: string, v: unknown) => {
+      onChange([{ ...single, [key]: v }])
+    }
+    const visibleSchema = itemSchema.filter(isEditableSchemaField)
+    if (visibleSchema.length === 0) return null
+    return (
+      <div className="space-y-2.5">
+        {visibleSchema.map((field, i) => (
+          field.kind === 'slot' ? (
+            <SlotEditor
+              key={field.key + '-' + i}
+              slot={field}
+              value={single[field.key]}
+              onChange={(v) => setField(field.key, v)}
+              snippets={snippets}
+            />
+          ) : (
+            <GroupEditor
+              key={field.key + '-' + i}
+              group={field}
+              value={single[field.key]}
+              onChange={(v) => setField(field.key, v)}
+              snippets={snippets}
+              depth={depth + 1}
+              cardTemplates={cardTemplates}
+            />
+          )
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div className="rounded-md border border-wm-border bg-wm-bg-elevated">
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-wm-border/60">
@@ -111,20 +175,38 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0 }: Pro
         ].join(' ')}>
           {groupTitle}{items.length > 0 ? ` · ${items.length}` : ''}
         </p>
-        <button
-          type="button"
-          onClick={addItem}
-          className="inline-flex items-center gap-1 h-6 px-2 rounded-md text-[10px] font-semibold bg-wm-accent-tint text-wm-accent-strong border border-wm-accent/30 hover:bg-wm-accent/15 transition-colors"
-        >
-          <Plus size={11} />
-          {semantics.addLabel}
-        </button>
+        {!isFixed && (
+          <button
+            type="button"
+            onClick={addItem}
+            className="inline-flex items-center gap-1 h-6 px-2 rounded-md text-[10px] font-semibold bg-wm-accent-tint text-wm-accent-strong border border-wm-accent/30 hover:bg-wm-accent/15 transition-colors"
+          >
+            <Plus size={11} />
+            {semantics.addLabel}
+          </button>
+        )}
       </div>
 
       {items.length === 0 ? (
         <p className="px-3 py-3 text-[11px] text-wm-text-subtle italic">
           {semantics.emptyHint}
         </p>
+      ) : isSingleSlotList(group) ? (
+        <ul className="px-3 py-2 space-y-1.5">
+          {items.map((item, idx) => (
+            <FlatListRow
+              key={idx}
+              idx={idx}
+              total={items.length}
+              schema={itemSchema}
+              semantics={semantics}
+              snippets={snippets}
+              item={item}
+              onPatch={(patch) => setItem(idx, patch)}
+              onRemove={() => removeItem(idx)}
+            />
+          ))}
+        </ul>
       ) : (
         <ul>
           {items.map((item, idx) => (
@@ -139,7 +221,7 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0 }: Pro
                 item={item}
                 idx={idx}
                 total={items.length}
-                schema={group.item_schema}
+                schema={itemSchema}
                 semantics={semantics}
                 snippets={snippets}
                 depth={depth + 1}
@@ -149,6 +231,7 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0 }: Pro
                 onRemove={() => removeItem(idx)}
                 onMoveUp={() => moveItem(idx, -1)}
                 onMoveDown={() => moveItem(idx, 1)}
+                cardTemplates={cardTemplates}
               />
             </li>
           ))}
@@ -158,9 +241,254 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0 }: Pro
   )
 }
 
+// ── Palette group editor ───────────────────────────────────────────
+//
+// For groups with `item_template_ref: "from_palette"`. The user picks
+// a Card-family template; each item is edited against that template's
+// `fields` schema. Storage shape on the section's field_values:
+//   { __palette_template_id: string, items: [{...}, {...}] }
+// Backward-compatible read: a plain array is treated as `items` and
+// the schema's default `referenced_template_id` is used.
+
+interface PaletteValue {
+  __palette_template_id?: string
+  items?: Array<Record<string, unknown>>
+}
+
+function readPaletteValue(value: unknown, defaultId?: string): { templateId: string | undefined; items: Array<Record<string, unknown>> } {
+  if (Array.isArray(value)) {
+    return { templateId: defaultId, items: value as Array<Record<string, unknown>> }
+  }
+  if (value && typeof value === 'object') {
+    const v = value as PaletteValue
+    return {
+      templateId: v.__palette_template_id ?? defaultId,
+      items: Array.isArray(v.items) ? v.items : [],
+    }
+  }
+  return { templateId: defaultId, items: [] }
+}
+
+function PaletteGroupEditor({
+  group, value, onChange, snippets, depth, cardTemplates,
+}: {
+  group: WebGroupDef
+  value: unknown
+  onChange: (v: unknown) => void
+  snippets: readonly WMSnippetOption[]
+  depth: number
+  cardTemplates: Record<string, WebContentTemplate>
+}) {
+  const { templateId, items } = readPaletteValue(value, group.referenced_template_id)
+  const selectedCard = templateId ? cardTemplates[templateId] : null
+  const cardSchema: WebFieldDef[] = Array.isArray(selectedCard?.fields) ? (selectedCard?.fields as WebFieldDef[]) : []
+
+  const writePalette = (nextItems: Array<Record<string, unknown>>, nextTemplateId?: string) => {
+    onChange({
+      __palette_template_id: nextTemplateId ?? templateId,
+      items: nextItems,
+    })
+  }
+
+  const onPickTemplate = (id: string) => {
+    writePalette(items, id)
+  }
+
+  const setItem = (idx: number, patch: Record<string, unknown>) => {
+    const next = [...items]
+    next[idx] = { ...next[idx], ...patch }
+    writePalette(next)
+  }
+  const addItem = () => writePalette([...items, {}])
+  const removeItem = (idx: number) => writePalette(items.filter((_, i) => i !== idx))
+
+  const cardList = Object.values(cardTemplates)
+    .filter(t => (group.referenced_family ? t.family === group.referenced_family : true))
+    .sort((a, b) => (a.layer_name ?? '').localeCompare(b.layer_name ?? ''))
+
+  return (
+    <div className="rounded-md border border-wm-border bg-wm-bg-elevated">
+      <div className="px-3 py-2 border-b border-wm-border/60 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[10px] uppercase tracking-[0.08em] font-bold truncate text-wm-accent-strong">
+            {group.layer_name ?? group.key} · {items.length}
+          </p>
+          <button
+            type="button"
+            onClick={addItem}
+            className="inline-flex items-center gap-1 h-6 px-2 rounded-md text-[10px] font-semibold bg-wm-accent-tint text-wm-accent-strong border border-wm-accent/30 hover:bg-wm-accent/15 transition-colors"
+          >
+            <Plus size={11} /> Add
+          </button>
+        </div>
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-[0.08em] font-bold text-wm-text-muted block mb-1">
+            Card template
+          </span>
+          <select
+            value={templateId ?? ''}
+            onChange={(e) => onPickTemplate(e.target.value)}
+            className="w-full text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated focus:border-wm-accent focus:outline-none"
+          >
+            <option value="">— Pick a {group.referenced_family ?? 'card'} —</option>
+            {cardList.map(t => (
+              <option key={t.id} value={t.id}>{t.layer_name}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {!selectedCard ? (
+        <p className="px-3 py-3 text-[11px] text-wm-text-subtle italic">
+          Pick a card template to start editing items.
+        </p>
+      ) : items.length === 0 ? (
+        <p className="px-3 py-3 text-[11px] text-wm-text-subtle italic">
+          No items yet — click Add.
+        </p>
+      ) : (
+        <ul>
+          {items.map((item, idx) => (
+            <li
+              key={idx}
+              className={['px-3 py-2', idx > 0 ? 'border-t border-wm-border/40' : ''].join(' ')}
+            >
+              <PaletteItemBlock
+                idx={idx}
+                schema={cardSchema}
+                snippets={snippets}
+                item={item}
+                onPatch={(patch) => setItem(idx, patch)}
+                onRemove={() => removeItem(idx)}
+                depth={depth + 1}
+                cardTemplates={cardTemplates}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function PaletteItemBlock({
+  idx, schema, snippets, item, onPatch, onRemove, depth, cardTemplates,
+}: {
+  idx: number
+  schema: WebFieldDef[]
+  snippets: readonly WMSnippetOption[]
+  item: Record<string, unknown>
+  onPatch: (patch: Record<string, unknown>) => void
+  onRemove: () => void
+  depth: number
+  cardTemplates: Record<string, WebContentTemplate>
+}) {
+  const [open, setOpen] = useState(idx < 2)
+  return (
+    <div>
+      <div className="flex items-center gap-1 group/cell">
+        <button
+          type="button"
+          onClick={() => setOpen(o => !o)}
+          className="inline-flex items-center gap-1 text-[11px] text-wm-text-muted hover:text-wm-accent-strong transition-colors min-w-0"
+        >
+          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          <span className="font-semibold">Item {idx + 1}</span>
+        </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="ml-auto h-6 w-6 grid place-items-center rounded text-wm-text-subtle hover:bg-wm-danger-bg hover:text-wm-danger opacity-0 group-hover/cell:opacity-100 transition-opacity"
+          title="Remove item"
+        >
+          <Trash2 size={11} />
+        </button>
+      </div>
+      {open && (
+        <div className="mt-2 space-y-2.5">
+          {schema.filter(isEditableSchemaField).map((field, i) => (
+            field.kind === 'slot' ? (
+              <SlotEditor
+                key={field.key + '-' + i}
+                slot={field}
+                value={item[field.key]}
+                onChange={(v) => onPatch({ [field.key]: v })}
+                snippets={snippets}
+              />
+            ) : (
+              <GroupEditor
+                key={field.key + '-' + i}
+                group={field}
+                value={item[field.key]}
+                onChange={(v) => onPatch({ [field.key]: v })}
+                snippets={snippets}
+                depth={depth + 1}
+                cardTemplates={cardTemplates}
+              />
+            )
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Render one item as a flat row — used when the group's item_schema
+ *  is just a single editable slot (e.g. FAQ heading, list_item heading).
+ *  Avoids the chevron-nested feel inside cards. */
+function FlatListRow({
+  idx, total: _total, schema, semantics, snippets, item, onPatch, onRemove,
+}: {
+  idx: number
+  total: number
+  schema: WebFieldDef[]
+  semantics: GroupSemantics
+  snippets: readonly WMSnippetOption[]
+  item: Record<string, unknown>
+  onPatch: (patch: Record<string, unknown>) => void
+  onRemove: () => void
+}) {
+  const slot = schema.find(f => f.kind === 'slot')
+  if (!slot || slot.kind !== 'slot') return null
+  return (
+    <li className="flex items-start gap-2 group/row">
+      <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mt-2.5 shrink-0 tabular-nums">
+        {String(idx + 1).padStart(2, '0')}
+      </span>
+      <div className="flex-1 min-w-0">
+        <SlotEditor
+          slot={slot}
+          value={item[slot.key]}
+          onChange={(v) => onPatch({ [slot.key]: v })}
+          snippets={snippets}
+        />
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        title={`Remove ${semantics.itemLabel.toLowerCase()}`}
+        className="h-6 w-6 grid place-items-center rounded text-wm-text-subtle hover:bg-wm-danger-bg hover:text-wm-danger opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0 mt-2"
+      >
+        <Trash2 size={11} />
+      </button>
+    </li>
+  )
+}
+
+function isSingleSlotList(group: WebGroupDef): boolean {
+  if (!Array.isArray(group.item_schema) || group.item_schema.length !== 1) return false
+  const f = group.item_schema[0]
+  if (f.kind !== 'slot') return false
+  // Reserve the flat-row layout for short-form slots only. Richtext
+  // bodies (the long descriptions in a List Item / FAQ item / etc.)
+  // need the full-width ItemCard layout — squeezing them between a
+  // numeric prefix and a remove button cramps the editor and toolbar.
+  return f.type === 'text' || f.type === 'cta' || f.type === 'url' || f.type === 'email' || f.type === 'phone'
+}
+
 function ItemCard({
   item, idx, total, schema, semantics, snippets, depth, isOpen,
-  onToggle, onPatch, onRemove, onMoveUp, onMoveDown,
+  onToggle, onPatch, onRemove, onMoveUp, onMoveDown, cardTemplates,
 }: {
   item: Record<string, unknown>
   idx: number
@@ -175,6 +503,7 @@ function ItemCard({
   onRemove: () => void
   onMoveUp: () => void
   onMoveDown: () => void
+  cardTemplates?: Record<string, WebContentTemplate>
 }) {
   const preview = buildItemPreview(item, schema)
   const itemLabel = `${semantics.itemLabel} ${idx + 1}`
@@ -229,6 +558,7 @@ function ItemCard({
                 onChange={(v) => onPatch({ [field.key]: v })}
                 snippets={snippets}
                 depth={depth}
+                cardTemplates={cardTemplates}
               />
             )
           })}
