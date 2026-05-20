@@ -18,15 +18,18 @@ import { useState } from 'react'
 import {
   X, Image as ImageIcon, LayoutGrid, MousePointerClick, FormInput,
   ChevronDown, ChevronRight, RotateCw, Archive, Trash2,
+  MessageSquarePlus, Clock,
 } from 'lucide-react'
 import { SlotEditor } from './SlotEditor'
 import { GroupEditor } from './GroupEditor'
 import { GridEditor, detectGridChain } from './GridEditor'
 import { SnippetMenu } from './SnippetMenu'
 import { summarizeSlotPresence } from '../../../lib/webBrixiesLayoutParser'
+import { supabase } from '../../../lib/supabase'
 import type { WMSnippetOption } from '../RichTextEditor'
 import type {
   WebContentTemplate, WebSection, WebFieldDef, WebGroupDef,
+  WebReview, WebReviewComment,
 } from '../../../types/database'
 
 interface Props {
@@ -40,11 +43,20 @@ interface Props {
   onChangeVariant: () => void
   onUnbind: () => void
   onRemove: () => void
+  /** Active internal review on the project (or null). Drives the
+   *  comment-create entry point at the bottom of the panel. */
+  activeInternalReview?: WebReview | null
+  /** Open comments + suggestions attached to this section. */
+  sectionComments?: WebReviewComment[]
+  /** Called after a comment is created or resolved so the parent
+   *  workspace reloads the review state. */
+  onCommentsChange?: () => Promise<void>
 }
 
 export function SectionDetailsPanel({
   section, template, snippets, cardTemplates,
   onChange, onClose, onChangeVariant, onUnbind, onRemove,
+  activeInternalReview, sectionComments, onCommentsChange,
 }: Props) {
   const values = (section.field_values ?? {}) as Record<string, unknown>
   const setValue = (key: string, v: unknown) => {
@@ -157,6 +169,15 @@ export function SectionDetailsPanel({
             />
           </Section>
         )}
+
+        {/* Review comments + suggestion entry point */}
+        <ReviewCommentsBlock
+          section={section}
+          template={template}
+          activeInternalReview={activeInternalReview ?? null}
+          sectionComments={sectionComments ?? []}
+          onCommentsChange={onCommentsChange ?? (async () => {})}
+        />
 
         {/* Counters at the bottom — read-only */}
         {template && presence && (
@@ -390,4 +411,223 @@ function FreehandBodyField({
       className="w-full bg-wm-bg-elevated text-wm-text px-3 py-2 rounded-md border border-wm-border outline-none focus:border-wm-accent focus:ring-2 focus:ring-wm-accent/15 text-[13px] resize-y transition-colors"
     />
   )
+}
+
+// ── Review comments block ─────────────────────────────────────────
+
+/** Lives at the bottom of the panel body. Shows open comments on the
+ *  current section (if any) + a small "Add note" entry point that
+ *  creates a new comment row tied to the active internal review.
+ *  Resolution actions (Apply / Amend / Dismiss) ship in Phase E. */
+function ReviewCommentsBlock({
+  section, template, activeInternalReview, sectionComments, onCommentsChange,
+}: {
+  section: WebSection
+  template: WebContentTemplate | null
+  activeInternalReview: WebReview | null
+  sectionComments: WebReviewComment[]
+  onCommentsChange: () => Promise<void>
+}) {
+  const [open, setOpen] = useState<boolean>(false)
+  const [kind, setKind] = useState<'comment' | 'suggested'>('comment')
+  const [fieldKey, setFieldKey] = useState<string>('')
+  const [body, setBody] = useState('')
+  const [suggested, setSuggested] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const fieldChoices = (template?.fields ?? []).filter(
+    (f): f is WebFieldDef & { kind: 'slot' } => f.kind === 'slot' && f.type !== 'image',
+  )
+
+  const reset = () => {
+    setOpen(false); setKind('comment'); setFieldKey(''); setBody(''); setSuggested('')
+  }
+
+  const submit = async () => {
+    if (!activeInternalReview) return
+    if (!body.trim() && !suggested.trim()) return
+
+    setSaving(true)
+    const { data: user } = await supabase.auth.getUser()
+    const values = (section.field_values ?? {}) as Record<string, unknown>
+
+    const payload: Record<string, unknown> = {
+      review_id:        activeInternalReview.id,
+      web_page_id:      section.web_page_id,
+      web_section_id:   section.id,
+      field_key:        fieldKey || null,
+      author_kind:      'staff',
+      author_user_id:   user?.user?.id ?? null,
+      kind:             kind === 'suggested' && fieldKey ? 'suggested' : 'comment',
+      body:             body.trim() || null,
+    }
+    if (kind === 'suggested' && fieldKey) {
+      payload.original_value  = values[fieldKey] ?? null
+      payload.suggested_value = suggested
+    }
+
+    const { error } = await supabase
+      .from('web_review_comments')
+      .insert(payload as never)
+    setSaving(false)
+    if (error) {
+      console.error('[reviews] insert comment failed:', error.message)
+      return
+    }
+    reset()
+    await onCommentsChange()
+  }
+
+  return (
+    <Section title="Review comments" defaultOpen>
+      {/* Existing open comments */}
+      {sectionComments.length === 0 ? (
+        <p className="text-[11px] text-wm-text-subtle italic mb-2">
+          No comments on this section yet.
+        </p>
+      ) : (
+        <ul className="space-y-1.5 mb-3">
+          {sectionComments.map(c => (
+            <li key={c.id} className="rounded-md border border-wm-border bg-wm-bg px-2.5 py-1.5">
+              <div className="flex items-center gap-1.5 text-[10px] text-wm-text-subtle mb-0.5">
+                <KindTag kind={c.kind} />
+                {c.field_key && <span className="font-mono">{c.field_key}</span>}
+                <span className="ml-auto inline-flex items-center gap-0.5">
+                  <Clock size={9} /> {fmtTime(c.created_at)}
+                </span>
+              </div>
+              {c.body && <p className="text-[12px] text-wm-text whitespace-pre-wrap">{c.body}</p>}
+              {c.kind === 'suggested' && c.suggested_value != null && (
+                <div className="mt-1 text-[11px] font-mono text-wm-text border-l-2 border-wm-accent pl-2">
+                  → {String(c.suggested_value).slice(0, 120)}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Entry point */}
+      {!activeInternalReview ? (
+        <p className="text-[11px] text-wm-text-subtle italic">
+          Start an internal review (in the Review tab) to add comments + suggested edits here.
+        </p>
+      ) : !open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-wm-border bg-wm-bg-elevated text-[11px] font-semibold text-wm-text hover:border-wm-accent hover:text-wm-accent-strong transition-colors"
+        >
+          <MessageSquarePlus size={11} /> Add note
+        </button>
+      ) : (
+        <div className="rounded-md border border-wm-accent/40 bg-wm-bg-elevated p-2.5 space-y-2">
+          <div className="flex items-center gap-2 text-[11px]">
+            <label className="inline-flex items-center gap-1">
+              <input
+                type="radio"
+                checked={kind === 'comment'}
+                onChange={() => setKind('comment')}
+                className="accent-wm-accent"
+              />
+              <span className="text-wm-text">Comment</span>
+            </label>
+            <label className="inline-flex items-center gap-1">
+              <input
+                type="radio"
+                checked={kind === 'suggested'}
+                onChange={() => setKind('suggested')}
+                className="accent-wm-accent"
+              />
+              <span className="text-wm-text">Suggest edit</span>
+            </label>
+          </div>
+
+          {kind === 'suggested' && (
+            <>
+              <label className="block">
+                <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Field</span>
+                <select
+                  value={fieldKey}
+                  onChange={(e) => setFieldKey(e.target.value)}
+                  className="mt-0.5 w-full text-[12px] px-2 py-1 rounded border border-wm-border bg-wm-bg focus:border-wm-accent focus:outline-none"
+                >
+                  <option value="">— Pick a field —</option>
+                  {fieldChoices.map(f => (
+                    <option key={f.key} value={f.key}>{f.layer_name ?? f.key}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Suggested value</span>
+                <textarea
+                  value={suggested}
+                  onChange={(e) => setSuggested(e.target.value)}
+                  rows={2}
+                  className="mt-0.5 w-full text-[12px] px-2 py-1 rounded border border-wm-border bg-wm-bg focus:border-wm-accent focus:outline-none resize-y"
+                />
+              </label>
+            </>
+          )}
+
+          <label className="block">
+            <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
+              {kind === 'suggested' ? 'Why (optional)' : 'Note'}
+            </span>
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={2}
+              placeholder={kind === 'suggested'
+                ? 'Context for the suggestion (optional)…'
+                : 'Drop a note for review…'}
+              className="mt-0.5 w-full text-[12px] px-2 py-1 rounded border border-wm-border bg-wm-bg focus:border-wm-accent focus:outline-none resize-y"
+            />
+          </label>
+
+          <div className="flex items-center gap-2 justify-end">
+            <button
+              type="button"
+              onClick={reset}
+              className="text-[11px] font-semibold text-wm-text-muted hover:text-wm-text"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void submit()}
+              disabled={saving || (!body.trim() && !suggested.trim()) || (kind === 'suggested' && !fieldKey)}
+              className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-wm-accent text-wm-text-on-accent text-[11px] font-semibold hover:bg-wm-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saving ? 'Saving…' : 'Add'}
+            </button>
+          </div>
+        </div>
+      )}
+    </Section>
+  )
+}
+
+function KindTag({ kind }: { kind: WebReviewComment['kind'] }) {
+  const colors: Record<WebReviewComment['kind'], string> = {
+    comment:   'bg-wm-bg-hover text-wm-text-muted',
+    suggested: 'bg-wm-accent-tint text-wm-accent-strong',
+    requested: 'bg-wm-warn-bg text-wm-warn',
+  }
+  const labels: Record<WebReviewComment['kind'], string> = {
+    comment:   'Comment',
+    suggested: 'Suggested',
+    requested: 'Requested',
+  }
+  return (
+    <span className={`inline-flex items-center px-1 rounded font-bold ${colors[kind]}`}>
+      {labels[kind]}
+    </span>
+  )
+}
+
+function fmtTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  } catch { return iso }
 }

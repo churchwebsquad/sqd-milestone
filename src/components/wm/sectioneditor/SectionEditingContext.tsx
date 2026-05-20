@@ -12,7 +12,9 @@
  */
 import { createContext, useContext, useState, useMemo } from 'react'
 import type { WMSnippetOption } from '../RichTextEditor'
-import type { WebContentTemplate, WebSection } from '../../../types/database'
+import type {
+  WebContentTemplate, WebSection, WebReview, WebReviewComment,
+} from '../../../types/database'
 
 export interface SectionDetail {
   section: WebSection
@@ -26,6 +28,17 @@ export interface SectionDetail {
   onUnbind:        () => void
   onRemove:        () => void
   onClose:         () => void
+  /** The current user's open internal review (or any open internal
+   *  review if no preference) — used as the parent for new comments
+   *  created from the section panel. Null when no internal review is
+   *  open. */
+  activeInternalReview?: WebReview | null
+  /** Open comments attached to the currently-selected section.
+   *  Surfaced inline below the field list. */
+  sectionComments?: WebReviewComment[]
+  /** Refresh hook — called after creating / resolving a comment so
+   *  the workspace re-reads the review state. */
+  onCommentsChange?: () => Promise<void>
 }
 
 interface ContextValue {

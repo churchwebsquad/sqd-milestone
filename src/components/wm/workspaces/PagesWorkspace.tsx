@@ -32,7 +32,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FileText, Loader2, Plus, Trash2, Eye, Edit3, Upload, Archive, MoreHorizontal,
-  ChevronDown,
+  ChevronDown, MessageSquare, ArrowRight,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { loadEditorSnippets } from '../../../lib/webSnippets'
@@ -58,6 +58,7 @@ import {
 } from '../../../lib/webBindTemplate'
 import { parseCuratedLibrary, getEffectiveLibraryIds } from '../../../lib/webCuratedLibrary'
 import { augmentTemplate } from '../../../lib/webBrixiesSchemaAugment'
+import { loadProjectReviewState, type ProjectReviewState } from '../../../lib/webReviews'
 import type { SnippetMap } from '../../../lib/webBrixiesRender'
 import type {
   StrategyWebProject, WebPage, WebSection, WebContentTemplate,
@@ -106,6 +107,15 @@ export function PagesWorkspace({ project, onChange }: Props) {
     | null
   >(null)
   const [archiving, setArchiving] = useState(false)
+  // Project-level review state — drives the active-review banner above
+  // the page editor and the comment-creation entry point in the section
+  // panel. Re-loaded after any mutation.
+  const [reviewState, setReviewState] = useState<ProjectReviewState | null>(null)
+  const loadReviewState = async () => {
+    const s = await loadProjectReviewState(project.id)
+    setReviewState(s)
+  }
+  useEffect(() => { void loadReviewState() }, [project.id])
 
   const activePageId = params.get('page')
 
@@ -251,6 +261,8 @@ export function PagesWorkspace({ project, onChange }: Props) {
             <PageEditor
               page={activePage}
               project={project}
+              reviewState={reviewState}
+              onReviewChange={loadReviewState}
               onPageChange={async () => {
                 await loadPages()
               }}
@@ -529,10 +541,12 @@ function serializeFieldValuesToHtml(
 // ── Page editor (right pane) ──────────────────────────────────────────
 
 function PageEditor({
-  page, project, onPageChange, onArchived,
+  page, project, reviewState, onReviewChange, onPageChange, onArchived,
 }: {
   page: WebPage
   project: StrategyWebProject
+  reviewState: ProjectReviewState | null
+  onReviewChange: () => Promise<void>
   onPageChange: () => Promise<void>
   onArchived: () => void
 }) {
@@ -947,6 +961,14 @@ function PageEditor({
       publishDetail(null)
       return
     }
+    // Active internal review = the most recently started open internal
+    // review on the project. Comments authored from the section panel
+    // attach to it. When no internal review is open, the comment-create
+    // affordance is hidden (rail panel renders a "start a review" hint).
+    const activeInternalReview = reviewState?.open_reviews.find(r => r.kind === 'internal') ?? null
+    const sectionComments = reviewState?.comments.filter(
+      c => c.web_section_id === selectedSection.id,
+    ) ?? []
     publishDetail({
       section: selectedSection,
       template: selectedTemplate,
@@ -957,9 +979,12 @@ function PageEditor({
       onChangeVariant: () => setBindingSection(selectedSection),
       onUnbind: () => void unbindSection(selectedSection.id),
       onRemove: () => void archiveSection(selectedSection.id),
+      activeInternalReview,
+      sectionComments,
+      onCommentsChange: onReviewChange,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSection, selectedTemplate, snippets, viewMode, cardTemplates])
+  }, [selectedSection, selectedTemplate, snippets, viewMode, cardTemplates, reviewState])
 
   // Always clear on unmount so the rail doesn't stick after navigation.
   useEffect(() => {
@@ -1019,12 +1044,38 @@ function PageEditor({
     </header>
   )
 
+  // Per-page comment counts (open) — drives the active-review banner.
+  const pageCommentCounts = useMemo(() => {
+    if (!reviewState) return { open: 0, requested: 0, suggested: 0, comments: 0 }
+    const mine = reviewState.comments.filter(c => c.web_page_id === page.id && c.status === 'open')
+    return {
+      open:      mine.length,
+      requested: mine.filter(c => c.kind === 'requested').length,
+      suggested: mine.filter(c => c.kind === 'suggested').length,
+      comments:  mine.filter(c => c.kind === 'comment').length,
+    }
+  }, [reviewState, page.id])
+  const hasOpenInternal = !!reviewState?.open_reviews.some(r => r.kind === 'internal')
+  const hasOpenPartner  = !!reviewState?.has_open_partner
+
   return (
     <div className="flex" style={{ minHeight: 'calc(100vh - var(--wm-header-h, 88px))' }}>
       {/* Single scrollable canvas — the section details panel lives in
           the AssistantRail (see SectionEditingContext). */}
       <div className="flex-1 min-w-0 overflow-y-auto">
         <div className="px-6 md:px-10 py-6 max-w-4xl mx-auto">
+          {(hasOpenInternal || hasOpenPartner) && (
+            <ReviewBanner
+              hasInternal={hasOpenInternal}
+              hasPartner={hasOpenPartner}
+              counts={pageCommentCounts}
+              onJumpToReviews={() => {
+                const next = new URLSearchParams(window.location.search)
+                next.set('tab', 'review')
+                window.location.search = next.toString()
+              }}
+            />
+          )}
           {headerNode}
 
           {viewMode === 'preview' ? (
@@ -1186,6 +1237,58 @@ function PageActionsMenu({ onArchive }: { onArchive: () => void }) {
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+// ── Active-review banner ─────────────────────────────────────────────
+
+/** Surfaced above the page editor whenever an internal or partner
+ *  review is open. Click jumps to the Review tab. Counts reflect open
+ *  comments scoped to THIS page. */
+function ReviewBanner({
+  hasInternal, hasPartner, counts, onJumpToReviews,
+}: {
+  hasInternal: boolean
+  hasPartner: boolean
+  counts: { open: number; requested: number; suggested: number; comments: number }
+  onJumpToReviews: () => void
+}) {
+  // Partner banner wins when both are active (it's the outward-facing one).
+  const isPartner = hasPartner
+  return (
+    <div
+      className={[
+        'mb-4 rounded-md border px-3 py-2 flex items-center gap-3',
+        isPartner
+          ? 'border-wm-warn/30 bg-wm-warn-bg'
+          : 'border-wm-accent/30 bg-wm-accent-tint',
+      ].join(' ')}
+    >
+      <MessageSquare
+        size={14}
+        className={isPartner ? 'text-wm-warn shrink-0' : 'text-wm-accent-strong shrink-0'}
+      />
+      <div className="min-w-0 flex-1">
+        <p className={[
+          'text-[12px] font-semibold',
+          isPartner ? 'text-wm-warn' : 'text-wm-accent-strong',
+        ].join(' ')}>
+          {isPartner ? 'Partner review active' : 'Internal review active'}
+        </p>
+        <p className="text-[11px] text-wm-text-muted">
+          {counts.open === 0
+            ? 'No open comments on this page yet.'
+            : `${counts.open} open · ${counts.requested} requested · ${counts.suggested} suggested · ${counts.comments} comment${counts.comments === 1 ? '' : 's'}`}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onJumpToReviews}
+        className="inline-flex items-center gap-1 text-[11px] font-semibold text-wm-accent-strong hover:underline shrink-0"
+      >
+        Go to Review tab <ArrowRight size={10} />
+      </button>
     </div>
   )
 }

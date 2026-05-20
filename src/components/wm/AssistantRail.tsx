@@ -140,6 +140,9 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
               onChangeVariant={sectionDetail.onChangeVariant}
               onUnbind={sectionDetail.onUnbind}
               onRemove={sectionDetail.onRemove}
+              activeInternalReview={sectionDetail.activeInternalReview}
+              sectionComments={sectionDetail.sectionComments}
+              onCommentsChange={sectionDetail.onCommentsChange}
             />
           </SnippetFocusProvider>
         )}

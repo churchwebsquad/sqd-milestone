@@ -49,6 +49,9 @@ export interface ProjectReviewState {
   totals: PageReviewCounts
   /** Most recent closed review (for "Approved · partner/internal" display). */
   last_closed: WebReview | null
+  /** All comments across all reviews on this project. Used by the
+   *  Reviews inbox + the page/section badges. */
+  comments: WebReviewComment[]
 }
 
 const EMPTY_COUNTS: PageReviewCounts = {
@@ -122,6 +125,7 @@ export async function loadProjectReviewState(projectId: string): Promise<Project
     page_counts,
     totals,
     last_closed,
+    comments,
   }
 }
 
