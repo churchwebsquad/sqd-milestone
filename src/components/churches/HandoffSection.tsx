@@ -37,9 +37,10 @@ function LinkButton({ label, url }: { label: string; url: string }) {
   )
 }
 
-/** Collapsible section within a handoff card. Defaults to open so
- *  the strategist sees the brief immediately without an extra click. */
-function HandoffAccordionItem({ title, defaultOpen = true, children }: {
+/** Collapsible section within a handoff card. Collapsed by default
+ *  — the brief is dense and the strategist usually opens just one
+ *  section at a time. */
+function HandoffAccordionItem({ title, defaultOpen = false, children }: {
   title: string
   defaultOpen?: boolean
   children: React.ReactNode
