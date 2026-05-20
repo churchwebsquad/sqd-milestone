@@ -350,6 +350,43 @@ export default function PortalReviewPage() {
     setFinishing(false)
   }
 
+  /** Partner approves the whole site without per-section edits. Drops a
+   *  single project-scoped 'comment' kind row so staff sees the approval
+   *  in the queue, then marks the review finished. Optional final note
+   *  comes from a small modal so we don't lose context if the partner
+   *  has one thing to flag before approving. */
+  const approveSite = async (finalNote: string) => {
+    if (!data?.review) return
+    setFinishing(true)
+    // Pick the first page as the comment anchor — the project doesn't
+    // have a "no page" comment surface, so we attach to page #1 with a
+    // clear "site-wide approval" prefix.
+    const anchorPage = data.pages[0]
+    if (anchorPage) {
+      await supabase.from('web_review_comments').insert({
+        review_id:           data.review.id,
+        web_page_id:         anchorPage.id,
+        web_section_id:      null,
+        field_key:           null,
+        author_kind:         'partner',
+        author_external_name: partnerName,
+        kind:                'comment',
+        body:                `Site-wide approval${finalNote.trim() ? `: ${finalNote.trim()}` : '. No changes requested.'}`,
+      } as never)
+    }
+    const stamp = new Date().toISOString()
+    const note = `Partner ${partnerName ?? ''} APPROVED the site at ${stamp}${finalNote.trim() ? ` — ${finalNote.trim()}` : ''}`.trim()
+    const existing = (data.review.notes ?? '').trim()
+    const merged = existing ? `${existing}\n${note}` : note
+    await supabase
+      .from('web_reviews')
+      .update({ notes: merged } as never)
+      .eq('id', data.review.id)
+    await loadMyComments()
+    setFinishedAt(stamp)
+    setFinishing(false)
+  }
+
   const requestedCount = myComments.filter(c => c.kind === 'requested').length
   const generalCount   = myComments.filter(c => c.kind === 'comment').length
 
@@ -357,13 +394,13 @@ export default function PortalReviewPage() {
     <div className="min-h-screen bg-gradient-to-br from-lavender-tint/40 via-cream to-cream">
       {/* Top bar */}
       <header className="border-b border-lavender bg-white/80 backdrop-blur sticky top-0 z-30">
-        <div className="max-w-[1280px] mx-auto px-4 py-3 flex items-center gap-3 flex-wrap">
+        <div className="max-w-[1440px] mx-auto px-4 py-3 flex items-center gap-3 flex-wrap">
           <div className="min-w-0 flex-1">
             <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">
-              {data.project.church_name ?? data.project.name} · Website review
-            </p>
-            <h1 className="text-[18px] font-semibold text-deep-plum truncate">
               {data.project.name}
+            </p>
+            <h1 className="text-[20px] font-semibold text-deep-plum truncate">
+              {data.project.church_name ?? data.project.name} Wireframes: Copy Review
             </h1>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -466,6 +503,7 @@ export default function PortalReviewPage() {
               })
             }}
             onFinish={markFinished}
+            onApprove={approveSite}
           />
         </aside>
       </div>
@@ -491,7 +529,7 @@ export default function PortalReviewPage() {
 
 function FeedbackTracker({
   comments, pages, sectionsByPage, templates, finishedAt, finishing,
-  onJumpToSection, onFinish,
+  onJumpToSection, onFinish, onApprove,
 }: {
   comments: WebReviewComment[]
   pages: WebPage[]
@@ -501,7 +539,10 @@ function FeedbackTracker({
   finishing: boolean
   onJumpToSection: (pageId: string, sectionId: string) => void
   onFinish: () => Promise<void>
+  onApprove: (finalNote: string) => Promise<void>
 }) {
+  const [showApprove, setShowApprove] = useState(false)
+  const [approvalNote, setApprovalNote] = useState('')
   const pageById = useMemo(() => {
     const m = new Map<string, WebPage>()
     for (const p of pages) m.set(p.id, p)
@@ -604,19 +645,67 @@ function FeedbackTracker({
         )}
       </div>
       <div className="px-3 py-3 border-t border-lavender bg-cream/40 space-y-2">
-        <button
-          type="button"
-          onClick={() => void onFinish()}
-          disabled={finishing || comments.length === 0}
-          className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-deep-plum text-white text-[12px] font-semibold px-4 py-2 hover:bg-primary-purple transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {finishing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-          Tell the Squad you've finished reviewing
-        </button>
-        {comments.length === 0 && (
-          <p className="text-[10px] text-purple-gray text-center italic">
-            Leave at least one piece of feedback before you wrap up.
-          </p>
+        {showApprove ? (
+          <div className="space-y-2">
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-widest font-bold text-emerald-700 block mb-1">
+                Any final notes for the Squad? (optional)
+              </span>
+              <textarea
+                value={approvalNote}
+                onChange={(e) => setApprovalNote(e.target.value)}
+                rows={2}
+                placeholder="Anything to flag before we proceed — or leave blank to approve as-is."
+                className="w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-[12px] text-deep-plum placeholder-purple-gray/50 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
+              />
+            </label>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => { setShowApprove(false); setApprovalNote('') }}
+                className="text-[11px] font-semibold text-purple-gray hover:text-deep-plum px-2"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void onApprove(approvalNote)}
+                disabled={finishing}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-full bg-emerald-600 text-white text-[12px] font-semibold px-4 py-2 hover:bg-emerald-700 transition-colors disabled:opacity-40"
+              >
+                {finishing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                Approve site
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => setShowApprove(true)}
+              disabled={finishing}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 text-white text-[12px] font-semibold px-4 py-2 hover:bg-emerald-700 transition-colors disabled:opacity-40"
+              title="Approve the whole site as-is. No per-section feedback required."
+            >
+              {finishing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+              Approve site
+            </button>
+            <button
+              type="button"
+              onClick={() => void onFinish()}
+              disabled={finishing || comments.length === 0}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-deep-plum text-white text-[12px] font-semibold px-4 py-2 hover:bg-primary-purple transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Submit the feedback you've saved so the Squad knows you're done."
+            >
+              {finishing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+              Submit feedback & finish
+            </button>
+            {comments.length === 0 && (
+              <p className="text-[10px] text-purple-gray text-center italic">
+                Leave at least one piece of feedback, or use Approve site if everything looks good.
+              </p>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -700,31 +789,31 @@ function CommentDrawer({
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
+  // Flatten the template into every editable leaf the partner can
+  // request a change to. Recurses through groups (cards, item lists)
+  // so each repeating item × child slot surfaces as its own row.
+  // Path-style keys (`cards.0.heading`) let resolveComment write back
+  // into the nested field_values shape on Apply.
   const editableFields = useMemo(() => {
-    if (!template) return [] as Array<{ field: WebFieldDef & { kind: 'slot' }; current: unknown }>
+    if (!template) return [] as EditableLeaf[]
     const values = (draft.section.field_values ?? {}) as Record<string, unknown>
-    return (template.fields ?? [])
-      .filter((f): f is WebFieldDef & { kind: 'slot' } =>
-        f.kind === 'slot' &&
-        (f.type === 'text' || f.type === 'richtext' || f.type === 'cta'),
-      )
-      .map(f => ({ field: f, current: values[f.key] }))
+    return flattenTemplateFields(template.fields ?? [], values)
   }, [template, draft.section.field_values])
 
   const setBody = (body: string) => setDraft({ ...draft, body })
-  const toggleSuggestion = (f: WebFieldDef & { kind: 'slot' }, current: unknown) => {
-    const existing = draft.suggestions.find(s => s.field_key === f.key)
+  const toggleSuggestion = (leaf: EditableLeaf) => {
+    const existing = draft.suggestions.find(s => s.field_key === leaf.fieldKey)
     if (existing) {
-      setDraft({ ...draft, suggestions: draft.suggestions.filter(s => s.field_key !== f.key) })
+      setDraft({ ...draft, suggestions: draft.suggestions.filter(s => s.field_key !== leaf.fieldKey) })
     } else {
-      const init = currentToProposedString(current)
+      const init = currentToProposedString(leaf.current)
       setDraft({
         ...draft,
         suggestions: [...draft.suggestions, {
-          field_key:      f.key,
-          layer_name:     f.layer_name ?? f.key,
-          field_type:     f.type as FieldSuggestion['field_type'],
-          original_value: current ?? null,
+          field_key:      leaf.fieldKey,
+          layer_name:     leaf.label,
+          field_type:     leaf.fieldType,
+          original_value: leaf.current ?? null,
           proposed_value: init,
         }],
       })
@@ -799,23 +888,30 @@ function CommentDrawer({
                 Suggest specific edits
               </p>
               <div className="space-y-2.5">
-                {editableFields.map(({ field, current }) => {
-                  const sug = draft.suggestions.find(s => s.field_key === field.key)
+                {editableFields.map((leaf) => {
+                  const sug = draft.suggestions.find(s => s.field_key === leaf.fieldKey)
                   const editing = !!sug
                   return (
                     <div
-                      key={field.key}
+                      key={leaf.fieldKey}
                       className={[
                         'rounded-xl border px-3 py-2',
                         editing ? 'border-primary-purple bg-lavender-tint/30' : 'border-lavender bg-white',
                       ].join(' ')}
                     >
                       <div className="flex items-center justify-between gap-2 mb-1">
-                        <p className="text-[11px] font-semibold text-deep-plum">{field.layer_name ?? field.key}</p>
+                        <div className="min-w-0">
+                          {leaf.itemLabel && (
+                            <p className="text-[10px] uppercase tracking-widest font-bold text-purple-gray">
+                              {leaf.itemLabel}
+                            </p>
+                          )}
+                          <p className="text-[11px] font-semibold text-deep-plum">{leaf.label}</p>
+                        </div>
                         <button
                           type="button"
-                          onClick={() => toggleSuggestion(field, current)}
-                          className="text-[11px] font-semibold text-primary-purple hover:underline"
+                          onClick={() => toggleSuggestion(leaf)}
+                          className="text-[11px] font-semibold text-primary-purple hover:underline shrink-0"
                         >
                           {editing ? 'Cancel edit' : 'Edit this'}
                         </button>
@@ -823,15 +919,15 @@ function CommentDrawer({
                       {/* Surface the current value as rendered text (not
                           raw HTML) so the partner sees what readers see. */}
                       <FieldCurrentPreview
-                        type={field.type as 'text' | 'richtext' | 'cta'}
-                        value={current}
+                        type={leaf.fieldType}
+                        value={leaf.current}
                       />
                       {editing && sug && (
-                        field.type === 'richtext' ? (
+                        leaf.fieldType === 'richtext' ? (
                           <div className="mt-2 rounded-md border border-primary-purple/40 bg-white">
                             <WMRichTextEditor
                               value={sug.proposed_value}
-                              onChange={(html) => setSuggestionValue(field.key, html)}
+                              onChange={(html) => setSuggestionValue(leaf.fieldKey, html)}
                               placeholder="Type your suggested wording…"
                               compact
                             />
@@ -839,9 +935,9 @@ function CommentDrawer({
                         ) : (
                           <textarea
                             value={sug.proposed_value}
-                            onChange={(e) => setSuggestionValue(field.key, e.target.value)}
-                            rows={field.type === 'text' ? 2 : 3}
-                            placeholder={field.type === 'cta' ? 'Button label — /route' : 'Type your suggested wording…'}
+                            onChange={(e) => setSuggestionValue(leaf.fieldKey, e.target.value)}
+                            rows={leaf.fieldType === 'text' ? 2 : 3}
+                            placeholder={leaf.fieldType === 'cta' ? 'Button label — /route' : 'Type your suggested wording…'}
                             className="w-full mt-1 rounded-md border border-primary-purple/40 bg-white px-2 py-1.5 text-[12px] text-deep-plum outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/15"
                             autoFocus
                           />
@@ -949,6 +1045,60 @@ function currentToProposedString(v: unknown): string {
     }
   }
   return String(v)
+}
+
+/** Flattened editable leaf — one row in the partner edit list. Scalar
+ *  slots produce a single leaf; groups recurse so each item × child slot
+ *  surfaces. fieldKey is a dotted path (e.g. `cards.0.heading`) that
+ *  resolveComment reads back into nested field_values on Apply. */
+interface EditableLeaf {
+  fieldKey:   string
+  label:      string
+  itemLabel?: string
+  fieldType:  FieldSuggestion['field_type']
+  current:    unknown
+}
+
+function flattenTemplateFields(
+  fields: WebFieldDef[],
+  values: Record<string, unknown>,
+): EditableLeaf[] {
+  const out: EditableLeaf[] = []
+  for (const f of fields) {
+    if (f.kind === 'slot') {
+      if (f.type === 'text' || f.type === 'richtext' || f.type === 'cta') {
+        out.push({
+          fieldKey:  f.key,
+          label:     f.layer_name ?? f.key,
+          fieldType: f.type,
+          current:   values[f.key],
+        })
+      }
+      continue
+    }
+    if (f.kind === 'group') {
+      const raw = values[f.key]
+      const items: Array<Record<string, unknown>> = Array.isArray(raw)
+        ? (raw as Array<Record<string, unknown>>)
+        : []
+      const groupLabel = f.layer_name ?? f.key
+      items.forEach((item, idx) => {
+        const itemLabel = `${groupLabel} · #${idx + 1}`
+        for (const child of f.item_schema ?? []) {
+          if (child.kind !== 'slot') continue
+          if (child.type !== 'text' && child.type !== 'richtext' && child.type !== 'cta') continue
+          out.push({
+            fieldKey:  `${f.key}.${idx}.${child.key}`,
+            label:     child.layer_name ?? child.key,
+            itemLabel,
+            fieldType: child.type,
+            current:   item?.[child.key],
+          })
+        }
+      })
+    }
+  }
+  return out
 }
 
 /** Read-only preview of a field's current value. Rich text renders as

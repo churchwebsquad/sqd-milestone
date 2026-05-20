@@ -429,7 +429,10 @@ function ReviewCommentsBlock({
   sectionComments: WebReviewComment[]
   onCommentsChange: () => Promise<void>
 }) {
-  const [open, setOpen] = useState<boolean>(false)
+  // Open the comment form by default when an internal review is
+  // active — saves the strategist from hunting for "Add note" each
+  // time they pick a section.
+  const [open, setOpen] = useState<boolean>(!!activeInternalReview)
   const [kind, setKind] = useState<'comment' | 'suggested'>('comment')
   const [fieldKey, setFieldKey] = useState<string>('')
   const [body, setBody] = useState('')
@@ -452,15 +455,33 @@ function ReviewCommentsBlock({
     const { data: user } = await supabase.auth.getUser()
     const values = (section.field_values ?? {}) as Record<string, unknown>
 
+    // Snapshot the staff name onto the row so we don't have to do a
+    // user_id → employees join every time we render the inbox.
+    // Looks up the employees row by the auth email; falls back to the
+    // email itself if we don't find a match (rare — domain-gated auth).
+    let staffName: string | null = null
+    const email = user?.user?.email ?? null
+    if (email) {
+      const { data: emp } = await supabase
+        .from('employees')
+        .select('full_name, name, first_name')
+        .ilike('email', email)
+        .limit(1)
+        .maybeSingle()
+      const e = emp as { full_name?: string | null; name?: string | null; first_name?: string | null } | null
+      staffName = e?.full_name?.trim() || e?.name?.trim() || e?.first_name?.trim() || email
+    }
+
     const payload: Record<string, unknown> = {
-      review_id:        activeInternalReview.id,
-      web_page_id:      section.web_page_id,
-      web_section_id:   section.id,
-      field_key:        fieldKey || null,
-      author_kind:      'staff',
-      author_user_id:   user?.user?.id ?? null,
-      kind:             kind === 'suggested' && fieldKey ? 'suggested' : 'comment',
-      body:             body.trim() || null,
+      review_id:           activeInternalReview.id,
+      web_page_id:         section.web_page_id,
+      web_section_id:      section.id,
+      field_key:           fieldKey || null,
+      author_kind:         'staff',
+      author_user_id:      user?.user?.id ?? null,
+      author_external_name: staffName,
+      kind:                kind === 'suggested' && fieldKey ? 'suggested' : 'comment',
+      body:                body.trim() || null,
     }
     if (kind === 'suggested' && fieldKey) {
       payload.original_value  = values[fieldKey] ?? null
@@ -475,7 +496,9 @@ function ReviewCommentsBlock({
       console.error('[reviews] insert comment failed:', error.message)
       return
     }
-    reset()
+    // Clear the fields but keep the form open so the strategist can
+    // immediately add another comment without re-clicking "Add note".
+    setKind('comment'); setFieldKey(''); setBody(''); setSuggested('')
     await onCommentsChange()
   }
 

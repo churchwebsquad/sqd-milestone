@@ -157,6 +157,15 @@ export function ReviewWorkspace({ project }: Props) {
     setMutating(false)
     if (res.ok) {
       await load()
+      // Internal reviews happen *on* the page canvas — drop the user
+      // straight onto Pages so they don't have to navigate back manually
+      // and hunt for the comment surface. Partner reviews stay here so
+      // the strategist can grab the portal link.
+      if (kind === 'internal') {
+        const next = new URLSearchParams(window.location.search)
+        next.set('tab', 'pages')
+        setParams(next, { replace: false })
+      }
     } else {
       setMutationError(
         `Couldn't start ${kind} review: ${res.error ?? 'unknown error'}. ` +
@@ -497,9 +506,8 @@ function CommentRow({
   onJumpToPage: () => void
   onResolved: () => Promise<void>
 }) {
-  const author = comment.author_kind === 'partner'
-    ? (comment.author_external_name ?? 'Partner')
-    : 'Staff'
+  const author = comment.author_external_name
+    ?? (comment.author_kind === 'partner' ? 'Partner' : 'Staff')
   const sectionLabel = template?.layer_name
     ?? (section ? `Section · ${section.sort_order + 1}` : null)
   const sectionFieldValues = section
@@ -562,6 +570,11 @@ function CommentRow({
             )}
             <span className="opacity-60">·</span>
             <StatusBadge status={comment.status} />
+            {comment.status !== 'open' && comment.resolved_at && (
+              <span className="text-wm-text-subtle italic">
+                · {fmtDateTime(comment.resolved_at)}
+              </span>
+            )}
             <span className="ml-auto">
               <CommentActions
                 comment={comment}

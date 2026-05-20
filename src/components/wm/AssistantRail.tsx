@@ -238,15 +238,22 @@ function FeedbackTab({
   query: string
   onJumpToSection: (pageId: string, sectionId: string) => void
 }) {
-  const [comments, setComments] = useState<WebReviewComment[]>([])
+  const [openComments, setOpenComments] = useState<WebReviewComment[]>([])
+  const [resolvedComments, setResolvedComments] = useState<WebReviewComment[]>([])
   const [pages, setPages] = useState<WebPage[]>([])
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true)
     const state = await loadProjectReviewState(projectId)
-    const open = state.comments.filter(c => c.status === 'open')
-    setComments(open)
+    setOpenComments(state.comments.filter(c => c.status === 'open'))
+    // Most-recently-resolved first; cap at 50 to keep the rail fast.
+    setResolvedComments(
+      state.comments
+        .filter(c => c.status !== 'open')
+        .sort((a, b) => (b.resolved_at ?? b.updated_at ?? '').localeCompare(a.resolved_at ?? a.updated_at ?? ''))
+        .slice(0, 50),
+    )
     const { data: pageRows } = await supabase
       .from('web_pages')
       .select('id, name, slug, sort_order, web_project_id')
@@ -260,26 +267,30 @@ function FeedbackTab({
   useEffect(() => { void load() }, [load])
 
   const q = query.trim().toLowerCase()
-  const filtered = useMemo(() => {
-    if (!q) return comments
-    return comments.filter(c => {
-      const hay = [
-        c.body, c.field_key,
-        typeof c.suggested_value === 'string' ? c.suggested_value : '',
-        c.author_external_name ?? '',
-      ].filter(Boolean).join(' ').toLowerCase()
-      return hay.includes(q)
-    })
-  }, [comments, q])
+  const filterFn = useCallback((c: WebReviewComment) => {
+    if (!q) return true
+    const hay = [
+      c.body, c.field_key,
+      typeof c.suggested_value === 'string' ? c.suggested_value : '',
+      c.author_external_name ?? '',
+    ].filter(Boolean).join(' ').toLowerCase()
+    return hay.includes(q)
+  }, [q])
 
-  const grouped = useMemo(() => {
+  const filteredOpen     = useMemo(() => openComments.filter(filterFn), [openComments, filterFn])
+  const filteredResolved = useMemo(() => resolvedComments.filter(filterFn), [resolvedComments, filterFn])
+
+  const groupByPage = useCallback((items: WebReviewComment[]) => {
     const groups: Array<{ page: WebPage; items: WebReviewComment[] }> = []
     for (const p of pages) {
-      const items = filtered.filter(c => c.web_page_id === p.id)
-      if (items.length > 0) groups.push({ page: p, items })
+      const own = items.filter(c => c.web_page_id === p.id)
+      if (own.length > 0) groups.push({ page: p, items: own })
     }
     return groups
-  }, [filtered, pages])
+  }, [pages])
+
+  const groupedOpen     = useMemo(() => groupByPage(filteredOpen),     [filteredOpen, groupByPage])
+  const groupedResolved = useMemo(() => groupByPage(filteredResolved), [filteredResolved, groupByPage])
 
   if (loading) {
     return (
@@ -291,12 +302,12 @@ function FeedbackTab({
     )
   }
 
-  if (filtered.length === 0) {
+  if (filteredOpen.length === 0 && filteredResolved.length === 0) {
     return (
       <div className="p-3">
         <EmptyState
           icon={<Inbox size={20} />}
-          title={q ? 'No matches' : 'No open feedback'}
+          title={q ? 'No matches' : 'No feedback yet'}
           body={q
             ? 'No comments match this filter. Try different keywords.'
             : 'Start an internal review (or send a partner review link) and feedback will roll up here.'}
@@ -307,7 +318,7 @@ function FeedbackTab({
 
   return (
     <div className="p-3 space-y-3">
-      {grouped.map(({ page, items }) => (
+      {groupedOpen.map(({ page, items }) => (
         <div key={page.id}>
           <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5 px-1">
             {page.name} · {items.length}
@@ -325,7 +336,7 @@ function FeedbackTab({
                     <KindTag kind={c.kind} />
                     {c.field_key && <span className="font-mono text-[10px] text-wm-text-subtle">{c.field_key}</span>}
                     <span className="ml-auto text-[10px] text-wm-text-subtle">
-                      {c.author_kind === 'partner' ? (c.author_external_name ?? 'Partner') : 'Staff'}
+                      {c.author_external_name ?? (c.author_kind === 'partner' ? 'Partner' : 'Staff')}
                     </span>
                   </div>
                   <p className="text-[11px] text-wm-text leading-snug line-clamp-2">
@@ -337,6 +348,53 @@ function FeedbackTab({
           </ul>
         </div>
       ))}
+
+      {/* Resolved — grayed-out tail. Hidden when none surface. */}
+      {groupedResolved.length > 0 && (
+        <div className="pt-2 mt-2 border-t border-wm-border/60 space-y-3 opacity-70">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle px-1">
+            Resolved · {filteredResolved.length}
+          </p>
+          {groupedResolved.map(({ page, items }) => (
+            <div key={`resolved-${page.id}`}>
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5 px-1">
+                {page.name} · {items.length}
+              </p>
+              <ul className="space-y-1">
+                {items.map(c => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      onClick={() => c.web_section_id && onJumpToSection(page.id, c.web_section_id)}
+                      disabled={!c.web_section_id}
+                      className="w-full text-left rounded-md bg-wm-bg-hover/40 border border-wm-border/60 px-2.5 py-1.5 hover:border-wm-accent transition-colors disabled:cursor-default group line-through decoration-wm-text-subtle/40 hover:no-underline"
+                    >
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <KindTag kind={c.kind} />
+                        <span className="text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 bg-wm-success-bg text-wm-success border border-wm-success/20 no-underline">
+                          {c.status}
+                        </span>
+                        {c.field_key && <span className="font-mono text-[10px] text-wm-text-subtle no-underline">{c.field_key}</span>}
+                        <span className="ml-auto text-[10px] text-wm-text-subtle no-underline">
+                          {c.author_external_name ?? (c.author_kind === 'partner' ? 'Partner' : 'Staff')}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-wm-text leading-snug line-clamp-2 no-underline">
+                        {c.body || (typeof c.suggested_value === 'string' ? stripHtml(c.suggested_value) : '(no body)')}
+                      </p>
+                      {c.resolution_note && (
+                        <p className="text-[10px] text-wm-text-subtle italic mt-0.5 no-underline">
+                          {c.resolution_note}
+                        </p>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

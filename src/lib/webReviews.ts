@@ -258,14 +258,31 @@ export async function resolveComment(opts: {
   }
 }): Promise<boolean> {
   const { data: user } = await supabase.auth.getUser()
+  // Snapshot resolver name so the inbox doesn't need a user_id join.
+  let resolverName: string | null = null
+  const email = user?.user?.email ?? null
+  if (email) {
+    const { data: emp } = await supabase
+      .from('employees')
+      .select('full_name, name, first_name')
+      .ilike('email', email)
+      .limit(1)
+      .maybeSingle()
+    const e = emp as { full_name?: string | null; name?: string | null; first_name?: string | null } | null
+    resolverName = e?.full_name?.trim() || e?.name?.trim() || e?.first_name?.trim() || email
+  }
 
   // 1. If this resolution involves a real field write, patch the
   //    section's field_values first. (Doing it before marking the
   //    comment resolved means an error here leaves the comment open
   //    rather than recording a phantom resolution.)
+  //
+  //    fieldKey may be a dotted path (`cards.0.heading`) when the
+  //    partner suggested an edit inside a group/item — set the nested
+  //    leaf instead of clobbering the whole group.
   if ((opts.outcome === 'applied' || opts.outcome === 'amended') && opts.sectionToPatch) {
     const { sectionId, fieldKey, currentFieldValues } = opts.sectionToPatch
-    const next = { ...currentFieldValues, [fieldKey]: opts.finalValue }
+    const next = setNestedPath(currentFieldValues, fieldKey, opts.finalValue)
     const { error: patchErr } = await supabase
       .from('web_sections')
       .update({ field_values: next } as never)
@@ -276,13 +293,21 @@ export async function resolveComment(opts: {
     }
   }
 
+  // Compose the resolution note with the resolver's name baked in
+  // when no explicit note was provided — gives the inbox a clean
+  // "Resolved by … " line without a separate column.
+  const composedNote =
+    opts.resolutionNote?.trim()
+      ? (resolverName ? `${opts.resolutionNote.trim()} — ${resolverName}` : opts.resolutionNote.trim())
+      : (resolverName ? `Resolved by ${resolverName}` : null)
+
   const { error } = await supabase
     .from('web_review_comments')
     .update({
       status:              opts.outcome,
       resolved_by_user_id: user?.user?.id ?? null,
       resolved_at:         new Date().toISOString(),
-      resolution_note:     opts.resolutionNote ?? null,
+      resolution_note:     composedNote,
     } as never)
     .eq('id', opts.commentId)
   if (error) {
@@ -290,4 +315,42 @@ export async function resolveComment(opts: {
     return false
   }
   return true
+}
+
+/** Write `value` into the dotted `path` inside `root`, returning a new
+ *  object. Array indices in the path (digits) write into the array at
+ *  that index; non-numeric segments write into objects. Non-mutating. */
+function setNestedPath(
+  root: Record<string, unknown>,
+  path: string,
+  value: unknown,
+): Record<string, unknown> {
+  const parts = path.split('.')
+  const recur = (node: unknown, depth: number): unknown => {
+    const key    = parts[depth]
+    const isLast = depth === parts.length - 1
+    if (isLast) {
+      if (/^\d+$/.test(key)) {
+        const arr = Array.isArray(node) ? node.slice() : []
+        arr[Number(key)] = value
+        return arr
+      }
+      const obj = (node && typeof node === 'object' && !Array.isArray(node))
+        ? { ...(node as Record<string, unknown>) }
+        : {}
+      ;(obj as Record<string, unknown>)[key] = value
+      return obj
+    }
+    if (/^\d+$/.test(key)) {
+      const arr = Array.isArray(node) ? node.slice() : []
+      arr[Number(key)] = recur(arr[Number(key)], depth + 1)
+      return arr
+    }
+    const obj = (node && typeof node === 'object' && !Array.isArray(node))
+      ? { ...(node as Record<string, unknown>) }
+      : {}
+    ;(obj as Record<string, unknown>)[key] = recur((obj as Record<string, unknown>)[key], depth + 1)
+    return obj
+  }
+  return recur(root, 0) as Record<string, unknown>
 }
