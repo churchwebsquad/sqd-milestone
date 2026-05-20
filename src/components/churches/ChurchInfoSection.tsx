@@ -32,7 +32,7 @@ export default function ChurchInfoSection({ church, account, onSave, editing }: 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
         <EditableField label="Church Name" value={church.church_name} locked onSave={() => Promise.resolve()} />
         <EditableField label="Member Number" value={String(church.member)} locked onSave={() => Promise.resolve()} />
-        <EditableField label="Website" value={raw.church_website as string | null ?? church.website} type="url" onSave={v => onSave('church_website', v)} forceEdit={editing} />
+        <EditableField label="Website" value={raw.church_website as string | null} type="url" onSave={v => onSave('church_website', v)} forceEdit={editing} />
         <EditableField label="Primary Contact Name" value={fullName} onSave={v => onSave('first_name_of_primary', v)} forceEdit={editing} />
         <EditableField label="Primary Contact Email" value={raw.primary_contact_email as string | null} type="email" onSave={v => onSave('primary_contact_email', v)} forceEdit={editing} />
         <EditableField label="Cohort" value={church.cohort} onSave={v => onSave('cohort', v)} forceEdit={editing} />

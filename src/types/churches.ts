@@ -154,7 +154,6 @@ export const DETAIL_SECTIONS = [
   { id: 'brand-squad', label: 'Brand Squad' },
   { id: 'brand-voice', label: 'Brand Voice' },
   { id: 'website-squad', label: 'Website Squad' },
-  { id: 'copy-review', label: 'Copy Review' },
   { id: 'social-media', label: 'Social Media' },
   { id: 'clickup-tasks', label: 'ClickUp Tasks' },
 ] as const

@@ -53,10 +53,11 @@ export default function EditableField({ label, value, locked, type = 'text', onS
         <div className="flex items-center gap-2 group">
           {type === 'url' && value ? (
             <a
-              href={value}
+              href={normalizeHref(value)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 rounded-full border border-lavender bg-white text-xs text-deep-plum px-3 py-1 hover:bg-lavender-tint transition-colors"
+              title={value}
             >
               <ExternalLink size={10} className="shrink-0" />
               {label}
@@ -118,4 +119,14 @@ export default function EditableField({ label, value, locked, type = 'text', onS
       {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
     </div>
   )
+}
+
+// Browsers treat `href="example.com"` as a relative path and resolve
+// it under the current origin (→ 404). Force absolute when needed.
+function normalizeHref(raw: string): string {
+  const v = raw.trim()
+  if (!v) return v
+  if (/^https?:\/\//i.test(v)) return v
+  if (v.startsWith('mailto:') || v.startsWith('tel:')) return v
+  return `https://${v.replace(/^\/+/, '')}`
 }

@@ -168,7 +168,9 @@ export default function WebSquadSection({ church, submissions, websiteAudits, on
         <SubSectionLabel label="Tools" icon={Wrench} variant="tools" />
         <div className="flex flex-wrap gap-2">
           <ToolLink label="Web Support Evaluation" url="https://website-support-audit-dashboard.lovable.app/" />
-          <ToolLink label="Fix Website on Evaluation Tool" url="https://forms.thesqd.com/t/31cW5GUouJus?id=recbZlL98sB46bbER" />
+          {typeof raw.audit_fix_website === 'string' && raw.audit_fix_website.startsWith('http') && (
+            <ToolLink label="Fix Website on Evaluation Tool" url={raw.audit_fix_website} />
+          )}
           <ToolLink label="ContentSnare" url="https://churchmediasquad.contentsnare.com/requests" />
         </div>
       </div>
@@ -224,11 +226,6 @@ export default function WebSquadSection({ church, submissions, websiteAudits, on
               ))}
             </div>
           </div>
-          {Boolean(raw.audit_fix_website) && typeof raw.audit_fix_website === 'string' && (
-            <div className="mt-3">
-              <ToolLink label="Audit Fix Website" url={raw.audit_fix_website as string} />
-            </div>
-          )}
         </div>
       )}
 
