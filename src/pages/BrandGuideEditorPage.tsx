@@ -27,7 +27,7 @@ import { buildPortalUrl } from '../lib/portalUrl'
 import { STYLE_TAG_OPTIONS } from '../lib/brandStyleTags'
 
 const BRAND_BUCKET = 'brand-assets'
-const LOGO_MIME = ['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'video/mp4']
+const LOGO_MIME = ['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'video/mp4', 'video/webm', 'video/quicktime']
 // Per-logo motion file. Lottie ships as JSON; videos / WebP+GIF
 // covered for partners that didn't deliver a Lottie. Cap is enforced
 // at upload time (40 MB).

@@ -10,17 +10,43 @@ const DEFAULT_MAX_BYTES = 20 * 1024 * 1024    // 20 MB — matches submission-at
 const DEFAULT_MAX_DIM = 4000
 const JPEG_QUALITY = 0.95
 
-/** MIME types that cannot be losslessly canvas-resized; uploaded as-is. */
+/** MIME types that cannot be losslessly canvas-resized; uploaded as-is.
+ *  Video formats live here too — the canvas resize path assumes `<img>`
+ *  semantics and would throw "Image load failed" on a video source. */
 const NON_RESIZABLE_MIME = new Set<string>([
   'image/gif',         // animation would be stripped
   'image/svg+xml',     // vector, no benefit from raster resize
   'video/mp4',
+  'video/webm',
+  'video/quicktime',
+  'video/x-matroska',  // some browsers report .webm as Matroska
   'application/pdf',   // not an image
   'application/zip',
   'application/x-zip-compressed',
   'font/woff', 'font/woff2', 'font/ttf', 'font/otf',
   'application/octet-stream',
 ])
+
+/** Browsers occasionally report video files with a missing or generic
+ *  MIME (`""`, `application/octet-stream`, `video/x-matroska` for WEBM
+ *  on some Linux/older Chrome builds). Coerce by extension so the
+ *  validate step doesn't reject a legitimate file. Idempotent — if the
+ *  browser-reported MIME is already valid, returns the file unchanged. */
+export function normalizeFileType(file: File): File {
+  const lower = file.name.toLowerCase()
+  const isUnknown = !file.type
+    || file.type === 'application/octet-stream'
+    || file.type === 'video/x-matroska'
+  if (!isUnknown) return file
+  if (lower.endsWith('.webm')) return new File([file], file.name, { type: 'video/webm' })
+  if (lower.endsWith('.mp4'))  return new File([file], file.name, { type: 'video/mp4' })
+  if (lower.endsWith('.mov'))  return new File([file], file.name, { type: 'video/quicktime' })
+  if (lower.endsWith('.md') || lower.endsWith('.markdown')) {
+    return new File([file], file.name, { type: 'text/markdown' })
+  }
+  if (lower.endsWith('.txt'))  return new File([file], file.name, { type: 'text/plain' })
+  return file
+}
 
 export type UploadProgress = (pct: number) => void
 
@@ -172,6 +198,11 @@ export async function uploadAttachment(
   const maxDim = options.maxDim ?? DEFAULT_MAX_DIM
   const pathPrefix = options.pathPrefix
     ?? (memberIdOrNull != null ? `${memberIdOrNull}` : '')
+
+  // Coerce missing/odd MIME types from the file extension so a WEBM
+  // reported by the browser as `application/octet-stream` (occasionally
+  // happens on Linux + older Chrome) still passes the mime check.
+  file = normalizeFileType(file)
 
   validate(file, { allowedMime, maxBytes })
   onProgress?.(10)
