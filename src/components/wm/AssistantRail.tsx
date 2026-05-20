@@ -58,10 +58,14 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
   const [query, setQuery] = useState('')
   const [counts, setCounts] = useState({ snippets: 0, feedback: 0, audit: 0 })
   const [params, setParams] = useSearchParams()
-  const activePageId = activeTab === 'pages' ? params.get('page') : null
+  // Both the Pages workspace and the Review workspace use ?page= and
+  // ?section= for selection. Honor either so the rail's Section /
+  // Audit / Feedback tabs Just Work in review mode too.
+  const tabUsesSectionContext = activeTab === 'pages' || activeTab === 'review'
+  const activePageId = tabUsesSectionContext ? params.get('page') : null
 
   const sectionDetail = useSectionDetail()
-  const sectionTabAvailable = activeTab === 'pages' && sectionDetail != null
+  const sectionTabAvailable = tabUsesSectionContext && sectionDetail != null
 
   // Auto-switch to the Section tab whenever a section is selected, and
   // back to the previous tab when deselected.

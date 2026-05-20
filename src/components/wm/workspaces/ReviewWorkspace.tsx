@@ -23,7 +23,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Eye, Loader2, MessageSquare, ChevronRight, Filter, Inbox,
-  ArrowRight, Check, X, Clock, Plus, Link as LinkIcon, Copy,
+  ArrowRight, Check, X, Clock, Plus, Link as LinkIcon, Copy, Layout,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { WMButton } from '../Button'
@@ -33,6 +33,7 @@ import {
   loadProjectReviewState, startReview, closeReview,
   type ProjectReviewState,
 } from '../../../lib/webReviews'
+import { InternalReviewWorkspace } from './InternalReviewWorkspace'
 import type {
   StrategyWebProject, WebPage, WebSection, WebContentTemplate,
   WebReview, WebReviewComment, WebReviewCommentKind, WebReviewCommentStatus,
@@ -63,6 +64,13 @@ export function ReviewWorkspace({ project }: Props) {
   // user sees feedback instead of a silent no-op.
   const [mutationError, setMutationError] = useState<string | null>(null)
   const [mutating, setMutating] = useState(false)
+
+  // Inbox vs. workspace mode. The workspace ("review mode") is the
+  // portal-style staff surface that opens automatically when an
+  // internal review is active. User can toggle back to the inbox
+  // (queue of sessions + filterable comment list) at any time.
+  type ViewMode = 'workspace' | 'inbox'
+  const [viewMode, setViewMode] = useState<ViewMode>('workspace')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -157,15 +165,10 @@ export function ReviewWorkspace({ project }: Props) {
     setMutating(false)
     if (res.ok) {
       await load()
-      // Internal reviews happen *on* the page canvas — drop the user
-      // straight onto Pages so they don't have to navigate back manually
-      // and hunt for the comment surface. Partner reviews stay here so
-      // the strategist can grab the portal link.
-      if (kind === 'internal') {
-        const next = new URLSearchParams(window.location.search)
-        next.set('tab', 'pages')
-        setParams(next, { replace: false })
-      }
+      // After starting an internal review, snap into workspace mode
+      // so the user lands on the portal-style editing surface instead
+      // of staying on the inbox.
+      if (kind === 'internal') setViewMode('workspace')
     } else {
       setMutationError(
         `Couldn't start ${kind} review: ${res.error ?? 'unknown error'}. ` +
@@ -188,13 +191,45 @@ export function ReviewWorkspace({ project }: Props) {
 
   if (!state) return null
 
-  const openReviews   = state.open_reviews
-  const closedReviews = state.reviews.filter(r => r.status === 'closed')
-  const showEmpty     = state.reviews.length === 0 && state.comments.length === 0
+  const openReviews    = state.open_reviews
+  const closedReviews  = state.reviews.filter(r => r.status === 'closed')
+  const showEmpty      = state.reviews.length === 0 && state.comments.length === 0
+  // Pick the most recently-started open internal review as the
+  // workspace's anchor. The Review tab gates on this — if no internal
+  // review exists, the workspace mode falls back to inbox.
+  const activeInternal = openReviews.find(r => r.kind === 'internal') ?? null
+
+  if (viewMode === 'workspace' && activeInternal) {
+    return (
+      <InternalReviewWorkspace
+        project={project}
+        review={activeInternal}
+        onExitToInbox={() => setViewMode('inbox')}
+        onReviewChange={load}
+      />
+    )
+  }
 
   return (
     <div className="p-6 md:p-8">
       <div className="max-w-5xl mx-auto">
+        {/* Mode toggle — surfaces when an internal review is open so
+            the user can flip back to the portal-style workspace. */}
+        {activeInternal && viewMode === 'inbox' && (
+          <div className="mb-4 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setViewMode('workspace')}
+              className="inline-flex items-center gap-1.5 rounded-full bg-wm-text text-wm-bg-elevated text-[11px] font-semibold hover:opacity-90 px-3 py-1.5 transition-opacity"
+            >
+              <Layout size={11} /> Open review workspace
+            </button>
+            <span className="text-[11px] text-wm-text-subtle">
+              Currently in inbox mode · {activeInternal.started_by_name ? `started by ${activeInternal.started_by_name}` : 'internal review open'}
+            </span>
+          </div>
+        )}
+
         <Header />
 
         {/* Start buttons */}
