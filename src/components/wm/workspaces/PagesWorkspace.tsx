@@ -252,6 +252,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
             onToggleSelection={togglePageSelection}
             onArchive={requestArchive}
             onAddPageInPhase={(phase) => setAddPageInPhase(phase)}
+            pageReviewCounts={reviewState?.page_counts ?? {}}
           />
         </aside>
 
@@ -343,6 +344,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
 function PageList({
   pages, loading, activeId, selectedIds,
   onSelect, onToggleSelection, onArchive, onAddPageInPhase,
+  pageReviewCounts,
 }: {
   pages: WebPage[]
   loading: boolean
@@ -352,6 +354,7 @@ function PageList({
   onToggleSelection: (id: string) => void
   onArchive: (id: string) => void
   onAddPageInPhase: (phase: string) => void
+  pageReviewCounts: Record<string, import('../../../lib/webReviews').PageReviewCounts>
 }) {
   const selectionActive = selectedIds.size > 0
 
@@ -426,6 +429,7 @@ function PageList({
                     <p className="text-[13px] font-medium text-wm-text truncate">{p.name}</p>
                     <p className="text-[10px] text-wm-text-subtle truncate">/{p.slug}</p>
                   </div>
+                  <PageReviewBadge counts={pageReviewCounts[p.id]} />
                   <WMStatusPill tone={STATUS_TONES[p.content_status]} size="sm">
                     {p.content_status === 'in_review' ? 'review' : p.content_status}
                   </WMStatusPill>
@@ -1290,5 +1294,32 @@ function ReviewBanner({
         Go to Review tab <ArrowRight size={10} />
       </button>
     </div>
+  )
+}
+
+// ── Page-row review badge ────────────────────────────────────────────
+
+/** Small pill rendered next to the per-page status pill in the left
+ *  list. Shows "Edits requested", "Edits suggested", or "Commented"
+ *  with a count. Source data is the project's review state, derived
+ *  per page via `pageReviewBadge()`. */
+function PageReviewBadge({
+  counts,
+}: {
+  counts: import('../../../lib/webReviews').PageReviewCounts | undefined
+}) {
+  if (!counts || counts.open_total === 0) return null
+  const tone =
+    counts.open_requested > 0 ? 'warning'
+    : counts.open_suggested > 0 ? 'info'
+    : 'neutral'
+  const label =
+    counts.open_requested > 0 ? `${counts.open_requested} req`
+    : counts.open_suggested > 0 ? `${counts.open_suggested} sug`
+    : `${counts.open_comments} note${counts.open_comments === 1 ? '' : 's'}`
+  return (
+    <WMStatusPill tone={tone as WMStatusTone} size="sm">
+      {label}
+    </WMStatusPill>
   )
 }

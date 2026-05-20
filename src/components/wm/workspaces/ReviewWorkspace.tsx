@@ -28,6 +28,7 @@ import {
 import { supabase } from '../../../lib/supabase'
 import { WMButton } from '../Button'
 import { WMStatusPill } from '../StatusPill'
+import { CommentActions } from '../sectioneditor/CommentActions'
 import {
   loadProjectReviewState, startReview, closeReview,
   type ProjectReviewState,
@@ -57,6 +58,11 @@ export function ReviewWorkspace({ project }: Props) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('open')
   const [kindFilter, setKindFilter] = useState<KindFilter>('all')
   const [pageFilter, setPageFilter] = useState<string | 'all'>('all')
+
+  // Surfaces mutation failures (RLS denial, network, etc.) so the
+  // user sees feedback instead of a silent no-op.
+  const [mutationError, setMutationError] = useState<string | null>(null)
+  const [mutating, setMutating] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -143,13 +149,30 @@ export function ReviewWorkspace({ project }: Props) {
   // ── Mutations ────────────────────────────────────────────────────
 
   const handleStart = async (kind: 'internal' | 'partner') => {
-    const review = await startReview({ projectId: project.id, kind })
-    if (review) await load()
+    setMutating(true)
+    setMutationError(null)
+    const res = await startReview({ projectId: project.id, kind })
+    setMutating(false)
+    if (res.ok) {
+      await load()
+    } else {
+      setMutationError(
+        `Couldn't start ${kind} review: ${res.error ?? 'unknown error'}. ` +
+        `Check that you're signed in and refresh the page if the issue persists.`
+      )
+    }
   }
   const handleClose = async (reviewId: string) => {
     if (!confirm('Close this review session? Open comments stay attached to their pages and carry into the next session.')) return
-    const ok = await closeReview(reviewId)
-    if (ok) await load()
+    setMutating(true)
+    setMutationError(null)
+    const res = await closeReview(reviewId)
+    setMutating(false)
+    if (res.ok) {
+      await load()
+    } else {
+      setMutationError(`Couldn't close review: ${res.error ?? 'unknown error'}.`)
+    }
   }
 
   if (!state) return null
@@ -168,17 +191,18 @@ export function ReviewWorkspace({ project }: Props) {
           <WMButton
             variant="primary"
             size="md"
-            iconLeft={<Plus size={13} />}
+            iconLeft={mutating ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
             onClick={() => void handleStart('internal')}
+            disabled={mutating}
           >
             Start internal review
           </WMButton>
           <WMButton
             variant="secondary"
             size="md"
-            iconLeft={<Plus size={13} />}
+            iconLeft={mutating ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
             onClick={() => void handleStart('partner')}
-            disabled={state.has_open_partner}
+            disabled={mutating || state.has_open_partner}
             title={state.has_open_partner
               ? 'A partner review is already open. Close it before starting another.'
               : 'Generate a shareable partner-facing review link'}
@@ -191,6 +215,24 @@ export function ReviewWorkspace({ project }: Props) {
             </span>
           )}
         </div>
+
+        {mutationError && (
+          <div
+            role="alert"
+            className="mb-6 rounded-md border border-wm-danger/40 bg-wm-danger-bg px-3 py-2 text-[12px] text-wm-danger flex items-start gap-2"
+          >
+            <X size={14} className="mt-0.5 shrink-0" />
+            <p className="flex-1 leading-snug">{mutationError}</p>
+            <button
+              type="button"
+              onClick={() => setMutationError(null)}
+              className="text-[11px] font-semibold opacity-70 hover:opacity-100"
+              aria-label="Dismiss error"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {showEmpty && (
           <div className="mb-6 rounded-md border border-dashed border-wm-border bg-wm-bg-elevated p-8 text-center">
@@ -302,6 +344,7 @@ export function ReviewWorkspace({ project }: Props) {
                   return tplId ? templates[tplId] : undefined
                 })()}
                 onJumpToPage={() => jumpToPage(c.web_page_id)}
+                onResolved={load}
               />
             ))}
           </ul>
@@ -442,7 +485,7 @@ function ReviewSessionCard({
 }
 
 function CommentRow({
-  comment, review, page, section, template, onJumpToPage,
+  comment, review, page, section, template, onJumpToPage, onResolved,
 }: {
   comment: WebReviewComment
   review: WebReview | null
@@ -450,12 +493,16 @@ function CommentRow({
   section: WebSection | undefined
   template: Pick<WebContentTemplate, 'id' | 'layer_name'> | undefined
   onJumpToPage: () => void
+  onResolved: () => Promise<void>
 }) {
   const author = comment.author_kind === 'partner'
     ? (comment.author_external_name ?? 'Partner')
     : 'Staff'
   const sectionLabel = template?.layer_name
     ?? (section ? `Section · ${section.sort_order + 1}` : null)
+  const sectionFieldValues = section
+    ? (section.field_values ?? {}) as Record<string, unknown>
+    : undefined
   return (
     <li className={[
       'rounded-md border bg-wm-bg-elevated px-3 py-2.5',
@@ -503,7 +550,7 @@ function CommentRow({
             </div>
           )}
           {/* Footer */}
-          <div className="mt-1.5 flex items-center gap-2 text-[10px] text-wm-text-subtle">
+          <div className="mt-1.5 flex items-center gap-2 text-[10px] text-wm-text-subtle flex-wrap">
             <span>{author}</span>
             {review && (
               <>
@@ -513,6 +560,13 @@ function CommentRow({
             )}
             <span className="opacity-60">·</span>
             <StatusBadge status={comment.status} />
+            <span className="ml-auto">
+              <CommentActions
+                comment={comment}
+                sectionFieldValues={sectionFieldValues}
+                onResolved={onResolved}
+              />
+            </span>
           </div>
         </div>
       </div>

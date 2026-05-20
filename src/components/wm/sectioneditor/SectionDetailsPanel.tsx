@@ -24,6 +24,7 @@ import { SlotEditor } from './SlotEditor'
 import { GroupEditor } from './GroupEditor'
 import { GridEditor, detectGridChain } from './GridEditor'
 import { SnippetMenu } from './SnippetMenu'
+import { CommentActions } from './CommentActions'
 import { summarizeSlotPresence } from '../../../lib/webBrixiesLayoutParser'
 import { supabase } from '../../../lib/supabase'
 import type { WMSnippetOption } from '../RichTextEditor'
@@ -497,11 +498,19 @@ function ReviewCommentsBlock({
                 </span>
               </div>
               {c.body && <p className="text-[12px] text-wm-text whitespace-pre-wrap">{c.body}</p>}
-              {c.kind === 'suggested' && c.suggested_value != null && (
-                <div className="mt-1 text-[11px] font-mono text-wm-text border-l-2 border-wm-accent pl-2">
-                  → {String(c.suggested_value).slice(0, 120)}
+              {(c.kind === 'suggested' || c.kind === 'requested') && c.suggested_value != null && (
+                <div className="mt-1 text-[11px] font-mono text-wm-text border-l-2 border-wm-accent pl-2 line-clamp-2">
+                  → {stringifyVal(c.suggested_value)}
                 </div>
               )}
+              <div className="mt-1.5 flex items-center justify-end">
+                <CommentActions
+                  comment={c}
+                  sectionFieldValues={(section.field_values ?? {}) as Record<string, unknown>}
+                  onResolved={onCommentsChange}
+                  compact
+                />
+              </div>
             </li>
           ))}
         </ul>
@@ -630,4 +639,17 @@ function fmtTime(iso: string): string {
   try {
     return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
   } catch { return iso }
+}
+
+function stringifyVal(v: unknown): string {
+  if (v == null) return ''
+  if (typeof v === 'string') return v.slice(0, 140)
+  if (typeof v === 'object' && v !== null) {
+    const obj = v as { label?: unknown; url?: unknown }
+    if (typeof obj.label === 'string') {
+      return obj.url ? `${obj.label} — ${String(obj.url)}` : obj.label
+    }
+    try { return JSON.stringify(v).slice(0, 140) } catch { return String(v) }
+  }
+  return String(v)
 }

@@ -184,13 +184,19 @@ export function pageReviewBadge(counts: PageReviewCounts | undefined): PageStatu
 
 // ── Mutators ───────────────────────────────────────────────────────
 
+export interface ReviewMutationResult<T> {
+  ok: boolean
+  data: T | null
+  error: string | null
+}
+
 /** Start a new review session on the project. For partner reviews we
  *  generate the opaque token used by the public portal URL. */
 export async function startReview(opts: {
   projectId: string
   kind: 'internal' | 'partner'
   notes?: string
-}): Promise<WebReview | null> {
+}): Promise<ReviewMutationResult<WebReview>> {
   const partner_token = opts.kind === 'partner' ? crypto.randomUUID().replace(/-/g, '') : null
   const { data: user } = await supabase.auth.getUser()
   const { data, error } = await supabase
@@ -207,14 +213,14 @@ export async function startReview(opts: {
     .maybeSingle()
   if (error) {
     console.error('[reviews] startReview failed:', error.message)
-    return null
+    return { ok: false, data: null, error: error.message }
   }
-  return data as WebReview | null
+  return { ok: true, data: data as WebReview | null, error: null }
 }
 
 /** Close a review. Open comments stay attached to their pages and
  *  carry into the next review session. */
-export async function closeReview(reviewId: string): Promise<boolean> {
+export async function closeReview(reviewId: string): Promise<ReviewMutationResult<null>> {
   const { data: user } = await supabase.auth.getUser()
   const { error } = await supabase
     .from('web_reviews')
@@ -226,9 +232,9 @@ export async function closeReview(reviewId: string): Promise<boolean> {
     .eq('id', reviewId)
   if (error) {
     console.error('[reviews] closeReview failed:', error.message)
-    return false
+    return { ok: false, data: null, error: error.message }
   }
-  return true
+  return { ok: true, data: null, error: null }
 }
 
 /** Resolve a comment / suggestion / request. `applied` writes
