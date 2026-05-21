@@ -28,6 +28,7 @@ import {
   validateCopywriterPageOutput,
   importCopywriterPageOutput,
   loadFamilyAlternates,
+  friendlyScanMessage,
   type CopywriterPageOutput,
   type CopywriterValidationReport,
   type TemplateRef,
@@ -536,16 +537,36 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
                               <span className="text-[10px] text-wm-text-subtle font-mono shrink-0">· {s.concept_id}</span>
                             )}
                           </div>
-                          {/* Mechanical-fit warnings scoped to this section, surfaced
-                              right under the dropdown so the user knows WHY they might
-                              swap (e.g., "this banner has no CTA slot"). */}
+                          {/* Mechanical-fit warnings scoped to this section,
+                              rewritten in plain-language so the user knows what
+                              to actually DO (verify after import vs swap template). */}
                           {sectionIssues.length > 0 && (
-                            <ul className="mt-1 ml-8 space-y-0.5">
-                              {sectionIssues.map((m, i) => (
-                                <li key={i} className="text-[10px] text-wm-warning leading-snug">
-                                  <span className="font-semibold">{m.slot}</span> · {m.issue}
-                                </li>
-                              ))}
+                            <ul className="mt-1.5 ml-8 space-y-1.5">
+                              {sectionIssues.map((m, i) => {
+                                const f = friendlyScanMessage(m)
+                                return (
+                                  <li
+                                    key={i}
+                                    className={[
+                                      'rounded-md border px-2 py-1.5 text-[10px] leading-snug',
+                                      f.severity === 'action'
+                                        ? 'border-wm-warning/40 bg-wm-warning-bg text-wm-text'
+                                        : 'border-wm-border bg-wm-bg text-wm-text-muted',
+                                    ].join(' ')}
+                                  >
+                                    <p className="font-semibold text-wm-text">{f.headline}</p>
+                                    <p className="mt-0.5">{f.advice}</p>
+                                    <details className="mt-1">
+                                      <summary className="cursor-pointer text-[9px] uppercase tracking-widest font-semibold text-wm-text-subtle hover:text-wm-text">
+                                        Technical detail
+                                      </summary>
+                                      <p className="mt-1 font-mono text-[10px] text-wm-text-subtle whitespace-pre-wrap">
+                                        {f.technical}
+                                      </p>
+                                    </details>
+                                  </li>
+                                )
+                              })}
                             </ul>
                           )}
                         </li>

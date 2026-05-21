@@ -36,6 +36,7 @@ import {
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { loadEditorSnippets } from '../../../lib/webSnippets'
+import { friendlyScanMessage } from '../../../lib/webCopywriterOutput'
 import { WMButton } from '../Button'
 import { WMIconButton } from '../IconButton'
 import { WMStatusPill } from '../StatusPill'
@@ -1427,16 +1428,34 @@ function CopywriterNotesBanner({ brief }: { brief: unknown }) {
           {scan.length > 0 && (
             <div>
               <p className="text-[10px] uppercase tracking-widest font-bold text-wm-warning mb-1">
-                Mechanical scan log · {scan.length}
+                Scan flags · {scan.length}
               </p>
-              <ul className="space-y-1">
-                {scan.map((m, i) => (
-                  <li key={i} className="text-[11px] text-wm-text">
-                    <span className="font-semibold">Section {m.section_sort} · {m.slot}</span>
-                    <span className="text-wm-text-muted"> — {m.issue}</span>
-                    {m.fix && <span className="text-wm-text-subtle italic"> {m.fix}</span>}
-                  </li>
-                ))}
+              <ul className="space-y-1.5">
+                {scan.map((m, i) => {
+                  const f = friendlyScanMessage(m)
+                  return (
+                    <li
+                      key={i}
+                      className={[
+                        'rounded-md border px-2 py-1.5 text-[11px] leading-snug',
+                        f.severity === 'action'
+                          ? 'border-wm-warning/40 bg-wm-warning-bg text-wm-text'
+                          : 'border-wm-border bg-wm-bg text-wm-text-muted',
+                      ].join(' ')}
+                    >
+                      <p className="font-semibold text-wm-text">{f.headline}</p>
+                      <p className="mt-0.5">{f.advice}</p>
+                      <details className="mt-1">
+                        <summary className="cursor-pointer text-[9px] uppercase tracking-widest font-semibold text-wm-text-subtle hover:text-wm-text">
+                          Technical detail
+                        </summary>
+                        <p className="mt-1 font-mono text-[10px] text-wm-text-subtle whitespace-pre-wrap">
+                          {f.technical}
+                        </p>
+                      </details>
+                    </li>
+                  )
+                })}
               </ul>
             </div>
           )}

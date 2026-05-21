@@ -59,6 +59,64 @@ export interface CopywriterMechanicalScanEntry {
   fix?:         string
 }
 
+/** Plain-language rewrite of a mechanical_scan_log entry. The raw
+ *  `issue` / `fix` strings the copywriter emits are written for the
+ *  next pipeline stage to consume — they reference internal field
+ *  names (default_count, schema, slot) that aren't strategist-
+ *  friendly. The modal prefers `headline` + `advice`; both surfaces
+ *  expose the raw `issue` behind a "Technical detail" expander. */
+export interface FriendlyScanMessage {
+  /** One-sentence headline framed as what the user is looking at. */
+  headline: string
+  /** What the user should DO (or do nothing — just verify after import). */
+  advice:   string
+  /** Severity gate for the UI — 'verify' means "probably fine, eyeball
+   *  it"; 'action' means "this won't render without a swap". */
+  severity: 'verify' | 'action'
+  /** Untouched copy from the copywriter, kept for the technical-detail
+   *  expander so power users see exactly what was flagged. */
+  technical: string
+}
+
+export function friendlyScanMessage(entry: CopywriterMechanicalScanEntry): FriendlyScanMessage {
+  const issue = entry.issue ?? ''
+  const technical = entry.fix ? `${issue}\n${entry.fix}` : issue
+
+  // Pattern 1: default_count mismatch — the renderer reads however
+  // many items are in the array, so this is almost always fine.
+  // Flag for verification, not action.
+  if (/default_count/i.test(issue) || /variable-count repeats/i.test(issue)) {
+    const countMatch = issue.match(/\b(\d+)\s+(?:step|item|card)/i)
+    const provided = countMatch ? countMatch[1] : 'more'
+    return {
+      headline: `Section ${entry.section_sort} has ${provided} items in "${entry.slot}", more than this template's default.`,
+      advice:   `Should render fine — our editor accepts any item count. After import, scan the section to confirm all items show. If they're cut off, use the template dropdown above to pick a layout sized for ${provided} items.`,
+      severity: 'verify',
+      technical,
+    }
+  }
+
+  // Pattern 2: missing slot — the template literally has no place
+  // for this content, so the data is lost unless they swap.
+  if (/no\s+\w*\s*slot/i.test(issue) || /no buttons or CTA slot/i.test(issue) || /no matching slot/i.test(issue)) {
+    return {
+      headline: `Section ${entry.section_sort}: this template has no slot for "${entry.slot}".`,
+      advice:   `The content the copywriter wrote for "${entry.slot}" won't render with this template. Use the template dropdown above to pick a variant that includes a ${entry.slot.toLowerCase()} slot before importing.`,
+      severity: 'action',
+      technical,
+    }
+  }
+
+  // Generic fallback — show the issue verbatim but at least frame it
+  // as "the copywriter flagged this".
+  return {
+    headline: `Section ${entry.section_sort}: the copywriter flagged "${entry.slot}".`,
+    advice:   'Review the technical detail below and decide whether to swap templates.',
+    severity: 'action',
+    technical,
+  }
+}
+
 export interface CopywriterGap {
   section_sort: number
   note:         string
@@ -155,13 +213,16 @@ export async function validateCopywriterPageOutput(
       }
     }
   }
-  // Surface mechanical_scan_log and gaps_flagged as warnings — the
-  // import proceeds but the strategist sees them after.
+  // Surface mechanical_scan_log entries via the plain-language
+  // translator so the issues list isn't full of internal jargon.
+  // `verify` severity drops to 'info' (not action-required);
+  // `action` stays a warning.
   for (const m of (out.mechanical_scan_log ?? [])) {
+    const f = friendlyScanMessage(m)
     issues.push({
-      severity: 'warning',
-      scope:    `section ${m.section_sort} · ${m.slot}`,
-      message:  m.issue + (m.fix ? ` — ${m.fix}` : ''),
+      severity: f.severity === 'action' ? 'warning' : 'info',
+      scope:    `section ${m.section_sort}`,
+      message:  `${f.headline} — ${f.advice}`,
     })
   }
   for (const g of (out.gaps_flagged ?? [])) {
