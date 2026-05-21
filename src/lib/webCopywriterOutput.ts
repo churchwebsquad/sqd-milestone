@@ -327,7 +327,7 @@ function strategicSetupToSeo(setup: CopywriterStrategicSetup | undefined): WebPa
  *       only has one button-shaped slot (`contact`). We rebuild this
  *       to `{contact: {label: "Walk in", url: ""}}` so ButtonInput +
  *       the inventory reader see the right shape. */
-function normalizeFieldValuesForTemplate(
+export function normalizeFieldValuesForTemplate(
   template: WebContentTemplate | null,
   values: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -400,6 +400,12 @@ export async function importCopywriterPageOutput(
      *  modal apply user-picked template swaps without mutating the
      *  original payload. */
     templateOverrides?: Record<number, string>
+    /** Map of `sort_order` → field_values pre-remapped to the new
+     *  template's schema. Set by the modal when the user changes a
+     *  variant via the catalog picker — preserves any cross-family
+     *  remapping (e.g. banner → cta) so the import doesn't dump
+     *  copy that doesn't match the original template anymore. */
+    fieldValuesOverrides?: Record<number, Record<string, unknown>>
   } = {},
 ): Promise<{ result?: CopywriterImportResult; error?: string }> {
   // 1. Find or create the page (by project + slug).
@@ -543,16 +549,22 @@ export async function importCopywriterPageOutput(
     }
   }
 
+  const fieldOverrides = opts.fieldValuesOverrides ?? {}
   const sectionRows = sectionsWithOverrides
     .slice()
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
     .map((s) => {
-      const tpl = templatesById[s.template_id] ?? null
-      const normalized = normalizeFieldValuesForTemplate(tpl, s.field_values ?? {})
+      const tpl       = templatesById[s.template_id] ?? null
+      // When the modal has already remapped field_values (variant
+      // swap via the catalog picker), use those verbatim — they're
+      // already shaped for the new template. Otherwise normalize the
+      // copywriter shape against the resolved template's schema.
+      const override   = fieldOverrides[s.sort_order]
+      const fieldValues = override ?? normalizeFieldValuesForTemplate(tpl, s.field_values ?? {})
       return {
         web_page_id:         pageId,
         content_template_id: s.template_id,
-        field_values:        normalized,
+        field_values:        fieldValues,
         sort_order:          s.sort_order ?? 0,
         content_status:      'draft' as const,
         notes:               sectionNotes(s),

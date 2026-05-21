@@ -11,8 +11,12 @@
  */
 
 import { useEffect, useState } from 'react'
-import { ArrowRight, AlertCircle, CheckCircle2, FileText, Sparkles, RotateCw } from 'lucide-react'
+import { ArrowRight, AlertCircle, CheckCircle2, FileText, Sparkles, RotateCw, LayoutGrid } from 'lucide-react'
 import { WMButton } from './Button'
+import { WMCatalogSidePanel } from './CatalogSidePanel'
+import { supabase } from '../../lib/supabase'
+import { fieldValuesToDocHtml, docHtmlToFieldValues } from '../../lib/webBrixiesDoc'
+import type { WebContentTemplate, WebTemplateKind } from '../../types/database'
 import {
   validateBrief,
   importBrief,
@@ -29,6 +33,7 @@ import {
   importCopywriterPageOutput,
   loadFamilyAlternates,
   friendlyScanMessage,
+  normalizeFieldValuesForTemplate,
   type CopywriterPageOutput,
   type CopywriterValidationReport,
   type TemplateRef,
@@ -142,9 +147,18 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
   const [copyReport, setCopyReport] = useState<CopywriterValidationReport | null>(null)
   // Per-section template override: sort_order → replacement template_id.
   const [templateOverrides, setTemplateOverrides] = useState<Record<number, string>>({})
+  // Per-section field_values override: sort_order → values already
+  // shaped for the override template. Populated by the variant-swap
+  // doc round-trip so cross-family swaps don't drop copy.
+  const [fieldValuesOverrides, setFieldValuesOverrides] = useState<Record<number, Record<string, unknown>>>({})
   // Templates grouped by family — populated after a successful copy
   // validation so the swap dropdown has alternates to offer.
   const [familyAlternates, setFamilyAlternates] = useState<Record<string, TemplateRef[]>>({})
+  // When set, opens the catalog picker for a specific section so the
+  // user can pick any template (cross-family) and we'll remap the
+  // field_values to its schema.
+  const [variantSwapForSort, setVariantSwapForSort] = useState<number | null>(null)
+  const [variantSwapping, setVariantSwapping] = useState(false)
   const [validating, setValidating] = useState(false)
   const [importing, setImporting] = useState(false)
   const [addSnippets, setAddSnippets] = useState(true)
@@ -180,9 +194,70 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
     setCopyOutput(null)
     setCopyReport(null)
     setTemplateOverrides({})
+    setFieldValuesOverrides({})
     setFamilyAlternates({})
+    setVariantSwapForSort(null)
     setImportMsg(null)
     setBundleProgress(null)
+  }
+
+  /** Swap the bound template for a section and remap its field_values
+   *  via the Brixies doc round-trip so copy carries across families.
+   *  When the new template id matches the copywriter's original pick
+   *  we treat that as "revert" — both overrides clear. */
+  const applyTemplateSwap = async (sortOrder: number, newTemplateId: string) => {
+    if (!copyOutput) return
+    const section = copyOutput.sections.find(s => s.sort_order === sortOrder)
+    if (!section) return
+
+    // Revert path — same as copywriter's original pick.
+    if (newTemplateId === section.template_id) {
+      setTemplateOverrides(prev => {
+        const next = { ...prev }
+        delete next[sortOrder]
+        return next
+      })
+      setFieldValuesOverrides(prev => {
+        const next = { ...prev }
+        delete next[sortOrder]
+        return next
+      })
+      return
+    }
+
+    setVariantSwapping(true)
+    try {
+      const { data: tpls, error } = await supabase
+        .from('web_content_templates')
+        .select('*')
+        .in('id', [section.template_id, newTemplateId])
+      if (error) throw new Error(error.message)
+      const rows = (tpls ?? []) as WebContentTemplate[]
+      const oldTpl = rows.find(t => t.id === section.template_id) ?? null
+      const newTpl = rows.find(t => t.id === newTemplateId)
+      if (!newTpl) throw new Error('Selected template not found in catalog.')
+
+      // 1. Normalize copywriter shape into canonical field_values.
+      // 2. Doc round-trip via the OLD template to a Brixies doc, then
+      //    parse back into the NEW template's slots. This is the same
+      //    pipeline PagesWorkspace.bindSection uses for change-variant
+      //    — preserves headings / body / CTAs / etc. across families.
+      // 3. Pass the normalized values as existingGroupValues so any
+      //    group keys that overlap between schemas survive (otherwise
+      //    docHtmlToFieldValues only repopulates leaf slots).
+      const normalized = normalizeFieldValuesForTemplate(oldTpl, section.field_values ?? {})
+      let remapped = normalized
+      if (oldTpl) {
+        const docHtml = fieldValuesToDocHtml(normalized, oldTpl)
+        const { field_values } = docHtmlToFieldValues(docHtml, newTpl, normalized)
+        remapped = field_values
+      }
+
+      setTemplateOverrides(prev => ({ ...prev, [sortOrder]: newTemplateId }))
+      setFieldValuesOverrides(prev => ({ ...prev, [sortOrder]: remapped }))
+    } finally {
+      setVariantSwapping(false)
+    }
   }
 
   const handleValidate = async () => {
@@ -242,6 +317,7 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
     try {
       const { result, error } = await importCopywriterPageOutput(copyOutput, project, {
         templateOverrides,
+        fieldValuesOverrides,
       })
       if (error) {
         setImportMsg(`Error: ${error}`)
@@ -490,13 +566,8 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
                             </span>
                             <select
                               value={effectiveId}
-                              onChange={(e) => {
-                                const next = { ...templateOverrides }
-                                if (e.target.value === s.template_id) delete next[s.sort_order]
-                                else                                  next[s.sort_order] = e.target.value
-                                setTemplateOverrides(next)
-                              }}
-                              disabled={importing}
+                              onChange={(e) => void applyTemplateSwap(s.sort_order, e.target.value)}
+                              disabled={importing || variantSwapping}
                               className={[
                                 'min-w-0 flex-1 h-7 text-[12px] px-2 rounded border bg-wm-bg outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/15',
                                 broken          ? 'border-wm-danger text-wm-danger' :
@@ -519,14 +590,19 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
                                 </optgroup>
                               )}
                             </select>
+                            <button
+                              type="button"
+                              onClick={() => setVariantSwapForSort(s.sort_order)}
+                              disabled={importing || variantSwapping}
+                              className="inline-flex items-center gap-1 text-[10px] font-semibold text-wm-accent-strong hover:underline shrink-0 disabled:opacity-50"
+                              title="Browse the full template catalog (with thumbnails) — copy is remapped to the new template's schema."
+                            >
+                              <LayoutGrid size={10} /> Browse
+                            </button>
                             {templateOverrides[s.sort_order] && (
                               <button
                                 type="button"
-                                onClick={() => {
-                                  const next = { ...templateOverrides }
-                                  delete next[s.sort_order]
-                                  setTemplateOverrides(next)
-                                }}
+                                onClick={() => void applyTemplateSwap(s.sort_order, s.template_id)}
                                 className="inline-flex items-center gap-0.5 text-[10px] text-wm-text-subtle hover:text-wm-accent-strong shrink-0"
                                 title="Revert to the copywriter's pick"
                               >
@@ -895,6 +971,33 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
           )}
         </div>
       </div>
+
+      {/* Catalog picker — opens when the user clicks "Browse" next
+          to a section's template dropdown. Filtered to content/media/
+          post_template kinds (same gate Pages uses for change-variant).
+          On select, the doc round-trip remap runs so copy survives
+          even when the new template is in a different family. */}
+      {copyOutput && variantSwapForSort != null && (
+        <WMCatalogSidePanel
+          open={true}
+          onClose={() => setVariantSwapForSort(null)}
+          title="Pick a different template"
+          subtitle={`Section ${variantSwapForSort}`}
+          kindFilter={['content', 'media', 'post_template'] as readonly WebTemplateKind[]}
+          mode="single"
+          selectedIds={(() => {
+            const s = copyOutput.sections.find(x => x.sort_order === variantSwapForSort)
+            const tid = s ? (templateOverrides[s.sort_order] ?? s.template_id) : null
+            return tid ? [tid] : []
+          })()}
+          onSelect={async (ids) => {
+            if (ids[0] && variantSwapForSort != null) {
+              await applyTemplateSwap(variantSwapForSort, ids[0])
+            }
+            setVariantSwapForSort(null)
+          }}
+        />
+      )}
     </div>
   )
 }
