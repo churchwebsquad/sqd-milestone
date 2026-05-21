@@ -151,6 +151,23 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
   // Multi-page progress — current page index / total / current title.
   const [bundleProgress, setBundleProgress] = useState<{ done: number; total: number; current: string } | null>(null)
 
+  // After copywriter validation lands, pre-load every alternate
+  // template in the same family for each section so the swap dropdown
+  // is instant + we can highlight when a swap target also has
+  // mechanical issues. MUST run before the `if (!open)` early-return
+  // below — hook order has to be stable across renders.
+  useEffect(() => {
+    if (!copyReport) return
+    const ids = Array.from(new Set(Object.keys(copyReport.resolved_templates)))
+    if (ids.length === 0) return
+    let cancelled = false
+    void (async () => {
+      const { byFamily } = await loadFamilyAlternates(ids)
+      if (!cancelled) setFamilyAlternates(byFamily)
+    })()
+    return () => { cancelled = true }
+  }, [copyReport])
+
   if (!open) return null
 
   const reset = () => {
@@ -166,22 +183,6 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
     setImportMsg(null)
     setBundleProgress(null)
   }
-
-  // After copywriter validation lands, pre-load every alternate
-  // template in the same family for each section so the swap dropdown
-  // is instant + we can highlight when a swap target also has
-  // mechanical issues.
-  useEffect(() => {
-    if (!copyReport) return
-    const ids = Array.from(new Set(Object.keys(copyReport.resolved_templates)))
-    if (ids.length === 0) return
-    let cancelled = false
-    void (async () => {
-      const { byFamily } = await loadFamilyAlternates(ids)
-      if (!cancelled) setFamilyAlternates(byFamily)
-    })()
-    return () => { cancelled = true }
-  }, [copyReport])
 
   const handleValidate = async () => {
     setParseError(null)
