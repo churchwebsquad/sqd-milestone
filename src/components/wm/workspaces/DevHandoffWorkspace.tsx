@@ -341,14 +341,6 @@ function SeoSummaryTable({ rows }: { rows: PageSeoRow[] }) {
 }
 
 function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
-  // Group by page for readability.
-  const byPage: Record<string, { name: string; slug: string; items: CtaRow[] }> = {}
-  for (const r of rows) {
-    const grp = byPage[r.pageId] ?? { name: r.pageName, slug: r.pageSlug, items: [] }
-    grp.items.push(r)
-    byPage[r.pageId] = grp
-  }
-  const ordered = Object.entries(byPage)
   const brokenCount = rows.filter(r => r.validationError != null).length
 
   return (
@@ -365,62 +357,82 @@ function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
           </span>
         </div>
       )}
-      {ordered.map(([pageId, grp]) => (
-        <div key={pageId}>
-          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong mb-1">
-            {grp.name} <span className="font-mono text-wm-text-subtle">/{grp.slug}</span> · {grp.items.length}
-          </p>
-          <ul className="space-y-0.5">
-            {grp.items.map((c, idx) => {
+
+      <div className="overflow-x-auto -mx-2">
+        <table className="w-full text-[11px] border-collapse">
+          <thead>
+            <tr className="text-left text-wm-text-subtle">
+              <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Route</th>
+              <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Page</th>
+              <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Section</th>
+              <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Button label</th>
+              <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Kind</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((c, idx) => {
               const target = c.cta.target ?? defaultTargetFor(c.cta.kind)
               const broken = c.validationError != null
               return (
-                <li
+                <tr
                   key={`${c.sectionId}-${c.fieldKey}-${idx}`}
                   className={[
-                    'flex items-start gap-2 text-[11px] rounded-md border bg-wm-bg-elevated px-2 py-1.5',
-                    broken ? 'border-wm-warn/40' : 'border-wm-border',
-                  ].join(' ')}
+                    'border-t border-wm-border/40 align-top',
+                    broken && 'bg-wm-warn-bg/40',
+                  ].filter(Boolean).join(' ')}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 mb-0.5">
-                      <p className="font-semibold text-wm-text truncate">
-                        {c.cta.label || <span className="italic text-wm-text-subtle">(no label)</span>}
-                      </p>
-                      <span className="inline-flex shrink-0 items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 bg-lavender-tint text-primary-purple border border-primary-purple/20">
-                        {CTA_KIND_LABELS[c.cta.kind]}
-                      </span>
-                      {target === '_blank' && (
-                        <span className="inline-flex shrink-0 items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 bg-wm-bg-hover text-wm-text-subtle border border-wm-border">
-                          New tab
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-wm-text-subtle truncate">
-                      {c.sectionLabel} · {c.fieldLabel || c.fieldKey}
-                    </p>
+                  <td className="px-2 py-2 max-w-[260px]">
+                    {c.cta.url ? (
+                      <a
+                        href={c.cta.url}
+                        target={target}
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 font-mono text-wm-accent-strong hover:underline truncate"
+                        title={c.cta.url}
+                      >
+                        {target === '_blank' && <ExternalLink size={9} className="shrink-0" />}
+                        <span className="truncate">{c.cta.url}</span>
+                      </a>
+                    ) : (
+                      <span className="italic text-wm-text-subtle">no url</span>
+                    )}
                     {broken && (
                       <p className="text-[10px] text-wm-warn mt-0.5 inline-flex items-center gap-1">
                         <AlertTriangle size={9} /> {c.validationError}
                       </p>
                     )}
-                  </div>
-                  <a
-                    href={c.cta.url || '#'}
-                    target={target}
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[10px] font-mono text-wm-accent-strong hover:underline shrink-0 max-w-[40%] truncate"
-                    title={c.cta.url}
-                  >
-                    {target === '_blank' && <ExternalLink size={9} />}
-                    {c.cta.url || <span className="italic text-wm-text-subtle">no url</span>}
-                  </a>
-                </li>
+                  </td>
+                  <td className="px-2 py-2">
+                    <p className="font-semibold text-wm-text">{c.pageName}</p>
+                    <p className="text-[10px] text-wm-text-subtle font-mono">/{c.pageSlug}</p>
+                  </td>
+                  <td className="px-2 py-2 max-w-[180px]">
+                    <p className="text-wm-text truncate" title={c.sectionLabel}>{c.sectionLabel}</p>
+                    {c.fieldLabel && c.fieldLabel !== c.fieldKey && (
+                      <p className="text-[10px] text-wm-text-subtle truncate" title={c.fieldLabel}>{c.fieldLabel}</p>
+                    )}
+                  </td>
+                  <td className="px-2 py-2 max-w-[180px]">
+                    <p className="text-wm-text truncate" title={c.cta.label}>
+                      {c.cta.label || <span className="italic text-wm-text-subtle">(no label)</span>}
+                    </p>
+                  </td>
+                  <td className="px-2 py-2 whitespace-nowrap">
+                    <span className="inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 bg-lavender-tint text-primary-purple border border-primary-purple/20">
+                      {CTA_KIND_LABELS[c.cta.kind]}
+                    </span>
+                    {target === '_blank' && (
+                      <span className="ml-1 inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 bg-wm-bg-hover text-wm-text-subtle border border-wm-border">
+                        New tab
+                      </span>
+                    )}
+                  </td>
+                </tr>
               )
             })}
-          </ul>
-        </div>
-      ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
