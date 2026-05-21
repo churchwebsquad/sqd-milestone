@@ -19,6 +19,7 @@ import { useSnippetFocus } from './SnippetFocusContext'
 import { useProjectPages } from './ProjectPagesContext'
 import {
   normalizeCtaValue, defaultTargetFor, validateCta, CTA_KIND_LABELS,
+  isButtonShapedSlot,
 } from '../../../lib/cta'
 import type { WebSlotDef, CtaKind, CtaValue } from '../../../types/database'
 
@@ -378,16 +379,10 @@ function kindOf(slot: WebSlotDef): SlotKind {
   return 'other'
 }
 
-function isButtonShaped(slot: WebSlotDef): boolean {
-  if (slot.type === 'cta') return true
-  if (slot.type === 'text' && slot.scope === 'button') return true
-  // Best-effort: text slot named like "button label" without explicit scope.
-  if (slot.type === 'text') {
-    const k = (slot.label ?? slot.key).toLowerCase()
-    if (k.includes('button') || k.includes('cta')) return true
-  }
-  return false
-}
+// Delegates to the shared classifier in src/lib/cta.ts so every
+// surface (slot editor + dev handoff inventory) treats the same set
+// of slots as button-shaped.
+const isButtonShaped = isButtonShapedSlot
 
 const TONES: Record<SlotKind, string> = {
   heading:  'text-wm-accent-strong',

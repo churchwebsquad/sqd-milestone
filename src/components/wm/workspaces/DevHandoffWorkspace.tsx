@@ -32,6 +32,7 @@ import {
 } from '../../../lib/designSystemSpec'
 import {
   normalizeCtaValue, defaultTargetFor, validateCta, CTA_KIND_LABELS,
+  isButtonShapedSlot,
 } from '../../../lib/cta'
 import type {
   StrategyWebProject, WebPage, WebSection, WebContentTemplate,
@@ -461,9 +462,11 @@ function extractCtaInventory(opts: {
 }
 
 /** Recursive walker for template field schemas. Calls `onCta` for every
- *  slot of type 'cta' encountered, with the raw bound value from the
- *  section's field_values (including group items). The caller is
- *  responsible for normalizing the raw value via normalizeCtaValue. */
+ *  button-shaped slot (type='cta', or type='text' with scope='button',
+ *  or a text slot labelled like a button) with the raw bound value
+ *  from the section's field_values (including group items). The
+ *  caller is responsible for normalizing the raw value via
+ *  normalizeCtaValue. */
 function walkFieldsForCtas(
   fields: WebFieldDef[],
   values: Record<string, unknown>,
@@ -473,7 +476,7 @@ function walkFieldsForCtas(
 ): void {
   for (const f of fields) {
     if (f.kind === 'slot') {
-      if (f.type !== 'cta') continue
+      if (!isButtonShapedSlot(f)) continue
       onCta({
         fieldKey:   `${pathPrefix}${f.key}`,
         fieldLabel: labelPrefix ? `${labelPrefix} › ${f.layer_name ?? f.key}` : (f.layer_name ?? f.key),

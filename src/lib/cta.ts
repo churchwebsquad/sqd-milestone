@@ -16,7 +16,26 @@
  * gets the safest classification, which is `external_url`.
  */
 
-import type { CtaKind, CtaValue } from '../types/database'
+import type { CtaKind, CtaValue, WebSlotDef } from '../types/database'
+
+/** A slot is "button-shaped" — meaning its value is a CtaValue and
+ *  the section panel renders it through ButtonInput — when any of
+ *  three rules match. Centralized here so the Dev Handoff inventory,
+ *  the slot editor, and any future walker apply the same definition.
+ *
+ *  Rules (mirror SlotEditor's isButtonShaped):
+ *    1. type === 'cta'                                  (canonical)
+ *    2. type === 'text' && scope === 'button'           (text-button hybrid)
+ *    3. type === 'text' && label/key contains "button"  (heuristic) */
+export function isButtonShapedSlot(slot: WebSlotDef): boolean {
+  if (slot.type === 'cta') return true
+  if (slot.type === 'text' && slot.scope === 'button') return true
+  if (slot.type === 'text') {
+    const k = (slot.label ?? slot.key).toLowerCase()
+    if (k.includes('button') || k.includes('cta')) return true
+  }
+  return false
+}
 
 export function inferCtaKind(url: string): CtaKind {
   const v = url.trim()
