@@ -1220,9 +1220,52 @@ export interface WebReview {
   closed_at: string | null
   closed_by_user_id: string | null
   closed_by_name: string | null
+  /** If this review was kicked off in response to a staff-to-staff
+   *  request, the request row id. Null otherwise. */
+  review_request_id: string | null
   notes: string | null
   created_at: string
   updated_at: string
+}
+
+/** Staff-to-staff review request. One staff member asks another to
+ *  do an internal review with optional notes; the assignee sees the
+ *  request on their Review tab and can start the review from there. */
+export interface WebReviewRequest {
+  id: string
+  web_project_id: string
+  requester_user_id: string
+  requester_name: string | null
+  /** Email of the staff member being asked. We match by email
+   *  because the employees table doesn't carry an auth.users link;
+   *  every staff lookup in the app already goes through email. */
+  assignee_email: string
+  assignee_name: string | null
+  notes: string | null
+  status: 'pending' | 'started' | 'completed' | 'cancelled'
+  started_review_id: string | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  cancelled_at: string | null
+}
+
+/** Field-level edit log entry. Captured when staff edits a section
+ *  field while their internal review is open — gives the next person
+ *  to work the queue an audit trail of what already changed during
+ *  the review. */
+export interface WebReviewEdit {
+  id: string
+  review_id: string
+  web_section_id: string
+  web_page_id: string
+  field_path: string
+  field_label: string | null
+  before_value: unknown
+  after_value: unknown
+  edited_by_user_id: string | null
+  edited_by_name: string | null
+  edited_at: string
 }
 
 export type WebReviewCommentKind = 'comment' | 'suggested' | 'requested'

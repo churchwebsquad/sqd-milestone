@@ -20,7 +20,8 @@
 
 import { supabase } from './supabase'
 import type {
-  WebReview, WebReviewComment, WebReviewCommentStatus,
+  WebReview, WebReviewComment, WebReviewCommentStatus, WebReviewEdit,
+  WebReviewRequest,
 } from '../types/database'
 
 // ── Public types ───────────────────────────────────────────────────
@@ -192,6 +193,54 @@ export interface ReviewMutationResult<T> {
 
 /** Start a new review session on the project. For partner reviews we
  *  generate the opaque token used by the public portal URL. */
+/** Append a field-edit log entry. Called from the review workspace
+ *  whenever the staff member edits a section field while their
+ *  internal review is open. Fire-and-forget — the log is best-effort;
+ *  failure here shouldn't block the underlying edit. */
+export async function logReviewEdit(opts: {
+  reviewId: string
+  sectionId: string
+  pageId: string
+  fieldPath: string
+  fieldLabel: string | null
+  beforeValue: unknown
+  afterValue: unknown
+}): Promise<void> {
+  const { data: user } = await supabase.auth.getUser()
+  const editorName = await resolveStaffName(user?.user?.email ?? null)
+  const { error } = await supabase.from('web_review_edits').insert({
+    review_id:         opts.reviewId,
+    web_section_id:    opts.sectionId,
+    web_page_id:       opts.pageId,
+    field_path:        opts.fieldPath,
+    field_label:       opts.fieldLabel,
+    before_value:      opts.beforeValue,
+    after_value:       opts.afterValue,
+    edited_by_user_id: user?.user?.id ?? null,
+    edited_by_name:    editorName,
+  } as never)
+  if (error) console.error('[reviews] logReviewEdit failed:', error.message)
+}
+
+/** Read every edit recorded against a project's reviews. The Feedback
+ *  rail pulls this once per load and surfaces edits inline alongside
+ *  comments in each session card. */
+export async function loadProjectReviewEdits(projectId: string): Promise<WebReviewEdit[]> {
+  // Two-step: find all review ids on this project, then pull their edits.
+  const { data: reviews } = await supabase
+    .from('web_reviews')
+    .select('id')
+    .eq('web_project_id', projectId)
+  const reviewIds = ((reviews ?? []) as Array<{ id: string }>).map(r => r.id)
+  if (reviewIds.length === 0) return []
+  const { data: edits } = await supabase
+    .from('web_review_edits')
+    .select('*')
+    .in('review_id', reviewIds)
+    .order('edited_at', { ascending: false })
+  return (edits ?? []) as WebReviewEdit[]
+}
+
 /** Resolve the current user's display name via the employees table.
  *  Falls back to the auth email when no employee row matches. */
 async function resolveStaffName(email: string | null | undefined): Promise<string | null> {
@@ -210,6 +259,10 @@ export async function startReview(opts: {
   projectId: string
   kind: 'internal' | 'partner'
   notes?: string
+  /** If this review was kicked off by accepting a staff-to-staff
+   *  request, pass the request id so the two get linked + the
+   *  request flips to 'started'. */
+  fromRequestId?: string
 }): Promise<ReviewMutationResult<WebReview>> {
   const partner_token = opts.kind === 'partner' ? crypto.randomUUID().replace(/-/g, '') : null
   const { data: user } = await supabase.auth.getUser()
@@ -224,6 +277,7 @@ export async function startReview(opts: {
       started_by_name:    starterName,
       partner_token,
       notes:              opts.notes ?? null,
+      review_request_id:  opts.fromRequestId ?? null,
     } as never)
     .select('*')
     .maybeSingle()
@@ -231,7 +285,70 @@ export async function startReview(opts: {
     console.error('[reviews] startReview failed:', error.message)
     return { ok: false, data: null, error: error.message }
   }
+  // If this review answers a request, mark it started + link back.
+  if (opts.fromRequestId && data) {
+    const review = data as WebReview
+    await supabase.from('web_review_requests').update({
+      status:            'started',
+      started_review_id: review.id,
+      started_at:        new Date().toISOString(),
+    } as never).eq('id', opts.fromRequestId)
+  }
   return { ok: true, data: data as WebReview | null, error: null }
+}
+
+// ── Review requests (staff-to-staff) ──────────────────────────────
+
+export async function createReviewRequest(opts: {
+  projectId: string
+  assigneeEmail: string
+  assigneeName: string | null
+  notes: string
+}): Promise<ReviewMutationResult<WebReviewRequest>> {
+  const { data: user } = await supabase.auth.getUser()
+  const requesterName = await resolveStaffName(user?.user?.email ?? null)
+  const { data, error } = await supabase
+    .from('web_review_requests')
+    .insert({
+      web_project_id:    opts.projectId,
+      requester_user_id: user?.user?.id ?? null,
+      requester_name:    requesterName,
+      assignee_email:    opts.assigneeEmail.toLowerCase().trim(),
+      assignee_name:     opts.assigneeName,
+      notes:             opts.notes.trim() || null,
+      status:            'pending',
+    } as never)
+    .select('*')
+    .maybeSingle()
+  if (error) {
+    console.error('[reviews] createReviewRequest failed:', error.message)
+    return { ok: false, data: null, error: error.message }
+  }
+  return { ok: true, data: data as WebReviewRequest | null, error: null }
+}
+
+/** Cancel a pending request (only the requester normally does this).
+ *  No-op if the request has already been started. */
+export async function cancelReviewRequest(requestId: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('web_review_requests')
+    .update({ status: 'cancelled', cancelled_at: new Date().toISOString() } as never)
+    .eq('id', requestId)
+    .eq('status', 'pending')  // don't touch already-started requests
+  if (error) {
+    console.error('[reviews] cancelReviewRequest failed:', error.message)
+    return false
+  }
+  return true
+}
+
+export async function listReviewRequests(projectId: string): Promise<WebReviewRequest[]> {
+  const { data } = await supabase
+    .from('web_review_requests')
+    .select('*')
+    .eq('web_project_id', projectId)
+    .order('created_at', { ascending: false })
+  return (data ?? []) as WebReviewRequest[]
 }
 
 /** Close a review. Open comments stay attached to their pages and
@@ -340,6 +457,23 @@ export async function finalizeReview(opts: {
   if (closeErr) {
     console.error('[reviews] finalizeReview close failed:', closeErr.message)
     return { ok: false, data: null, error: closeErr.message }
+  }
+
+  // If this review was kicked off by a staff-to-staff request, flip
+  // the request to 'completed' so the requester sees it's done.
+  const reviewRowFull = reviewRow as { notes?: string | null } | null
+  void reviewRowFull  // keep TS happy
+  const { data: linked } = await supabase
+    .from('web_reviews')
+    .select('review_request_id')
+    .eq('id', opts.reviewId)
+    .maybeSingle()
+  const requestId = (linked as { review_request_id?: string | null } | null)?.review_request_id ?? null
+  if (requestId) {
+    await supabase
+      .from('web_review_requests')
+      .update({ status: 'completed', completed_at: finalizedAt } as never)
+      .eq('id', requestId)
   }
 
   return {

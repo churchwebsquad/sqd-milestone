@@ -28,10 +28,10 @@ import { supabase } from '../../lib/supabase'
 import { runAudit } from '../../lib/webAudit'
 import type { AuditFinding, AuditSeverity } from '../../lib/webAudit'
 import type {
-  StrategyWebProject, WebReview, WebReviewComment,
+  StrategyWebProject, WebReview, WebReviewComment, WebReviewEdit,
 } from '../../types/database'
 import {
-  loadProjectReviewState, startReview, closeReview,
+  loadProjectReviewState, startReview, closeReview, loadProjectReviewEdits,
   type ProjectReviewState,
 } from '../../lib/webReviews'
 import { WMButton } from './Button'
@@ -122,8 +122,15 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
 
   const jumpToSection = useCallback((pageId: string, sectionId: string) => {
     const next = new URLSearchParams(window.location.search)
-    next.set('tab', 'pages')
+    // Stay on whatever workspace the user is in (review or pages).
+    // Both surfaces honor ?page= + ?section= deep-links, so this just
+    // updates the in-canvas selection without yanking the user out of
+    // review mode.
+    if (next.get('tab') !== 'review' && next.get('tab') !== 'pages') {
+      next.set('tab', 'pages')
+    }
     next.set('page', pageId)
+    next.set('section', sectionId)
     setParams(next, { replace: false })
     queueMicrotask(() => {
       document.getElementById(`section-${sectionId}`)?.scrollIntoView({
@@ -261,6 +268,7 @@ function FeedbackTab({
   onJumpToSection: (pageId: string, sectionId: string) => void
 }) {
   const [state, setState] = useState<ProjectReviewState | null>(null)
+  const [edits, setEdits] = useState<WebReviewEdit[]>([])
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -268,7 +276,12 @@ function FeedbackTab({
 
   const load = useCallback(async () => {
     setLoading(true)
-    setState(await loadProjectReviewState(projectId))
+    const [s, e] = await Promise.all([
+      loadProjectReviewState(projectId),
+      loadProjectReviewEdits(projectId),
+    ])
+    setState(s)
+    setEdits(e)
     setLoading(false)
   }, [projectId])
 
@@ -376,6 +389,7 @@ function FeedbackTab({
                     key={r.id}
                     review={r}
                     comments={state.comments.filter(c => c.review_id === r.id).filter(filterFn)}
+                    edits={edits.filter(e => e.review_id === r.id)}
                     onJumpToSection={onJumpToSection}
                     onClose={() => void handleClose(r.id)}
                     onCopyLink={() => r.partner_token && copyPortalLink(r.partner_token, r.id)}
@@ -387,35 +401,24 @@ function FeedbackTab({
           )}
 
           {closedReviews.length > 0 && (
-            <div className="pt-2 mt-1 border-t border-wm-border/60 opacity-70">
+            <div className="pt-2 mt-1 border-t border-wm-border/60">
               <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5 px-1">
-                Recently closed
+                Recently closed · {closedReviews.length}
               </p>
-              <ul className="space-y-1">
-                {closedReviews.map(r => {
-                  const total = state.comments.filter(c => c.review_id === r.id).length
-                  return (
-                    <li key={r.id} className="rounded-md bg-wm-bg-hover/40 border border-wm-border/60 px-2 py-1.5">
-                      <div className="flex items-center gap-1.5 text-[10px] text-wm-text-subtle">
-                        <span className={[
-                          'inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5',
-                          r.kind === 'partner' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-blue-50 text-blue-700 border border-blue-200',
-                        ].join(' ')}>
-                          {r.kind}
-                        </span>
-                        <span className="font-semibold text-wm-text truncate">
-                          {r.kind === 'partner' ? (r.partner_name ?? 'Partner') : (r.started_by_name ?? 'Staff')}
-                        </span>
-                        <span className="ml-auto">{total} item{total === 1 ? '' : 's'}</span>
-                      </div>
-                      <p className="text-[10px] text-wm-text-subtle">
-                        Closed {fmtShortDateTime(r.closed_at ?? r.updated_at)}
-                        {r.closed_by_name && ` by ${r.closed_by_name}`}
-                      </p>
-                    </li>
-                  )
-                })}
-              </ul>
+              <div className="space-y-2 opacity-90">
+                {closedReviews.map(r => (
+                  <ReviewSession
+                    key={r.id}
+                    review={r}
+                    comments={state.comments.filter(c => c.review_id === r.id).filter(filterFn)}
+                    edits={edits.filter(e => e.review_id === r.id)}
+                    onJumpToSection={onJumpToSection}
+                    onClose={() => {}}  // already closed
+                    onCopyLink={() => r.partner_token && copyPortalLink(r.partner_token, r.id)}
+                    copied={copied === r.id}
+                  />
+                ))}
+              </div>
             </div>
           )}
         </>
@@ -428,16 +431,18 @@ function FeedbackTab({
  *  Partner sessions break into 'requested' + 'comment'; internal
  *  sessions break into 'suggested' + 'comment'. */
 function ReviewSession({
-  review, comments, onJumpToSection, onClose, onCopyLink, copied,
+  review, comments, edits, onJumpToSection, onClose, onCopyLink, copied,
 }: {
   review: WebReview
   comments: WebReviewComment[]
+  edits: WebReviewEdit[]
   onJumpToSection: (pageId: string, sectionId: string) => void
   onClose: () => void
   onCopyLink: () => void
   copied: boolean
 }) {
   const isPartner = review.kind === 'partner'
+  const isClosed  = review.status === 'closed'
   const name      = isPartner ? (review.partner_name ?? 'Partner') : (review.started_by_name ?? 'Staff')
 
   // Partition by the kinds each side actually produces.
@@ -450,7 +455,9 @@ function ReviewSession({
       {/* Session header */}
       <div className={[
         'px-2.5 py-2 border-b border-wm-border/60',
-        isPartner ? 'bg-amber-50/50' : 'bg-blue-50/40',
+        isClosed  ? 'bg-wm-bg-hover/40'
+        : isPartner ? 'bg-amber-50/50'
+        : 'bg-blue-50/40',
       ].join(' ')}>
         <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
           <span className={[
@@ -460,35 +467,45 @@ function ReviewSession({
             {isPartner ? 'Partner' : 'Internal'}
           </span>
           <span className="text-[11px] font-semibold text-wm-text truncate">{name}</span>
+          {isClosed && (
+            <span className="inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 bg-wm-success-bg text-wm-success border border-wm-success/20">
+              Closed
+            </span>
+          )}
           <span className="ml-auto text-[10px] font-semibold text-wm-text-subtle">
             {comments.length} item{comments.length === 1 ? '' : 's'}
           </span>
         </div>
         <p className="text-[10px] text-wm-text-subtle">
           Started {fmtShortDateTime(review.started_at)}
+          {isClosed && review.closed_at && (
+            <> · Closed {fmtShortDateTime(review.closed_at)}{review.closed_by_name && ` by ${review.closed_by_name}`}</>
+          )}
         </p>
-        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-          {isPartner && review.partner_token && (
+        {!isClosed && (
+          <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+            {isPartner && review.partner_token && (
+              <button
+                type="button"
+                onClick={onCopyLink}
+                className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-800 hover:text-amber-900"
+              >
+                {copied ? <Check size={10} /> : <Copy size={10} />}
+                {copied ? 'Copied' : 'Copy partner link'}
+              </button>
+            )}
             <button
               type="button"
-              onClick={onCopyLink}
-              className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-800 hover:text-amber-900"
+              onClick={onClose}
+              className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold text-wm-text-subtle hover:text-wm-danger"
             >
-              {copied ? <Check size={10} /> : <Copy size={10} />}
-              {copied ? 'Copied' : 'Copy partner link'}
+              <X size={10} /> Close
             </button>
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold text-wm-text-subtle hover:text-wm-danger"
-          >
-            <X size={10} /> Close
-          </button>
-        </div>
+          </div>
+        )}
       </div>
 
-      {/* Comment groups */}
+      {/* Comment groups + (internal only) edit log */}
       <div className="px-1 py-1 space-y-1">
         {isPartner ? (
           <>
@@ -499,14 +516,80 @@ function ReviewSession({
           <>
             <CommentGroup label="Staff suggestions" items={suggested} onJumpToSection={onJumpToSection} defaultOpen />
             <CommentGroup label="Staff comments"   items={comment}    onJumpToSection={onJumpToSection} />
+            <EditGroup    label="Changes made"     items={edits}      onJumpToSection={onJumpToSection} />
           </>
         )}
-        {comments.length === 0 && (
+        {comments.length === 0 && edits.length === 0 && (
           <p className="px-2 py-1.5 text-[11px] text-wm-text-subtle italic">No items yet.</p>
         )}
       </div>
     </div>
   )
+}
+
+/** Collapsible audit log of field changes made during a review.
+ *  Internal-only — partner reviews don't write to field_values
+ *  directly, so they have no edits to show. */
+function EditGroup({
+  label, items, onJumpToSection, defaultOpen = false,
+}: {
+  label: string
+  items: WebReviewEdit[]
+  onJumpToSection: (pageId: string, sectionId: string) => void
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  if (items.length === 0) return null
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-1 px-2 py-1 text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle hover:text-wm-text"
+      >
+        {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+        <span>{label}</span>
+        <span className="ml-auto text-wm-text-subtle">{items.length}</span>
+      </button>
+      {open && (
+        <ul className="px-1 pb-1 space-y-1">
+          {items.map(e => (
+            <li key={e.id}>
+              <button
+                type="button"
+                onClick={() => onJumpToSection(e.web_page_id, e.web_section_id)}
+                className="w-full text-left rounded-md bg-emerald-50/30 border border-emerald-200/50 px-2 py-1.5 hover:border-emerald-400 transition-colors"
+              >
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <span className="font-mono text-[9px] text-emerald-700">{e.field_label ?? e.field_path}</span>
+                  <span className="ml-auto text-[9px] text-wm-text-subtle">
+                    {fmtShortDateTime(e.edited_at)}
+                  </span>
+                </div>
+                <p className="text-[10px] text-wm-text-subtle line-through line-clamp-1">
+                  {stringifyEditValue(e.before_value)}
+                </p>
+                <p className="text-[11px] text-wm-text leading-snug line-clamp-2">
+                  {stringifyEditValue(e.after_value)}
+                </p>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function stringifyEditValue(v: unknown): string {
+  if (v == null) return '(empty)'
+  if (typeof v === 'string') return stripHtml(v) || '(empty)'
+  if (typeof v === 'object') {
+    const obj = v as { label?: unknown }
+    if (typeof obj.label === 'string') return obj.label
+    try { return JSON.stringify(v).slice(0, 80) } catch { return String(v) }
+  }
+  return String(v)
 }
 
 function CommentGroup({

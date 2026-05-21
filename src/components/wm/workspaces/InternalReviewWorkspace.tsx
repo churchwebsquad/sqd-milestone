@@ -27,12 +27,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  X, Loader2, FileText, MessageSquare, Check,
+  Loader2, FileText, MessageSquare, Check,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { augmentTemplate } from '../../../lib/webBrixiesSchemaAugment'
 import { loadEditorSnippets } from '../../../lib/webSnippets'
-import { loadProjectReviewState, type ProjectReviewState, closeReview, finalizeReview } from '../../../lib/webReviews'
+import { loadProjectReviewState, type ProjectReviewState, finalizeReview, logReviewEdit } from '../../../lib/webReviews'
 import { SectionList } from '../sectioneditor/SectionList'
 import { useSectionDetailPublisher } from '../sectioneditor/SectionEditingContext'
 import type { WMSnippetOption } from '../RichTextEditor'
@@ -190,6 +190,13 @@ export function InternalReviewWorkspace({
   }, [reviewState, activePageId])
 
   const updateSection = useCallback(async (sectionId: string, patch: Partial<WebSection>) => {
+    // Snapshot the section + its field labels BEFORE applying the
+    // patch — needed for the review edit log diff below.
+    const beforeSection = Object.values(sectionsByPage).flat().find(s => s.id === sectionId) ?? null
+    const beforeFV = (beforeSection?.field_values ?? {}) as Record<string, unknown>
+    const afterFV  = (patch.field_values ?? beforeFV) as Record<string, unknown>
+    const template = beforeSection?.content_template_id ? templates[beforeSection.content_template_id] : null
+
     // Optimistic local update so the iframe re-renders immediately.
     setSectionsByPage(prev => {
       const next: Record<string, WebSection[]> = {}
@@ -199,7 +206,29 @@ export function InternalReviewWorkspace({
       return next
     })
     await supabase.from('web_sections').update(patch).eq('id', sectionId)
-  }, [])
+
+    // Audit log: for every top-level field that changed in this
+    // patch, write a web_review_edits row tied to the active internal
+    // review. Best-effort — failures are logged but don't block.
+    if (beforeSection && patch.field_values) {
+      const changedKeys = new Set<string>()
+      for (const k of Object.keys({ ...beforeFV, ...afterFV })) {
+        if (JSON.stringify(beforeFV[k]) !== JSON.stringify(afterFV[k])) changedKeys.add(k)
+      }
+      for (const key of changedKeys) {
+        const labelFromTemplate = template?.fields?.find(f => f.key === key)?.layer_name ?? null
+        void logReviewEdit({
+          reviewId:    review.id,
+          sectionId:   beforeSection.id,
+          pageId:      beforeSection.web_page_id,
+          fieldPath:   key,
+          fieldLabel:  labelFromTemplate,
+          beforeValue: beforeFV[key] ?? null,
+          afterValue:  afterFV[key] ?? null,
+        })
+      }
+    }
+  }, [sectionsByPage, templates, review.id])
 
   const refreshAfterCommentAction = useCallback(async () => {
     // Apply / Amend writes into web_sections.field_values; reload
@@ -249,26 +278,20 @@ export function InternalReviewWorkspace({
 
   // ── Close review ────────────────────────────────────────────────
 
-  const handleClose = async () => {
-    if (!confirm('Close this internal review? Open comments stay attached to their pages and carry into the next session. Pages keep their current status.')) return
-    setClosing(true)
-    const res = await closeReview(review.id)
-    setClosing(false)
-    if (res.ok) {
-      await onReviewChange()
-      onExitToInbox()
-    }
-  }
-
-  const handleFinalize = async () => {
-    if (!confirm('Finalize this review? Pages with no remaining open feedback will be marked Approved; pages with unresolved comments stay In Review.')) return
+  /** Single completion action — closing your internal review IS
+   *  finalizing it. Pages with no remaining open feedback flip to
+   *  Approved; pages with unresolved comments stay In Review for the
+   *  next person to work through. The session itself is marked
+   *  closed and counted as complete. */
+  const handleFinish = async () => {
+    if (!confirm('Finish this review? Your comments + suggestions stay attached so staff can work through them. Pages with no open feedback will be marked Approved.')) return
     setClosing(true)
     const res = await finalizeReview({ reviewId: review.id, projectId: project.id })
     setClosing(false)
     if (res.ok) {
       const d = res.data
       if (d) {
-        alert(`Review finalized.\n${d.pagesApproved} page(s) approved.\n${d.pagesPending} page(s) still pending (open feedback).`)
+        alert(`Review complete.\n${d.pagesApproved} page(s) approved.\n${d.pagesPending} page(s) still need attention.`)
       }
       await onReviewChange()
       onExitToInbox()
@@ -355,23 +378,13 @@ export function InternalReviewWorkspace({
             )}
             <button
               type="button"
-              onClick={() => void handleClose()}
-              disabled={closing}
-              className="inline-flex items-center gap-1.5 rounded-full border border-wm-border bg-wm-bg-elevated text-[11px] font-semibold text-wm-text-muted hover:border-wm-danger hover:text-wm-danger px-3 py-1.5 transition-colors disabled:opacity-40"
-              title="Close this review session. Pages keep their current status — open comments stay open."
-            >
-              {closing ? <Loader2 size={11} className="animate-spin" /> : <X size={11} />}
-              Close review
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleFinalize()}
+              onClick={() => void handleFinish()}
               disabled={closing}
               className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-700 px-3 py-1.5 transition-colors disabled:opacity-40"
-              title="Finalize: close this review and mark pages with no open feedback as Approved."
+              title="Mark your review complete. Your comments + suggestions stay attached for staff to work through. Pages with no open feedback flip to Approved."
             >
               {closing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
-              Finalize review
+              Finish review
             </button>
           </div>
         </header>

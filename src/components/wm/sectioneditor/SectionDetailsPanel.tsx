@@ -116,6 +116,21 @@ export function SectionDetailsPanel({
 
       {/* Scrollable body */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-5">
+        {/* When an internal review is active, surface the review
+            comments block at the TOP so it's visually distinct from
+            the page-editing chrome — it's the primary action surface
+            during review mode, not an afterthought tucked at the
+            bottom. */}
+        {activeInternalReview && (
+          <ReviewCommentsBlock
+            section={section}
+            template={template}
+            activeInternalReview={activeInternalReview}
+            sectionComments={sectionComments ?? []}
+            onCommentsChange={onCommentsChange ?? (async () => {})}
+          />
+        )}
+
         {/* Field editors */}
         {template && visibleFields.length > 0 && (
           <Section title="Fields" defaultOpen>
@@ -171,14 +186,19 @@ export function SectionDetailsPanel({
           </Section>
         )}
 
-        {/* Review comments + suggestion entry point */}
-        <ReviewCommentsBlock
-          section={section}
-          template={template}
-          activeInternalReview={activeInternalReview ?? null}
-          sectionComments={sectionComments ?? []}
-          onCommentsChange={onCommentsChange ?? (async () => {})}
-        />
+        {/* Review comments + suggestion entry point. Only renders
+            HERE (at the bottom) when there's no active internal
+            review; an active review pulls this block to the top via
+            the conditional above. */}
+        {!activeInternalReview && (
+          <ReviewCommentsBlock
+            section={section}
+            template={template}
+            activeInternalReview={null}
+            sectionComments={sectionComments ?? []}
+            onCommentsChange={onCommentsChange ?? (async () => {})}
+          />
+        )}
 
         {/* Counters at the bottom — read-only */}
         {template && presence && (
