@@ -234,13 +234,21 @@ export async function importCopywriterPageOutput(
   const slug = out.page_slug.replace(/^\/+/, '').trim()
   if (!slug) return { error: 'page_slug is empty after trimming.' }
 
-  const { data: existing, error: findErr } = await supabase
+  // Lookup is tolerant of dupes: if a previous archived row + a live
+  // row both carry the same slug, we want the live one. Sort archived
+  // last so we land on the active row at index 0. We don't use
+  // .maybeSingle() here — it errors on > 1 rows even when one is
+  // archived and irrelevant.
+  const { data: existingRows, error: findErr } = await supabase
     .from('web_pages')
-    .select('id, content_status, sort_order')
+    .select('id, content_status, sort_order, archived')
     .eq('web_project_id', project.id)
     .eq('slug', slug)
-    .maybeSingle()
+    .order('archived', { ascending: true })  // false < true → live first
+    .order('updated_at', { ascending: false })
   if (findErr) return { error: `page lookup failed: ${findErr.message}` }
+  const existing = (existingRows ?? []).find(r => !(r as { archived?: boolean }).archived)
+    ?? ((existingRows ?? [])[0] ?? null)
 
   const seo = strategicSetupToSeo(out.strategic_setup)
 
@@ -248,11 +256,16 @@ export async function importCopywriterPageOutput(
   let created = false
   if (existing) {
     pageId = (existing as { id: string }).id
+    // If we matched an archived dupe (e.g. an earlier import that
+    // got abandoned), un-archive it on update — beats inserting a
+    // second row with the same slug.
+    const wasArchived = !!(existing as { archived?: boolean }).archived
     const { error: updErr } = await supabase
       .from('web_pages')
       .update({
         name: out.page_title,
         seo,
+        archived: wasArchived ? false : undefined,
         updated_at: new Date().toISOString(),
       })
       .eq('id', pageId)
