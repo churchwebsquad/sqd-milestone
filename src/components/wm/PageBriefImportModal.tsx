@@ -10,8 +10,8 @@
  *  - Step 2 (later) will add Brixies template fitting + overflow panel
  */
 
-import { useState } from 'react'
-import { ArrowRight, AlertCircle, CheckCircle2, FileText, Sparkles } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ArrowRight, AlertCircle, CheckCircle2, FileText, Sparkles, RotateCw } from 'lucide-react'
 import { WMButton } from './Button'
 import {
   validateBrief,
@@ -27,8 +27,10 @@ import {
   isCopywriterPageOutput,
   validateCopywriterPageOutput,
   importCopywriterPageOutput,
+  loadFamilyAlternates,
   type CopywriterPageOutput,
   type CopywriterValidationReport,
+  type TemplateRef,
 } from '../../lib/webCopywriterOutput'
 import type { StrategyWebProject } from '../../types/database'
 
@@ -137,6 +139,11 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
   // looks like a copywriter output instead of a legacy brief.
   const [copyOutput, setCopyOutput] = useState<CopywriterPageOutput | null>(null)
   const [copyReport, setCopyReport] = useState<CopywriterValidationReport | null>(null)
+  // Per-section template override: sort_order → replacement template_id.
+  const [templateOverrides, setTemplateOverrides] = useState<Record<number, string>>({})
+  // Templates grouped by family — populated after a successful copy
+  // validation so the swap dropdown has alternates to offer.
+  const [familyAlternates, setFamilyAlternates] = useState<Record<string, TemplateRef[]>>({})
   const [validating, setValidating] = useState(false)
   const [importing, setImporting] = useState(false)
   const [addSnippets, setAddSnippets] = useState(true)
@@ -154,9 +161,27 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
     setReport(null)
     setCopyOutput(null)
     setCopyReport(null)
+    setTemplateOverrides({})
+    setFamilyAlternates({})
     setImportMsg(null)
     setBundleProgress(null)
   }
+
+  // After copywriter validation lands, pre-load every alternate
+  // template in the same family for each section so the swap dropdown
+  // is instant + we can highlight when a swap target also has
+  // mechanical issues.
+  useEffect(() => {
+    if (!copyReport) return
+    const ids = Array.from(new Set(Object.keys(copyReport.resolved_templates)))
+    if (ids.length === 0) return
+    let cancelled = false
+    void (async () => {
+      const { byFamily } = await loadFamilyAlternates(ids)
+      if (!cancelled) setFamilyAlternates(byFamily)
+    })()
+    return () => { cancelled = true }
+  }, [copyReport])
 
   const handleValidate = async () => {
     setParseError(null)
@@ -213,7 +238,9 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
     setImporting(true)
     setImportMsg(null)
     try {
-      const { result, error } = await importCopywriterPageOutput(copyOutput, project)
+      const { result, error } = await importCopywriterPageOutput(copyOutput, project, {
+        templateOverrides,
+      })
       if (error) {
         setImportMsg(`Error: ${error}`)
         return
@@ -421,31 +448,104 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
                 )
               })()}
 
-              {/* Section + template summary */}
+              {/* Section + template summary with inline template swap */}
               <div className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
                 <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-2">
                   Sections to import · {copyOutput.sections.length}
                 </p>
-                <ul className="space-y-0.5">
+                <p className="text-[11px] text-wm-text-muted mb-2 leading-snug">
+                  Swap the bound template for any section if the copywriter's pick is missing a
+                  slot you need (e.g. a banner without a CTA).
+                </p>
+                <ul className="space-y-1.5">
                   {copyOutput.sections
                     .slice()
                     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
                     .map(s => {
-                      const tpl = copyReport.resolved_templates[s.template_id]
-                      const broken = copyReport.unresolved_template_ids.includes(s.template_id)
+                      // Apply any user-picked override first.
+                      const effectiveId  = templateOverrides[s.sort_order] ?? s.template_id
+                      const broken       = copyReport.unresolved_template_ids.includes(effectiveId)
+                      // Figure out which family this template lives in
+                      // so we can offer alternates in the dropdown.
+                      const family = Object.keys(familyAlternates).find(fam =>
+                        familyAlternates[fam].some(t => t.id === effectiveId),
+                      ) ?? null
+                      const alternates = family ? familyAlternates[family] : []
+                      // Issues from mechanical_scan_log scoped to this
+                      // section — surface inline so the strategist knows
+                      // why they might want to swap.
+                      const sectionIssues = (copyOutput.mechanical_scan_log ?? [])
+                        .filter(m => m.section_sort === s.sort_order)
+
                       return (
                         <li
                           key={`${s.sort_order}-${s.template_id}`}
-                          className="flex items-center gap-2 text-[12px] text-wm-text"
+                          className="text-[12px] text-wm-text"
                         >
-                          <span className="text-wm-text-subtle font-mono text-[10px] w-6 text-right">
-                            {String(s.sort_order ?? 0).padStart(2, '0')}
-                          </span>
-                          <span className={broken ? 'text-wm-danger' : 'text-wm-text-muted'}>
-                            {tpl ?? `${s.template_id} (not in catalog)`}
-                          </span>
-                          {s.concept_id && (
-                            <span className="text-[10px] text-wm-text-subtle font-mono">· {s.concept_id}</span>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-wm-text-subtle font-mono text-[10px] w-6 text-right shrink-0">
+                              {String(s.sort_order ?? 0).padStart(2, '0')}
+                            </span>
+                            <select
+                              value={effectiveId}
+                              onChange={(e) => {
+                                const next = { ...templateOverrides }
+                                if (e.target.value === s.template_id) delete next[s.sort_order]
+                                else                                  next[s.sort_order] = e.target.value
+                                setTemplateOverrides(next)
+                              }}
+                              disabled={importing}
+                              className={[
+                                'min-w-0 flex-1 h-7 text-[12px] px-2 rounded border bg-wm-bg outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/15',
+                                broken          ? 'border-wm-danger text-wm-danger' :
+                                templateOverrides[s.sort_order] ? 'border-wm-accent text-wm-accent-strong' :
+                                                  'border-wm-border text-wm-text',
+                              ].join(' ')}
+                            >
+                              {/* The original copywriter pick (always first so the user can revert). */}
+                              <option value={s.template_id}>
+                                {copyReport.resolved_templates[s.template_id] ?? `${s.template_id} (not in catalog)`}
+                                {effectiveId === s.template_id ? '' : ' (copywriter pick)'}
+                              </option>
+                              {alternates.length > 0 && (
+                                <optgroup label={`Other ${family ?? 'templates'}`}>
+                                  {alternates
+                                    .filter(t => t.id !== s.template_id)
+                                    .map(t => (
+                                      <option key={t.id} value={t.id}>{t.layer_name}</option>
+                                    ))}
+                                </optgroup>
+                              )}
+                            </select>
+                            {templateOverrides[s.sort_order] && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = { ...templateOverrides }
+                                  delete next[s.sort_order]
+                                  setTemplateOverrides(next)
+                                }}
+                                className="inline-flex items-center gap-0.5 text-[10px] text-wm-text-subtle hover:text-wm-accent-strong shrink-0"
+                                title="Revert to the copywriter's pick"
+                              >
+                                <RotateCw size={9} /> Revert
+                              </button>
+                            )}
+                            {s.concept_id && (
+                              <span className="text-[10px] text-wm-text-subtle font-mono shrink-0">· {s.concept_id}</span>
+                            )}
+                          </div>
+                          {/* Mechanical-fit warnings scoped to this section, surfaced
+                              right under the dropdown so the user knows WHY they might
+                              swap (e.g., "this banner has no CTA slot"). */}
+                          {sectionIssues.length > 0 && (
+                            <ul className="mt-1 ml-8 space-y-0.5">
+                              {sectionIssues.map((m, i) => (
+                                <li key={i} className="text-[10px] text-wm-warning leading-snug">
+                                  <span className="font-semibold">{m.slot}</span> · {m.issue}
+                                </li>
+                              ))}
+                            </ul>
                           )}
                         </li>
                       )

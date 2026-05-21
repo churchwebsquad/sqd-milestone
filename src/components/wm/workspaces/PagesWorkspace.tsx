@@ -1154,6 +1154,7 @@ function PageEditor({
               }}
             />
           )}
+          <CopywriterNotesBanner brief={page.brief} />
           {headerNode}
 
           {viewMode === 'preview' ? (
@@ -1374,6 +1375,111 @@ function ReviewBanner({
 }
 
 // ── Page-row review badge ────────────────────────────────────────────
+
+/** Surfaces the copywriter's mechanical scan log + flagged gaps +
+ *  kickbacks on the page editor, after import. Pulls from
+ *  web_pages.brief.copywriter_meta which the copywriter-output
+ *  importer writes on every commit. Collapsible; defaults open when
+ *  there's at least one warning so the strategist sees them on
+ *  their first visit to the page. */
+function CopywriterNotesBanner({ brief }: { brief: unknown }) {
+  const meta = (() => {
+    if (!brief || typeof brief !== 'object') return null
+    const m = (brief as Record<string, unknown>).copywriter_meta
+    if (!m || typeof m !== 'object') return null
+    return m as {
+      imported_at?:               string
+      mechanical_scan_log?:       Array<{ section_sort: number; slot: string; issue: string; fix?: string }>
+      gaps_flagged?:              Array<{ section_sort: number; note: string }>
+      kickbacks_to_copywriter?:   Array<{ section_sort?: number; note?: string }>
+      template_overrides_applied?: Array<{ sort_order: number; template_id: string }>
+    }
+  })()
+  const scan      = meta?.mechanical_scan_log     ?? []
+  const gaps      = meta?.gaps_flagged            ?? []
+  const kickbacks = meta?.kickbacks_to_copywriter ?? []
+  const overrides = meta?.template_overrides_applied ?? []
+  const total = scan.length + gaps.length + kickbacks.length
+  const [open, setOpen] = useState(scan.length + kickbacks.length > 0)
+  if (!meta || total === 0) return null
+  return (
+    <div className="mb-4 rounded-md border border-wm-border bg-wm-bg-elevated">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-wm-bg-hover"
+      >
+        <div className="flex items-center gap-2">
+          <FileText size={12} className="text-wm-accent-strong" />
+          <span className="text-[12px] font-semibold text-wm-text">Copywriter notes</span>
+          <span className="text-[10px] text-wm-text-subtle">
+            {scan.length > 0      && `${scan.length} scan log · `}
+            {gaps.length > 0      && `${gaps.length} gap${gaps.length === 1 ? '' : 's'} · `}
+            {kickbacks.length > 0 && `${kickbacks.length} kickback${kickbacks.length === 1 ? '' : 's'} · `}
+            {overrides.length > 0 && `${overrides.length} template swap${overrides.length === 1 ? '' : 's'} · `}
+            {meta.imported_at && new Date(meta.imported_at).toLocaleString(undefined, { month: 'short', day: 'numeric' })}
+          </span>
+        </div>
+        <span className="text-[10px] text-wm-text-subtle">{open ? 'Hide' : 'Show'}</span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3 space-y-2.5 border-t border-wm-border/60 pt-2.5">
+          {scan.length > 0 && (
+            <div>
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-warning mb-1">
+                Mechanical scan log · {scan.length}
+              </p>
+              <ul className="space-y-1">
+                {scan.map((m, i) => (
+                  <li key={i} className="text-[11px] text-wm-text">
+                    <span className="font-semibold">Section {m.section_sort} · {m.slot}</span>
+                    <span className="text-wm-text-muted"> — {m.issue}</span>
+                    {m.fix && <span className="text-wm-text-subtle italic"> {m.fix}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {kickbacks.length > 0 && (
+            <div>
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-warning mb-1">
+                Kickbacks · {kickbacks.length}
+              </p>
+              <ul className="space-y-1">
+                {kickbacks.map((k, i) => (
+                  <li key={i} className="text-[11px] text-wm-text">
+                    {k.section_sort != null && <span className="font-semibold">Section {k.section_sort} · </span>}
+                    <span className="text-wm-text-muted">{typeof k.note === 'string' ? k.note : JSON.stringify(k)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {gaps.length > 0 && (
+            <div>
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">
+                Gaps to confirm · {gaps.length}
+              </p>
+              <ul className="space-y-1">
+                {gaps.map((g, i) => (
+                  <li key={i} className="text-[11px] text-wm-text">
+                    <span className="font-semibold">Section {g.section_sort}</span>
+                    <span className="text-wm-text-muted"> — {g.note}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {overrides.length > 0 && (
+            <p className="text-[10px] text-wm-text-subtle italic">
+              {overrides.length} template{overrides.length === 1 ? '' : 's'} swapped from the copywriter's pick during import.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 /** Small pill rendered next to the per-page status pill in the left
  *  list. Shows "Edits requested", "Edits suggested", or "Commented"

@@ -196,6 +196,49 @@ export interface CopywriterImportResult {
   seo_written:      boolean
 }
 
+/** Resolve a template by id. Returns id, layer_name, family for use
+ *  in the import modal's template-swap dropdown. */
+export interface TemplateRef {
+  id:         string
+  layer_name: string
+  family:     string | null
+}
+
+/** Load every template in the same family as the input set, plus the
+ *  inputs themselves. Used by the import modal so the user can swap
+ *  any section's selected template for an alternate in the same
+ *  family (e.g., swap banner-section-1 → banner-section-3 if the
+ *  default doesn't have a CTA slot the copywriter needs). */
+export async function loadFamilyAlternates(
+  templateIds: string[],
+): Promise<{ byId: Record<string, TemplateRef>; byFamily: Record<string, TemplateRef[]> }> {
+  if (templateIds.length === 0) return { byId: {}, byFamily: {} }
+  // 1. Pull the input templates first to learn their families.
+  const { data: inputs } = await supabase
+    .from('web_content_templates')
+    .select('id, layer_name, family')
+    .in('id', templateIds)
+  const families = Array.from(new Set(((inputs ?? []) as TemplateRef[]).map(t => t.family).filter((f): f is string => !!f)))
+  // 2. Pull every template in those families.
+  let all: TemplateRef[] = (inputs ?? []) as TemplateRef[]
+  if (families.length > 0) {
+    const { data: fam } = await supabase
+      .from('web_content_templates')
+      .select('id, layer_name, family')
+      .in('family', families)
+      .order('layer_name')
+    all = (fam ?? []) as TemplateRef[]
+  }
+  const byId: Record<string, TemplateRef> = {}
+  for (const t of all) byId[t.id] = t
+  const byFamily: Record<string, TemplateRef[]> = {}
+  for (const t of all) {
+    const f = t.family ?? 'Other'
+    ;(byFamily[f] ??= []).push(t)
+  }
+  return { byId, byFamily }
+}
+
 /** Map strategic_setup → web_pages.seo. The copywriter's
  *  `aeo_smart_snippet` lands as the answer_intent on the AEO side. */
 function strategicSetupToSeo(setup: CopywriterStrategicSetup | undefined): WebPageSeo {
@@ -291,6 +334,12 @@ function sectionNotes(s: CopywriterSection): string {
 export async function importCopywriterPageOutput(
   out: CopywriterPageOutput,
   project: StrategyWebProject,
+  opts: {
+    /** Map of `sort_order` → replacement template_id. Lets the import
+     *  modal apply user-picked template swaps without mutating the
+     *  original payload. */
+    templateOverrides?: Record<number, string>
+  } = {},
 ): Promise<{ result?: CopywriterImportResult; error?: string }> {
   // 1. Find or create the page (by project + slug).
   const slug = out.page_slug.replace(/^\/+/, '').trim()
@@ -314,6 +363,38 @@ export async function importCopywriterPageOutput(
 
   const seo = strategicSetupToSeo(out.strategic_setup)
 
+  // Apply template overrides (from the import modal's swap dropdown)
+  // BEFORE we look up templates for normalization. Sections get a
+  // shallow clone with `template_id` replaced.
+  const overrides = opts.templateOverrides ?? {}
+  const sectionsWithOverrides: CopywriterSection[] = out.sections.map(s => {
+    const replacement = overrides[s.sort_order]
+    return replacement && replacement !== s.template_id
+      ? { ...s, template_id: replacement }
+      : s
+  })
+
+  // Persist the copywriter top-level meta on web_pages.brief so the
+  // page editor can surface mechanical_scan_log + gaps_flagged +
+  // kickbacks for review AFTER import. The legacy PageBrief shape
+  // also lives here for non-copywriter imports — we namespace this
+  // under `copywriter_meta` so the two coexist.
+  const briefPayload = {
+    copywriter_meta: {
+      imported_at:               new Date().toISOString(),
+      page_title:                out.page_title,
+      primary_persona:           out.primary_persona ?? null,
+      strategic_setup:           out.strategic_setup ?? null,
+      mechanical_scan_log:       out.mechanical_scan_log ?? [],
+      gaps_flagged:              out.gaps_flagged ?? [],
+      kickbacks_to_copywriter:   out.kickbacks_to_copywriter ?? [],
+      template_overrides_applied: Object.entries(overrides).map(([sort, tid]) => ({
+        sort_order: Number(sort),
+        template_id: tid,
+      })),
+    },
+  }
+
   let pageId: string
   let created = false
   if (existing) {
@@ -327,6 +408,7 @@ export async function importCopywriterPageOutput(
       .update({
         name: out.page_title,
         seo,
+        brief: briefPayload,
         archived: wasArchived ? false : undefined,
         updated_at: new Date().toISOString(),
       })
@@ -356,6 +438,7 @@ export async function importCopywriterPageOutput(
         content_status:  draftStatus,
         edited_since_ai: false,
         seo,
+        brief:           briefPayload,
       } as never)
       .select('id')
       .single()
@@ -387,7 +470,7 @@ export async function importCopywriterPageOutput(
   // schema before writing. Without this step the copywriter's
   // {items: [...]} group wrappers + flat button-shape items don't
   // bind, and the section renders empty.
-  const tplIds = Array.from(new Set(out.sections.map(s => s.template_id).filter(Boolean)))
+  const tplIds = Array.from(new Set(sectionsWithOverrides.map(s => s.template_id).filter(Boolean)))
   const templatesById: Record<string, WebContentTemplate> = {}
   if (tplIds.length > 0) {
     const { data: tplRows } = await supabase
@@ -399,7 +482,7 @@ export async function importCopywriterPageOutput(
     }
   }
 
-  const sectionRows = out.sections
+  const sectionRows = sectionsWithOverrides
     .slice()
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
     .map((s) => {
