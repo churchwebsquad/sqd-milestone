@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, Plus, Eye, X, UserPlus, Inbox } from 'lucide-react'
+import { Loader2, Plus, Eye, X, UserPlus, Inbox, Copy, Check } from 'lucide-react'
 import {
   loadProjectReviewState, startReview, listReviewRequests,
   cancelReviewRequest, type ProjectReviewState,
@@ -35,6 +35,7 @@ export function ReviewWorkspace({ project }: Props) {
   const [mutating, setMutating] = useState(false)
   const [mutationError, setMutationError] = useState<string | null>(null)
   const [requestModalOpen, setRequestModalOpen] = useState(false)
+  const [partnerLinkCopied, setPartnerLinkCopied] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -83,6 +84,42 @@ export function ReviewWorkspace({ project }: Props) {
     if (!confirm('Cancel this review request?')) return
     await cancelReviewRequest(requestId)
     await load()
+  }
+
+  /** "Get partner review link" flow — if no partner review is open,
+   *  start one so we have a token to copy; either way copy the
+   *  resulting link to the clipboard. The button label flips to
+   *  "Copied" for a short window after a successful copy. */
+  const handleGetPartnerLink = async () => {
+    setMutating(true)
+    setMutationError(null)
+    let token: string | null = null
+    const existing = state?.open_reviews.find(r => r.kind === 'partner') ?? null
+    if (existing?.partner_token) {
+      token = existing.partner_token
+    } else {
+      const res = await startReview({ projectId: project.id, kind: 'partner' })
+      if (!res.ok) {
+        setMutationError(`Couldn't start partner review: ${res.error ?? 'unknown error'}.`)
+        setMutating(false)
+        return
+      }
+      token = res.data?.partner_token ?? null
+      await load()
+    }
+    setMutating(false)
+    if (!token) {
+      setMutationError("Partner review started but no link was issued — refresh and try again.")
+      return
+    }
+    const url = `${window.location.origin}/portal/review/${token}`
+    try {
+      await navigator.clipboard.writeText(url)
+      setPartnerLinkCopied(true)
+      setTimeout(() => setPartnerLinkCopied(false), 2500)
+    } catch {
+      setMutationError(`Couldn't copy to clipboard — link is ${url}`)
+    }
   }
 
   if (loading) {
@@ -170,7 +207,21 @@ export function ReviewWorkspace({ project }: Props) {
             <WMButton
               variant="primary"
               size="md"
-              iconLeft={mutating ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+              iconLeft={
+                mutating ? <Loader2 size={13} className="animate-spin" /> :
+                partnerLinkCopied ? <Check size={13} /> :
+                <Copy size={13} />
+              }
+              onClick={() => void handleGetPartnerLink()}
+              disabled={mutating}
+              title="Generate the partner-facing review URL (starts a partner review if needed) and copy it to your clipboard."
+            >
+              {partnerLinkCopied ? 'Link copied' : 'Get partner review link'}
+            </WMButton>
+            <WMButton
+              variant="secondary"
+              size="md"
+              iconLeft={<Plus size={13} />}
               onClick={() => void handleStart()}
               disabled={mutating}
             >

@@ -23,7 +23,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   Tag, BookOpen, Mic, MessageSquare, AlertTriangle, RotateCw, Search,
   Loader2, SquarePen, Inbox, Plus, Copy, X, Check, ChevronRight, ChevronDown,
-  Globe,
+  Globe, UserPlus,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { runAudit } from '../../lib/webAudit'
@@ -44,6 +44,8 @@ import { SnippetsWorkspace } from './workspaces/SnippetsWorkspace'
 import { VoiceWorkspace } from './workspaces/VoiceWorkspace'
 import { HeuristicsWorkspace } from './workspaces/HeuristicsWorkspace'
 import { SeoPanel } from './SeoPanel'
+import { RequestReviewModal } from './RequestReviewModal'
+import { useAuth } from '../../contexts/AuthContext'
 
 type RailTab = 'section' | 'snippets' | 'voice' | 'heuristics' | 'feedback' | 'audit' | 'seo'
 
@@ -276,6 +278,7 @@ function FeedbackTab({
   query: string
   onJumpToSection: (pageId: string, sectionId: string) => void
 }) {
+  const { user } = useAuth()
   const [state, setState] = useState<ProjectReviewState | null>(null)
   const [edits, setEdits] = useState<WebReviewEdit[]>([])
   // Maps for resolving an edit row's page name + section label so the
@@ -284,9 +287,11 @@ function FeedbackTab({
   const [pageById, setPageById] = useState<Record<string, { id: string; name: string }>>({})
   const [sectionLabelById, setSectionLabelById] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
-  const [starting, setStarting] = useState(false)
+  const [mutating, setMutating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
+  const [partnerLinkCopied, setPartnerLinkCopied] = useState(false)
+  const [requestModalOpen, setRequestModalOpen] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -343,13 +348,51 @@ function FeedbackTab({
 
   useEffect(() => { void load() }, [load])
 
-  const handleStartPartner = async () => {
-    setStarting(true)
+  /** Get-or-start a partner review and copy its link. Mirrors the
+   *  same button on the Review tab so both surfaces feel like one
+   *  action regardless of where the user clicks. */
+  const handleGetPartnerLink = async () => {
+    setMutating(true)
     setError(null)
-    const res = await startReview({ projectId, kind: 'partner' })
-    setStarting(false)
+    let token: string | null = null
+    const existing = state?.open_reviews.find(r => r.kind === 'partner') ?? null
+    if (existing?.partner_token) {
+      token = existing.partner_token
+    } else {
+      const res = await startReview({ projectId, kind: 'partner' })
+      if (!res.ok) {
+        setError(res.error ?? 'Failed to start partner review.')
+        setMutating(false)
+        return
+      }
+      token = res.data?.partner_token ?? null
+      await load()
+    }
+    setMutating(false)
+    if (!token) {
+      setError("Partner review started but no link was issued — refresh and try again.")
+      return
+    }
+    const url = `${window.location.origin}/portal/review/${token}`
+    try {
+      await navigator.clipboard.writeText(url)
+      setPartnerLinkCopied(true)
+      setTimeout(() => setPartnerLinkCopied(false), 2500)
+    } catch {
+      setError(`Couldn't copy to clipboard — link is ${url}`)
+    }
+  }
+
+  /** Start an internal review for the current user. Per the per-user
+   *  semantics, each staff has at most one open internal review on a
+   *  project; we no-op if they've already got one running. */
+  const handleStartInternal = async () => {
+    setMutating(true)
+    setError(null)
+    const res = await startReview({ projectId, kind: 'internal' })
+    setMutating(false)
     if (res.ok) await load()
-    else setError(res.error ?? 'Failed to start partner review.')
+    else setError(res.error ?? 'Failed to start internal review.')
   }
 
   const handleClose = async (reviewId: string) => {
@@ -388,35 +431,57 @@ function FeedbackTab({
 
   const openReviews   = state.open_reviews
   const closedReviews = state.reviews.filter(r => r.status === 'closed').slice(0, 10)
-  const openPartner   = openReviews.find(r => r.kind === 'partner') ?? null
+  // Current user's own open internal review — hides the "Start
+  // internal review" rail button when they've already got one going.
+  const myOpenInternal = openReviews.find(
+    r => r.kind === 'internal' && r.started_by_user_id === user?.id,
+  ) ?? null
 
   return (
     <div className="p-3 space-y-3">
-      {/* Top action — start a partner review (or copy link if one's already open) */}
-      {openPartner ? (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900 flex items-center gap-2">
-          <span className="font-semibold">Partner review open</span>
-          <button
-            type="button"
-            onClick={() => openPartner.partner_token && copyPortalLink(openPartner.partner_token, openPartner.id)}
-            className="ml-auto inline-flex items-center gap-1 text-amber-800 font-semibold hover:text-amber-900"
+      {/* Top actions — partner link (dark) + internal review + request
+          (light). Mirrors the Review tab's empty-state CTAs so the
+          same actions are always one click away regardless of where
+          the user is in the workspace. */}
+      <div className="space-y-1.5">
+        <WMButton
+          variant="primary"
+          size="sm"
+          iconLeft={
+            mutating ? <Loader2 size={11} className="animate-spin" /> :
+            partnerLinkCopied ? <Check size={11} /> :
+            <Copy size={11} />
+          }
+          onClick={() => void handleGetPartnerLink()}
+          disabled={mutating}
+          className="w-full justify-center"
+          title="Generate the partner-facing review URL (starts a partner review if needed) and copy it to your clipboard."
+        >
+          {partnerLinkCopied ? 'Link copied' : 'Get partner review link'}
+        </WMButton>
+        {!myOpenInternal && (
+          <WMButton
+            variant="secondary"
+            size="sm"
+            iconLeft={mutating ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+            onClick={() => void handleStartInternal()}
+            disabled={mutating}
+            className="w-full justify-center"
           >
-            {copied === openPartner.id ? <Check size={11} /> : <Copy size={11} />}
-            {copied === openPartner.id ? 'Copied' : 'Copy partner link'}
-          </button>
-        </div>
-      ) : (
+            Start an internal review
+          </WMButton>
+        )}
         <WMButton
           variant="secondary"
           size="sm"
-          iconLeft={starting ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
-          onClick={() => void handleStartPartner()}
-          disabled={starting}
+          iconLeft={<UserPlus size={11} />}
+          onClick={() => setRequestModalOpen(true)}
+          disabled={mutating}
           className="w-full justify-center"
         >
-          Start Partner Review
+          Request a review
         </WMButton>
-      )}
+      </div>
 
       {error && (
         <div role="alert" className="rounded-md border border-wm-danger/40 bg-wm-danger-bg px-2 py-1.5 text-[11px] text-wm-danger flex items-start gap-1.5">
@@ -482,6 +547,15 @@ function FeedbackTab({
             </div>
           )}
         </>
+      )}
+
+      {requestModalOpen && (
+        <RequestReviewModal
+          projectId={projectId}
+          currentEmail={user?.email ?? null}
+          onClose={() => setRequestModalOpen(false)}
+          onCreated={load}
+        />
       )}
     </div>
   )
