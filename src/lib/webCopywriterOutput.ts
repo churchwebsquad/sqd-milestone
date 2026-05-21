@@ -24,8 +24,10 @@
  */
 
 import { supabase } from './supabase'
+import { isButtonShapedSlot } from './cta'
 import type {
   StrategyWebProject, WebPageSeo, WebPageContentStatus,
+  WebContentTemplate, WebFieldDef,
 } from '../types/database'
 
 // ── Format ──────────────────────────────────────────────────────────
@@ -208,6 +210,66 @@ function strategicSetupToSeo(setup: CopywriterStrategicSetup | undefined): WebPa
   }
 }
 
+/** Walk a section's field_values against the bound template's field
+ *  schema and translate copywriter conventions into the canonical
+ *  shape the editor + renderer expect. Two normalizations:
+ *
+ *    1. Group values shipped as `{ items: [...] }` get unwrapped to
+ *       bare arrays. The copywriter wraps every group; the renderer
+ *       reads them as `Array<Record<string, unknown>>` directly.
+ *
+ *    2. Button-shaped slots inside group items can arrive flat —
+ *       e.g. `{contact: "Walk in", url: null}` — when the item schema
+ *       only has one button-shaped slot (`contact`). We rebuild this
+ *       to `{contact: {label: "Walk in", url: ""}}` so ButtonInput +
+ *       the inventory reader see the right shape. */
+function normalizeFieldValuesForTemplate(
+  template: WebContentTemplate | null,
+  values: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!template?.fields) return values
+  return walkFieldsNormalize(template.fields, values)
+}
+
+function walkFieldsNormalize(
+  fields: WebFieldDef[],
+  values: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const f of fields) {
+    if (f.kind === 'slot') {
+      const v = values[f.key]
+      // Button-shaped slot with a bare-string value → upgrade to
+      // {label, url} pulling the URL from a sibling key when present.
+      // Common copywriter convention: button label lives at `<slot_key>`
+      // and the URL lives at sibling `url`.
+      if (isButtonShapedSlot(f) && typeof v === 'string') {
+        const sibling = values['url']
+        out[f.key] = {
+          label: v,
+          url:   typeof sibling === 'string' ? sibling : '',
+        }
+      } else {
+        out[f.key] = v
+      }
+      continue
+    }
+    if (f.kind === 'group') {
+      let raw: unknown = values[f.key]
+      // Unwrap { items: [...] } wrapper.
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)
+          && 'items' in (raw as Record<string, unknown>)) {
+        raw = (raw as { items: unknown }).items
+      }
+      const arr = Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : []
+      out[f.key] = arr.map(item =>
+        walkFieldsNormalize(f.item_schema ?? [], item ?? {}),
+      )
+    }
+  }
+  return out
+}
+
 /** Bundle the per-section copywriter context (job, voice notes,
  *  alternatives, atom refs) into the section.notes column. Stored as
  *  a JSON string under a known key so the editor + downstream tools
@@ -320,17 +382,38 @@ export async function importCopywriterPageOutput(
     }
   }
 
+  // Pull the templates referenced by these sections so we can
+  // normalize each section's field_values against the template's
+  // schema before writing. Without this step the copywriter's
+  // {items: [...]} group wrappers + flat button-shape items don't
+  // bind, and the section renders empty.
+  const tplIds = Array.from(new Set(out.sections.map(s => s.template_id).filter(Boolean)))
+  const templatesById: Record<string, WebContentTemplate> = {}
+  if (tplIds.length > 0) {
+    const { data: tplRows } = await supabase
+      .from('web_content_templates')
+      .select('id, fields')
+      .in('id', tplIds)
+    for (const t of ((tplRows ?? []) as Array<{ id: string; fields: WebFieldDef[] }>)) {
+      templatesById[t.id] = t as unknown as WebContentTemplate
+    }
+  }
+
   const sectionRows = out.sections
     .slice()
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-    .map((s) => ({
-      web_page_id:         pageId,
-      content_template_id: s.template_id,
-      field_values:        s.field_values ?? {},
-      sort_order:          s.sort_order ?? 0,
-      content_status:      'draft' as const,
-      notes:               sectionNotes(s),
-    }))
+    .map((s) => {
+      const tpl = templatesById[s.template_id] ?? null
+      const normalized = normalizeFieldValuesForTemplate(tpl, s.field_values ?? {})
+      return {
+        web_page_id:         pageId,
+        content_template_id: s.template_id,
+        field_values:        normalized,
+        sort_order:          s.sort_order ?? 0,
+        content_status:      'draft' as const,
+        notes:               sectionNotes(s),
+      }
+    })
 
   let sectionsCreated = 0
   if (sectionRows.length > 0) {
