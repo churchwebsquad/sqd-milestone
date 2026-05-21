@@ -10,7 +10,7 @@
  *  - Step 2 (later) will add Brixies template fitting + overflow panel
  */
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ArrowRight, AlertCircle, CheckCircle2, FileText, Sparkles, RotateCw, LayoutGrid } from 'lucide-react'
 import { WMButton } from './Button'
 import { WMCatalogSidePanel } from './CatalogSidePanel'
@@ -31,12 +31,10 @@ import {
   isCopywriterPageOutput,
   validateCopywriterPageOutput,
   importCopywriterPageOutput,
-  loadFamilyAlternates,
   friendlyScanMessage,
   normalizeFieldValuesForTemplate,
   type CopywriterPageOutput,
   type CopywriterValidationReport,
-  type TemplateRef,
 } from '../../lib/webCopywriterOutput'
 import type { StrategyWebProject } from '../../types/database'
 
@@ -151,9 +149,6 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
   // shaped for the override template. Populated by the variant-swap
   // doc round-trip so cross-family swaps don't drop copy.
   const [fieldValuesOverrides, setFieldValuesOverrides] = useState<Record<number, Record<string, unknown>>>({})
-  // Templates grouped by family — populated after a successful copy
-  // validation so the swap dropdown has alternates to offer.
-  const [familyAlternates, setFamilyAlternates] = useState<Record<string, TemplateRef[]>>({})
   // When set, opens the catalog picker for a specific section so the
   // user can pick any template (cross-family) and we'll remap the
   // field_values to its schema.
@@ -165,23 +160,6 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
   const [importMsg, setImportMsg] = useState<string | null>(null)
   // Multi-page progress — current page index / total / current title.
   const [bundleProgress, setBundleProgress] = useState<{ done: number; total: number; current: string } | null>(null)
-
-  // After copywriter validation lands, pre-load every alternate
-  // template in the same family for each section so the swap dropdown
-  // is instant + we can highlight when a swap target also has
-  // mechanical issues. MUST run before the `if (!open)` early-return
-  // below — hook order has to be stable across renders.
-  useEffect(() => {
-    if (!copyReport) return
-    const ids = Array.from(new Set(Object.keys(copyReport.resolved_templates)))
-    if (ids.length === 0) return
-    let cancelled = false
-    void (async () => {
-      const { byFamily } = await loadFamilyAlternates(ids)
-      if (!cancelled) setFamilyAlternates(byFamily)
-    })()
-    return () => { cancelled = true }
-  }, [copyReport])
 
   if (!open) return null
 
@@ -195,7 +173,6 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
     setCopyReport(null)
     setTemplateOverrides({})
     setFieldValuesOverrides({})
-    setFamilyAlternates({})
     setVariantSwapForSort(null)
     setImportMsg(null)
     setBundleProgress(null)
@@ -541,14 +518,11 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
                     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
                     .map(s => {
                       // Apply any user-picked override first.
-                      const effectiveId  = templateOverrides[s.sort_order] ?? s.template_id
-                      const broken       = copyReport.unresolved_template_ids.includes(effectiveId)
-                      // Figure out which family this template lives in
-                      // so we can offer alternates in the dropdown.
-                      const family = Object.keys(familyAlternates).find(fam =>
-                        familyAlternates[fam].some(t => t.id === effectiveId),
-                      ) ?? null
-                      const alternates = family ? familyAlternates[family] : []
+                      const effectiveId   = templateOverrides[s.sort_order] ?? s.template_id
+                      const broken        = copyReport.unresolved_template_ids.includes(effectiveId)
+                      const overridden    = !!templateOverrides[s.sort_order]
+                      const tplName       = copyReport.resolved_templates[effectiveId]
+                        ?? `${effectiveId} (not in catalog)`
                       // Issues from mechanical_scan_log scoped to this
                       // section — surface inline so the strategist knows
                       // why they might want to swap.
@@ -564,47 +538,33 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
                             <span className="text-wm-text-subtle font-mono text-[10px] w-6 text-right shrink-0">
                               {String(s.sort_order ?? 0).padStart(2, '0')}
                             </span>
-                            <select
-                              value={effectiveId}
-                              onChange={(e) => void applyTemplateSwap(s.sort_order, e.target.value)}
-                              disabled={importing || variantSwapping}
-                              className={[
-                                'min-w-0 flex-1 h-7 text-[12px] px-2 rounded border bg-wm-bg outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/15',
-                                broken          ? 'border-wm-danger text-wm-danger' :
-                                templateOverrides[s.sort_order] ? 'border-wm-accent text-wm-accent-strong' :
-                                                  'border-wm-border text-wm-text',
-                              ].join(' ')}
-                            >
-                              {/* The original copywriter pick (always first so the user can revert). */}
-                              <option value={s.template_id}>
-                                {copyReport.resolved_templates[s.template_id] ?? `${s.template_id} (not in catalog)`}
-                                {effectiveId === s.template_id ? '' : ' (copywriter pick)'}
-                              </option>
-                              {alternates.length > 0 && (
-                                <optgroup label={`Other ${family ?? 'templates'}`}>
-                                  {alternates
-                                    .filter(t => t.id !== s.template_id)
-                                    .map(t => (
-                                      <option key={t.id} value={t.id}>{t.layer_name}</option>
-                                    ))}
-                                </optgroup>
-                              )}
-                            </select>
+                            {/* Single swap affordance: the current template
+                                renders as a button that opens the catalog
+                                picker. Same flow as PagesWorkspace's
+                                change-variant. */}
                             <button
                               type="button"
                               onClick={() => setVariantSwapForSort(s.sort_order)}
                               disabled={importing || variantSwapping}
-                              className="inline-flex items-center gap-1 text-[10px] font-semibold text-wm-accent-strong hover:underline shrink-0 disabled:opacity-50"
-                              title="Browse the full template catalog (with thumbnails) — copy is remapped to the new template's schema."
+                              className={[
+                                'min-w-0 flex-1 inline-flex items-center justify-between gap-2 h-7 px-2.5 rounded border bg-wm-bg-elevated text-[12px] hover:border-wm-accent transition-colors disabled:opacity-50',
+                                broken      ? 'border-wm-danger text-wm-danger' :
+                                overridden  ? 'border-wm-accent text-wm-accent-strong' :
+                                              'border-wm-border text-wm-text',
+                              ].join(' ')}
+                              title="Click to browse the full template catalog. Copy is remapped to the new template's schema, so cross-family swaps don't lose data."
                             >
-                              <LayoutGrid size={10} /> Browse
+                              <span className="truncate">{tplName}</span>
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-wm-text-subtle shrink-0">
+                                <LayoutGrid size={10} /> Change
+                              </span>
                             </button>
-                            {templateOverrides[s.sort_order] && (
+                            {overridden && (
                               <button
                                 type="button"
                                 onClick={() => void applyTemplateSwap(s.sort_order, s.template_id)}
                                 className="inline-flex items-center gap-0.5 text-[10px] text-wm-text-subtle hover:text-wm-accent-strong shrink-0"
-                                title="Revert to the copywriter's pick"
+                                title={`Revert to the copywriter's pick (${copyReport.resolved_templates[s.template_id] ?? s.template_id})`}
                               >
                                 <RotateCw size={9} /> Revert
                               </button>
