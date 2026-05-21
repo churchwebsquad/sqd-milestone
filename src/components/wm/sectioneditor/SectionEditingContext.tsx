@@ -23,6 +23,12 @@ export interface SectionDetail {
   /** Card-family templates available to palette-referenced groups
    *  in the section panel (Feature 22/82/106 picker). */
   cardTemplates?: Record<string, WebContentTemplate>
+  /** The project's pages (id + name + slug). Threaded here because
+   *  the SectionDetailsPanel renders inside the AssistantRail — a
+   *  sibling of the workspace tree, OUTSIDE any provider wrapped
+   *  around the workspace. The CTA slot editor's internal-route
+   *  dropdown reads this list. */
+  pages?: ReadonlyArray<{ id: string; name: string; slug: string }>
   onChange:        (patch: Partial<WebSection>) => void
   onChangeVariant: () => void
   onUnbind:        () => void

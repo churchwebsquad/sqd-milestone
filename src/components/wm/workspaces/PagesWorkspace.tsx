@@ -273,6 +273,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
             <PageEditor
               page={activePage}
               project={project}
+              projectPages={pages}
               reviewState={reviewState}
               onReviewChange={loadReviewState}
               onPageChange={async () => {
@@ -557,10 +558,14 @@ function serializeFieldValuesToHtml(
 // ── Page editor (right pane) ──────────────────────────────────────────
 
 function PageEditor({
-  page, project, reviewState, onReviewChange, onPageChange, onArchived,
+  page, project, projectPages, reviewState, onReviewChange, onPageChange, onArchived,
 }: {
   page: WebPage
   project: StrategyWebProject
+  /** The whole project's page list — threaded through to the section
+   *  detail so the CTA editor's internal-route dropdown can resolve
+   *  slugs against actual pages. */
+  projectPages: WebPage[]
   reviewState: ProjectReviewState | null
   onReviewChange: () => Promise<void>
   onPageChange: () => Promise<void>
@@ -1014,6 +1019,7 @@ function PageEditor({
       template: selectedTemplate,
       snippets,
       cardTemplates,
+      pages: projectPages.map(p => ({ id: p.id, name: p.name, slug: p.slug })),
       onChange: (patch) => void updateSection(selectedSection.id, patch),
       onClose: () => setSelectedSectionId(null),
       onChangeVariant: () => setBindingSection(selectedSection),

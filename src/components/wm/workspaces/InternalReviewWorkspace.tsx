@@ -261,6 +261,7 @@ export function InternalReviewWorkspace({
       template: selectedTemplate,
       snippets,
       cardTemplates,
+      pages: pages.map(p => ({ id: p.id, name: p.name, slug: p.slug })),
       onChange:        (patch) => void updateSection(selectedSection.id, patch),
       onClose:         () => setSelectedSection(null),
       onChangeVariant: () => {}, // not surfaced in v1 of review mode

@@ -25,6 +25,7 @@ import { GroupEditor } from './GroupEditor'
 import { GridEditor, detectGridChain } from './GridEditor'
 import { SnippetMenu } from './SnippetMenu'
 import { CommentActions } from './CommentActions'
+import { ProjectPagesProvider } from './ProjectPagesContext'
 import { summarizeSlotPresence } from '../../../lib/webBrixiesLayoutParser'
 import { supabase } from '../../../lib/supabase'
 import type { WMSnippetOption } from '../RichTextEditor'
@@ -39,6 +40,11 @@ interface Props {
   snippets: readonly WMSnippetOption[]
   /** Card-family templates available to palette-referenced groups. */
   cardTemplates?: Record<string, WebContentTemplate>
+  /** Project's full page list, threaded in so the CTA slot editor's
+   *  "internal route" dropdown can read it. The panel renders inside
+   *  the AssistantRail — a sibling of the workspace tree, so the
+   *  workspace-mounted ProjectPagesProvider doesn't reach in here. */
+  pages?: ReadonlyArray<{ id: string; name: string; slug: string }>
   onChange: (patch: Partial<WebSection>) => void
   onClose: () => void
   onChangeVariant: () => void
@@ -55,7 +61,7 @@ interface Props {
 }
 
 export function SectionDetailsPanel({
-  section, template, snippets, cardTemplates,
+  section, template, snippets, cardTemplates, pages,
   onChange, onClose, onChangeVariant, onUnbind, onRemove,
   activeInternalReview, sectionComments, onCommentsChange,
 }: Props) {
@@ -69,6 +75,7 @@ export function SectionDetailsPanel({
   const visibleFields = fields.filter(isEditableField)
 
   return (
+    <ProjectPagesProvider pages={pages ?? []}>
     <aside className="w-full h-full flex flex-col bg-wm-bg-elevated min-h-0">
       {/* Header */}
       <header className="shrink-0 px-4 py-3 border-b border-wm-border bg-wm-bg">
@@ -229,6 +236,7 @@ export function SectionDetailsPanel({
         )}
       </div>
     </aside>
+    </ProjectPagesProvider>
   )
 }
 

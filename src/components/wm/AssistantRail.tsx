@@ -187,6 +187,7 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
               template={sectionDetail.template}
               snippets={sectionDetail.snippets}
               cardTemplates={sectionDetail.cardTemplates}
+              pages={sectionDetail.pages}
               onChange={sectionDetail.onChange}
               onClose={sectionDetail.onClose}
               onChangeVariant={sectionDetail.onChangeVariant}
