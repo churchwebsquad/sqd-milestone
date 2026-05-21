@@ -23,6 +23,13 @@ import {
   type BriefValidationReport,
   type ImportResult,
 } from '../../lib/webPageBrief'
+import {
+  isCopywriterPageOutput,
+  validateCopywriterPageOutput,
+  importCopywriterPageOutput,
+  type CopywriterPageOutput,
+  type CopywriterValidationReport,
+} from '../../lib/webCopywriterOutput'
 import type { StrategyWebProject } from '../../types/database'
 
 interface Props {
@@ -125,6 +132,11 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
   const [brief, setBrief] = useState<PageBrief | null>(null)
   const [bundle, setBundle] = useState<PageBriefBundle | null>(null)
   const [report, setReport] = useState<BriefValidationReport | null>(null)
+  // New copywriter output path runs in parallel — same modal, same
+  // textarea, different parse/validate/import functions when the JSON
+  // looks like a copywriter output instead of a legacy brief.
+  const [copyOutput, setCopyOutput] = useState<CopywriterPageOutput | null>(null)
+  const [copyReport, setCopyReport] = useState<CopywriterValidationReport | null>(null)
   const [validating, setValidating] = useState(false)
   const [importing, setImporting] = useState(false)
   const [addSnippets, setAddSnippets] = useState(true)
@@ -140,6 +152,8 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
     setBrief(null)
     setBundle(null)
     setReport(null)
+    setCopyOutput(null)
+    setCopyReport(null)
     setImportMsg(null)
     setBundleProgress(null)
   }
@@ -149,6 +163,8 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
     setReport(null)
     setBrief(null)
     setBundle(null)
+    setCopyOutput(null)
+    setCopyReport(null)
     let parsed: unknown
     try {
       // Cowork includes // line and /* block */ comments as human-readable
@@ -158,6 +174,21 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
       parsed = JSON.parse(stripJsonComments(jsonText))
     } catch (e) {
       setParseError(e instanceof Error ? e.message : 'Invalid JSON')
+      return
+    }
+    // Detection order: copywriter output → bundle → legacy brief.
+    // Copywriter output has strategic_setup + sections with
+    // template_id + field_values; it's the most specific shape so
+    // sniff for it first.
+    if (isCopywriterPageOutput(parsed)) {
+      const out = parsed as CopywriterPageOutput
+      setCopyOutput(out)
+      setValidating(true)
+      try {
+        setCopyReport(await validateCopywriterPageOutput(out, project))
+      } finally {
+        setValidating(false)
+      }
       return
     }
     // Multi-page bundle? Skip validation (heavy for N pages) and route
@@ -174,6 +205,40 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
       setReport(r)
     } finally {
       setValidating(false)
+    }
+  }
+
+  const handleImportCopywriter = async () => {
+    if (!copyOutput) return
+    setImporting(true)
+    setImportMsg(null)
+    try {
+      const { result, error } = await importCopywriterPageOutput(copyOutput, project)
+      if (error) {
+        setImportMsg(`Error: ${error}`)
+        return
+      }
+      if (result) {
+        // Re-use the existing onImported callback by synthesizing an
+        // ImportResult-shaped payload (no auto_bind step — every
+        // section is already bound to its template_id).
+        await onImported({
+          page_id:          result.page_id,
+          created:          result.created,
+          sections_created: result.sections_created,
+          sections_replaced: result.sections_replaced,
+          snippets_added:   0,
+          auto_bind:        null,
+        })
+        setImportMsg(
+          `${result.created ? 'Created' : 'Updated'} "${copyOutput.page_title}" · ` +
+          `${result.sections_created} section${result.sections_created === 1 ? '' : 's'}` +
+          `${result.sections_replaced ? ` (replaced ${result.sections_replaced})` : ''}` +
+          `${result.seo_written ? ' · SEO written' : ''}.`,
+        )
+      }
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -265,8 +330,10 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
             </div>
             <h2 className="text-[18px] font-semibold text-wm-text">From cowork JSON</h2>
             <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
-              Paste a page brief. Validation surfaces snippet gaps + needs-input markers + coverage orphans
-              before you commit. Import creates the page if missing, replaces sections from the brief.
+              Paste a page brief or copywriter page output. The modal auto-detects
+              which shape it received. Briefs run the snippet + coverage validation
+              before commit; copywriter output ships ready-bound sections and SEO
+              metadata that get written directly.
             </p>
           </div>
           <button
@@ -316,6 +383,119 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
             <div className="rounded-md border border-wm-danger/30 bg-wm-danger-bg p-3">
               <p className="text-[11px] uppercase tracking-widest font-bold text-wm-danger mb-1">JSON parse error</p>
               <p className="text-[12px] text-wm-text font-mono">{parseError}</p>
+            </div>
+          )}
+
+          {/* Copywriter-output validation report */}
+          {copyReport && copyOutput && (
+            <div className="space-y-3">
+              {(() => {
+                const errCount  = copyReport.issues.filter(i => i.severity === 'error').length
+                const warnCount = copyReport.issues.filter(i => i.severity === 'warning').length
+                const infoCount = copyReport.issues.filter(i => i.severity === 'info').length
+                if (!copyReport.valid) {
+                  return (
+                    <div className="rounded-md border border-wm-danger/30 bg-wm-danger-bg p-3 flex items-center gap-2">
+                      <AlertCircle size={14} className="text-wm-danger shrink-0" />
+                      <p className="text-[13px] font-semibold text-wm-danger">
+                        Copywriter output — {errCount} error(s) must be resolved before import
+                      </p>
+                    </div>
+                  )
+                }
+                return (
+                  <div className="rounded-md border border-wm-success/30 bg-wm-success-bg p-3 flex items-start gap-2">
+                    <CheckCircle2 size={14} className="text-wm-success shrink-0 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] font-semibold text-wm-success">
+                        Copywriter output ready — "{copyOutput.page_title}" (/{copyOutput.page_slug}) ·
+                        {' '}{copyOutput.sections.length} section{copyOutput.sections.length === 1 ? '' : 's'}
+                      </p>
+                      <p className="text-[11px] text-wm-text-muted mt-0.5">
+                        {warnCount > 0 && `${warnCount} warning${warnCount === 1 ? '' : 's'} · `}
+                        {infoCount > 0 && `${infoCount} note${infoCount === 1 ? '' : 's'} · `}
+                        Every section ships ready-to-write field values, so no auto-bind step runs.
+                      </p>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Section + template summary */}
+              <div className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
+                <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-2">
+                  Sections to import · {copyOutput.sections.length}
+                </p>
+                <ul className="space-y-0.5">
+                  {copyOutput.sections
+                    .slice()
+                    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+                    .map(s => {
+                      const tpl = copyReport.resolved_templates[s.template_id]
+                      const broken = copyReport.unresolved_template_ids.includes(s.template_id)
+                      return (
+                        <li
+                          key={`${s.sort_order}-${s.template_id}`}
+                          className="flex items-center gap-2 text-[12px] text-wm-text"
+                        >
+                          <span className="text-wm-text-subtle font-mono text-[10px] w-6 text-right">
+                            {String(s.sort_order ?? 0).padStart(2, '0')}
+                          </span>
+                          <span className={broken ? 'text-wm-danger' : 'text-wm-text-muted'}>
+                            {tpl ?? `${s.template_id} (not in catalog)`}
+                          </span>
+                          {s.concept_id && (
+                            <span className="text-[10px] text-wm-text-subtle font-mono">· {s.concept_id}</span>
+                          )}
+                        </li>
+                      )
+                    })}
+                </ul>
+              </div>
+
+              {/* SEO preview */}
+              {copyOutput.strategic_setup && (
+                <div className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
+                  <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-2">
+                    SEO / AEO to write
+                  </p>
+                  <dl className="text-[11px] space-y-1">
+                    {copyOutput.strategic_setup.metadata_title && (
+                      <div className="flex gap-2"><dt className="text-wm-text-subtle">Title:</dt><dd className="text-wm-text">{copyOutput.strategic_setup.metadata_title}</dd></div>
+                    )}
+                    {copyOutput.strategic_setup.metadata_description && (
+                      <div className="flex gap-2"><dt className="text-wm-text-subtle">Meta:</dt><dd className="text-wm-text">{copyOutput.strategic_setup.metadata_description}</dd></div>
+                    )}
+                    {copyOutput.strategic_setup.aeo_smart_snippet && (
+                      <div className="flex gap-2"><dt className="text-wm-text-subtle">AEO:</dt><dd className="text-wm-text">{copyOutput.strategic_setup.aeo_smart_snippet}</dd></div>
+                    )}
+                  </dl>
+                </div>
+              )}
+
+              {/* Issues list — mechanical scan + gaps + kickbacks */}
+              {copyReport.issues.length > 0 && (
+                <div className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
+                  <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-2">
+                    Notes from the copywriter ({copyReport.issues.length})
+                  </p>
+                  <ul className="space-y-1.5">
+                    {copyReport.issues.map((issue, i) => (
+                      <li key={i} className="text-[12px] flex items-start gap-2">
+                        <span className={[
+                          'shrink-0 text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded',
+                          issue.severity === 'error'   ? 'bg-wm-danger text-white' :
+                          issue.severity === 'warning' ? 'bg-wm-warning text-white' :
+                                                          'bg-wm-bg-hover text-wm-text-subtle',
+                        ].join(' ')}>{issue.severity}</span>
+                        <span className="text-wm-text">
+                          <code className="text-wm-text-subtle">{issue.scope}</code> · {issue.message}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
 
@@ -552,6 +732,19 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
           <WMButton variant="ghost" size="sm" onClick={() => { reset(); onClose() }} disabled={importing}>
             Close
           </WMButton>
+          {copyReport && (
+            <WMButton
+              variant="primary"
+              size="sm"
+              iconLeft={<Sparkles size={11} />}
+              iconRight={<ArrowRight size={11} />}
+              disabled={!copyReport.valid || importing}
+              loading={importing}
+              onClick={handleImportCopywriter}
+            >
+              Import copywriter output
+            </WMButton>
+          )}
           {report && (
             <WMButton
               variant="primary"

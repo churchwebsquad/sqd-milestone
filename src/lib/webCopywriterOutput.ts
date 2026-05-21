@@ -1,0 +1,341 @@
+/**
+ * Copywriter page output importer.
+ *
+ * The "page brief" format that cowork emits has been superseded for
+ * pages where the copywriter has already done the binding work — the
+ * new format ships page-level metadata + a flat list of sections
+ * where each section already names its target template and ships
+ * ready-to-write field_values. We import it directly: look up the
+ * template by id, write the values, no auto-bind step needed.
+ *
+ * Detection is heuristic — the strategist can paste either format
+ * into the same modal. We sniff `strategic_setup` + per-section
+ * `template_id` + `field_values` to decide whether this is a
+ * copywriter output vs a legacy brief.
+ *
+ * The format also carries:
+ *   · strategic_setup → SEO / AEO data → web_pages.seo
+ *   · section_job / voice_notes_from_copywriter / alternatives_considered
+ *     / atoms_lifted_canonical → stashed onto web_sections.notes as a
+ *     JSON blob keyed under `copywriter_context`
+ *   · mechanical_scan_log / gaps_flagged / kickbacks_to_copywriter →
+ *     surfaced as validation messages in the import modal (informational
+ *     only; do not block import)
+ */
+
+import { supabase } from './supabase'
+import type {
+  StrategyWebProject, WebPageSeo, WebPageContentStatus,
+} from '../types/database'
+
+// ── Format ──────────────────────────────────────────────────────────
+
+export interface CopywriterSection {
+  sort_order:    number
+  concept_id?:   string
+  template_id:   string
+  section_job?:  string
+  tagline_strategy?: string | null
+  field_values:  Record<string, unknown>
+  alternatives_considered?: Record<string, unknown>
+  atoms_lifted_canonical?:  string[]
+  voice_notes_from_copywriter?: string
+  [k: string]: unknown
+}
+
+export interface CopywriterStrategicSetup {
+  metadata_title?:       string
+  metadata_description?: string
+  aeo_smart_snippet?:    string
+  [k: string]: unknown
+}
+
+export interface CopywriterMechanicalScanEntry {
+  section_sort: number
+  slot:         string
+  issue:        string
+  fix?:         string
+}
+
+export interface CopywriterGap {
+  section_sort: number
+  note:         string
+}
+
+export interface CopywriterKickback {
+  section_sort?: number
+  note?:         string
+  [k: string]:   unknown
+}
+
+export interface CopywriterPageOutput {
+  page_title:        string
+  page_slug:         string
+  primary_persona?:  string
+  strategic_setup?:  CopywriterStrategicSetup
+  sections:          CopywriterSection[]
+  mechanical_scan_log?:    CopywriterMechanicalScanEntry[]
+  kickbacks_to_copywriter?: CopywriterKickback[]
+  gaps_flagged?:           CopywriterGap[]
+  [k: string]: unknown
+}
+
+/** True when the parsed JSON looks like a copywriter output (vs the
+ *  legacy brief format). Detection markers, in priority order:
+ *  - has `strategic_setup`
+ *  - has `sections` whose elements carry `template_id` + `field_values`
+ *  - has `mechanical_scan_log` or `gaps_flagged` (cowriter-only) */
+export function isCopywriterPageOutput(parsed: unknown): parsed is CopywriterPageOutput {
+  if (!parsed || typeof parsed !== 'object') return false
+  const obj = parsed as Record<string, unknown>
+  if (!Array.isArray(obj.sections) || obj.sections.length === 0) return false
+  if (typeof obj.page_slug !== 'string') return false
+  if (obj.strategic_setup && typeof obj.strategic_setup === 'object') return true
+  if (Array.isArray(obj.mechanical_scan_log)) return true
+  if (Array.isArray(obj.gaps_flagged))        return true
+  const first = obj.sections[0] as Record<string, unknown>
+  return typeof first.template_id === 'string'
+      && typeof first.field_values === 'object'
+      && first.field_values !== null
+}
+
+// ── Validation ──────────────────────────────────────────────────────
+
+export interface CopywriterValidationIssue {
+  severity: 'error' | 'warning' | 'info'
+  scope:    string
+  message:  string
+}
+
+export interface CopywriterValidationReport {
+  valid:  boolean
+  issues: CopywriterValidationIssue[]
+  /** Section template_ids that didn't resolve to a real
+   *  web_content_templates row. */
+  unresolved_template_ids: string[]
+  /** Template ids that resolved successfully (id → layer_name). */
+  resolved_templates: Record<string, string>
+}
+
+export async function validateCopywriterPageOutput(
+  out: CopywriterPageOutput,
+  project: StrategyWebProject,
+): Promise<CopywriterValidationReport> {
+  void project
+  const issues: CopywriterValidationIssue[] = []
+  if (!out.page_slug?.trim()) {
+    issues.push({ severity: 'error', scope: 'page', message: 'page_slug is required.' })
+  }
+  if (!out.page_title?.trim()) {
+    issues.push({ severity: 'error', scope: 'page', message: 'page_title is required.' })
+  }
+  // Resolve every section's template_id in one go.
+  const tplIds = Array.from(new Set(out.sections.map(s => s.template_id).filter(Boolean)))
+  let resolved: Record<string, string> = {}
+  let unresolved: string[] = []
+  if (tplIds.length > 0) {
+    const { data, error } = await supabase
+      .from('web_content_templates')
+      .select('id, layer_name')
+      .in('id', tplIds)
+    if (error) {
+      issues.push({ severity: 'error', scope: 'templates', message: `Template lookup failed: ${error.message}` })
+    } else {
+      const rows = (data ?? []) as Array<{ id: string; layer_name: string }>
+      resolved = Object.fromEntries(rows.map(r => [r.id, r.layer_name]))
+      unresolved = tplIds.filter(id => !resolved[id])
+      for (const id of unresolved) {
+        issues.push({
+          severity: 'error',
+          scope:    `section.template_id="${id}"`,
+          message:  `No template found with id "${id}". The copywriter output references a Brixies template that isn't in the catalog.`,
+        })
+      }
+    }
+  }
+  // Surface mechanical_scan_log and gaps_flagged as warnings — the
+  // import proceeds but the strategist sees them after.
+  for (const m of (out.mechanical_scan_log ?? [])) {
+    issues.push({
+      severity: 'warning',
+      scope:    `section ${m.section_sort} · ${m.slot}`,
+      message:  m.issue + (m.fix ? ` — ${m.fix}` : ''),
+    })
+  }
+  for (const g of (out.gaps_flagged ?? [])) {
+    issues.push({
+      severity: 'info',
+      scope:    `section ${g.section_sort}`,
+      message:  g.note,
+    })
+  }
+  for (const k of (out.kickbacks_to_copywriter ?? [])) {
+    issues.push({
+      severity: 'warning',
+      scope:    k.section_sort != null ? `section ${k.section_sort}` : 'page',
+      message:  typeof k.note === 'string' ? k.note : JSON.stringify(k),
+    })
+  }
+  return {
+    valid:                   issues.filter(i => i.severity === 'error').length === 0,
+    issues,
+    unresolved_template_ids: unresolved,
+    resolved_templates:      resolved,
+  }
+}
+
+// ── Import ──────────────────────────────────────────────────────────
+
+export interface CopywriterImportResult {
+  page_id:          string
+  created:          boolean
+  sections_created: number
+  sections_replaced: number
+  seo_written:      boolean
+}
+
+/** Map strategic_setup → web_pages.seo. The copywriter's
+ *  `aeo_smart_snippet` lands as the answer_intent on the AEO side. */
+function strategicSetupToSeo(setup: CopywriterStrategicSetup | undefined): WebPageSeo {
+  return {
+    seo: {
+      title:            setup?.metadata_title?.trim() || undefined,
+      meta_description: setup?.metadata_description?.trim() || undefined,
+    },
+    aeo: {
+      answer_intent: setup?.aeo_smart_snippet?.trim() || undefined,
+    },
+  }
+}
+
+/** Bundle the per-section copywriter context (job, voice notes,
+ *  alternatives, atom refs) into the section.notes column. Stored as
+ *  a JSON string under a known key so the editor + downstream tools
+ *  can parse it back. */
+function sectionNotes(s: CopywriterSection): string {
+  const payload = {
+    copywriter_context: {
+      concept_id:                  s.concept_id ?? null,
+      section_job:                 s.section_job ?? null,
+      tagline_strategy:            s.tagline_strategy ?? null,
+      voice_notes_from_copywriter: s.voice_notes_from_copywriter ?? null,
+      alternatives_considered:     s.alternatives_considered ?? null,
+      atoms_lifted_canonical:      s.atoms_lifted_canonical ?? null,
+    },
+  }
+  return JSON.stringify(payload)
+}
+
+export async function importCopywriterPageOutput(
+  out: CopywriterPageOutput,
+  project: StrategyWebProject,
+): Promise<{ result?: CopywriterImportResult; error?: string }> {
+  // 1. Find or create the page (by project + slug).
+  const slug = out.page_slug.replace(/^\/+/, '').trim()
+  if (!slug) return { error: 'page_slug is empty after trimming.' }
+
+  const { data: existing, error: findErr } = await supabase
+    .from('web_pages')
+    .select('id, content_status, sort_order')
+    .eq('web_project_id', project.id)
+    .eq('slug', slug)
+    .maybeSingle()
+  if (findErr) return { error: `page lookup failed: ${findErr.message}` }
+
+  const seo = strategicSetupToSeo(out.strategic_setup)
+
+  let pageId: string
+  let created = false
+  if (existing) {
+    pageId = (existing as { id: string }).id
+    const { error: updErr } = await supabase
+      .from('web_pages')
+      .update({
+        name: out.page_title,
+        seo,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', pageId)
+    if (updErr) return { error: `page update failed: ${updErr.message}` }
+  } else {
+    // New page → land in 'draft' until comments/reviews bump it. Pick
+    // a sort_order at the end of the current list.
+    const { data: maxRow } = await supabase
+      .from('web_pages')
+      .select('sort_order')
+      .eq('web_project_id', project.id)
+      .order('sort_order', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const nextSort = ((maxRow as { sort_order?: number } | null)?.sort_order ?? 0) + 1
+    const draftStatus: WebPageContentStatus = 'draft'
+    const { data: insertRow, error: insErr } = await supabase
+      .from('web_pages')
+      .insert({
+        web_project_id:  project.id,
+        name:            out.page_title,
+        slug,
+        phase:           '1',
+        sort_order:      nextSort,
+        archived:        false,
+        content_status:  draftStatus,
+        edited_since_ai: false,
+        seo,
+      } as never)
+      .select('id')
+      .single()
+    if (insErr || !insertRow) return { error: `page create failed: ${insErr?.message ?? 'unknown'}` }
+    pageId = (insertRow as { id: string }).id
+    created = true
+  }
+
+  // 2. Replace sections. Delete every existing section, then insert
+  //    one row per copywriter section in sort_order order.
+  let sectionsReplaced = 0
+  if (!created) {
+    const { data: oldSections } = await supabase
+      .from('web_sections')
+      .select('id')
+      .eq('web_page_id', pageId)
+    sectionsReplaced = ((oldSections ?? []) as Array<{ id: string }>).length
+    if (sectionsReplaced > 0) {
+      const { error: delErr } = await supabase
+        .from('web_sections')
+        .delete()
+        .eq('web_page_id', pageId)
+      if (delErr) return { error: `section wipe failed: ${delErr.message}` }
+    }
+  }
+
+  const sectionRows = out.sections
+    .slice()
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map((s) => ({
+      web_page_id:         pageId,
+      content_template_id: s.template_id,
+      field_values:        s.field_values ?? {},
+      sort_order:          s.sort_order ?? 0,
+      content_status:      'draft' as const,
+      notes:               sectionNotes(s),
+    }))
+
+  let sectionsCreated = 0
+  if (sectionRows.length > 0) {
+    const { error: secErr, data: insertedSecs } = await supabase
+      .from('web_sections')
+      .insert(sectionRows as never)
+      .select('id')
+    if (secErr) return { error: `section insert failed: ${secErr.message}` }
+    sectionsCreated = ((insertedSecs ?? []) as Array<{ id: string }>).length
+  }
+
+  return {
+    result: {
+      page_id:           pageId,
+      created,
+      sections_created:  sectionsCreated,
+      sections_replaced: sectionsReplaced,
+      seo_written:       !!(out.strategic_setup),
+    },
+  }
+}
