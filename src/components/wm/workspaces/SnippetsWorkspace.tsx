@@ -15,11 +15,12 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Tag, Plus, Trash2, Loader2, X } from 'lucide-react'
+import { Tag, Plus, Trash2, Loader2, X, Upload } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { WMButton } from '../Button'
 import { WMIconButton } from '../IconButton'
 import { WMStatusPill } from '../StatusPill'
+import { SnippetsImportModal } from '../SnippetsImportModal'
 import type { StrategyWebProject, WebProjectSnippet } from '../../../types/database'
 
 interface Props {
@@ -58,6 +59,7 @@ export function SnippetsWorkspace({ project, onChange }: Props) {
   const [customs, setCustoms] = useState<WebProjectSnippet[]>([])
   const [loadingCustoms, setLoadingCustoms] = useState(true)
   const [addOpen, setAddOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
 
   const loadCustoms = async () => {
     setLoadingCustoms(true)
@@ -93,11 +95,24 @@ export function SnippetsWorkspace({ project, onChange }: Props) {
           <Tag size={13} />
           <p className="text-[11px] font-bold uppercase tracking-widest">Snippets</p>
         </div>
-        <h1 className="text-[16px] font-semibold text-wm-text">Reusable text</h1>
-        <p className="text-[12px] text-wm-text-muted mt-1">
-          Tokens like <code className="text-wm-accent-strong">{'{{phone}}'}</code> resolve
-          anywhere they appear in body copy. Update once, applied everywhere.
-        </p>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h1 className="text-[16px] font-semibold text-wm-text">Reusable text</h1>
+            <p className="text-[12px] text-wm-text-muted mt-1">
+              Tokens like <code className="text-wm-accent-strong">{'{{phone}}'}</code> resolve
+              anywhere they appear in body copy. Update once, applied everywhere.
+            </p>
+          </div>
+          <WMButton
+            variant="secondary"
+            size="sm"
+            iconLeft={<Upload size={11} />}
+            onClick={() => setImportOpen(true)}
+            className="shrink-0"
+          >
+            Import
+          </WMButton>
+        </div>
       </div>
 
       {/* Global merge fields — flat list (no card wrapper, no grid). */}
@@ -171,6 +186,18 @@ export function SnippetsWorkspace({ project, onChange }: Props) {
           onCreated={async () => { setAddOpen(false); await loadCustoms() }}
         />
       )}
+
+      <SnippetsImportModal
+        project={project}
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={async () => {
+          // Reload local custom snippets + bubble up to refresh the
+          // rail's snippet count + the project row (in case globals
+          // were updated).
+          await Promise.all([loadCustoms(), onChange()])
+        }}
+      />
     </div>
   )
 }
