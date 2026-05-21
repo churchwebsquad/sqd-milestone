@@ -363,10 +363,10 @@ function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
           <thead>
             <tr className="text-left text-wm-text-subtle">
               <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Route</th>
-              <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Page</th>
-              <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Section</th>
               <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Button label</th>
               <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Kind</th>
+              <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Page</th>
+              <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Section</th>
             </tr>
           </thead>
           <tbody>
@@ -402,16 +402,6 @@ function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
                       </p>
                     )}
                   </td>
-                  <td className="px-2 py-2">
-                    <p className="font-semibold text-wm-text">{c.pageName}</p>
-                    <p className="text-[10px] text-wm-text-subtle font-mono">/{c.pageSlug}</p>
-                  </td>
-                  <td className="px-2 py-2 max-w-[180px]">
-                    <p className="text-wm-text truncate" title={c.sectionLabel}>{c.sectionLabel}</p>
-                    {c.fieldLabel && c.fieldLabel !== c.fieldKey && (
-                      <p className="text-[10px] text-wm-text-subtle truncate" title={c.fieldLabel}>{c.fieldLabel}</p>
-                    )}
-                  </td>
                   <td className="px-2 py-2 max-w-[180px]">
                     <p className="text-wm-text truncate" title={c.cta.label}>
                       {c.cta.label || <span className="italic text-wm-text-subtle">(no label)</span>}
@@ -425,6 +415,16 @@ function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
                       <span className="ml-1 inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 bg-wm-bg-hover text-wm-text-subtle border border-wm-border">
                         New tab
                       </span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2">
+                    <p className="font-semibold text-wm-text">{c.pageName}</p>
+                    <p className="text-[10px] text-wm-text-subtle font-mono">/{c.pageSlug}</p>
+                  </td>
+                  <td className="px-2 py-2 max-w-[180px]">
+                    <p className="text-wm-text truncate" title={c.sectionLabel}>{c.sectionLabel}</p>
+                    {c.fieldLabel && c.fieldLabel !== c.fieldKey && (
+                      <p className="text-[10px] text-wm-text-subtle truncate" title={c.fieldLabel}>{c.fieldLabel}</p>
                     )}
                   </td>
                 </tr>
