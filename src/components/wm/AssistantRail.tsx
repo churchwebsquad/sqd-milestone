@@ -23,6 +23,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   Tag, BookOpen, Mic, MessageSquare, AlertTriangle, RotateCw, Search,
   Loader2, SquarePen, Inbox, Plus, Copy, X, Check, ChevronRight, ChevronDown,
+  Globe,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { runAudit } from '../../lib/webAudit'
@@ -42,8 +43,9 @@ import { useSectionDetail } from './sectioneditor/SectionEditingContext'
 import { SnippetsWorkspace } from './workspaces/SnippetsWorkspace'
 import { VoiceWorkspace } from './workspaces/VoiceWorkspace'
 import { HeuristicsWorkspace } from './workspaces/HeuristicsWorkspace'
+import { SeoPanel } from './SeoPanel'
 
-type RailTab = 'section' | 'snippets' | 'voice' | 'heuristics' | 'feedback' | 'audit'
+type RailTab = 'section' | 'snippets' | 'voice' | 'heuristics' | 'feedback' | 'audit' | 'seo'
 
 interface Props {
   projectId: string
@@ -92,7 +94,7 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
   const railRequest = params.get('rail') as RailTab | null
   useEffect(() => {
     if (!railRequest) return
-    const valid: RailTab[] = ['section', 'snippets', 'voice', 'heuristics', 'feedback', 'audit']
+    const valid: RailTab[] = ['section', 'snippets', 'voice', 'heuristics', 'feedback', 'audit', 'seo']
     if (valid.includes(railRequest)) setTab(railRequest)
     const next = new URLSearchParams(window.location.search)
     next.delete('rail')
@@ -154,6 +156,9 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
         <RailTabButton tab="voice"      active={tab} setTab={setTab} icon={<Mic size={13} />}            label="Voice" />
         <RailTabButton tab="heuristics" active={tab} setTab={setTab} icon={<BookOpen size={13} />}       label="Heuristics" />
         <RailTabButton tab="feedback"   active={tab} setTab={setTab} icon={<MessageSquare size={13} />}  count={counts.feedback} label="Feedback" />
+        {tabUsesSectionContext && activePageId && (
+          <RailTabButton tab="seo"      active={tab} setTab={setTab} icon={<Globe size={13} />}          label="SEO" />
+        )}
         <RailTabButton tab="audit"      active={tab} setTab={setTab} icon={<AlertTriangle size={13} />}  count={counts.audit} label="Audit" />
       </div>
 
@@ -204,6 +209,10 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
           : <RailUnavailable label="Heuristics" />
         )}
         {tab === 'feedback' && <FeedbackTab projectId={projectId} query={query} onJumpToSection={jumpToSection} />}
+        {tab === 'seo' && (activePageId
+          ? <SeoPanel pageId={activePageId} />
+          : <RailUnavailable label="SEO" />
+        )}
         {tab === 'audit' && <AuditTab projectId={projectId} activePageId={activePageId} query={query} onCount={n => setCounts(c => ({ ...c, audit: n }))} />}
       </div>
     </div>
@@ -269,6 +278,11 @@ function FeedbackTab({
 }) {
   const [state, setState] = useState<ProjectReviewState | null>(null)
   const [edits, setEdits] = useState<WebReviewEdit[]>([])
+  // Maps for resolving an edit row's page name + section label so the
+  // rail shows "Plan Your Visit › Hero Section 49" alongside each
+  // field change.
+  const [pageById, setPageById] = useState<Record<string, { id: string; name: string }>>({})
+  const [sectionLabelById, setSectionLabelById] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -282,6 +296,48 @@ function FeedbackTab({
     ])
     setState(s)
     setEdits(e)
+
+    // Resolve page + section labels for whatever the edits reference.
+    const pageIds    = Array.from(new Set(e.map(x => x.web_page_id)))
+    const sectionIds = Array.from(new Set(e.map(x => x.web_section_id)))
+    if (pageIds.length > 0) {
+      const { data: pages } = await supabase
+        .from('web_pages')
+        .select('id, name')
+        .in('id', pageIds)
+      const pmap: Record<string, { id: string; name: string }> = {}
+      for (const p of (pages ?? []) as Array<{ id: string; name: string }>) pmap[p.id] = p
+      setPageById(pmap)
+    }
+    if (sectionIds.length > 0) {
+      // Resolve to template layer_name when bound; else "Freehand".
+      const { data: sections } = await supabase
+        .from('web_sections')
+        .select('id, content_template_id, sort_order')
+        .in('id', sectionIds)
+      const tplIds = Array.from(new Set(
+        ((sections ?? []) as Array<{ content_template_id: string | null }>)
+          .map(s => s.content_template_id).filter((x): x is string => !!x),
+      ))
+      const tplMap: Record<string, string> = {}
+      if (tplIds.length > 0) {
+        const { data: tpls } = await supabase
+          .from('web_content_templates')
+          .select('id, layer_name')
+          .in('id', tplIds)
+        for (const t of (tpls ?? []) as Array<{ id: string; layer_name: string | null }>) {
+          tplMap[t.id] = t.layer_name ?? 'Section'
+        }
+      }
+      const smap: Record<string, string> = {}
+      for (const s of (sections ?? []) as Array<{ id: string; content_template_id: string | null; sort_order: number | null }>) {
+        smap[s.id] = s.content_template_id
+          ? (tplMap[s.content_template_id] ?? 'Section')
+          : `Section · ${(s.sort_order ?? 0) + 1}`
+      }
+      setSectionLabelById(smap)
+    }
+
     setLoading(false)
   }, [projectId])
 
@@ -390,6 +446,8 @@ function FeedbackTab({
                     review={r}
                     comments={state.comments.filter(c => c.review_id === r.id).filter(filterFn)}
                     edits={edits.filter(e => e.review_id === r.id)}
+                    pageById={pageById}
+                    sectionLabelById={sectionLabelById}
                     onJumpToSection={onJumpToSection}
                     onClose={() => void handleClose(r.id)}
                     onCopyLink={() => r.partner_token && copyPortalLink(r.partner_token, r.id)}
@@ -412,6 +470,8 @@ function FeedbackTab({
                     review={r}
                     comments={state.comments.filter(c => c.review_id === r.id).filter(filterFn)}
                     edits={edits.filter(e => e.review_id === r.id)}
+                    pageById={pageById}
+                    sectionLabelById={sectionLabelById}
                     onJumpToSection={onJumpToSection}
                     onClose={() => {}}  // already closed
                     onCopyLink={() => r.partner_token && copyPortalLink(r.partner_token, r.id)}
@@ -431,11 +491,14 @@ function FeedbackTab({
  *  Partner sessions break into 'requested' + 'comment'; internal
  *  sessions break into 'suggested' + 'comment'. */
 function ReviewSession({
-  review, comments, edits, onJumpToSection, onClose, onCopyLink, copied,
+  review, comments, edits, pageById, sectionLabelById,
+  onJumpToSection, onClose, onCopyLink, copied,
 }: {
   review: WebReview
   comments: WebReviewComment[]
   edits: WebReviewEdit[]
+  pageById: Record<string, { id: string; name: string }>
+  sectionLabelById: Record<string, string>
   onJumpToSection: (pageId: string, sectionId: string) => void
   onClose: () => void
   onCopyLink: () => void
@@ -516,7 +579,13 @@ function ReviewSession({
           <>
             <CommentGroup label="Staff suggestions" items={suggested} onJumpToSection={onJumpToSection} defaultOpen />
             <CommentGroup label="Staff comments"   items={comment}    onJumpToSection={onJumpToSection} />
-            <EditGroup    label="Changes made"     items={edits}      onJumpToSection={onJumpToSection} />
+            <EditGroup
+              label="Changes made"
+              items={edits}
+              pageById={pageById}
+              sectionLabelById={sectionLabelById}
+              onJumpToSection={onJumpToSection}
+            />
           </>
         )}
         {comments.length === 0 && edits.length === 0 && (
@@ -531,10 +600,12 @@ function ReviewSession({
  *  Internal-only — partner reviews don't write to field_values
  *  directly, so they have no edits to show. */
 function EditGroup({
-  label, items, onJumpToSection, defaultOpen = false,
+  label, items, pageById, sectionLabelById, onJumpToSection, defaultOpen = false,
 }: {
   label: string
   items: WebReviewEdit[]
+  pageById: Record<string, { id: string; name: string }>
+  sectionLabelById: Record<string, string>
   onJumpToSection: (pageId: string, sectionId: string) => void
   defaultOpen?: boolean
 }) {
@@ -553,28 +624,37 @@ function EditGroup({
       </button>
       {open && (
         <ul className="px-1 pb-1 space-y-1">
-          {items.map(e => (
-            <li key={e.id}>
-              <button
-                type="button"
-                onClick={() => onJumpToSection(e.web_page_id, e.web_section_id)}
-                className="w-full text-left rounded-md bg-emerald-50/30 border border-emerald-200/50 px-2 py-1.5 hover:border-emerald-400 transition-colors"
-              >
-                <div className="flex items-center gap-1.5 mb-0.5">
-                  <span className="font-mono text-[9px] text-emerald-700">{e.field_label ?? e.field_path}</span>
-                  <span className="ml-auto text-[9px] text-wm-text-subtle">
-                    {fmtShortDateTime(e.edited_at)}
-                  </span>
-                </div>
-                <p className="text-[10px] text-wm-text-subtle line-through line-clamp-1">
-                  {stringifyEditValue(e.before_value)}
-                </p>
-                <p className="text-[11px] text-wm-text leading-snug line-clamp-2">
-                  {stringifyEditValue(e.after_value)}
-                </p>
-              </button>
-            </li>
-          ))}
+          {items.map(e => {
+            const pageName     = pageById[e.web_page_id]?.name ?? 'Unknown page'
+            const sectionLabel = sectionLabelById[e.web_section_id] ?? 'Section'
+            return (
+              <li key={e.id}>
+                <button
+                  type="button"
+                  onClick={() => onJumpToSection(e.web_page_id, e.web_section_id)}
+                  className="w-full text-left rounded-md bg-emerald-50/30 border border-emerald-200/50 px-2 py-1.5 hover:border-emerald-400 transition-colors"
+                >
+                  {/* Breadcrumb: which page → which section → which field */}
+                  <div className="flex items-center gap-1 text-[9px] text-wm-text-subtle mb-0.5 flex-wrap">
+                    <span className="font-semibold text-wm-text">{pageName}</span>
+                    <span className="opacity-60">›</span>
+                    <span className="font-mono truncate">{sectionLabel}</span>
+                    <span className="opacity-60">›</span>
+                    <span className="font-mono text-emerald-700">{e.field_label ?? e.field_path}</span>
+                    <span className="ml-auto text-wm-text-subtle">
+                      {fmtShortDateTime(e.edited_at)}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-wm-text-subtle line-through line-clamp-1">
+                    {stringifyEditValue(e.before_value)}
+                  </p>
+                  <p className="text-[11px] text-wm-text leading-snug line-clamp-2">
+                    {stringifyEditValue(e.after_value)}
+                  </p>
+                </button>
+              </li>
+            )
+          })}
         </ul>
       )}
     </div>

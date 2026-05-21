@@ -81,10 +81,19 @@ const SnippetsContext = createContext<readonly WMSnippetOption[]>([])
 const useEditorSnippets = () => useContext(SnippetsContext)
 
 const STATUS_TONES: Record<WebPage['content_status'], WMStatusTone> = {
-  draft:     'neutral',
-  in_review: 'info',
-  approved:  'success',
-  archived:  'neutral',
+  draft:            'neutral',
+  internal_review:  'info',
+  partner_review:   'warning',
+  partner_approved: 'success',
+  archived:         'neutral',
+}
+
+const STATUS_LABELS: Record<WebPage['content_status'], string> = {
+  draft:            'Draft',
+  internal_review:  'Internal Review',
+  partner_review:   'Partner Review',
+  partner_approved: 'Partner Approved',
+  archived:         'Archived',
 }
 
 export function PagesWorkspace({ project, onChange }: Props) {
@@ -431,7 +440,7 @@ function PageList({
                   </div>
                   <PageReviewBadge counts={pageReviewCounts[p.id]} />
                   <WMStatusPill tone={STATUS_TONES[p.content_status]} size="sm">
-                    {p.content_status === 'in_review' ? 'review' : p.content_status}
+                    {STATUS_LABELS[p.content_status] ?? p.content_status}
                   </WMStatusPill>
                 </button>
                 <button
@@ -1032,7 +1041,7 @@ function PageEditor({
       <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
           <WMStatusPill tone={STATUS_TONES[page.content_status]} size="md">
-            {page.content_status === 'in_review' ? 'in review' : page.content_status}
+            {STATUS_LABELS[page.content_status] ?? page.content_status}
           </WMStatusPill>
           {page.ai_drafted_at && (
             <WMAIAttribution
@@ -1233,9 +1242,10 @@ function StatusMenu({
 }) {
   const [open, setOpen] = useState(false)
   const options: Array<{ value: WebPage['content_status']; label: string; tone: WMStatusTone }> = [
-    { value: 'draft',     label: 'Draft',          tone: 'neutral' },
-    { value: 'in_review', label: 'In review',      tone: 'info'    },
-    { value: 'approved',  label: 'Approved',       tone: 'success' },
+    { value: 'draft',            label: 'Draft',            tone: 'neutral' },
+    { value: 'internal_review',  label: 'Internal Review',  tone: 'info'    },
+    { value: 'partner_review',   label: 'Partner Review',   tone: 'warning' },
+    { value: 'partner_approved', label: 'Partner Approved', tone: 'success' },
   ]
   return (
     <div className="relative">

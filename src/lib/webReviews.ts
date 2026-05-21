@@ -294,6 +294,20 @@ export async function startReview(opts: {
       started_at:        new Date().toISOString(),
     } as never).eq('id', opts.fromRequestId)
   }
+
+  // Auto-bump page lifecycle on partner reviews. Internal reviews
+  // don't bump on creation (the comment-insert trigger handles that
+  // page-by-page); but a partner review is a whole-project event —
+  // every page in draft/internal_review flips to partner_review the
+  // moment the partner link is generated.
+  if (opts.kind === 'partner') {
+    await supabase
+      .from('web_pages')
+      .update({ content_status: 'partner_review', updated_at: new Date().toISOString() } as never)
+      .eq('web_project_id', opts.projectId)
+      .in('content_status', ['draft', 'internal_review'])
+  }
+
   return { ok: true, data: data as WebReview | null, error: null }
 }
 
@@ -324,6 +338,15 @@ export async function createReviewRequest(opts: {
     console.error('[reviews] createReviewRequest failed:', error.message)
     return { ok: false, data: null, error: error.message }
   }
+  // Requesting a review is itself a signal the page is no longer
+  // pure draft. Bump every draft page on the project to
+  // internal_review so the status reflects "someone is going to look
+  // at this soon".
+  await supabase
+    .from('web_pages')
+    .update({ content_status: 'internal_review', updated_at: new Date().toISOString() } as never)
+    .eq('web_project_id', opts.projectId)
+    .eq('content_status', 'draft')
   return { ok: true, data: data as WebReviewRequest | null, error: null }
 }
 
@@ -412,17 +435,22 @@ export async function finalizeReview(opts: {
     pagesWithOpen.add(r.web_page_id)
   }
   const cleanPageIds = ((pageRows ?? []) as Array<{ id: string; content_status: string }>)
-    .filter(p => p.content_status === 'in_review' && !pagesWithOpen.has(p.id))
+    .filter(p =>
+      (p.content_status === 'internal_review' || p.content_status === 'partner_review')
+      && !pagesWithOpen.has(p.id),
+    )
     .map(p => p.id)
   const pendingPageIds = ((pageRows ?? []) as Array<{ id: string; content_status: string }>)
     .filter(p => pagesWithOpen.has(p.id))
     .map(p => p.id)
 
-  // 2. Approve clean pages.
+  // 2. Approve clean pages. We use partner_approved as the terminal
+  //    "good to ship" status — even when staff finalizes, the
+  //    convention is that approval is partner-driven.
   if (cleanPageIds.length > 0) {
     const { error: upErr } = await supabase
       .from('web_pages')
-      .update({ content_status: 'approved', updated_at: finalizedAt })
+      .update({ content_status: 'partner_approved', updated_at: finalizedAt })
       .in('id', cleanPageIds)
     if (upErr) {
       console.error('[reviews] finalizeReview page-update failed:', upErr.message)

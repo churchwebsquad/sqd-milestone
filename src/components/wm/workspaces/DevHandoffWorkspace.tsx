@@ -20,19 +20,42 @@
  * "coming soon" placeholders so the surface is visible end-to-end.
  */
 
-import { useMemo } from 'react'
-import { Cog, Download, FileText, AlertCircle } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Cog, Download, FileText, AlertCircle, Globe, Link as LinkIcon, ExternalLink } from 'lucide-react'
 import { WMButton } from '../Button'
 import { WMCard } from '../Card'
+import { supabase } from '../../../lib/supabase'
 import {
   parseDesignSystemSpec, emptyDesignSystemSpec, toAcssGvmJson,
   ACSS_ROLES,
   type DesignSystemSpec,
 } from '../../../lib/designSystemSpec'
-import type { StrategyWebProject } from '../../../types/database'
+import type {
+  StrategyWebProject, WebPage, WebSection, WebContentTemplate,
+  WebPageSeo, WebFieldDef,
+} from '../../../types/database'
 
 interface Props {
   project: StrategyWebProject
+}
+
+interface CtaRow {
+  pageId:      string
+  pageName:    string
+  pageSlug:    string
+  sectionId:   string
+  sectionLabel: string
+  fieldKey:    string
+  fieldLabel:  string
+  label:       string
+  url:         string
+}
+
+interface PageSeoRow {
+  pageId:   string
+  pageName: string
+  pageSlug: string
+  seo:      WebPageSeo | null
 }
 
 export function DevHandoffWorkspace({ project }: Props) {
@@ -40,6 +63,53 @@ export function DevHandoffWorkspace({ project }: Props) {
     () => parseDesignSystemSpec(project.design_system) ?? emptyDesignSystemSpec(),
     [project.design_system],
   )
+
+  // Load pages + sections + templates so we can extract SEO data
+  // per page and walk every CTA slot across the project.
+  const [seoRows, setSeoRows] = useState<PageSeoRow[]>([])
+  const [ctaRows, setCtaRows] = useState<CtaRow[]>([])
+  const [seoCtaLoading, setSeoCtaLoading] = useState(true)
+
+  useEffect(() => {
+    void (async () => {
+      setSeoCtaLoading(true)
+      const { data: pageRows } = await supabase
+        .from('web_pages')
+        .select('id, name, slug, seo')
+        .eq('web_project_id', project.id)
+        .eq('archived', false)
+        .order('sort_order')
+      const pages = (pageRows ?? []) as Array<Pick<WebPage, 'id' | 'name' | 'slug' | 'seo'>>
+
+      const pageIds = pages.map(p => p.id)
+      let sections: WebSection[] = []
+      if (pageIds.length > 0) {
+        const { data: secRows } = await supabase
+          .from('web_sections')
+          .select('*')
+          .in('web_page_id', pageIds)
+          .order('sort_order')
+        sections = (secRows ?? []) as WebSection[]
+      }
+      const tplIds = Array.from(new Set(
+        sections.map(s => s.content_template_id).filter((x): x is string => !!x),
+      ))
+      const templates: Record<string, WebContentTemplate> = {}
+      if (tplIds.length > 0) {
+        const { data: tplRows } = await supabase
+          .from('web_content_templates')
+          .select('id, layer_name, fields, family')
+          .in('id', tplIds)
+        for (const t of (tplRows ?? []) as WebContentTemplate[]) templates[t.id] = t
+      }
+
+      setSeoRows(pages.map(p => ({
+        pageId: p.id, pageName: p.name, pageSlug: p.slug, seo: p.seo ?? null,
+      })))
+      setCtaRows(extractCtaInventory({ pages, sections, templates }))
+      setSeoCtaLoading(false)
+    })()
+  }, [project.id])
 
   // Coverage report — how many roles have a medium anchor set?
   const rolesWithAnchor = useMemo(() => {
@@ -140,22 +210,332 @@ export function DevHandoffWorkspace({ project }: Props) {
             </details>
           </WMCard>
 
-          {/* ── Placeholder: full handoff doc ───────────────────── */}
+          {/* ── SEO / AEO / GEO ─────────────────────────────────── */}
           <WMCard padding="loose">
-            <div className="flex items-center gap-2 mb-1 text-wm-text-subtle">
-              <FileText size={13} />
-              <h2 className="text-[13px] font-bold uppercase tracking-widest">
-                Full handoff document <span className="font-normal normal-case tracking-normal text-wm-text-muted">— coming soon</span>
-              </h2>
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+                  <Globe size={13} />
+                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
+                    SEO · AEO · GEO export
+                  </h2>
+                </div>
+                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+                  Page-by-page SEO title + meta description, focus keywords,
+                  AEO answer intent + Q&A, and GEO service areas. Authored
+                  from the Pages tab's SEO panel. Download as Markdown so
+                  the dev team can paste straight into the WordPress page
+                  template / Yoast / Rank Math fields.
+                </p>
+              </div>
+              <WMButton
+                variant="primary"
+                size="md"
+                iconLeft={<Download size={13} />}
+                onClick={() => downloadSeoMarkdown(projectSlug, project.name, seoRows)}
+                disabled={seoRows.length === 0 || seoCtaLoading}
+              >
+                Download SEO doc
+              </WMButton>
             </div>
-            <p className="text-[12px] text-wm-text-muted mt-1">
-              Markdown bundle covering sitemap, CTA inventory, Brixies section
-              inventory, SEO metadata per page, and asset bundle checklist.
-              Generates per the Dev Handoff SOP — wired in a follow-up.
-            </p>
+            {seoCtaLoading ? (
+              <p className="text-[12px] text-wm-text-subtle">Loading…</p>
+            ) : seoRows.length === 0 ? (
+              <p className="text-[12px] text-wm-text-subtle italic">No pages on this project yet.</p>
+            ) : (
+              <SeoSummaryTable rows={seoRows} />
+            )}
+          </WMCard>
+
+          {/* ── CTA inventory ────────────────────────────────────── */}
+          <WMCard padding="loose">
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+                  <LinkIcon size={13} />
+                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
+                    CTA inventory
+                  </h2>
+                </div>
+                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+                  Every CTA across the site — page, section, label, and
+                  destination URL. Useful for the dev team's button-routing
+                  audit and the launch checklist (broken links / missing
+                  targets).
+                </p>
+              </div>
+              <WMButton
+                variant="primary"
+                size="md"
+                iconLeft={<Download size={13} />}
+                onClick={() => downloadCtaCsv(projectSlug, ctaRows)}
+                disabled={ctaRows.length === 0 || seoCtaLoading}
+              >
+                Download CSV
+              </WMButton>
+            </div>
+            {seoCtaLoading ? (
+              <p className="text-[12px] text-wm-text-subtle">Loading…</p>
+            ) : ctaRows.length === 0 ? (
+              <p className="text-[12px] text-wm-text-subtle italic">No CTAs bound on any section yet.</p>
+            ) : (
+              <CtaInventoryTable rows={ctaRows} />
+            )}
           </WMCard>
         </div>
       </div>
     </div>
   )
+}
+
+// ── Sub-views ──────────────────────────────────────────────────────
+
+function SeoSummaryTable({ rows }: { rows: PageSeoRow[] }) {
+  return (
+    <div className="overflow-x-auto -mx-2">
+      <table className="w-full text-[11px] border-collapse">
+        <thead>
+          <tr className="text-left text-wm-text-subtle">
+            <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Page</th>
+            <th className="px-2 py-1.5 font-bold uppercase tracking-widest">SEO title</th>
+            <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Meta description</th>
+            <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Focus / Geo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => {
+            const s = r.seo?.seo ?? {}
+            const g = r.seo?.geo ?? {}
+            return (
+              <tr key={r.pageId} className="border-t border-wm-border/40 align-top">
+                <td className="px-2 py-2">
+                  <p className="font-semibold text-wm-text">{r.pageName}</p>
+                  <p className="text-[10px] text-wm-text-subtle font-mono">/{r.pageSlug}</p>
+                </td>
+                <td className="px-2 py-2 text-wm-text max-w-[200px] truncate" title={s.title ?? ''}>
+                  {s.title || <span className="text-wm-text-subtle italic">—</span>}
+                </td>
+                <td className="px-2 py-2 text-wm-text-muted leading-snug max-w-[260px]">
+                  {s.meta_description || <span className="text-wm-text-subtle italic">—</span>}
+                </td>
+                <td className="px-2 py-2 text-wm-text-muted leading-snug max-w-[200px]">
+                  {(s.focus_keywords ?? []).slice(0, 3).join(', ')}
+                  {(g.service_areas ?? []).length > 0 && (
+                    <p className="text-[10px] text-wm-text-subtle mt-0.5">
+                      ▸ {g.service_areas?.join(', ')}
+                    </p>
+                  )}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
+  // Group by page for readability.
+  const byPage: Record<string, { name: string; slug: string; items: CtaRow[] }> = {}
+  for (const r of rows) {
+    const grp = byPage[r.pageId] ?? { name: r.pageName, slug: r.pageSlug, items: [] }
+    grp.items.push(r)
+    byPage[r.pageId] = grp
+  }
+  const ordered = Object.entries(byPage)
+
+  return (
+    <div className="space-y-3">
+      {ordered.map(([pageId, grp]) => (
+        <div key={pageId}>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong mb-1">
+            {grp.name} <span className="font-mono text-wm-text-subtle">/{grp.slug}</span> · {grp.items.length}
+          </p>
+          <ul className="space-y-0.5">
+            {grp.items.map((c, idx) => {
+              const external = isExternalUrl(c.url)
+              return (
+                <li
+                  key={`${c.sectionId}-${c.fieldKey}-${idx}`}
+                  className="flex items-start gap-2 text-[11px] rounded-md border border-wm-border bg-wm-bg-elevated px-2 py-1.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-wm-text truncate">
+                      {c.label || <span className="italic text-wm-text-subtle">(no label)</span>}
+                    </p>
+                    <p className="text-[10px] text-wm-text-subtle truncate">
+                      {c.sectionLabel} · {c.fieldLabel || c.fieldKey}
+                    </p>
+                  </div>
+                  <a
+                    href={c.url || '#'}
+                    target={external ? '_blank' : '_self'}
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[10px] font-mono text-wm-accent-strong hover:underline shrink-0 max-w-[40%] truncate"
+                    title={c.url}
+                  >
+                    {external && <ExternalLink size={9} />}
+                    {c.url || <span className="italic text-wm-text-subtle">no url</span>}
+                  </a>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Helpers ────────────────────────────────────────────────────────
+
+function isExternalUrl(url: string): boolean {
+  if (!url) return false
+  try {
+    const u = new URL(url)
+    return u.origin !== window.location.origin
+  } catch { return false }
+}
+
+function extractCtaInventory(opts: {
+  pages:     Array<Pick<WebPage, 'id' | 'name' | 'slug'>>
+  sections:  WebSection[]
+  templates: Record<string, WebContentTemplate>
+}): CtaRow[] {
+  const pageById: Record<string, { name: string; slug: string }> = {}
+  for (const p of opts.pages) pageById[p.id] = { name: p.name, slug: p.slug }
+
+  const rows: CtaRow[] = []
+  for (const s of opts.sections) {
+    const page = pageById[s.web_page_id]
+    if (!page) continue
+    const template = s.content_template_id ? opts.templates[s.content_template_id] : null
+    const sectionLabel = template?.layer_name ?? `Section · ${s.sort_order + 1}`
+    const values = (s.field_values ?? {}) as Record<string, unknown>
+    walkFieldsForCtas(template?.fields ?? [], values, (entry) => {
+      rows.push({
+        pageId:       s.web_page_id,
+        pageName:     page.name,
+        pageSlug:     page.slug,
+        sectionId:    s.id,
+        sectionLabel,
+        fieldKey:     entry.fieldKey,
+        fieldLabel:   entry.fieldLabel,
+        label:        entry.label,
+        url:          entry.url,
+      })
+    })
+  }
+  return rows
+}
+
+/** Recursive walker for template field schemas. Calls `onCta` for every
+ *  slot of type 'cta' encountered, with the bound value resolved from
+ *  the section's field_values (including group items). */
+function walkFieldsForCtas(
+  fields: WebFieldDef[],
+  values: Record<string, unknown>,
+  onCta: (entry: { fieldKey: string; fieldLabel: string; label: string; url: string }) => void,
+  pathPrefix: string = '',
+  labelPrefix: string = '',
+): void {
+  for (const f of fields) {
+    if (f.kind === 'slot') {
+      if (f.type !== 'cta') continue
+      const v = values[f.key]
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        const obj = v as { label?: unknown; url?: unknown }
+        onCta({
+          fieldKey:   `${pathPrefix}${f.key}`,
+          fieldLabel: labelPrefix ? `${labelPrefix} › ${f.layer_name ?? f.key}` : (f.layer_name ?? f.key),
+          label:      typeof obj.label === 'string' ? obj.label : '',
+          url:        typeof obj.url   === 'string' ? obj.url   : '',
+        })
+      }
+      continue
+    }
+    if (f.kind === 'group') {
+      const items = Array.isArray(values[f.key]) ? (values[f.key] as Array<Record<string, unknown>>) : []
+      items.forEach((item, idx) => {
+        walkFieldsForCtas(
+          f.item_schema ?? [],
+          item,
+          onCta,
+          `${pathPrefix}${f.key}.${idx}.`,
+          labelPrefix
+            ? `${labelPrefix} › ${f.layer_name ?? f.key} #${idx + 1}`
+            : `${f.layer_name ?? f.key} #${idx + 1}`,
+        )
+      })
+    }
+  }
+}
+
+function downloadSeoMarkdown(projectSlug: string, projectName: string, rows: PageSeoRow[]): void {
+  const lines: string[] = [
+    `# ${projectName} — SEO / AEO / GEO`,
+    '',
+    `Generated ${new Date().toLocaleString()}.`,
+    '',
+  ]
+  for (const r of rows) {
+    lines.push(`## ${r.pageName}`)
+    lines.push(`Slug: \`/${r.pageSlug}\``)
+    lines.push('')
+    const s = r.seo?.seo ?? {}
+    const a = r.seo?.aeo ?? {}
+    const g = r.seo?.geo ?? {}
+    lines.push('### SEO')
+    lines.push(`- **Title:** ${s.title ?? '—'}`)
+    lines.push(`- **Meta description:** ${s.meta_description ?? '—'}`)
+    lines.push(`- **Focus keywords:** ${(s.focus_keywords ?? []).join(', ') || '—'}`)
+    if (s.canonical_url) lines.push(`- **Canonical URL:** ${s.canonical_url}`)
+    lines.push('')
+    if (a.answer_intent || (a.structured_qa ?? []).length > 0) {
+      lines.push('### AEO')
+      if (a.answer_intent) lines.push(`- **Answer intent:** ${a.answer_intent}`)
+      for (const qa of (a.structured_qa ?? [])) {
+        lines.push(`- **Q:** ${qa.q}`)
+        lines.push(`  **A:** ${qa.a}`)
+      }
+      lines.push('')
+    }
+    if ((g.service_areas ?? []).length > 0 || (g.local_keywords ?? []).length > 0 || g.local_landmarks) {
+      lines.push('### GEO')
+      if ((g.service_areas ?? []).length > 0)  lines.push(`- **Service areas:** ${g.service_areas?.join(', ')}`)
+      if ((g.local_keywords ?? []).length > 0) lines.push(`- **Local keywords:** ${g.local_keywords?.join(', ')}`)
+      if (g.local_landmarks)                    lines.push(`- **Landmarks / context:** ${g.local_landmarks}`)
+      lines.push('')
+    }
+    lines.push('---')
+    lines.push('')
+  }
+  triggerDownload(`${projectSlug}-seo.md`, lines.join('\n'), 'text/markdown')
+}
+
+function downloadCtaCsv(projectSlug: string, rows: CtaRow[]): void {
+  const cells = (s: string) => `"${s.replace(/"/g, '""')}"`
+  const csv: string[] = [
+    ['Page', 'Slug', 'Section', 'Field', 'Label', 'URL', 'Target'].map(cells).join(','),
+  ]
+  for (const r of rows) {
+    csv.push([
+      r.pageName, `/${r.pageSlug}`, r.sectionLabel, r.fieldLabel || r.fieldKey,
+      r.label, r.url, isExternalUrl(r.url) ? 'external' : 'site',
+    ].map(cells).join(','))
+  }
+  triggerDownload(`${projectSlug}-ctas.csv`, csv.join('\n'), 'text/csv')
+}
+
+function triggerDownload(filename: string, content: string, mime: string): void {
+  const blob = new Blob([content], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }

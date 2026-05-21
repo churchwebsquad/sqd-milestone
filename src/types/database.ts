@@ -1163,12 +1163,52 @@ export interface WebPage {
   created_at: string
   updated_at: string
   // ── Content Manager workflow status (v30) ──
-  content_status: 'draft' | 'in_review' | 'approved' | 'archived'
+  content_status: WebPageContentStatus
   ai_drafted_at: string | null
   ai_drafted_by_stage: string | null
   edited_since_ai: boolean
+  /** SEO / AEO (answer engine) / GEO (geo-targeting) authoring per
+   *  page. Shape is open — see WebPageSeo for the canonical keys. */
+  seo: WebPageSeo | null
   [key: string]: unknown
 }
+
+/** Canonical (but flexible) shape of web_pages.seo. Strategists can
+ *  add ad-hoc keys; the SEO panel renders the canonical fields below
+ *  with explicit inputs and exposes the rest as a raw editor row. */
+export interface WebPageSeo {
+  seo?: {
+    title?:            string
+    meta_description?: string
+    focus_keywords?:   string[]
+    canonical_url?:    string
+  }
+  aeo?: {
+    /** What question is this page intended to answer? */
+    answer_intent?:    string
+    /** Q&A blocks that map cleanly to answer engines + FAQ schema. */
+    structured_qa?:    Array<{ q: string; a: string }>
+  }
+  geo?: {
+    /** "Kent, OH", "Akron, OH" — drives local pack relevance. */
+    service_areas?:    string[]
+    local_keywords?:   string[]
+    /** Free text for landmarks, neighborhoods, regional context. */
+    local_landmarks?:  string
+  }
+  [key: string]: unknown
+}
+
+/** Page review lifecycle. Renamed from the legacy
+ *  draft/in_review/approved trio to make the partner vs internal
+ *  flavor of "in review" explicit, and to clarify that approval is
+ *  a partner-driven concept. */
+export type WebPageContentStatus =
+  | 'draft'
+  | 'internal_review'
+  | 'partner_review'
+  | 'partner_approved'
+  | 'archived'
 
 /** One section instance on a page, bound to a content template. The
  *  typed `field_values` object matches the template's `fields` —
@@ -1183,7 +1223,7 @@ export interface WebSection {
   content_template_id: string | null
   field_values: Record<string, unknown>
   sort_order: number
-  content_status: 'draft' | 'in_review' | 'approved' | string
+  content_status: 'draft' | 'internal_review' | 'partner_review' | 'partner_approved' | string
   notes: string | null
   created_at: string
   updated_at: string
