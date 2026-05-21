@@ -235,7 +235,8 @@ export async function startReview(opts: {
 }
 
 /** Close a review. Open comments stay attached to their pages and
- *  carry into the next review session. */
+ *  carry into the next review session. Pages stay at whatever
+ *  content_status they're at — no implicit approval. */
 export async function closeReview(reviewId: string): Promise<ReviewMutationResult<null>> {
   const { data: user } = await supabase.auth.getUser()
   const closerName = await resolveStaffName(user?.user?.email ?? null)
@@ -253,6 +254,99 @@ export async function closeReview(reviewId: string): Promise<ReviewMutationResul
     return { ok: false, data: null, error: error.message }
   }
   return { ok: true, data: null, error: null }
+}
+
+/** Finalize a review — close the session AND promote every page on
+ *  the project that has no remaining open feedback from `in_review`
+ *  to `approved`. Pages with unresolved comments stay at `in_review`
+ *  so staff knows they still need attention. Appends a "Finalized by"
+ *  marker to web_reviews.notes for the timeline. */
+export async function finalizeReview(opts: {
+  reviewId:  string
+  projectId: string
+}): Promise<ReviewMutationResult<{ pagesApproved: number; pagesPending: number }>> {
+  const { data: user } = await supabase.auth.getUser()
+  const closerName = await resolveStaffName(user?.user?.email ?? null)
+  const finalizedAt = new Date().toISOString()
+
+  // 1. Read every page on the project + the open comment counts so we
+  //    know which pages are clear of feedback.
+  const [{ data: pageRows, error: pErr }, { data: openRows, error: cErr }] = await Promise.all([
+    supabase
+      .from('web_pages')
+      .select('id, content_status')
+      .eq('web_project_id', opts.projectId)
+      .eq('archived', false),
+    supabase
+      .from('web_review_comments')
+      .select('web_page_id, review_id, status')
+      .eq('status', 'open'),
+  ])
+  if (pErr || cErr) {
+    const msg = pErr?.message ?? cErr?.message ?? 'unknown error'
+    console.error('[reviews] finalizeReview load failed:', msg)
+    return { ok: false, data: null, error: msg }
+  }
+
+  // Pages with any open comment (this review or any other) stay
+  // pending — we only approve genuinely-clean ones.
+  const pagesWithOpen = new Set<string>()
+  for (const r of (openRows ?? []) as Array<{ web_page_id: string }>) {
+    pagesWithOpen.add(r.web_page_id)
+  }
+  const cleanPageIds = ((pageRows ?? []) as Array<{ id: string; content_status: string }>)
+    .filter(p => p.content_status === 'in_review' && !pagesWithOpen.has(p.id))
+    .map(p => p.id)
+  const pendingPageIds = ((pageRows ?? []) as Array<{ id: string; content_status: string }>)
+    .filter(p => pagesWithOpen.has(p.id))
+    .map(p => p.id)
+
+  // 2. Approve clean pages.
+  if (cleanPageIds.length > 0) {
+    const { error: upErr } = await supabase
+      .from('web_pages')
+      .update({ content_status: 'approved', updated_at: finalizedAt })
+      .in('id', cleanPageIds)
+    if (upErr) {
+      console.error('[reviews] finalizeReview page-update failed:', upErr.message)
+      return { ok: false, data: null, error: upErr.message }
+    }
+  }
+
+  // 3. Close the review + stamp a "Finalized" marker into notes so
+  //    the audit trail records that this close was a real wrap-up.
+  const note = `Finalized by ${closerName ?? 'staff'} at ${finalizedAt} — ${cleanPageIds.length} page(s) approved, ${pendingPageIds.length} still pending`
+  const { data: reviewRow, error: rErr } = await supabase
+    .from('web_reviews')
+    .select('notes')
+    .eq('id', opts.reviewId)
+    .maybeSingle()
+  if (rErr) {
+    console.error('[reviews] finalizeReview review-read failed:', rErr.message)
+    return { ok: false, data: null, error: rErr.message }
+  }
+  const existing = ((reviewRow as { notes?: string | null } | null)?.notes ?? '').trim()
+  const merged = existing ? `${existing}\n${note}` : note
+  const { error: closeErr } = await supabase
+    .from('web_reviews')
+    .update({
+      status:            'closed',
+      closed_at:         finalizedAt,
+      closed_by_user_id: user?.user?.id ?? null,
+      closed_by_name:    closerName,
+      notes:             merged,
+    } as never)
+    .eq('id', opts.reviewId)
+  if (closeErr) {
+    console.error('[reviews] finalizeReview close failed:', closeErr.message)
+    return { ok: false, data: null, error: closeErr.message }
+  }
+
+  return {
+    ok: true,
+    data: { pagesApproved: cleanPageIds.length, pagesPending: pendingPageIds.length },
+    error: null,
+  }
 }
 
 /** Resolve a comment / suggestion / request. `applied` writes

@@ -85,6 +85,21 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sectionTabAvailable])
 
+  // External trigger: when ?rail=<tab> is set in the URL, switch to
+  // that tab and clear the param. Used by the in-canvas "Open Feedback
+  // panel" button so the rail responds without yanking the user to
+  // a different top-level tab.
+  const railRequest = params.get('rail') as RailTab | null
+  useEffect(() => {
+    if (!railRequest) return
+    const valid: RailTab[] = ['section', 'snippets', 'voice', 'heuristics', 'feedback', 'audit']
+    if (valid.includes(railRequest)) setTab(railRequest)
+    const next = new URLSearchParams(window.location.search)
+    next.delete('rail')
+    setParams(next, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [railRequest])
+
   // Counts on mount + project change. Snippets via direct count;
   // feedback via the same review-state lib the Review tab uses.
   const loadCounts = useCallback(async () => {

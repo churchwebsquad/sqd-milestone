@@ -27,12 +27,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Inbox, X, Loader2, FileText, MessageSquare,
+  X, Loader2, FileText, MessageSquare, Check,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { augmentTemplate } from '../../../lib/webBrixiesSchemaAugment'
 import { loadEditorSnippets } from '../../../lib/webSnippets'
-import { loadProjectReviewState, type ProjectReviewState, closeReview } from '../../../lib/webReviews'
+import { loadProjectReviewState, type ProjectReviewState, closeReview, finalizeReview } from '../../../lib/webReviews'
 import { SectionList } from '../sectioneditor/SectionList'
 import { useSectionDetailPublisher } from '../sectioneditor/SectionEditingContext'
 import type { WMSnippetOption } from '../RichTextEditor'
@@ -250,11 +250,26 @@ export function InternalReviewWorkspace({
   // ── Close review ────────────────────────────────────────────────
 
   const handleClose = async () => {
-    if (!confirm('Close this internal review? Open comments stay attached to their pages and carry into the next session.')) return
+    if (!confirm('Close this internal review? Open comments stay attached to their pages and carry into the next session. Pages keep their current status.')) return
     setClosing(true)
     const res = await closeReview(review.id)
     setClosing(false)
     if (res.ok) {
+      await onReviewChange()
+      onExitToInbox()
+    }
+  }
+
+  const handleFinalize = async () => {
+    if (!confirm('Finalize this review? Pages with no remaining open feedback will be marked Approved; pages with unresolved comments stay In Review.')) return
+    setClosing(true)
+    const res = await finalizeReview({ reviewId: review.id, projectId: project.id })
+    setClosing(false)
+    if (res.ok) {
+      const d = res.data
+      if (d) {
+        alert(`Review finalized.\n${d.pagesApproved} page(s) approved.\n${d.pagesPending} page(s) still pending (open feedback).`)
+      }
       await onReviewChange()
       onExitToInbox()
     }
@@ -340,20 +355,23 @@ export function InternalReviewWorkspace({
             )}
             <button
               type="button"
-              onClick={onExitToInbox}
-              className="inline-flex items-center gap-1.5 rounded-full border border-wm-border bg-wm-bg-elevated text-[11px] font-semibold text-wm-text-muted hover:border-wm-accent hover:text-wm-text px-3 py-1.5 transition-colors"
-            >
-              <Inbox size={11} /> View inbox
-            </button>
-            <button
-              type="button"
               onClick={() => void handleClose()}
               disabled={closing}
-              className="inline-flex items-center gap-1.5 rounded-full bg-wm-text text-wm-bg-elevated text-[11px] font-semibold hover:opacity-90 px-3 py-1.5 transition-opacity disabled:opacity-40"
-              title="Close this review session"
+              className="inline-flex items-center gap-1.5 rounded-full border border-wm-border bg-wm-bg-elevated text-[11px] font-semibold text-wm-text-muted hover:border-wm-danger hover:text-wm-danger px-3 py-1.5 transition-colors disabled:opacity-40"
+              title="Close this review session. Pages keep their current status — open comments stay open."
             >
               {closing ? <Loader2 size={11} className="animate-spin" /> : <X size={11} />}
               Close review
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleFinalize()}
+              disabled={closing}
+              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-700 px-3 py-1.5 transition-colors disabled:opacity-40"
+              title="Finalize: close this review and mark pages with no open feedback as Approved."
+            >
+              {closing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+              Finalize review
             </button>
           </div>
         </header>

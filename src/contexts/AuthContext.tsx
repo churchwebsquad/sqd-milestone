@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import type { Employee } from '../types/database'
@@ -87,17 +87,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             return
           }
 
-          // ── Valid domain — unblock the app immediately, fetch profile async ─
-          setAuthError(null)
-          setUser(session.user)
-          setIsLoading(false)   // don't hold the load screen for the DB query
+          // ── Valid domain ─────────────────────────────────────────────────
+          // TOKEN_REFRESHED and other onAuthStateChange events fire with
+          // a *new* session.user object reference every time, even when
+          // the actual user identity hasn't changed. Always calling
+          // setUser(session.user) caused the entire app to re-render
+          // (and iframes to flicker) on every refresh tick. Bail out if
+          // we already have the same user id loaded.
+          setAuthError(prev => (prev == null ? prev : null))
+          setUser(prev => (prev?.id === session.user.id ? prev : session.user))
+          setIsLoading(prev => (prev === false ? prev : false))
+
+          // Skip the employees lookup if we already have a profile for
+          // this user — only fetch when the user identity actually
+          // changed or we don't have one yet.
+          if (staffProfile && staffProfile.email?.toLowerCase() === email.toLowerCase()) {
+            return
+          }
 
           fetchStaffProfile(email)
             .then(profile => {
               if (!profile) {
-                // Authenticated but not in employees — sign them out and surface
-                // an error. They'll briefly see the app before being redirected;
-                // that's acceptable vs hanging on the load screen indefinitely.
                 supabase.auth.signOut()
                 setAuthError(
                   `Your account (${email}) wasn't found in the staff directory. ` +
@@ -107,7 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 setStaffProfile(null)
                 return
               }
-              setStaffProfile(profile)
+              setStaffProfile(prev => (prev?.id === profile.id ? prev : profile))
             })
             .catch(err => {
               console.error('[AuthContext] staff profile fetch failed:', err)
@@ -115,14 +125,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             })
         } else {
           // Signed out or session expired
-          setUser(null)
-          setStaffProfile(null)
-          setIsLoading(false)
+          setUser(prev => (prev == null ? prev : null))
+          setStaffProfile(prev => (prev == null ? prev : null))
+          setIsLoading(prev => (prev === false ? prev : false))
         }
       }
     )
 
     return () => subscription.unsubscribe()
+    // staffProfile read above is the latest from closure — we only use
+    // it as a fast-path skip, not as a reactive dep.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const signOut = async () => {
@@ -136,8 +149,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // V1: all verified staff are admins
   const isAdmin = staffProfile !== null
 
+  // Memoize the context value so consumers only re-render when one of
+  // the underlying primitives / object references actually changes.
+  // Previously this was a fresh object literal on every render, which
+  // forced every useAuth() consumer to re-render even when nothing
+  // had changed.
+  const value = useMemo(
+    () => ({ user, staffProfile, isAdmin, isLoading, authError, clearAuthError, signOut }),
+    [user, staffProfile, isAdmin, isLoading, authError],
+  )
+
   return (
-    <AuthContext.Provider value={{ user, staffProfile, isAdmin, isLoading, authError, clearAuthError, signOut }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   )

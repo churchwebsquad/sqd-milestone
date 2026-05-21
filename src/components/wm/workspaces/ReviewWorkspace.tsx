@@ -17,6 +17,7 @@ import { Loader2, Plus, Eye, X } from 'lucide-react'
 import {
   loadProjectReviewState, startReview, type ProjectReviewState,
 } from '../../../lib/webReviews'
+import { useAuth } from '../../../contexts/AuthContext'
 import { WMButton } from '../Button'
 import { InternalReviewWorkspace } from './InternalReviewWorkspace'
 import type { StrategyWebProject } from '../../../types/database'
@@ -26,6 +27,7 @@ interface Props {
 }
 
 export function ReviewWorkspace({ project }: Props) {
+  const { user } = useAuth()
   const [state, setState] = useState<ProjectReviewState | null>(null)
   const [loading, setLoading] = useState(true)
   const [mutating, setMutating] = useState(false)
@@ -39,7 +41,13 @@ export function ReviewWorkspace({ project }: Props) {
 
   useEffect(() => { void load() }, [load])
 
-  const activeInternal = state?.open_reviews.find(r => r.kind === 'internal') ?? null
+  // Internal reviews are PER-USER. The Review tab only flips into
+  // workspace mode for the current staff member's own open internal
+  // review — coworkers' open reviews surface in the Feedback panel
+  // but don't take over this tab.
+  const activeInternal = state?.open_reviews.find(
+    r => r.kind === 'internal' && r.started_by_user_id === user?.id,
+  ) ?? null
 
   const handleStart = async () => {
     setMutating(true)
@@ -89,13 +97,14 @@ export function ReviewWorkspace({ project }: Props) {
           Review
         </p>
         <h1 className="text-xl font-semibold text-wm-text mb-2">
-          No internal review in progress
+          You don't have an internal review open
         </h1>
         <p className="text-[13px] text-wm-text-muted leading-snug mb-5">
-          Start an internal review to walk through the site, leave comments,
-          suggest edits, and capture every change request before sending the
-          partner review link. Partner reviews + the inbox of every comment
-          across sessions live in the Feedback panel on the right.
+          Internal reviews are personal to each staff member &mdash; start one
+          to walk through the site, leave your own comments, suggest edits, and
+          capture every change request before sending the partner review link.
+          Reviews started by other staff and partner reviews all roll up in the
+          Feedback panel on the right.
         </p>
         <WMButton
           variant="primary"

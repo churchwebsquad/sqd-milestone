@@ -1126,11 +1126,12 @@ function PageEditor({
               hasPartner={hasOpenPartner}
               counts={pageCommentCounts}
               onJumpToReviews={() => {
-                // SPA nav, not window.location.search = ... — full
-                // reloads here were silently dropping unsaved work in
-                // the section editor.
+                // Open the Feedback panel in-place rather than yanking
+                // the user off the Pages canvas. The AssistantRail
+                // listens for ?rail=feedback, switches tab, then
+                // clears the param.
                 const next = new URLSearchParams(window.location.search)
-                next.set('tab', 'review')
+                next.set('rail', 'feedback')
                 setDeepLinkParams(next, { replace: false })
               }}
             />
@@ -1347,7 +1348,7 @@ function ReviewBanner({
         onClick={onJumpToReviews}
         className="inline-flex items-center gap-1 text-[11px] font-semibold text-wm-accent-strong hover:underline shrink-0"
       >
-        Go to Review tab <ArrowRight size={10} />
+        Open Feedback panel <ArrowRight size={10} />
       </button>
     </div>
   )
