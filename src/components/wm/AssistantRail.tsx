@@ -18,19 +18,22 @@
  * a comment in the Feedback tab navigates to the section it targets.
  */
 
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Tag, BookOpen, Mic, MessageSquare, AlertTriangle, RotateCw, Search,
-  Loader2, SquarePen, Inbox,
+  Loader2, SquarePen, Inbox, Plus, Copy, X, Check, ChevronRight, ChevronDown,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { runAudit } from '../../lib/webAudit'
 import type { AuditFinding, AuditSeverity } from '../../lib/webAudit'
 import type {
-  StrategyWebProject, WebPage, WebReviewComment,
+  StrategyWebProject, WebReview, WebReviewComment,
 } from '../../types/database'
-import { loadProjectReviewState } from '../../lib/webReviews'
+import {
+  loadProjectReviewState, startReview, closeReview,
+  type ProjectReviewState,
+} from '../../lib/webReviews'
 import { WMButton } from './Button'
 import { WMStatusPill } from './StatusPill'
 import { SectionDetailsPanel } from './sectioneditor/SectionDetailsPanel'
@@ -140,7 +143,7 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
               type="text"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder={tab === 'feedback' ? 'Filter feedback…' : 'Filter violations…'}
+              placeholder={tab === 'feedback' ? 'Search feedback…' : 'Filter violations…'}
               className="w-full h-8 pl-7 pr-2 rounded-md bg-wm-bg-elevated border border-wm-border text-[12px] text-wm-text placeholder-wm-text-subtle outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20"
             />
           </div>
@@ -242,33 +245,41 @@ function FeedbackTab({
   query: string
   onJumpToSection: (pageId: string, sectionId: string) => void
 }) {
-  const [openComments, setOpenComments] = useState<WebReviewComment[]>([])
-  const [resolvedComments, setResolvedComments] = useState<WebReviewComment[]>([])
-  const [pages, setPages] = useState<WebPage[]>([])
+  const [state, setState] = useState<ProjectReviewState | null>(null)
   const [loading, setLoading] = useState(true)
+  const [starting, setStarting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
-    const state = await loadProjectReviewState(projectId)
-    setOpenComments(state.comments.filter(c => c.status === 'open'))
-    // Most-recently-resolved first; cap at 50 to keep the rail fast.
-    setResolvedComments(
-      state.comments
-        .filter(c => c.status !== 'open')
-        .sort((a, b) => (b.resolved_at ?? b.updated_at ?? '').localeCompare(a.resolved_at ?? a.updated_at ?? ''))
-        .slice(0, 50),
-    )
-    const { data: pageRows } = await supabase
-      .from('web_pages')
-      .select('id, name, slug, sort_order, web_project_id')
-      .eq('web_project_id', projectId)
-      .eq('archived', false)
-      .order('sort_order')
-    setPages((pageRows ?? []) as WebPage[])
+    setState(await loadProjectReviewState(projectId))
     setLoading(false)
   }, [projectId])
 
   useEffect(() => { void load() }, [load])
+
+  const handleStartPartner = async () => {
+    setStarting(true)
+    setError(null)
+    const res = await startReview({ projectId, kind: 'partner' })
+    setStarting(false)
+    if (res.ok) await load()
+    else setError(res.error ?? 'Failed to start partner review.')
+  }
+
+  const handleClose = async (reviewId: string) => {
+    if (!confirm('Close this review? Open comments stay attached to their pages and carry into the next session.')) return
+    const res = await closeReview(reviewId)
+    if (res.ok) await load()
+  }
+
+  const copyPortalLink = (token: string, reviewId: string) => {
+    const url = `${window.location.origin}/portal/review/${token}`
+    void navigator.clipboard.writeText(url)
+    setCopied(reviewId)
+    setTimeout(() => setCopied(c => c === reviewId ? null : c), 1500)
+  }
 
   const q = query.trim().toLowerCase()
   const filterFn = useCallback((c: WebReviewComment) => {
@@ -281,22 +292,7 @@ function FeedbackTab({
     return hay.includes(q)
   }, [q])
 
-  const filteredOpen     = useMemo(() => openComments.filter(filterFn), [openComments, filterFn])
-  const filteredResolved = useMemo(() => resolvedComments.filter(filterFn), [resolvedComments, filterFn])
-
-  const groupByPage = useCallback((items: WebReviewComment[]) => {
-    const groups: Array<{ page: WebPage; items: WebReviewComment[] }> = []
-    for (const p of pages) {
-      const own = items.filter(c => c.web_page_id === p.id)
-      if (own.length > 0) groups.push({ page: p, items: own })
-    }
-    return groups
-  }, [pages])
-
-  const groupedOpen     = useMemo(() => groupByPage(filteredOpen),     [filteredOpen, groupByPage])
-  const groupedResolved = useMemo(() => groupByPage(filteredResolved), [filteredResolved, groupByPage])
-
-  if (loading) {
+  if (loading || !state) {
     return (
       <div className="p-3 space-y-1.5">
         {Array.from({ length: 3 }).map((_, i) => (
@@ -306,118 +302,248 @@ function FeedbackTab({
     )
   }
 
-  if (filteredOpen.length === 0 && filteredResolved.length === 0) {
-    return (
-      <div className="p-3">
-        <EmptyState
-          icon={<Inbox size={20} />}
-          title={q ? 'No matches' : 'No feedback yet'}
-          body={q
-            ? 'No comments match this filter. Try different keywords.'
-            : 'Start an internal review (or send a partner review link) and feedback will roll up here.'}
-        />
-      </div>
-    )
-  }
+  const openReviews   = state.open_reviews
+  const closedReviews = state.reviews.filter(r => r.status === 'closed').slice(0, 10)
+  const openPartner   = openReviews.find(r => r.kind === 'partner') ?? null
 
   return (
     <div className="p-3 space-y-3">
-      {groupedOpen.map(({ page, items }) => (
-        <div key={page.id}>
-          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5 px-1">
-            {page.name} · {items.length}
-          </p>
-          <ul className="space-y-1">
-            {items.map(c => (
-              <li key={c.id}>
-                <button
-                  type="button"
-                  onClick={() => c.web_section_id && onJumpToSection(page.id, c.web_section_id)}
-                  disabled={!c.web_section_id}
-                  className="w-full text-left rounded-md bg-wm-bg-elevated border border-wm-border px-2.5 py-1.5 hover:border-wm-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
-                >
-                  <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
-                    <KindTag kind={c.kind} />
-                    {c.field_key && <span className="font-mono text-[10px] text-wm-text-subtle">{c.field_key}</span>}
-                    <span className="ml-auto text-[10px] font-semibold text-wm-text">
-                      {c.author_external_name ?? (c.author_kind === 'partner' ? 'Partner' : 'Staff')}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-wm-text leading-snug line-clamp-2">
-                    {c.body || (typeof c.suggested_value === 'string' ? stripHtml(c.suggested_value) : '(no body)')}
-                  </p>
-                  <p className="text-[10px] text-wm-text-subtle mt-0.5">{fmtShortDateTime(c.created_at)}</p>
-                </button>
-              </li>
-            ))}
-          </ul>
+      {/* Top action — start a partner review (or copy link if one's already open) */}
+      {openPartner ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900 flex items-center gap-2">
+          <span className="font-semibold">Partner review open</span>
+          <button
+            type="button"
+            onClick={() => openPartner.partner_token && copyPortalLink(openPartner.partner_token, openPartner.id)}
+            className="ml-auto inline-flex items-center gap-1 text-amber-800 font-semibold hover:text-amber-900"
+          >
+            {copied === openPartner.id ? <Check size={11} /> : <Copy size={11} />}
+            {copied === openPartner.id ? 'Copied' : 'Copy partner link'}
+          </button>
         </div>
-      ))}
+      ) : (
+        <WMButton
+          variant="secondary"
+          size="sm"
+          iconLeft={starting ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+          onClick={() => void handleStartPartner()}
+          disabled={starting}
+          className="w-full justify-center"
+        >
+          Start Partner Review
+        </WMButton>
+      )}
 
-      {/* Resolved — grayed-out tail. Hidden when none surface. */}
-      {groupedResolved.length > 0 && (
-        <div className="pt-2 mt-2 border-t border-wm-border/60 space-y-3 opacity-70">
-          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle px-1">
-            Resolved · {filteredResolved.length}
-          </p>
-          {groupedResolved.map(({ page, items }) => (
-            <div key={`resolved-${page.id}`}>
+      {error && (
+        <div role="alert" className="rounded-md border border-wm-danger/40 bg-wm-danger-bg px-2 py-1.5 text-[11px] text-wm-danger flex items-start gap-1.5">
+          <X size={11} className="mt-0.5 shrink-0" />
+          <p className="flex-1 leading-snug">{error}</p>
+        </div>
+      )}
+
+      {/* Open reviews section */}
+      {openReviews.length === 0 && closedReviews.length === 0 ? (
+        <EmptyState
+          icon={<Inbox size={20} />}
+          title="No reviews yet"
+          body="Start a partner review above, or open an internal review from the Review tab."
+        />
+      ) : (
+        <>
+          {openReviews.length > 0 && (
+            <div>
               <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5 px-1">
-                {page.name} · {items.length}
+                Reviews · {openReviews.length}
+              </p>
+              <div className="space-y-2">
+                {openReviews.map(r => (
+                  <ReviewSession
+                    key={r.id}
+                    review={r}
+                    comments={state.comments.filter(c => c.review_id === r.id).filter(filterFn)}
+                    onJumpToSection={onJumpToSection}
+                    onClose={() => void handleClose(r.id)}
+                    onCopyLink={() => r.partner_token && copyPortalLink(r.partner_token, r.id)}
+                    copied={copied === r.id}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {closedReviews.length > 0 && (
+            <div className="pt-2 mt-1 border-t border-wm-border/60 opacity-70">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5 px-1">
+                Recently closed
               </p>
               <ul className="space-y-1">
-                {items.map(c => (
-                  <li key={c.id}>
-                    <button
-                      type="button"
-                      onClick={() => c.web_section_id && onJumpToSection(page.id, c.web_section_id)}
-                      disabled={!c.web_section_id}
-                      className="w-full text-left rounded-md bg-wm-bg-hover/40 border border-wm-border/60 px-2.5 py-1.5 hover:border-wm-accent transition-colors disabled:cursor-default group line-through decoration-wm-text-subtle/40 hover:no-underline"
-                    >
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        <KindTag kind={c.kind} />
-                        <span className="text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 bg-wm-success-bg text-wm-success border border-wm-success/20 no-underline">
-                          {c.status}
+                {closedReviews.map(r => {
+                  const total = state.comments.filter(c => c.review_id === r.id).length
+                  return (
+                    <li key={r.id} className="rounded-md bg-wm-bg-hover/40 border border-wm-border/60 px-2 py-1.5">
+                      <div className="flex items-center gap-1.5 text-[10px] text-wm-text-subtle">
+                        <span className={[
+                          'inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5',
+                          r.kind === 'partner' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-blue-50 text-blue-700 border border-blue-200',
+                        ].join(' ')}>
+                          {r.kind}
                         </span>
-                        {c.field_key && <span className="font-mono text-[10px] text-wm-text-subtle no-underline">{c.field_key}</span>}
-                        <span className="ml-auto text-[10px] text-wm-text-subtle no-underline">
-                          {c.author_external_name ?? (c.author_kind === 'partner' ? 'Partner' : 'Staff')}
+                        <span className="font-semibold text-wm-text truncate">
+                          {r.kind === 'partner' ? (r.partner_name ?? 'Partner') : (r.started_by_name ?? 'Staff')}
                         </span>
+                        <span className="ml-auto">{total} item{total === 1 ? '' : 's'}</span>
                       </div>
-                      <p className="text-[11px] text-wm-text leading-snug line-clamp-2 no-underline">
-                        {c.body || (typeof c.suggested_value === 'string' ? stripHtml(c.suggested_value) : '(no body)')}
+                      <p className="text-[10px] text-wm-text-subtle">
+                        Closed {fmtShortDateTime(r.closed_at ?? r.updated_at)}
+                        {r.closed_by_name && ` by ${r.closed_by_name}`}
                       </p>
-                      <p className="text-[10px] text-wm-text-subtle mt-0.5 no-underline">
-                        {fmtShortDateTime(c.created_at)}
-                        {c.resolved_at && ` · resolved ${fmtShortDateTime(c.resolved_at)}`}
-                      </p>
-                      {c.resolution_note && (
-                        <p className="text-[10px] text-wm-text-subtle italic mt-0.5 no-underline">
-                          {c.resolution_note}
-                        </p>
-                      )}
-                    </button>
-                  </li>
-                ))}
+                    </li>
+                  )
+                })}
               </ul>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
     </div>
   )
 }
 
-function KindTag({ kind }: { kind: WebReviewComment['kind'] }) {
-  const cfg = {
-    comment:   { label: 'Comment',   tone: 'bg-lavender-tint text-primary-purple border border-primary-purple/20' },
-    suggested: { label: 'Suggested', tone: 'bg-blue-50 text-blue-700 border border-blue-200' },
-    requested: { label: 'Requested', tone: 'bg-amber-50 text-amber-700 border border-amber-200' },
-  }[kind]
+/** One open review session — header + collapsible groups by kind.
+ *  Partner sessions break into 'requested' + 'comment'; internal
+ *  sessions break into 'suggested' + 'comment'. */
+function ReviewSession({
+  review, comments, onJumpToSection, onClose, onCopyLink, copied,
+}: {
+  review: WebReview
+  comments: WebReviewComment[]
+  onJumpToSection: (pageId: string, sectionId: string) => void
+  onClose: () => void
+  onCopyLink: () => void
+  copied: boolean
+}) {
+  const isPartner = review.kind === 'partner'
+  const name      = isPartner ? (review.partner_name ?? 'Partner') : (review.started_by_name ?? 'Staff')
+
+  // Partition by the kinds each side actually produces.
+  const requested = comments.filter(c => c.kind === 'requested')
+  const suggested = comments.filter(c => c.kind === 'suggested')
+  const comment   = comments.filter(c => c.kind === 'comment')
+
   return (
-    <span className={`inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 ${cfg.tone}`}>
-      {cfg.label}
-    </span>
+    <div className="rounded-md border border-wm-border bg-wm-bg-elevated overflow-hidden">
+      {/* Session header */}
+      <div className={[
+        'px-2.5 py-2 border-b border-wm-border/60',
+        isPartner ? 'bg-amber-50/50' : 'bg-blue-50/40',
+      ].join(' ')}>
+        <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+          <span className={[
+            'inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5',
+            isPartner ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-blue-100 text-blue-700 border border-blue-200',
+          ].join(' ')}>
+            {isPartner ? 'Partner' : 'Internal'}
+          </span>
+          <span className="text-[11px] font-semibold text-wm-text truncate">{name}</span>
+          <span className="ml-auto text-[10px] font-semibold text-wm-text-subtle">
+            {comments.length} item{comments.length === 1 ? '' : 's'}
+          </span>
+        </div>
+        <p className="text-[10px] text-wm-text-subtle">
+          Started {fmtShortDateTime(review.started_at)}
+        </p>
+        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+          {isPartner && review.partner_token && (
+            <button
+              type="button"
+              onClick={onCopyLink}
+              className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-800 hover:text-amber-900"
+            >
+              {copied ? <Check size={10} /> : <Copy size={10} />}
+              {copied ? 'Copied' : 'Copy partner link'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold text-wm-text-subtle hover:text-wm-danger"
+          >
+            <X size={10} /> Close
+          </button>
+        </div>
+      </div>
+
+      {/* Comment groups */}
+      <div className="px-1 py-1 space-y-1">
+        {isPartner ? (
+          <>
+            <CommentGroup label="Partner requests" items={requested} onJumpToSection={onJumpToSection} defaultOpen />
+            <CommentGroup label="Partner comments" items={comment}   onJumpToSection={onJumpToSection} />
+          </>
+        ) : (
+          <>
+            <CommentGroup label="Staff suggestions" items={suggested} onJumpToSection={onJumpToSection} defaultOpen />
+            <CommentGroup label="Staff comments"   items={comment}    onJumpToSection={onJumpToSection} />
+          </>
+        )}
+        {comments.length === 0 && (
+          <p className="px-2 py-1.5 text-[11px] text-wm-text-subtle italic">No items yet.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CommentGroup({
+  label, items, onJumpToSection, defaultOpen = false,
+}: {
+  label: string
+  items: WebReviewComment[]
+  onJumpToSection: (pageId: string, sectionId: string) => void
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  if (items.length === 0) return null
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-1 px-2 py-1 text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle hover:text-wm-text"
+      >
+        {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+        <span>{label}</span>
+        <span className="ml-auto text-wm-text-subtle">{items.length}</span>
+      </button>
+      {open && (
+        <ul className="px-1 pb-1 space-y-1">
+          {items.map(c => (
+            <li key={c.id}>
+              <button
+                type="button"
+                onClick={() => c.web_section_id && onJumpToSection(c.web_page_id, c.web_section_id)}
+                disabled={!c.web_section_id}
+                className={[
+                  'w-full text-left rounded-md bg-wm-bg border border-wm-border/60 px-2 py-1.5 hover:border-wm-accent transition-colors',
+                  !c.web_section_id && 'opacity-60 cursor-default',
+                  c.status !== 'open' && 'opacity-60 line-through decoration-wm-text-subtle/40',
+                ].filter(Boolean).join(' ')}
+              >
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  {c.field_key && <span className="font-mono text-[9px] text-wm-text-subtle">{c.field_key}</span>}
+                  <span className="ml-auto text-[9px] text-wm-text-subtle no-underline">
+                    {fmtShortDateTime(c.created_at)}
+                  </span>
+                </div>
+                <p className="text-[11px] text-wm-text leading-snug line-clamp-2 no-underline">
+                  {c.body || (typeof c.suggested_value === 'string' ? stripHtml(c.suggested_value) : '(no body)')}
+                </p>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 

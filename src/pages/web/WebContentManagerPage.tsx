@@ -94,14 +94,13 @@ export default function WebContentManagerPage() {
 
   useEffect(() => { void loadProject() }, [projectId])
 
-  // Poll the project row every 5s while open so the AI status pill +
-  // any externally-mutated jsonb (intake docs, design_system, etc.)
-  // stay current without manual refresh.
-  useEffect(() => {
-    if (!projectId) return
-    const interval = setInterval(() => { void loadProject(true) }, 5000)
-    return () => clearInterval(interval)
-  }, [projectId])
+  // Project polling was removed: it ran every 5 seconds and replaced
+  // the `project` object reference even when nothing changed, which
+  // re-rendered every workspace + flickered the iframe canvas. The
+  // AI-status pill that originally needed live updates has been
+  // dropped, and any in-app mutation already calls loadProject()
+  // explicitly via onChange callbacks. External jsonb edits land on
+  // the next page refresh — that's acceptable.
 
   if (loading) {
     return (
