@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Cog, Download, FileText, AlertCircle, Globe, Link as LinkIcon, ExternalLink } from 'lucide-react'
+import { Cog, Download, FileText, AlertCircle, Globe, Link as LinkIcon, ExternalLink, AlertTriangle } from 'lucide-react'
 import { WMButton } from '../Button'
 import { WMCard } from '../Card'
 import { supabase } from '../../../lib/supabase'
@@ -30,9 +30,12 @@ import {
   ACSS_ROLES,
   type DesignSystemSpec,
 } from '../../../lib/designSystemSpec'
+import {
+  normalizeCtaValue, defaultTargetFor, validateCta, CTA_KIND_LABELS,
+} from '../../../lib/cta'
 import type {
   StrategyWebProject, WebPage, WebSection, WebContentTemplate,
-  WebPageSeo, WebFieldDef,
+  WebPageSeo, WebFieldDef, CtaValue,
 } from '../../../types/database'
 
 interface Props {
@@ -47,8 +50,9 @@ interface CtaRow {
   sectionLabel: string
   fieldKey:    string
   fieldLabel:  string
-  label:       string
-  url:         string
+  cta:         CtaValue
+  /** null when valid, otherwise the validation error message. */
+  validationError: string | null
 }
 
 interface PageSeoRow {
@@ -344,9 +348,22 @@ function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
     byPage[r.pageId] = grp
   }
   const ordered = Object.entries(byPage)
+  const brokenCount = rows.filter(r => r.validationError != null).length
 
   return (
     <div className="space-y-3">
+      {/* Summary bar — at-a-glance count of broken links so the dev
+          team knows whether the inventory needs cleanup before launch. */}
+      {brokenCount > 0 && (
+        <div className="rounded-md border border-wm-warn/40 bg-wm-warn-bg px-2.5 py-1.5 text-[11px] text-wm-warn flex items-center gap-1.5">
+          <AlertTriangle size={11} />
+          <span>
+            <span className="font-semibold">{brokenCount}</span> CTA{brokenCount === 1 ? '' : 's'} need
+            {brokenCount === 1 ? 's' : ''} attention — broken internal route, missing URL,
+            or wrong scheme.
+          </span>
+        </div>
+      )}
       {ordered.map(([pageId, grp]) => (
         <div key={pageId}>
           <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong mb-1">
@@ -354,29 +371,48 @@ function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
           </p>
           <ul className="space-y-0.5">
             {grp.items.map((c, idx) => {
-              const external = isExternalUrl(c.url)
+              const target = c.cta.target ?? defaultTargetFor(c.cta.kind)
+              const broken = c.validationError != null
               return (
                 <li
                   key={`${c.sectionId}-${c.fieldKey}-${idx}`}
-                  className="flex items-start gap-2 text-[11px] rounded-md border border-wm-border bg-wm-bg-elevated px-2 py-1.5"
+                  className={[
+                    'flex items-start gap-2 text-[11px] rounded-md border bg-wm-bg-elevated px-2 py-1.5',
+                    broken ? 'border-wm-warn/40' : 'border-wm-border',
+                  ].join(' ')}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-wm-text truncate">
-                      {c.label || <span className="italic text-wm-text-subtle">(no label)</span>}
-                    </p>
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <p className="font-semibold text-wm-text truncate">
+                        {c.cta.label || <span className="italic text-wm-text-subtle">(no label)</span>}
+                      </p>
+                      <span className="inline-flex shrink-0 items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 bg-lavender-tint text-primary-purple border border-primary-purple/20">
+                        {CTA_KIND_LABELS[c.cta.kind]}
+                      </span>
+                      {target === '_blank' && (
+                        <span className="inline-flex shrink-0 items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 bg-wm-bg-hover text-wm-text-subtle border border-wm-border">
+                          New tab
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[10px] text-wm-text-subtle truncate">
                       {c.sectionLabel} · {c.fieldLabel || c.fieldKey}
                     </p>
+                    {broken && (
+                      <p className="text-[10px] text-wm-warn mt-0.5 inline-flex items-center gap-1">
+                        <AlertTriangle size={9} /> {c.validationError}
+                      </p>
+                    )}
                   </div>
                   <a
-                    href={c.url || '#'}
-                    target={external ? '_blank' : '_self'}
+                    href={c.cta.url || '#'}
+                    target={target}
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-[10px] font-mono text-wm-accent-strong hover:underline shrink-0 max-w-[40%] truncate"
-                    title={c.url}
+                    title={c.cta.url}
                   >
-                    {external && <ExternalLink size={9} />}
-                    {c.url || <span className="italic text-wm-text-subtle">no url</span>}
+                    {target === '_blank' && <ExternalLink size={9} />}
+                    {c.cta.url || <span className="italic text-wm-text-subtle">no url</span>}
                   </a>
                 </li>
               )
@@ -390,14 +426,6 @@ function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-function isExternalUrl(url: string): boolean {
-  if (!url) return false
-  try {
-    const u = new URL(url)
-    return u.origin !== window.location.origin
-  } catch { return false }
-}
-
 function extractCtaInventory(opts: {
   pages:     Array<Pick<WebPage, 'id' | 'name' | 'slug'>>
   sections:  WebSection[]
@@ -405,6 +433,7 @@ function extractCtaInventory(opts: {
 }): CtaRow[] {
   const pageById: Record<string, { name: string; slug: string }> = {}
   for (const p of opts.pages) pageById[p.id] = { name: p.name, slug: p.slug }
+  const slugSet = new Set(opts.pages.map(p => p.slug))
 
   const rows: CtaRow[] = []
   for (const s of opts.sections) {
@@ -414,16 +443,17 @@ function extractCtaInventory(opts: {
     const sectionLabel = template?.layer_name ?? `Section · ${s.sort_order + 1}`
     const values = (s.field_values ?? {}) as Record<string, unknown>
     walkFieldsForCtas(template?.fields ?? [], values, (entry) => {
+      const cta = normalizeCtaValue(entry.rawValue)
       rows.push({
-        pageId:       s.web_page_id,
-        pageName:     page.name,
-        pageSlug:     page.slug,
-        sectionId:    s.id,
+        pageId:          s.web_page_id,
+        pageName:        page.name,
+        pageSlug:         page.slug,
+        sectionId:       s.id,
         sectionLabel,
-        fieldKey:     entry.fieldKey,
-        fieldLabel:   entry.fieldLabel,
-        label:        entry.label,
-        url:          entry.url,
+        fieldKey:        entry.fieldKey,
+        fieldLabel:      entry.fieldLabel,
+        cta,
+        validationError: validateCta(cta, slugSet),
       })
     })
   }
@@ -431,28 +461,24 @@ function extractCtaInventory(opts: {
 }
 
 /** Recursive walker for template field schemas. Calls `onCta` for every
- *  slot of type 'cta' encountered, with the bound value resolved from
- *  the section's field_values (including group items). */
+ *  slot of type 'cta' encountered, with the raw bound value from the
+ *  section's field_values (including group items). The caller is
+ *  responsible for normalizing the raw value via normalizeCtaValue. */
 function walkFieldsForCtas(
   fields: WebFieldDef[],
   values: Record<string, unknown>,
-  onCta: (entry: { fieldKey: string; fieldLabel: string; label: string; url: string }) => void,
+  onCta: (entry: { fieldKey: string; fieldLabel: string; rawValue: unknown }) => void,
   pathPrefix: string = '',
   labelPrefix: string = '',
 ): void {
   for (const f of fields) {
     if (f.kind === 'slot') {
       if (f.type !== 'cta') continue
-      const v = values[f.key]
-      if (v && typeof v === 'object' && !Array.isArray(v)) {
-        const obj = v as { label?: unknown; url?: unknown }
-        onCta({
-          fieldKey:   `${pathPrefix}${f.key}`,
-          fieldLabel: labelPrefix ? `${labelPrefix} › ${f.layer_name ?? f.key}` : (f.layer_name ?? f.key),
-          label:      typeof obj.label === 'string' ? obj.label : '',
-          url:        typeof obj.url   === 'string' ? obj.url   : '',
-        })
-      }
+      onCta({
+        fieldKey:   `${pathPrefix}${f.key}`,
+        fieldLabel: labelPrefix ? `${labelPrefix} › ${f.layer_name ?? f.key}` : (f.layer_name ?? f.key),
+        rawValue:   values[f.key],
+      })
       continue
     }
     if (f.kind === 'group') {
@@ -517,12 +543,16 @@ function downloadSeoMarkdown(projectSlug: string, projectName: string, rows: Pag
 function downloadCtaCsv(projectSlug: string, rows: CtaRow[]): void {
   const cells = (s: string) => `"${s.replace(/"/g, '""')}"`
   const csv: string[] = [
-    ['Page', 'Slug', 'Section', 'Field', 'Label', 'URL', 'Target'].map(cells).join(','),
+    ['Page', 'Slug', 'Section', 'Field', 'Label', 'Kind', 'URL', 'Target', 'Status']
+      .map(cells).join(','),
   ]
   for (const r of rows) {
+    const target = r.cta.target ?? defaultTargetFor(r.cta.kind)
     csv.push([
       r.pageName, `/${r.pageSlug}`, r.sectionLabel, r.fieldLabel || r.fieldKey,
-      r.label, r.url, isExternalUrl(r.url) ? 'external' : 'site',
+      r.cta.label, CTA_KIND_LABELS[r.cta.kind], r.cta.url,
+      target === '_blank' ? 'new tab' : 'same tab',
+      r.validationError ?? 'ok',
     ].map(cells).join(','))
   }
   triggerDownload(`${projectSlug}-ctas.csv`, csv.join('\n'), 'text/csv')

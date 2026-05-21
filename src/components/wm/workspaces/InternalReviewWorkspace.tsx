@@ -35,6 +35,7 @@ import { loadEditorSnippets } from '../../../lib/webSnippets'
 import { loadProjectReviewState, type ProjectReviewState, finalizeReview, logReviewEdit } from '../../../lib/webReviews'
 import { SectionList } from '../sectioneditor/SectionList'
 import { useSectionDetailPublisher } from '../sectioneditor/SectionEditingContext'
+import { ProjectPagesProvider } from '../sectioneditor/ProjectPagesContext'
 import type { WMSnippetOption } from '../RichTextEditor'
 import type { SnippetMap } from '../../../lib/webBrixiesRender'
 import type {
@@ -311,6 +312,7 @@ export function InternalReviewWorkspace({
   const totalOpen = reviewState?.totals.open_total ?? 0
 
   return (
+    <ProjectPagesProvider pages={pages.map(p => ({ id: p.id, name: p.name, slug: p.slug }))}>
     <div className="flex h-full" style={{ minHeight: 'calc(100vh - var(--wm-header-h, 88px))' }}>
       {/* Left — page nav (portal-style simple list) */}
       <aside className="w-60 shrink-0 border-r border-wm-border bg-wm-bg-elevated p-3 overflow-y-auto sticky top-0" style={{ maxHeight: 'calc(100vh - var(--wm-header-h, 88px))' }}>
@@ -421,5 +423,6 @@ export function InternalReviewWorkspace({
         </div>
       </div>
     </div>
+    </ProjectPagesProvider>
   )
 }

@@ -50,6 +50,7 @@ import { PagePreview } from '../PagePreview'
 import { WMSegmentedToggle } from '../SegmentedToggle'
 import { SectionList } from '../sectioneditor/SectionList'
 import { useSectionDetailPublisher } from '../sectioneditor/SectionEditingContext'
+import { ProjectPagesProvider } from '../sectioneditor/ProjectPagesContext'
 import { fieldValuesToDocHtml, docHtmlToFieldValues } from '../../../lib/webBrixiesDoc'
 import { extractSuggestedFamily, type PageBrief } from '../../../lib/webPageBrief'
 import {
@@ -217,6 +218,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
 
   return (
     <SnippetsContext.Provider value={snippets}>
+      <ProjectPagesProvider pages={pages.map(p => ({ id: p.id, name: p.name, slug: p.slug }))}>
       <div className="flex" style={{ minHeight: 'calc(100vh - var(--wm-header-h, 88px))' }}>
         {/* Page list (left) — sticky so it stays in view while the
             editor canvas scrolls. */}
@@ -344,6 +346,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
         onConfirm={executeArchive}
         onCancel={() => { if (!archiving) setArchiveConfirm(null) }}
       />
+      </ProjectPagesProvider>
     </SnippetsContext.Provider>
   )
 }

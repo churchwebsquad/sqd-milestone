@@ -11,12 +11,16 @@
  */
 import { useRef } from 'react'
 import type { Editor as TipTapEditor } from '@tiptap/react'
-import { Link2 } from 'lucide-react'
+import { Link2, AlertTriangle } from 'lucide-react'
 import { WMRichTextEditor } from '../RichTextEditor'
 import type { WMSnippetOption } from '../RichTextEditor'
 import { SnippetMenu } from './SnippetMenu'
 import { useSnippetFocus } from './SnippetFocusContext'
-import type { WebSlotDef } from '../../../types/database'
+import { useProjectPages } from './ProjectPagesContext'
+import {
+  normalizeCtaValue, defaultTargetFor, validateCta, CTA_KIND_LABELS,
+} from '../../../lib/cta'
+import type { WebSlotDef, CtaKind, CtaValue } from '../../../types/database'
 
 interface Props {
   slot: WebSlotDef
@@ -173,9 +177,19 @@ function RichTextInput({
   )
 }
 
-/** Button-shaped slot — renders a label + URL combo regardless of
- *  whether the underlying slot is type='cta' or type='text scope=button'.
- *  Value shape: `{ label: string, url: string }`. */
+/** Button-shaped slot — renders a label + kind + URL combo regardless
+ *  of whether the underlying slot is `type='cta'` or
+ *  `type='text scope=button'`. Value shape: `CtaValue` (see types).
+ *
+ *  Back-compat: legacy `{ label, url }` or bare-string values get
+ *  normalized on read and silently upgraded on the first edit. The
+ *  kind picker switches the URL input between:
+ *    · internal_route → dropdown of project page slugs (Phase B)
+ *    · external_url   → http(s) text input
+ *    · anchor         → #id text input
+ *    · mailto / tel   → text input with the right scheme prefix
+ *  An inline validation chip surfaces broken internal routes /
+ *  malformed external URLs so staff catches them at authoring time. */
 function ButtonInput({
   slot, value, onChange,
 }: {
@@ -184,40 +198,123 @@ function ButtonInput({
   onChange: (v: unknown) => void
 }) {
   const focus = useSnippetFocus()
-  // Accept legacy shape (string from text+button slots) and auto-upgrade.
-  const cta: { label: string; url: string } = (() => {
-    if (typeof value === 'object' && value !== null) {
-      const o = value as { label?: unknown; url?: unknown }
-      return {
-        label: typeof o.label === 'string' ? o.label : '',
-        url: typeof o.url === 'string' ? o.url : '',
-      }
+  const pages = useProjectPages()
+  const cta = normalizeCtaValue(value)
+  const slugSet = new Set<string>(pages.map(p => p.slug))
+  const validationError = validateCta(cta, slugSet)
+
+  const patch = (partial: Partial<CtaValue>) => {
+    const next: CtaValue = { ...cta, ...partial }
+    // When the user changes kind, prep a sensible default URL prefix
+    // + default target so the field doesn't feel mismatched.
+    if (partial.kind && partial.kind !== cta.kind) {
+      if (partial.kind === 'anchor' && !next.url.startsWith('#')) next.url = ''
+      if (partial.kind === 'mailto' && !next.url.startsWith('mailto:')) next.url = 'mailto:'
+      if (partial.kind === 'tel'    && !next.url.startsWith('tel:'))    next.url = 'tel:'
+      if (partial.kind === 'external_url' && !/^https?:\/\//i.test(next.url)) next.url = ''
+      if (partial.kind === 'internal_route' && /^https?:\/\//i.test(next.url)) next.url = ''
+      // Reset target so the inferred default applies.
+      next.target = defaultTargetFor(next.kind)
     }
-    if (typeof value === 'string') return { label: value, url: '' }
-    return { label: '', url: '' }
-  })()
+    onChange(next)
+  }
+
   return (
     <div className="space-y-1.5">
       <input
         type="text"
         value={cta.label}
         maxLength={slot.max_chars}
-        onChange={e => onChange({ ...cta, label: e.target.value })}
+        onChange={e => patch({ label: e.target.value })}
         onFocus={e => focus.registerInput(slot.key + ':label', e.currentTarget)}
         onBlur={() => focus.clear(slot.key + ':label')}
         placeholder="Button label"
         className="w-full bg-wm-bg-elevated text-wm-text px-3 py-2 rounded-md border border-wm-border outline-none focus:border-wm-accent focus:ring-2 focus:ring-wm-accent/15 transition-colors text-[13px] font-semibold"
       />
-      <div className="relative">
-        <Link2 size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-wm-text-subtle pointer-events-none" />
-        <input
-          type="url"
-          value={cta.url}
-          onChange={e => onChange({ ...cta, url: e.target.value })}
-          placeholder="/route"
-          className="w-full bg-wm-bg-elevated text-wm-text pl-7 pr-3 py-2 rounded-md border border-wm-border outline-none focus:border-wm-accent focus:ring-2 focus:ring-wm-accent/15 transition-colors text-[12px] font-mono text-wm-text-muted"
-        />
+      <div className="flex items-center gap-1.5">
+        <select
+          value={cta.kind}
+          onChange={e => patch({ kind: e.target.value as CtaKind })}
+          className="bg-wm-bg-elevated text-wm-text px-2 py-1.5 rounded-md border border-wm-border outline-none focus:border-wm-accent focus:ring-2 focus:ring-wm-accent/15 text-[11px] shrink-0"
+          aria-label="Link type"
+        >
+          {(Object.keys(CTA_KIND_LABELS) as CtaKind[]).map(k => (
+            <option key={k} value={k}>{CTA_KIND_LABELS[k]}</option>
+          ))}
+        </select>
+        {/* Target toggle — _self is the default for in-site stuff,
+            _blank is the default for external. Staff can override. */}
+        <label
+          className="inline-flex items-center gap-1 text-[10px] text-wm-text-muted cursor-pointer ml-auto select-none"
+          title="Open in a new tab"
+        >
+          <input
+            type="checkbox"
+            checked={(cta.target ?? defaultTargetFor(cta.kind)) === '_blank'}
+            onChange={e => patch({ target: e.target.checked ? '_blank' : '_self' })}
+            className="h-3 w-3 rounded border-wm-border text-wm-accent focus:ring-wm-accent"
+          />
+          New tab
+        </label>
       </div>
+      <CtaUrlInput cta={cta} pages={pages} onChange={(url) => patch({ url })} />
+      {validationError && (
+        <div className="inline-flex items-start gap-1 text-[10px] text-wm-warn">
+          <AlertTriangle size={10} className="mt-0.5 shrink-0" />
+          <span className="leading-snug">{validationError}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Kind-specific URL input. Internal routes get a project-page
+ *  dropdown so strategists can't typo a slug; everything else gets
+ *  a typed text input with the right scheme placeholder. */
+function CtaUrlInput({
+  cta, pages, onChange,
+}: {
+  cta: CtaValue
+  pages: ReadonlyArray<{ id: string; name: string; slug: string }>
+  onChange: (url: string) => void
+}) {
+  if (cta.kind === 'internal_route') {
+    const currentSlug = cta.url.replace(/^\/+/, '').split(/[?#]/)[0]
+    return (
+      <div className="relative">
+        <Link2 size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-wm-text-subtle pointer-events-none z-10" />
+        <select
+          value={currentSlug}
+          onChange={e => onChange(e.target.value ? `/${e.target.value}` : '')}
+          className="w-full bg-wm-bg-elevated text-wm-text pl-7 pr-3 py-2 rounded-md border border-wm-border outline-none focus:border-wm-accent focus:ring-2 focus:ring-wm-accent/15 transition-colors text-[12px] font-mono"
+        >
+          <option value="">— Pick a page —</option>
+          {pages.map(p => (
+            <option key={p.id} value={p.slug}>/{p.slug} · {p.name}</option>
+          ))}
+          {currentSlug && !pages.some(p => p.slug === currentSlug) && (
+            <option value={currentSlug}>/{currentSlug} (unmatched)</option>
+          )}
+        </select>
+      </div>
+    )
+  }
+  const placeholder =
+    cta.kind === 'external_url' ? 'https://example.com' :
+    cta.kind === 'anchor'       ? '#section-id' :
+    cta.kind === 'mailto'       ? 'mailto:hello@example.com' :
+    cta.kind === 'tel'          ? 'tel:+15555551234' :
+    ''
+  return (
+    <div className="relative">
+      <Link2 size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-wm-text-subtle pointer-events-none" />
+      <input
+        type="text"
+        value={cta.url}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full bg-wm-bg-elevated text-wm-text pl-7 pr-3 py-2 rounded-md border border-wm-border outline-none focus:border-wm-accent focus:ring-2 focus:ring-wm-accent/15 transition-colors text-[12px] font-mono text-wm-text-muted"
+      />
     </div>
   )
 }

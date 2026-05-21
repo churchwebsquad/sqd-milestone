@@ -1173,6 +1173,28 @@ export interface WebPage {
   [key: string]: unknown
 }
 
+/** CTA value bound to a `slot.type === 'cta'` field. Backwards-
+ *  compatible reader (`normalizeCtaValue` in src/lib/cta.ts) accepts
+ *  the legacy `{ label, url }` and string-only shapes. The `kind`
+ *  field lets editors validate against the right context — internal
+ *  routes pick from a project-pages dropdown, external URLs validate
+ *  scheme, etc. */
+export type CtaKind =
+  | 'internal_route'
+  | 'external_url'
+  | 'anchor'
+  | 'mailto'
+  | 'tel'
+
+export interface CtaValue {
+  label:  string
+  url:    string
+  kind:   CtaKind
+  /** '_self' opens in the same tab; '_blank' opens a new tab. When
+   *  omitted, the renderer infers based on kind (external → _blank). */
+  target?: '_self' | '_blank'
+}
+
 /** Canonical (but flexible) shape of web_pages.seo. Strategists can
  *  add ad-hoc keys; the SEO panel renders the canonical fields below
  *  with explicit inputs and exposes the rest as a raw editor row. */

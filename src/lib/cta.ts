@@ -1,0 +1,124 @@
+/**
+ * CTA value normalization + classification.
+ *
+ * CTAs were historically stored as `{ label, url }` (or even a bare
+ * string for text+button hybrid slots). Phase A adds `kind` + optional
+ * `target` so the editor can render the right input + the dev handoff
+ * inventory can validate routes.
+ *
+ * `normalizeCtaValue` accepts any of the legacy shapes and returns
+ * the canonical CtaValue. Every reader in the app should funnel
+ * through this so the rest of the code can pretend the shape was
+ * always `CtaValue`.
+ *
+ * `inferCtaKind` heuristically classifies a URL string when the
+ * stored shape didn't carry a kind. Conservative — anything ambiguous
+ * gets the safest classification, which is `external_url`.
+ */
+
+import type { CtaKind, CtaValue } from '../types/database'
+
+export function inferCtaKind(url: string): CtaKind {
+  const v = url.trim()
+  if (!v) return 'internal_route'                              // empty defaults sensibly
+  if (v.startsWith('mailto:'))               return 'mailto'
+  if (v.startsWith('tel:'))                  return 'tel'
+  if (v.startsWith('#'))                     return 'anchor'
+  if (/^https?:\/\//i.test(v))               return 'external_url'
+  if (v.startsWith('/'))                     return 'internal_route'
+  // Bare strings like "visit" or "about-us" — most likely intended as
+  // internal but not necessarily prefixed. Treat as internal so the
+  // page-slug validator in Dev Handoff flags them if they don't match.
+  return 'internal_route'
+}
+
+/** Default `target` for a kind. External + mailto + tel naturally
+ *  open in a new tab; internal routes + anchors stay in-page. */
+export function defaultTargetFor(kind: CtaKind): '_self' | '_blank' {
+  switch (kind) {
+    case 'external_url':
+    case 'mailto':
+    case 'tel':
+      return '_blank'
+    default:
+      return '_self'
+  }
+}
+
+/** Coerce any legacy shape into a canonical CtaValue. Safe to call
+ *  on undefined / null / strings / partial objects. */
+export function normalizeCtaValue(raw: unknown): CtaValue {
+  if (raw == null) {
+    return { label: '', url: '', kind: 'internal_route' }
+  }
+  if (typeof raw === 'string') {
+    return { label: raw, url: '', kind: 'internal_route' }
+  }
+  if (typeof raw === 'object') {
+    const o = raw as { label?: unknown; url?: unknown; kind?: unknown; target?: unknown }
+    const label = typeof o.label === 'string' ? o.label : ''
+    const url   = typeof o.url   === 'string' ? o.url   : ''
+    const kind: CtaKind = isCtaKind(o.kind) ? o.kind : inferCtaKind(url)
+    const target = o.target === '_blank' || o.target === '_self'
+      ? o.target
+      : undefined
+    return { label, url, kind, target }
+  }
+  return { label: '', url: '', kind: 'internal_route' }
+}
+
+/** Type guard so we trust caller-stamped kinds and only infer when the
+ *  stored value is missing or garbage. */
+function isCtaKind(v: unknown): v is CtaKind {
+  return v === 'internal_route' || v === 'external_url' ||
+         v === 'anchor' || v === 'mailto' || v === 'tel'
+}
+
+/** Human-readable label for the kind picker + the handoff inventory. */
+export const CTA_KIND_LABELS: Record<CtaKind, string> = {
+  internal_route: 'Internal page',
+  external_url:   'External URL',
+  anchor:         'Anchor on this page',
+  mailto:         'Email link',
+  tel:            'Phone link',
+}
+
+/** Validate a CTA's URL against the set of internal page slugs known
+ *  to this project. Returns `null` when valid (or N/A — non-internal
+ *  kinds), or an error string describing what's wrong. */
+export function validateCta(
+  cta: CtaValue,
+  knownSlugs: ReadonlySet<string>,
+): string | null {
+  const url = cta.url.trim()
+  switch (cta.kind) {
+    case 'internal_route': {
+      if (!url) return 'No URL set.'
+      // Strip leading slash + hash/query for slug match.
+      const slug = url.replace(/^\/+/, '').split(/[?#]/)[0]
+      if (!knownSlugs.has(slug)) return `No page on this site matches "/${slug}".`
+      return null
+    }
+    case 'external_url': {
+      if (!url) return 'No URL set.'
+      if (!/^https?:\/\//i.test(url)) return 'External URLs must start with https:// (or http://).'
+      try { new URL(url) } catch { return 'URL is malformed.' }
+      return null
+    }
+    case 'anchor': {
+      if (!url) return 'No anchor set.'
+      if (!url.startsWith('#')) return 'Anchors should start with #.'
+      return null
+    }
+    case 'mailto': {
+      if (!url) return 'No email set.'
+      if (!url.startsWith('mailto:')) return 'Email links should start with mailto:.'
+      return null
+    }
+    case 'tel': {
+      if (!url) return 'No phone set.'
+      if (!url.startsWith('tel:')) return 'Phone links should start with tel:.'
+      return null
+    }
+  }
+}
