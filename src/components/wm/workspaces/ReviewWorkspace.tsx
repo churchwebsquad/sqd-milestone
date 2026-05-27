@@ -1,27 +1,39 @@
 /**
  * Web Manager — Review workspace.
  *
- * Three states:
- *   1. Active internal review (started by ME) → InternalReviewWorkspace.
- *   2. No active review but pending requests assigned TO ME → list
- *      them with "Start review for this request" CTAs.
- *   3. Otherwise → empty state with Start / Request CTAs.
+ * Renders the feedback board kanban as the default landing for the
+ * Review tab. When the current user already has an open internal
+ * review, the embedded InternalReviewWorkspace surfaces as a
+ * drill-down with a breadcrumb back to the kanban.
  *
- * Coworkers' open reviews surface in the Feedback panel — they don't
- * take over this tab.
+ * Top-bar action group exposes "Get partner review link", "Start an
+ * internal review", and "Request a review" persistently (no longer
+ * empty-state-only) so the strategist can mutate review state from
+ * the same surface they're triaging in.
  */
 
-import { useCallback, useEffect, useState } from 'react'
-import { Loader2, Plus, Eye, X, UserPlus, Inbox, Copy, Check } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
-  loadProjectReviewState, startReview, listReviewRequests,
-  cancelReviewRequest, type ProjectReviewState,
+  Loader2, Plus, Copy, Check, UserPlus, Inbox, X,
+} from 'lucide-react'
+import {
+  loadProjectReviewState, loadProjectReviewEdits, listReviewRequests,
+  buildFeedbackBoards, cancelReviewRequest, startReview,
+  type ProjectReviewState,
 } from '../../../lib/webReviews'
 import { useAuth } from '../../../contexts/AuthContext'
 import { WMButton } from '../Button'
 import { RequestReviewModal } from '../RequestReviewModal'
 import { InternalReviewWorkspace } from './InternalReviewWorkspace'
-import type { StrategyWebProject, WebReviewRequest } from '../../../types/database'
+import { FeedbackBoardKanban } from '../feedback/FeedbackBoardKanban'
+import { FeedbackTabs } from '../feedback/FeedbackTabs'
+import { AssigneeFilter } from '../feedback/AssigneeFilter'
+import { useFeedbackActions } from '../feedback/useFeedbackActions'
+import { supabase } from '../../../lib/supabase'
+import type {
+  StrategyWebProject, WebReviewRequest, WebReviewEdit, WebReviewComment,
+} from '../../../types/database'
 
 interface Props {
   project: StrategyWebProject
@@ -29,54 +41,125 @@ interface Props {
 
 export function ReviewWorkspace({ project }: Props) {
   const { user } = useAuth()
+  const [, setSearch] = useSearchParams()
   const [state, setState] = useState<ProjectReviewState | null>(null)
+  const [edits, setEdits] = useState<WebReviewEdit[]>([])
   const [requests, setRequests] = useState<WebReviewRequest[]>([])
+  const [pageById, setPageById] = useState<Record<string, { id: string; name: string }>>({})
+  const [sectionLabelById, setSectionLabelById] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
-  const [mutating, setMutating] = useState(false)
-  const [mutationError, setMutationError] = useState<string | null>(null)
   const [requestModalOpen, setRequestModalOpen] = useState(false)
   const [partnerLinkCopied, setPartnerLinkCopied] = useState(false)
 
+  // Filter + tab state for the kanban.
+  const [activeTab, setActiveTab] = useState<string>('all')
+  const [selectedAssignees, setSelectedAssignees] = useState<Set<string>>(new Set())
+  // When the kanban is the active surface, the embedded editor is
+  // hidden. Users opt into the editor explicitly via the top-bar
+  // button. Persists in a query param so deep-links into the editor
+  // survive page reloads.
+  const [forceEditor, setForceEditor] = useState(false)
+
   const load = useCallback(async () => {
     setLoading(true)
-    const [s, r] = await Promise.all([
+    const [s, e, r] = await Promise.all([
       loadProjectReviewState(project.id),
+      loadProjectReviewEdits(project.id),
       listReviewRequests(project.id),
     ])
     setState(s)
+    setEdits(e)
     setRequests(r)
+
+    // Resolve page + section labels for every comment + edit location.
+    const pageIds = Array.from(new Set([
+      ...e.map(x => x.web_page_id),
+      ...s.comments.map(c => c.web_page_id),
+    ]))
+    const sectionIds = Array.from(new Set([
+      ...e.map(x => x.web_section_id),
+      ...s.comments.map(c => c.web_section_id).filter((x): x is string => !!x),
+    ]))
+    if (pageIds.length > 0) {
+      const { data: pages } = await supabase
+        .from('web_pages')
+        .select('id, name')
+        .in('id', pageIds)
+      const pmap: Record<string, { id: string; name: string }> = {}
+      for (const p of (pages ?? []) as Array<{ id: string; name: string }>) pmap[p.id] = p
+      setPageById(pmap)
+    }
+    if (sectionIds.length > 0) {
+      const { data: sections } = await supabase
+        .from('web_sections')
+        .select('id, content_template_id, sort_order')
+        .in('id', sectionIds)
+      const tplIds = Array.from(new Set(
+        ((sections ?? []) as Array<{ content_template_id: string | null }>)
+          .map(s => s.content_template_id).filter((x): x is string => !!x),
+      ))
+      const tplMap: Record<string, string> = {}
+      if (tplIds.length > 0) {
+        const { data: tpls } = await supabase
+          .from('web_content_templates')
+          .select('id, layer_name')
+          .in('id', tplIds)
+        for (const t of (tpls ?? []) as Array<{ id: string; layer_name: string | null }>) {
+          tplMap[t.id] = t.layer_name ?? 'Section'
+        }
+      }
+      const smap: Record<string, string> = {}
+      for (const sec of (sections ?? []) as Array<{ id: string; content_template_id: string | null; sort_order: number | null }>) {
+        smap[sec.id] = sec.content_template_id
+          ? (tplMap[sec.content_template_id] ?? 'Section')
+          : `Section · ${(sec.sort_order ?? 0) + 1}`
+      }
+      setSectionLabelById(smap)
+    }
+
     setLoading(false)
   }, [project.id])
 
   useEffect(() => { void load() }, [load])
 
-  // Active internal review is PER-USER.
-  const activeInternal = state?.open_reviews.find(
-    r => r.kind === 'internal' && r.started_by_user_id === user?.id,
-  ) ?? null
+  const actions = useFeedbackActions({ projectId: project.id, onChanged: load })
 
-  // Pending requests assigned to the current user — matched by email.
+  // Shared internal-review round semantics: an open internal review
+  // is a round any staff can contribute to (not pinned to the
+  // starter). The drill-down editor binds to the most recent open
+  // internal review on the project. To start a fresh round, the
+  // current one must be closed first.
+  const activeInternal = state?.open_reviews
+    .filter(r => r.kind === 'internal')
+    .sort((a, b) => b.round_number - a.round_number)[0] ?? null
+
   const myEmail = user?.email?.toLowerCase().trim() ?? ''
   const pendingForMe = requests.filter(
     r => r.status === 'pending' && r.assignee_email?.toLowerCase() === myEmail,
   )
-  // Pending requests THE CURRENT USER sent (so they can cancel).
   const pendingFromMe = requests.filter(
     r => r.status === 'pending' && r.requester_user_id === user?.id,
   )
 
-  const handleStart = async (fromRequestId?: string) => {
-    setMutating(true)
-    setMutationError(null)
-    const res = await startReview({ projectId: project.id, kind: 'internal', fromRequestId })
-    setMutating(false)
+  const handleStartInternal = async (fromRequestId?: string) => {
+    // Use startReview directly so we can pass fromRequestId — the
+    // shared hook's wrapper doesn't accept request linkage today.
+    const res = await startReview({
+      projectId: project.id, kind: 'internal', fromRequestId,
+    })
     if (res.ok) {
       await load()
-    } else {
-      setMutationError(
-        `Couldn't start internal review: ${res.error ?? 'unknown error'}. ` +
-        `Check that you're signed in and refresh the page if the issue persists.`,
-      )
+      // After starting an internal review the user almost always
+      // wants to enter the editor immediately — drill in.
+      setForceEditor(true)
+    }
+  }
+
+  const handleGetPartnerLink = async () => {
+    const url = await actions.getPartnerReviewLink()
+    if (url) {
+      setPartnerLinkCopied(true)
+      setTimeout(() => setPartnerLinkCopied(false), 2500)
     }
   }
 
@@ -86,39 +169,54 @@ export function ReviewWorkspace({ project }: Props) {
     await load()
   }
 
-  /** "Get partner review link" flow — if no partner review is open,
-   *  start one so we have a token to copy; either way copy the
-   *  resulting link to the clipboard. The button label flips to
-   *  "Copied" for a short window after a successful copy. */
-  const handleGetPartnerLink = async () => {
-    setMutating(true)
-    setMutationError(null)
-    let token: string | null = null
-    const existing = state?.open_reviews.find(r => r.kind === 'partner') ?? null
-    if (existing?.partner_token) {
-      token = existing.partner_token
-    } else {
-      const res = await startReview({ projectId: project.id, kind: 'partner' })
-      if (!res.ok) {
-        setMutationError(`Couldn't start partner review: ${res.error ?? 'unknown error'}.`)
-        setMutating(false)
-        return
+  // Build feedback boards from state + edits.
+  const feedbackBoards = useMemo(() => {
+    if (!state) return null
+    return buildFeedbackBoards(state, edits)
+  }, [state, edits])
+
+  const visibleBoards = feedbackBoards
+    ? (activeTab === 'all'
+        ? feedbackBoards.boards
+        : (feedbackBoards.byTab[activeTab] ?? []))
+    : []
+
+  const commentFilter = selectedAssignees.size === 0
+    ? undefined
+    : (c: WebReviewComment) => {
+        const id = c.assignee_user_id ?? c.assignee_email ?? c.assignee_name ?? ''
+        return selectedAssignees.has(id)
       }
-      token = res.data?.partner_token ?? null
-      await load()
-    }
-    setMutating(false)
-    if (!token) {
-      setMutationError("Partner review started but no link was issued — refresh and try again.")
-      return
-    }
-    const url = `${window.location.origin}/portal/review/${token}`
-    try {
-      await navigator.clipboard.writeText(url)
-      setPartnerLinkCopied(true)
-      setTimeout(() => setPartnerLinkCopied(false), 2500)
-    } catch {
-      setMutationError(`Couldn't copy to clipboard — link is ${url}`)
+
+  const pageNameFor    = (id: string) => pageById[id]?.name ?? null
+  const sectionLabelFor = (id: string | null) => (id ? (sectionLabelById[id] ?? null) : null)
+
+  /** Click handler on a card's page/section pill — drill into the
+   *  embedded review editor at that section when an internal round is
+   *  open (so the user can resolve in context), or fall back to the
+   *  Pages workspace when no round is active. */
+  const jumpToSection = (pageId: string, sectionId: string) => {
+    setSearch(prev => {
+      const next = new URLSearchParams(prev)
+      // Stay on the Review tab so we drop into InternalReviewWorkspace's
+      // canvas rather than yanking the user to a different surface.
+      next.set('tab', 'review')
+      next.set('page', pageId)
+      next.set('section', sectionId)
+      return next
+    })
+    if (activeInternal) {
+      setForceEditor(true)
+    } else {
+      // No open round to drop into — fall back to the Pages tab so
+      // the strategist can at least see the section.
+      setSearch(prev => {
+        const next = new URLSearchParams(prev)
+        next.set('tab', 'pages')
+        next.set('page', pageId)
+        next.set('section', sectionId)
+        return next
+      })
     }
   }
 
@@ -130,164 +228,179 @@ export function ReviewWorkspace({ project }: Props) {
     )
   }
 
-  // Active internal review → editing workspace.
-  if (activeInternal) {
+  // Drill-down editor — only when the user has an active internal
+  // review AND has chosen to enter it (or just started one).
+  if (forceEditor && activeInternal) {
     return (
       <InternalReviewWorkspace
         project={project}
         review={activeInternal}
-        onExitToInbox={() => {}}
+        onExitToInbox={() => setForceEditor(false)}
         onReviewChange={load}
       />
     )
   }
 
   return (
-    <div className="px-6 md:px-10 py-16">
-      <div className="max-w-md mx-auto">
-        {/* Pending requests assigned to me — surfaced ABOVE the empty
-            state since they're the highest-signal action. */}
-        {pendingForMe.length > 0 && (
-          <div className="mb-8 space-y-2">
-            <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong mb-2">
-              Reviews requested of you · {pendingForMe.length}
+    <div className="px-6 md:px-8 py-6 flex flex-col gap-5 min-w-0">
+      {/* Top bar — title + actions */}
+      <header className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex flex-col gap-0.5">
+          <h1 className="text-[22px] font-bold text-wm-text leading-tight">Feedback</h1>
+          {feedbackBoards && (
+            <p className="text-[12px] text-wm-text-muted">
+              {feedbackBoards.boards.reduce((n, b) => n + b.counts.open, 0)} open ·{' '}
+              {feedbackBoards.boards.reduce((n, b) => n + b.counts.resolved, 0)} resolved
+              {' · '}
+              {feedbackBoards.boards.length} round{feedbackBoards.boards.length === 1 ? '' : 's'}
             </p>
-            {pendingForMe.map(req => (
-              <div
-                key={req.id}
-                className="rounded-xl border border-wm-accent/30 bg-wm-accent-tint/40 px-4 py-3"
-              >
-                <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                  <Inbox size={11} className="text-wm-accent-strong" />
-                  <p className="text-[12px] font-semibold text-wm-text">
-                    {req.requester_name ?? 'A staff member'} asked you to review
-                  </p>
-                  <span className="ml-auto text-[10px] text-wm-text-subtle">
-                    {fmtDateTime(req.created_at)}
-                  </span>
-                </div>
-                {req.notes && (
-                  <p className="text-[12px] text-wm-text-muted leading-snug whitespace-pre-wrap mb-2">
-                    "{req.notes}"
-                  </p>
-                )}
-                <WMButton
-                  variant="primary"
-                  size="sm"
-                  iconLeft={mutating ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
-                  onClick={() => void handleStart(req.id)}
-                  disabled={mutating}
-                >
-                  Start this review
-                </WMButton>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Empty-state CTA */}
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-12 w-12 rounded-full grid place-items-center bg-wm-accent-tint text-wm-accent-strong">
-            <Eye size={20} />
-          </div>
-          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong mb-1">
-            Review
-          </p>
-          <h1 className="text-xl font-semibold text-wm-text mb-2">
-            Ready to review this website?
-          </h1>
-          <p className="text-[13px] text-wm-text-muted leading-snug mb-5">
-            Internal reviews are personal to each staff member &mdash; start one
-            to walk through the site, leave your own comments, suggest edits, and
-            capture every change request before sending the partner review link.
-            Reviews started by other staff and partner reviews all roll up in the
-            Feedback panel on the right.
-          </p>
-          <div className="flex items-center justify-center gap-2 flex-wrap">
-            <WMButton
-              variant="primary"
-              size="md"
-              iconLeft={
-                mutating ? <Loader2 size={13} className="animate-spin" /> :
-                partnerLinkCopied ? <Check size={13} /> :
-                <Copy size={13} />
-              }
-              onClick={() => void handleGetPartnerLink()}
-              disabled={mutating}
-              title="Generate the partner-facing review URL (starts a partner review if needed) and copy it to your clipboard."
-            >
-              {partnerLinkCopied ? 'Link copied' : 'Get partner review link'}
-            </WMButton>
-            <WMButton
-              variant="secondary"
-              size="md"
-              iconLeft={<Plus size={13} />}
-              onClick={() => void handleStart()}
-              disabled={mutating}
-            >
-              Start an internal review
-            </WMButton>
-            <WMButton
-              variant="secondary"
-              size="md"
-              iconLeft={<UserPlus size={13} />}
-              onClick={() => setRequestModalOpen(true)}
-            >
-              Request a review
-            </WMButton>
-          </div>
+          )}
         </div>
-
-        {/* Outgoing requests — let the user see + cancel anything
-            they've already asked for. */}
-        {pendingFromMe.length > 0 && (
-          <div className="mt-8 pt-6 border-t border-wm-border/60">
-            <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-2">
-              Reviews you've requested · {pendingFromMe.length}
-            </p>
-            <ul className="space-y-1.5">
-              {pendingFromMe.map(req => (
-                <li key={req.id} className="rounded-md border border-wm-border bg-wm-bg-elevated px-3 py-2 text-[12px] text-wm-text flex items-start gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p>
-                      Waiting on <span className="font-semibold">{req.assignee_name ?? req.assignee_email}</span>
-                    </p>
-                    {req.notes && (
-                      <p className="text-[11px] text-wm-text-muted italic line-clamp-2 mt-0.5">"{req.notes}"</p>
-                    )}
-                    <p className="text-[10px] text-wm-text-subtle mt-0.5">{fmtDateTime(req.created_at)}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleCancelRequest(req.id)}
-                    className="text-[11px] font-semibold text-wm-text-muted hover:text-wm-danger shrink-0"
-                  >
-                    Cancel
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {mutationError && (
-          <div
-            role="alert"
-            className="mt-4 rounded-md border border-wm-danger/40 bg-wm-danger-bg px-3 py-2 text-[12px] text-wm-danger flex items-start gap-2 text-left"
-          >
-            <X size={14} className="mt-0.5 shrink-0" />
-            <p className="flex-1 leading-snug">{mutationError}</p>
-            <button
-              type="button"
-              onClick={() => setMutationError(null)}
-              className="text-[11px] font-semibold opacity-70 hover:opacity-100"
-              aria-label="Dismiss error"
+        <div className="flex items-center gap-2 flex-wrap">
+          {activeInternal && (
+            <WMButton
+              variant="secondary"
+              size="sm"
+              onClick={() => setForceEditor(true)}
             >
-              Dismiss
-            </button>
-          </div>
-        )}
-      </div>
+              Open editor
+            </WMButton>
+          )}
+          <WMButton
+            variant="secondary"
+            size="sm"
+            iconLeft={
+              actions.busy ? <Loader2 size={11} className="animate-spin" /> :
+              partnerLinkCopied ? <Check size={11} /> :
+              <Copy size={11} />
+            }
+            onClick={() => void handleGetPartnerLink()}
+            disabled={actions.busy}
+          >
+            {partnerLinkCopied ? 'Link copied' : 'Get partner review link'}
+          </WMButton>
+          {!activeInternal && (
+            <WMButton
+              variant="secondary"
+              size="sm"
+              iconLeft={actions.busy ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+              onClick={() => void handleStartInternal()}
+              disabled={actions.busy}
+              title="Open a fresh internal review round on this project. Multiple staff can contribute to the same round."
+            >
+              Start internal review {nextInternalRoundLabel(state)}
+            </WMButton>
+          )}
+          <WMButton
+            variant="primary"
+            size="sm"
+            iconLeft={<UserPlus size={11} />}
+            onClick={() => setRequestModalOpen(true)}
+            disabled={actions.busy}
+          >
+            Request a review
+          </WMButton>
+        </div>
+      </header>
+
+      {actions.lastError && (
+        <div role="alert" className="rounded-md border border-wm-danger/40 bg-wm-danger-bg px-3 py-2 text-[12px] text-wm-danger flex items-start gap-2">
+          <X size={14} className="mt-0.5 shrink-0" />
+          <p className="flex-1 leading-snug">{actions.lastError}</p>
+        </div>
+      )}
+
+      {/* Pending requests assigned to the current user — banner above
+          the kanban so they can't be missed. */}
+      {pendingForMe.length > 0 && (
+        <div className="rounded-xl border border-wm-accent/30 bg-wm-accent-tint/40 px-4 py-3 flex flex-col gap-2">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">
+            Reviews requested of you · {pendingForMe.length}
+          </p>
+          {pendingForMe.map(req => (
+            <div key={req.id} className="flex items-center gap-2 flex-wrap">
+              <Inbox size={11} className="text-wm-accent-strong" />
+              <p className="text-[12px] text-wm-text">
+                <span className="font-semibold">{req.requester_name ?? 'A teammate'}</span>
+                {req.notes ? `: "${req.notes}"` : ' asked you to review.'}
+              </p>
+              <WMButton
+                variant="primary"
+                size="sm"
+                iconLeft={<Plus size={11} />}
+                onClick={() => void handleStartInternal(req.id)}
+                disabled={actions.busy}
+                className="ml-auto"
+              >
+                Start this review
+              </WMButton>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Filter row + tabs */}
+      {feedbackBoards && feedbackBoards.boards.length > 0 && (
+        <div className="flex items-center gap-3 flex-wrap">
+          {feedbackBoards.assignees.length > 0 && (
+            <AssigneeFilter
+              available={feedbackBoards.assignees}
+              selectedIds={selectedAssignees}
+              onChange={setSelectedAssignees}
+            />
+          )}
+          <FeedbackTabs
+            boards={feedbackBoards}
+            active={activeTab}
+            onChange={setActiveTab}
+          />
+        </div>
+      )}
+
+      {/* Kanban */}
+      {feedbackBoards && (
+        <FeedbackBoardKanban
+          boards={visibleBoards}
+          pageNameFor={pageNameFor}
+          sectionLabelFor={sectionLabelFor}
+          onJumpToLocation={(c) => {
+            if (c.web_section_id) jumpToSection(c.web_page_id, c.web_section_id)
+          }}
+          onChanged={load}
+          filter={commentFilter}
+        />
+      )}
+
+      {/* Outgoing pending requests — small footer list. */}
+      {pendingFromMe.length > 0 && (
+        <div className="rounded-md border border-wm-border bg-wm-bg-elevated px-3 py-2.5">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">
+            Reviews you've requested · {pendingFromMe.length}
+          </p>
+          <ul className="space-y-1.5">
+            {pendingFromMe.map(req => (
+              <li key={req.id} className="text-[12px] flex items-start gap-2">
+                <div className="flex-1 min-w-0">
+                  <p>
+                    Waiting on{' '}
+                    <span className="font-semibold">{req.assignee_name ?? req.assignee_email}</span>
+                  </p>
+                  {req.notes && (
+                    <p className="text-[11px] text-wm-text-muted italic line-clamp-1">"{req.notes}"</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleCancelRequest(req.id)}
+                  className="text-[11px] font-semibold text-wm-text-muted hover:text-wm-danger shrink-0"
+                >
+                  Cancel
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {requestModalOpen && (
         <RequestReviewModal
@@ -301,10 +414,13 @@ export function ReviewWorkspace({ project }: Props) {
   )
 }
 
-function fmtDateTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-    })
-  } catch { return iso }
+/** Label for the "Start internal review" CTA — predicts the next
+ *  round number so staff knows what they're spinning up ("Round 1" vs
+ *  "Round 2"). Pure derivation from the loaded review list. */
+function nextInternalRoundLabel(state: ProjectReviewState | null): string {
+  if (!state) return ''
+  const maxInternal = state.reviews
+    .filter(r => r.kind === 'internal')
+    .reduce((m, r) => Math.max(m, r.round_number), 0)
+  return `· Round ${maxInternal + 1}`
 }

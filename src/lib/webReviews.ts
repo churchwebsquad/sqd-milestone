@@ -20,8 +20,8 @@
 
 import { supabase } from './supabase'
 import type {
-  WebReview, WebReviewComment, WebReviewCommentStatus, WebReviewEdit,
-  WebReviewRequest,
+  WebReview, WebReviewComment, WebReviewCommentStatus, WebReviewCommentCategory,
+  WebReviewEdit, WebReviewRequest, WebReviewStatus, BoardStatus,
 } from '../types/database'
 
 // ── Public types ───────────────────────────────────────────────────
@@ -63,6 +63,34 @@ const EMPTY_COUNTS: PageReviewCounts = {
   resolved_total: 0,
 }
 
+// ── Status normalization (legacy → new vocabulary) ─────────────────
+//
+// v39 added the 5-state board status (no_status / open_for_review /
+// editing_content / on_hold / completed) but kept legacy 'open'/'closed'
+// valid in the DB CHECK constraint so reads don't break while writers
+// transition. Every reader of `WebReview.status` should pass it through
+// `normalizeBoardStatus` first to collapse legacy values into the new
+// vocabulary. A follow-up v40 removes the legacy values entirely.
+
+/** Collapse legacy 'open'/'closed' into the new board-status vocabulary. */
+export function normalizeBoardStatus(status: WebReviewStatus): BoardStatus {
+  if (status === 'open')   return 'open_for_review'
+  if (status === 'closed') return 'completed'
+  return status
+}
+
+/** True when a board is in any "done" state — covers both legacy
+ *  'closed' and the new 'completed'. */
+function isBoardClosed(status: WebReviewStatus): boolean {
+  return status === 'completed' || status === 'closed'
+}
+
+/** Format a review's display label: "Internal R2" / "Partner R3". */
+export function roundLabel(review: Pick<WebReview, 'kind' | 'round_number'>): string {
+  const k = review.kind === 'partner' ? 'Partner' : 'Internal'
+  return `${k} R${review.round_number}`
+}
+
 // ── Load ───────────────────────────────────────────────────────────
 
 /** Load all reviews + their comments for the project in one round trip
@@ -75,10 +103,10 @@ export async function loadProjectReviewState(projectId: string): Promise<Project
     .order('started_at', { ascending: false })
 
   const reviews = (reviewRows ?? []) as WebReview[]
-  const open_reviews = reviews.filter(r => r.status === 'open')
+  const open_reviews = reviews.filter(r => !isBoardClosed(r.status))
   const open_partner = open_reviews.filter(r => r.kind === 'partner')
   const open_internal = open_reviews.filter(r => r.kind === 'internal')
-  const last_closed = reviews.find(r => r.status === 'closed') ?? null
+  const last_closed = reviews.find(r => isBoardClosed(r.status)) ?? null
 
   // Load comments across every review on this project.
   const reviewIds = reviews.map(r => r.id)
@@ -272,7 +300,7 @@ export async function startReview(opts: {
     .insert({
       web_project_id:     opts.projectId,
       kind:               opts.kind,
-      status:             'open',
+      status:             'open_for_review' satisfies BoardStatus,
       started_by_user_id: user?.user?.id ?? null,
       started_by_name:    starterName,
       partner_token,
@@ -383,7 +411,7 @@ export async function closeReview(reviewId: string): Promise<ReviewMutationResul
   const { error } = await supabase
     .from('web_reviews')
     .update({
-      status:            'closed',
+      status:            'completed' satisfies BoardStatus,
       closed_at:         new Date().toISOString(),
       closed_by_user_id: user?.user?.id ?? null,
       closed_by_name:    closerName,
@@ -475,7 +503,7 @@ export async function finalizeReview(opts: {
   const { error: closeErr } = await supabase
     .from('web_reviews')
     .update({
-      status:            'closed',
+      status:            'completed' satisfies BoardStatus,
       closed_at:         finalizedAt,
       closed_by_user_id: user?.user?.id ?? null,
       closed_by_name:    closerName,
@@ -569,6 +597,7 @@ export async function resolveComment(opts: {
     .update({
       status:              opts.outcome,
       resolved_by_user_id: user?.user?.id ?? null,
+      resolved_by_name:    resolverName,
       resolved_at:         new Date().toISOString(),
       resolution_note:     composedNote,
     } as never)
@@ -616,4 +645,207 @@ function setNestedPath(
     return obj
   }
   return recur(root, 0) as Record<string, unknown>
+}
+
+// ── Feedback board mutators ────────────────────────────────────────
+//
+// Surface the per-card / per-board edits the new feedback UI needs.
+// Each is a thin Supabase update — failures log and return false so the
+// caller can decide whether to surface a toast.
+
+/** Change a comment's design/content tag. Pass null to clear. */
+export async function setCommentCategory(
+  commentId: string,
+  category: WebReviewCommentCategory | null,
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('web_review_comments')
+    .update({ category } as never)
+    .eq('id', commentId)
+  if (error) console.error('[reviews] setCommentCategory failed:', error.message)
+  return !error
+}
+
+/** Assign / re-assign / unassign a comment to a staff member. The
+ *  snapshot pattern (id + name + email) lets the card render the
+ *  assignee chip without joining auth.users. */
+export async function setCommentAssignee(
+  commentId: string,
+  assignee: { userId: string | null; name: string | null; email: string | null } | null,
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('web_review_comments')
+    .update({
+      assignee_user_id: assignee?.userId ?? null,
+      assignee_name:    assignee?.name   ?? null,
+      assignee_email:   assignee?.email  ?? null,
+    } as never)
+    .eq('id', commentId)
+  if (error) console.error('[reviews] setCommentAssignee failed:', error.message)
+  return !error
+}
+
+/** Set / clear the optional due date shown in the card footer. */
+export async function setCommentDueDate(
+  commentId: string,
+  dueAt: string | null,
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('web_review_comments')
+    .update({ due_at: dueAt } as never)
+    .eq('id', commentId)
+  if (error) console.error('[reviews] setCommentDueDate failed:', error.message)
+  return !error
+}
+
+/** Change a review's board-level status. Surfaced from the column-
+ *  header menu in the new feedback UI. Choosing 'completed' here is
+ *  equivalent to a close-without-finalize — no page-status promotion. */
+export async function setBoardStatus(reviewId: string, status: BoardStatus): Promise<boolean> {
+  const { data: user } = await supabase.auth.getUser()
+  // Closing the board also stamps closed_at / closed_by for the
+  // audit trail. Re-opening clears them so we don't end up with a row
+  // showing both "completed" and a stale closed_at.
+  const isClosing = status === 'completed'
+  const patch: Record<string, unknown> = { status }
+  if (isClosing) {
+    const closerName = await resolveStaffName(user?.user?.email ?? null)
+    patch.closed_at         = new Date().toISOString()
+    patch.closed_by_user_id = user?.user?.id ?? null
+    patch.closed_by_name    = closerName
+  } else {
+    patch.closed_at         = null
+    patch.closed_by_user_id = null
+    patch.closed_by_name    = null
+  }
+  const { error } = await supabase
+    .from('web_reviews')
+    .update(patch as never)
+    .eq('id', reviewId)
+  if (error) console.error('[reviews] setBoardStatus failed:', error.message)
+  return !error
+}
+
+// ── Feedback board derivation ──────────────────────────────────────
+//
+// Pure-derivation helper: take a loaded ProjectReviewState + edits and
+// return the board-shaped projection the new feedback UI consumes.
+// One function used by both the side rail and the Review tab so neither
+// surface drifts. No I/O.
+
+export interface FeedbackBoardCounts {
+  open: number
+  resolved: number
+  total: number
+}
+
+export interface FeedbackBoard {
+  reviewId: string
+  kind: 'internal' | 'partner'
+  roundNumber: number
+  /** Human label for the column header ("Internal R2"). */
+  label: string
+  /** Normalized BoardStatus — legacy 'open'/'closed' have already been collapsed. */
+  status: BoardStatus
+  startedAt: string
+  startedByName: string | null
+  partnerName: string | null
+  partnerToken: string | null
+  comments: WebReviewComment[]
+  edits: WebReviewEdit[]
+  counts: FeedbackBoardCounts
+}
+
+export interface FeedbackAssignee {
+  /** auth.users.id when known. Falls back to email-based identity. */
+  id: string
+  name: string
+  email: string | null
+}
+
+export interface ProjectFeedbackBoards {
+  /** Boards sorted (kind, roundNumber) descending — newest first. */
+  boards: FeedbackBoard[]
+  /** Tab → boards. 'all' carries every board; round tabs carry one each. */
+  byTab: Record<string, FeedbackBoard[]>
+  /** Unique assignees across every board's comments, for the filter dropdown. */
+  assignees: FeedbackAssignee[]
+}
+
+/** Build the feedback-board projection. Pure; safe to memoize on the
+ *  caller side keyed by state.reviews/comments + edits identity. */
+export function buildFeedbackBoards(
+  state: ProjectReviewState,
+  edits: WebReviewEdit[],
+): ProjectFeedbackBoards {
+  const editsByReview = new Map<string, WebReviewEdit[]>()
+  for (const e of edits) {
+    const arr = editsByReview.get(e.review_id) ?? []
+    arr.push(e)
+    editsByReview.set(e.review_id, arr)
+  }
+
+  const commentsByReview = new Map<string, WebReviewComment[]>()
+  for (const c of state.comments) {
+    const arr = commentsByReview.get(c.review_id) ?? []
+    arr.push(c)
+    commentsByReview.set(c.review_id, arr)
+  }
+
+  const boards: FeedbackBoard[] = state.reviews.map(r => {
+    const comments = commentsByReview.get(r.id) ?? []
+    const open     = comments.filter(c => c.status === 'open').length
+    const resolved = comments.length - open
+    return {
+      reviewId:      r.id,
+      kind:          r.kind,
+      roundNumber:   r.round_number,
+      label:         roundLabel(r),
+      status:        normalizeBoardStatus(r.status),
+      startedAt:     r.started_at,
+      startedByName: r.started_by_name,
+      partnerName:   r.partner_name,
+      partnerToken:  r.partner_token,
+      comments,
+      edits:         editsByReview.get(r.id) ?? [],
+      counts: { open, resolved, total: comments.length },
+    }
+  })
+  // Sort by (kind, roundNumber) descending — newest first within each
+  // kind. Partner reviews are typically rarer; staff usually wants
+  // their own internal rounds at the top, so internal comes first when
+  // round numbers tie.
+  boards.sort((a, b) => {
+    if (a.roundNumber !== b.roundNumber) return b.roundNumber - a.roundNumber
+    if (a.kind !== b.kind) return a.kind === 'internal' ? -1 : 1
+    return b.startedAt.localeCompare(a.startedAt)
+  })
+
+  const byTab: Record<string, FeedbackBoard[]> = { all: [...boards] }
+  for (const b of boards) {
+    const key = `${b.kind}-${b.roundNumber}`  // e.g. 'internal-2'
+    byTab[key] = [b]
+  }
+
+  // Collect unique assignees across every comment for the filter.
+  const seen = new Map<string, FeedbackAssignee>()
+  for (const board of boards) {
+    for (const c of board.comments) {
+      if (!c.assignee_name && !c.assignee_email) continue
+      const id = c.assignee_user_id ?? c.assignee_email ?? c.assignee_name!
+      if (!seen.has(id)) {
+        seen.set(id, {
+          id,
+          name:  c.assignee_name  ?? c.assignee_email ?? 'Unassigned',
+          email: c.assignee_email ?? null,
+        })
+      }
+    }
+  }
+
+  return {
+    boards,
+    byTab,
+    assignees: Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name)),
+  }
 }

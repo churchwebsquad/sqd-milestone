@@ -15,13 +15,17 @@ import type { WebContentTemplate, WebSection } from '../../types/database'
 interface Props {
   sections: WebSection[]
   templates: Record<string, WebContentTemplate>
+  /** Card-family templates keyed by id — required so palette-referenced
+   *  groups (Feature 2 / 22 / 82 / 106, etc.) can render their picked
+   *  card variant. Missing this map = empty card grids in preview. */
+  cardTemplates?: Record<string, WebContentTemplate>
   snippetMap: SnippetMap
   onSelectSection: (id: string) => void
 }
 
 const BRIXIES_VIEWPORT_PX = 1512
 
-export function PagePreview({ sections, templates, snippetMap, onSelectSection }: Props) {
+export function PagePreview({ sections, templates, cardTemplates, snippetMap, onSelectSection }: Props) {
   if (sections.length === 0) {
     return (
       <div className="text-center py-16 text-[12px] text-wm-text-muted">
@@ -55,6 +59,7 @@ export function PagePreview({ sections, templates, snippetMap, onSelectSection }
                   template={template}
                   values={(section.field_values ?? {}) as Record<string, unknown>}
                   snippetMap={snippetMap}
+                  cardTemplates={cardTemplates}
                 />
               ) : (
                 <FreehandPreview section={section} />
@@ -74,15 +79,16 @@ export function PagePreview({ sections, templates, snippetMap, onSelectSection }
 // ── Per-section iframe ───────────────────────────────────────────────
 
 function SectionFrame({
-  template, values, snippetMap,
+  template, values, snippetMap, cardTemplates,
 }: {
   template: WebContentTemplate
   values: Record<string, unknown>
   snippetMap: SnippetMap
+  cardTemplates?: Record<string, WebContentTemplate>
 }) {
   const html = useMemo(
-    () => renderSectionToHtml(template, values, snippetMap),
-    [template, values, snippetMap],
+    () => renderSectionToHtml(template, values, snippetMap, cardTemplates),
+    [template, values, snippetMap, cardTemplates],
   )
   const containerRef = useRef<HTMLDivElement | null>(null)
   const iframeRef = useRef<HTMLIFrameElement | null>(null)

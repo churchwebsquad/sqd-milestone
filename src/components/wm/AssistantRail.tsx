@@ -33,8 +33,12 @@ import type {
 } from '../../types/database'
 import {
   loadProjectReviewState, startReview, closeReview, loadProjectReviewEdits,
+  buildFeedbackBoards,
   type ProjectReviewState,
 } from '../../lib/webReviews'
+import { FeedbackBoardVerticalList } from './feedback/FeedbackBoardVerticalList'
+import { FeedbackTabs } from './feedback/FeedbackTabs'
+import { AssigneeFilter } from './feedback/AssigneeFilter'
 import { WMButton } from './Button'
 import { WMStatusPill } from './StatusPill'
 import { SectionDetailsPanel } from './sectioneditor/SectionDetailsPanel'
@@ -44,6 +48,7 @@ import { SnippetsWorkspace } from './workspaces/SnippetsWorkspace'
 import { VoiceWorkspace } from './workspaces/VoiceWorkspace'
 import { HeuristicsWorkspace } from './workspaces/HeuristicsWorkspace'
 import { SeoPanel } from './SeoPanel'
+import { CopywriterNotesPanel } from './CopywriterNotesPanel'
 import { RequestReviewModal } from './RequestReviewModal'
 import { useAuth } from '../../contexts/AuthContext'
 
@@ -193,8 +198,12 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
               onChangeVariant={sectionDetail.onChangeVariant}
               onUnbind={sectionDetail.onUnbind}
               onRemove={sectionDetail.onRemove}
+              project={sectionDetail.project}
+              libraryTemplatesById={sectionDetail.libraryTemplatesById}
+              onLibraryChange={sectionDetail.onLibraryChange}
               activeInternalReview={sectionDetail.activeInternalReview}
               sectionComments={sectionDetail.sectionComments}
+              reviewsById={sectionDetail.reviewsById}
               onCommentsChange={sectionDetail.onCommentsChange}
             />
           </SnippetFocusProvider>
@@ -267,9 +276,13 @@ function RailTabButton({
   )
 }
 
-// ── Feedback tab — sitemap-grouped rollup of every open review comment.
-// Replaced the prior "Ideas" panel which didn't earn its rail real
-// estate. Clicking a row navigates to the section's page and scrolls.
+// ── Feedback tab — round-grouped vertical boards.
+//
+// Replaced the prior flat list with the round-board UI: each open or
+// recently-closed review session renders as a collapsible board with
+// its own status pill, comments rendered as the new FeedbackCard.
+// Top-of-rail actions (Get partner link / Start internal / Request)
+// + assignee filter + round-tab strip sit above.
 // ─────────────────────────────────────────────────────────────────────
 
 function FeedbackTab({
@@ -282,17 +295,20 @@ function FeedbackTab({
   const { user } = useAuth()
   const [state, setState] = useState<ProjectReviewState | null>(null)
   const [edits, setEdits] = useState<WebReviewEdit[]>([])
-  // Maps for resolving an edit row's page name + section label so the
-  // rail shows "Plan Your Visit › Hero Section 49" alongside each
-  // field change.
+  // Maps for resolving page/section labels referenced by every
+  // comment and edit. Resolved once per load against the same query
+  // pattern the old FeedbackTab used.
   const [pageById, setPageById] = useState<Record<string, { id: string; name: string }>>({})
   const [sectionLabelById, setSectionLabelById] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [mutating, setMutating] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [copied, setCopied] = useState<string | null>(null)
   const [partnerLinkCopied, setPartnerLinkCopied] = useState(false)
   const [requestModalOpen, setRequestModalOpen] = useState(false)
+
+  // Feedback UI state — round tab selection + assignee filter.
+  const [activeTab, setActiveTab] = useState<string>('all')
+  const [selectedAssignees, setSelectedAssignees] = useState<Set<string>>(new Set())
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -303,9 +319,17 @@ function FeedbackTab({
     setState(s)
     setEdits(e)
 
-    // Resolve page + section labels for whatever the edits reference.
-    const pageIds    = Array.from(new Set(e.map(x => x.web_page_id)))
-    const sectionIds = Array.from(new Set(e.map(x => x.web_section_id)))
+    // Resolve page + section labels for whatever the edits AND
+    // comments reference. The new feedback card shows the location
+    // pill per-comment, so the lookup needs to cover both.
+    const pageIds    = Array.from(new Set([
+      ...e.map(x => x.web_page_id),
+      ...s.comments.map(c => c.web_page_id),
+    ]))
+    const sectionIds = Array.from(new Set([
+      ...e.map(x => x.web_section_id),
+      ...s.comments.map(c => c.web_section_id).filter((x): x is string => !!x),
+    ]))
     if (pageIds.length > 0) {
       const { data: pages } = await supabase
         .from('web_pages')
@@ -430,13 +454,34 @@ function FeedbackTab({
     )
   }
 
-  const openReviews   = state.open_reviews
-  const closedReviews = state.reviews.filter(r => r.status === 'closed').slice(0, 10)
-  // Current user's own open internal review — hides the "Start
-  // internal review" rail button when they've already got one going.
-  const myOpenInternal = openReviews.find(
-    r => r.kind === 'internal' && r.started_by_user_id === user?.id,
-  ) ?? null
+  const openReviews = state.open_reviews
+  // Shared internal-review rounds — any open internal review hides
+  // the "Start internal review" rail button. A new round can only
+  // start once the current round is closed.
+  const myOpenInternal = openReviews.find(r => r.kind === 'internal') ?? null
+  void user  // retained for future per-author guards
+
+  // Build round-keyed boards. Memoization keyed on identity of the
+  // arrays is enough since `load()` always produces fresh refs.
+  const feedbackBoards = buildFeedbackBoards(state, edits)
+  const visibleBoards = activeTab === 'all'
+    ? feedbackBoards.boards
+    : (feedbackBoards.byTab[activeTab] ?? [])
+
+  // Compose the comment-level filter from both the query box (existing
+  // rail search) and the new assignee filter. Both produce predicates
+  // that are AND'ed.
+  const commentFilter = (c: WebReviewComment): boolean => {
+    if (!filterFn(c)) return false
+    if (selectedAssignees.size > 0) {
+      const id = c.assignee_user_id ?? c.assignee_email ?? c.assignee_name ?? ''
+      if (!selectedAssignees.has(id)) return false
+    }
+    return true
+  }
+
+  const pageNameFor    = (id: string) => pageById[id]?.name ?? null
+  const sectionLabelFor = (id: string | null) => (id ? (sectionLabelById[id] ?? null) : null)
 
   return (
     <div className="p-3 space-y-3">
@@ -491,63 +536,42 @@ function FeedbackTab({
         </div>
       )}
 
-      {/* Open reviews section */}
-      {openReviews.length === 0 && closedReviews.length === 0 ? (
+      {/* Filter + round tabs */}
+      {feedbackBoards.boards.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {feedbackBoards.assignees.length > 0 && (
+            <AssigneeFilter
+              available={feedbackBoards.assignees}
+              selectedIds={selectedAssignees}
+              onChange={setSelectedAssignees}
+            />
+          )}
+          <FeedbackTabs
+            boards={feedbackBoards}
+            active={activeTab}
+            onChange={setActiveTab}
+          />
+        </div>
+      )}
+
+      {/* Boards */}
+      {feedbackBoards.boards.length === 0 ? (
         <EmptyState
           icon={<Inbox size={20} />}
           title="No reviews yet"
-          body="Start a partner review above, or open an internal review from the Review tab."
+          body="Start a partner review above, or open an internal review."
         />
       ) : (
-        <>
-          {openReviews.length > 0 && (
-            <div>
-              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5 px-1">
-                Reviews · {openReviews.length}
-              </p>
-              <div className="space-y-2">
-                {openReviews.map(r => (
-                  <ReviewSession
-                    key={r.id}
-                    review={r}
-                    comments={state.comments.filter(c => c.review_id === r.id).filter(filterFn)}
-                    edits={edits.filter(e => e.review_id === r.id)}
-                    pageById={pageById}
-                    sectionLabelById={sectionLabelById}
-                    onJumpToSection={onJumpToSection}
-                    onClose={() => void handleClose(r.id)}
-                    onCopyLink={() => r.partner_token && copyPortalLink(r.partner_token, r.id)}
-                    copied={copied === r.id}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {closedReviews.length > 0 && (
-            <div className="pt-2 mt-1 border-t border-wm-border/60">
-              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5 px-1">
-                Recently closed · {closedReviews.length}
-              </p>
-              <div className="space-y-2 opacity-90">
-                {closedReviews.map(r => (
-                  <ReviewSession
-                    key={r.id}
-                    review={r}
-                    comments={state.comments.filter(c => c.review_id === r.id).filter(filterFn)}
-                    edits={edits.filter(e => e.review_id === r.id)}
-                    pageById={pageById}
-                    sectionLabelById={sectionLabelById}
-                    onJumpToSection={onJumpToSection}
-                    onClose={() => {}}  // already closed
-                    onCopyLink={() => r.partner_token && copyPortalLink(r.partner_token, r.id)}
-                    copied={copied === r.id}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-        </>
+        <FeedbackBoardVerticalList
+          boards={visibleBoards}
+          pageNameFor={pageNameFor}
+          sectionLabelFor={sectionLabelFor}
+          onJumpToLocation={(c) => {
+            if (c.web_section_id) onJumpToSection(c.web_page_id, c.web_section_id)
+          }}
+          onChanged={load}
+          filter={commentFilter}
+        />
       )}
 
       {requestModalOpen && (
@@ -562,255 +586,6 @@ function FeedbackTab({
   )
 }
 
-/** One open review session — header + collapsible groups by kind.
- *  Partner sessions break into 'requested' + 'comment'; internal
- *  sessions break into 'suggested' + 'comment'. */
-function ReviewSession({
-  review, comments, edits, pageById, sectionLabelById,
-  onJumpToSection, onClose, onCopyLink, copied,
-}: {
-  review: WebReview
-  comments: WebReviewComment[]
-  edits: WebReviewEdit[]
-  pageById: Record<string, { id: string; name: string }>
-  sectionLabelById: Record<string, string>
-  onJumpToSection: (pageId: string, sectionId: string) => void
-  onClose: () => void
-  onCopyLink: () => void
-  copied: boolean
-}) {
-  const isPartner = review.kind === 'partner'
-  const isClosed  = review.status === 'closed'
-  const name      = isPartner ? (review.partner_name ?? 'Partner') : (review.started_by_name ?? 'Staff')
-
-  // Partition by the kinds each side actually produces.
-  const requested = comments.filter(c => c.kind === 'requested')
-  const suggested = comments.filter(c => c.kind === 'suggested')
-  const comment   = comments.filter(c => c.kind === 'comment')
-
-  return (
-    <div className="rounded-md border border-wm-border bg-wm-bg-elevated overflow-hidden">
-      {/* Session header */}
-      <div className={[
-        'px-2.5 py-2 border-b border-wm-border/60',
-        isClosed  ? 'bg-wm-bg-hover/40'
-        : isPartner ? 'bg-amber-50/50'
-        : 'bg-blue-50/40',
-      ].join(' ')}>
-        <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
-          <span className={[
-            'inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5',
-            isPartner ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-blue-100 text-blue-700 border border-blue-200',
-          ].join(' ')}>
-            {isPartner ? 'Partner' : 'Internal'}
-          </span>
-          <span className="text-[11px] font-semibold text-wm-text truncate">{name}</span>
-          {isClosed && (
-            <span className="inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 bg-wm-success-bg text-wm-success border border-wm-success/20">
-              Closed
-            </span>
-          )}
-          <span className="ml-auto text-[10px] font-semibold text-wm-text-subtle">
-            {comments.length} item{comments.length === 1 ? '' : 's'}
-          </span>
-        </div>
-        <p className="text-[10px] text-wm-text-subtle">
-          Started {fmtShortDateTime(review.started_at)}
-          {isClosed && review.closed_at && (
-            <> · Closed {fmtShortDateTime(review.closed_at)}{review.closed_by_name && ` by ${review.closed_by_name}`}</>
-          )}
-        </p>
-        {!isClosed && (
-          <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-            {isPartner && review.partner_token && (
-              <button
-                type="button"
-                onClick={onCopyLink}
-                className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-800 hover:text-amber-900"
-              >
-                {copied ? <Check size={10} /> : <Copy size={10} />}
-                {copied ? 'Copied' : 'Copy partner link'}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={onClose}
-              className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold text-wm-text-subtle hover:text-wm-danger"
-            >
-              <X size={10} /> Close
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Comment groups + (internal only) edit log */}
-      <div className="px-1 py-1 space-y-1">
-        {isPartner ? (
-          <>
-            <CommentGroup label="Partner requests" items={requested} onJumpToSection={onJumpToSection} defaultOpen />
-            <CommentGroup label="Partner comments" items={comment}   onJumpToSection={onJumpToSection} />
-          </>
-        ) : (
-          <>
-            <CommentGroup label="Staff suggestions" items={suggested} onJumpToSection={onJumpToSection} defaultOpen />
-            <CommentGroup label="Staff comments"   items={comment}    onJumpToSection={onJumpToSection} />
-            <EditGroup
-              label="Changes made"
-              items={edits}
-              pageById={pageById}
-              sectionLabelById={sectionLabelById}
-              onJumpToSection={onJumpToSection}
-            />
-          </>
-        )}
-        {comments.length === 0 && edits.length === 0 && (
-          <p className="px-2 py-1.5 text-[11px] text-wm-text-subtle italic">No items yet.</p>
-        )}
-      </div>
-    </div>
-  )
-}
-
-/** Collapsible audit log of field changes made during a review.
- *  Internal-only — partner reviews don't write to field_values
- *  directly, so they have no edits to show. */
-function EditGroup({
-  label, items, pageById, sectionLabelById, onJumpToSection, defaultOpen = false,
-}: {
-  label: string
-  items: WebReviewEdit[]
-  pageById: Record<string, { id: string; name: string }>
-  sectionLabelById: Record<string, string>
-  onJumpToSection: (pageId: string, sectionId: string) => void
-  defaultOpen?: boolean
-}) {
-  const [open, setOpen] = useState(defaultOpen)
-  if (items.length === 0) return null
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-1 px-2 py-1 text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle hover:text-wm-text"
-      >
-        {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-        <span>{label}</span>
-        <span className="ml-auto text-wm-text-subtle">{items.length}</span>
-      </button>
-      {open && (
-        <ul className="px-1 pb-1 space-y-1">
-          {items.map(e => {
-            const pageName     = pageById[e.web_page_id]?.name ?? 'Unknown page'
-            const sectionLabel = sectionLabelById[e.web_section_id] ?? 'Section'
-            return (
-              <li key={e.id}>
-                <button
-                  type="button"
-                  onClick={() => onJumpToSection(e.web_page_id, e.web_section_id)}
-                  className="w-full text-left rounded-md bg-emerald-50/30 border border-emerald-200/50 px-2 py-1.5 hover:border-emerald-400 transition-colors"
-                >
-                  {/* Breadcrumb: which page → which section → which field */}
-                  <div className="flex items-center gap-1 text-[9px] text-wm-text-subtle mb-0.5 flex-wrap">
-                    <span className="font-semibold text-wm-text">{pageName}</span>
-                    <span className="opacity-60">›</span>
-                    <span className="font-mono truncate">{sectionLabel}</span>
-                    <span className="opacity-60">›</span>
-                    <span className="font-mono text-emerald-700">{e.field_label ?? e.field_path}</span>
-                    <span className="ml-auto text-wm-text-subtle">
-                      {fmtShortDateTime(e.edited_at)}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-wm-text-subtle line-through line-clamp-1">
-                    {stringifyEditValue(e.before_value)}
-                  </p>
-                  <p className="text-[11px] text-wm-text leading-snug line-clamp-2">
-                    {stringifyEditValue(e.after_value)}
-                  </p>
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-    </div>
-  )
-}
-
-function stringifyEditValue(v: unknown): string {
-  if (v == null) return '(empty)'
-  if (typeof v === 'string') return stripHtml(v) || '(empty)'
-  if (typeof v === 'object') {
-    const obj = v as { label?: unknown }
-    if (typeof obj.label === 'string') return obj.label
-    try { return JSON.stringify(v).slice(0, 80) } catch { return String(v) }
-  }
-  return String(v)
-}
-
-function CommentGroup({
-  label, items, onJumpToSection, defaultOpen = false,
-}: {
-  label: string
-  items: WebReviewComment[]
-  onJumpToSection: (pageId: string, sectionId: string) => void
-  defaultOpen?: boolean
-}) {
-  const [open, setOpen] = useState(defaultOpen)
-  if (items.length === 0) return null
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-1 px-2 py-1 text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle hover:text-wm-text"
-      >
-        {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-        <span>{label}</span>
-        <span className="ml-auto text-wm-text-subtle">{items.length}</span>
-      </button>
-      {open && (
-        <ul className="px-1 pb-1 space-y-1">
-          {items.map(c => (
-            <li key={c.id}>
-              <button
-                type="button"
-                onClick={() => c.web_section_id && onJumpToSection(c.web_page_id, c.web_section_id)}
-                disabled={!c.web_section_id}
-                className={[
-                  'w-full text-left rounded-md bg-wm-bg border border-wm-border/60 px-2 py-1.5 hover:border-wm-accent transition-colors',
-                  !c.web_section_id && 'opacity-60 cursor-default',
-                  c.status !== 'open' && 'opacity-60 line-through decoration-wm-text-subtle/40',
-                ].filter(Boolean).join(' ')}
-              >
-                <div className="flex items-center gap-1.5 mb-0.5">
-                  {c.field_key && <span className="font-mono text-[9px] text-wm-text-subtle">{c.field_key}</span>}
-                  <span className="ml-auto text-[9px] text-wm-text-subtle no-underline">
-                    {fmtShortDateTime(c.created_at)}
-                  </span>
-                </div>
-                <p className="text-[11px] text-wm-text leading-snug line-clamp-2 no-underline">
-                  {c.body || (typeof c.suggested_value === 'string' ? stripHtml(c.suggested_value) : '(no body)')}
-                </p>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
-
-function fmtShortDateTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-    })
-  } catch { return iso }
-}
-
-function stripHtml(s: string): string {
-  return s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
-}
 
 // ── Audit tab ─────────────────────────────────────────────────────────
 
@@ -825,6 +600,12 @@ function AuditTab({
   const [findings, setFindings] = useState<AuditFinding[]>([])
   const [scanning, setScanning] = useState(false)
   const [scanned, setScanned] = useState(false)
+  // Copywriter notes for the active page — pulled from
+  // web_pages.brief.copywriter_meta, which the importer writes on
+  // every commit. Shown above the rule-violation findings so the
+  // strategist sees scan flags + kickbacks + gaps without leaving
+  // the rail.
+  const [pageBrief, setPageBrief] = useState<unknown>(null)
 
   const scan = useCallback(async () => {
     if (!activePageId) return
@@ -836,11 +617,25 @@ function AuditTab({
     onCount(list.length)
   }, [activePageId, onCount])
 
-  // Clear findings when page changes
+  // Clear findings + refetch brief when page changes
   useEffect(() => {
     setFindings([])
     setScanned(false)
     onCount(0)
+    if (!activePageId) {
+      setPageBrief(null)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      const { data } = await supabase
+        .from('web_pages')
+        .select('brief')
+        .eq('id', activePageId)
+        .maybeSingle()
+      if (!cancelled) setPageBrief((data as { brief?: unknown } | null)?.brief ?? null)
+    })()
+    return () => { cancelled = true }
   }, [activePageId, onCount])
 
   const q = query.trim().toLowerCase()
@@ -862,6 +657,7 @@ function AuditTab({
 
   return (
     <div className="p-3 space-y-2">
+      <CopywriterNotesPanel brief={pageBrief} />
       <WMButton
         variant="secondary"
         size="sm"

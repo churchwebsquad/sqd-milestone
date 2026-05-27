@@ -364,6 +364,38 @@ function buildIframeDoc(html: string): string {
   body { width: 1512px; }
   img { max-width: 100%; height: auto; }
   a { color: inherit; text-decoration: none; }
+
+  /* ── Per-template layout overrides ──────────────────────────────
+     Brixies source_html ships inline flex styles tuned for the
+     desktop canvas at exactly 6 cards across or N slides side-by-
+     side. When the bound section has more content than the
+     template's default layout assumed, the row squeezes copy to
+     unreadable widths or overflows the viewport. We override inline
+     flex behavior with !important so containers wrap and each
+     card/slide keeps a readable minimum width. */
+
+  /* Feature 14 — cards row wraps; each card holds at least ~280px. */
+  [data-layer="Feature section 14"] [data-layer="Container cards"] {
+    flex-wrap: wrap !important;
+    gap: 30px !important;
+  }
+  [data-layer="Feature section 14"] [data-layer="Card"] {
+    flex: 1 1 280px !important;
+    min-width: 280px !important;
+    max-width: 100% !important;
+  }
+
+  /* Timeline 16 — slides wrap to a second row, each slide stays at
+     least ~280px so its card content is legible. */
+  [data-layer="Timeline Section 16"] [data-layer="Slider"] {
+    flex-wrap: wrap !important;
+    gap: 24px !important;
+  }
+  [data-layer="Timeline Section 16"] [data-layer="Slide"] {
+    flex: 1 1 280px !important;
+    min-width: 280px !important;
+    max-width: 100% !important;
+  }
 </style>
 </head>
 <body>${html}</body>

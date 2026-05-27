@@ -42,9 +42,20 @@ export interface SectionDetail {
   /** Open comments attached to the currently-selected section.
    *  Surfaced inline below the field list. */
   sectionComments?: WebReviewComment[]
+  /** Review row keyed by id — the new FeedbackCard needs each
+   *  comment's review.kind + review.round_number to render its tags
+   *  row. Resolved against the global review list once and passed
+   *  through so the inline card doesn't refetch. */
+  reviewsById?: Record<string, WebReview>
   /** Refresh hook — called after creating / resolving a comment so
    *  the workspace re-reads the review state. */
   onCommentsChange?: () => Promise<void>
+  /** Project row + library template index — threaded through to the
+   *  SectionDetailsPanel so its "Save to site library" affordance
+   *  can read/write `curated_library` without a refetch. */
+  project?: import('../../../types/database').StrategyWebProject
+  libraryTemplatesById?: Record<string, Pick<import('../../../types/database').WebContentTemplate, 'id' | 'layer_name'>>
+  onLibraryChange?: () => Promise<void>
 }
 
 interface ContextValue {

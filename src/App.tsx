@@ -24,6 +24,7 @@ import BrandGuidePortalPage from './pages/BrandGuidePortalPage'
 import BrandingIndexPage from './pages/BrandingIndexPage'
 import BrandHandoffPage from './pages/BrandHandoffPage'
 import PortalReviewPage from './pages/PortalReviewPage'
+import FeedbackPreviewPage from './pages/FeedbackPreviewPage'
 import InitiativesPage from './pages/strategy/InitiativesPage'
 import InitiativeDetailPage from './pages/strategy/InitiativeDetailPage'
 import ActionItemDetailPage from './pages/strategy/ActionItemDetailPage'
@@ -80,6 +81,8 @@ export default function App() {
               web_reviews.partner_token. No login required; partner
               enters their name on first visit. */}
           <Route path="/portal/review/:token" element={<PortalReviewPage />} />
+          {/* Dev-only fixture preview for the feedback UI primitives. */}
+          <Route path="/dev/feedback-preview" element={<FeedbackPreviewPage />} />
           {/* Legacy brand-guide URLs — kept live so old links don't rot. New
               links go through buildPortalUrl() which emits brand.thesqd.com. */}
           <Route path="/brand/:churchSlug" element={<BrandGuidePortalPage />} />

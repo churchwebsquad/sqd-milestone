@@ -87,6 +87,11 @@ export function DevHandoffWorkspace({ project }: Props) {
       const pages = (pageRows ?? []) as Array<Pick<WebPage, 'id' | 'name' | 'slug' | 'seo'>>
 
       const pageIds = pages.map(p => p.id)
+      // Dev handoff enumerates ACTUAL page implementations, not the
+      // project's curated_library. Every template the spec references
+      // comes from web_sections.content_template_id; library bindings
+      // that were never used on a real page don't show up in the
+      // handoff doc.
       let sections: WebSection[] = []
       if (pageIds.length > 0) {
         const { data: secRows } = await supabase

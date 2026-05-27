@@ -52,6 +52,7 @@ interface PortalData {
   pages: WebPage[]
   sectionsByPage: Record<string, WebSection[]>
   templates: Record<string, WebContentTemplate>
+  cardTemplates: Record<string, WebContentTemplate>
   snippetMap: SnippetMap
 }
 
@@ -158,6 +159,45 @@ export default function PortalReviewPage() {
           }
         }
 
+        // Card templates — palette-referenced groups (Feature 2/22/82/106 etc.)
+        // defer their item template to a Card-family row. Without loading these,
+        // the renderer's expandPaletteGroup leaves the placeholder element in
+        // place and the card grid renders empty.
+        const cardIds = new Set<string>()
+        const collectCardIds = (fields: unknown): void => {
+          if (!Array.isArray(fields)) return
+          for (const f of fields as Array<Record<string, unknown>>) {
+            if (f.kind === 'group') {
+              const persisted = (f as { __palette_template_id?: unknown }).__palette_template_id
+              const ref = (f as { referenced_template_id?: unknown }).referenced_template_id
+              if (typeof persisted === 'string' && persisted) cardIds.add(persisted)
+              if (typeof ref === 'string' && ref) cardIds.add(ref)
+              if (Array.isArray(f.item_schema)) collectCardIds(f.item_schema)
+            }
+          }
+        }
+        for (const t of Object.values(templates)) collectCardIds(t.fields as unknown)
+        // Also include any palette overrides the strategist picked per-section.
+        for (const s of sectionRows) {
+          const fv = (s.field_values ?? {}) as Record<string, unknown>
+          for (const v of Object.values(fv)) {
+            if (v && typeof v === 'object' && !Array.isArray(v)) {
+              const tid = (v as { __palette_template_id?: unknown }).__palette_template_id
+              if (typeof tid === 'string' && tid) cardIds.add(tid)
+            }
+          }
+        }
+        const cardTemplates: Record<string, WebContentTemplate> = {}
+        if (cardIds.size > 0) {
+          const { data: cardRows } = await supabase
+            .from('web_content_templates')
+            .select('*')
+            .in('id', Array.from(cardIds))
+          for (const t of (cardRows ?? []) as WebContentTemplate[]) {
+            cardTemplates[t.id] = augmentTemplate(t)
+          }
+        }
+
         const snippetList = await loadEditorSnippets(project as StrategyWebProject)
         const snippetMap: Record<string, string> = {}
         for (const sn of snippetList) snippetMap[sn.token] = sn.resolvedValue
@@ -169,6 +209,7 @@ export default function PortalReviewPage() {
           pages,
           sectionsByPage,
           templates,
+          cardTemplates,
           snippetMap,
         })
 
@@ -474,6 +515,7 @@ export default function PortalReviewPage() {
               <PagePreview
                 sections={activeSections}
                 templates={data.templates}
+                cardTemplates={data.cardTemplates}
                 snippetMap={data.snippetMap}
                 onSelectSection={startComment}
               />

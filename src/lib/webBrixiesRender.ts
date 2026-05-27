@@ -62,6 +62,7 @@ export function renderSectionToHtml(
   wrapOverflowingFlexContainers(root)
   styleHyperlinks(root)
   neutralizeLoremPlaceholders(root)
+  neutralizeDefaultButtonLabels(root)
 
   return root.outerHTML
 }
@@ -176,15 +177,104 @@ function appendStyle(existing: string, addition: string): string {
  *  Brixies's design-tool sample — clear it so the preview shows an
  *  empty slot instead of placeholder copy the strategist can't
  *  override. The schema augmenter handles the editability side; this
- *  is the visual safety net. */
-const LOREM_RE = /lorem\s+ipsum/i
+ *  is the visual safety net.
+ *
+ *  Brixies rotates through several lorem variants ("Lorem ipsum…",
+ *  "Eos laudantium repellat…", "Illum sit dolores…", etc.) so the
+ *  prefix list covers the common starts. A density check fires only
+ *  on dense Latin filler (≥50% of tokens are marker words AND ≥5
+ *  hits) so legitimate English copy containing accidental matches
+ *  like "in" or "et" isn't accidentally wiped. */
+const LOREM_PREFIXES = [
+  /^lorem\s+ipsum/i,
+  /^eos\s+laudantium/i,
+  /^illum\s+sit\s+dolores/i,
+  /^consectetur\s+adipiscing/i,
+  /^dolor\s+sit\s+amet/i,
+  /^sed\s+do\s+eiusmod/i,
+  /^ut\s+enim\s+ad\s+minim/i,
+]
+// Distinctively-Latin marker words. Excludes short English-overlapping
+// tokens (in, et, id, est, do, sit, non, ea, ut, ex, ad, eu, sed) so
+// the density test can't be tripped by ordinary English sentences.
+const LOREM_MARKERS = new Set([
+  'lorem','ipsum','dolor','amet','consectetur','adipiscing','elit',
+  'eiusmod','tempor','incididunt','labore','dolore','magna','aliqua',
+  'veniam','quis','nostrud','exercitation','ullamco','laboris','nisi',
+  'aliquip','commodo','consequat','duis','aute','irure','reprehenderit',
+  'voluptate','velit','cillum','fugiat','pariatur','excepteur','sint',
+  'occaecat','cupidatat','proident','culpa','officia','deserunt','mollit',
+  'laborum','laudantium','repellat','architecto','illum','dolores',
+  'voluptatem','possimus','magnam','cupiditate','veritatis','accusamus',
+  'quisquam','tincidunt',
+])
+
+function looksLikeLorem(text: string): boolean {
+  const t = text.trim()
+  if (!t) return false
+  for (const re of LOREM_PREFIXES) if (re.test(t)) return true
+  // Density test: only triggers on Latin-dense blocks. Requires both
+  // ≥5 marker hits AND ≥50% marker density, so a heading like "Live
+  // in Christ" or "Faith and hope" can't accidentally trip.
+  const tokens = t.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean)
+  if (tokens.length < 5) return false
+  let hits = 0
+  for (const tk of tokens) {
+    if (LOREM_MARKERS.has(tk)) hits++
+  }
+  return hits >= 5 && hits * 2 >= tokens.length
+}
 
 function neutralizeLoremPlaceholders(root: Element): void {
   const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   let node = walker.nextNode() as Text | null
   while (node) {
-    const v = node.nodeValue ?? ''
-    if (LOREM_RE.test(v)) node.nodeValue = ''
+    if (looksLikeLorem(node.nodeValue ?? '')) node.nodeValue = ''
+    node = walker.nextNode() as Text | null
+  }
+}
+
+/** Brixies source HTML ships every button with a canned default label
+ *  ("Learn more", "Contact now", "Sign Up", etc.). When the section's
+ *  CTA slot wasn't bound by the strategist, the source default leaks
+ *  into the rendered output as a real-looking pointer-to-nowhere link.
+ *
+ *  Detect: text nodes whose entire trimmed content matches a known
+ *  default label AND whose ancestor is recognizable as a button shell
+ *  (has data-layer that includes "button" or "contact", OR is inside
+ *  an <a> wrapper applyCta inserted). Clear the text — the styled
+ *  button outline stays visible so the strategist sees where a CTA
+ *  goes, but the placeholder copy disappears. */
+const DEFAULT_BUTTON_LABELS = new Set([
+  'learn more', 'learn more →', 'learn more.', 'read more',
+  'contact now', 'contact us', 'sign up', 'sign up now',
+  'get started', 'get started now', 'subscribe', 'subscribe now',
+  'try it free', 'try for free', 'start free trial', 'start free',
+  'book a demo', 'request a demo', 'request demo', 'schedule a call',
+  'discover more', 'find out more', 'explore now', 'view more',
+  'see more', 'shop now', 'buy now', 'join now', 'join us',
+  'register', 'register now', 'apply now', 'download', 'download now',
+])
+
+function isInsideButtonShell(node: Node): boolean {
+  let el: Element | null = node.parentElement
+  while (el) {
+    const layer = el.getAttribute?.('data-layer')?.toLowerCase() ?? ''
+    if (layer.includes('button') || layer.includes('cta') || layer === 'contact'
+        || layer === 'contact us' || layer === 'contact now') return true
+    el = el.parentElement
+  }
+  return false
+}
+
+function neutralizeDefaultButtonLabels(root: Element): void {
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let node = walker.nextNode() as Text | null
+  while (node) {
+    const v = (node.nodeValue ?? '').trim().toLowerCase()
+    if (v && DEFAULT_BUTTON_LABELS.has(v) && isInsideButtonShell(node)) {
+      node.nodeValue = ''
+    }
     node = walker.nextNode() as Text | null
   }
 }
@@ -654,8 +744,13 @@ function isCtaShape(raw: unknown): boolean {
 }
 
 function applyCta(el: Element, cta: { label?: string; url?: string }): void {
-  const url = cta.url ?? ''
-  const label = cta.label ?? ''
+  const url = (cta.url ?? '').trim()
+  const label = (cta.label ?? '').trim()
+  // Don't hide the element when label/url are empty — a hidden button
+  // produces "dropped CTA" complaints in unbound sections. The
+  // post-render pass `neutralizeDefaultButtonLabels` strips known
+  // Brixies placeholder labels so the source default doesn't leak
+  // through as a real-looking CTA.
   if (label) {
     // Preserve the inner styled wrapper that carries the button's
     // typography (color, font-size, font-weight). Brixies sources
@@ -731,6 +826,14 @@ function expandGroup(groupEl: Element, group: WebGroupDef, raw: unknown): void {
     return
   }
   const items = Array.isArray(raw) ? raw as Array<Record<string, unknown>> : []
+  // Honor items.length when the strategist has supplied items; fall
+  // back to the template's design-time default_count for unbound
+  // groups so the section preserves its visual structure (rows of
+  // cards / step lists / etc.). Without this, ANY section whose
+  // import didn't include this specific group rendered as a giant
+  // hole — Feature 109, Content 1, FAQ 10, etc. Lorem-text
+  // neutralization + placeholder-image scrubbing handle the
+  // "leaked default copy" concern that prompted the earlier removal.
   const count = items.length > 0 ? items.length : group.default_count
   if (count <= 0) {
     while (groupEl.firstChild) groupEl.removeChild(groupEl.firstChild)

@@ -32,7 +32,7 @@ import {
 import { supabase } from '../../../lib/supabase'
 import { augmentTemplate } from '../../../lib/webBrixiesSchemaAugment'
 import { loadEditorSnippets } from '../../../lib/webSnippets'
-import { loadProjectReviewState, type ProjectReviewState, finalizeReview, logReviewEdit } from '../../../lib/webReviews'
+import { loadProjectReviewState, type ProjectReviewState, logReviewEdit } from '../../../lib/webReviews'
 import { SectionList } from '../sectioneditor/SectionList'
 import { useSectionDetailPublisher } from '../sectioneditor/SectionEditingContext'
 import { ProjectPagesProvider } from '../sectioneditor/ProjectPagesContext'
@@ -286,18 +286,17 @@ export function InternalReviewWorkspace({
    *  next person to work through. The session itself is marked
    *  closed and counted as complete. */
   const handleFinish = async () => {
-    if (!confirm('Finish this review? Your comments + suggestions stay attached so staff can work through them. Pages with no open feedback will be marked Approved.')) return
+    // "Finish review" means "I've added my feedback for this round" —
+    // NOT "this round is done". The round stays open_for_review (or
+    // moves to editing_content once someone starts resolving) until
+    // every comment is resolved; the v41 DB trigger handles those
+    // transitions automatically. So this button is purely a navigate-
+    // back affordance: refresh state (in case my latest edit didn't
+    // sync yet) + return to the kanban.
     setClosing(true)
-    const res = await finalizeReview({ reviewId: review.id, projectId: project.id })
+    await onReviewChange()
     setClosing(false)
-    if (res.ok) {
-      const d = res.data
-      if (d) {
-        alert(`Review complete.\n${d.pagesApproved} page(s) approved.\n${d.pagesPending} page(s) still need attention.`)
-      }
-      await onReviewChange()
-      onExitToInbox()
-    }
+    onExitToInbox()
   }
 
   // ── Render ──────────────────────────────────────────────────────
@@ -383,11 +382,11 @@ export function InternalReviewWorkspace({
               type="button"
               onClick={() => void handleFinish()}
               disabled={closing}
-              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-700 px-3 py-1.5 transition-colors disabled:opacity-40"
-              title="Mark your review complete. Your comments + suggestions stay attached for staff to work through. Pages with no open feedback flip to Approved."
+              className="inline-flex items-center gap-1.5 rounded-full bg-wm-text text-white text-[11px] font-semibold hover:bg-black px-3 py-1.5 transition-colors disabled:opacity-40"
+              title="I'm done adding feedback for this round. The round stays open until every comment is resolved (Apply/Amend/Dismiss); status updates automatically as resolutions happen."
             >
               {closing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
-              Finish review
+              Done — exit editor
             </button>
           </div>
         </header>

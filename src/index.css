@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
@@ -78,7 +79,7 @@
   --color-verif-verified-fg: #047857;
 
   /* Typography */
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-sans: 'DM Sans', 'Inter', system-ui, -apple-system, sans-serif;
   --font-serif: Georgia, serif;
 
   /* ── Web Manager module ────────────────────────────────────────────
@@ -89,31 +90,33 @@
      Purple, near-invisible borders. Dark mode tokens land in Phase B.
      Used as bg-wm-bg, text-wm-text, border-wm-border, etc. */
 
-  /* Surfaces */
-  --color-wm-bg:             #F8F6F2;   /* warm off-white canvas */
+  /* Surfaces — cooler off-white per the feedback-overhaul aesthetic. */
+  --color-wm-bg:             #FAFAF9;   /* canvas */
   --color-wm-bg-elevated:    #FFFFFF;   /* panels, cards */
-  --color-wm-bg-hover:       #F1EEE7;
-  --color-wm-bg-selected:    #F2EFFD;   /* accent-tinted selection */
-  --color-wm-bg-pressed:     #EAE5FB;
+  --color-wm-bg-hover:       #F4F4F4;
+  --color-wm-bg-selected:    #ECEAFF;   /* accent-tinted selection */
+  --color-wm-bg-pressed:     #E0DCFF;
 
   /* Text */
-  --color-wm-text:           #0C0B0D;   /* near-black, faintly warm */
-  --color-wm-text-muted:     #5C5560;
-  --color-wm-text-subtle:    #8B848E;
+  --color-wm-text:           #313131;   /* near-black, neutral warmth */
+  --color-wm-text-muted:     #828282;
+  --color-wm-text-subtle:    #A8A8A8;
   --color-wm-text-on-accent: #FFFFFF;
 
   /* Borders */
-  --color-wm-border:         #E8E3DA;   /* warm hairline */
-  --color-wm-border-strong:  #D4CEC2;
-  --color-wm-border-focus:   #7E71EC;
+  --color-wm-border:         #ECECEC;   /* hairline */
+  --color-wm-border-strong:  #E3E3E3;
+  --color-wm-border-focus:   #3300FF;
 
-  /* Accent — softer tint of CMS Primary Purple */
-  --color-wm-accent:         #7E71EC;
-  --color-wm-accent-hover:   #6B5CE7;
-  --color-wm-accent-strong:  #5B4CE0;   /* small-text accent (AA-safe) */
-  --color-wm-accent-tint:    #EFEDFD;
+  /* Accent — indigo per new aesthetic. */
+  --color-wm-accent:         #3300FF;
+  --color-wm-accent-hover:   #2200CC;
+  --color-wm-accent-strong:  #2200CC;   /* small-text accent (AA-safe on white) */
+  --color-wm-accent-tint:    #ECEAFF;
 
-  /* Semantic status */
+  /* Semantic status (validation / system errors / save success). Kept
+     for system semantics; distinct from the feedback-tone palette
+     below. */
   --color-wm-success:        #16A34A;
   --color-wm-success-bg:     #F0FDF4;
   --color-wm-warning:        #D97706;
@@ -126,6 +129,25 @@
   /* AI surfaces */
   --color-wm-ai-bg:          #F5F2FE;
   --color-wm-ai-border:      #DDD4FB;
+
+  /* Feedback-tone palette — 6 saturated colors used by the new
+     feedback board UI (and any other surface that wants vibrant
+     status pills). Distinct from the muted semantic tokens above so
+     "comment is in editing" reads differently than "you have a
+     validation warning." Each tone has a foreground and a soft
+     background variant. */
+  --color-wm-tone-orange:    #FF5C00;
+  --color-wm-tone-orange-bg: #FFECE1;
+  --color-wm-tone-blue:      #2C62B4;
+  --color-wm-tone-blue-bg:   #E1F6FF;
+  --color-wm-tone-pink:      #FF00B8;
+  --color-wm-tone-pink-bg:   #FBE6FC;
+  --color-wm-tone-green:     #188544;
+  --color-wm-tone-green-bg:  #CDF4DD;
+  --color-wm-tone-turquoise: #268FB0;
+  --color-wm-tone-turquoise-bg: #D9F4F8;
+  --color-wm-tone-yellow:    #B07A0A;
+  --color-wm-tone-yellow-bg: #FFF3D1;
 }
 
 /* Hero gradient utility used on login page and portal header */

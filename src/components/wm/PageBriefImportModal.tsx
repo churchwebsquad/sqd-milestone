@@ -10,12 +10,15 @@
  *  - Step 2 (later) will add Brixies template fitting + overflow panel
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowRight, AlertCircle, CheckCircle2, FileText, Sparkles, RotateCw, LayoutGrid } from 'lucide-react'
 import { WMButton } from './Button'
 import { WMCatalogSidePanel } from './CatalogSidePanel'
 import { supabase } from '../../lib/supabase'
-import { fieldValuesToDocHtml, docHtmlToFieldValues } from '../../lib/webBrixiesDoc'
+import {
+  fieldValuesToDocHtml, docHtmlToFieldValues, reconcileFieldValuesAcrossTemplates,
+  valuesToDocHtmlByShape, computeUnmappedValues, mergeFieldValuesPreferNonEmpty,
+} from '../../lib/webBrixiesDoc'
 import type { WebContentTemplate, WebTemplateKind } from '../../types/database'
 import {
   validateBrief,
@@ -29,13 +32,20 @@ import {
 } from '../../lib/webPageBrief'
 import {
   isCopywriterPageOutput,
+  isCopywriterPageBundle,
+  normalizeCopywriterPageOutput,
   validateCopywriterPageOutput,
   importCopywriterPageOutput,
   friendlyScanMessage,
   normalizeFieldValuesForTemplate,
+  analyzeBundleFit,
+  pairBundleTemplates,
   type CopywriterPageOutput,
   type CopywriterValidationReport,
+  type SectionFitDiagnostic,
 } from '../../lib/webCopywriterOutput'
+import type { SectionPairResult } from '../../lib/webBrixiesPairer'
+import { importSnippets, type SnippetsImportPayload } from '../../lib/webSnippetsImport'
 import type { StrategyWebProject } from '../../types/database'
 
 interface Props {
@@ -132,6 +142,71 @@ const PLACEHOLDER = `Paste a cowork-produced page brief JSON here. Example shape
   "cs_flags": {...}
 }`
 
+/** Glanceable health dot next to each section in the bundle list.
+ *  Green  = the bound template will accept every leaf of source.
+ *  Amber  = some source content lands in __unmapped or drops entirely
+ *           — still importable but worth swapping if the user cares.
+ *  Red    = the template lookup itself is broken (no `fields` resolved);
+ *           takes precedence over fit. */
+function FitChip({
+  fit, broken,
+}: {
+  fit: SectionFitDiagnostic | undefined
+  broken: boolean
+}) {
+  if (broken) {
+    return (
+      <span title="Template not in catalog" className="shrink-0 inline-flex items-center justify-center w-2 h-2 rounded-full bg-wm-danger" />
+    )
+  }
+  if (!fit) {
+    return <span className="shrink-0 inline-flex items-center justify-center w-2 h-2 rounded-full bg-wm-border-strong/40" />
+  }
+  const { health, unmapped_source_keys, dropped_paths } = fit
+  const tooltip = health === 'clean'
+    ? 'Clean fit — all source content will land in the bound template.'
+    : health === 'attention'
+      ? 'Likely wrong template — most source content will not render. Consider swapping.'
+      : `${unmapped_source_keys.length} unmapped key${unmapped_source_keys.length === 1 ? '' : 's'}, ${dropped_paths.length} dropped path${dropped_paths.length === 1 ? '' : 's'}.`
+  const cls = health === 'clean'
+    ? 'bg-wm-success'
+    : health === 'attention'
+      ? 'bg-wm-danger'
+      : 'bg-wm-warning'
+  return (
+    <span title={tooltip} className={`shrink-0 inline-flex items-center justify-center w-2 h-2 rounded-full ${cls}`} />
+  )
+}
+
+/** Inline expansion of a non-clean fit: lists the source keys that
+ *  would fall into __unmapped and the deep paths that wouldn't be
+ *  represented anywhere in the bound payload. Compact — meant to be
+ *  scannable rather than exhaustive. */
+function FitDetail({ fit }: { fit: SectionFitDiagnostic }) {
+  const { unmapped_source_keys, dropped_paths, health } = fit
+  const cls = health === 'attention'
+    ? 'border-wm-danger/40 bg-wm-danger-bg/40'
+    : 'border-wm-warning/40 bg-wm-warning-bg/40'
+  const lines: string[] = []
+  if (unmapped_source_keys.length > 0) {
+    lines.push(`Unmapped: ${unmapped_source_keys.slice(0, 6).join(', ')}${unmapped_source_keys.length > 6 ? `, +${unmapped_source_keys.length - 6} more` : ''}`)
+  }
+  if (dropped_paths.length > 0) {
+    lines.push(`Dropped: ${dropped_paths.slice(0, 6).join(', ')}${dropped_paths.length > 6 ? `, +${dropped_paths.length - 6} more` : ''}`)
+  }
+  if (lines.length === 0) return null
+  return (
+    <div className={`mt-1.5 ml-8 rounded-md border px-2 py-1.5 text-[10px] leading-snug text-wm-text-muted ${cls}`}>
+      {lines.map((l, i) => <p key={i}>{l}</p>)}
+      <p className="mt-1 text-wm-text-subtle">
+        {health === 'attention'
+          ? 'Click the template name above to pick a variant that fits this content shape.'
+          : 'You can import as-is or swap to a variant with matching slots.'}
+      </p>
+    </div>
+  )
+}
+
 export function PageBriefImportModal({ project, open, onClose, onImported }: Props) {
   const [jsonText, setJsonText] = useState('')
   const [parseError, setParseError] = useState<string | null>(null)
@@ -143,16 +218,24 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
   // looks like a copywriter output instead of a legacy brief.
   const [copyOutput, setCopyOutput] = useState<CopywriterPageOutput | null>(null)
   const [copyReport, setCopyReport] = useState<CopywriterValidationReport | null>(null)
+  // Multi-page copywriter bundle: { pages: [CopywriterPageOutput, ...] }.
+  // Validated per page so each gets its own template-binding wizard.
+  const [copyBundle, setCopyBundle] = useState<CopywriterPageOutput[] | null>(null)
+  const [copyBundleReports, setCopyBundleReports] = useState<CopywriterValidationReport[] | null>(null)
   // Per-section template override: sort_order → replacement template_id.
+  // For copywriter bundles we key by page index too: pageIdx → sort_order → tid.
   const [templateOverrides, setTemplateOverrides] = useState<Record<number, string>>({})
+  const [templateOverridesByPage, setTemplateOverridesByPage] = useState<Record<number, Record<number, string>>>({})
   // Per-section field_values override: sort_order → values already
   // shaped for the override template. Populated by the variant-swap
   // doc round-trip so cross-family swaps don't drop copy.
   const [fieldValuesOverrides, setFieldValuesOverrides] = useState<Record<number, Record<string, unknown>>>({})
+  const [fieldValuesOverridesByPage, setFieldValuesOverridesByPage] = useState<Record<number, Record<number, Record<string, unknown>>>>({})
   // When set, opens the catalog picker for a specific section so the
   // user can pick any template (cross-family) and we'll remap the
-  // field_values to its schema.
+  // field_values to its schema. For bundles, also tracks the page index.
   const [variantSwapForSort, setVariantSwapForSort] = useState<number | null>(null)
+  const [variantSwapPageIdx, setVariantSwapPageIdx] = useState<number | null>(null)
   const [variantSwapping, setVariantSwapping] = useState(false)
   const [validating, setValidating] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -160,6 +243,48 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
   const [importMsg, setImportMsg] = useState<string | null>(null)
   // Multi-page progress — current page index / total / current title.
   const [bundleProgress, setBundleProgress] = useState<{ done: number; total: number; current: string } | null>(null)
+  // Snippets manifest carried at the top of a copywriter page bundle.
+  // Captured at parse time so the bundle import can run snippets first
+  // (so {{token}} references in field_values actually resolve at
+  // render time after the pages land).
+  const [pendingSnippetsManifest, setPendingSnippetsManifest] = useState<SnippetsImportPayload | null>(null)
+  // Pre-import shape diagnostics — dry-run bind per section so the
+  // strategist can see "this template will drop content" BEFORE
+  // hitting Import. Keyed by pageIdx → sort_order → fit. Recomputed
+  // when the user changes a template override.
+  const [bundleFit, setBundleFit] = useState<Record<number, Record<number, SectionFitDiagnostic>> | null>(null)
+  const [singleFit, setSingleFit] = useState<Record<number, SectionFitDiagnostic> | null>(null)
+  // Master-pairer overrides — every section the pairer re-routed off
+  // cowork's pick. Auto-applied to templateOverridesByPage when the
+  // bundle loads; the "See what I changed" panel shows each rationale
+  // so the strategist can spot-check and manually swap if needed.
+  const [pairerResults, setPairerResults] = useState<Record<number, SectionPairResult[]> | null>(null)
+  const [pairerCollapsed, setPairerCollapsed] = useState(false)
+
+  // Recompute bundle fit whenever the user picks a different template
+  // for any section. Debounced via the rAF tick so a burst of state
+  // changes during a single variant-swap doesn't trigger multiple
+  // analyses. Single-page output gets the same treatment.
+  useEffect(() => {
+    if (!copyBundle) return
+    let cancelled = false
+    const handle = requestAnimationFrame(() => {
+      void analyzeBundleFit(copyBundle, templateOverridesByPage).then(fit => {
+        if (!cancelled) setBundleFit(fit)
+      })
+    })
+    return () => { cancelled = true; cancelAnimationFrame(handle) }
+  }, [copyBundle, templateOverridesByPage])
+  useEffect(() => {
+    if (!copyOutput) return
+    let cancelled = false
+    const handle = requestAnimationFrame(() => {
+      void analyzeBundleFit([copyOutput], { 0: templateOverrides }).then(fit => {
+        if (!cancelled) setSingleFit(fit[0] ?? null)
+      })
+    })
+    return () => { cancelled = true; cancelAnimationFrame(handle) }
+  }, [copyOutput, templateOverrides])
 
   if (!open) return null
 
@@ -171,67 +296,159 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
     setReport(null)
     setCopyOutput(null)
     setCopyReport(null)
+    setCopyBundle(null)
+    setCopyBundleReports(null)
     setTemplateOverrides({})
+    setTemplateOverridesByPage({})
     setFieldValuesOverrides({})
+    setFieldValuesOverridesByPage({})
     setVariantSwapForSort(null)
+    setVariantSwapPageIdx(null)
     setImportMsg(null)
+    setPairerResults(null)
+    setPairerCollapsed(false)
     setBundleProgress(null)
+    setPendingSnippetsManifest(null)
+    setBundleFit(null)
+    setSingleFit(null)
   }
 
   /** Swap the bound template for a section and remap its field_values
    *  via the Brixies doc round-trip so copy carries across families.
    *  When the new template id matches the copywriter's original pick
    *  we treat that as "revert" — both overrides clear. */
-  const applyTemplateSwap = async (sortOrder: number, newTemplateId: string) => {
-    if (!copyOutput) return
-    const section = copyOutput.sections.find(s => s.sort_order === sortOrder)
+  const applyTemplateSwap = async (sortOrder: number, newTemplateId: string, pageIdx: number | null = null) => {
+    // Bundle path: when pageIdx is set, look up the section + write
+    // overrides under the per-page maps instead of the single-page ones.
+    const isBundle = pageIdx != null && copyBundle != null
+    const section = isBundle
+      ? copyBundle[pageIdx].sections.find(s => s.sort_order === sortOrder)
+      : copyOutput?.sections.find(s => s.sort_order === sortOrder)
     if (!section) return
+    const ctxOriginalTemplateId = section.template_id
 
     // Revert path — same as copywriter's original pick.
-    if (newTemplateId === section.template_id) {
-      setTemplateOverrides(prev => {
-        const next = { ...prev }
-        delete next[sortOrder]
-        return next
-      })
-      setFieldValuesOverrides(prev => {
-        const next = { ...prev }
-        delete next[sortOrder]
-        return next
-      })
+    if (newTemplateId === ctxOriginalTemplateId) {
+      if (isBundle) {
+        setTemplateOverridesByPage(prev => {
+          const pageMap = { ...(prev[pageIdx] ?? {}) }
+          delete pageMap[sortOrder]
+          return { ...prev, [pageIdx]: pageMap }
+        })
+        setFieldValuesOverridesByPage(prev => {
+          const pageMap = { ...(prev[pageIdx] ?? {}) }
+          delete pageMap[sortOrder]
+          return { ...prev, [pageIdx]: pageMap }
+        })
+      } else {
+        setTemplateOverrides(prev => {
+          const next = { ...prev }
+          delete next[sortOrder]
+          return next
+        })
+        setFieldValuesOverrides(prev => {
+          const next = { ...prev }
+          delete next[sortOrder]
+          return next
+        })
+      }
       return
     }
 
     setVariantSwapping(true)
     try {
+      // Fetch the new template (always) + the old one if its id might
+      // resolve (concept-style ids from the copywriter won't, so we
+      // skip the round-trip and let the value-shape emitter handle it).
+      const lookupIds = ctxOriginalTemplateId
+        ? [ctxOriginalTemplateId, newTemplateId]
+        : [newTemplateId]
       const { data: tpls, error } = await supabase
         .from('web_content_templates')
         .select('*')
-        .in('id', [section.template_id, newTemplateId])
+        .in('id', lookupIds)
       if (error) throw new Error(error.message)
       const rows = (tpls ?? []) as WebContentTemplate[]
-      const oldTpl = rows.find(t => t.id === section.template_id) ?? null
+      const oldTpl = rows.find(t => t.id === ctxOriginalTemplateId) ?? null
       const newTpl = rows.find(t => t.id === newTemplateId)
       if (!newTpl) throw new Error('Selected template not found in catalog.')
 
       // 1. Normalize copywriter shape into canonical field_values.
       // 2. Doc round-trip via the OLD template to a Brixies doc, then
-      //    parse back into the NEW template's slots. This is the same
-      //    pipeline PagesWorkspace.bindSection uses for change-variant
-      //    — preserves headings / body / CTAs / etc. across families.
+      //    parse back into the NEW template's slots. Same pipeline
+      //    PagesWorkspace.bindSection uses for change-variant —
+      //    preserves headings / body / CTAs / etc. across families.
       // 3. Pass the normalized values as existingGroupValues so any
       //    group keys that overlap between schemas survive (otherwise
       //    docHtmlToFieldValues only repopulates leaf slots).
-      const normalized = normalizeFieldValuesForTemplate(oldTpl, section.field_values ?? {})
-      let remapped = normalized
-      if (oldTpl) {
-        const docHtml = fieldValuesToDocHtml(normalized, oldTpl)
-        const { field_values } = docHtmlToFieldValues(docHtml, newTpl, normalized)
-        remapped = field_values
+      // The round-trip is wrapped because malformed copywriter output
+      // (e.g. richtext field that isn't a string) can throw in
+      // fieldValuesToDocHtml — when that happens we still want the
+      // template swap to commit, just with the raw normalized values
+      // instead of a remap.
+      // Keep the raw copywriter field_values around — even keys oldTpl
+      // doesn't define survive here, so the canonical-key reconcile pass
+      // below can fish them back out if newTpl happens to define them.
+      // Also merge in any previously-stashed __unmapped entries so a
+      // later swap can rehydrate them once a matching slot exists.
+      const sectionValues = section.field_values ?? {}
+      const priorUnmapped = (sectionValues.__unmapped as Record<string, unknown> | undefined) ?? {}
+      const rawValues: Record<string, unknown> = { ...priorUnmapped, ...sectionValues }
+      delete rawValues.__unmapped
+
+      // Three-phase bind so nested groups (card[].buttons_card,
+      // container_left[], slide[].card[], etc.) survive the swap:
+      //   Phase 1 — normalize the raw values against the NEW template's
+      //   schema. When the copywriter's source keys already match the
+      //   target template, this populates slots directly with all
+      //   nested data intact.
+      //   Phase 2 — value-shape doc route fills any slots Phase 1
+      //   couldn't (e.g. semantic-name mapping when keys diverge).
+      //   Phase 3 — canonical-key reconcile for the long tail.
+      const normalized = normalizeFieldValuesForTemplate(newTpl, rawValues)
+      let shapeFilled: Record<string, unknown> = {}
+      try {
+        const docHtml = oldTpl
+          ? fieldValuesToDocHtml(normalizeFieldValuesForTemplate(oldTpl, rawValues), oldTpl)
+            + valuesToDocHtmlByShape(rawValues)
+          : valuesToDocHtmlByShape(rawValues)
+        shapeFilled = docHtmlToFieldValues(docHtml || '<p></p>', newTpl, rawValues).field_values
+      } catch (err) {
+        console.warn('[variant-swap] value-shape phase failed, keeping normalize only', err)
+      }
+      let remapped = mergeFieldValuesPreferNonEmpty(normalized, shapeFilled, newTpl)
+      // Canonical-key fallback for any slot still empty.
+      remapped = reconcileFieldValuesAcrossTemplates(rawValues, newTpl, remapped)
+
+      // Recompute __unmapped against the new template. Anything that
+      // matched a slot is dropped from the stash; the rest stays so
+      // the next swap gets another chance.
+      const unmapped = computeUnmappedValues(rawValues, remapped, newTpl)
+      if (Object.keys(unmapped).length > 0) {
+        remapped = { ...remapped, __unmapped: unmapped }
+      } else {
+        // Drop any prior __unmapped that's now empty.
+        const { __unmapped: _drop, ...rest } = remapped as Record<string, unknown>
+        void _drop
+        remapped = rest
       }
 
-      setTemplateOverrides(prev => ({ ...prev, [sortOrder]: newTemplateId }))
-      setFieldValuesOverrides(prev => ({ ...prev, [sortOrder]: remapped }))
+      if (isBundle) {
+        setTemplateOverridesByPage(prev => ({
+          ...prev,
+          [pageIdx]: { ...(prev[pageIdx] ?? {}), [sortOrder]: newTemplateId },
+        }))
+        setFieldValuesOverridesByPage(prev => ({
+          ...prev,
+          [pageIdx]: { ...(prev[pageIdx] ?? {}), [sortOrder]: remapped },
+        }))
+      } else {
+        setTemplateOverrides(prev => ({ ...prev, [sortOrder]: newTemplateId }))
+        setFieldValuesOverrides(prev => ({ ...prev, [sortOrder]: remapped }))
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setImportMsg(`Couldn't swap template: ${msg}`)
     } finally {
       setVariantSwapping(false)
     }
@@ -255,23 +472,87 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
       setParseError(e instanceof Error ? e.message : 'Invalid JSON')
       return
     }
-    // Detection order: copywriter output → bundle → legacy brief.
-    // Copywriter output has strategic_setup + sections with
-    // template_id + field_values; it's the most specific shape so
-    // sniff for it first.
-    if (isCopywriterPageOutput(parsed)) {
-      const out = parsed as CopywriterPageOutput
-      setCopyOutput(out)
+    // Detection order: copywriter bundle (`{pages: [...]}` w/ copywriter
+    // shape) → single copywriter output → legacy bundle → legacy brief.
+    // Copywriter bundle MUST be checked before `isPageBriefBundle`
+    // because the bundle shape overlaps (both have `pages: [...]`) and
+    // the legacy importer would treat each page as freehand, losing the
+    // structured field_values + template hints.
+    if (isCopywriterPageBundle(parsed)) {
+      const pages = (parsed as { pages: CopywriterPageOutput[] }).pages
+      pages.forEach(normalizeCopywriterPageOutput)
+      setCopyBundle(pages)
+      // Cowork's web-page-formatter-v2 ships a `snippets_manifest` at
+      // the top level — extract it so the bundle import can run
+      // snippets first. Pending entries (expansion === null) are
+      // dropped because the validator requires a string expansion;
+      // they're cowork placeholders, not live snippets.
+      const manifest = (parsed as { snippets_manifest?: unknown }).snippets_manifest
+      if (manifest && typeof manifest === 'object') {
+        const m = manifest as Record<string, unknown>
+        const rawSnippets = Array.isArray(m.snippets) ? m.snippets : []
+        const usableSnippets = rawSnippets.filter(
+          (s: unknown): s is { token: string; expansion: string } => {
+            return !!s && typeof s === 'object'
+              && typeof (s as { expansion?: unknown }).expansion === 'string'
+          },
+        )
+        setPendingSnippetsManifest({
+          globals: (m.globals && typeof m.globals === 'object'
+            ? m.globals as SnippetsImportPayload['globals']
+            : undefined),
+          snippets: usableSnippets as SnippetsImportPayload['snippets'],
+        })
+      } else {
+        setPendingSnippetsManifest(null)
+      }
       setValidating(true)
       try {
-        setCopyReport(await validateCopywriterPageOutput(out, project))
+        // Pair first — site-wide aggressive re-pair across the bundle.
+        // The pairer's overrides are auto-applied to
+        // templateOverridesByPage; analyzeBundleFit then runs with
+        // those overrides folded in so fit diagnostics reflect the
+        // final pick (not cowork's original).
+        const pair = await pairBundleTemplates(pages, project)
+        setPairerResults(pair.resultsByPage)
+        setTemplateOverridesByPage(pair.overridesByPage)
+        const [reports, fit] = await Promise.all([
+          Promise.all(pages.map(p => validateCopywriterPageOutput(p, project))),
+          analyzeBundleFit(pages, pair.overridesByPage),
+        ])
+        setCopyBundleReports(reports)
+        setBundleFit(fit)
       } finally {
         setValidating(false)
       }
       return
     }
-    // Multi-page bundle? Skip validation (heavy for N pages) and route
-    // straight to bulk import.
+    // Copywriter output has strategic_setup + sections with
+    // template_id + field_values; it's the most specific single-page
+    // shape so sniff for it next.
+    if (isCopywriterPageOutput(parsed)) {
+      const out = normalizeCopywriterPageOutput(parsed as CopywriterPageOutput)
+      setCopyOutput(out)
+      setValidating(true)
+      try {
+        // Pair the single page too — same site-wide cohesion path.
+        const pair = await pairBundleTemplates([out], project)
+        setPairerResults(pair.resultsByPage)
+        const singleOverrides = pair.overridesByPage[0] ?? {}
+        setTemplateOverrides(singleOverrides)
+        const [report, fit] = await Promise.all([
+          validateCopywriterPageOutput(out, project),
+          analyzeBundleFit([out], { 0: singleOverrides }),
+        ])
+        setCopyReport(report)
+        setSingleFit(fit[0] ?? null)
+      } finally {
+        setValidating(false)
+      }
+      return
+    }
+    // Legacy multi-page bundle? Skip validation (heavy for N pages) and
+    // route straight to bulk import.
     if (isPageBriefBundle(parsed)) {
       setBundle(parsed)
       return
@@ -312,15 +593,124 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
           snippets_added:   0,
           auto_bind:        null,
         })
+        const fallbacks = result.library_fallbacks ?? []
+        const fallbackSummary = fallbacks.length > 0
+          ? ` · auto-bound ${fallbacks.length} section${fallbacks.length === 1 ? '' : 's'} from ${
+              fallbacks.every(f => f.source === 'site_library') ? 'your site library' :
+              fallbacks.every(f => f.source === 'catalog')      ? 'the catalog' :
+                                                                  'your site library + catalog'
+            } (${fallbacks.map(f => `#${f.sort_order} → ${f.fallback_name}`).join(', ')})`
+          : ''
         setImportMsg(
           `${result.created ? 'Created' : 'Updated'} "${copyOutput.page_title}" · ` +
           `${result.sections_created} section${result.sections_created === 1 ? '' : 's'}` +
           `${result.sections_replaced ? ` (replaced ${result.sections_replaced})` : ''}` +
-          `${result.seo_written ? ' · SEO written' : ''}.`,
+          `${result.sections_preserved ? ` · kept ${result.sections_preserved} unchanged (user edits preserved)` : ''}` +
+          `${result.seo_written ? ' · SEO written' : ''}` +
+          fallbackSummary +
+          '.',
         )
       }
     } finally {
       setImporting(false)
+    }
+  }
+
+  const handleImportCopyBundle = async () => {
+    if (!copyBundle) return
+    setImporting(true)
+    setImportMsg(null)
+    setBundleProgress({ done: 0, total: copyBundle.length, current: '' })
+    const results: Array<{
+      page_title: string
+      page_slug:  string
+      result?: Awaited<ReturnType<typeof importCopywriterPageOutput>>['result']
+      error?:  string
+    }> = []
+    // Snippet import counts roll up into the final summary message so
+    // the user sees globals + snippet rows landed alongside pages.
+    let snippetsResult: { globalsUpdated: number; snippetsArchived: number; snippetsInserted: number } | null = null
+    let snippetsError: string | null = null
+    try {
+      // Snippets first — page sections reference `{{token}}` in their
+      // field_values, and tokens only resolve if the snippets exist in
+      // web_project_snippets by the time the editor renders.
+      if (pendingSnippetsManifest && addSnippets) {
+        const hasAnything =
+          (pendingSnippetsManifest.snippets && pendingSnippetsManifest.snippets.length > 0)
+          || (pendingSnippetsManifest.globals && Object.keys(pendingSnippetsManifest.globals).length > 0)
+        if (hasAnything) {
+          const snipRes = await importSnippets(pendingSnippetsManifest, project)
+          if (snipRes.error) {
+            snippetsError = snipRes.error
+          } else if (snipRes.result) {
+            snippetsResult = snipRes.result
+          }
+        }
+      }
+      for (let i = 0; i < copyBundle.length; i++) {
+        const page = copyBundle[i]
+        setBundleProgress({ done: i, total: copyBundle.length, current: page.page_title })
+        const pageOverrides = templateOverridesByPage[i] ?? {}
+        const pageFieldOverrides = fieldValuesOverridesByPage[i] ?? {}
+        const { result, error } = await importCopywriterPageOutput(page, project, {
+          templateOverrides:    pageOverrides,
+          fieldValuesOverrides: pageFieldOverrides,
+        })
+        results.push({ page_title: page.page_title, page_slug: page.page_slug, result, error })
+      }
+      setBundleProgress({ done: copyBundle.length, total: copyBundle.length, current: '' })
+
+      // Aggregate summary: sections imported, fallbacks applied, errors.
+      const totals = results.reduce(
+        (acc, r) => {
+          if (r.result) {
+            acc.sections += r.result.sections_created
+            acc.fallbacks += r.result.library_fallbacks.length
+            acc.replaced += r.result.sections_replaced
+            acc.preserved += r.result.sections_preserved ?? 0
+          }
+          return acc
+        },
+        { sections: 0, fallbacks: 0, replaced: 0, preserved: 0 },
+      )
+      const failed = results.filter(r => r.error)
+      const ok = results.length - failed.length
+
+      // Navigate to the last successfully imported page so the editor
+      // opens to something the strategist can immediately review.
+      const lastOk = [...results].reverse().find(r => r.result)
+      if (lastOk?.result) {
+        await onImported({
+          page_id:           lastOk.result.page_id,
+          created:           lastOk.result.created,
+          sections_created:  lastOk.result.sections_created,
+          sections_replaced: lastOk.result.sections_replaced,
+          snippets_added:    0,
+          auto_bind:         null,
+        })
+      }
+
+      const failedList = failed.map(f => `${f.page_title}: ${f.error}`).join(' · ')
+      const snipParts: string[] = []
+      if (snippetsResult) {
+        if (snippetsResult.globalsUpdated > 0) snipParts.push(`${snippetsResult.globalsUpdated} global${snippetsResult.globalsUpdated === 1 ? '' : 's'}`)
+        if (snippetsResult.snippetsInserted > 0) snipParts.push(`${snippetsResult.snippetsInserted} snippet${snippetsResult.snippetsInserted === 1 ? '' : 's'}`)
+        if (snippetsResult.snippetsArchived > 0) snipParts.push(`archived ${snippetsResult.snippetsArchived} prior`)
+      }
+      setImportMsg(
+        `${ok}/${results.length} page${results.length === 1 ? '' : 's'} imported · ` +
+        `${totals.sections} section${totals.sections === 1 ? '' : 's'}` +
+        `${totals.replaced ? ` (replaced ${totals.replaced})` : ''}` +
+        `${totals.preserved ? ` · kept ${totals.preserved} unchanged` : ''}` +
+        `${totals.fallbacks ? ` · auto-bound ${totals.fallbacks} section${totals.fallbacks === 1 ? '' : 's'} from your site library` : ''}` +
+        `${snipParts.length > 0 ? ` · ${snipParts.join(', ')}` : ''}.` +
+        (snippetsError ? `\nSnippet import failed: ${snippetsError}` : '') +
+        (failedList ? `\nFailed: ${failedList}` : ''),
+      )
+    } finally {
+      setImporting(false)
+      setBundleProgress(null)
     }
   }
 
@@ -468,19 +858,269 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
             </div>
           )}
 
+          {/* Master-pairer summary — surfaces every section the
+              importer re-routed off cowork's pick. Auto-applied; the
+              strategist can still manually swap any section via the
+              variant picker below. */}
+          {pairerResults && (() => {
+            const overrides: Array<{ pageIdx: number; r: SectionPairResult }> = []
+            for (const [pageIdxStr, results] of Object.entries(pairerResults)) {
+              const pageIdx = Number(pageIdxStr)
+              for (const r of results) {
+                if (r.overridden) overrides.push({ pageIdx, r })
+              }
+            }
+            if (overrides.length === 0) return null
+            return (
+              <div className="rounded-md border border-wm-accent/30 bg-wm-accent-tint p-3">
+                <button
+                  type="button"
+                  onClick={() => setPairerCollapsed(c => !c)}
+                  className="w-full flex items-center justify-between gap-3 text-left"
+                >
+                  <div>
+                    <p className="text-[11px] uppercase tracking-widest font-bold text-wm-accent mb-0.5">
+                      See what I changed
+                    </p>
+                    <p className="text-[12px] text-wm-text">
+                      {overrides.length} section{overrides.length === 1 ? '' : 's'} re-paired for better shape match + site-wide cohesion.
+                    </p>
+                  </div>
+                  <span className="text-[11px] font-mono text-wm-accent shrink-0">
+                    {pairerCollapsed ? '▸ show' : '▾ hide'}
+                  </span>
+                </button>
+                {!pairerCollapsed && (
+                  <ul className="mt-3 space-y-2">
+                    {overrides.map(({ pageIdx, r }) => {
+                      const pageSlug = copyBundle?.[pageIdx]?.page_slug
+                                    ?? copyOutput?.page_slug
+                                    ?? ''
+                      return (
+                        <li key={`${pageIdx}-${r.sort_order}`} className="text-[12px] leading-snug">
+                          <div className="font-semibold text-wm-text">
+                            <span className="font-mono text-[10px] text-wm-text-muted mr-1.5">
+                              {pageSlug ? `${pageSlug} · ` : ''}#{r.sort_order}
+                            </span>
+                            <span className="line-through text-wm-text-subtle mr-1.5">
+                              {r.cowork_id || '(unbound)'}
+                            </span>
+                            <span className="text-wm-accent">→ {r.picked_name}</span>
+                            <span className="ml-1.5 text-[10px] font-normal text-wm-text-muted">
+                              ({r.picked_family})
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-wm-text-muted">{r.rationale}</p>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </div>
+            )
+          })()}
+
+          {/* Copywriter-bundle validation report — per page, with the
+              same picker affordance as single-page. */}
+          {copyBundle && copyBundleReports && (() => {
+            // Cross-page section count + unbound count.
+            let totalSections = 0
+            let totalUnbound = 0
+            for (let i = 0; i < copyBundle.length; i++) {
+              const page = copyBundle[i]
+              const rep  = copyBundleReports[i]
+              totalSections += page.sections.length
+              for (const s of page.sections) {
+                const effectiveId = (templateOverridesByPage[i] ?? {})[s.sort_order] ?? s.template_id
+                if (!effectiveId || rep.unresolved_template_ids.includes(effectiveId)) totalUnbound++
+              }
+            }
+            const firstUnbound = (() => {
+              for (let i = 0; i < copyBundle.length; i++) {
+                const page = copyBundle[i]
+                const rep  = copyBundleReports[i]
+                for (const s of page.sections) {
+                  const eff = (templateOverridesByPage[i] ?? {})[s.sort_order] ?? s.template_id
+                  if (!eff || rep.unresolved_template_ids.includes(eff)) {
+                    return { pageIdx: i, sortOrder: s.sort_order }
+                  }
+                }
+              }
+              return null
+            })()
+
+            return (
+              <div className="space-y-3">
+                <div className={[
+                  'rounded-md border p-3',
+                  totalUnbound > 0 ? 'border-wm-warning/40 bg-wm-warning-bg' : 'border-wm-success/30 bg-wm-success-bg',
+                ].join(' ')}>
+                  <div className="flex items-start gap-2">
+                    {totalUnbound > 0
+                      ? <AlertCircle size={14} className="text-wm-warning shrink-0 mt-0.5" />
+                      : <CheckCircle2 size={14} className="text-wm-success shrink-0 mt-0.5" />}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] font-semibold text-wm-text">
+                        Copywriter bundle — {copyBundle.length} page{copyBundle.length === 1 ? '' : 's'} ·
+                        {' '}{totalSections} section{totalSections === 1 ? '' : 's'}
+                        {totalUnbound > 0 && ` · ${totalUnbound} need${totalUnbound === 1 ? 's' : ''} a Brixies template`}
+                      </p>
+                      <p className="text-[11px] text-wm-text-muted mt-1 leading-snug">
+                        {totalUnbound > 0
+                          ? 'Pick a Brixies template for each section below — your copy carries through to whichever you choose, so nothing gets dropped. We auto-advance through the rest after each pick.'
+                          : 'Every section is bound. Ready to import.'}
+                      </p>
+                      {firstUnbound && (
+                        <div className="flex items-center gap-2 mt-2">
+                          <WMButton
+                            variant="primary"
+                            size="sm"
+                            iconLeft={<LayoutGrid size={11} />}
+                            onClick={() => {
+                              setVariantSwapPageIdx(firstUnbound.pageIdx)
+                              setVariantSwapForSort(firstUnbound.sortOrder)
+                            }}
+                            disabled={importing || variantSwapping}
+                          >
+                            Pick template for #{firstUnbound.sortOrder} ({copyBundle[firstUnbound.pageIdx].page_title})
+                          </WMButton>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Per-page section list */}
+                {copyBundle.map((page, pageIdx) => {
+                  const rep = copyBundleReports[pageIdx]
+                  const pageOverrides = templateOverridesByPage[pageIdx] ?? {}
+                  return (
+                    <div key={`${pageIdx}-${page.page_slug}`} className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
+                          {page.page_title} · /{page.page_slug.replace(/^\/+/, '')}
+                        </p>
+                        <span className="text-[10px] text-wm-text-subtle">
+                          {page.sections.length} section{page.sections.length === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      <ul className="space-y-1.5">
+                        {page.sections.slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)).map(s => {
+                          const effectiveId = pageOverrides[s.sort_order] ?? s.template_id
+                          const broken      = !effectiveId || rep.unresolved_template_ids.includes(effectiveId)
+                          const overridden  = !!pageOverrides[s.sort_order]
+                          const tplName     = rep.resolved_templates[effectiveId]
+                            ?? (broken ? `${effectiveId || '(none specified)'} — pick a template` : effectiveId)
+                          const fit = bundleFit?.[pageIdx]?.[s.sort_order]
+                          return (
+                            <li key={`${s.sort_order}-${s.template_id}`} className="text-[12px] text-wm-text">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-wm-text-subtle font-mono text-[10px] w-6 text-right shrink-0">
+                                  {String(s.sort_order ?? 0).padStart(2, '0')}
+                                </span>
+                                <FitChip fit={fit} broken={broken} />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setVariantSwapPageIdx(pageIdx)
+                                    setVariantSwapForSort(s.sort_order)
+                                  }}
+                                  disabled={importing || variantSwapping}
+                                  className={[
+                                    'min-w-0 flex-1 inline-flex items-center justify-between gap-2 h-7 px-2.5 rounded border bg-wm-bg-elevated text-[12px] hover:border-wm-accent transition-colors disabled:opacity-50',
+                                    broken      ? 'border-wm-danger text-wm-danger' :
+                                    overridden  ? 'border-wm-accent text-wm-accent-strong' :
+                                                  'border-wm-border text-wm-text',
+                                  ].join(' ')}
+                                  title="Click to browse the Brixies catalog. Copy is remapped to the picked template's schema so nothing drops."
+                                >
+                                  <span className="truncate">{tplName}</span>
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-wm-text-subtle shrink-0">
+                                    <LayoutGrid size={10} /> {broken ? 'Pick' : 'Change'}
+                                  </span>
+                                </button>
+                                {s.concept_id && (
+                                  <span className="text-[10px] text-wm-text-subtle font-mono shrink-0">· {s.concept_id}</span>
+                                )}
+                              </div>
+                              {fit && fit.health !== 'clean' && !broken && (
+                                <FitDetail fit={fit} />
+                              )}
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
+
           {/* Copywriter-output validation report */}
-          {copyReport && copyOutput && (
-            <div className="space-y-3">
+          {copyReport && copyOutput && (() => {
+            // Per-section binding state, recomputed each render so user
+            // picks (templateOverrides) clear the corresponding errors.
+            const unboundSorts = copyOutput.sections
+              .filter(s => {
+                const effectiveId = templateOverrides[s.sort_order] ?? s.template_id
+                return !effectiveId || copyReport.unresolved_template_ids.includes(effectiveId)
+              })
+              .map(s => s.sort_order)
+            // Validation errors that aren't about template binding — these
+            // we can't auto-resolve via picks, so they still block import.
+            const nonTemplateErrors = copyReport.issues.filter(i =>
+              i.severity === 'error' && !i.scope.startsWith('section.template_id=')
+            ).length
+            // Effective valid state: no other errors AND every section
+            // has a resolvable template (either originally or via override).
+            const effectiveValid = nonTemplateErrors === 0 && unboundSorts.length === 0
+            return (
+            <div className="space-y-3" data-effective-valid={String(effectiveValid)}>
               {(() => {
-                const errCount  = copyReport.issues.filter(i => i.severity === 'error').length
                 const warnCount = copyReport.issues.filter(i => i.severity === 'warning').length
                 const infoCount = copyReport.issues.filter(i => i.severity === 'info').length
-                if (!copyReport.valid) {
+                if (unboundSorts.length > 0) {
+                  const firstUnbound = unboundSorts[0]
+                  return (
+                    <div className="rounded-md border border-wm-warning/40 bg-wm-warning-bg p-3">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle size={14} className="text-wm-warning shrink-0 mt-0.5" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[13px] font-semibold text-wm-text">
+                            {unboundSorts.length} section{unboundSorts.length === 1 ? '' : 's'} need
+                            {unboundSorts.length === 1 ? 's' : ''} a Brixies template
+                          </p>
+                          <p className="text-[11px] text-wm-text-muted mt-1 leading-snug">
+                            The copywriter shipped concept names instead of catalog IDs. Pick a
+                            Brixies template for each section below — your copy carries through to
+                            whichever you choose, so nothing gets dropped.
+                          </p>
+                          <div className="flex items-center gap-2 mt-2">
+                            <WMButton
+                              variant="primary"
+                              size="sm"
+                              iconLeft={<LayoutGrid size={11} />}
+                              onClick={() => setVariantSwapForSort(firstUnbound)}
+                              disabled={importing || variantSwapping}
+                            >
+                              Pick template for #{firstUnbound}
+                            </WMButton>
+                            <span className="text-[10px] text-wm-text-subtle">
+                              We'll auto-advance through the rest after each pick.
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                }
+                if (!effectiveValid) {
                   return (
                     <div className="rounded-md border border-wm-danger/30 bg-wm-danger-bg p-3 flex items-center gap-2">
                       <AlertCircle size={14} className="text-wm-danger shrink-0" />
                       <p className="text-[13px] font-semibold text-wm-danger">
-                        Copywriter output — {errCount} error(s) must be resolved before import
+                        Copywriter output — {nonTemplateErrors} error(s) must be resolved before import
                       </p>
                     </div>
                   )
@@ -529,6 +1169,7 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
                       const sectionIssues = (copyOutput.mechanical_scan_log ?? [])
                         .filter(m => m.section_sort === s.sort_order)
 
+                      const fit = singleFit?.[s.sort_order]
                       return (
                         <li
                           key={`${s.sort_order}-${s.template_id}`}
@@ -538,6 +1179,7 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
                             <span className="text-wm-text-subtle font-mono text-[10px] w-6 text-right shrink-0">
                               {String(s.sort_order ?? 0).padStart(2, '0')}
                             </span>
+                            <FitChip fit={fit} broken={broken} />
                             {/* Single swap affordance: the current template
                                 renders as a button that opens the catalog
                                 picker. Same flow as PagesWorkspace's
@@ -573,6 +1215,9 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
                               <span className="text-[10px] text-wm-text-subtle font-mono shrink-0">· {s.concept_id}</span>
                             )}
                           </div>
+                          {fit && fit.health !== 'clean' && !broken && (
+                            <FitDetail fit={fit} />
+                          )}
                           {/* Mechanical-fit warnings scoped to this section,
                               rewritten in plain-language so the user knows what
                               to actually DO (verify after import vs swap template). */}
@@ -655,7 +1300,8 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
                 </div>
               )}
             </div>
-          )}
+            )
+          })()}
 
           {/* Validation report */}
           {report && brief && (
@@ -890,19 +1536,31 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
           <WMButton variant="ghost" size="sm" onClick={() => { reset(); onClose() }} disabled={importing}>
             Close
           </WMButton>
-          {copyReport && (
-            <WMButton
-              variant="primary"
-              size="sm"
-              iconLeft={<Sparkles size={11} />}
-              iconRight={<ArrowRight size={11} />}
-              disabled={!copyReport.valid || importing}
-              loading={importing}
-              onClick={handleImportCopywriter}
-            >
-              Import copywriter output
-            </WMButton>
-          )}
+          {copyReport && copyOutput && (() => {
+            // Same effective-valid calc as the body callout — overrides
+            // resolve template-binding errors, other errors still block.
+            const unboundCount = copyOutput.sections.filter(s => {
+              const effectiveId = templateOverrides[s.sort_order] ?? s.template_id
+              return !effectiveId || copyReport.unresolved_template_ids.includes(effectiveId)
+            }).length
+            const nonTemplateErrors = copyReport.issues.filter(i =>
+              i.severity === 'error' && !i.scope.startsWith('section.template_id=')
+            ).length
+            const effectiveValid = nonTemplateErrors === 0 && unboundCount === 0
+            return (
+              <WMButton
+                variant="primary"
+                size="sm"
+                iconLeft={<Sparkles size={11} />}
+                iconRight={<ArrowRight size={11} />}
+                disabled={!effectiveValid || importing}
+                loading={importing}
+                onClick={handleImportCopywriter}
+              >
+                Import copywriter output
+              </WMButton>
+            )
+          })()}
           {report && (
             <WMButton
               variant="primary"
@@ -929,35 +1587,116 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
               Import {bundle.pages.length} page{bundle.pages.length === 1 ? '' : 's'}
             </WMButton>
           )}
+          {copyBundle && copyBundleReports && (() => {
+            // Importable when every section across every page has a
+            // resolvable template (either originally or via override).
+            // Sections that remain unbound when the user hits import
+            // fall through to the library/catalog fallback inside
+            // importCopywriterPageOutput — but the button still
+            // enables so the strategist isn't trapped if they decide
+            // to trust the fallback for the rest.
+            let nonTemplateErrors = 0
+            for (const r of copyBundleReports) {
+              nonTemplateErrors += r.issues.filter(i =>
+                i.severity === 'error' && !i.scope.startsWith('section.template_id=')
+              ).length
+            }
+            return (
+              <WMButton
+                variant="primary"
+                size="sm"
+                iconLeft={<Sparkles size={11} />}
+                iconRight={<ArrowRight size={11} />}
+                disabled={nonTemplateErrors > 0 || importing}
+                loading={importing}
+                onClick={handleImportCopyBundle}
+              >
+                Import {copyBundle.length} page{copyBundle.length === 1 ? '' : 's'}
+              </WMButton>
+            )
+          })()}
         </div>
       </div>
 
-      {/* Catalog picker — opens when the user clicks "Browse" next
-          to a section's template dropdown. Filtered to content/media/
-          post_template kinds (same gate Pages uses for change-variant).
-          On select, the doc round-trip remap runs so copy survives
-          even when the new template is in a different family. */}
-      {copyOutput && variantSwapForSort != null && (
-        <WMCatalogSidePanel
-          open={true}
-          onClose={() => setVariantSwapForSort(null)}
-          title="Pick a different template"
-          subtitle={`Section ${variantSwapForSort}`}
-          kindFilter={['content', 'media', 'post_template'] as readonly WebTemplateKind[]}
-          mode="single"
-          selectedIds={(() => {
-            const s = copyOutput.sections.find(x => x.sort_order === variantSwapForSort)
-            const tid = s ? (templateOverrides[s.sort_order] ?? s.template_id) : null
-            return tid ? [tid] : []
-          })()}
-          onSelect={async (ids) => {
-            if (ids[0] && variantSwapForSort != null) {
-              await applyTemplateSwap(variantSwapForSort, ids[0])
-            }
-            setVariantSwapForSort(null)
-          }}
-        />
-      )}
+      {/* Catalog picker — opens when the user clicks the template pill
+          on a section. Filtered to content/media/post_template kinds.
+          Handles both single-page (copyOutput) and bundle (copyBundle)
+          cases; pageIdx is null for single-page. */}
+      {variantSwapForSort != null && (copyOutput || (copyBundle && variantSwapPageIdx != null)) && (() => {
+        const isBundle = variantSwapPageIdx != null && copyBundle != null
+        const section  = isBundle
+          ? copyBundle[variantSwapPageIdx].sections.find(s => s.sort_order === variantSwapForSort)
+          : copyOutput?.sections.find(s => s.sort_order === variantSwapForSort)
+        const pageTitle = isBundle ? copyBundle[variantSwapPageIdx].page_title : (copyOutput?.page_title ?? '')
+        const currentOverride = isBundle
+          ? (templateOverridesByPage[variantSwapPageIdx] ?? {})[variantSwapForSort]
+          : templateOverrides[variantSwapForSort]
+        const currentTid = currentOverride ?? section?.template_id
+        return (
+          <WMCatalogSidePanel
+            open={true}
+            onClose={() => {
+              setVariantSwapForSort(null)
+              setVariantSwapPageIdx(null)
+            }}
+            title="Pick a Brixies template"
+            subtitle={`${pageTitle} · Section ${variantSwapForSort}${section?.concept_id ? ` (${section.concept_id})` : ''}`}
+            kindFilter={['content', 'media', 'post_template'] as readonly WebTemplateKind[]}
+            mode="single"
+            selectedIds={currentTid ? [currentTid] : []}
+            onSelect={async (ids) => {
+              const picked = ids[0]
+              const justPickedFor = variantSwapForSort
+              const justPickedPageIdx = variantSwapPageIdx
+              try {
+                if (picked && justPickedFor != null) {
+                  await applyTemplateSwap(justPickedFor, picked, justPickedPageIdx)
+                }
+              } finally {
+                // Auto-advance through the remaining unbound sections.
+                // For bundles we walk pages → sections; for single-page
+                // we just walk the single page's sections.
+                let advanced = false
+                if (picked && justPickedFor != null) {
+                  if (isBundle && copyBundle && copyBundleReports && justPickedPageIdx != null) {
+                    outer: for (let i = 0; i < copyBundle.length; i++) {
+                      const page = copyBundle[i]
+                      const rep  = copyBundleReports[i]
+                      const pageMap = templateOverridesByPage[i] ?? {}
+                      for (const s of page.sections) {
+                        if (i === justPickedPageIdx && s.sort_order === justPickedFor) continue
+                        const override = pageMap[s.sort_order]
+                        const effectiveId = override ?? s.template_id
+                        if (!effectiveId || rep.unresolved_template_ids.includes(effectiveId)) {
+                          setVariantSwapPageIdx(i)
+                          setVariantSwapForSort(s.sort_order)
+                          advanced = true
+                          break outer
+                        }
+                      }
+                    }
+                  } else if (copyOutput && copyReport) {
+                    const nextUnbound = copyOutput.sections.find(s => {
+                      if (s.sort_order === justPickedFor) return false
+                      const override = templateOverrides[s.sort_order]
+                      const effectiveId = override ?? s.template_id
+                      return !effectiveId || copyReport.unresolved_template_ids.includes(effectiveId)
+                    })
+                    if (nextUnbound) {
+                      setVariantSwapForSort(nextUnbound.sort_order)
+                      advanced = true
+                    }
+                  }
+                }
+                if (!advanced) {
+                  setVariantSwapForSort(null)
+                  setVariantSwapPageIdx(null)
+                }
+              }
+            }}
+          />
+        )
+      })()}
     </div>
   )
 }

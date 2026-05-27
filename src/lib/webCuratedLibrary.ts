@@ -466,6 +466,111 @@ export function getEffectiveLibraryIds(library: CuratedLibrary): Set<string> {
   return out
 }
 
+// ── Page-builder helpers ────────────────────────────────────────────
+//
+// The Global Elements workspace is the canonical editor, but the page
+// builder also surfaces a "Save to site library" affordance on each
+// bound section so the strategist can promote a variant to the
+// project's palette without context-switching. These helpers do the
+// concept-matching and shape mutation that affordance needs.
+
+/** Subset of WebContentTemplate the matcher uses. Pull from anywhere —
+ *  the actual template row, the imported palette card, etc. */
+export interface LibraryMatchableTemplate {
+  id:     string
+  family: string | null
+  kind:   WebTemplateKind | null
+}
+
+/** Find the LIBRARY_CONCEPTS this template could fit under. We check
+ *  each concept's family + kind filters; if both pass, the concept is
+ *  a candidate. The page-builder UI uses this to decide what concept
+ *  label to show on the "Save to site library" button — and to show a
+ *  picker when more than one concept accepts the template. */
+export function findCandidateConcepts(
+  template: LibraryMatchableTemplate,
+): LibraryConcept[] {
+  const out: LibraryConcept[] = []
+  for (const c of LIBRARY_CONCEPTS) {
+    if (c.kindFilter && c.kindFilter.length > 0) {
+      if (!template.kind) continue
+      if (!c.kindFilter.includes(template.kind)) continue
+    }
+    if (c.familyFilter && c.familyFilter.length > 0) {
+      if (!template.family) continue
+      const fam = template.family.toLowerCase()
+      const matches = c.familyFilter.some(f => fam.includes(f.toLowerCase()))
+      if (!matches) continue
+    }
+    out.push(c)
+  }
+  return out
+}
+
+/** Returns the concepts in `library` where this template is currently
+ *  one of the explicit bindings. Used to show "✓ In Library" state on
+ *  the page builder when the template is already a pick. */
+export function findConceptsContainingTemplate(
+  library: CuratedLibrary,
+  templateId: string,
+): LibraryConcept[] {
+  const out: LibraryConcept[] = []
+  for (const c of LIBRARY_CONCEPTS) {
+    const explicit = library[c.id] ?? []
+    if (explicit.includes(templateId)) out.push(c)
+  }
+  return out
+}
+
+/** Operation describing how `addOrReplaceLibraryBinding` resolves a
+ *  Save request given the concept's current bindings + maxPicks. */
+export type LibraryAddOp =
+  | { kind: 'add' }                                // room available
+  | { kind: 'replace'; replacesTemplateId: string } // user explicitly picks which to swap
+  | { kind: 'already_present' }                    // template is already bound
+
+/** Pure mutation: produce the next CuratedLibrary after adding the
+ *  given template to the given concept. Caller passes the chosen
+ *  operation. Persistence is the caller's job. */
+export function addOrReplaceLibraryBinding(
+  library: CuratedLibrary,
+  conceptId: string,
+  templateId: string,
+  op: LibraryAddOp,
+): CuratedLibrary {
+  const current = library[conceptId] ?? []
+  let next: string[]
+  switch (op.kind) {
+    case 'already_present':
+      return library  // no-op
+    case 'add':
+      if (current.includes(templateId)) return library
+      next = [...current, templateId]
+      break
+    case 'replace':
+      next = current.map(id => id === op.replacesTemplateId ? templateId : id)
+      // Dedupe in case the new id already existed somewhere else.
+      next = Array.from(new Set(next))
+      break
+  }
+  return { ...library, [conceptId]: next }
+}
+
+/** Remove a template id from a concept's bindings. Drops the concept
+ *  key entirely when the binding becomes empty. */
+export function removeLibraryBinding(
+  library: CuratedLibrary,
+  conceptId: string,
+  templateId: string,
+): CuratedLibrary {
+  const current = library[conceptId] ?? []
+  const next = current.filter(id => id !== templateId)
+  const out: CuratedLibrary = { ...library }
+  if (next.length === 0) delete out[conceptId]
+  else out[conceptId] = next
+  return out
+}
+
 /** Coerce a jsonb value to the typed CuratedLibrary shape, dropping
  *  anything that doesn't look right. Defensive — the column is jsonb
  *  with no schema, so old or hand-edited values might be malformed. */

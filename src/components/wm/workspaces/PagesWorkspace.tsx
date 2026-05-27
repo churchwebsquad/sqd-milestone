@@ -36,7 +36,6 @@ import {
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { loadEditorSnippets } from '../../../lib/webSnippets'
-import { friendlyScanMessage } from '../../../lib/webCopywriterOutput'
 import { WMButton } from '../Button'
 import { WMIconButton } from '../IconButton'
 import { WMStatusPill } from '../StatusPill'
@@ -52,7 +51,17 @@ import { WMSegmentedToggle } from '../SegmentedToggle'
 import { SectionList } from '../sectioneditor/SectionList'
 import { useSectionDetailPublisher } from '../sectioneditor/SectionEditingContext'
 import { ProjectPagesProvider } from '../sectioneditor/ProjectPagesContext'
-import { fieldValuesToDocHtml, docHtmlToFieldValues } from '../../../lib/webBrixiesDoc'
+import {
+  fieldValuesToDocHtml, docHtmlToFieldValues, reconcileFieldValuesAcrossTemplates,
+  computeUnmappedValues, computeDroppedDeepPaths,
+  valuesToDocHtmlByShape, mergeFieldValuesPreferNonEmpty,
+  type ReconcileTelemetry,
+} from '../../../lib/webBrixiesDoc'
+import {
+  recordBindTelemetry, computeMatchedSlotKeys, collectPaletteTemplateIds,
+  emptyReconcileTelemetry, type BindSource,
+} from '../../../lib/webBindTelemetry'
+import { normalizeFieldValuesForTemplate } from '../../../lib/webCopywriterOutput'
 import { extractSuggestedFamily, type PageBrief } from '../../../lib/webPageBrief'
 import {
   composeBind, findBriefSection, extractSectionIdFromNotes,
@@ -277,6 +286,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
               projectPages={pages}
               reviewState={reviewState}
               onReviewChange={loadReviewState}
+              onProjectChange={onChange}
               onPageChange={async () => {
                 await loadPages()
               }}
@@ -559,7 +569,7 @@ function serializeFieldValuesToHtml(
 // ── Page editor (right pane) ──────────────────────────────────────────
 
 function PageEditor({
-  page, project, projectPages, reviewState, onReviewChange, onPageChange, onArchived,
+  page, project, projectPages, reviewState, onReviewChange, onProjectChange, onPageChange, onArchived,
 }: {
   page: WebPage
   project: StrategyWebProject
@@ -568,6 +578,10 @@ function PageEditor({
    *  slugs against actual pages. */
   projectPages: WebPage[]
   reviewState: ProjectReviewState | null
+  /** Refresh the project row from the host — fired when the
+   *  SectionDetailsPanel's "Save to site library" action mutates
+   *  `strategy_web_projects.curated_library`. */
+  onProjectChange?: () => Promise<void>
   onReviewChange: () => Promise<void>
   onPageChange: () => Promise<void>
   onArchived: () => void
@@ -598,13 +612,33 @@ function PageEditor({
   // right-side details panel.
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null)
   // Bind-to-template flow: when set, opens the catalog panel pre-filtered
-  // by the brief-suggested family and routes the pick into bindSection().
+  // by the brief-suggested family. The pick is routed through
+  // computeBindNextValues so the catalog can detect dropped content
+  // and surface the variant-swap confirm dialog before applying.
   const [bindingSection, setBindingSection] = useState<WebSection | null>(null)
   // Cached ranking for the open bind panel — both the deterministic
   // baseline (computed when the panel opens) and the AI re-rank (filled
   // on demand by the "Suggest with AI" button).
   const [bindRanking, setBindRanking] = useState<RankedVariant[]>([])
   const [bindAIRankingInFlight, setBindAIRankingInFlight] = useState(false)
+  // Variant-swap confirmation — when picking a new variant would push
+  // currently-visible content into the __unmapped stash, hold the
+  // computed payload here and surface a ConfirmDialog so the user can
+  // see exactly what falls out of view before committing.
+  const [pendingSwap, setPendingSwap] = useState<{
+    sectionId: string
+    templateId: string
+    newTemplate: WebContentTemplate
+    newTemplateName: string
+    nextValues: FieldValues
+    droppedFromVisible: string[]
+    telemetry: {
+      reconcile: ReconcileTelemetry
+      bindDurationMs: number
+      sourceValuesSizeBytes: number
+    }
+  } | null>(null)
+  const [pendingSwapApplying, setPendingSwapApplying] = useState(false)
   // Page brief, loaded once per page. Drives the brief→slot auto-fill on
   // bind. Lookups are by `Section ID: <id>` on web_sections.notes.
   const pageBrief = (page.brief as PageBrief | null | undefined) ?? null
@@ -787,44 +821,116 @@ function PageEditor({
     void markEdited()
   }
 
-  /** Bind a freehand section to a Brixies template.
-   *  Two sources fill the slots:
-   *    1. The page brief's `fields` object (if cowork's brief includes
-   *       this section — looked up by `Section ID:` in section.notes).
-   *    2. Heuristic mapping from the freehand body HTML (h1 → heading,
-   *       <p> → body, etc.) for anything the brief didn't cover.
-   *  The original freehand body is always stashed under `__overflow_html`
-   *  so the strategist can verify nothing was dropped, route remaining
-   *  copy manually, then clear the overflow when satisfied. */
-  const bindSection = async (sectionId: string, templateId: string) => {
-    const section = sections.find(s => s.id === sectionId)
-    if (!section) return
-    const { data: tplRow } = await supabase
-      .from('web_content_templates')
-      .select('*')
-      .eq('id', templateId)
-      .maybeSingle()
-    if (!tplRow) return
-    const newTemplate = tplRow as WebContentTemplate
-
-    const currentValues = (section.field_values ?? {}) as FieldValues
+  /** Pure computation of the next field_values for binding `section` to
+   *  `newTemplate`. Sources that fill the new template's slots:
+   *    1. `section.source_field_values` (set at import time) — the
+   *       immutable copywriter shape. Variant swap re-derives from this
+   *       directly so content loss can't compound across swaps. User
+   *       edits made post-import are overlaid on top.
+   *    2. Legacy fallback for sections without `source_field_values`:
+   *       remap from the current `field_values` against the old
+   *       template, plus brief-driven auto-fill for freehand sections.
+   *  Returns the payload plus the list of source keys that won't be
+   *  represented in the new template's slots after the swap. The
+   *  caller decides whether to prompt before persisting. */
+  const computeBindNextValues = (
+    section: WebSection,
+    newTemplate: WebContentTemplate,
+  ): {
+    nextValues: FieldValues
+    droppedFromVisible: string[]
+    /** Side-channel data the persist step uses to write bind telemetry.
+     *  Compute stays pure — applyBindPayload fires the actual insert. */
+    telemetry: {
+      reconcile: ReconcileTelemetry
+      bindDurationMs: number
+      sourceValuesSizeBytes: number
+    }
+  } => {
+    const bindStart = Date.now()
+    const reconcileTele = emptyReconcileTelemetry()
+    const storedValues = (section.field_values ?? {}) as FieldValues
+    const sourceFieldValues =
+      (section.source_field_values && typeof section.source_field_values === 'object'
+        ? section.source_field_values as FieldValues
+        : null)
+    // Merge any previously-stashed __unmapped entries back into the
+    // source values BEFORE we route into the new template — that's
+    // what gives previously-unmapped content a second chance to land
+    // in a matching slot when the schema now supports it.
+    const priorUnmapped = (storedValues.__unmapped as Record<string, unknown> | undefined) ?? {}
+    const currentValues: FieldValues = { ...priorUnmapped, ...storedValues }
+    delete (currentValues as Record<string, unknown>).__unmapped
     const oldTemplate = section.content_template_id ? templates[section.content_template_id] : null
 
     let nextValues: FieldValues
     let overflowHtml = ''
     let bindReport: ComposedBindResult['source_report'] | null = null
 
-    if (oldTemplate) {
-      // Re-bind from a bound section. Convert the current values to a
-      // proper Brixies doc HTML using the OLD template's slot schema,
-      // then parse the doc back into the NEW template's slots. This
-      // preserves structured content (tagline / headings / body / CTAs /
-      // cards / images) across template swaps without falling back to
-      // the rescue serializer that emits group data as literal
-      // "buttons:" bullet lists.
-      const oldDocHtml = fieldValuesToDocHtml(currentValues, oldTemplate)
-      const { field_values } = docHtmlToFieldValues(oldDocHtml, newTemplate, {})
-      nextValues = field_values
+    if (sourceFieldValues && Object.keys(sourceFieldValues).length > 0) {
+      // Source-of-truth path. Re-derive directly from the copywriter's
+      // original shape using the same three-phase reconcile the
+      // importer runs, then overlay any user edits to storedValues so
+      // post-import authoring isn't lost on swap.
+      const normalized = normalizeFieldValuesForTemplate(newTemplate, sourceFieldValues) as FieldValues
+      let shapeFilled: Record<string, unknown> = {}
+      try {
+        const shapeHtml = valuesToDocHtmlByShape(sourceFieldValues)
+        shapeFilled = docHtmlToFieldValues(
+          shapeHtml === '<p></p>' ? '<p></p>' : shapeHtml,
+          newTemplate,
+          sourceFieldValues,
+        ).field_values
+      } catch (err) {
+        console.warn('[bindSection] source-derive value-shape phase failed', err)
+      }
+      const fromSource = mergeFieldValuesPreferNonEmpty(normalized, shapeFilled, newTemplate) as FieldValues
+      const fromSourceReconciled = reconcileFieldValuesAcrossTemplates(
+        sourceFieldValues, newTemplate, fromSource, cardTemplates, reconcileTele,
+      ) as FieldValues
+
+      // Overlay user edits on top of the source-derived base. We map
+      // storedValues through the new template's normalize first so the
+      // shape matches; empty edits don't clobber source-derived content
+      // because mergeFieldValuesPreferNonEmpty only takes non-empty
+      // values from `primary`.
+      const userEditsInNewShape = normalizeFieldValuesForTemplate(newTemplate, currentValues) as FieldValues
+      nextValues = mergeFieldValuesPreferNonEmpty(
+        userEditsInNewShape, fromSourceReconciled, newTemplate,
+      ) as FieldValues
+
+      const priorOverflow = typeof currentValues.__overflow_html === 'string'
+        ? currentValues.__overflow_html
+        : ''
+      if (priorOverflow) overflowHtml = priorOverflow
+    } else if (oldTemplate) {
+      // Three-phase bind so nested groups (card[].buttons_card,
+      // container_left[], slide[].card[], etc.) carry through the
+      // swap:
+      //   Phase 1 — normalize the raw values against the NEW
+      //   template's schema. When source keys match target keys
+      //   verbatim this populates everything with nested data intact.
+      //   Phase 2 — value-shape doc route fills any slots Phase 1
+      //   couldn't (semantic-name mapping for diverging keys).
+      //   Phase 3 — canonical-key reconcile for the long tail.
+      const normalized = normalizeFieldValuesForTemplate(newTemplate, currentValues) as FieldValues
+      let shapeFilled: Record<string, unknown> = {}
+      try {
+        let docHtml: string
+        try {
+          docHtml = fieldValuesToDocHtml(currentValues, oldTemplate)
+        } catch {
+          docHtml = ''
+        }
+        const shapeHtml = valuesToDocHtmlByShape(currentValues)
+        const combined = docHtml + (shapeHtml === '<p></p>' ? '' : shapeHtml)
+        shapeFilled = docHtmlToFieldValues(combined || '<p></p>', newTemplate, currentValues).field_values
+      } catch (err) {
+        console.warn('[bindSection] value-shape phase failed, keeping normalize only', err)
+      }
+      nextValues = mergeFieldValuesPreferNonEmpty(normalized, shapeFilled, newTemplate) as FieldValues
+      // Canonical-key fallback for any newTemplate slot still empty.
+      nextValues = reconcileFieldValuesAcrossTemplates(currentValues, newTemplate, nextValues, cardTemplates, reconcileTele) as FieldValues
       // Carry the prior overflow forward — it's still the strategist's
       // safety net for anything they're routing in.
       const priorOverflow = typeof currentValues.__overflow_html === 'string'
@@ -832,40 +938,159 @@ function PageEditor({
         : ''
       if (priorOverflow) overflowHtml = priorOverflow
     } else {
-      // Initial bind from a freehand section. Use the body HTML
-      // (which IS the Brixies doc HTML for freehand) + composeBind
-      // to fill the new template's slots from the brief if available.
+      // Initial bind from a freehand section. Two cases:
+      //   (a) imported-as-freehand sections that still have structured
+      //       field_values (heading / description / buttons / card_grid
+      //       etc.) — route those through the value-shape doc emit so
+      //       the new template's slots actually get filled.
+      //   (b) plain-text freehand sections where everything's under
+      //       `body` HTML — fall through to the legacy composeBind that
+      //       parses the body against the brief.
       const sourceHtml = typeof currentValues.body === 'string'
         ? currentValues.body
         : (typeof currentValues.__overflow_html === 'string' ? currentValues.__overflow_html : '')
 
-      const briefSectionId = extractSectionIdFromNotes(section.notes)
-      const briefSection = findBriefSection(pageBrief, briefSectionId)
+      // Has structured keys beyond body / reserved? If so, prefer the
+      // value-shape route — composeBind doesn't see those keys.
+      const structuralKeys = Object.keys(currentValues).filter(k =>
+        k !== 'body' && k !== '__overflow_html' && k !== '__unmapped'
+          && k !== '__bind_report' && k !== '__extra_ctas' && k !== '__extra_cards',
+      )
+      const hasStructuredValues = structuralKeys.length > 0
 
-      const composed = composeBind(briefSection, sourceHtml, newTemplate)
-      nextValues = { ...composed.field_values }
-      if (composed.residual_html) overflowHtml = composed.residual_html
-      if (composed.source_report.unmatched_brief_keys.length > 0
-          || composed.source_report.missing_slots.length > 0) {
-        bindReport = composed.source_report
+      if (hasStructuredValues) {
+        // Same three-phase pattern as the bound→bound swap above:
+        // normalize source keys against newTemplate first (preserves
+        // nested data when keys match), then value-shape doc route
+        // fills any remaining empties, then canonical-key reconcile.
+        const normalized = normalizeFieldValuesForTemplate(newTemplate, currentValues) as FieldValues
+        let shapeFilled: Record<string, unknown> = {}
+        try {
+          const shapeHtml = valuesToDocHtmlByShape(currentValues)
+          const source = (sourceHtml || '') + (shapeHtml === '<p></p>' ? '' : shapeHtml)
+          shapeFilled = docHtmlToFieldValues(source || '<p></p>', newTemplate, currentValues).field_values
+        } catch (err) {
+          console.warn('[bindSection] freehand→bound shape route failed, falling back', err)
+        }
+        nextValues = mergeFieldValuesPreferNonEmpty(normalized, shapeFilled, newTemplate) as FieldValues
+        nextValues = reconcileFieldValuesAcrossTemplates(currentValues, newTemplate, nextValues, cardTemplates, reconcileTele) as FieldValues
+      } else {
+        const briefSectionId = extractSectionIdFromNotes(section.notes)
+        const briefSection = findBriefSection(pageBrief, briefSectionId)
+
+        const composed = composeBind(briefSection, sourceHtml, newTemplate)
+        nextValues = { ...composed.field_values }
+        if (composed.residual_html) overflowHtml = composed.residual_html
+        if (composed.source_report.unmatched_brief_keys.length > 0
+            || composed.source_report.missing_slots.length > 0) {
+          bindReport = composed.source_report
+        }
       }
     }
 
     if (overflowHtml) nextValues.__overflow_html = overflowHtml
     if (bindReport) nextValues.__bind_report = bindReport
 
+    // Recompute __unmapped against the new template. With
+    // source_field_values present we compute against the canonical
+    // source (so the editor's "Unmapped content" panel reflects what
+    // the COPYWRITER shipped that doesn't fit, not just whatever was
+    // visible right before the swap). Without source, fall back to
+    // the legacy "compare against current visible+stash" behavior.
+    const unmappedBasis: FieldValues = sourceFieldValues ?? currentValues
+    const unmapped = computeUnmappedValues(unmappedBasis, nextValues, newTemplate)
+    if (Object.keys(unmapped).length > 0) {
+      nextValues.__unmapped = unmapped
+    } else if ('__unmapped' in nextValues) {
+      delete (nextValues as Record<string, unknown>).__unmapped
+    }
+
+    // "Dropped" = source/visible content that won't be represented in
+    // the new template's slots, deep-walked so CTAs hidden inside
+    // `card[N].buttons_card` (or any other nested group slot) trigger
+    // the warning. With source_field_values we measure against the
+    // canonical source so the warning catches drops the copywriter
+    // shipped, even if a previous swap had already pushed them into
+    // __unmapped. Legacy sections compare against the visible-stored
+    // state instead.
+    let droppedFromVisible: string[]
+    if (sourceFieldValues) {
+      droppedFromVisible = computeDroppedDeepPaths(sourceFieldValues, nextValues)
+    } else {
+      const visibleStored: FieldValues = { ...storedValues }
+      delete (visibleStored as Record<string, unknown>).__unmapped
+      droppedFromVisible = computeDroppedDeepPaths(visibleStored, nextValues)
+    }
+
+    const sourceValuesSizeBytes = sourceFieldValues
+      ? JSON.stringify(sourceFieldValues).length
+      : JSON.stringify(storedValues).length
+
+    return {
+      nextValues,
+      droppedFromVisible,
+      telemetry: {
+        reconcile: reconcileTele,
+        bindDurationMs: Date.now() - bindStart,
+        sourceValuesSizeBytes,
+      },
+    }
+  }
+
+  /** Persist a previously-computed bind payload (and refresh local
+   *  state). Used by both the no-prompt fast path and the
+   *  confirm-then-apply flow for variant swaps that drop content. */
+  const applyBindPayload = async (
+    sectionId: string,
+    templateId: string,
+    nextValues: FieldValues,
+    telemetry?: {
+      reconcile: ReconcileTelemetry
+      bindDurationMs: number
+      sourceValuesSizeBytes: number
+      bindSource: BindSource
+      newTemplate: WebContentTemplate
+    },
+  ) => {
     await updateSection(sectionId, {
       content_template_id: templateId,
       field_values: nextValues,
     })
     await loadSections()
+    if (telemetry) {
+      const t = telemetry
+      const section = sections.find(s => s.id === sectionId)
+      const unmapped = (nextValues.__unmapped as Record<string, unknown> | undefined) ?? {}
+      const sourceForDropCalc = (section?.source_field_values
+        ?? (section?.field_values as Record<string, unknown> | null)
+        ?? {}) as Record<string, unknown>
+      void recordBindTelemetry({
+        web_section_id:   sectionId,
+        web_project_id:   project.id,
+        bind_source:      t.bindSource,
+        template_id:      templateId,
+        palette_template_ids: collectPaletteTemplateIds(t.newTemplate.fields),
+        matched_slot_keys:    computeMatchedSlotKeys(t.newTemplate, nextValues),
+        unmapped_source_keys: Object.keys(unmapped),
+        dropped_paths:        computeDroppedDeepPaths(sourceForDropCalc, nextValues),
+        used_shape_align:     t.reconcile.used_shape_align,
+        used_faq_inference:   Boolean(t.newTemplate.fields?.some(
+          f => f.kind === 'group' && Array.isArray(f.item_schema)
+            && f.item_schema.some(s => s.kind === 'slot' && s.key === 'question')
+            && f.item_schema.some(s => s.kind === 'slot' && s.key === 'answer'),
+        )),
+        source_field_values_size_bytes: t.sourceValuesSizeBytes,
+        bind_duration_ms: t.bindDurationMs,
+      })
+    }
   }
 
   /** Unbind a template-bound section back to freehand. Restores the
    *  overflow stash as the new freehand body so all the brief content is
    *  immediately editable again. If no overflow exists (rare — strategist
    *  cleared it), serialize the current slot values to HTML as a best-
-   *  effort body. */
+   *  effort body. Carries the __unmapped stash forward so re-binding to
+   *  a new template can rehydrate it. */
   const unbindSection = async (sectionId: string) => {
     const section = sections.find(s => s.id === sectionId)
     if (!section) return
@@ -875,9 +1100,16 @@ function PageEditor({
     if (!body) {
       body = serializeFieldValuesToHtml(values, templates[section.content_template_id ?? ''])
     }
+    const preservedUnmapped = values.__unmapped
+    const next: FieldValues = { body }
+    if (preservedUnmapped && typeof preservedUnmapped === 'object'
+        && !Array.isArray(preservedUnmapped)
+        && Object.keys(preservedUnmapped as Record<string, unknown>).length > 0) {
+      next.__unmapped = preservedUnmapped
+    }
     await updateSection(sectionId, {
       content_template_id: null,
-      field_values: { body },
+      field_values: next,
     })
     await loadSections()
   }
@@ -1015,6 +1247,17 @@ function PageEditor({
     const sectionComments = reviewState?.comments.filter(
       c => c.web_section_id === selectedSection.id,
     ) ?? []
+    const reviewsById = Object.fromEntries(
+      (reviewState?.reviews ?? []).map(r => [r.id, r]),
+    )
+    // Library template index — used by the SectionDetailsPanel's
+    // "Save to site library" popover to render Replace lists with
+    // real names rather than ids.
+    const libraryTemplatesById: Record<string, { id: string; layer_name: string }> = {}
+    for (const t of Object.values(templates)) {
+      if (siteLibraryIds.has(t.id)) libraryTemplatesById[t.id] = { id: t.id, layer_name: t.layer_name }
+    }
+
     publishDetail({
       section: selectedSection,
       template: selectedTemplate,
@@ -1026,8 +1269,12 @@ function PageEditor({
       onChangeVariant: () => setBindingSection(selectedSection),
       onUnbind: () => void unbindSection(selectedSection.id),
       onRemove: () => void archiveSection(selectedSection.id),
+      project,
+      libraryTemplatesById,
+      onLibraryChange: onProjectChange ?? (async () => {}),
       activeInternalReview,
       sectionComments,
+      reviewsById,
       // After a comment resolves we want both the comment list to
       // refresh AND the section's field_values to re-read from the
       // database — Apply / Amend writes to web_sections.field_values,
@@ -1155,13 +1402,13 @@ function PageEditor({
               }}
             />
           )}
-          <CopywriterNotesBanner brief={page.brief} />
           {headerNode}
 
           {viewMode === 'preview' ? (
             <PagePreview
               sections={sections}
               templates={templates}
+              cardTemplates={cardTemplates}
               snippetMap={snippetMap}
               onSelectSection={(id) => {
                 setViewMode('edit')
@@ -1207,7 +1454,15 @@ function PageEditor({
         kindFilter={['content', 'media', 'post_template'] as readonly WebTemplateKind[]}
         siteLibraryIds={siteLibraryIds}
         mode="single"
-        onSelect={async (ids) => { if (ids[0]) await addSection(ids[0]) }}
+        onSelect={async (ids) => {
+          try {
+            if (ids[0]) await addSection(ids[0])
+          } catch (err) {
+            console.error('[add-section] failed', err)
+          } finally {
+            setPickerOpen(false)
+          }
+        }}
       />
 
       {/* Catalog picker — bind a section to a Brixies template / change variant. */}
@@ -1233,9 +1488,89 @@ function PageEditor({
         }
         aiRanking={bindAIRankingInFlight}
         onSelect={async (ids) => {
-          if (bindingSection && ids[0]) {
-            await bindSection(bindingSection.id, ids[0])
+          const section = bindingSection
+          const templateId = ids[0]
+          if (!section || !templateId) { setBindingSection(null); return }
+          try {
+            const { data: tplRow } = await supabase
+              .from('web_content_templates')
+              .select('*')
+              .eq('id', templateId)
+              .maybeSingle()
+            if (!tplRow) return
+            const newTemplate = tplRow as WebContentTemplate
+            const { nextValues, droppedFromVisible, telemetry } = computeBindNextValues(section, newTemplate)
+
+            const isVariantSwap = section.content_template_id != null
+            if (isVariantSwap && droppedFromVisible.length > 0) {
+              setPendingSwap({
+                sectionId: section.id,
+                templateId,
+                newTemplate,
+                newTemplateName: newTemplate.layer_name ?? 'this variant',
+                nextValues,
+                droppedFromVisible,
+                telemetry,
+              })
+              setBindingSection(null)
+              return
+            }
+
+            await applyBindPayload(section.id, templateId, nextValues, {
+              ...telemetry,
+              bindSource: isVariantSwap ? 'variant_swap' : 'initial_bind',
+              newTemplate,
+            })
+          } catch (err) {
+            console.error('[change-variant] bind failed', err)
+          } finally {
             setBindingSection(null)
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={pendingSwap !== null}
+        title="Some content won't fit the new variant"
+        destructive
+        confirmLabel="Swap anyway"
+        cancelLabel="Keep current variant"
+        loading={pendingSwapApplying}
+        body={
+          <>
+            <p>
+              Swapping to <span className="font-medium text-wm-text">{pendingSwap?.newTemplateName}</span>
+              {' '}will move these out of visible slots:
+            </p>
+            <ul className="list-disc pl-5 mt-2 text-wm-text">
+              {pendingSwap?.droppedFromVisible.slice(0, 8).map(k => (
+                <li key={k}>{k}</li>
+              ))}
+              {(pendingSwap?.droppedFromVisible.length ?? 0) > 8 && (
+                <li>…and {(pendingSwap!.droppedFromVisible.length - 8)} more</li>
+              )}
+            </ul>
+            <p className="mt-2">
+              The content will be stashed under the section so it isn't lost —
+              swapping to a variant that supports those fields will restore it.
+            </p>
+          </>
+        }
+        onCancel={() => { if (!pendingSwapApplying) setPendingSwap(null) }}
+        onConfirm={async () => {
+          if (!pendingSwap) return
+          setPendingSwapApplying(true)
+          try {
+            await applyBindPayload(pendingSwap.sectionId, pendingSwap.templateId, pendingSwap.nextValues, {
+              ...pendingSwap.telemetry,
+              bindSource: 'variant_swap',
+              newTemplate: pendingSwap.newTemplate,
+            })
+            setPendingSwap(null)
+          } catch (err) {
+            console.error('[change-variant] confirm-apply failed', err)
+          } finally {
+            setPendingSwapApplying(false)
           }
         }}
       />
@@ -1376,129 +1711,6 @@ function ReviewBanner({
 }
 
 // ── Page-row review badge ────────────────────────────────────────────
-
-/** Surfaces the copywriter's mechanical scan log + flagged gaps +
- *  kickbacks on the page editor, after import. Pulls from
- *  web_pages.brief.copywriter_meta which the copywriter-output
- *  importer writes on every commit. Collapsible; defaults open when
- *  there's at least one warning so the strategist sees them on
- *  their first visit to the page. */
-function CopywriterNotesBanner({ brief }: { brief: unknown }) {
-  const meta = (() => {
-    if (!brief || typeof brief !== 'object') return null
-    const m = (brief as Record<string, unknown>).copywriter_meta
-    if (!m || typeof m !== 'object') return null
-    return m as {
-      imported_at?:               string
-      mechanical_scan_log?:       Array<{ section_sort: number; slot: string; issue: string; fix?: string }>
-      gaps_flagged?:              Array<{ section_sort: number; note: string }>
-      kickbacks_to_copywriter?:   Array<{ section_sort?: number; note?: string }>
-      template_overrides_applied?: Array<{ sort_order: number; template_id: string }>
-    }
-  })()
-  const scan      = meta?.mechanical_scan_log     ?? []
-  const gaps      = meta?.gaps_flagged            ?? []
-  const kickbacks = meta?.kickbacks_to_copywriter ?? []
-  const overrides = meta?.template_overrides_applied ?? []
-  const total = scan.length + gaps.length + kickbacks.length
-  const [open, setOpen] = useState(scan.length + kickbacks.length > 0)
-  if (!meta || total === 0) return null
-  return (
-    <div className="mb-4 rounded-md border border-wm-border bg-wm-bg-elevated">
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-wm-bg-hover"
-      >
-        <div className="flex items-center gap-2">
-          <FileText size={12} className="text-wm-accent-strong" />
-          <span className="text-[12px] font-semibold text-wm-text">Copywriter notes</span>
-          <span className="text-[10px] text-wm-text-subtle">
-            {scan.length > 0      && `${scan.length} scan log · `}
-            {gaps.length > 0      && `${gaps.length} gap${gaps.length === 1 ? '' : 's'} · `}
-            {kickbacks.length > 0 && `${kickbacks.length} kickback${kickbacks.length === 1 ? '' : 's'} · `}
-            {overrides.length > 0 && `${overrides.length} template swap${overrides.length === 1 ? '' : 's'} · `}
-            {meta.imported_at && new Date(meta.imported_at).toLocaleString(undefined, { month: 'short', day: 'numeric' })}
-          </span>
-        </div>
-        <span className="text-[10px] text-wm-text-subtle">{open ? 'Hide' : 'Show'}</span>
-      </button>
-      {open && (
-        <div className="px-3 pb-3 space-y-2.5 border-t border-wm-border/60 pt-2.5">
-          {scan.length > 0 && (
-            <div>
-              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-warning mb-1">
-                Scan flags · {scan.length}
-              </p>
-              <ul className="space-y-1.5">
-                {scan.map((m, i) => {
-                  const f = friendlyScanMessage(m)
-                  return (
-                    <li
-                      key={i}
-                      className={[
-                        'rounded-md border px-2 py-1.5 text-[11px] leading-snug',
-                        f.severity === 'action'
-                          ? 'border-wm-warning/40 bg-wm-warning-bg text-wm-text'
-                          : 'border-wm-border bg-wm-bg text-wm-text-muted',
-                      ].join(' ')}
-                    >
-                      <p className="font-semibold text-wm-text">{f.headline}</p>
-                      <p className="mt-0.5">{f.advice}</p>
-                      <details className="mt-1">
-                        <summary className="cursor-pointer text-[9px] uppercase tracking-widest font-semibold text-wm-text-subtle hover:text-wm-text">
-                          Technical detail
-                        </summary>
-                        <p className="mt-1 font-mono text-[10px] text-wm-text-subtle whitespace-pre-wrap">
-                          {f.technical}
-                        </p>
-                      </details>
-                    </li>
-                  )
-                })}
-              </ul>
-            </div>
-          )}
-          {kickbacks.length > 0 && (
-            <div>
-              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-warning mb-1">
-                Kickbacks · {kickbacks.length}
-              </p>
-              <ul className="space-y-1">
-                {kickbacks.map((k, i) => (
-                  <li key={i} className="text-[11px] text-wm-text">
-                    {k.section_sort != null && <span className="font-semibold">Section {k.section_sort} · </span>}
-                    <span className="text-wm-text-muted">{typeof k.note === 'string' ? k.note : JSON.stringify(k)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {gaps.length > 0 && (
-            <div>
-              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">
-                Gaps to confirm · {gaps.length}
-              </p>
-              <ul className="space-y-1">
-                {gaps.map((g, i) => (
-                  <li key={i} className="text-[11px] text-wm-text">
-                    <span className="font-semibold">Section {g.section_sort}</span>
-                    <span className="text-wm-text-muted"> — {g.note}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {overrides.length > 0 && (
-            <p className="text-[10px] text-wm-text-subtle italic">
-              {overrides.length} template{overrides.length === 1 ? '' : 's'} swapped from the copywriter's pick during import.
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
 
 /** Small pill rendered next to the per-page status pill in the left
  *  list. Shows "Edits requested", "Edits suggested", or "Commented"

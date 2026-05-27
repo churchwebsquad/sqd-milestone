@@ -1185,6 +1185,11 @@ export type CtaKind =
   | 'anchor'
   | 'mailto'
   | 'tel'
+  /** Snippet token like `{{directions_url}}` — the actual URL is
+   *  resolved at render-time from the project's snippet map. Treated
+   *  as opaque by validation; the snippet itself is validated when
+   *  added to the project snippet list. */
+  | 'snippet'
 
 export interface CtaValue {
   label:  string
@@ -1244,6 +1249,11 @@ export interface WebSection {
    *  AI agents MUST always set this; freehand is strictly user-facing. */
   content_template_id: string | null
   field_values: Record<string, unknown>
+  /** Original imported shape from the copywriter page bundle, frozen at
+   *  import time. Read on variant swap to re-derive `field_values`
+   *  against a new template without compounding content loss. NULL for
+   *  freehand-created sections and for sections imported before v36. */
+  source_field_values: Record<string, unknown> | null
   sort_order: number
   content_status: 'draft' | 'internal_review' | 'partner_review' | 'partner_approved' | string
   notes: string | null
@@ -1265,11 +1275,28 @@ export interface WebSection {
 //   • `requested` — partner-authored edit (must be resolved, dismissal
 //                   requires a resolution_note)
 
+/** Board-level status for a review, surfaced as a status pill on each
+ *  feedback board column. Legacy 'open'/'closed' remain valid in the
+ *  DB until migration v40 retires them; the loader normalizes them on
+ *  read to 'open_for_review' / 'completed'. */
+export type BoardStatus =
+  | 'no_status'
+  | 'open_for_review'
+  | 'editing_content'
+  | 'on_hold'
+  | 'completed'
+
+/** Wire format (what the DB still accepts during the transition). */
+export type WebReviewStatus = BoardStatus | 'open' | 'closed'
+
 export interface WebReview {
   id: string
   web_project_id: string
   kind: 'internal' | 'partner'
-  status: 'open' | 'closed'
+  status: WebReviewStatus
+  /** Sequential round number within (web_project_id, kind). Auto-assigned
+   *  by trigger on insert; never reused after deletes. */
+  round_number: number
   started_at: string
   started_by_user_id: string | null
   /** Display name of the staff member who started the review. Snapshotted
@@ -1332,6 +1359,8 @@ export interface WebReviewEdit {
 
 export type WebReviewCommentKind = 'comment' | 'suggested' | 'requested'
 export type WebReviewCommentStatus = 'open' | 'applied' | 'amended' | 'dismissed'
+/** Card-applied tag from the feedback board UI. */
+export type WebReviewCommentCategory = 'design' | 'content'
 
 export interface WebReviewComment {
   id: string
@@ -1353,8 +1382,20 @@ export interface WebReviewComment {
   suggested_value: unknown
   status: WebReviewCommentStatus
   resolved_by_user_id: string | null
+  /** Display-name snapshot of resolved_by_user_id, populated when Apply /
+   *  Amend / Dismiss fires. Avoids joins for the resolution banner. */
+  resolved_by_name: string | null
   resolved_at: string | null
   resolution_note: string | null
+  /** Strategist-applied tag from the feedback board UI. */
+  category: WebReviewCommentCategory | null
+  /** Staff member responsible for resolving this comment. Snapshot
+   *  pattern (id + name + email) so the card renders without a join. */
+  assignee_user_id: string | null
+  assignee_name: string | null
+  assignee_email: string | null
+  /** Optional due date shown in the feedback card footer. */
+  due_at: string | null
   created_at: string
   updated_at: string
 }

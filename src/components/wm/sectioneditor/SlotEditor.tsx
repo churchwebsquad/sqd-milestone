@@ -214,6 +214,7 @@ function ButtonInput({
       if (partial.kind === 'tel'    && !next.url.startsWith('tel:'))    next.url = 'tel:'
       if (partial.kind === 'external_url' && !/^https?:\/\//i.test(next.url)) next.url = ''
       if (partial.kind === 'internal_route' && /^https?:\/\//i.test(next.url)) next.url = ''
+      if (partial.kind === 'snippet' && !/\{\{\s*[\w.]+\s*\}\}/.test(next.url)) next.url = ''
       // Reset target so the inferred default applies.
       next.target = defaultTargetFor(next.kind)
     }
@@ -305,6 +306,7 @@ function CtaUrlInput({
     cta.kind === 'anchor'       ? '#section-id' :
     cta.kind === 'mailto'       ? 'mailto:hello@example.com' :
     cta.kind === 'tel'          ? 'tel:+15555551234' :
+    cta.kind === 'snippet'      ? '{{directions_url}}' :
     ''
   return (
     <div className="relative">

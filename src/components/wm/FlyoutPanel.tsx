@@ -10,6 +10,7 @@
  */
 
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { WMIconButton } from './IconButton'
 
@@ -45,7 +46,12 @@ export function WMFlyoutPanel({
 
   if (!open) return null
 
-  return (
+  // Render via portal so the flyout always positions against the
+  // viewport. Hosts that mount the flyout inside a stacking context
+  // (e.g. import modal with backdrop-filter, which traps `position:
+  // fixed` and the z-index) would otherwise see clicks intercepted by
+  // the parent overlay and the panel stacked incorrectly.
+  return createPortal(
     <div className="fixed inset-0 z-[100] flex justify-end" role="dialog" aria-modal="true">
       <div
         className="absolute inset-0 bg-wm-text/30 backdrop-blur-[1px] animate-wm-fade-in"
@@ -86,6 +92,7 @@ export function WMFlyoutPanel({
           </footer>
         )}
       </aside>
-    </div>
+    </div>,
+    document.body,
   )
 }

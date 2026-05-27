@@ -11,7 +11,7 @@
  * Manager card palette (multi, kind=component, max 4).
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Search, Check, Sparkles, X, Star } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { WMFlyoutPanel } from './FlyoutPanel'
@@ -127,25 +127,24 @@ export function WMCatalogSidePanel({
     })
     // Apply optional ranking — keep ids in `rankedIds` order, then
     // append everything else in the original (family, layer_name) order.
-    if (rankedIds && rankedIds.length > 0) {
-      const order = new Map(rankedIds.map((id, idx) => [id, idx]))
-      return [...filtered].sort((a, b) => {
+    // Sort policy: site-library picks ALWAYS go first (the project's
+    // curated palette is the strategist's preferred choices). Within
+    // each tier — library vs. non-library — apply the explicit
+    // ranking when present, else preserve catalog order.
+    const order = (rankedIds && rankedIds.length > 0)
+      ? new Map(rankedIds.map((id, idx) => [id, idx]))
+      : null
+    return [...filtered].sort((a, b) => {
+      const aLib = siteLibraryIds?.has(a.id) ? 0 : 1
+      const bLib = siteLibraryIds?.has(b.id) ? 0 : 1
+      if (aLib !== bLib) return aLib - bLib
+      if (order) {
         const ai = order.has(a.id) ? order.get(a.id)! : Number.MAX_SAFE_INTEGER
         const bi = order.has(b.id) ? order.get(b.id)! : Number.MAX_SAFE_INTEGER
         return ai - bi
-      })
-    }
-    // Fallback ordering when no explicit ranking: pin site-library
-    // picks to the top so the strategist sees the project's curated
-    // variants first.
-    if (siteLibraryIds && siteLibraryIds.size > 0) {
-      return [...filtered].sort((a, b) => {
-        const aLib = siteLibraryIds.has(a.id) ? 0 : 1
-        const bLib = siteLibraryIds.has(b.id) ? 0 : 1
-        return aLib - bLib
-      })
-    }
-    return filtered
+      }
+      return 0
+    })
   }, [rows, query, kindFilter, familyFilter, familyFilterActive, rankedIds, siteLibraryIds])
 
   const handleCardClick = async (id: string) => {
@@ -269,12 +268,30 @@ export function WMCatalogSidePanel({
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
-            {visible.map(t => {
+            {visible.map((t, idx) => {
               const isSelected = draftSelection.includes(t.id)
               const isSiteLibrary = !!siteLibraryIds?.has(t.id)
+              // Inject section headers (full-width grid rows) so the
+              // strategist can see where the site-library tier ends and
+              // the broader catalog begins. The boundaries fall between
+              // the last library row and the first non-library row.
+              const prevIsLibrary = idx > 0 ? !!siteLibraryIds?.has(visible[idx - 1].id) : false
+              const isFirst        = idx === 0
+              const showLibraryHeader  = isFirst && isSiteLibrary
+              const showCatalogHeader  = !isSiteLibrary && (isFirst || prevIsLibrary)
               return (
+                <Fragment key={t.id}>
+                {showLibraryHeader && (
+                  <p className="col-span-2 text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong flex items-center gap-1.5 mb-0">
+                    <Star size={10} className="fill-wm-accent-strong" /> Site library
+                  </p>
+                )}
+                {showCatalogHeader && (
+                  <p className="col-span-2 text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mt-2 mb-0">
+                    Brixies catalog
+                  </p>
+                )}
                 <button
-                  key={t.id}
                   type="button"
                   onClick={() => void handleCardClick(t.id)}
                   className={[
@@ -321,6 +338,7 @@ export function WMCatalogSidePanel({
                     )}
                   </div>
                 </button>
+                </Fragment>
               )
             })}
           </div>

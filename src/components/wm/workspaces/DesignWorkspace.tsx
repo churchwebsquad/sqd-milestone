@@ -806,6 +806,10 @@ function FigmaStyleGuideSection({
   const [used, setUsed] = useState<WebContentTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const loadUsed = useCallback(async () => {
+    // Design handoff enumerates ACTUAL page implementations + chrome
+    // bindings (header/footer/megamenu/offcanvas) — never the curated
+    // library wholesale. If a library pick was never placed on a real
+    // page, the designer doesn't need to prep it in Figma.
     setLoading(true)
     const { data: sectionRows } = await supabase
       .from('web_sections')

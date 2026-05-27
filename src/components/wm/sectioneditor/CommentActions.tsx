@@ -43,10 +43,15 @@ interface Props {
   onResolved: () => Promise<void>
   /** Tighter layout for narrow panels (the section panel inline list). */
   compact?: boolean
+  /** When true, the Dismiss affordance is hidden from this component.
+   *  Used by the feedback card where dismissing requires drilling into
+   *  the section editor first — the card itself only shows resolution-
+   *  through-action options (Apply / Amend). */
+  hideDismiss?: boolean
 }
 
 export function CommentActions({
-  comment, sectionFieldValues, onResolved, compact = false,
+  comment, sectionFieldValues, onResolved, compact = false, hideDismiss = false,
 }: Props) {
   const [mode, setMode] = useState<'idle' | 'amend' | 'dismiss'>('idle')
   const [amendValue, setAmendValue] = useState<string>(stringify(comment.suggested_value))
@@ -212,7 +217,9 @@ export function CommentActions({
     )
   }
 
-  // Full layout — three buttons in a row
+  // Full layout — three buttons in a row (Dismiss hidden when
+  // hideDismiss is set, e.g. on FeedbackCard where dismissal requires
+  // viewing the comment in section context first).
   return (
     <div className="flex items-center gap-1.5">
       {canApplyOrAmend && (
@@ -236,14 +243,16 @@ export function CommentActions({
           </button>
         </>
       )}
-      <button
-        type="button"
-        onClick={() => setMode('dismiss')}
-        disabled={saving}
-        className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md bg-wm-bg-elevated border border-wm-border text-wm-text-muted text-[11px] font-semibold hover:border-wm-text-subtle hover:text-wm-text transition-colors disabled:opacity-50"
-      >
-        <X size={11} /> Dismiss
-      </button>
+      {!hideDismiss && (
+        <button
+          type="button"
+          onClick={() => setMode('dismiss')}
+          disabled={saving}
+          className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md bg-wm-bg-elevated border border-wm-border text-wm-text-muted text-[11px] font-semibold hover:border-wm-text-subtle hover:text-wm-text transition-colors disabled:opacity-50"
+        >
+          <X size={11} /> Dismiss
+        </button>
+      )}
     </div>
   )
 }

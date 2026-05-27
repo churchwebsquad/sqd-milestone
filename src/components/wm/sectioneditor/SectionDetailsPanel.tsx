@@ -18,13 +18,15 @@ import { useState } from 'react'
 import {
   X, Image as ImageIcon, LayoutGrid, MousePointerClick, FormInput,
   ChevronDown, ChevronRight, RotateCw, Archive, Trash2,
-  MessageSquarePlus, Clock,
+  MessageSquarePlus, Clock, AlertTriangle,
 } from 'lucide-react'
 import { SlotEditor } from './SlotEditor'
 import { GroupEditor } from './GroupEditor'
 import { GridEditor, detectGridChain } from './GridEditor'
 import { SnippetMenu } from './SnippetMenu'
 import { CommentActions } from './CommentActions'
+import { FeedbackCard } from '../feedback/FeedbackCard'
+import { SaveToLibraryButton } from './SaveToLibraryButton'
 import { ProjectPagesProvider } from './ProjectPagesContext'
 import { summarizeSlotPresence } from '../../../lib/webBrixiesLayoutParser'
 import { supabase } from '../../../lib/supabase'
@@ -50,11 +52,26 @@ interface Props {
   onChangeVariant: () => void
   onUnbind: () => void
   onRemove: () => void
+  /** Project row — needed by the "Save to site library" button so it
+   *  can read/write `curated_library`. Optional so older callers
+   *  (e.g. legacy review portal) compile; SaveToLibraryButton is
+   *  hidden when this isn't passed. */
+  project?: import('../../../types/database').StrategyWebProject
+  /** Existing library bindings + their template metadata, used by the
+   *  Save popover to render "Replace this pick" lists with names. */
+  libraryTemplatesById?: Record<string, Pick<WebContentTemplate, 'id' | 'layer_name'>>
+  /** Refresh hook fired after the curated_library is mutated from
+   *  this panel. The workspace re-reads the project row when this
+   *  fires so the badge state stays in sync. */
+  onLibraryChange?: () => Promise<void>
   /** Active internal review on the project (or null). Drives the
    *  comment-create entry point at the bottom of the panel. */
   activeInternalReview?: WebReview | null
   /** Open comments + suggestions attached to this section. */
   sectionComments?: WebReviewComment[]
+  /** Review row keyed by id — used to resolve each comment's
+   *  reviewKind + roundNumber for the new FeedbackCard header. */
+  reviewsById?: Record<string, WebReview>
   /** Called after a comment is created or resolved so the parent
    *  workspace reloads the review state. */
   onCommentsChange?: () => Promise<void>
@@ -63,7 +80,8 @@ interface Props {
 export function SectionDetailsPanel({
   section, template, snippets, cardTemplates, pages,
   onChange, onClose, onChangeVariant, onUnbind, onRemove,
-  activeInternalReview, sectionComments, onCommentsChange,
+  project, libraryTemplatesById, onLibraryChange,
+  activeInternalReview, sectionComments, reviewsById, onCommentsChange,
 }: Props) {
   const values = (section.field_values ?? {}) as Record<string, unknown>
   const setValue = (key: string, v: unknown) => {
@@ -111,6 +129,14 @@ export function SectionDetailsPanel({
         </div>
         <div className="mt-2 flex items-center gap-1 flex-wrap">
           <PanelButton onClick={onChangeVariant} icon={<RotateCw size={11} />}>Change variant</PanelButton>
+          {template && project && onLibraryChange && (
+            <SaveToLibraryButton
+              project={project}
+              template={template}
+              templatesById={libraryTemplatesById}
+              onChange={onLibraryChange}
+            />
+          )}
           {template && (
             <PanelButton onClick={onUnbind} icon={<Archive size={11} />} variant="ghost">Unbind</PanelButton>
           )}
@@ -134,6 +160,7 @@ export function SectionDetailsPanel({
             template={template}
             activeInternalReview={activeInternalReview}
             sectionComments={sectionComments ?? []}
+            reviewsById={reviewsById ?? {}}
             onCommentsChange={onCommentsChange ?? (async () => {})}
           />
         )}
@@ -203,9 +230,45 @@ export function SectionDetailsPanel({
             template={template}
             activeInternalReview={null}
             sectionComments={sectionComments ?? []}
+            reviewsById={reviewsById ?? {}}
             onCommentsChange={onCommentsChange ?? (async () => {})}
           />
         )}
+
+        {/* Unmapped content — copy that didn't make it into a slot or
+            group on the bound template. The import pipeline stashes
+            anything it can't route so nothing drops silently; swapping
+            the template later rehydrates entries whose canonical key
+            matches a slot on the new schema. */}
+        {(() => {
+          const raw = values.__unmapped
+          if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+          const entries = Object.entries(raw as Record<string, unknown>)
+            .filter(([, v]) => v !== undefined && v !== null && v !== '')
+          if (entries.length === 0) return null
+          return (
+            <Section title={`Unmapped content (${entries.length})`} defaultOpen>
+              <div className="rounded-md border border-wm-warning/40 bg-wm-warning-bg p-3">
+                <div className="flex items-start gap-2 mb-2">
+                  <AlertTriangle size={12} className="text-wm-warning shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-wm-text leading-snug">
+                    Copy from the import that doesn't have a matching slot here. Swap
+                    the variant to a template that defines these keys and they'll
+                    rehydrate automatically.
+                  </p>
+                </div>
+                <ul className="space-y-2">
+                  {entries.map(([k, v]) => (
+                    <li key={k} className="rounded border border-wm-border bg-wm-bg-elevated p-2">
+                      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle font-mono mb-1">{k}</p>
+                      <UnmappedValuePreview value={v} />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </Section>
+          )
+        })()}
 
         {/* Counters at the bottom — read-only */}
         {template && presence && (
@@ -449,12 +512,13 @@ function FreehandBodyField({
  *  creates a new comment row tied to the active internal review.
  *  Resolution actions (Apply / Amend / Dismiss) ship in Phase E. */
 function ReviewCommentsBlock({
-  section, template, activeInternalReview, sectionComments, onCommentsChange,
+  section, template, activeInternalReview, sectionComments, reviewsById, onCommentsChange,
 }: {
   section: WebSection
   template: WebContentTemplate | null
   activeInternalReview: WebReview | null
   sectionComments: WebReviewComment[]
+  reviewsById: Record<string, WebReview>
   onCommentsChange: () => Promise<void>
 }) {
   // Open the comment form by default when an internal review is
@@ -532,42 +596,30 @@ function ReviewCommentsBlock({
 
   return (
     <Section title="Review comments" defaultOpen>
-      {/* Existing open comments */}
+      {/* Existing comments — rendered as the new FeedbackCard so the
+          section panel matches the rail's feedback tab visually. */}
       {sectionComments.length === 0 ? (
         <p className="text-[11px] text-wm-text-subtle italic mb-2">
           No comments on this section yet.
         </p>
       ) : (
-        <ul className="space-y-1.5 mb-3">
-          {sectionComments.map(c => (
-            <li key={c.id} className="rounded-md border border-wm-border bg-wm-bg px-2.5 py-1.5">
-              <div className="flex items-center gap-1.5 text-[10px] text-wm-text-subtle mb-0.5 flex-wrap">
-                <KindTag kind={c.kind} />
-                <span className="font-semibold text-wm-text">
-                  {c.author_external_name ?? (c.author_kind === 'partner' ? 'Partner' : 'Staff')}
-                </span>
-                {c.field_key && <span className="font-mono opacity-70">{c.field_key}</span>}
-                <span className="ml-auto inline-flex items-center gap-0.5">
-                  <Clock size={9} /> {fmtTime(c.created_at)}
-                </span>
-              </div>
-              {c.body && <p className="text-[12px] text-wm-text whitespace-pre-wrap">{c.body}</p>}
-              {(c.kind === 'suggested' || c.kind === 'requested') && c.suggested_value != null && (
-                <div className="mt-1 text-[11px] font-mono text-wm-text border-l-2 border-wm-accent pl-2 line-clamp-2">
-                  → {stringifyVal(c.suggested_value)}
-                </div>
-              )}
-              <div className="mt-1.5 flex items-center justify-end">
-                <CommentActions
-                  comment={c}
-                  sectionFieldValues={(section.field_values ?? {}) as Record<string, unknown>}
-                  onResolved={onCommentsChange}
-                  compact
-                />
-              </div>
-            </li>
-          ))}
-        </ul>
+        <div className="space-y-2 mb-3">
+          {sectionComments.map(c => {
+            const r = reviewsById[c.review_id]
+            return (
+              <FeedbackCard
+                key={c.id}
+                comment={c}
+                reviewKind={r?.kind ?? 'internal'}
+                roundNumber={r?.round_number ?? 1}
+                pageName={null}
+                sectionLabel={null}
+                sectionFieldValues={(section.field_values ?? {}) as Record<string, unknown>}
+                onChanged={onCommentsChange}
+              />
+            )
+          })}
+        </div>
       )}
 
       {/* Entry point */}
@@ -706,4 +758,67 @@ function stringifyVal(v: unknown): string {
     try { return JSON.stringify(v).slice(0, 140) } catch { return String(v) }
   }
   return String(v)
+}
+
+/** Render a single __unmapped value. Strings render as-is (with HTML
+ *  stripped for safety). Arrays / `{items: [...]}` render as a short
+ *  bullet list with at most 5 items previewed. Everything else falls
+ *  back to a JSON preview. */
+function UnmappedValuePreview({ value }: { value: unknown }) {
+  if (typeof value === 'string') {
+    const clean = value.replace(/<[^>]+>/g, '').trim()
+    return <p className="text-[12px] text-wm-text leading-snug whitespace-pre-wrap">{clean}</p>
+  }
+  const items = Array.isArray(value)
+    ? value
+    : (value && typeof value === 'object' && 'items' in (value as Record<string, unknown>)
+        && Array.isArray((value as { items: unknown }).items)
+        ? (value as { items: unknown[] }).items
+        : null)
+  if (items) {
+    const preview = items.slice(0, 5)
+    return (
+      <ul className="space-y-1 list-disc pl-4">
+        {preview.map((item, i) => (
+          <li key={i} className="text-[11px] text-wm-text leading-snug">
+            {typeof item === 'object' && item !== null ? renderItemPreview(item as Record<string, unknown>) : String(item)}
+          </li>
+        ))}
+        {items.length > preview.length && (
+          <li className="text-[10px] text-wm-text-subtle italic list-none">
+            …and {items.length - preview.length} more
+          </li>
+        )}
+      </ul>
+    )
+  }
+  if (value && typeof value === 'object') {
+    const obj = value as { label?: unknown; url?: unknown }
+    if (typeof obj.label === 'string' || typeof obj.url === 'string') {
+      const label = typeof obj.label === 'string' ? obj.label : ''
+      const url   = typeof obj.url === 'string' ? obj.url : ''
+      return (
+        <p className="text-[12px] text-wm-text leading-snug">
+          {label}{label && url ? ' — ' : ''}
+          {url && <code className="text-[10px] text-wm-text-subtle font-mono">{url}</code>}
+        </p>
+      )
+    }
+  }
+  return <p className="text-[11px] font-mono text-wm-text-muted">{stringifyVal(value)}</p>
+}
+
+function renderItemPreview(item: Record<string, unknown>): string {
+  // Prefer a heading-shaped key if present.
+  for (const [k, v] of Object.entries(item)) {
+    const ck = k.toLowerCase().replace(/[_\s-]+/g, '')
+    if ((ck.includes('heading') || ck.includes('title') || ck.includes('name') || ck === 'label') && typeof v === 'string' && v.trim()) {
+      return v
+    }
+  }
+  // Else first non-empty string.
+  for (const v of Object.values(item)) {
+    if (typeof v === 'string' && v.trim()) return v.slice(0, 100)
+  }
+  try { return JSON.stringify(item).slice(0, 100) } catch { return '' }
 }

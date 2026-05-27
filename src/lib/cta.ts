@@ -40,6 +40,10 @@ export function isButtonShapedSlot(slot: WebSlotDef): boolean {
 export function inferCtaKind(url: string): CtaKind {
   const v = url.trim()
   if (!v) return 'internal_route'                              // empty defaults sensibly
+  // Snippet token — resolved at render time from the project's
+  // snippet map. Detect anywhere in the string so partial tokens like
+  // "{{base_url}}/page" still classify as snippet.
+  if (/\{\{\s*[\w.]+\s*\}\}/.test(v))         return 'snippet'
   if (v.startsWith('mailto:'))               return 'mailto'
   if (v.startsWith('tel:'))                  return 'tel'
   if (v.startsWith('#'))                     return 'anchor'
@@ -52,12 +56,15 @@ export function inferCtaKind(url: string): CtaKind {
 }
 
 /** Default `target` for a kind. External + mailto + tel naturally
- *  open in a new tab; internal routes + anchors stay in-page. */
+ *  open in a new tab; internal routes + anchors stay in-page. Snippets
+ *  default to a new tab because the most common church snippets
+ *  (give_url, directions_url, livestream_url) point off-site. */
 export function defaultTargetFor(kind: CtaKind): '_self' | '_blank' {
   switch (kind) {
     case 'external_url':
     case 'mailto':
     case 'tel':
+    case 'snippet':
       return '_blank'
     default:
       return '_self'
@@ -90,7 +97,8 @@ export function normalizeCtaValue(raw: unknown): CtaValue {
  *  stored value is missing or garbage. */
 function isCtaKind(v: unknown): v is CtaKind {
   return v === 'internal_route' || v === 'external_url' ||
-         v === 'anchor' || v === 'mailto' || v === 'tel'
+         v === 'anchor' || v === 'mailto' || v === 'tel' ||
+         v === 'snippet'
 }
 
 /** Human-readable label for the kind picker + the handoff inventory. */
@@ -100,6 +108,7 @@ export const CTA_KIND_LABELS: Record<CtaKind, string> = {
   anchor:         'Anchor on this page',
   mailto:         'Email link',
   tel:            'Phone link',
+  snippet:        'Site snippet',
 }
 
 /** Validate a CTA's URL against the set of internal page slugs known
@@ -137,6 +146,11 @@ export function validateCta(
     case 'tel': {
       if (!url) return 'No phone set.'
       if (!url.startsWith('tel:')) return 'Phone links should start with tel:.'
+      return null
+    }
+    case 'snippet': {
+      if (!url) return 'No snippet set.'
+      if (!/\{\{\s*[\w.]+\s*\}\}/.test(url)) return 'Snippet links should contain {{token}}.'
       return null
     }
   }

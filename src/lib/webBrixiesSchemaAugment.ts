@@ -107,15 +107,289 @@ export function augmentTemplate(template: WebContentTemplate): WebContentTemplat
   // it as card.heading — two slots editing the same visual element.
   const globalLayers = collectAllSchemaLayers(template.fields)
 
-  const augmented = template.fields.map(f => augmentField(f, root, globalLayers))
+  let augmented = template.fields.map(f => augmentField(f, root, globalLayers))
+
+  // FAQ inference — catalog templates like faq-section-1 ship with a
+  // schema of only heading + description, yet their source_html
+  // contains a container holding N sibling accordion frames (each with
+  // a bold question + body answer). Without a synthesized items group
+  // the importer has nowhere to put cowork's `faq_items` payload and
+  // the section renders empty toggles.
+  //
+  // GATED to FAQ-family templates only. The previous unrestricted
+  // version mis-fired on hero/feature templates whose top container
+  // also has "2+ children each with some bold text" (heading +
+  // description + buttons) and synthesized a spurious `items` group
+  // that the renderer then tried to expand, mangling the layout.
+  if (isFaqTemplate(template) && !hasFaqShapedGroup(augmented)) {
+    const faqGroup = inferFaqGroup(root, new Set([
+      ...collectAllSchemaLayers(augmented),
+      ...globalLayers,
+    ]))
+    if (faqGroup) augmented = [...augmented, faqGroup]
+  }
+
+  // Hero tagline injection — every hero with a heading + description
+  // should expose an editable tagline so the strategist has the same
+  // eyebrow slot across the catalog. About half the Brixies hero
+  // templates ship a Tagline layer (49, 55, 65, 77, 80, 85, etc.),
+  // the rest don't (1, 5, 13, 14, 27, 32, 34, 41, 43, 44, 56, 9,
+  // etc.). We synthesize one for the latter: inject a styled Tagline
+  // <div> directly above the source's Heading and surface a top-level
+  // `tagline` slot in the schema pointing at it.
+  let mutatedSourceHtml: string | null = null
+  if (isHeroTemplate(template) && !hasTaglineSlot(augmented)) {
+    const injection = injectHeroTagline(root, augmented)
+    if (injection) {
+      augmented = injection.augmented
+      mutatedSourceHtml = root.outerHTML
+    }
+  }
+
   // NOTE: top-level inference (inferUnaddressedFields) was attempted but
   // introduced layer_name collisions with existing fields — the renderer's
   // indexByLayer Map would overwrite the user-valued field with an empty
   // augmented one, blanking out substituted content. The function is kept
   // below for reference and future work; not invoked. Lorem visibility
   // is handled by neutralizeLoremPlaceholders in the renderer instead.
-  if (JSON.stringify(augmented) === JSON.stringify(template.fields)) return template
-  return { ...template, fields: augmented }
+  const fieldsChanged = JSON.stringify(augmented) !== JSON.stringify(template.fields)
+  if (!fieldsChanged && !mutatedSourceHtml) return template
+  return {
+    ...template,
+    fields: augmented,
+    ...(mutatedSourceHtml ? { source_html: mutatedSourceHtml } : {}),
+  }
+}
+
+/** True when the template is in the Hero Section family — matches the
+ *  catalog's `family` value or an id prefix. */
+function isHeroTemplate(template: WebContentTemplate): boolean {
+  if (typeof template.family === 'string' && /hero/i.test(template.family)) return true
+  if (typeof template.id === 'string' && /^hero[-_]/i.test(template.id)) return true
+  return false
+}
+
+/** Walks `schema` deeply looking for any slot named tagline/eyebrow/
+ *  kicker/pretitle. Returns true if found — the augmenter then skips
+ *  the synthesis pass for this template. */
+function hasTaglineSlot(schema: ReadonlyArray<WebFieldDef>): boolean {
+  for (const f of schema) {
+    if (f.kind === 'slot') {
+      const key = (f.key ?? '').toLowerCase()
+      const layer = (f.layer_name ?? '').toLowerCase()
+      if (/tagline|eyebrow|kicker|pretitle/.test(key)) return true
+      if (/tagline|eyebrow|kicker|pretitle/.test(layer)) return true
+    }
+    if (f.kind === 'group' && Array.isArray(f.item_schema)) {
+      if (hasTaglineSlot(f.item_schema)) return true
+    }
+  }
+  return false
+}
+
+/** Find the first top-level Heading-shaped element in the source —
+ *  the element above which a Tagline should be inserted. Prefers
+ *  layers literally named Heading / Title; falls back to large bold
+ *  text styles when the source uses generic layer names. */
+function findHeroHeading(root: Element): Element | null {
+  const candidates = Array.from(root.querySelectorAll('[data-layer]'))
+  for (const el of candidates) {
+    const layer = (el.getAttribute('data-layer') ?? '').toLowerCase()
+    if (/^(heading|title|h1|hero[-_ ]?title)$/i.test(layer)) return el
+  }
+  // Style-based fallback: a large bold text node sitting in the upper
+  // half of the section's content stack.
+  for (const el of candidates) {
+    const style = el.getAttribute('style') ?? ''
+    const fontMatch = /font-size:\s*([\d.]+)px/i.exec(style)
+    const weightMatch = /font-weight:\s*(\d+)/i.exec(style)
+    const px = fontMatch ? parseFloat(fontMatch[1]) : NaN
+    const weight = weightMatch ? parseInt(weightMatch[1], 10) : NaN
+    if (!isNaN(px) && px >= 32 && !isNaN(weight) && weight >= 600) return el
+  }
+  return null
+}
+
+/** Inject a styled Tagline element directly above the heading and
+ *  return an updated schema with a `tagline` slot at the top. The
+ *  caller serializes `root.outerHTML` after we mutate it in place.
+ *  Style mirrors hero-section-49's existing tagline (the catalog's
+ *  canonical example) — neutral color, Inter font, weight 600,
+ *  alignment inherited from the heading so center-aligned hero
+ *  variants keep their alignment. */
+function injectHeroTagline(
+  root: Element,
+  augmented: ReadonlyArray<WebFieldDef>,
+): { augmented: WebFieldDef[] } | null {
+  // If the source already carries a tagline-shaped element, surface
+  // it as a top-level slot instead of injecting a second one.
+  const existing = Array.from(root.querySelectorAll('[data-layer]')).find(el => {
+    const layer = (el.getAttribute('data-layer') ?? '').toLowerCase()
+    return /^(tagline|eyebrow|kicker|pretitle)$/.test(layer)
+  })
+  if (existing) {
+    const layerName = existing.getAttribute('data-layer') ?? 'Tagline'
+    const taglineSlot: WebSlotDef = {
+      kind: 'slot',
+      key: 'tagline',
+      layer_name: layerName,
+      type: 'text',
+      max_chars: 60,
+      label: 'Tagline',
+    }
+    return { augmented: [taglineSlot, ...augmented] }
+  }
+
+  const heading = findHeroHeading(root)
+  if (!heading) return null
+  const headingParent = heading.parentElement
+  if (!headingParent) return null
+
+  // Inherit alignment from the heading so we don't fight its layout.
+  const hStyle = heading.getAttribute('style') ?? ''
+  const alignMatch = /text-align:\s*([a-z]+)/i.exec(hStyle)
+  const align = alignMatch ? alignMatch[1] : 'inherit'
+
+  const doc = root.ownerDocument
+  const tagline = doc.createElement('div')
+  tagline.setAttribute('data-layer', 'Tagline')
+  tagline.setAttribute('class', 'Tagline')
+  tagline.setAttribute('style', [
+    `text-align: ${align}`,
+    'color: #6B5CE7',                 // brand Purple Mid — distinguishes from heading
+    'font-size: 14px',
+    'font-family: Inter',
+    'font-weight: 600',
+    'line-height: 22px',
+    'letter-spacing: 0.08em',
+    'text-transform: uppercase',
+    'word-wrap: break-word',
+    'margin-bottom: 4px',
+  ].join('; '))
+  tagline.textContent = 'Tagline'
+
+  headingParent.insertBefore(tagline, heading)
+
+  const taglineSlot: WebSlotDef = {
+    kind: 'slot',
+    key: 'tagline',
+    layer_name: 'Tagline',
+    type: 'text',
+    max_chars: 60,
+    label: 'Tagline',
+  }
+  return { augmented: [taglineSlot, ...augmented] }
+}
+
+/** Only fire FAQ inference on templates that ARE FAQ templates.
+ *  Matches by family name ("FAQ Section" in the catalog) or by id
+ *  prefix (`faq-` / `faq_`). Anything else — hero, feature, content,
+ *  timeline — skips the FAQ pass to avoid synthesizing spurious
+ *  groups whose layer_name collides with the renderer's expansion. */
+function isFaqTemplate(template: WebContentTemplate): boolean {
+  if (typeof template.family === 'string' && /faq/i.test(template.family)) return true
+  if (typeof template.id === 'string' && /^faq[-_]/i.test(template.id)) return true
+  return false
+}
+
+/** True when `schema` already contains a group whose item_schema has
+ *  both a question-shaped slot and an answer-shaped slot, deeply. */
+function hasFaqShapedGroup(schema: ReadonlyArray<WebFieldDef>): boolean {
+  for (const f of schema) {
+    if (f.kind === 'group' && Array.isArray(f.item_schema)) {
+      const hasQ = f.item_schema.some(s => s.kind === 'slot'
+        && (/question/i.test(s.key) || /question/i.test(s.layer_name ?? '')))
+      const hasA = f.item_schema.some(s => s.kind === 'slot'
+        && (/answer/i.test(s.key) || /answer/i.test(s.layer_name ?? '')))
+      if (hasQ && hasA) return true
+      if (hasFaqShapedGroup(f.item_schema)) return true
+    }
+  }
+  return false
+}
+
+/** Walk the source DOM looking for a container holding 2+ sibling
+ *  data-layer children that each contain a styled (bold) text +
+ *  optional longer-body text — the classic accordion shape. Returns a
+ *  synthesized group field with `question` + `answer` item slots so
+ *  the binder + reconcile-alias matcher can route FAQ payloads here. */
+function inferFaqGroup(root: Element, existingLayers: Set<string>): WebGroupDef | null {
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_ELEMENT)
+  let node = walker.nextNode() as Element | null
+
+  while (node) {
+    const layer = node.getAttribute('data-layer')
+    if (!layer) { node = walker.nextNode() as Element | null; continue }
+    const norm = normalize(layer)
+    if (existingLayers.has(norm)) { node = walker.nextNode() as Element | null; continue }
+
+    const dataChildren = Array.from(node.children).filter(c => c.hasAttribute('data-layer'))
+    if (dataChildren.length < 2) { node = walker.nextNode() as Element | null; continue }
+
+    // Each child must look like an accordion frame: contain at least
+    // one bold-shaped text descendant somewhere in its subtree.
+    const allFaqShaped = dataChildren.every(child => {
+      const cands = collectTextCandidates(child)
+      return cands.some(c => isBoldText(c.element))
+    })
+    if (!allFaqShaped) { node = walker.nextNode() as Element | null; continue }
+
+    // Pick the richest sibling as the item template — the one with
+    // the most distinct text candidates. Frame 57 in faq-section-1
+    // is the only sibling that has the answer paragraph; the rest are
+    // header-only stubs.
+    const richest = dataChildren.reduce((best, cur) =>
+      collectTextCandidates(cur).length > collectTextCandidates(best).length ? cur : best,
+    dataChildren[0])
+    const cands = collectTextCandidates(richest)
+    let questionEl: Element | null = null
+    let answerEl:   Element | null = null
+    for (const c of cands) {
+      if (!questionEl && isBoldText(c.element)) {
+        questionEl = c.element
+      } else if (!answerEl && !isBoldText(c.element)
+          && (c.element.textContent ?? '').trim().length > 40) {
+        answerEl = c.element
+      }
+    }
+    if (!questionEl) { node = walker.nextNode() as Element | null; continue }
+
+    const itemSchema: WebSlotDef[] = [
+      {
+        kind: 'slot',
+        key: 'question',
+        layer_name: questionEl.getAttribute('data-layer') ?? '',
+        type: 'text',
+        max_chars: 200,
+        heading_level: 3,
+      },
+    ]
+    if (answerEl) {
+      itemSchema.push({
+        kind: 'slot',
+        key: 'answer',
+        layer_name: answerEl.getAttribute('data-layer') ?? '',
+        type: 'richtext',
+        max_chars: 400,
+      })
+    }
+
+    return {
+      kind: 'group',
+      key: 'items',
+      layer_name: layer,
+      default_count: dataChildren.length,
+      item_schema: itemSchema,
+    }
+  }
+  return null
+}
+
+function isBoldText(el: Element): boolean {
+  const style = el.getAttribute('style') ?? ''
+  const m = /font-weight:\s*(\d+)/i.exec(style)
+  const w = m ? parseInt(m[1], 10) : NaN
+  return !isNaN(w) && w >= 600
 }
 
 function augmentField(field: WebFieldDef, sourceRoot: Element, globalLayers: Set<string>): WebFieldDef {
