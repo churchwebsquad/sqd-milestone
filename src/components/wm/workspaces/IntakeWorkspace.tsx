@@ -16,11 +16,14 @@
 
 import { useEffect, useState, useRef } from 'react'
 import {
-  Check, CircleAlert, ClipboardList, ExternalLink, Loader2, Trash2, Upload,
+  Check, CircleAlert, ChevronDown, ChevronRight, ClipboardList,
+  ExternalLink, Loader2, Trash2, Upload,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { uploadAttachment, removeAttachment } from '../../../lib/attachmentUpload'
 import { fetchIntakeStatus } from '../../../lib/webIntake'
+import { CrawlWorkspace } from './CrawlWorkspace'
+import { CrawlInventory } from './CrawlInventory'
 import type { IntakeRowStatus, IntakeStatus } from '../../../lib/webIntake'
 import type { StrategyWebProject, WebIntakeCategory, WebIntakeDocument } from '../../../types/database'
 
@@ -154,43 +157,47 @@ export function IntakeWorkspace({ project, onChange }: Props) {
 
   return (
     <div className="p-6 md:p-8">
-      <div className="max-w-3xl mx-auto">
-        <header className="mb-5">
+      <div className="max-w-5xl mx-auto space-y-6">
+        <header>
           <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
             <ClipboardList size={13} />
-            <p className="text-[11px] font-bold uppercase tracking-widest">Intake</p>
+            <p className="text-[11px] font-bold uppercase tracking-widest">Intake &amp; Crawl</p>
           </div>
-          <h1 className="text-2xl font-semibold text-wm-text">Foundations checklist</h1>
+          <h1 className="text-2xl font-semibold text-wm-text">Foundations</h1>
           <p className="text-sm text-wm-text-muted mt-1 max-w-2xl">
-            Verify the inputs every downstream tab depends on. Three hard stops gate
-            authoring — sitemap, copy drafts, and the design system all reference
-            what lands here.
+            Inputs every downstream tab depends on. Three hard stops gate
+            authoring; the crawl populates snippets + voice signals
+            automatically once it runs.
           </p>
         </header>
 
-        <StatusBar intake={intake} />
+        {/* Compact checklist — each row collapses to a single line by
+            default. Click to expand for uploads + per-row affordances. */}
+        <section className="rounded-xl border border-wm-border bg-wm-bg-elevated">
+          <CompactStatusBar intake={intake} />
+          <ul className="divide-y divide-wm-border">
+            {(['discovery_questionnaire', 'strategy_brief', 'brand_handoff', 'am_handoff', 'content_collection'] as const).map(key => (
+              <CompactIntakeRow
+                key={key}
+                rowKey={key}
+                row={intake[key]}
+                project={project}
+                onChange={async () => { await refreshIntake(); await onChange() }}
+              />
+            ))}
+          </ul>
+        </section>
 
-        <div className="mt-5 space-y-3">
-          {(['discovery_questionnaire', 'strategy_brief', 'brand_handoff', 'am_handoff', 'content_collection'] as const).map(key => (
-            <IntakeRow
-              key={key}
-              rowKey={key}
-              row={intake[key]}
-              project={project}
-              onChange={async () => { await refreshIntake(); await onChange() }}
-            />
-          ))}
+        {/* Site crawl — formerly its own tab, now lives alongside the
+            checklist since intake + crawl together form the "what do
+            we know about this church?" surface. */}
+        <CrawlWorkspace project={project} />
 
-          <div className="rounded-md border border-dashed border-wm-border bg-wm-bg-hover/40 px-4 py-3 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[13px] font-semibold text-wm-text">Site crawl</p>
-              <p className="text-[11px] text-wm-text-muted mt-0.5">Automated crawl of the partner's current site.</p>
-            </div>
-            <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle bg-wm-bg px-2 py-1 rounded-full">
-              Phase 2
-            </span>
-          </div>
-        </div>
+        {/* Crawl Inventory — topic-bucketed view of crawled content
+            (voice signals on narrative topics, structured items on
+            sermons/events/staff). Populated automatically by the
+            crawl-categorize edge function. */}
+        <CrawlInventory projectId={project.id} />
       </div>
     </div>
   )
@@ -220,6 +227,109 @@ function StatusBar({ intake }: { intake: IntakeStatus }) {
         />
       </div>
     </div>
+  )
+}
+
+// ── Condensed bar + row ───────────────────────────────────────────────
+
+function CompactStatusBar({ intake }: { intake: IntakeStatus }) {
+  const pct = (intake.hard_stops_complete / intake.hard_stops_total) * 100
+  return (
+    <header className="px-4 py-2.5 border-b border-wm-border bg-wm-bg-hover/30 flex items-center gap-3">
+      <div className="flex-1 min-w-0">
+        <p className="text-[11px] font-semibold text-wm-text leading-tight">
+          Hard stops:{' '}
+          <span className={intake.ready_for_content ? 'text-wm-success' : 'text-wm-warn'}>
+            {intake.hard_stops_complete} of {intake.hard_stops_total}
+          </span>
+          <span className="ml-2 text-[10px] text-wm-text-muted font-normal">
+            {intake.ready_for_content ? 'Ready to author' : 'Awaiting required inputs'}
+          </span>
+        </p>
+        <div className="mt-1.5 h-1 bg-wm-bg-hover rounded-full overflow-hidden">
+          <div
+            className={['h-full rounded-full transition-all', intake.ready_for_content ? 'bg-wm-success' : 'bg-wm-accent'].join(' ')}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+    </header>
+  )
+}
+
+function CompactIntakeRow({
+  rowKey, row, project, onChange,
+}: {
+  rowKey: RowKey
+  row: IntakeRowStatus
+  project: StrategyWebProject
+  onChange: () => Promise<void>
+}) {
+  const meta = ROW_META[rowKey]
+  // Default-expand pending hard stops (action needed); default-collapse
+  // everything else (just confirmation).
+  const defaultOpen = meta.hardStop && !row.received
+  const [open, setOpen] = useState(defaultOpen)
+
+  const fileCount = row.uploaded_files.length
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full px-4 py-2 flex items-center gap-3 hover:bg-wm-bg-hover/30 transition-colors text-left"
+      >
+        <span className="shrink-0 text-wm-text-subtle">
+          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        </span>
+        <CompactStatusPill received={row.received} hardStop={meta.hardStop} />
+        <span className="flex-1 min-w-0">
+          <span className="text-[13px] font-semibold text-wm-text">{meta.title}</span>
+          {!meta.hardStop && (
+            <span className="ml-2 text-[10px] uppercase tracking-widest text-wm-text-subtle">Optional</span>
+          )}
+          {row.received && row.source_label && (
+            <span className="ml-2 text-[11px] text-wm-text-muted truncate">
+              · {row.source_label}
+            </span>
+          )}
+        </span>
+        {fileCount > 0 && (
+          <span className="shrink-0 text-[10px] text-wm-text-muted bg-wm-bg px-1.5 py-0.5 rounded">
+            {fileCount} file{fileCount === 1 ? '' : 's'}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="px-4 pb-3 pt-1 pl-12 border-t border-wm-border/40">
+          <IntakeRow
+            rowKey={rowKey}
+            row={row}
+            project={project}
+            onChange={onChange}
+          />
+        </div>
+      )}
+    </li>
+  )
+}
+
+function CompactStatusPill({ received, hardStop }: { received: boolean; hardStop: boolean }) {
+  if (received) {
+    return (
+      <span className="inline-flex items-center gap-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 bg-wm-success-bg text-wm-success border border-wm-success/20 shrink-0">
+        <Check size={9} />
+      </span>
+    )
+  }
+  return (
+    <span className={[
+      'inline-flex items-center gap-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 border shrink-0',
+      hardStop ? 'bg-wm-warn-bg text-wm-warn border-wm-warn/20' : 'bg-wm-bg text-wm-text-muted border-wm-border',
+    ].join(' ')}>
+      <CircleAlert size={9} />
+    </span>
   )
 }
 

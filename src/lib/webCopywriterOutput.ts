@@ -31,10 +31,17 @@ import {
   pairSections, loadProjectSiteState, augmentCatalog,
   type SectionPairResult, type SectionPairInput,
 } from './webBrixiesPairer'
+import { autoMapAggressive, type PlacementLogEntry } from './webUnmappedMapper'
+import {
+  extractDocument, bindDocumentToTemplate, assignNodeIds,
+  type ContentDocument, type BindProvenanceMap,
+} from './webContentDocument'
 import {
   recordBindTelemetry, computeMatchedSlotKeys, collectPaletteTemplateIds,
   emptyReconcileTelemetry, type BindTelemetryRecord,
 } from './webBindTelemetry'
+import { deriveProvenanceFromBind } from './webFieldProvenance'
+import type { FieldProvenanceMap } from '../types/database'
 import {
   reconcileFieldValuesAcrossTemplates,
   valuesToDocHtmlByShape,
@@ -652,6 +659,22 @@ export interface SectionBindResult {
   usedFaqInference: boolean
   /** Free-form warnings raised during bind (e.g. value-shape phase failures). */
   bindNotes: string[]
+  /** Aggressive auto-map moves applied to drain `__unmapped` after the
+   *  reconcile pass. The panel surfaces these as a "We placed N items"
+   *  banner so strategists can spot-check the conversions. */
+  autoPlacements: PlacementLogEntry[]
+  /** The ContentDocument IR derived from `rawValues`. Returned without
+   *  node_ids so callers can decide whether to run `assignNodeIds`
+   *  against a previous snapshot (preserves identity across re-imports)
+   *  or against null (fresh import). NULL only when extractDocument
+   *  threw — captured in bindNotes. v54+. */
+  ir: ContentDocument | null
+  /** Per-field provenance map derived from the template + bind output:
+   *  populated slots get `source: 'auto'`, required-but-unpopulated
+   *  slots get `source: 'unbound'`. Persisted to
+   *  web_sections.field_provenance so the rebind cycle can preserve
+   *  staff overrides via `applyOverridesOnRebind`. v54+. */
+  field_provenance: FieldProvenanceMap
 }
 
 /** Pure three-phase bind: normalize → value-shape doc → canonical
@@ -669,36 +692,70 @@ export function computeSectionBind(
   const bindNotes: string[] = []
   let fieldValues: Record<string, unknown>
 
+  // IR is computed up-front from rawValues regardless of bind path —
+  // we always want to return it so the caller can persist `ir_snapshot`
+  // and assign node_ids against a previous snapshot. extractDocument is
+  // pure (no DB / no LLM) so the cost is negligible.
+  let ir: ContentDocument | null = null
+  try {
+    ir = extractDocument({ field_values: rawValues })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    bindNotes.push(`ir extraction failed: ${msg}`)
+  }
+
+  // Per-slot trace of which IR block populated each value. Empty when
+  // the bind doesn't run (override path, freehand section, bind throw).
+  // Forwarded to `deriveProvenanceFromBind` so the resulting provenance
+  // map carries `ir_path` / `ir_kind` / `ir_text_snippet` per slot.
+  const bindTraces: BindProvenanceMap = {}
+
   if (override) {
     fieldValues = override
   } else if (template) {
-    const normalized = normalizeFieldValuesForTemplate(template, rawValues)
-    let shapeFilled: Record<string, unknown> = {}
+    // Phase 3 rebuild: extract a ContentDocument from cowork's brief
+    // (key naming is informational only; shape + intent drive the
+    // classification) and bind it slot-by-slot against the template
+    // schema. Replaces the legacy normalize → value-shape doc →
+    // reconcile pipeline entirely. The old HTML round-trip + alias
+    // tables couldn't bridge cowork's arbitrary field names to a
+    // template's slot keys without an ever-growing aliases table;
+    // the document approach matches by INTENT, not by name.
     try {
-      const docHtml = valuesToDocHtmlByShape(rawValues)
-      shapeFilled = docHtmlToFieldValues(docHtml, template, rawValues).field_values
+      // Re-use the IR we already extracted; falls back to a fresh
+      // extract if the up-front pass threw.
+      const doc = ir ?? extractDocument({ field_values: rawValues })
+      fieldValues = bindDocumentToTemplate(doc, template, paletteTemplates, bindTraces)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      bindNotes.push(`value-shape phase failed: ${msg}`)
+      bindNotes.push(`document bind failed: ${msg}`)
+      fieldValues = {}
     }
-    fieldValues = mergeFieldValuesPreferNonEmpty(normalized, shapeFilled, template)
-    fieldValues = reconcileFieldValuesAcrossTemplates(
-      rawValues, template, fieldValues, paletteTemplates, reconcileTele,
-    )
   } else {
-    fieldValues = normalizeFieldValuesForTemplate(null, rawValues)
+    // No template bound — pass raw values through. Caller may stash
+    // these on the section for a later bind to consume.
+    fieldValues = { ...rawValues }
   }
 
-  const unmapped = computeUnmappedValues(rawValues, fieldValues, template)
-  const fieldValuesWithUnmapped = Object.keys(unmapped).length > 0
-    ? { ...fieldValues, __unmapped: unmapped }
-    : fieldValues
+  const rawUnmapped = computeUnmappedValues(rawValues, fieldValues, template)
+  // Aggressive auto-map pass — drain `__unmapped` by shape-converting
+  // each leftover into the best-fit slot on the current template.
+  // Whatever can't be placed stays in __unmapped for the UI to surface.
+  const automap = autoMapAggressive(rawUnmapped, template, fieldValues)
+  const stillUnmapped = automap.stillUnmapped
+  const finalValues = Object.keys(stillUnmapped).length > 0
+    ? { ...automap.fieldValues, __unmapped: stillUnmapped }
+    : (() => {
+        const v: Record<string, unknown> = { ...automap.fieldValues }
+        delete v.__unmapped
+        return v
+      })()
 
   return {
-    fieldValues: fieldValuesWithUnmapped,
-    unmapped,
-    droppedPaths: computeDroppedDeepPaths(rawValues, fieldValues),
-    matchedSlotKeys: computeMatchedSlotKeys(template, fieldValues),
+    fieldValues: finalValues,
+    unmapped: stillUnmapped,
+    droppedPaths: computeDroppedDeepPaths(rawValues, automap.fieldValues),
+    matchedSlotKeys: computeMatchedSlotKeys(template, automap.fieldValues),
     usedShapeAlign: reconcileTele.used_shape_align,
     usedFaqInference: Boolean(template && Array.isArray(template.fields) && template.fields.some(
       f => f.kind === 'group' && Array.isArray(f.item_schema)
@@ -706,6 +763,9 @@ export function computeSectionBind(
         && f.item_schema.some(s => s.kind === 'slot' && s.key === 'answer'),
     )),
     bindNotes,
+    autoPlacements: automap.placements,
+    ir,
+    field_provenance: deriveProvenanceFromBind(finalValues, template, bindTraces),
   }
 }
 
@@ -1048,12 +1108,16 @@ export async function importCopywriterPageOutput(
     sort_order: number
     source_field_values: Record<string, unknown> | null
     content_template_id: string | null
+    /** Previous IR snapshot, if any. v54+ rows carry this so the
+     *  matcher can preserve node_ids across re-imports. NULL for rows
+     *  written before slice B wired the IR through. */
+    ir_snapshot: ContentDocument | null
   }
   const existingByOrder = new Map<number, ExistingSection>()
   if (!created) {
     const { data: oldSecs } = await supabase
       .from('web_sections')
-      .select('id, sort_order, source_field_values, content_template_id')
+      .select('id, sort_order, source_field_values, content_template_id, ir_snapshot')
       .eq('web_page_id', pageId)
     for (const s of ((oldSecs ?? []) as ExistingSection[])) {
       existingByOrder.set(s.sort_order, s)
@@ -1249,6 +1313,20 @@ export async function importCopywriterPageOutput(
         notes:                bind.bindNotes.length > 0 ? bind.bindNotes.join(' · ') : undefined,
       })
 
+      // Carry node_ids forward from the previous IR snapshot at this
+      // sort_order (if any). This is what lets a re-import of the same
+      // page preserve identity through the existing diff-replace flow —
+      // the matcher walks new vs old IR by content similarity, so even
+      // when this section is being deleted + re-inserted, every block
+      // and item keeps the node_id it had before. Without this step,
+      // field_provenance.ir_path would point at stale IDs after any
+      // re-import and bound fields would flip to `unbound`.
+      let ir_snapshot: ContentDocument | null = null
+      if (bind.ir) {
+        const previousIr = existingByOrder.get(s.sort_order)?.ir_snapshot ?? null
+        ir_snapshot = assignNodeIds(bind.ir, previousIr)
+      }
+
       return {
         web_page_id:         pageId,
         content_template_id: s.template_id || null,
@@ -1258,6 +1336,12 @@ export async function importCopywriterPageOutput(
         // the source instead of compounding remaps off the current
         // (already-transformed) field_values.
         source_field_values: rawValues,
+        ir_snapshot,
+        // Per-field provenance from this import: populated slots → 'auto',
+        // required-unfilled slots → 'unbound'. The Text view gutter
+        // reads this; the rebind cycle uses it to preserve any field
+        // staff has since flipped to 'override'.
+        field_provenance:    bind.field_provenance,
         sort_order:          s.sort_order ?? 0,
         content_status:      'draft' as const,
         notes:               sectionNotes(s),

@@ -9,6 +9,8 @@ import type {
   StrategyBrandVoiceAttribute,
   StrategyBrandVoiceGuideline,
   StrategyBrandAttribute,
+  StrategyBrandCustomSection,
+  StrategyBrandCustomSectionEntry,
 } from '../types/database'
 
 /**
@@ -25,6 +27,9 @@ export interface BrandGuideBundle {
   voiceAttributes: StrategyBrandVoiceAttribute[]
   voiceGuidelines: StrategyBrandVoiceGuideline[]
   attributes: StrategyBrandAttribute[]
+  /** Open-ended user-defined sections (heading + entries). Each section
+   *  carries its entries inline; CRUD operates per-section. */
+  customSections: Array<StrategyBrandCustomSection & { entries: StrategyBrandCustomSectionEntry[] }>
 }
 
 /** Draft row types used by the editor — `id` is optional for not-yet-saved rows.
@@ -41,6 +46,9 @@ export interface LogoDraft {
   /** Optional motion version of this logo (mp4/webm/Lottie). Surfaced
    *  alongside the still preview on the public portal + handoff. */
   animation_url: string | null
+  /** Optional hex (e.g. #1e2a44) to render behind this logo on the
+   *  portal — for light/inverse logos that disappear against white. */
+  background_color: string | null
   clear_space_note: string | null
 }
 
@@ -54,6 +62,9 @@ export interface ColorDraft {
   pms: string | null
   proportion_pct: number | null
   on_color_logo_url: string | null
+  /** Scale percent (10-200) applied to the on-color logo on the
+   *  portal. Default 100 = native size. */
+  on_color_logo_scale_pct: number | null
 }
 
 export interface CombinationDraft {
@@ -90,6 +101,9 @@ export interface ElementDraft {
   label: string | null
   preview_url: string | null
   download_url: string | null
+  /** Optional hex bg for the element preview tile — helps low-opacity
+   *  patterns / textures stay visible on the portal. */
+  pattern_background_color: string | null
 }
 
 export interface VoiceAttributeDraft {
@@ -164,7 +178,7 @@ export async function loadGuideBySlug(slug: string): Promise<BrandGuideBundle | 
 }
 
 async function loadChildren(guide: StrategyBrandGuide): Promise<BrandGuideBundle> {
-  const [logos, colors, combos, fonts, elements, voiceAttrs, voiceGuidelines, brandAttrs] = await Promise.all([
+  const [logos, colors, combos, fonts, elements, voiceAttrs, voiceGuidelines, brandAttrs, customSections] = await Promise.all([
     supabase.from('strategy_brand_logos')
       .select('*').eq('brand_guide_id', guide.id).order('sort_order'),
     supabase.from('strategy_brand_colors')
@@ -181,7 +195,23 @@ async function loadChildren(guide: StrategyBrandGuide): Promise<BrandGuideBundle
       .select('*').eq('brand_guide_id', guide.id).order('sort_order'),
     supabase.from('strategy_brand_attributes')
       .select('*').eq('brand_guide_id', guide.id).order('sort_order'),
+    // Fetch sections + their entries in one round-trip via embedded select.
+    supabase.from('strategy_brand_custom_sections')
+      .select('*, entries:strategy_brand_custom_section_entries(*)')
+      .eq('brand_guide_id', guide.id).order('sort_order'),
   ])
+
+  // Normalize embedded entries — Supabase returns them inline already
+  // sorted-ish; explicit sort keeps the editor's order deterministic.
+  const csRows = (customSections.data ?? []) as Array<StrategyBrandCustomSection & {
+    entries: StrategyBrandCustomSectionEntry[] | null
+  }>
+  const customSectionsNormalized = csRows.map(s => ({
+    ...s,
+    entries: (s.entries ?? []).slice().sort(
+      (a, b) => (a.sort_order - b.sort_order) || a.created_at.localeCompare(b.created_at),
+    ),
+  }))
 
   return {
     guide,
@@ -193,6 +223,7 @@ async function loadChildren(guide: StrategyBrandGuide): Promise<BrandGuideBundle
     voiceAttributes:   (voiceAttrs.data      ?? []) as StrategyBrandVoiceAttribute[],
     voiceGuidelines:   (voiceGuidelines.data ?? []) as StrategyBrandVoiceGuideline[],
     attributes:        (brandAttrs.data      ?? []) as StrategyBrandAttribute[],
+    customSections:    customSectionsNormalized,
   }
 }
 
@@ -365,6 +396,7 @@ export async function saveLogos(
         .update({
           kind: r.kind, label: r.label, preview_url: r.preview_url,
           download_url: r.download_url, animation_url: r.animation_url,
+          background_color: r.background_color,
           clear_space_note: r.clear_space_note,
           sort_order: i,
         }).eq('id', r.id)
@@ -374,6 +406,7 @@ export async function saveLogos(
         brand_guide_id: guideId,
         kind: r.kind, label: r.label, preview_url: r.preview_url,
         download_url: r.download_url, animation_url: r.animation_url,
+        background_color: r.background_color,
         clear_space_note: r.clear_space_note,
         sort_order: i,
       })
@@ -396,7 +429,9 @@ export async function saveColors(
         .update({
           name: r.name, tier: r.tier, hex: r.hex, cmyk: r.cmyk, rgb: r.rgb,
           pms: r.pms, proportion_pct: r.proportion_pct,
-          on_color_logo_url: r.on_color_logo_url, sort_order: i,
+          on_color_logo_url: r.on_color_logo_url,
+          on_color_logo_scale_pct: r.on_color_logo_scale_pct,
+          sort_order: i,
         }).eq('id', r.id)
       if (error) throw new Error(error.message)
     } else {
@@ -404,7 +439,9 @@ export async function saveColors(
         brand_guide_id: guideId,
         name: r.name, tier: r.tier, hex: r.hex, cmyk: r.cmyk, rgb: r.rgb,
         pms: r.pms, proportion_pct: r.proportion_pct,
-        on_color_logo_url: r.on_color_logo_url, sort_order: i,
+        on_color_logo_url: r.on_color_logo_url,
+        on_color_logo_scale_pct: r.on_color_logo_scale_pct,
+        sort_order: i,
       })
       if (error) throw new Error(error.message)
     }
@@ -488,14 +525,18 @@ export async function saveElements(
       const { error } = await supabase.from('strategy_brand_elements')
         .update({
           kind: r.kind, label: r.label, preview_url: r.preview_url,
-          download_url: r.download_url, sort_order: i,
+          download_url: r.download_url,
+          pattern_background_color: r.pattern_background_color,
+          sort_order: i,
         }).eq('id', r.id)
       if (error) throw new Error(error.message)
     } else {
       const { error } = await supabase.from('strategy_brand_elements').insert({
         brand_guide_id: guideId,
         kind: r.kind, label: r.label, preview_url: r.preview_url,
-        download_url: r.download_url, sort_order: i,
+        download_url: r.download_url,
+        pattern_background_color: r.pattern_background_color,
+        sort_order: i,
       })
       if (error) throw new Error(error.message)
     }
@@ -569,4 +610,105 @@ export async function saveBrandAttributes(
       if (error) throw new Error(error.message)
     }
   }
+}
+
+// ── Custom sections ─────────────────────────────────────────────────────────
+//
+// Section meta and entries save independently. The editor passes draft
+// shapes (id may be missing for new rows); the helper diffs against
+// existing ids, deletes removed rows, then upserts the rest with their
+// new sort_order. Mirrors `saveVoiceGuidelines` so the editor's mental
+// model stays consistent across all heading+body sections.
+
+export interface CustomSectionEntryDraft {
+  id?: string
+  title: string
+  body: string
+}
+
+export interface CustomSectionDraft {
+  id?: string
+  heading: string
+  description: string | null
+  column_count: number
+  entries: CustomSectionEntryDraft[]
+}
+
+/** Create a new section row. The caller usually follows up with
+ *  `saveCustomSectionEntries` to attach entries. */
+export async function createCustomSection(
+  guideId: string,
+  heading: string,
+  description: string | null,
+  column_count: number,
+  sort_order: number,
+): Promise<StrategyBrandCustomSection> {
+  const { data, error } = await supabase
+    .from('strategy_brand_custom_sections')
+    .insert({ brand_guide_id: guideId, heading, description, column_count, sort_order })
+    .select()
+    .single()
+  if (error || !data) throw error ?? new Error('Failed to create custom section')
+  return data as StrategyBrandCustomSection
+}
+
+/** Patch a section's heading / description / column_count / sort_order. */
+export async function updateCustomSection(
+  sectionId: string,
+  patch: Partial<Pick<StrategyBrandCustomSection,
+    'heading' | 'description' | 'column_count' | 'sort_order'>>,
+): Promise<StrategyBrandCustomSection> {
+  const { data, error } = await supabase
+    .from('strategy_brand_custom_sections')
+    .update(patch as Record<string, unknown>)
+    .eq('id', sectionId)
+    .select()
+    .single()
+  if (error || !data) throw error ?? new Error('Failed to update custom section')
+  return data as StrategyBrandCustomSection
+}
+
+/** Delete a section. CASCADE on the FK removes its entries automatically. */
+export async function deleteCustomSection(sectionId: string): Promise<void> {
+  const { error } = await supabase
+    .from('strategy_brand_custom_sections')
+    .delete()
+    .eq('id', sectionId)
+  if (error) throw new Error(error.message)
+}
+
+/** Diff + upsert entries for one custom section. Pass current entries
+ *  + existing ids so removed-from-draft entries get deleted. */
+export async function saveCustomSectionEntries(
+  sectionId:   string,
+  rows:        CustomSectionEntryDraft[],
+  existingIds: string[],
+): Promise<void> {
+  const keep = new Set(rows.filter(r => r.id).map(r => r.id!))
+  await deleteMissingEntries(existingIds, keep)
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]
+    if (r.id) {
+      const { error } = await supabase.from('strategy_brand_custom_section_entries')
+        .update({ title: r.title, body: r.body, sort_order: i })
+        .eq('id', r.id)
+      if (error) throw new Error(error.message)
+    } else {
+      const { error } = await supabase.from('strategy_brand_custom_section_entries').insert({
+        custom_section_id: sectionId,
+        title: r.title, body: r.body, sort_order: i,
+      })
+      if (error) throw new Error(error.message)
+    }
+  }
+}
+
+async function deleteMissingEntries(existingIds: string[], keep: Set<string>): Promise<void> {
+  const toDrop = existingIds.filter(id => !keep.has(id))
+  if (toDrop.length === 0) return
+  const { error } = await supabase
+    .from('strategy_brand_custom_section_entries')
+    .delete()
+    .in('id', toDrop)
+  if (error) throw new Error(error.message)
 }

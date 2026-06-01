@@ -24,6 +24,8 @@ import BrandGuidePortalPage from './pages/BrandGuidePortalPage'
 import BrandingIndexPage from './pages/BrandingIndexPage'
 import BrandHandoffPage from './pages/BrandHandoffPage'
 import PortalReviewPage from './pages/PortalReviewPage'
+import PartnerHubPage from './pages/PartnerHubPage'
+import ContentCollectionPage from './pages/ContentCollectionPage'
 import FeedbackPreviewPage from './pages/FeedbackPreviewPage'
 import InitiativesPage from './pages/strategy/InitiativesPage'
 import InitiativeDetailPage from './pages/strategy/InitiativeDetailPage'
@@ -77,6 +79,12 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/portal/:token" element={<ClientPortalPage />} />
           <Route path="/portal/:token/copy-review" element={<CopyReviewPortalPage />} />
+          {/* Partner hub — greenfield. Lists outstanding asks (content
+              collection sessions, etc.). Will eventually subsume the
+              milestone view above, but we keep both routes live during
+              rollout so production partner links don't break. */}
+          <Route path="/portal/:token/hub" element={<PartnerHubPage />} />
+          <Route path="/portal/:token/hub/content-collection/:sessionId" element={<ContentCollectionPage />} />
           {/* Partner-facing web review portal — token comes from
               web_reviews.partner_token. No login required; partner
               enters their name on first visit. */}

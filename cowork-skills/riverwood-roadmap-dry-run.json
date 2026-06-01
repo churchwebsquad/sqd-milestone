@@ -1,0 +1,60 @@
+{
+  "project_id": "3490-poc",
+  "compiled_at": "2026-05-20T21:06:36.970978Z",
+  "skill_version": "web_roadmap_builder v1",
+  "dry_run": true,
+  "roadmap_opening_paragraph": "Hi Nate, here is your website roadmap for Riverwood Chapel, the strategic outline for the next chapter of riverwoodchapel.org. The site is built around your mission (To know Jesus, to be known, and to make Him known) and the audiences you've named: The Suburban Family, The Kent State Student, The Person in a Hard Season, and The Established Member. You'll see 6 Phase 1 pages drafted next, with a review queue waiting for your approval before anything publishes. Your voice on every page is the goal.",
+  "roadmap_properties": {
+    "primary_goals": "Your new site is built to be new visitor friendly and focused, hold resources for current members but not a hub for everything, and serve as the land place for events.",
+    "tone_characteristics": [
+      "warm",
+      "shepherding",
+      "understated",
+      "multigenerational",
+      "authentic",
+      "steady"
+    ],
+    "target_audience": [
+      "The Suburban Family",
+      "The Kent State Student",
+      "The Person in a Hard Season",
+      "The Established Member"
+    ],
+    "brand_style_tags": [
+      "warm",
+      "understated",
+      "multigenerational",
+      "earthy",
+      "minimal"
+    ],
+    "x_factor": "A big church that wants to feel small. Flat structure, accessible pastors, and a home-like atmosphere over mega-church performance.",
+    "engagement_type": "redesign"
+  },
+  "roadmap_milestone_overview": "Milestone 1: Strategy\n- Content Collection: Your journey begins by submitting your existing digital assets through ContentSnare.\n- Web Strategy (Review 1): Your sitemap and page outlines are developed to create intuitive navigation. You'll review and approve this structural roadmap on Notion before copy begins.\n\nMilestone 2: Copy & Design\n- Message and Design: Your 6 Phase 1 pages are written and designed in parallel.\n- Combined Review (Review 2): You'll review the written copy alongside the visual page designs. Once approved, the technical build begins on schedule.\n\nMilestone 3: Development\n- The Build: Your approved designs are developed into a fully functional staging site.\n- Final Quality Check (Review 3): You'll explore the staging link for a final walkthrough.\n- Site Launch: Your website is officially launched.\n- Alternative Option: If you're facing a strict deadline, core essential pages can be prioritized for a rapid initial launch with remaining pages completed in the background.",
+  "_confidence_log": {
+    "roadmap_opening_paragraph": "composed_from_lifts",
+    "primary_goals": "lifted_from_atoms",
+    "tone_characteristics": "lifted_from_voice_card",
+    "target_audience": "lifted_from_voice_card",
+    "brand_style_tags": "inferred",
+    "x_factor": "lifted_from_voice_card",
+    "engagement_type": "lifted_from_project_metadata",
+    "roadmap_milestone_overview": "lifted_from_template"
+  },
+  "_voice_match_self_check": {
+    "no_em_dashes": true,
+    "em_dash_count": 0,
+    "banned_terms_avoided": true,
+    "banned_terms_found": [],
+    "no_triad_lists": true,
+    "triads_found": [],
+    "you_your_language": true,
+    "you_your_count_in_opening": 2,
+    "mission_or_xfactor_named": true,
+    "mission_in_opening": true,
+    "xfactor_in_opening": false,
+    "no_we_our_in_body": true,
+    "opening_sentence_count": 4,
+    "opening_sentence_count_in_range": true
+  }
+}

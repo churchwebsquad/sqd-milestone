@@ -1,0 +1,1167 @@
+{
+  "project_id": "3490-poc",
+  "compiled_at": "2026-05-21T17:17:22.449636Z",
+  "skill_version": "web_section_planner v2",
+  "dry_run": true,
+  "sources": {
+    "sitemap": "riverwood-sitemap-dry-run.json",
+    "content_map": "riverwood-content-map-dry-run.json",
+    "normalizer": "riverwood-normalizer-dry-run.json",
+    "voice_card": "riverwood-voice-card-dry-run.json",
+    "brixies_library": "brixies-library.json"
+  },
+  "sections_by_page": {
+    "/": [
+      {
+        "sort_order": 1,
+        "concept_id": "hero_homepage",
+        "intent_summary": "Welcome hero. 'A place to feel known' or similar. Service times snippet + 2 CTAs (Plan a Visit, Watch a sermon).",
+        "atom_external_ref_ids": [],
+        "section_job": "Make a visitor — whoever just landed here — feel that this is a place they could belong, and that the first step toward finding out costs them nothing",
+        "tagline_strategy": "hook"
+      },
+      {
+        "sort_order": 2,
+        "concept_id": "content_image_text",
+        "intent_summary": "Mission framing — Know Jesus, Be Known, Make Him Known in plain language.",
+        "atom_external_ref_ids": [],
+        "section_job": "Help the visitor read the mission as a description of what their own life could look like here, not as a slogan they're being sold"
+      },
+      {
+        "sort_order": 3,
+        "concept_id": "feature_card_grid",
+        "intent_summary": "Three mission pillars as cards (Know Jesus → Watch + Beliefs; Be Known → Connect; Make Him Known → Impact).",
+        "atom_external_ref_ids": [],
+        "section_job": "Make every kind of visitor see one card that names where they are in their faith right now, and feel met by it"
+      },
+      {
+        "sort_order": 4,
+        "concept_id": "cta_callout",
+        "intent_summary": "Big banner CTA — Plan a Visit. Service time snippet + parking note.",
+        "atom_external_ref_ids": [],
+        "section_job": "Turn a visitor's curiosity into a Sunday on the calendar by making the courage to come feel small"
+      },
+      {
+        "sort_order": 5,
+        "concept_id": "contact_section",
+        "intent_summary": "Foyer-style welcome: address, map preview, phone, office hours.",
+        "atom_external_ref_ids": [],
+        "section_job": "Make the church feel like a place with a door, a phone someone answers, and a person who knows the answer to your question"
+      }
+    ],
+    "/visit": [
+      {
+        "sort_order": 1,
+        "concept_id": "hero_inner",
+        "intent_summary": "Plan a Visit hero. Tone-aware for primary persona (The Suburban Family).",
+        "atom_external_ref_ids": [],
+        "section_job": "Tell a person who's nervous about walking into a new church that the door is open and nothing about Sunday will require courage they don't have",
+        "tagline_strategy": "informational"
+      },
+      {
+        "sort_order": 2,
+        "concept_id": "content_image_text",
+        "intent_summary": "What to expect on Sunday — service experience prose lifted from content collection.",
+        "atom_external_ref_ids": [
+          "contentsnare:the-details:contact-information:rfld_R3L8qYCyq60Xde",
+          "contentsnare:the-details:social-media-newsletter-bullet:rfld_vZLR9NFxR5DaK8:repeater_0"
+        ],
+        "section_job": "Let the visitor see Sunday morning in their head before they get here — so they can already imagine themselves in it"
+      },
+      {
+        "sort_order": 3,
+        "concept_id": "feature_unique",
+        "intent_summary": "4-step kids check-in process.",
+        "atom_external_ref_ids": [],
+        "section_job": "Make a parent who's nervous about leaving their kid with strangers see exactly how that moment goes, and feel that their kid will be okay",
+        "_emotional_weight_no_proof": "section_job is emotional-proof-heavy but no named-person fact or testimonial atom available. Drafter may underdeliver. Route to needs queue: request a named teacher quote, parent testimonial, or partner-authored proof from this church before drafting."
+      },
+      {
+        "sort_order": 4,
+        "concept_id": "feature_card_grid",
+        "intent_summary": "3 cards: Where to park · What to wear · Where the kids go. Wayfinding for first-time families.",
+        "atom_external_ref_ids": [],
+        "section_job": "Take three of the small worries that keep a first-time visitor from coming, and answer each one so it stops being a barrier"
+      },
+      {
+        "sort_order": 5,
+        "concept_id": "cta_simple",
+        "intent_summary": "Pre-register your kids — Church Center check-in URL.",
+        "atom_external_ref_ids": [],
+        "section_job": "Turn the visitor's 'maybe Sunday' into a Sunday they've already started planning for"
+      },
+      {
+        "sort_order": 6,
+        "concept_id": "contact_section",
+        "intent_summary": "Quick contact — Nate Walker + map + phone.",
+        "atom_external_ref_ids": [],
+        "section_job": "Give a hesitant visitor a real name and a real phone, so the church stops being an institution and starts being people"
+      }
+    ],
+    "/watch": [
+      {
+        "sort_order": 1,
+        "concept_id": "hero_inner",
+        "intent_summary": "Sermons hero. Tone-aware for primary persona (The Person in a Hard Season).",
+        "atom_external_ref_ids": [],
+        "section_job": "Let someone who isn't ready to walk in yet hear what's actually being preached, so the next step toward coming in feels obvious",
+        "tagline_strategy": "omit"
+      },
+      {
+        "sort_order": 2,
+        "concept_id": "archive_current_series",
+        "intent_summary": "Current sermon series featured prominently. Pulls from Church Center.",
+        "atom_external_ref_ids": [],
+        "section_job": "Show the visitor what this church is wrestling with right now, so they sense they'd be joining a live conversation, not a recording"
+      },
+      {
+        "sort_order": 3,
+        "concept_id": "cta_simple",
+        "intent_summary": "Watch the Sunday livestream → YouTube. Add service times here.",
+        "atom_external_ref_ids": [],
+        "section_job": "Make it easy for a visitor to drop into Sunday from their couch, and feel less alone in their living room because they're worshiping with this church"
+      },
+      {
+        "sort_order": 4,
+        "concept_id": "feature_card_grid",
+        "intent_summary": "Recent sermons grid — link out to Church Center archive.",
+        "atom_external_ref_ids": [],
+        "section_job": "Help a visitor who came looking for an answer to a specific question find the message that touches it"
+      }
+    ],
+    "/give": [
+      {
+        "sort_order": 1,
+        "concept_id": "hero_inner",
+        "intent_summary": "Give hero. Tone-aware for primary persona (The Established Member).",
+        "atom_external_ref_ids": [],
+        "section_job": "Make a giver feel like a partner in something real, not a donor asked to keep the lights on",
+        "tagline_strategy": "hook"
+      },
+      {
+        "sort_order": 2,
+        "concept_id": "content_image_text",
+        "intent_summary": "Why give — Riverwood's full give_rationale text (lifted verbatim).",
+        "atom_external_ref_ids": [
+          "contentsnare:giving:ways-to-give:rfld_a9KneRI7z0W0gq"
+        ],
+        "section_job": "Help the giver see their generosity flowing into specific lives, names, and places — so a gift feels like a story, not a transaction"
+      },
+      {
+        "sort_order": 3,
+        "concept_id": "feature_card_grid",
+        "intent_summary": "Ways to give cards: Online (Suran), Non-cash (Cindy Bowser), Year-End Statement, Building Campaign placeholder.",
+        "atom_external_ref_ids": [
+          "contentsnare:giving:ways-to-give:rfld_R3L8qYCyq3vpde:repeater_0",
+          "contentsnare:giving:ways-to-give:rfld_R3L8qYCyq3vpde:repeater_1"
+        ],
+        "section_job": "Meet each giver where their life is — give them the path that fits their season, their tax situation, and their pace"
+      },
+      {
+        "sort_order": 4,
+        "concept_id": "accordion_faq",
+        "intent_summary": "Common giving questions — tax statements, recurring gifts, designated funds.",
+        "atom_external_ref_ids": [],
+        "section_job": "Take the small uncertainties that keep a generous person from clicking give, and quietly resolve them"
+      },
+      {
+        "sort_order": 5,
+        "concept_id": "cta_simple",
+        "intent_summary": "Give online → Suran giving form.",
+        "atom_external_ref_ids": [],
+        "section_job": "Turn the giver's 'yes' into a gift on its way, with no friction between intent and arrival"
+      }
+    ],
+    "/kids": [
+      {
+        "sort_order": 1,
+        "concept_id": "hero_inner",
+        "intent_summary": "Kids at Riverwood hero. Tone-aware for primary persona (The Suburban Family).",
+        "atom_external_ref_ids": [],
+        "section_job": "Make a parent feel that their kid will be loved here and want to come back. Address the parent's actual desire (a child who loves church and is known by name), not their logistics question",
+        "tagline_strategy": "informational"
+      },
+      {
+        "sort_order": 2,
+        "concept_id": "content_image_text",
+        "intent_summary": "What kids learn at Riverwood — Gospel Project curriculum, partnership with parents in childhood discipleship.",
+        "atom_external_ref_ids": [],
+        "section_job": "Help a parent feel that what their kid hears on Sunday is the real thing, taught by people who are actually partnering with them as parents",
+        "_concept_upgrade_recommended": "feature_team or content_image_text + named-person callout",
+        "_proof_person": {
+          "name": "Josh Miller",
+          "role": "Kids &amp; Middle School Pastor"
+        }
+      },
+      {
+        "sort_order": 3,
+        "concept_id": "feature_card_grid",
+        "intent_summary": "3 age tiers as cards (Open Arms Nursery, Preschool, Elementary).",
+        "atom_external_ref_ids": [
+          "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_0",
+          "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_1",
+          "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_2"
+        ],
+        "section_job": "Let each parent see their kid on this page — at their age, in their stage — so they know the church has thought specifically about who their child is"
+      },
+      {
+        "sort_order": 4,
+        "concept_id": "feature_unique",
+        "intent_summary": "Kids check-in process as a 4-step numbered flow. Process Section concept.",
+        "atom_external_ref_ids": [],
+        "section_job": "Walk a nervous parent through the exact moment of Sunday morning when their hand will leave their kid's, and make it feel okay"
+      },
+      {
+        "sort_order": 5,
+        "concept_id": "cta_simple",
+        "intent_summary": "Pre-register your kids — Church Center check-in URL.",
+        "atom_external_ref_ids": [],
+        "section_job": "Turn a parent's 'we're going to try it' into a small action right now that means Sunday morning is already easier"
+      }
+    ],
+    "/story-beliefs": [
+      {
+        "sort_order": 1,
+        "concept_id": "hero_inner",
+        "intent_summary": "Our Story & Beliefs hero. Tone-aware for primary persona (The Person in a Hard Season).",
+        "atom_external_ref_ids": [],
+        "section_job": "Make a visitor sense that this church has been here long enough to be trusted, and is clear enough about what it believes to be honest with",
+        "tagline_strategy": "hook"
+      },
+      {
+        "sort_order": 2,
+        "concept_id": "content_image_text",
+        "intent_summary": "Mission + Vision verbatim. 'Heaven on earth in Kent and Portage County.'",
+        "atom_external_ref_ids": [],
+        "section_job": "Let the visitor read the mission and feel that this church actually lives it — that the sentence describes what they'd find here next Sunday",
+        "_emotional_weight_no_proof": "section_job is emotional-proof-heavy but no named-person fact or testimonial atom available. Drafter may underdeliver. Route to needs queue: request a named teacher quote, parent testimonial, or partner-authored proof from this church before drafting."
+      },
+      {
+        "sort_order": 3,
+        "concept_id": "timeline_story",
+        "intent_summary": "9 church history milestones from 1991 founding through 2024.",
+        "atom_external_ref_ids": [],
+        "section_job": "Let the visitor see that the church is older than them and still moving, so joining it means joining something already in motion"
+      },
+      {
+        "sort_order": 4,
+        "concept_id": "feature_card_grid",
+        "intent_summary": "7 church values as cards: Scripture First, Intentional Discipleship, Known and Connected, Accessible Leadership, Multigenerational, Community Presence.",
+        "atom_external_ref_ids": [
+          "discovery:messaging.values.0",
+          "discovery:messaging.values.1",
+          "discovery:messaging.values.2",
+          "discovery:messaging.values.3",
+          "discovery:messaging.values.4",
+          "discovery:messaging.values.5",
+          "contentsnare:about-your-church:mission-beliefs:rfld_GRgvR3HQ0085g2"
+        ],
+        "section_job": "Make the visitor feel the values as a description of the church's personality — what they'd notice if they sat through a Sunday and a small group and a Wednesday night"
+      },
+      {
+        "sort_order": 5,
+        "concept_id": "accordion_faq",
+        "intent_summary": "Statement of Beliefs — 8 doctrines as expandable items.",
+        "atom_external_ref_ids": [],
+        "section_job": "Let a visitor with theological caution see exactly what's believed here without having to ask anyone, so they can decide for themselves whether it fits"
+      }
+    ],
+    "/leadership": [
+      {
+        "sort_order": 1,
+        "concept_id": "hero_inner",
+        "intent_summary": "Leadership Team hero. Tone-aware for primary persona (The Person in a Hard Season).",
+        "atom_external_ref_ids": [],
+        "section_job": "Make a visitor feel that the people leading this church are reachable people, not branded personalities — and that they'd recognize them in the Foyer",
+        "tagline_strategy": "hook"
+      },
+      {
+        "sort_order": 2,
+        "concept_id": "feature_team",
+        "intent_summary": "Staff grid — 21 staff members with roles + emails + bios.",
+        "atom_external_ref_ids": [],
+        "section_job": "Let every staff member's face and name land, so the church stops being an institution and becomes a roster of people the visitor could actually talk to"
+      },
+      {
+        "sort_order": 3,
+        "concept_id": "content_image_text",
+        "intent_summary": "Accessible Leadership value text — what this looks like in practice.",
+        "atom_external_ref_ids": [],
+        "section_job": "Make the visitor feel that they could email a pastor at this church and a pastor would actually email back",
+        "_concept_upgrade_recommended": "feature_team or content_image_text + named-person callout",
+        "_proof_person": {
+          "name": "Cole Tawney",
+          "role": "Lead Pastor"
+        }
+      }
+    ],
+    "/connect": [
+      {
+        "sort_order": 1,
+        "concept_id": "hero_inner",
+        "intent_summary": "Connect hero. Tone-aware for primary persona (The Suburban Family).",
+        "atom_external_ref_ids": [],
+        "section_job": "Make every visitor — kid, college student, adult, longtime member — see one path on this page that's clearly theirs",
+        "tagline_strategy": "informational"
+      },
+      {
+        "sort_order": 2,
+        "concept_id": "feature_card_grid",
+        "intent_summary": "4 connect pathways: Kids, Students & College, Adult Studies, Discovery & Membership.",
+        "atom_external_ref_ids": [],
+        "section_job": "Give each life stage one card so a visitor instantly sees their family's next move without having to figure it out"
+      },
+      {
+        "sort_order": 3,
+        "concept_id": "cta_simple",
+        "intent_summary": "Email Maggie or visit the Welcome Center in the Foyer.",
+        "atom_external_ref_ids": [],
+        "section_job": "For the visitor still uncertain which pathway fits, hand them a real person who can hear it out and point the right way"
+      }
+    ],
+    "/students-college": [
+      {
+        "sort_order": 1,
+        "concept_id": "hero_inner",
+        "intent_summary": "Students & College hero. Tone-aware for primary persona (The Kent State Student).",
+        "atom_external_ref_ids": [],
+        "section_job": "Make a student or college parent feel that this isn't a youth group with a tag-on — that students here have their own gravity, their own people, their own room",
+        "tagline_strategy": "informational"
+      },
+      {
+        "sort_order": 2,
+        "concept_id": "feature_tabbed",
+        "intent_summary": "Tabbed: Middle School / High School / College. Each tab has its schedule and director.",
+        "atom_external_ref_ids": [],
+        "section_job": "Let a middle schooler, high schooler, or college student see their specific community without scrolling past someone else's age"
+      },
+      {
+        "sort_order": 3,
+        "concept_id": "cta_simple",
+        "intent_summary": "Email the director — link to staff directory.",
+        "atom_external_ref_ids": [],
+        "section_job": "Give a student or parent a real person who knows their age group by name — because at Riverwood the relationship is the offer, not the program",
+        "_emotional_weight_no_proof": "section_job is emotional-proof-heavy but no named-person fact or testimonial atom available. Drafter may underdeliver. Route to needs queue: request a named teacher quote, parent testimonial, or partner-authored proof from this church before drafting."
+      }
+    ],
+    "/adult-studies": [
+      {
+        "sort_order": 1,
+        "concept_id": "hero_inner",
+        "intent_summary": "Adult Studies & Classes hero. Tone-aware for primary persona (The Suburban Family).",
+        "atom_external_ref_ids": [],
+        "section_job": "Make an adult feel that life at this church doesn't end when Sunday does — that there are rooms full of people who want to know them by name",
+        "tagline_strategy": "informational"
+      },
+      {
+        "sort_order": 2,
+        "concept_id": "feature_card_grid",
+        "intent_summary": "4 group types: Life Groups, Care Support Groups, Bible Studies, Men's Huddle, Women to Women.",
+        "atom_external_ref_ids": [
+          "contentsnare:discipleship-next-steps:next-steps-classes:rfld_RqKznjHbDD83KG:repeater_0",
+          "contentsnare:discipleship-next-steps:next-steps-classes:rfld_vRdJJeS58Nj0dM:repeater_0",
+          "contentsnare:ministries:adults:rfld_RqKznjHbDD83KG:repeater_0",
+          "contentsnare:ministries:adults:rfld_RqKznjHbDD83KG:repeater_1"
+        ],
+        "section_job": "Let each adult see the small-group option that fits their season — single, married, mid-life, post-kids, in a hard place — without having to translate"
+      },
+      {
+        "sort_order": 3,
+        "concept_id": "accordion_faq",
+        "intent_summary": "How small groups work — meeting cadence, sign-up, contact (Josh Miller).",
+        "atom_external_ref_ids": [],
+        "section_job": "Quietly answer the awkward questions about small groups (do I have to host, do I have to share, can I leave) so a hesitant adult can sign up without anxiety"
+      }
+    ],
+    "/discovery-membership": [
+      {
+        "sort_order": 1,
+        "concept_id": "hero_inner",
+        "intent_summary": "Discovery & Membership hero. Tone-aware for primary persona (All four).",
+        "atom_external_ref_ids": [],
+        "section_job": "Make membership feel like a commitment that means something, and one a hesitant person could actually take this season",
+        "tagline_strategy": "informational"
+      },
+      {
+        "sort_order": 2,
+        "concept_id": "feature_unique",
+        "intent_summary": "4-week class process: Mission · Values · Theology · Staff + practical next steps.",
+        "atom_external_ref_ids": [],
+        "section_job": "Show the visitor that becoming a member is a four-week class with a clear end, not an open-ended ask"
+      },
+      {
+        "sort_order": 3,
+        "concept_id": "content_image_text",
+        "intent_summary": "Baptism section — why, what it looks like, 5-step sign-up process. Acts 2:39 + Matthew 3:11.",
+        "atom_external_ref_ids": [
+          "contentsnare:discipleship-next-steps:baptism:rfld_rzLr1DsxRNkRKp"
+        ],
+        "section_job": "Help a person considering baptism feel that it's a real public moment, that they don't have to organize it alone, and that the church will walk with them through it",
+        "_concept_upgrade_recommended": "feature_team or content_image_text + named-person callout",
+        "_proof_person": {
+          "name": "Cole Tawney",
+          "role": "Lead Pastor"
+        }
+      },
+      {
+        "sort_order": 4,
+        "concept_id": "cta_simple",
+        "intent_summary": "Sign up for Discovery — Church Center registration URL.",
+        "atom_external_ref_ids": [],
+        "section_job": "For the person who's decided, make the next move take one click and feel like the right kind of step"
+      }
+    ],
+    "/care": [
+      {
+        "sort_order": 1,
+        "concept_id": "hero_inner",
+        "intent_summary": "Care & Recovery hero. Tone-aware for primary persona (The Person in a Hard Season).",
+        "atom_external_ref_ids": [],
+        "section_job": "Tell a person walking through a hard season that they don't have to be okay to come here, and that someone in this church has walked through it too",
+        "tagline_strategy": "informational"
+      },
+      {
+        "sort_order": 2,
+        "concept_id": "feature_card_grid",
+        "intent_summary": "5 named programs as cards: Care 101, GriefShare, Overcome, Celebrate Recovery, Cancer Care.",
+        "atom_external_ref_ids": [
+          "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_0",
+          "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_1",
+          "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_2",
+          "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_3",
+          "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_4"
+        ],
+        "section_job": "Let a person in a specific hard season see a card that names exactly what they're going through, so they know they're not the first one to need it here"
+      },
+      {
+        "sort_order": 3,
+        "concept_id": "contact_section",
+        "intent_summary": "Care Team contact — Jeff Haynes (Care & Outreach Pastor), Nola Ruble (Admin).",
+        "atom_external_ref_ids": [],
+        "section_job": "Give a person who's hurting a real name, a real email, and the sense that a human being is already on the other side waiting for their message"
+      }
+    ],
+    "/outreach": [
+      {
+        "sort_order": 1,
+        "concept_id": "hero_inner",
+        "intent_summary": "Local & Global Outreach hero. Tone-aware for primary persona (The Established Member).",
+        "atom_external_ref_ids": [],
+        "section_job": "Let a visitor feel that this church doesn't just gather on Sunday — that what happens here on Sunday spills out into Kent and around the world every week",
+        "tagline_strategy": "informational"
+      },
+      {
+        "sort_order": 2,
+        "concept_id": "feature_card_grid",
+        "intent_summary": "Local: Food Pantry + 2 partners.",
+        "atom_external_ref_ids": [],
+        "section_job": "Let the visitor see the specific people and places this church is showing up for in its own city, by name"
+      },
+      {
+        "sort_order": 3,
+        "concept_id": "feature_card_carousel",
+        "intent_summary": "Global: 10 missionary partnerships. Some names are pseudonyms — security-sensitive.",
+        "atom_external_ref_ids": [],
+        "section_job": "Let the visitor feel the global reach without drowning in it — proof that Riverwood's mission goes further than they expected"
+      },
+      {
+        "sort_order": 4,
+        "concept_id": "contact_section",
+        "intent_summary": "Outreach contact — Jeff Haynes (Care & Outreach Pastor).",
+        "atom_external_ref_ids": [],
+        "section_job": "For a visitor whose Sunday morning is starting to spill into their week, give them a real person who can show them where to start"
+      }
+    ],
+    "/events": [
+      {
+        "sort_order": 1,
+        "concept_id": "hero_inner",
+        "intent_summary": "Events hero. Tone-aware for primary persona (All four).",
+        "atom_external_ref_ids": [],
+        "section_job": "Let a visitor scan one page and feel the pace and texture of what's happening at the church right now",
+        "tagline_strategy": "omit"
+      },
+      {
+        "sort_order": 2,
+        "concept_id": "archive_filter",
+        "intent_summary": "Planning Center events embed. Calendar surface.",
+        "atom_external_ref_ids": [],
+        "section_job": "Help the visitor find one event in the next few weeks where they could show up and meet someone"
+      },
+      {
+        "sort_order": 3,
+        "concept_id": "contact_section",
+        "intent_summary": "Event questions — Cora Gray (Event Communications Coordinator).",
+        "atom_external_ref_ids": [],
+        "section_job": "Give a visitor with a logistical question about an event a real person to write to instead of guessing"
+      }
+    ]
+  },
+  "content_page_map": [
+    {
+      "atom_external_ref_id": "discovery:messaging.values.0",
+      "page_slug": "/story-beliefs",
+      "section_sort_order": 4,
+      "role": "canonical",
+      "treatment": "Full content on /story-beliefs. Section 4."
+    },
+    {
+      "atom_external_ref_id": "discovery:messaging.values.1",
+      "page_slug": "/story-beliefs",
+      "section_sort_order": 4,
+      "role": "canonical",
+      "treatment": "Full content on /story-beliefs. Section 4."
+    },
+    {
+      "atom_external_ref_id": "discovery:messaging.values.2",
+      "page_slug": "/story-beliefs",
+      "section_sort_order": 4,
+      "role": "canonical",
+      "treatment": "Full content on /story-beliefs. Section 4."
+    },
+    {
+      "atom_external_ref_id": "discovery:messaging.values.3",
+      "page_slug": "/story-beliefs",
+      "section_sort_order": 4,
+      "role": "canonical",
+      "treatment": "Full content on /story-beliefs. Section 4."
+    },
+    {
+      "atom_external_ref_id": "discovery:messaging.values.4",
+      "page_slug": "/story-beliefs",
+      "section_sort_order": 4,
+      "role": "canonical",
+      "treatment": "Full content on /story-beliefs. Section 4."
+    },
+    {
+      "atom_external_ref_id": "discovery:messaging.values.5",
+      "page_slug": "/story-beliefs",
+      "section_sort_order": 4,
+      "role": "canonical",
+      "treatment": "Full content on /story-beliefs. Section 4."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:about-your-church:mission-beliefs:rfld_GRgvR3HQ0085g2",
+      "page_slug": "/story-beliefs",
+      "section_sort_order": 4,
+      "role": "canonical",
+      "treatment": "Full content on /story-beliefs. Section 4."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:about-your-church:church-origins-common-lingo:rfld_EDKb5WhY4480gY",
+      "page_slug": "/story-beliefs",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /story-beliefs."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:about-your-church:church-origins-common-lingo:rfld_wOd96mc1MMrwgZ",
+      "page_slug": "/story-beliefs",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /story-beliefs."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:the-details:contact-information:rfld_R3L8qYCyq60Xde",
+      "page_slug": "/visit",
+      "section_sort_order": 2,
+      "role": "canonical",
+      "treatment": "Full content on /visit. Section 2."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:the-details:social-media-newsletter-bullet:rfld_vZLR9NFxR5DaK8:repeater_0",
+      "page_slug": "/visit",
+      "section_sort_order": 2,
+      "role": "canonical",
+      "treatment": "Full content on /visit. Section 2."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:the-details:social-media-newsletter-bullet:rfld_J0KwyaUz16kOdk",
+      "page_slug": "/visit",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /visit."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:the-details:social-media-newsletter-bullet:rfld_wVd0y3UAJ6lAgZ",
+      "page_slug": "/visit",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /visit."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:the-details:social-media-newsletter-bullet:rfld_0Wd3yqUR4RYXKm",
+      "page_slug": "/visit",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /visit."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:weekend-services:service-details:rfld_rzLr1DsxRRynKp",
+      "page_slug": "/visit",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /visit."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:weekend-services:service-details:rfld_qZKp7wHZjjBjg2",
+      "page_slug": "/visit",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /visit."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:weekend-services:service-details:rfld_GRgvR3HQ00Zlg2",
+      "page_slug": "/visit",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /visit."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:weekend-services:service-details:rfld_a9KneRI7z0Nngq:repeater_0",
+      "page_slug": "/visit",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /visit."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:weekend-services:sermons:rfld_9jgDrAFQYYx7LG:repeater_0",
+      "page_slug": "/watch",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /watch."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:weekend-services:sermons:rfld_PQLA3VSReeJwgJ",
+      "page_slug": "/watch",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /watch."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:weekend-services:sermons:rfld_8eLP0oH0XXnYLv:repeater_0",
+      "page_slug": "/watch",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /watch."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:weekend-services:sermons:rfld_8eLP0oH0XXnYLv:repeater_1",
+      "page_slug": "/watch",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /watch."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:staff-volunteers-testimonies:volunteers:rfld_baLy9qF2RRODL9",
+      "page_slug": "/connect",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /connect."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:staff-volunteers-testimonies:volunteers:rfld_J0KwyaUz11r2dk",
+      "page_slug": "/connect",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /connect."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:staff-volunteers-testimonies:volunteers:rfld_wVd0y3UAJJ1VgZ",
+      "page_slug": "/connect",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /connect."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_0",
+      "page_slug": "/students-college",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /students-college."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_1",
+      "page_slug": "/students-college",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /students-college."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_2",
+      "page_slug": "/students-college",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /students-college."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_3",
+      "page_slug": "/students-college",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /students-college."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_4",
+      "page_slug": "/students-college",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /students-college."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_5",
+      "page_slug": "/students-college",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /students-college."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_6",
+      "page_slug": "/students-college",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /students-college."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:small-groups:rfld_mzdXYltrxrb1g7",
+      "page_slug": "/adult-studies",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /adult-studies."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:small-groups:rfld_1jLjoBfzjz9vdr",
+      "page_slug": "/adult-studies",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /adult-studies."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:small-groups:rfld_E4Kl68cX5XJQd7",
+      "page_slug": "/adult-studies",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /adult-studies."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7PBBg5",
+      "page_slug": "/adult-studies",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /adult-studies."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:small-groups:rfld_GRgZ2XF0r7wPgP",
+      "page_slug": "/adult-studies",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /adult-studies."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:next-steps-classes:rfld_RqKznjHbDD83KG:repeater_0",
+      "page_slug": "/adult-studies",
+      "section_sort_order": 2,
+      "role": "canonical",
+      "treatment": "Full content on /adult-studies. Section 2."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:next-steps-classes:rfld_vRdJJeS58Nj0dM:repeater_0",
+      "page_slug": "/adult-studies",
+      "section_sort_order": 2,
+      "role": "canonical",
+      "treatment": "Full content on /adult-studies. Section 2."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:adults:rfld_RqKznjHbDD83KG:repeater_0",
+      "page_slug": "/adult-studies",
+      "section_sort_order": 2,
+      "role": "canonical",
+      "treatment": "Full content on /adult-studies. Section 2."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:adults:rfld_RqKznjHbDD83KG:repeater_1",
+      "page_slug": "/adult-studies",
+      "section_sort_order": 2,
+      "role": "canonical",
+      "treatment": "Full content on /adult-studies. Section 2."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:baptism:rfld_rzLr1DsxRNkRKp",
+      "page_slug": "/discovery-membership",
+      "section_sort_order": 3,
+      "role": "canonical",
+      "treatment": "Full content on /discovery-membership. Section 3."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:baptism:rfld_84KYY7taxORaK6",
+      "page_slug": "/discovery-membership",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /discovery-membership."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:baptism:rfld_04LWyjU21mOYg8",
+      "page_slug": "/discovery-membership",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /discovery-membership."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:baptism:rfld_qZKp7wHZjok7g2",
+      "page_slug": "/discovery-membership",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /discovery-membership."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_0",
+      "page_slug": "/kids",
+      "section_sort_order": 3,
+      "role": "canonical",
+      "treatment": "Full content on /kids. Section 3."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_1",
+      "page_slug": "/kids",
+      "section_sort_order": 3,
+      "role": "canonical",
+      "treatment": "Full content on /kids. Section 3."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_2",
+      "page_slug": "/kids",
+      "section_sort_order": 3,
+      "role": "canonical",
+      "treatment": "Full content on /kids. Section 3."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_0",
+      "page_slug": "/care",
+      "section_sort_order": 2,
+      "role": "canonical",
+      "treatment": "Full content on /care. Section 2."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_1",
+      "page_slug": "/care",
+      "section_sort_order": 2,
+      "role": "canonical",
+      "treatment": "Full content on /care. Section 2."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_2",
+      "page_slug": "/care",
+      "section_sort_order": 2,
+      "role": "canonical",
+      "treatment": "Full content on /care. Section 2."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_3",
+      "page_slug": "/care",
+      "section_sort_order": 2,
+      "role": "canonical",
+      "treatment": "Full content on /care. Section 2."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_4",
+      "page_slug": "/care",
+      "section_sort_order": 2,
+      "role": "canonical",
+      "treatment": "Full content on /care. Section 2."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:local-outreach:rfld_v8gOGDCljevogm",
+      "page_slug": "/outreach",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /outreach."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:local-outreach:rfld_GoKMRwH6Y9x1LY",
+      "page_slug": "/outreach",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /outreach."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:local-outreach:rfld_wOd96mc1MBZNgZ",
+      "page_slug": "/outreach",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /outreach."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:global-outreach:rfld_v8gOGDCljevogm",
+      "page_slug": "/outreach",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /outreach."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:global-outreach:rfld_GoKMRwH6Y9x1LY",
+      "page_slug": "/outreach",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /outreach."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:global-outreach:rfld_wOd96mc1MBZNgZ",
+      "page_slug": "/outreach",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /outreach."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:giving:ways-to-give:rfld_a9KneRI7z0W0gq",
+      "page_slug": "/give",
+      "section_sort_order": 2,
+      "role": "canonical",
+      "treatment": "Full content on /give. Section 2."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:giving:ways-to-give:rfld_vRdJJeS58NVvdM",
+      "page_slug": "/give",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /give."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:giving:ways-to-give:rfld_R3L8qYCyq3vpde:repeater_0",
+      "page_slug": "/give",
+      "section_sort_order": 3,
+      "role": "canonical",
+      "treatment": "Full content on /give. Section 3."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:giving:ways-to-give:rfld_R3L8qYCyq3vpde:repeater_1",
+      "page_slug": "/give",
+      "section_sort_order": 3,
+      "role": "canonical",
+      "treatment": "Full content on /give. Section 3."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:giving:ways-to-give:rfld_mzdXYltx4pyyg7",
+      "page_slug": "/give",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /give."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:giving:giving-campaigns:rfld_NbgqjxhAR9ewKw:repeater_0",
+      "page_slug": "/give",
+      "section_sort_order": null,
+      "role": "canonical",
+      "treatment": "Full content on /give."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_0",
+      "page_slug": "/visit",
+      "section_sort_order": null,
+      "role": "reference",
+      "treatment": "One-line callout in service-experience prose: 'Kids check-in handled at the New Families Desk in the Foyer.'"
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_1",
+      "page_slug": "/visit",
+      "section_sort_order": null,
+      "role": "reference",
+      "treatment": "One-line callout in service-experience prose: 'Kids check-in handled at the New Families Desk in the Foyer.'"
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_2",
+      "page_slug": "/visit",
+      "section_sort_order": null,
+      "role": "reference",
+      "treatment": "One-line callout in service-experience prose: 'Kids check-in handled at the New Families Desk in the Foyer.'"
+    },
+    {
+      "atom_external_ref_id": "brief:mission",
+      "page_slug": "/",
+      "section_sort_order": null,
+      "role": "reference",
+      "treatment": "Reference in homepage mission section: full mission statement quoted."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:about-your-church:mission-beliefs:rfld_rzLr1DsxRRAMKp",
+      "page_slug": "/",
+      "section_sort_order": null,
+      "role": "reference",
+      "treatment": "Reference in homepage mission section: full mission statement quoted."
+    },
+    {
+      "atom_external_ref_id": "discovery:messaging.key_phrases.0",
+      "page_slug": "/story-beliefs",
+      "section_sort_order": null,
+      "role": "reference",
+      "treatment": "Voice ammo: lift verbatim in mission framing."
+    },
+    {
+      "atom_external_ref_id": "discovery:messaging.key_phrases.1",
+      "page_slug": "/connect",
+      "section_sort_order": null,
+      "role": "reference",
+      "treatment": "Voice ammo: lift verbatim in Be Known framing."
+    },
+    {
+      "atom_external_ref_id": "discovery:messaging.key_phrases.3",
+      "page_slug": "/leadership",
+      "section_sort_order": null,
+      "role": "reference",
+      "treatment": "Voice ammo: lift verbatim in Accessible Leadership framing."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_0",
+      "page_slug": "/",
+      "section_sort_order": null,
+      "role": "cta",
+      "treatment": "Homepage card routing to /kids — primary CTA for The Suburban Family persona. Card surfaces the canonical atom's intent as a hook."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_0",
+      "page_slug": "/",
+      "section_sort_order": null,
+      "role": "cta",
+      "treatment": "Homepage card routing to /students-college — primary CTA for The Kent State Student persona. Card surfaces the canonical atom's intent as a hook."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_0",
+      "page_slug": "/",
+      "section_sort_order": null,
+      "role": "cta",
+      "treatment": "Homepage card routing to /care — primary CTA for The Person in a Hard Season persona. Card surfaces the canonical atom's intent as a hook."
+    },
+    {
+      "atom_external_ref_id": "contentsnare:ministries:local-outreach:rfld_v8gOGDCljevogm",
+      "page_slug": "/",
+      "section_sort_order": null,
+      "role": "cta",
+      "treatment": "Homepage card routing to /outreach — primary CTA for The Established Member persona. Card surfaces the canonical atom's intent as a hook."
+    }
+  ],
+  "_confidence_log": {
+    "/": "inferred_from_strategy_spine",
+    "/visit": "inferred_from_strategy_spine",
+    "/watch": "inferred_from_strategy_spine",
+    "/give": "inferred_from_strategy_spine",
+    "/kids": "lifted_from_natural_pages",
+    "/story-beliefs": "lifted_from_natural_pages",
+    "/leadership": "lifted_from_natural_pages",
+    "/connect": "inferred_from_strategy_spine",
+    "/students-college": "lifted_from_natural_pages",
+    "/adult-studies": "lifted_from_natural_pages",
+    "/discovery-membership": "lifted_from_natural_pages",
+    "/care": "lifted_from_natural_pages",
+    "/outreach": "lifted_from_natural_pages",
+    "/events": "lifted_from_natural_pages"
+  },
+  "_unfilled_with_reason": {},
+  "_validation": {
+    "pages_with_no_sections": [],
+    "card_grids_with_fewer_than_3_atoms": [],
+    "invalid_concept_ids": [],
+    "canonical_duplicates": [],
+    "orphan_atoms_no_role": [],
+    "cross_reference_ratio_per_page": {
+      "/visit": {
+        "canonical": 9,
+        "cross_ref": 3,
+        "ratio": 0.33
+      },
+      "/discovery-membership": {
+        "canonical": 4,
+        "cross_ref": 0,
+        "ratio": 0.0
+      },
+      "/adult-studies": {
+        "canonical": 9,
+        "cross_ref": 0,
+        "ratio": 0.0
+      },
+      "/give": {
+        "canonical": 6,
+        "cross_ref": 0,
+        "ratio": 0.0
+      },
+      "/care": {
+        "canonical": 5,
+        "cross_ref": 0,
+        "ratio": 0.0
+      },
+      "/outreach": {
+        "canonical": 6,
+        "cross_ref": 0,
+        "ratio": 0.0
+      },
+      "/kids": {
+        "canonical": 3,
+        "cross_ref": 0,
+        "ratio": 0.0
+      },
+      "/watch": {
+        "canonical": 4,
+        "cross_ref": 0,
+        "ratio": 0.0
+      },
+      "/story-beliefs": {
+        "canonical": 9,
+        "cross_ref": 1,
+        "ratio": 0.11
+      },
+      "/connect": {
+        "canonical": 3,
+        "cross_ref": 1,
+        "ratio": 0.33
+      },
+      "/students-college": {
+        "canonical": 7,
+        "cross_ref": 0,
+        "ratio": 0.0
+      }
+    }
+  },
+  "_atoms_without_canonical": [],
+  "_emotional_weight_log": [
+    {
+      "page": "/visit",
+      "section_sort": 3,
+      "weight": 1,
+      "decision": "flag_for_needs_queue",
+      "rationale": "No proof support available; flagged."
+    },
+    {
+      "page": "/kids",
+      "section_sort": 2,
+      "weight": 3,
+      "decision": "named_person_available",
+      "rationale": "Named person fact available: Josh Miller (Kids &amp; Middle School Pastor). Drafter should weave the person into the section copy. Future spec: bind to feature_team variant or content_with_named_callout."
+    },
+    {
+      "page": "/story-beliefs",
+      "section_sort": 2,
+      "weight": 1,
+      "decision": "flag_for_needs_queue",
+      "rationale": "No proof support available; flagged."
+    },
+    {
+      "page": "/leadership",
+      "section_sort": 3,
+      "weight": 1,
+      "decision": "named_person_available",
+      "rationale": "Named person fact available: Cole Tawney (Lead Pastor). Drafter should weave the person into the section copy. Future spec: bind to feature_team variant or content_with_named_callout."
+    },
+    {
+      "page": "/students-college",
+      "section_sort": 3,
+      "weight": 1,
+      "decision": "flag_for_needs_queue",
+      "rationale": "No proof support available; flagged."
+    },
+    {
+      "page": "/discovery-membership",
+      "section_sort": 3,
+      "weight": 1,
+      "decision": "named_person_available",
+      "rationale": "Named person fact available: Cole Tawney (Lead Pastor). Drafter should weave the person into the section copy. Future spec: bind to feature_team variant or content_with_named_callout."
+    }
+  ]
+}

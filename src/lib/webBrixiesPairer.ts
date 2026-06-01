@@ -36,6 +36,9 @@ import { supabase } from './supabase'
 import { augmentTemplate } from './webBrixiesSchemaAugment'
 import { LIBRARY_CONCEPTS } from './webCuratedLibrary'
 import { isButtonShapedSlot } from './cta'
+import {
+  extractDocument, fingerprintDocument, type DocumentFingerprint,
+} from './webContentDocument'
 import type {
   WebContentTemplate, WebFieldDef, WebGroupDef, WebSlotDef,
   StrategyWebProject,
@@ -220,69 +223,55 @@ function unwrapItems(v: unknown): unknown[] | null {
   return null
 }
 
-/** Extract a fingerprint from a brief section's field_values. */
+/** Extract a fingerprint from a brief section's field_values.
+ *
+ *  As of the rebuild, this routes through `extractDocument` → the
+ *  semantic IR → `fingerprintDocument`. The legacy key-name-based
+ *  detection has been removed entirely — every brief now passes
+ *  through the IR's shape-first classifier, so cowork's field naming
+ *  conventions (`container_left`, `staff_cards`, `grid.items`, etc.)
+ *  no longer drive scoring. */
 export function fingerprintBrief(fieldValues: Record<string, unknown>): FieldShape {
-  const shape = emptyShape()
-  let primaryGroup: GroupShape | null = null
-  let primaryGroupSize = 0
+  const doc = extractDocument({ field_values: fieldValues })
+  return documentFingerprintToFieldShape(fingerprintDocument(doc))
+}
 
-  for (const [key, value] of Object.entries(fieldValues ?? {})) {
-    if (!isMeaningful(value)) continue
-
-    // Slot signals — match the key against KEY_MAP and set the flag.
-    for (const m of KEY_MAP) {
-      if (m.keys.test(key)) { (shape as Record<string, unknown>)[m.signal] = true; break }
-    }
-
-    // CTA cardinality — single button-shaped value OR an array of them.
-    if (isCtaValue(key, value)) {
-      shape.cta_count += 1
-      continue
-    }
-
-    // Group — try to unwrap into an array of items.
-    const items = unwrapItems(value)
-    if (items != null) {
-      // Buttons group with a single item is a CTA, not a group.
-      if (/^(cta|button|buttons|action|link)s?$/i.test(key)) {
-        shape.cta_count += items.length
-        continue
-      }
-      shape.total_groups += 1
-      const itemShapes = items.map(it =>
-        fingerprintBrief(typeof it === 'object' && it !== null
-          ? (it as Record<string, unknown>) : {}),
-      )
-      // The "merged" per-item shape ORs together every item's flags so
-      // the template match doesn't need every item to be identical.
-      const merged = mergeShapes(itemShapes)
-      // Bullet count — nested `feature_element.items[]` or similar.
-      let bulletCount = 0
-      for (const it of items) {
-        if (it && typeof it === 'object') {
-          for (const [ik, iv] of Object.entries(it as Record<string, unknown>)) {
-            const nested = unwrapItems(iv)
-            if (nested && /(feature_element|list|bullets|items|points)/i.test(ik)
-                && !/(cta|button)/i.test(ik)) {
-              bulletCount = Math.max(bulletCount, nested.length)
-            }
-          }
-        }
-      }
-      const gShape: GroupShape = {
-        key,
-        count: items.length,
-        per_item: merged,
-        bullet_count: bulletCount,
-      }
-      if (items.length > primaryGroupSize) {
-        primaryGroup = gShape
-        primaryGroupSize = items.length
-      }
+/** Bridge from the IR's DocumentFingerprint to the pairer's FieldShape.
+ *  Same boolean signal vector + the structural primary_group field;
+ *  the only delta is that the IR's per_item omits primary_group (items
+ *  inside items aren't tracked structurally — they merge flat into
+ *  the parent's signals). */
+function documentFingerprintToFieldShape(fp: DocumentFingerprint): FieldShape {
+  const base: FieldShape = {
+    has_tagline: fp.has_tagline, has_heading: fp.has_heading,
+    has_description: fp.has_description, has_image: fp.has_image,
+    has_video: fp.has_video, has_name: fp.has_name, has_title: fp.has_title,
+    has_email: fp.has_email, has_role: fp.has_role, has_quote: fp.has_quote,
+    has_date: fp.has_date, has_speaker: fp.has_speaker,
+    has_step_number: fp.has_step_number, has_question: fp.has_question,
+    has_answer: fp.has_answer, has_address: fp.has_address,
+    cta_count: fp.cta_count, total_groups: fp.total_groups,
+    primary_group: null,
+  }
+  if (fp.primary_group) {
+    const pi = fp.primary_group.per_item
+    base.primary_group = {
+      key: fp.primary_group.key,
+      count: fp.primary_group.count,
+      bullet_count: fp.primary_group.bullet_count,
+      per_item: {
+        has_tagline: pi.has_tagline, has_heading: pi.has_heading,
+        has_description: pi.has_description, has_image: pi.has_image,
+        has_video: pi.has_video, has_name: pi.has_name, has_title: pi.has_title,
+        has_email: pi.has_email, has_role: pi.has_role, has_quote: pi.has_quote,
+        has_date: pi.has_date, has_speaker: pi.has_speaker,
+        has_step_number: pi.has_step_number, has_question: pi.has_question,
+        has_answer: pi.has_answer, has_address: pi.has_address,
+        cta_count: pi.cta_count, total_groups: 0, primary_group: null,
+      },
     }
   }
-  shape.primary_group = primaryGroup
-  return shape
+  return base
 }
 
 function mergeShapes(shapes: FieldShape[]): FieldShape {

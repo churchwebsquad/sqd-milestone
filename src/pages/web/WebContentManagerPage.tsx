@@ -48,7 +48,7 @@ type TabKey =
   | 'review'
 
 const TABS: readonly WMTabItem<TabKey>[] = [
-  { key: 'intake',     label: 'Intake',          icon: <ClipboardList size={13} /> },
+  { key: 'intake',     label: 'Intake & Crawl',  icon: <ClipboardList size={13} /> },
   { key: 'library',    label: 'Site Library',    icon: <LayoutGrid    size={13} /> },
   { key: 'pages',      label: 'Pages',           icon: <FileText      size={13} /> },
   { key: 'design',     label: 'Design Handoff',  icon: <Palette       size={13} /> },
@@ -70,6 +70,8 @@ export default function WebContentManagerPage() {
     if (rawTab === 'roadmap' || rawTab === 'rollup' || rawTab === 'snippets' || rawTab === 'voice' || rawTab === 'heuristics') {
       return DEFAULT_TAB                                // dropped/moved → land on pages
     }
+    if (rawTab === 'settings') return DEFAULT_TAB   // moved to /web (org-wide)
+    if (rawTab === 'crawl')    return 'intake'      // merged into intake
     const known: ReadonlyArray<TabKey> = ['intake','library','pages','design','devhandoff','review']
     return (known as readonly string[]).includes(rawTab) ? (rawTab as TabKey) : DEFAULT_TAB
   })()

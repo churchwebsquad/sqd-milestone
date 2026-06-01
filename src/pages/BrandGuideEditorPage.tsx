@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, ArrowRight, AlertCircle, Check, Link as LinkIcon, Loader2, Plus, Trash2, Upload, X,
   Palette, Type as TypeIcon, Image as ImageIcon, Sparkles, MessageCircle,
-  Layers,
+  Layers, FileText,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -17,9 +17,11 @@ import {
   subbrandShortSlug,
   saveLogos, saveColors, saveColorCombinations, saveTypography,
   saveElements, saveVoiceAttributes, saveVoiceGuidelines, saveBrandAttributes,
+  createCustomSection, updateCustomSection, deleteCustomSection, saveCustomSectionEntries,
   type BrandGuideBundle, type LogoDraft, type ColorDraft, type CombinationDraft,
   type TypographyDraft, type ElementDraft, type VoiceAttributeDraft,
   type VoiceGuidelineDraft, type AttributeDraft,
+  type CustomSectionEntryDraft,
 } from '../lib/brandGuide'
 import { uploadAttachment, AttachmentError } from '../lib/attachmentUpload'
 import { isGoogleFont } from '../lib/googleFonts'
@@ -256,6 +258,7 @@ export default function BrandGuideEditorPage() {
             <VoiceAttributesSection bundle={bundle} onSaved={reload} onError={setError} />
             <VoiceGuidelinesSection bundle={bundle} onSaved={reload} onError={setError} />
             <BrandAttributesSection bundle={bundle} onSaved={reload} onError={setError} />
+            <CustomSectionsSection bundle={bundle} onSaved={reload} onError={setError} />
           </>
         )}
         {!isSubbrand && (
@@ -456,6 +459,16 @@ function MetaCard({ guide, churchName, onChange, onError }: {
         </div>
       </div>
 
+      {/* Animations URL — external link (Dropbox / Drive). Animations
+          don't fit inside the bulk zip (file size cap), so we keep them
+          as a separate URL field that renders as its own affordance
+          on the portal. */}
+      <AnimationsUrlField
+        guide={guide}
+        onChange={onChange}
+        onError={() => { /* handled by parent error banner */ }}
+      />
+
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="text-xs text-purple-gray flex items-center gap-2">
           <span className="font-semibold">Portal URL:</span>
@@ -485,6 +498,79 @@ function MetaCard({ guide, churchName, onChange, onError }: {
         >
           {saving ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
           Save meta
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Animations URL field ──────────────────────────────────────────────────
+//
+// Brand team can't fit animations inside the bulk-assets zip (200 MB cap
+// on upload + animations are routinely larger than that). Instead they
+// drop a Dropbox / Drive / Cloudinary link here and the partner portal
+// renders it as its own affordance. URL field only — no file upload,
+// no parsing.
+
+function AnimationsUrlField({ guide, onChange, onError }: {
+  guide:    StrategyBrandGuide
+  onChange: (guide: StrategyBrandGuide) => void
+  onError:  (msg: string) => void
+}) {
+  const [draft, setDraft] = useState(guide.animations_url ?? '')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => { setDraft(guide.animations_url ?? '') }, [guide.animations_url])
+
+  const dirty = (draft.trim() || null) !== (guide.animations_url ?? null)
+
+  const save = async () => {
+    if (!dirty || saving) return
+    setSaving(true)
+    try {
+      const next = await updateGuideMeta(guide.id, { animations_url: draft.trim() || null })
+      onChange(next)
+    } catch (err) {
+      onError((err as { message?: string })?.message ?? 'Failed to save animations URL')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-lavender/70 bg-lavender-tint/20 p-3 mb-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-purple-gray">Animations link</p>
+          <p className="text-xs text-deep-plum mt-0.5">
+            {guide.animations_url
+              ? 'Linked — visible as "View animations" on the public portal.'
+              : 'Optional — Dropbox / Drive / Cloudinary link. Animations are too big for the bulk zip, so we link out instead.'}
+          </p>
+        </div>
+        {guide.animations_url && (
+          <a href={guide.animations_url} target="_blank" rel="noopener noreferrer"
+            className="shrink-0 text-[11px] text-primary-purple hover:underline font-semibold">
+            View current
+          </a>
+        )}
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <input
+          type="url"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          placeholder="https://www.dropbox.com/sh/…  or  https://drive.google.com/drive/folders/…"
+          className="flex-1 min-w-[260px] rounded-lg border border-lavender bg-white px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20"
+        />
+        <button
+          type="button"
+          onClick={save}
+          disabled={!dirty || saving}
+          className="inline-flex items-center gap-1 rounded-full bg-deep-plum text-cream text-xs font-semibold px-3 py-1.5 hover:bg-primary-purple disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {saving ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+          Save
         </button>
       </div>
     </div>
@@ -599,7 +685,7 @@ function LogosSection({ bundle, staffName, onSaved, onError }: {
 
   useEffect(() => { setDraft(bundle.logos) }, [bundle.logos])
 
-  const dirty = !rowsEqual(draft, bundle.logos, ['kind', 'label', 'preview_url', 'download_url', 'animation_url', 'clear_space_note'])
+  const dirty = !rowsEqual(draft, bundle.logos, ['kind', 'label', 'preview_url', 'download_url', 'animation_url', 'background_color', 'clear_space_note'])
 
   const save = async () => {
     setSaving(true)
@@ -610,7 +696,7 @@ function LogosSection({ bundle, staffName, onSaved, onError }: {
     finally { setSaving(false) }
   }
 
-  const addRow = () => setDraft([...draft, { kind: 'primary', label: staffName ? `${staffName}'s Logo` : 'Logo', preview_url: '', download_url: null, animation_url: null, clear_space_note: null }])
+  const addRow = () => setDraft([...draft, { kind: 'primary', label: staffName ? `${staffName}'s Logo` : 'Logo', preview_url: '', download_url: null, animation_url: null, background_color: null, clear_space_note: null }])
   const removeRow = (i: number) => setDraft(draft.filter((_, idx) => idx !== i))
   const updateRow = (i: number, patch: Partial<LogoDraft>) => setDraft(draft.map((r, idx) => idx === i ? { ...r, ...patch } : r))
 
@@ -721,6 +807,40 @@ function LogosSection({ bundle, staffName, onSaved, onError }: {
                 <input type="text" value={row.clear_space_note ?? ''} onChange={e => updateRow(i, { clear_space_note: e.target.value || null })}
                   placeholder="Maintain clear space equal to the height of the 'R' on all sides."
                   className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple" />
+              </Field>
+              {/* Display background — render this logo against the
+                  chosen color on the public portal. Useful for light /
+                  inverse logos that would disappear against white. */}
+              <Field label="Display background (optional)">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={row.background_color ?? '#ffffff'}
+                    onChange={e => updateRow(i, { background_color: e.target.value })}
+                    className="h-9 w-12 cursor-pointer rounded border border-lavender bg-white p-1"
+                    title="Pick background color"
+                  />
+                  <input
+                    type="text"
+                    value={row.background_color ?? ''}
+                    onChange={e => updateRow(i, { background_color: e.target.value || null })}
+                    placeholder="#1e2a44 — leave empty for white"
+                    className="flex-1 rounded-lg border border-lavender px-3 py-1.5 text-sm font-mono text-deep-plum outline-none focus:border-primary-purple"
+                  />
+                  {row.background_color && (
+                    <button
+                      type="button"
+                      onClick={() => updateRow(i, { background_color: null })}
+                      className="text-[11px] text-purple-gray hover:text-red-500"
+                      title="Clear background color"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <p className="mt-1 text-[11px] text-purple-gray/80">
+                  Defaults to white on the portal. Set a color when the logo needs contrast (e.g. white logo on navy).
+                </p>
               </Field>
               {/* Per-logo animation file. Optional — partners often
                   ship motion versions for the primary + the badge but
@@ -858,7 +978,7 @@ function ColorsSection({ bundle, parentBundle, onGuideChange, onSaved, onError }
 
   useEffect(() => { setDraft(bundle.colors) }, [bundle.colors])
 
-  const dirty = !rowsEqual(draft, bundle.colors, ['name', 'tier', 'hex', 'cmyk', 'rgb', 'pms', 'proportion_pct', 'on_color_logo_url'])
+  const dirty = !rowsEqual(draft, bundle.colors, ['name', 'tier', 'hex', 'cmyk', 'rgb', 'pms', 'proportion_pct', 'on_color_logo_url', 'on_color_logo_scale_pct'])
 
   const pickOnColor = (i: number) => { setOnColorIdx(i); onColorInputRef.current?.click() }
   const handleOnColor = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -895,7 +1015,7 @@ function ColorsSection({ bundle, parentBundle, onGuideChange, onSaved, onError }
     if (!/^#[0-9a-fA-F]{6}$/.test(newHex)) return
     setDraft([...draft, {
       name: newName.trim() || null, tier: newTier, hex: newHex.toLowerCase(),
-      cmyk: null, rgb: null, pms: null, proportion_pct: null, on_color_logo_url: null,
+      cmyk: null, rgb: null, pms: null, proportion_pct: null, on_color_logo_url: null, on_color_logo_scale_pct: 100,
     }])
     setNewHex('#')
     setNewName('')
@@ -1033,6 +1153,27 @@ function ColorsSection({ bundle, parentBundle, onGuideChange, onSaved, onError }
                           className="text-[10px] text-purple-gray hover:text-red-500">Clear</button>
                       )}
                     </div>
+                    {/* Scale slider — only meaningful when an on-color
+                        logo is set. Range 25-150% lets staff balance
+                        differently-sized logos across the on-color grid. */}
+                    {c.on_color_logo_url && (
+                      <div className="mt-1 flex items-center gap-1.5">
+                        <label className="text-[10px] text-purple-gray uppercase tracking-wider font-bold">Scale</label>
+                        <input
+                          type="range"
+                          min={25}
+                          max={150}
+                          step={5}
+                          value={c.on_color_logo_scale_pct ?? 100}
+                          onChange={e => updateColor(i, { on_color_logo_scale_pct: parseInt(e.target.value, 10) })}
+                          className="flex-1 accent-primary-purple"
+                          title={`${c.on_color_logo_scale_pct ?? 100}%`}
+                        />
+                        <span className="text-[10px] text-purple-gray font-mono w-9 text-right">
+                          {c.on_color_logo_scale_pct ?? 100}%
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1172,9 +1313,9 @@ function ColorCombinationsSection({ bundle, onSaved, onError }: {
 
 // ── Typography ─────────────────────────────────────────────────────────────
 
-const TYPE_TIERS: BrandTypographyTier[] = ['primary', 'secondary', 'accent']
+const TYPE_TIERS: BrandTypographyTier[] = ['primary', 'subheading', 'secondary', 'accent']
 const TYPE_TIER_LABEL: Record<BrandTypographyTier, string> = {
-  primary: 'Heading', secondary: 'Body', accent: 'Accent',
+  primary: 'Heading', subheading: 'Sub-heading', secondary: 'Body', accent: 'Accent',
 }
 
 type FontRowStatus = 'google' | 'google-url' | 'uploaded-file' | 'remote-url' | 'custom-none'
@@ -1585,7 +1726,7 @@ function ElementsSection({ bundle, onSaved, onError }: {
 
   useEffect(() => { setDraft(bundle.elements) }, [bundle.elements])
 
-  const dirty = !rowsEqual(draft, bundle.elements, ['kind', 'label', 'preview_url', 'download_url'])
+  const dirty = !rowsEqual(draft, bundle.elements, ['kind', 'label', 'preview_url', 'download_url', 'pattern_background_color'])
 
   const save = async () => {
     setSaving(true)
@@ -1596,7 +1737,7 @@ function ElementsSection({ bundle, onSaved, onError }: {
     finally { setSaving(false) }
   }
 
-  const addRow = () => setDraft([...draft, { kind: 'pattern', label: null, preview_url: null, download_url: null }])
+  const addRow = () => setDraft([...draft, { kind: 'pattern', label: null, preview_url: null, download_url: null, pattern_background_color: null }])
   const removeRow = (i: number) => setDraft(draft.filter((_, idx) => idx !== i))
   const updateRow = (i: number, patch: Partial<ElementDraft>) => setDraft(draft.map((r, idx) => idx === i ? { ...r, ...patch } : r))
 
@@ -1633,13 +1774,48 @@ function ElementsSection({ bundle, onSaved, onError }: {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {draft.map((row, i) => (
           <div key={row.id ?? `new-${i}`} className="rounded-xl border border-lavender p-3 space-y-2">
-            <div className="h-28 rounded-lg border border-lavender bg-lavender-tint/30 flex items-center justify-center overflow-hidden">
+            {/* Preview tile honors `pattern_background_color` so low-
+                opacity patterns stay visible against a real backdrop. */}
+            <div
+              className="h-28 rounded-lg border border-lavender flex items-center justify-center overflow-hidden"
+              style={{ backgroundColor: row.pattern_background_color ?? '' }}
+            >
               {row.preview_url ? (
                 <img src={row.preview_url} alt={row.label ?? 'Element'} className="max-h-full max-w-full object-contain" />
               ) : (
                 <button type="button" onClick={() => pickFile(i)} className="text-xs text-purple-gray hover:text-primary-purple font-semibold flex flex-col items-center gap-1">
                   {uploadingIdx === i ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
                   {uploadingIdx === i ? 'Uploading…' : 'Upload preview'}
+                </button>
+              )}
+            </div>
+            {/* Background-color picker for the preview tile (and the
+                portal render). Optional — leave empty for the default
+                lavender tint. */}
+            <div className="flex items-center gap-2">
+              <label className="text-[10px] uppercase tracking-widest font-bold text-purple-gray shrink-0">Backdrop</label>
+              <input
+                type="color"
+                value={row.pattern_background_color ?? '#ffffff'}
+                onChange={e => updateRow(i, { pattern_background_color: e.target.value })}
+                className="h-7 w-9 cursor-pointer rounded border border-lavender p-0.5"
+                title="Preview background"
+              />
+              <input
+                type="text"
+                value={row.pattern_background_color ?? ''}
+                onChange={e => updateRow(i, { pattern_background_color: e.target.value || null })}
+                placeholder="#hex (optional)"
+                className="flex-1 rounded-lg border border-lavender px-2 py-1 text-[12px] font-mono text-deep-plum outline-none focus:border-primary-purple"
+              />
+              {row.pattern_background_color && (
+                <button
+                  type="button"
+                  onClick={() => updateRow(i, { pattern_background_color: null })}
+                  className="text-[10px] text-purple-gray hover:text-red-500"
+                  title="Clear"
+                >
+                  Clear
                 </button>
               )}
             </div>
@@ -1799,21 +1975,24 @@ function VoicePrefillCard({ bundle, onPrefilled, onError }: {
 }) {
   const [loading, setLoading] = useState(false)
   const [lastFilename, setLastFilename] = useState<string | null>(null)
+  const [pasteMode, setPasteMode]       = useState(false)
+  const [pasted, setPasted]             = useState('')
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   const pickFile = () => inputRef.current?.click()
 
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-    if (!/\.(md|markdown|txt)$/i.test(file.name)) {
-      onError('Please upload a .md strategy brief exported from Notion.')
+  /** Run the prefill pipeline on a markdown string from any source —
+   *  file upload or pasted text. Centralizes the invoke + commit so the
+   *  two entry points share error handling. `sourceLabel` is the badge
+   *  shown next to the green checkmark after success ("strategy.md" or
+   *  "pasted text"). */
+  const runPrefill = async (markdown: string, sourceLabel: string) => {
+    if (!markdown.trim()) {
+      onError('Strategy brief is empty.')
       return
     }
     setLoading(true)
     try {
-      const markdown = await file.text()
       const { data, error } = await supabase.functions.invoke<{ prefill: BrandVoicePrefill; error?: string }>(
         'brand-voice-prefill',
         { body: { markdown } },
@@ -1822,12 +2001,28 @@ function VoicePrefillCard({ bundle, onPrefilled, onError }: {
       if (!data?.prefill) throw new Error(data?.error ?? 'No prefill returned from AI')
       await commitPrefill(bundle, data.prefill)
       await onPrefilled()
-      setLastFilename(file.name)
+      setLastFilename(sourceLabel)
+      setPasted('')
+      setPasteMode(false)
     } catch (err) {
       onError((err as { message?: string })?.message ?? 'Prefill failed')
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (!/\.(md|markdown|txt)$/i.test(file.name)) {
+      onError(
+        `Please upload a .md, .markdown, or .txt file. (Notion exports the brief as a .zip — unzip it first to grab the .md inside, or click "Paste text instead" below.)`,
+      )
+      return
+    }
+    const markdown = await file.text()
+    await runPrefill(markdown, file.name)
   }
 
   return (
@@ -1844,7 +2039,7 @@ function VoicePrefillCard({ bundle, onPrefilled, onError }: {
           <p className="text-[10px] font-bold uppercase tracking-widest text-primary-purple mb-1">AI prefill</p>
           <h3 className="text-sm font-bold text-deep-plum mb-1">Prefill "How we sound" from a strategy brief</h3>
           <p className="text-xs text-purple-gray">
-            Upload the Notion strategy-brief export (.md). Claude extracts the voice overview, tone characteristics, voice guidelines, brand attributes, and brand statement, and prepends them to the sections below for review. Nothing saves until you click Save on each section.
+            Upload the Notion strategy-brief export (.md), or paste the text directly. Claude extracts the voice overview, tone characteristics, voice guidelines, brand attributes, and brand statement, and prepends them to the sections below for review. Nothing saves until you click Save on each section.
           </p>
           {lastFilename && !loading && (
             <p className="text-[11px] text-green-700 mt-1.5 flex items-center gap-1">
@@ -1852,16 +2047,60 @@ function VoicePrefillCard({ bundle, onPrefilled, onError }: {
             </p>
           )}
         </div>
-        <button
-          type="button"
-          onClick={pickFile}
-          disabled={loading}
-          className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-primary-purple text-white text-xs font-semibold px-4 py-2 hover:bg-deep-plum transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {loading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
-          {loading ? 'Extracting…' : 'Upload strategy brief'}
-        </button>
+        <div className="shrink-0 flex flex-col items-end gap-1.5">
+          <button
+            type="button"
+            onClick={pickFile}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-full bg-primary-purple text-white text-xs font-semibold px-4 py-2 hover:bg-deep-plum transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {loading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+            {loading ? 'Extracting…' : 'Upload strategy brief'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPasteMode(p => !p)}
+            disabled={loading}
+            className="text-[11px] font-semibold text-primary-purple hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {pasteMode ? 'Cancel paste' : 'Paste text instead'}
+          </button>
+        </div>
       </div>
+      {pasteMode && (
+        <div className="mt-3 space-y-2">
+          <p className="text-[11px] text-purple-gray">
+            Notion exports the brief as a <strong>.zip</strong> — unzip it to find the .md inside, or paste the contents here. Plain markdown works too.
+          </p>
+          <textarea
+            value={pasted}
+            onChange={e => setPasted(e.target.value)}
+            placeholder="Paste the strategy brief markdown here…"
+            rows={10}
+            className="w-full text-[12px] font-mono leading-relaxed text-deep-plum bg-white border border-lavender rounded-md p-3 focus:outline-none focus:border-primary-purple resize-y"
+            spellCheck={false}
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => { setPasted(''); setPasteMode(false) }}
+              disabled={loading}
+              className="text-xs font-semibold text-purple-gray hover:text-deep-plum"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => runPrefill(pasted, 'pasted text')}
+              disabled={loading || !pasted.trim()}
+              className="inline-flex items-center gap-1.5 rounded-full bg-deep-plum text-cream text-xs font-semibold px-4 py-2 hover:bg-purple-mid transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {loading ? <Loader2 size={12} className="animate-spin" /> : null}
+              {loading ? 'Extracting…' : 'Use pasted text'}
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
@@ -2144,6 +2383,241 @@ function BrandAttributesSection({ bundle, onSaved, onError }: {
       </div>
       <SectionFooter dirty={dirty} saving={saving} onSave={save} onReset={() => setDraft(bundle.attributes)} />
     </SectionCard>
+  )
+}
+
+// ── Custom sections (user-defined heading + entries) ──────────────────────
+//
+// Open-ended sections the partner can add to capture content that
+// doesn't fit the fixed Voice/Color/Logo/Typography scaffolds — e.g.
+// "General Rules" with bullet-style heading+body entries. Each section
+// has its own card with its own Save / Delete buttons so they're
+// genuinely independent.
+
+function CustomSectionsSection({ bundle, onSaved, onError }: {
+  bundle:  BrandGuideBundle
+  onSaved: () => Promise<void>
+  onError: (msg: string) => void
+}) {
+  const [creating, setCreating] = useState(false)
+
+  const addSection = async () => {
+    setCreating(true)
+    try {
+      // Place new sections at the end. sort_order = max + 1 keeps
+      // existing sections in their position without renumbering.
+      const nextOrder = bundle.customSections.length > 0
+        ? Math.max(...bundle.customSections.map(s => s.sort_order)) + 1
+        : 0
+      await createCustomSection(bundle.guide.id, 'New section', null, 2, nextOrder)
+      await onSaved()
+    } catch (err) {
+      onError((err as { message?: string })?.message ?? 'Failed to add custom section')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <SectionCard
+      icon={FileText}
+      title="Custom sections"
+      description="Open-ended sections for brand-specific rules and guidance — e.g. General Rules, Typography Standards, Iconography Usage. Each section has its own heading and a list of title + body entries that render in a column grid on the public portal."
+    >
+      <div className="space-y-3">
+        {bundle.customSections.map(section => (
+          <CustomSectionCard
+            key={section.id}
+            section={section}
+            onSaved={onSaved}
+            onError={onError}
+          />
+        ))}
+        <button
+          type="button"
+          onClick={addSection}
+          disabled={creating}
+          className="w-full rounded-xl border-2 border-dashed border-lavender py-4 text-xs text-purple-gray hover:border-primary-purple hover:text-primary-purple transition-colors inline-flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {creating ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+          Add custom section
+        </button>
+      </div>
+    </SectionCard>
+  )
+}
+
+function CustomSectionCard({ section, onSaved, onError }: {
+  section: BrandGuideBundle['customSections'][number]
+  onSaved: () => Promise<void>
+  onError: (msg: string) => void
+}) {
+  // Local draft state for the entire section (heading + meta + entries).
+  // We diff on save against the persisted state and persist what changed.
+  const [heading,     setHeading]     = useState(section.heading)
+  const [description, setDescription] = useState(section.description ?? '')
+  const [columnCount, setColumnCount] = useState(section.column_count)
+  const [entries,     setEntries]     = useState<CustomSectionEntryDraft[]>(
+    section.entries.map(e => ({ id: e.id, title: e.title, body: e.body })),
+  )
+  const [saving,  setSaving]  = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  // Re-seed when the parent reloads (e.g. after another section saved).
+  useEffect(() => {
+    setHeading(section.heading)
+    setDescription(section.description ?? '')
+    setColumnCount(section.column_count)
+    setEntries(section.entries.map(e => ({ id: e.id, title: e.title, body: e.body })))
+  }, [section])
+
+  const metaDirty =
+    heading !== section.heading
+    || (description || null) !== (section.description ?? null)
+    || columnCount !== section.column_count
+  const entriesDirty = !rowsEqual(
+    entries as readonly unknown[],
+    section.entries as readonly unknown[],
+    ['title', 'body'],
+  )
+  const dirty = metaDirty || entriesDirty
+
+  const save = async () => {
+    if (!dirty || saving) return
+    setSaving(true)
+    try {
+      if (metaDirty) {
+        await updateCustomSection(section.id, {
+          heading,
+          description: description.trim() || null,
+          column_count: columnCount,
+        })
+      }
+      if (entriesDirty) {
+        await saveCustomSectionEntries(section.id, entries, section.entries.map(e => e.id))
+      }
+      await onSaved()
+    } catch (err) {
+      onError((err as { message?: string })?.message ?? 'Failed to save section')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const remove = async () => {
+    if (!confirm(`Delete section "${section.heading}" and all its entries? This can't be undone.`)) return
+    setDeleting(true)
+    try {
+      await deleteCustomSection(section.id)
+      await onSaved()
+    } catch (err) {
+      onError((err as { message?: string })?.message ?? 'Failed to delete section')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const addEntry    = ()                                                    => setEntries([...entries, { title: '', body: '' }])
+  const removeEntry = (i: number)                                           => setEntries(entries.filter((_, idx) => idx !== i))
+  const updateEntry = (i: number, patch: Partial<CustomSectionEntryDraft>) => setEntries(entries.map((r, idx) => idx === i ? { ...r, ...patch } : r))
+
+  return (
+    <div className="rounded-xl border border-lavender bg-white p-3 md:p-4 space-y-3">
+      {/* Section meta — heading, description, columns */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            type="text"
+            value={heading}
+            onChange={e => setHeading(e.target.value)}
+            placeholder="Section heading (e.g. General Rules)"
+            className="flex-1 min-w-[200px] rounded-lg border border-lavender bg-white px-3 py-1.5 text-base font-semibold text-deep-plum outline-none focus:border-primary-purple"
+          />
+          <label className="text-[11px] font-bold uppercase tracking-wider text-purple-gray flex items-center gap-1.5">
+            Columns
+            <select
+              value={columnCount}
+              onChange={e => setColumnCount(parseInt(e.target.value, 10))}
+              className="rounded-md border border-lavender bg-white px-2 py-1 text-xs text-deep-plum outline-none focus:border-primary-purple"
+            >
+              <option value={1}>1</option>
+              <option value={2}>2</option>
+              <option value={3}>3</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={remove}
+            disabled={deleting}
+            className="text-purple-gray hover:text-red-500 p-1.5 rounded-md"
+            title="Delete section"
+          >
+            {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+          </button>
+        </div>
+        <textarea
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder="Optional intro for the section (shown beneath the heading on the portal)."
+          rows={2}
+          className="w-full rounded-lg border border-lavender bg-white px-3 py-2 text-sm text-deep-plum outline-none focus:border-primary-purple resize-y"
+        />
+      </div>
+
+      {/* Entries grid */}
+      <div className={
+        columnCount === 1 ? 'grid grid-cols-1 gap-2'
+        : columnCount === 3 ? 'grid grid-cols-1 md:grid-cols-3 gap-2'
+        : 'grid grid-cols-1 md:grid-cols-2 gap-2'
+      }>
+        {entries.map((entry, i) => (
+          <div key={entry.id ?? `new-${i}`} className="rounded-lg border border-lavender/70 bg-lavender-tint/20 p-2.5 space-y-1.5">
+            <input
+              type="text"
+              value={entry.title}
+              onChange={e => updateEntry(i, { title: e.target.value })}
+              placeholder="Entry title (e.g. Keep it Simple)"
+              className="w-full rounded-md border border-lavender bg-white px-2.5 py-1.5 text-sm font-semibold text-deep-plum outline-none focus:border-primary-purple"
+            />
+            <textarea
+              value={entry.body}
+              onChange={e => updateEntry(i, { body: e.target.value })}
+              placeholder="Entry body — the guidance for this specific rule."
+              rows={4}
+              className="w-full rounded-md border border-lavender bg-white px-2.5 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple resize-y"
+            />
+            <div className="text-right">
+              <button type="button" onClick={() => removeEntry(i)} className="text-[11px] text-purple-gray hover:text-red-500">
+                Remove entry
+              </button>
+            </div>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={addEntry}
+          className="rounded-lg border-2 border-dashed border-lavender py-6 text-xs text-purple-gray hover:border-primary-purple hover:text-primary-purple transition-colors inline-flex items-center justify-center gap-1.5"
+        >
+          <Plus size={12} /> Add entry
+        </button>
+      </div>
+
+      {/* Save footer */}
+      <div className="flex items-center justify-end gap-2 pt-1 border-t border-lavender/50">
+        {dirty && (
+          <span className="text-[11px] italic text-purple-gray mr-auto">Unsaved changes</span>
+        )}
+        <button
+          type="button"
+          onClick={save}
+          disabled={!dirty || saving}
+          className="inline-flex items-center gap-1 rounded-full bg-deep-plum text-cream text-xs font-semibold px-3 py-1.5 hover:bg-primary-purple disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {saving ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+          Save section
+        </button>
+      </div>
+    </div>
   )
 }
 

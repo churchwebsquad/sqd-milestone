@@ -14,8 +14,9 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, Library, Plus, Search, X } from 'lucide-react'
+import { ArrowRight, ChevronDown, ChevronRight, Library, Plus, Search, Settings, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { SettingsWorkspace } from '../../components/wm/workspaces/SettingsWorkspace'
 import type { StrategyWebProject } from '../../types/database'
 
 interface ProjectRow extends StrategyWebProject {
@@ -30,6 +31,7 @@ export default function WebProjectsPage() {
   const [query, setQuery] = useState('')
   const [showArchived, setShowArchived] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -98,6 +100,20 @@ export default function WebProjectsPage() {
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(o => !o)}
+              className={`inline-flex items-center gap-1.5 rounded-full border text-xs font-semibold px-3 py-1.5 transition-colors ${
+                settingsOpen
+                  ? 'border-primary-purple bg-primary-purple/10 text-primary-purple'
+                  : 'border-lavender bg-white text-deep-plum hover:border-primary-purple hover:text-primary-purple'
+              }`}
+              title="Org-wide site manager settings — applies to every project, every church."
+            >
+              <Settings size={12} />
+              Settings
+              {settingsOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            </button>
             <Link
               to="/web/templates"
               className="inline-flex items-center gap-1.5 rounded-full border border-lavender bg-white text-xs font-semibold text-deep-plum px-3 py-1.5 hover:border-primary-purple hover:text-primary-purple transition-colors"
@@ -116,6 +132,21 @@ export default function WebProjectsPage() {
             </button>
           </div>
         </div>
+
+        {/* Org-wide Site Manager settings — applies to every project,
+            every church. Collapsed by default; toggle from the header. */}
+        {settingsOpen && (
+          <div className="mb-6 rounded-2xl border border-lavender bg-white/60 p-5">
+            <div className="mb-3">
+              <p className="text-xs font-bold text-primary-purple uppercase tracking-widest mb-0.5">Org-wide</p>
+              <h2 className="text-base font-semibold text-deep-plum">Settings</h2>
+              <p className="text-xs text-purple-gray mt-0.5">
+                Changes here apply to every project, every church.
+              </p>
+            </div>
+            <SettingsWorkspace />
+          </div>
+        )}
 
         {/* Search */}
         <div className="relative mb-4">

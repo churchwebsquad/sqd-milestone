@@ -386,29 +386,29 @@ function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
                     broken && 'bg-wm-warn-bg/40',
                   ].filter(Boolean).join(' ')}
                 >
-                  <td className="px-2 py-2 max-w-[260px]">
+                  <td className="px-2 py-2 max-w-[280px] align-top">
                     {c.cta.url ? (
                       <a
                         href={c.cta.url}
                         target={target}
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 font-mono text-wm-accent-strong hover:underline truncate"
+                        className="inline-flex items-start gap-1 font-mono text-wm-accent-strong hover:underline break-all"
                         title={c.cta.url}
                       >
-                        {target === '_blank' && <ExternalLink size={9} className="shrink-0" />}
-                        <span className="truncate">{c.cta.url}</span>
+                        {target === '_blank' && <ExternalLink size={9} className="shrink-0 mt-0.5" />}
+                        <span className="break-all">{c.cta.url}</span>
                       </a>
                     ) : (
                       <span className="italic text-wm-text-subtle">no url</span>
                     )}
                     {broken && (
-                      <p className="text-[10px] text-wm-warn mt-0.5 inline-flex items-center gap-1">
-                        <AlertTriangle size={9} /> {c.validationError}
+                      <p className="text-[10px] text-wm-warn mt-0.5 inline-flex items-start gap-1">
+                        <AlertTriangle size={9} className="mt-0.5 shrink-0" /> {c.validationError}
                       </p>
                     )}
                   </td>
-                  <td className="px-2 py-2 max-w-[180px]">
-                    <p className="text-wm-text truncate" title={c.cta.label}>
+                  <td className="px-2 py-2 max-w-[200px] align-top">
+                    <p className="text-wm-text break-words" title={c.cta.label}>
                       {c.cta.label || <span className="italic text-wm-text-subtle">(no label)</span>}
                     </p>
                   </td>
@@ -426,10 +426,10 @@ function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
                     <p className="font-semibold text-wm-text">{c.pageName}</p>
                     <p className="text-[10px] text-wm-text-subtle font-mono">/{c.pageSlug}</p>
                   </td>
-                  <td className="px-2 py-2 max-w-[180px]">
-                    <p className="text-wm-text truncate" title={c.sectionLabel}>{c.sectionLabel}</p>
+                  <td className="px-2 py-2 max-w-[200px] align-top">
+                    <p className="text-wm-text break-words" title={c.sectionLabel}>{c.sectionLabel}</p>
                     {c.fieldLabel && c.fieldLabel !== c.fieldKey && (
-                      <p className="text-[10px] text-wm-text-subtle truncate" title={c.fieldLabel}>{c.fieldLabel}</p>
+                      <p className="text-[10px] text-wm-text-subtle break-words" title={c.fieldLabel}>{c.fieldLabel}</p>
                     )}
                   </td>
                 </tr>

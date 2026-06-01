@@ -3,12 +3,12 @@ import { useParams } from 'react-router-dom'
 import {
   ArrowRight, Check, Download, ExternalLink, MessageCircle,
   Palette, Type as TypeIcon, Image as ImageIcon, Sparkles, AlertCircle,
-  Layers,
+  Layers, FileText, X,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type {
   BrandGuidePortalPayload, StrategyBrandColor, StrategyBrandTypography,
-  StrategyBrandLogo, StrategyBrandElement,
+  StrategyBrandLogo, StrategyBrandElement, StrategyBrandCustomSection,
 } from '../types/database'
 import { isGoogleFont, buildGoogleFontsUrls } from '../lib/googleFonts'
 import { buildPortalPath } from '../lib/portalUrl'
@@ -399,6 +399,21 @@ function TopBar({ payload, theme }: {
               <Download size={12} /> Download brand package
             </a>
           )}
+          {guide.animations_url && (
+            <a
+              href={guide.animations_url}
+              target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border text-xs font-semibold px-3 py-1.5 transition-colors"
+              style={{
+                borderColor: 'rgba(255,255,255,0.3)',
+                color: theme.topbarText,
+                backgroundColor: 'rgba(255,255,255,0.08)',
+              }}
+              title="View animations hosted externally (Dropbox / Drive)"
+            >
+              <ExternalLink size={12} /> View animations
+            </a>
+          )}
         </div>
       </div>
       {(guide.last_updated_at ?? guide.updated_at) && (
@@ -414,13 +429,26 @@ function TopBar({ payload, theme }: {
 
 function Body({ payload, theme }: { payload: BrandGuidePortalPayload; theme: PortalTheme }) {
   const isSubbrand = payload.guide.parent_id != null
-  const visibleSections = SECTIONS.filter(s => {
-    if (s.id === 'ministries') return payload.subbrands.length > 0
-    if (s.id === 'elements') return payload.elements.length > 0
-    // Subbrands are brand-identity only — skip voice/positioning/attributes.
-    if (isSubbrand && (s.id === 'voice' || s.id === 'attributes' || s.id === 'positioning')) return false
-    return true
-  })
+  // Custom sections are user-defined so they extend the static nav at
+  // runtime. Inserted just before Ministries so the open-ended content
+  // sits after the structured sections but before the family/subbrand
+  // wrap-up. Sections with no entries are skipped entirely.
+  const customSections = (payload.custom_sections ?? [])
+    .filter(s => Array.isArray(s.entries) && s.entries.length > 0)
+  const customNavItems = customSections.map(s => ({
+    id:    `custom-section-${s.id}`,
+    label: s.heading,
+  }))
+  const visibleSections = [
+    ...SECTIONS.filter(s => {
+      if (s.id === 'ministries') return payload.subbrands.length > 0
+      if (s.id === 'elements') return payload.elements.length > 0
+      // Subbrands are brand-identity only — skip voice/positioning/attributes.
+      if (isSubbrand && (s.id === 'voice' || s.id === 'attributes' || s.id === 'positioning')) return false
+      return true
+    }),
+    ...customNavItems,
+  ]
   const [activeId, setActiveId] = useState<string>(visibleSections[0].id)
   const [toast, setToast] = useState<string | null>(null)
 
@@ -506,6 +534,9 @@ function Body({ payload, theme }: { payload: BrandGuidePortalPayload; theme: Por
                 <PositioningSection statement={payload.guide.brand_statement} theme={theme} />
               </>
             )}
+            {customSections.map(section => (
+              <CustomSectionView key={section.id} section={section} theme={theme} />
+            ))}
             <MinistriesSection subbrands={payload.subbrands} theme={theme} />
             {isSubbrand && (
               <BrandFamilySection
@@ -636,8 +667,18 @@ function LogoSection({ logos, colors, theme }: {
   colors: StrategyBrandColor[]
   theme: PortalTheme
 }) {
-  const primary = logos.find(l => l.kind === 'primary')
-  const supporting = logos.filter(l => l.kind !== 'primary')
+  // Multi-primary handling: a guide can carry several logos tagged
+  // `kind='primary'` (horizontal + vertical + badge, etc.). Show the
+  // FIRST one in the hero "primary" card and route the extras into the
+  // supporting grid so they aren't silently dropped. Previously the
+  // filter at `l.kind !== 'primary'` excluded every primary including
+  // the extras, which dropped them from the partner view entirely.
+  const primariesAll  = logos.filter(l => l.kind === 'primary')
+  const primary       = primariesAll[0]
+  const supporting    = [
+    ...primariesAll.slice(1),
+    ...logos.filter(l => l.kind !== 'primary'),
+  ]
   const onColorColors = colors.filter(c => !!c.on_color_logo_url)
 
   return (
@@ -650,7 +691,10 @@ function LogoSection({ logos, colors, theme }: {
       />
 
       {primary ? (
-        <div className="rounded-xl border border-gray-200 p-6 md:p-12 bg-white flex items-center justify-center min-h-[220px] mb-6 relative">
+        <div
+          className="rounded-xl border border-gray-200 p-6 md:p-12 flex items-center justify-center min-h-[220px] mb-6 relative"
+          style={{ backgroundColor: primary.background_color ?? '#ffffff' }}
+        >
           {/* Download falls back to the uploaded preview (already a
               public Supabase URL) when no override was set on the
               editor — so the button is never hidden just because a
@@ -677,7 +721,11 @@ function LogoSection({ logos, colors, theme }: {
           <h3 className="text-base font-bold mt-10 mb-3" style={{ fontFamily: theme.headingFont, color: theme.text }}>Supporting logos</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {supporting.map(logo => (
-              <div key={logo.id} className="group relative rounded-xl border border-gray-200 bg-white aspect-square flex items-center justify-center p-6">
+              <div
+                key={logo.id}
+                className="group relative rounded-xl border border-gray-200 aspect-square flex items-center justify-center p-6"
+                style={{ backgroundColor: logo.background_color ?? '#ffffff' }}
+              >
                 <LogoArtwork logo={logo} maxHeight="max-h-24" />
                 {(logo.download_url || logo.preview_url) && (
                   <a
@@ -722,8 +770,12 @@ function LogoSection({ logos, colors, theme }: {
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {onColorColors.map(c => {
-              const logoSrc = c.on_color_logo_url!
-              const isVideo = logoSrc.endsWith('.mp4')
+              const logoSrc  = c.on_color_logo_url!
+              const isVideo  = logoSrc.endsWith('.mp4')
+              // Per-color scale (default 100%). Apply as a CSS transform so
+              // the logo scales from center without changing its aspect.
+              const scalePct = c.on_color_logo_scale_pct ?? 100
+              const scaleStyle = { transform: `scale(${scalePct / 100})`, transformOrigin: 'center' }
               return (
                 <div
                   key={c.id}
@@ -731,9 +783,9 @@ function LogoSection({ logos, colors, theme }: {
                   style={{ backgroundColor: c.hex }}
                 >
                   {isVideo ? (
-                    <video src={logoSrc} className="max-h-16 max-w-full" autoPlay loop muted playsInline />
+                    <video src={logoSrc} className="max-h-16 max-w-full" autoPlay loop muted playsInline style={scaleStyle} />
                   ) : (
-                    <img src={logoSrc} alt={c.name ?? 'On-color logo'} className="max-h-16 max-w-full object-contain" />
+                    <img src={logoSrc} alt={c.name ?? 'On-color logo'} className="max-h-16 max-w-full object-contain" style={scaleStyle} />
                   )}
                 </div>
               )
@@ -999,9 +1051,10 @@ function ColorSwatch({ color, theme, onCopy }: {
 // ── TYPOGRAPHY SECTION ─────────────────────────────────────────────────────
 
 const TYPE_TIER_LABEL: Record<string, string> = {
-  primary: 'Heading',
-  secondary: 'Body',
-  accent: 'Accent',
+  primary:    'Heading',
+  subheading: 'Sub-heading',
+  secondary:  'Body',
+  accent:     'Accent',
 }
 
 function TypographySection({ typography, theme }: { typography: StrategyBrandTypography[]; theme: PortalTheme }) {
@@ -1141,17 +1194,48 @@ const ELEMENT_LABEL: Record<string, string> = {
 }
 
 function ElementsSection({ elements, theme }: { elements: StrategyBrandElement[]; theme: PortalTheme }) {
+  // Click-to-enlarge state. Branding feedback: partners couldn't read
+  // the detail in element previews (especially brand kits) because the
+  // grid tiles are small. A lightbox opens the preview at viewport
+  // size with the label + download link. ESC + backdrop-click close it.
+  const [selected, setSelected] = useState<StrategyBrandElement | null>(null)
+
+  useEffect(() => {
+    if (!selected) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelected(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selected])
+
   if (elements.length === 0) return null
 
   return (
     <section id="elements" className="scroll-mt-24">
-      <SectionHeader icon={Sparkles} label="Elements & Application" description="The patterns, textures, and supporting graphics that make our church's visuals feel like ours." theme={theme} />
+      <SectionHeader icon={Sparkles} label="Elements & Application" description="The patterns, textures, and supporting graphics that make our church's visuals feel like ours. Click any tile to enlarge." theme={theme} />
 
       <div className="columns-1 sm:columns-2 md:columns-3 gap-4 [&>*]:mb-4">
         {elements.map(el => (
-          <div key={el.id} className="break-inside-avoid rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <div
+            key={el.id}
+            className="break-inside-avoid rounded-xl border border-gray-200 bg-white overflow-hidden"
+          >
             {el.preview_url && (
-              <img src={el.preview_url} alt={el.label ?? 'Element'} className="w-full h-auto object-cover" />
+              // Pattern backdrop honored when set so low-opacity textures
+              // don't disappear against white. Falls through to default
+              // white when null. Wrapping `<button>` makes the whole
+              // preview tile keyboard-accessible (Enter/Space activates).
+              <button
+                type="button"
+                onClick={() => setSelected(el)}
+                className="block w-full group relative cursor-zoom-in focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1"
+                style={{ backgroundColor: el.pattern_background_color ?? '#ffffff' }}
+                aria-label={`Enlarge ${el.label ?? ELEMENT_LABEL[el.kind] ?? 'element'}`}
+              >
+                <img src={el.preview_url} alt={el.label ?? 'Element'} className="w-full h-auto object-cover" />
+                <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/50 backdrop-blur-sm text-white text-[10px] font-semibold px-2 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  Enlarge
+                </span>
+              </button>
             )}
             <div className="px-4 py-3">
               <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">{ELEMENT_LABEL[el.kind] ?? el.kind}</p>
@@ -1167,7 +1251,74 @@ function ElementsSection({ elements, theme }: { elements: StrategyBrandElement[]
           </div>
         ))}
       </div>
+
+      {selected && <ElementLightbox element={selected} theme={theme} onClose={() => setSelected(null)} />}
     </section>
+  )
+}
+
+/** Full-viewport overlay showing one element preview at large size with
+ *  its metadata + download link. Backdrop click + ESC close it
+ *  (keydown wired in the parent). The wrapper stops propagation so a
+ *  click on the content itself doesn't dismiss. */
+function ElementLightbox({ element, theme, onClose }: {
+  element: StrategyBrandElement
+  theme:   PortalTheme
+  onClose: () => void
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={element.label ?? 'Element preview'}
+      onClick={onClose}
+      className="fixed inset-0 z-50 grid place-items-center bg-black/80 backdrop-blur-sm p-4 md:p-8 cursor-zoom-out"
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        className="relative w-full max-w-5xl max-h-[90vh] bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col cursor-default"
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close preview"
+          className="absolute top-3 right-3 z-10 inline-flex items-center justify-center h-8 w-8 rounded-full bg-white/90 backdrop-blur shadow-md text-gray-700 hover:text-black hover:bg-white transition-colors"
+        >
+          <X size={16} />
+        </button>
+        {element.preview_url && (
+          <div
+            className="flex-1 flex items-center justify-center overflow-auto min-h-0"
+            style={{ backgroundColor: element.pattern_background_color ?? '#ffffff' }}
+          >
+            <img
+              src={element.preview_url}
+              alt={element.label ?? 'Element'}
+              className="max-w-full max-h-[80vh] object-contain"
+            />
+          </div>
+        )}
+        <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between gap-3 flex-wrap shrink-0">
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">{ELEMENT_LABEL[element.kind] ?? element.kind}</p>
+            <p className="text-base font-semibold mt-0.5" style={{ fontFamily: theme.headingFont, color: theme.text }}>
+              {element.label ?? '—'}
+            </p>
+          </div>
+          {element.download_url && (
+            <a
+              href={element.download_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full text-white text-xs font-semibold px-3 py-1.5 transition-opacity hover:opacity-90"
+              style={{ backgroundColor: theme.topbarBg }}
+            >
+              <Download size={12} /> Download
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -1199,13 +1350,19 @@ function VoiceSection({ overview, toneCharacteristics, voiceGuidelines, theme }:
         </p>
       )}
 
+      {/* Tone + voice titles render in theme.text (always-readable) with
+          the brand's `secondary` color preserved as a left-border accent
+          so brands with a light-toned secondary (cream, pale pink, etc.)
+          don't end up with invisible titles on white. Brand expression
+          stays via the accent strip + heading font; readability is
+          guaranteed via the dark text. */}
       {toneCharacteristics.length > 0 && (
         <div className="mb-12">
           <h3 className="text-base font-bold mb-4" style={{ fontFamily: theme.headingFont, color: theme.text }}>Tone Characteristics</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
             {toneCharacteristics.map(v => (
-              <div key={v.id}>
-                <h4 className="text-2xl font-bold mb-2" style={{ fontFamily: theme.headingFont, color: theme.secondary }}>{v.title}</h4>
+              <div key={v.id} className="pl-4 border-l-4" style={{ borderColor: theme.secondary }}>
+                <h4 className="text-2xl font-bold mb-2" style={{ fontFamily: theme.headingFont, color: theme.text }}>{v.title}</h4>
                 <p className="text-sm text-gray-700 leading-relaxed">{v.description}</p>
               </div>
             ))}
@@ -1218,8 +1375,8 @@ function VoiceSection({ overview, toneCharacteristics, voiceGuidelines, theme }:
           <h3 className="text-base font-bold mb-4" style={{ fontFamily: theme.headingFont, color: theme.text }}>Voice Guidelines</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
             {voiceGuidelines.map(v => (
-              <div key={v.id}>
-                <h4 className="text-2xl font-bold mb-2" style={{ fontFamily: theme.headingFont, color: theme.secondary }}>{v.title}</h4>
+              <div key={v.id} className="pl-4 border-l-4" style={{ borderColor: theme.secondary }}>
+                <h4 className="text-2xl font-bold mb-2" style={{ fontFamily: theme.headingFont, color: theme.text }}>{v.title}</h4>
                 <p className="text-sm text-gray-700 leading-relaxed">{v.description}</p>
               </div>
             ))}
@@ -1284,6 +1441,50 @@ function PositioningSection({ statement, theme }: {
       >
         "{statement}"
       </blockquote>
+    </section>
+  )
+}
+
+// ── CUSTOM SECTIONS ────────────────────────────────────────────────────────
+//
+// Open-ended brand-guide sections defined by the editor. Heading is
+// user-supplied, entries render as a (configurable) column grid of
+// title + body blocks. Body text auto-paragraphs on blank lines so a
+// multi-paragraph entry reads as multiple paragraphs without HTML.
+
+function CustomSectionView({ section, theme }: {
+  section: StrategyBrandCustomSection
+  theme:   PortalTheme
+}) {
+  const entries = section.entries ?? []
+  if (entries.length === 0) return null
+  const colsClass = section.column_count === 1
+    ? 'grid grid-cols-1 gap-10'
+    : section.column_count === 3
+      ? 'grid grid-cols-1 md:grid-cols-3 gap-10'
+      : 'grid grid-cols-1 md:grid-cols-2 gap-10'
+  return (
+    <section id={`custom-section-${section.id}`} className="scroll-mt-24">
+      <SectionHeader
+        icon={FileText}
+        label={section.heading}
+        description={section.description ?? undefined}
+        theme={theme}
+      />
+      <div className={colsClass}>
+        {entries.map(entry => (
+          <div key={entry.id} className="pl-4 border-l-4" style={{ borderColor: theme.secondary }}>
+            <h3 className="text-2xl font-bold mb-2" style={{ fontFamily: theme.headingFont, color: theme.text }}>
+              {entry.title}
+            </h3>
+            {entry.body.split(/\n{2,}/).filter(p => p.trim().length > 0).map((paragraph, i) => (
+              <p key={i} className="text-sm text-gray-700 leading-relaxed mb-2 last:mb-0 whitespace-pre-line">
+                {paragraph}
+              </p>
+            ))}
+          </div>
+        ))}
+      </div>
     </section>
   )
 }

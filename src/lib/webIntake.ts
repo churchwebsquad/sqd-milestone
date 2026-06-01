@@ -51,7 +51,7 @@ export async function fetchIntakeStatus(
   webProjectId: string,
   member: number,
 ): Promise<IntakeStatus> {
-  const [docsRes, accountRes, brandRes, discoveryRes] = await Promise.all([
+  const [docsRes, accountRes, brandRes, discoveryRes, crawlRes, reviewsRes] = await Promise.all([
     supabase
       .from('web_intake_documents')
       .select('*')
@@ -78,6 +78,22 @@ export async function fetchIntakeStatus(
       .order('submitted_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
+    // Latest crawl job for this project. Used by the content_collection
+    // auto-complete derivation below.
+    supabase
+      .schema('web-hub')
+      .from('crawl_jobs')
+      .select('status, completed_at, created_at')
+      .eq('project_id', webProjectId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    // Partner reviews for this project. Same auto-complete derivation.
+    supabase
+      .from('web_reviews')
+      .select('id, kind, status, completed_at, started_at')
+      .eq('web_project_id', webProjectId)
+      .eq('kind', 'partner'),
   ])
 
   const docs = (docsRes.data ?? []) as WebIntakeDocument[]
@@ -137,14 +153,50 @@ export async function fetchIntakeStatus(
   // Content collection — uploaded files (hard stop — Stage 2+ can't run
   // without the partner's actual content to organize). Previously optional;
   // promoted to required because every downstream stage references it.
+  //
+  // Auto-complete: if there are NO uploaded files but the site crawl is
+  // complete AND every partner review has closed, mark received=true and
+  // surface that the row was satisfied via signals (no file upload
+  // needed — the crawl + partner feedback round-trip is itself the
+  // content collection for these projects). The partner-feedback gate
+  // requires at least one partner review to have existed (a fresh
+  // project with zero partner reviews can't auto-complete).
   const content = docsByCategory('content_collection')
+  const latestCrawl = crawlRes.data as { status?: string; completed_at?: string | null; created_at?: string | null } | null
+  const crawlComplete = latestCrawl?.status === 'complete'
+  const partnerReviews = (reviewsRes.data ?? []) as Array<{
+    id: string
+    status?: string | null
+    completed_at?: string | null
+    started_at?: string | null
+  }>
+  const partnerFeedbackComplete = partnerReviews.length > 0
+    && partnerReviews.every(r => r.status === 'completed' || r.status === 'closed')
+  const autoCompleteContentCollection = content.length === 0 && crawlComplete && partnerFeedbackComplete
+  // Pick the most-recent signal as the received_at when auto-completing.
+  const lastPartnerCompletedAt = partnerReviews
+    .map(r => r.completed_at)
+    .filter((d): d is string => Boolean(d))
+    .sort()
+    .pop() ?? null
+  const autoCompleteReceivedAt = autoCompleteContentCollection
+    ? (lastPartnerCompletedAt
+       && latestCrawl?.completed_at
+       && lastPartnerCompletedAt > latestCrawl.completed_at
+         ? lastPartnerCompletedAt
+         : latestCrawl?.completed_at ?? lastPartnerCompletedAt ?? latestCrawl?.created_at ?? null)
+    : null
   const content_collection: IntakeRowStatus = {
     key: 'content_collection',
     is_hard_stop: true,
-    received: content.length > 0,
-    received_at: content[0]?.uploaded_at ?? null,
+    received: content.length > 0 || autoCompleteContentCollection,
+    received_at: content[0]?.uploaded_at ?? autoCompleteReceivedAt,
     source_url: null,
-    source_label: content.length > 0 ? `${content.length} file${content.length === 1 ? '' : 's'} uploaded` : null,
+    source_label: content.length > 0
+      ? `${content.length} file${content.length === 1 ? '' : 's'} uploaded`
+      : (autoCompleteContentCollection
+         ? 'Auto-completed via site crawl + partner feedback'
+         : null),
     uploaded_files: content,
   }
 

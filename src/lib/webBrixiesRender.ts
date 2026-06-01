@@ -63,6 +63,7 @@ export function renderSectionToHtml(
   styleHyperlinks(root)
   neutralizeLoremPlaceholders(root)
   neutralizeDefaultButtonLabels(root)
+  hideEmptyButtonShells(root)
 
   return root.outerHTML
 }
@@ -277,6 +278,44 @@ function neutralizeDefaultButtonLabels(root: Element): void {
     }
     node = walker.nextNode() as Text | null
   }
+}
+
+/** Hide leaf button shells whose label is empty after binding +
+ *  default-label neutralization. Resolves the Brixies-source "phantom
+ *  button" symptom: when a CTA slot is unbound, the source's styled
+ *  button element still renders as an empty pill in the preview, which
+ *  reads as a broken layout. Better to hide it entirely — the bind
+ *  inspector surfaces the empty slot separately so the signal isn't
+ *  lost; the preview just stops showing buttons that have nothing
+ *  to render.
+ *
+ *  Targets only LEAF button shells (no nested button-shell descendants)
+ *  so wrapping containers like "Buttons" with multiple child CTAs stay
+ *  visible — only the empty children disappear. */
+function hideEmptyButtonShells(root: Element): void {
+  const all = root.querySelectorAll<HTMLElement>('[data-layer]')
+  for (const el of Array.from(all)) {
+    if (!isButtonShellLayer(el)) continue
+    if (hasNestedButtonShell(el)) continue
+    const txt = (el.textContent ?? '').trim()
+    if (txt) continue
+    const existing = el.getAttribute('style') ?? ''
+    const cleaned = existing.replace(/;?\s*display\s*:\s*[^;]+;?/gi, '').replace(/^\s*;/, '').trim()
+    el.setAttribute('style', (cleaned ? cleaned + ';' : '') + 'display:none')
+  }
+}
+
+function isButtonShellLayer(el: Element): boolean {
+  const layer = (el.getAttribute('data-layer') ?? '').toLowerCase()
+  return layer.includes('button') || layer.includes('cta')
+         || layer === 'contact' || layer === 'contact us' || layer === 'contact now'
+}
+
+function hasNestedButtonShell(el: Element): boolean {
+  for (const child of Array.from(el.querySelectorAll('[data-layer]'))) {
+    if (isButtonShellLayer(child)) return true
+  }
+  return false
 }
 
 /** When N identically-named siblings all carry `position: absolute`

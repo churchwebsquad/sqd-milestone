@@ -152,6 +152,20 @@ export function augmentTemplate(template: WebContentTemplate): WebContentTemplat
   // augmented one, blanking out substituted content. The function is kept
   // below for reference and future work; not invoked. Lorem visibility
   // is handled by neutralizeLoremPlaceholders in the renderer instead.
+
+  // Final pass — deduplicate field keys. The binder writes to
+  // `out[field.key]`, so two top-level fields with the same key cause
+  // the second one to overwrite the first (visible symptom: Hero
+  // Section 32 has two `image` groups; only the second binds, leaving
+  // the first image grid empty). 9 templates in the current catalog
+  // ship duplicate keys at the top level — banner-4, content-16,
+  // cta-48, feature-27, footer-26, footer-29, hero-32, hero-34,
+  // single-post-8. Rather than 9 data fixes (and ongoing risk for
+  // future Brixies imports), we rename collisions at augment time:
+  // the first occurrence keeps the key, subsequent ones get `_2`,
+  // `_3`, etc. Defensive — leaves single-key templates untouched.
+  augmented = dedupeFieldKeys(augmented)
+
   const fieldsChanged = JSON.stringify(augmented) !== JSON.stringify(template.fields)
   if (!fieldsChanged && !mutatedSourceHtml) return template
   return {
@@ -159,6 +173,29 @@ export function augmentTemplate(template: WebContentTemplate): WebContentTemplat
     fields: augmented,
     ...(mutatedSourceHtml ? { source_html: mutatedSourceHtml } : {}),
   }
+}
+
+/** Rename duplicate `key` values across an array of fields. The first
+ *  occurrence keeps its key; subsequent ones get `<key>_2`, `<key>_3`,
+ *  etc. Skips fields without a string key (defensive — augmentField
+ *  should never emit those, but the bind path tolerates them). */
+function dedupeFieldKeys(fields: ReadonlyArray<WebFieldDef>): WebFieldDef[] {
+  const seen = new Map<string, number>()
+  const out: WebFieldDef[] = []
+  for (const f of fields) {
+    const k = (f as { key?: unknown }).key
+    if (typeof k !== 'string' || !k) { out.push(f); continue }
+    const count = seen.get(k) ?? 0
+    if (count === 0) {
+      out.push(f)
+      seen.set(k, 1)
+    } else {
+      const newKey = `${k}_${count + 1}`
+      out.push({ ...(f as object), key: newKey } as WebFieldDef)
+      seen.set(k, count + 1)
+    }
+  }
+  return out
 }
 
 /** True when the template is in the Hero Section family — matches the
@@ -876,7 +913,31 @@ function inferSlotShape(layer: string, element: Element): InferredShape | null {
   return { type: 'text', keyBase: sanitizeKey(layer), max_chars: 100 }
 }
 
+/** Brixies designs sometimes ship layer_names that are the lorem
+ *  placeholder copy itself ("Lorem ipsum dolor sit amet", "Consectetur
+ *  adipiscing elit", "Sed do eiusmod tempor"). When the augmenter
+ *  hoists those layer_names into field keys, we end up with garbage
+ *  like `lorem_ipsum_dolor_sit_amet` in the inspector. Detect the
+ *  pattern and fall back to a semantic key derived from the slot's
+ *  intent. Caller still needs to pass that intent through; this
+ *  function returns the raw sanitized key unless the layer text is
+ *  recognizably lorem. */
+const LOREM_PATTERN = /\b(lorem\s+ipsum|dolor\s+sit\s+amet|consectetur\s+adipiscing|sed\s+do\s+eiusmod|incididunt|aliqua|enim\s+ad\s+minim|veniam|exercitation|ullamco|laboris|nostrud|deserunt\s+mollit|cupidatat|excepteur|occaecat)\b/i
+
+function isLoremLayer(layer: string): boolean {
+  return LOREM_PATTERN.test(layer)
+}
+
 function sanitizeKey(layer: string): string {
+  if (isLoremLayer(layer)) {
+    // Use a generic semantic key so the inspector reads cleanly. The
+    // bind path still works because `pickBlockForSlot` resolves by
+    // intent (slot.type / scope), not by key — only the visible label
+    // changes. Caller (`augmentField`) can pass a more contextual key
+    // when it knows the slot's role (heading / description / etc.);
+    // this is the catch-all fallback.
+    return 'text_item'
+  }
   return layer.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'field'
 }
 

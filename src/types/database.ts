@@ -513,7 +513,7 @@ export interface CopyReviewPortalPayload {
 
 export type BrandLogoKind = 'primary' | 'secondary' | 'badge' | 'icon'
 export type BrandColorTier = 'primary' | 'secondary' | 'accent' | 'background' | 'text' | 'light' | 'dark'
-export type BrandTypographyTier = 'primary' | 'secondary' | 'accent'
+export type BrandTypographyTier = 'primary' | 'subheading' | 'secondary' | 'accent'
 export type BrandElementKind = 'pattern' | 'texture' | 'application'
 
 export interface StrategyBrandGuide {
@@ -527,6 +527,11 @@ export interface StrategyBrandGuide {
   voice_overview: string | null
   brand_statement: string | null
   assets_zip_url: string | null
+  /** External link (Dropbox / Drive / Cloudinary / etc.) to the brand's
+   *  animations. Animations don't fit inside the bulk-assets zip (too
+   *  large), so we stash the URL here and render it as a separate
+   *  "Animations" affordance on the portal. */
+  animations_url: string | null
   is_published: boolean
   last_updated_at: string | null
   created_by: string | null
@@ -559,6 +564,10 @@ export interface StrategyBrandLogo {
    *  on the public portal + brand handoff. NULL when the variant has
    *  no motion version. */
   animation_url: string | null
+  /** Optional background color (hex) used behind this logo in the
+   *  portal render. Useful for light/inverse logos that would
+   *  disappear against the default white card. NULL → use white. */
+  background_color: string | null
   clear_space_note: string | null
   sort_order: number
   created_at: string
@@ -576,6 +585,11 @@ export interface StrategyBrandColor {
   pms: string | null
   proportion_pct: number | null
   on_color_logo_url: string | null
+  /** Scale (percent, 10-200) applied to the on-color logo when
+   *  rendered against this color's background on the portal. Default
+   *  100 = native size. Used to balance varied logo sizes across the
+   *  on-color grid. */
+  on_color_logo_scale_pct: number | null
   sort_order: number
   created_at: string
   [key: string]: unknown
@@ -633,6 +647,10 @@ export interface StrategyBrandElement {
   label: string | null
   preview_url: string | null
   download_url: string | null
+  /** Optional background color (hex) for the element preview tile in
+   *  the portal. Useful for low-opacity patterns/textures that vanish
+   *  against the default white background. NULL → use white. */
+  pattern_background_color: string | null
   sort_order: number
   created_at: string
   [key: string]: unknown
@@ -655,6 +673,37 @@ export interface StrategyBrandVoiceGuideline {
   brand_guide_id: string
   title: string
   description: string
+  sort_order: number
+  created_at: string
+  [key: string]: unknown
+}
+
+/** User-defined open-ended brand-guide section. Each section has its own
+ *  heading + optional description + a list of title/body entries
+ *  inside. Used for "General Rules"-style content where the section
+ *  heading varies per brand. The partner portal renders entries in a
+ *  `column_count`-wide grid similar to Tone Characteristics. */
+export interface StrategyBrandCustomSection {
+  id: string
+  brand_guide_id: string
+  heading: string
+  description: string | null
+  column_count: number
+  sort_order: number
+  created_at: string
+  updated_at: string
+  /** Embedded in the partner portal's payload (via get_brand_guide_by_slug)
+   *  so the renderer doesn't need a second round-trip. Editor lib loads
+   *  entries separately when editing. */
+  entries?: StrategyBrandCustomSectionEntry[]
+  [key: string]: unknown
+}
+
+export interface StrategyBrandCustomSectionEntry {
+  id: string
+  custom_section_id: string
+  title: string
+  body: string
   sort_order: number
   created_at: string
   [key: string]: unknown
@@ -765,10 +814,12 @@ export interface StrategyAnnouncementDismissal {
  *  workflow (Airtable migration today, FillOut webhook tomorrow). */
 export interface StrategyDiscoveryQuestionnaire {
   id: string
-  member: number
+  /** Nullable: webhook arrivals may land before staff has linked the
+   *  partner to a member number. Resolved later via staff action. */
+  member: number | null
   submission_id: string | null
   airtable_record_id: string | null
-  source: 'airtable_legacy' | 'fillout_webhook' | 'native'
+  source: 'airtable_legacy' | 'fillout_webhook' | 'fillout_webhook_unmatched' | 'native'
   submitted_at: string
   cohort: string | null
   discovery_call_booking: string | null
@@ -802,8 +853,8 @@ export interface StrategyDiscoveryQuestionnaire {
   communication_tone_consistency: string | null
   recurring_message_theme: string | null
 
-  visual_simple_to_elevated: number | null
-  visual_traditional_to_modern: number | null
+  visual_simple_to_intricate: number | null
+  visual_classic_to_modern: number | null
   visual_timeless_to_trendy: number | null
   visual_function_to_form: number | null
   storytelling_literal_to_abstract: number | null
@@ -816,6 +867,11 @@ export interface StrategyDiscoveryQuestionnaire {
   inspirational_websites: string | null
   exceptional_communicators: string | null
   branding_additional_notes: string | null
+  logo_upload_url: string | null
+  brand_guide_upload_url: string | null
+  ministry_subbrand_needs: string | null
+  photo_library_url: string | null
+  additional_creative_direction: string | null
 
   current_website_url: string | null
   current_website_platforms: string[] | null
@@ -831,8 +887,10 @@ export interface StrategyDiscoveryQuestionnaire {
   top_3_website_goals: string | null
   current_navigation_satisfaction: number | null
   initial_web_support_preferences: string[] | null
+  high_maintenance_pages: string | null
 
   social_platforms: string[] | null
+  other_social_platforms: string | null
   speaking_pastor_reference: string | null
   social_scheduling_email: string | null
 
@@ -844,6 +902,9 @@ export interface StrategyDiscoveryQuestionnaire {
   exemplary_video_moment: string | null
 
   internal_decision_makers: string | null
+  timeframe_alignment: string | null
+  blackout_dates: string | null
+  six_month_measurable_win: string | null
 
   bible_translations: string[] | null
   deviates_from_primary_translation: string | null
@@ -1254,6 +1315,23 @@ export interface WebSection {
    *  against a new template without compounding content loss. NULL for
    *  freehand-created sections and for sections imported before v36. */
   source_field_values: Record<string, unknown> | null
+  /** Writer's canonical prose for this section, in markdown. Source of
+   *  truth for the Text view. NULL until a markdown-aware import lands;
+   *  the matcher in webContentDocument re-parses this on edit so
+   *  node_ids in ir_snapshot survive reorders and small content edits.
+   *  Added in v54. */
+  source_markdown: string | null
+  /** ContentDocument snapshot captured at last parse, with stable
+   *  `node_id` on every block/item. The matcher carries IDs forward by
+   *  content similarity so field_provenance.ir_path stays resolvable
+   *  across re-parses. NULL for pre-v54 sections. */
+  ir_snapshot: import('../lib/webContentDocument').ContentDocument | null
+  /** Per-field provenance tags. Keyed by the same field key as
+   *  field_values. `source: auto` = bound from ir_snapshot via ir_path
+   *  (free to overwrite on rebind). `override` = staff edit (preserved
+   *  on rebind). `default` = template placeholder. `unbound` = template
+   *  required a value but none was bound. Added in v54. */
+  field_provenance: FieldProvenanceMap | null
   sort_order: number
   content_status: 'draft' | 'internal_review' | 'partner_review' | 'partner_approved' | string
   notes: string | null
@@ -1261,6 +1339,30 @@ export interface WebSection {
   updated_at: string
   [key: string]: unknown
 }
+
+/** Per-field provenance tag. Lives at `web_sections.field_provenance[fieldKey]`.
+ *  The override flag is the load-bearing bit — markdown re-flow only
+ *  overwrites fields where `source === 'auto'`, so staff polish in the
+ *  Layout view survives writer edits to the Text view. */
+export interface FieldProvenance {
+  source: 'auto' | 'override' | 'default' | 'unbound'
+  /** When `source === 'auto'`, the node_id-anchored IR path the value
+   *  was bound from (e.g. `lists{node_id=list:abc}.items{node_id=step:def}.body`).
+   *  Used to refresh this field's value when the IR re-parses. */
+  ir_path?: string
+  /** The kind of the source IR block ("heading", "tagline", "cta", "items"…)
+   *  — for the inspector's "from: heading" badge. Display-only, derived
+   *  at bind time so the inspector doesn't have to walk the IR. */
+  ir_kind?: string
+  /** First ~80 chars of the source IR block's text, for inspector
+   *  display: "from: heading · 'Where Faith Starts Young'". Display-only;
+   *  the canonical source is the IR snapshot resolved via `ir_path`. */
+  ir_text_snippet?: string
+  override_at?: string
+  override_by?: string
+}
+
+export type FieldProvenanceMap = Record<string, FieldProvenance>
 
 // ── Reviews ──────────────────────────────────────────────────────────
 //
@@ -1472,6 +1574,7 @@ export interface BrandGuidePortalPayload {
     voice_overview: string | null
     brand_statement: string | null
     assets_zip_url: string | null
+    animations_url: string | null
     ase_swatch_url: string | null
     last_updated_at: string | null
     updated_at: string
@@ -1484,6 +1587,7 @@ export interface BrandGuidePortalPayload {
   voice_attributes: StrategyBrandVoiceAttribute[]
   voice_guidelines: StrategyBrandVoiceGuideline[]
   attributes: StrategyBrandAttribute[]
+  custom_sections: StrategyBrandCustomSection[]
   subbrands: Array<{ slug: string; display_name: string }>
   /** Set when the loaded guide is a subbrand — null for main guides. */
   parent: { slug: string; display_name: string } | null

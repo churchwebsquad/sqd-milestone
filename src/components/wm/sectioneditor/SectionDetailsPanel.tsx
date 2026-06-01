@@ -14,7 +14,7 @@
  * No freehand __extras. If a section needs a CTA / card / etc. the
  * strategist swaps the variant.
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   X, Image as ImageIcon, LayoutGrid, MousePointerClick, FormInput,
   ChevronDown, ChevronRight, RotateCw, Archive, Trash2,
@@ -30,6 +30,11 @@ import { SaveToLibraryButton } from './SaveToLibraryButton'
 import { ProjectPagesProvider } from './ProjectPagesContext'
 import { summarizeSlotPresence } from '../../../lib/webBrixiesLayoutParser'
 import { supabase } from '../../../lib/supabase'
+import {
+  findPlacements, applyPlacement, previewConversion, isStructuredPlacement,
+  findShapeMismatches, healShapeMismatches,
+  type Placement,
+} from '../../../lib/webUnmappedMapper'
 import type { WMSnippetOption } from '../RichTextEditor'
 import type {
   WebContentTemplate, WebSection, WebFieldDef, WebGroupDef,
@@ -235,12 +240,75 @@ export function SectionDetailsPanel({
           />
         )}
 
-        {/* Unmapped content — copy that didn't make it into a slot or
-            group on the bound template. The import pipeline stashes
-            anything it can't route so nothing drops silently; swapping
-            the template later rehydrates entries whose canonical key
-            matches a slot on the new schema. */}
-        {(() => {
+        {/* Shape-mismatch healing — items placed before the re-keying
+            pipeline shipped (or from manual edits) sometimes have
+            field names that don't match the group's item_schema, so
+            they render as empty cards even though the data is present.
+            Detect those cases and offer a one-click heal. */}
+        {template && (() => {
+          const mismatches = findShapeMismatches(template, values, cardTemplates ?? {})
+          if (mismatches.length === 0) return null
+          const byGroup = new Map<string, typeof mismatches>()
+          for (const m of mismatches) {
+            const arr = byGroup.get(m.group_label) ?? []
+            arr.push(m)
+            byGroup.set(m.group_label, arr)
+          }
+          return (
+            <Section title={`Item shapes need fixing (${mismatches.length})`} defaultOpen>
+              <div className="rounded-md border border-wm-accent/40 bg-wm-accent-tint p-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle size={12} className="text-wm-accent shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-wm-text leading-snug">
+                    Cards in the layout have copy under field names that
+                    don't match the slot keys, so they render empty.
+                    Auto-fix re-keys them using semantic aliases
+                    (name → heading, title → description, etc.).
+                  </p>
+                </div>
+                <div className="space-y-1 text-[11px]">
+                  {Array.from(byGroup.entries()).map(([groupLabel, ms]) => (
+                    <div key={groupLabel}>
+                      <p className="font-semibold text-wm-text">
+                        {groupLabel}
+                        <span className="ml-1 text-wm-text-muted font-normal">
+                          ({ms.length} field{ms.length === 1 ? '' : 's'})
+                        </span>
+                      </p>
+                      <ul className="space-y-0.5 pl-3 text-[10px] text-wm-text-muted">
+                        {ms.slice(0, 4).map((m, i) => (
+                          <li key={i}>
+                            <span className="font-mono">{m.source_key}</span> → <span className="font-mono">{m.target_key}</span>
+                            <span className="ml-1 text-wm-text-subtle">({m.value_preview})</span>
+                          </li>
+                        ))}
+                        {ms.length > 4 && (
+                          <li className="italic text-wm-text-subtle">…and {ms.length - 4} more</li>
+                        )}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const result = healShapeMismatches(template, values, cardTemplates ?? {})
+                    if (result.healed > 0) onChange({ field_values: result.fieldValues })
+                  }}
+                  className="rounded-md bg-wm-accent text-white text-[11px] font-semibold px-3 py-1.5 hover:bg-wm-accent-hover transition-colors"
+                >
+                  Auto-fix {mismatches.length} field{mismatches.length === 1 ? '' : 's'} →
+                </button>
+              </div>
+            </Section>
+          )
+        })()}
+
+        {/* Unmapped content — copy the aggressive auto-mapper couldn't
+            place in the current template. Each leftover key gets a
+            "Move to →" dropdown listing every viable slot + the shape
+            conversion that would run when picked. */}
+        {template && (() => {
           const raw = values.__unmapped
           if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
           const entries = Object.entries(raw as Record<string, unknown>)
@@ -252,17 +320,25 @@ export function SectionDetailsPanel({
                 <div className="flex items-start gap-2 mb-2">
                   <AlertTriangle size={12} className="text-wm-warning shrink-0 mt-0.5" />
                   <p className="text-[11px] text-wm-text leading-snug">
-                    Copy from the import that doesn't have a matching slot here. Swap
-                    the variant to a template that defines these keys and they'll
-                    rehydrate automatically.
+                    Copy that didn't fit the layout. Pick a slot to move
+                    each item into — shape conversions are applied
+                    automatically.
                   </p>
                 </div>
                 <ul className="space-y-2">
                   {entries.map(([k, v]) => (
-                    <li key={k} className="rounded border border-wm-border bg-wm-bg-elevated p-2">
-                      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle font-mono mb-1">{k}</p>
-                      <UnmappedValuePreview value={v} />
-                    </li>
+                    <UnmappedEntryRow
+                      key={k}
+                      sourceKey={k}
+                      value={v}
+                      template={template}
+                      fieldValues={values}
+                      paletteTemplates={cardTemplates ?? {}}
+                      onPlace={(placement) => {
+                        const result = applyPlacement(values, k, v, placement)
+                        onChange({ field_values: result.fieldValues })
+                      }}
+                    />
                   ))}
                 </ul>
               </div>
@@ -761,9 +837,9 @@ function stringifyVal(v: unknown): string {
 }
 
 /** Render a single __unmapped value. Strings render as-is (with HTML
- *  stripped for safety). Arrays / `{items: [...]}` render as a short
- *  bullet list with at most 5 items previewed. Everything else falls
- *  back to a JSON preview. */
+ *  stripped for safety). Arrays / `{items: [...]}` render every item
+ *  with every field exposed so the strategist can see exactly what
+ *  they're moving — not a 3-line summary. */
 function UnmappedValuePreview({ value }: { value: unknown }) {
   if (typeof value === 'string') {
     const clean = value.replace(/<[^>]+>/g, '').trim()
@@ -776,20 +852,51 @@ function UnmappedValuePreview({ value }: { value: unknown }) {
         ? (value as { items: unknown[] }).items
         : null)
   if (items) {
-    const preview = items.slice(0, 5)
+    // Show full structure — every item with every field — so the user
+    // makes informed mapping decisions. Shared keys surface in a
+    // compact header so the user knows what shape the items take.
+    const sharedKeys: string[] = []
+    for (const it of items) {
+      if (it && typeof it === 'object' && !Array.isArray(it)) {
+        for (const k of Object.keys(it as Record<string, unknown>)) {
+          if (!sharedKeys.includes(k)) sharedKeys.push(k)
+        }
+      }
+    }
     return (
-      <ul className="space-y-1 list-disc pl-4">
-        {preview.map((item, i) => (
-          <li key={i} className="text-[11px] text-wm-text leading-snug">
-            {typeof item === 'object' && item !== null ? renderItemPreview(item as Record<string, unknown>) : String(item)}
-          </li>
-        ))}
-        {items.length > preview.length && (
-          <li className="text-[10px] text-wm-text-subtle italic list-none">
-            …and {items.length - preview.length} more
-          </li>
-        )}
-      </ul>
+      <div className="space-y-1.5">
+        <p className="text-[10px] text-wm-text-muted">
+          {items.length} item{items.length === 1 ? '' : 's'}
+          {sharedKeys.length > 0 && (
+            <span> · each has <span className="font-mono">{sharedKeys.join(', ')}</span></span>
+          )}
+        </p>
+        <ol className="space-y-1.5 pl-3 list-decimal text-[11px]">
+          {items.map((item, i) => (
+            <li key={i} className="text-wm-text leading-snug">
+              {item && typeof item === 'object' && !Array.isArray(item) ? (
+                <div className="space-y-0.5">
+                  {Object.entries(item as Record<string, unknown>).map(([k, v]) => {
+                    const str = typeof v === 'string'
+                      ? v
+                      : typeof v === 'number' || typeof v === 'boolean'
+                        ? String(v)
+                        : JSON.stringify(v).slice(0, 80)
+                    return (
+                      <div key={k}>
+                        <span className="text-[10px] font-mono text-wm-text-subtle uppercase tracking-wider mr-1.5">{k}</span>
+                        <span className="text-wm-text">{str}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                String(item)
+              )}
+            </li>
+          ))}
+        </ol>
+      </div>
     )
   }
   if (value && typeof value === 'object') {
@@ -821,4 +928,159 @@ function renderItemPreview(item: Record<string, unknown>): string {
     if (typeof v === 'string' && v.trim()) return v.slice(0, 100)
   }
   try { return JSON.stringify(item).slice(0, 100) } catch { return '' }
+}
+
+/** A group of placement options in the dropdown — either the
+ *  structurally-aligned "Recommended" set or the text-stuffing
+ *  fallbacks. Each option renders its target slot label + emptiness
+ *  state + a one-line preview of what would actually land. */
+function PlacementGroup({
+  title, badge, items, value, onPick,
+}: {
+  title: string
+  badge?: string
+  items: Placement[]
+  value: unknown
+  onPick: (p: Placement) => void
+}) {
+  return (
+    <div>
+      <div className="px-3 pt-2 pb-1 flex items-center gap-2 bg-wm-bg-hover/40">
+        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-muted">{title}</p>
+        {badge && (
+          <span className="inline-flex items-center rounded-full bg-wm-accent text-white text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5">
+            {badge}
+          </span>
+        )}
+      </div>
+      <ul className="divide-y divide-wm-border">
+        {items.map((p, i) => {
+          const preview = previewConversion(value, p)
+          return (
+            <li key={`${p.slot_path.join('.')}-${i}`}>
+              <button
+                type="button"
+                onClick={() => onPick(p)}
+                className="w-full text-left px-3 py-2 hover:bg-wm-bg-hover transition-colors"
+              >
+                <div className="flex items-baseline justify-between gap-2 mb-0.5">
+                  <span className="text-[12px] font-semibold text-wm-text">{p.slot_label}</span>
+                  <span className={`text-[10px] shrink-0 ${p.is_empty ? 'text-wm-text-subtle' : 'text-wm-warning'}`}>
+                    {p.is_empty ? 'empty' : 'has content'}
+                  </span>
+                </div>
+                {p.conversion_note && (
+                  <p className="text-[10px] text-wm-text-muted mb-1">{p.conversion_note}</p>
+                )}
+                {preview && (
+                  <div className="rounded bg-wm-bg-hover/60 px-2 py-1 mt-1">
+                    <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-0.5">Will land as</p>
+                    <p className="text-[11px] text-wm-text leading-snug">{preview}</p>
+                  </div>
+                )}
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
+/** One row in the Unmapped Content panel: preview of the leftover
+ *  value + a "Move to →" dropdown listing every viable slot the
+ *  current template can accept this value into (after a shape
+ *  conversion). Picking an option applies the conversion immediately.
+ *
+ *  Aggressive Layer-1 auto-mapping at bind time already places most
+ *  unmapped keys; what survives to this row is the truly-ambiguous
+ *  remainder (multiple equally-good fits, edge shapes, etc.). */
+function UnmappedEntryRow({
+  sourceKey, value, template, fieldValues, paletteTemplates, onPlace,
+}: {
+  sourceKey:        string
+  value:            unknown
+  template:         WebContentTemplate
+  fieldValues:      Record<string, unknown>
+  paletteTemplates: Record<string, WebContentTemplate>
+  onPlace:          (p: Placement) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const placements = open
+    ? findPlacements(sourceKey, value, template, fieldValues, paletteTemplates)
+    : []
+  // Close on Escape + on outside click — modal-style dismiss so the
+  // user doesn't get stuck with an absolute-positioned dropdown
+  // hanging over the panel.
+  const rootRef = useRef<HTMLLIElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    const onClick = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onClick)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onClick)
+    }
+  }, [open])
+
+  return (
+    <li ref={rootRef} className="rounded border border-wm-border bg-wm-bg-elevated p-2 space-y-2">
+      <div>
+        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle font-mono mb-1">{sourceKey}</p>
+        <UnmappedValuePreview value={value} />
+      </div>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen(o => !o)}
+          className="inline-flex items-center gap-1 rounded-md bg-wm-accent text-white text-[11px] font-semibold px-2.5 py-1 hover:bg-wm-accent-hover transition-colors"
+        >
+          Move to →
+          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        </button>
+        {open && (
+          // Absolute so the dropdown floats above the panel's scroll
+          // container — inline positioning was getting clipped at
+          // viewport bottom. High z-index to clear the rail header.
+          <div className="absolute top-full left-0 right-0 mt-1 z-50 rounded-md border border-wm-border bg-wm-bg-elevated shadow-lg max-h-[28rem] overflow-y-auto">
+            {placements.length === 0 ? (
+              <p className="px-3 py-2 text-[11px] text-wm-text-muted">
+                No editable slot accepts this shape. Try swapping the
+                template variant via the header — every other layout in
+                the catalog will rescore for this content.
+              </p>
+            ) : (() => {
+              const structured = placements.filter(isStructuredPlacement)
+              const fallback   = placements.filter(p => !isStructuredPlacement(p))
+              return (
+                <div>
+                  {structured.length > 0 && (
+                    <PlacementGroup
+                      title="Recommended — places the full structure"
+                      badge="best fit"
+                      items={structured}
+                      value={value}
+                      onPick={(p) => { onPlace(p); setOpen(false) }}
+                    />
+                  )}
+                  {fallback.length > 0 && (
+                    <PlacementGroup
+                      title={structured.length > 0 ? 'Or stuff into a single text slot:' : 'Place into a text slot:'}
+                      items={fallback}
+                      value={value}
+                      onPick={(p) => { onPlace(p); setOpen(false) }}
+                    />
+                  )}
+                </div>
+              )
+            })()}
+          </div>
+        )}
+      </div>
+    </li>
+  )
 }

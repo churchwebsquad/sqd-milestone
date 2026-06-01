@@ -1,0 +1,44 @@
+{
+  "project_id": "3490-poc",
+  "compiled_at": "2026-05-20T20:32:47.063526Z",
+  "skill_version": "web_content_strategy_author v1",
+  "dry_run": true,
+  "executive_summary": "Riverwood Chapel has spent 35 years in Kent learning what it means to be a big church that wants to feel small. The mission is clear: To know Jesus, to be known, and to make Him known. Your new website is built to carry that mission to 4 specific audiences. The Suburban Family looking for a kids ministry they can trust on Sunday morning. The Kent State Student trying out a church that doesn't try too hard. The Person in a Hard Season searching for a place to land. The Established Member checking that the church they helped build still feels like home.\n\nThe site organizes around 6 primary nav items. Plan a Visit, Watch, and Give sit standalone because they're the conversion-focused pages every visitor reaches for. About, Connect, and Impact each hold a dropdown that mirrors your three mission pillars. Connect carries Be Known . Kids, Students & College, Adult Studies, Discovery & Membership . the relational pathway. Impact carries Make Him Known . Care & Recovery, Local & Global Outreach . your work in the city and the world. About holds the trust-building pages: Our Story & Beliefs, Leadership Team.\n\nPhase 1 launches with 6 pages. Homepage, Plan a Visit, Sermons, and Give are non-negotiable. We added Kids because The Suburban Family is your largest target audience and their decision happens on that one page. We added Our Story & Beliefs because The Person in a Hard Season vets the theology before showing up and The Established Member needs to see the history. The remaining 8 pages ship in Phase 2.",
+  "navigation_architecture": "Plan a Visit sits standalone in the primary nav. First-time visitors decide whether to come Sunday based on three things: service times, parking, and kids check-in. Putting Plan a Visit at the top means those three friction points are one click away.\n\nAbout holds a dropdown . Our Story & Beliefs and Leadership Team. Most churches put 'About Us' alone in the nav, but for Riverwood the story (1991 founding through 2024 four services) and the people are two distinct trust signals. The dropdown lets the visitor pick which trust signal matters to them. We kept the label 'About' rather than 'Who We Are' or 'Our Story' because your understated tone reads better with default labels than with performative ones.\n\nConnect is a dropdown housing your Be Known mission pillar . Kids, Students & College, Adult Studies and Discovery & Membership. It's the relational growth pathway. Every page under Connect is an audience-specific surface; visitors find themselves and route to their next step.\n\nImpact is a dropdown housing your Make Him Known mission pillar . Care & Recovery and Local & Global Outreach. We chose 'Impact' over 'Make Him Known' for the visitor-facing label because the visitor doesn't yet know your three pillars. Impact is the visitor-language version of what you mean by Make Him Known. Inside the page copy, we'll surface the pillar names explicitly so the framing carries through.\n\nWatch is a short, direct verb that matches your warm-without-flashy register.\n\nGive is the conversion page for The Established Member persona and for anyone who's already part of Riverwood.\n\nIn the footer: Homepage, Events, Contact, Newsletter. Events sits in the footer rather than the primary nav because your events run on Planning Center embed. Events is a current-state surface, not a commitment pathway. The visitor browses events the same way they browse a community calendar, and that's the right mental model.",
+  "aeo_geo_search_strategy": "Search engines and AI assistants increasingly answer questions rather than just listing links. Riverwood's site is built to be the answer when someone in Kent or Portage County asks the right question. Three pillars anchor the strategy: brand grounding (your church name + city + denomination clearly on every page), local search support (Kent State University, Portage County, and '44240' all appear in keyword targets), and direct-answer framing (long-tail keywords are shaped as questions a visitor would actually ask).\n\nSpecific keyword targets vary by page. The homepage targets 'Riverwood Chapel', 'Riverwood Chapel Kent', and 'Non-denominational church Kent Ohio' as primary terms . branded queries and discovery queries both. Plan a Visit targets 'Plan a visit Riverwood Chapel' and 'Riverwood Chapel service times' plus long-tails like 'what to expect first time at riverwood chapel.' Care & Recovery is your highest-AEO page; someone searching 'Celebrate Recovery Kent Ohio' or 'GriefShare Kent OH' lands directly on that page with named programs, leaders, meeting times.\n\nThe Person in a Hard Season persona enters the site through Care & Recovery direct from search more often than any other path. That shapes the writing as much as the keywords do. The Care page reads safe, non-judgmental, and specific, so when search drops someone there in crisis, the page meets them where they are.",
+  "phase_summary": "Phase 1 (launches at go-live):\n\n- Homepage . synthesizes the 'big church that feels small' identity for every audience.\n- Plan a Visit . service times, parking, what to wear, kids check-in. The Suburban Family's first stop.\n- Sermons . pass-through to your Church Center archive with current series featured.\n- Give . generosity-as-worship framing with online and non-cash giving, plus building campaign placeholder.\n- Kids . The Suburban Family's critical conversion page. Gospel Project curriculum, three age tiers, four-step check-in process.\n- Our Story & Beliefs . 1991 founding through 2024; eight-doctrine Statement of Beliefs; six values from your Discovery class.\n\nPhase 2 (built post-launch or in parallel):\n\n- Leadership Team . your 21 staff with roles, emails, and optional bios. Accessible Leadership value framing.\n- Connect . routing hub for the Be Known mission pillar.\n- Students & College . Middle School / High School / College, each with its director.\n- Adult Studies & Classes . Life Groups, Care Support Groups, Bible Studies, Men's Huddle, Women to Women.\n- Discovery & Membership . your single assimilation pathway. Baptism is integrated into the page rather than standalone.\n- Care & Recovery . five named programs.\n- Local & Global Outreach . Food Pantry plus three local partners plus ten missionary partnerships under one page.\n- Events . Planning Center calendar surface.\n\nRationale notes for consolidations:\n\n- Local + Global Outreach combined under one page so visitors see the full picture of how Riverwood serves Kent and the world.\n- Baptism absorbed into Discovery & Membership because Discovery is your assimilation pathway and Baptism naturally completes that flow.\n- Membership absorbed into Discovery & Membership for the same reason. One pathway, not two.",
+  "_confidence_log": {
+    "executive_summary": "composed_from_lifts",
+    "navigation_architecture": "composed_from_lifts",
+    "aeo_geo_search_strategy": "lifted_heavily",
+    "phase_summary": "lifted_heavily"
+  },
+  "_voice_match_self_check": {
+    "tone_descriptors_present": [
+      "warm",
+      "understated"
+    ],
+    "banned_terms_avoided": true,
+    "banned_terms_found": [],
+    "branded_vocabulary_used": [
+      "Riverwood",
+      "Riverwood Chapel"
+    ],
+    "jesus_named_in_executive_summary": true,
+    "max_one_exclamation_per_sentence": true,
+    "no_em_dashes": true,
+    "em_dash_count": 0,
+    "en_dash_count": 0,
+    "no_triad_lists": true,
+    "triads_found": [],
+    "mission_verbatim": true,
+    "x_factor_verbatim": true,
+    "personas_used": [
+      "The Suburban Family",
+      "The Kent State Student",
+      "The Person in a Hard Season",
+      "The Established Member"
+    ],
+    "personas_missing": []
+  }
+}

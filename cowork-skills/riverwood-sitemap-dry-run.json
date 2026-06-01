@@ -1,0 +1,1077 @@
+{
+  "project_id": "3490-poc",
+  "compiled_at": "2026-05-20T20:03:08.837401Z",
+  "skill_version": "web_sitemap_builder v1",
+  "dry_run": true,
+  "source_atoms": "riverwood-normalizer-dry-run.json",
+  "source_voice_card": "riverwood-voice-card-dry-run.json",
+  "source_content_map": "riverwood-content-map-dry-run.json",
+  "pages": [
+    {
+      "slug": "/",
+      "name": "Home",
+      "phase": "1",
+      "primary_persona": "All four",
+      "secondary_personas": [],
+      "purpose": "Communicate 'big church that feels small' to every audience in the first scroll. Establish mission and route visitors to their entry path.",
+      "sort_order": 1,
+      "keywords": {
+        "primary": [
+          "Riverwood Chapel",
+          "Riverwood Chapel Kent",
+          "Non-denominational church Kent Ohio"
+        ],
+        "secondary": [
+          "Bible church Kent",
+          "Riverwood Chapel service times",
+          "Church family Kent OH",
+          "Evangelical church Kent Ohio",
+          "Christian church near Kent State"
+        ],
+        "long_tail": [
+          "What is Riverwood Chapel",
+          "Riverwood Chapel mission and beliefs",
+          "Big church that feels small Kent Ohio"
+        ],
+        "local": [
+          "Church near Kent State University",
+          "Kent Ohio church family",
+          "Portage County non-denominational church",
+          "Church near 44240"
+        ]
+      }
+    },
+    {
+      "slug": "/visit",
+      "name": "Plan a Visit",
+      "phase": "1",
+      "primary_persona": "The Suburban Family",
+      "secondary_personas": [
+        "The Kent State Student",
+        "The Person in a Hard Season"
+      ],
+      "purpose": "Lower the barrier to entry for cautious guests by surfacing logistics first (service times, parking, kids check-in, what to wear).",
+      "sort_order": 2,
+      "keywords": {
+        "primary": [
+          "Plan a visit Riverwood Chapel",
+          "Riverwood Chapel service times",
+          "Sunday service Kent Ohio"
+        ],
+        "secondary": [
+          "What to wear church Kent",
+          "Kids check-in Kent Ohio church",
+          "Riverwood Chapel parking",
+          "First time visit Riverwood",
+          "Riverwood Chapel Sundays"
+        ],
+        "long_tail": [
+          "What to expect first time at Riverwood Chapel",
+          "Where to park at Riverwood Chapel",
+          "What time are services at Riverwood Chapel"
+        ],
+        "local": [
+          "Church visit Kent Ohio",
+          "Kent Ohio church Sunday morning",
+          "Family church Kent OH"
+        ]
+      }
+    },
+    {
+      "slug": "/watch",
+      "name": "Sermons",
+      "phase": "1",
+      "primary_persona": "The Person in a Hard Season",
+      "secondary_personas": [
+        "All"
+      ],
+      "purpose": "Pass-through to Church Center / YouTube sermon archive. Riverwood does not manage sermons on-site (per content collection).",
+      "sort_order": 3,
+      "keywords": {
+        "primary": [
+          "Riverwood Chapel sermons",
+          "Riverwood Chapel livestream",
+          "Cole Tawney sermons"
+        ],
+        "secondary": [
+          "Sunday sermon Kent Ohio",
+          "Bible teaching church Portage County",
+          "Watch Riverwood Chapel online",
+          "Riverwood Chapel YouTube",
+          "Riverwood sermon archive"
+        ],
+        "long_tail": [
+          "What time is the Riverwood Chapel livestream",
+          "Where to watch Riverwood Chapel sermons"
+        ],
+        "local": [
+          "Sunday livestream Kent Ohio"
+        ]
+      }
+    },
+    {
+      "slug": "/give",
+      "name": "Give",
+      "phase": "1",
+      "primary_persona": "The Established Member",
+      "secondary_personas": [
+        "All"
+      ],
+      "purpose": "Make generosity a worship response rather than a transaction. Online giving + non-cash giving + future building campaign placeholder.",
+      "sort_order": 4,
+      "keywords": {
+        "primary": [
+          "Riverwood Chapel giving",
+          "Give to Riverwood Chapel",
+          "Online giving Kent Ohio church"
+        ],
+        "secondary": [
+          "Recurring giving church Kent",
+          "Non-cash giving Kent Ohio",
+          "Building campaign Riverwood",
+          "Riverwood Chapel donate",
+          "Generosity Kent Ohio church"
+        ],
+        "long_tail": [
+          "How to give to Riverwood Chapel",
+          "Stock donations Riverwood Chapel",
+          "Year-end giving statement Riverwood"
+        ],
+        "local": [
+          "Kent Ohio church giving"
+        ]
+      }
+    },
+    {
+      "slug": "/kids",
+      "name": "Kids at Riverwood",
+      "phase": "1",
+      "primary_persona": "The Suburban Family",
+      "secondary_personas": [],
+      "purpose": "The Suburban Family's critical conversion page. Confirm kids ministry is safe, organized, and curriculum-grounded (Gospel Project).",
+      "sort_order": 5,
+      "keywords": {
+        "primary": [
+          "Riverwood Chapel kids",
+          "Kids ministry Kent Ohio",
+          "Children's church Kent"
+        ],
+        "secondary": [
+          "Riverwood nursery",
+          "Sunday school Kent Ohio",
+          "Kids check-in Riverwood Chapel",
+          "Gospel Project curriculum Kent",
+          "Kids Wing Kent church",
+          "Children Sunday programs Kent OH"
+        ],
+        "long_tail": [
+          "Where is the kids wing at Riverwood Chapel",
+          "Pre-register Riverwood Chapel kids",
+          "Age groups Riverwood kids ministry"
+        ],
+        "local": [
+          "Family church Kent OH",
+          "Kids programs Portage County",
+          "Kent Ohio Sunday school"
+        ]
+      }
+    },
+    {
+      "slug": "/story-beliefs",
+      "name": "Our Story & Beliefs",
+      "phase": "1",
+      "primary_persona": "The Person in a Hard Season",
+      "secondary_personas": [
+        "The Established Member",
+        "The Suburban Family"
+      ],
+      "purpose": "Trust-building through church history (since 1991) and theological clarity (8 doctrines). Serves The Person in a Hard Season's vetting + The Established Member's legacy recognition.",
+      "sort_order": 6,
+      "keywords": {
+        "primary": [
+          "Riverwood Chapel beliefs",
+          "Riverwood Chapel statement of faith",
+          "Riverwood Chapel history"
+        ],
+        "secondary": [
+          "What does Riverwood believe",
+          "Statement of faith Kent Ohio church",
+          "Non-denominational evangelical beliefs Kent",
+          "Riverwood Chapel since 1991",
+          "Riverwood doctrine"
+        ],
+        "long_tail": [
+          "What does Riverwood Chapel teach about salvation",
+          "Riverwood Chapel statement of beliefs",
+          "Christian beliefs Kent Ohio"
+        ],
+        "local": [
+          "Kent Ohio Christian beliefs"
+        ]
+      }
+    },
+    {
+      "slug": "/leadership",
+      "name": "Leadership Team",
+      "phase": "2",
+      "primary_persona": "The Person in a Hard Season",
+      "secondary_personas": [
+        "All"
+      ],
+      "purpose": "Humanize the pastoral team for The Person in a Hard Season. Real names, real emails, real bios (21 staff in content collection).",
+      "sort_order": 7,
+      "keywords": {
+        "primary": [
+          "Riverwood Chapel leadership",
+          "Riverwood Chapel pastors",
+          "Cole Tawney lead pastor"
+        ],
+        "secondary": [
+          "Riverwood Chapel staff",
+          "Riverwood Chapel pastors",
+          "Kent Ohio church pastors",
+          "Meet the team Riverwood",
+          "Riverwood elders deacons"
+        ],
+        "long_tail": [
+          "Who is the lead pastor at Riverwood Chapel",
+          "Cole Tawney Riverwood Chapel"
+        ],
+        "local": [
+          "Kent Ohio church leadership"
+        ]
+      }
+    },
+    {
+      "slug": "/connect",
+      "name": "Connect",
+      "phase": "2",
+      "primary_persona": "The Suburban Family",
+      "secondary_personas": [
+        "The Kent State Student"
+      ],
+      "purpose": "Hub for Be Known mission pillar. Routes Suburban Family to relational next steps.",
+      "sort_order": 8,
+      "keywords": {
+        "primary": [
+          "Get connected Riverwood Chapel",
+          "Find community Kent Ohio church",
+          "Be known Riverwood"
+        ],
+        "secondary": [
+          "Life groups Kent Ohio",
+          "Volunteer Riverwood Chapel",
+          "Connection group Kent OH",
+          "Riverwood pathways",
+          "Welcome Center Riverwood"
+        ],
+        "long_tail": [
+          "How to get involved at Riverwood Chapel",
+          "First step after visiting Riverwood"
+        ],
+        "local": [
+          "Christian community Kent Ohio"
+        ]
+      }
+    },
+    {
+      "slug": "/students-college",
+      "name": "Students & College",
+      "phase": "2",
+      "primary_persona": "The Kent State Student",
+      "secondary_personas": [],
+      "purpose": "The Kent State Student's primary page. Distinct from Kids (different audience).",
+      "sort_order": 9,
+      "keywords": {
+        "primary": [
+          "Kent State campus ministry",
+          "Riverwood Chapel students",
+          "College ministry Kent Ohio"
+        ],
+        "secondary": [
+          "Middle school ministry Kent OH",
+          "High school youth Kent",
+          "Wednesday night students Riverwood",
+          "Sunday night high school Kent",
+          "Christian fellowship Kent State"
+        ],
+        "long_tail": [
+          "College ministry near Kent State",
+          "Christian community for Kent State students",
+          "Youth group Kent Ohio non-denominational"
+        ],
+        "local": [
+          "Kent State campus partner church",
+          "Kent Ohio youth ministry"
+        ]
+      }
+    },
+    {
+      "slug": "/adult-studies",
+      "name": "Adult Studies & Classes",
+      "phase": "2",
+      "primary_persona": "The Suburban Family",
+      "secondary_personas": [
+        "The Established Member"
+      ],
+      "purpose": "Adult discipleship — Life Groups + Care Support Groups + Bible Studies + Men's Huddle + Women to Women.",
+      "sort_order": 10,
+      "keywords": {
+        "primary": [
+          "Riverwood Chapel life groups",
+          "Bible study Kent Ohio",
+          "Adult Bible study Kent"
+        ],
+        "secondary": [
+          "Men's group Kent OH",
+          "Women's Bible study Kent",
+          "Small group Kent Ohio church",
+          "Discipleship class Riverwood",
+          "Five investments framework"
+        ],
+        "long_tail": [
+          "Where to join a Bible study in Kent",
+          "How to find a life group at Riverwood"
+        ],
+        "local": [
+          "Bible studies Kent Ohio"
+        ]
+      }
+    },
+    {
+      "slug": "/discovery-membership",
+      "name": "Discovery & Membership",
+      "phase": "2",
+      "primary_persona": "All four",
+      "secondary_personas": [],
+      "purpose": "Single defined assimilation pathway. Houses Baptism (per standard consolidation).",
+      "sort_order": 11,
+      "keywords": {
+        "primary": [
+          "Riverwood Chapel membership",
+          "Riverwood Chapel Discovery class",
+          "Baptism Kent Ohio church"
+        ],
+        "secondary": [
+          "Become a member Riverwood",
+          "Riverwood Discovery class",
+          "Baptism Riverwood Chapel",
+          "Membership process Kent OH",
+          "Get baptized Kent Ohio"
+        ],
+        "long_tail": [
+          "How to become a member at Riverwood Chapel",
+          "How to get baptized at Riverwood Chapel",
+          "Membership class Kent Ohio"
+        ],
+        "local": [
+          "Baptism Kent Ohio"
+        ]
+      }
+    },
+    {
+      "slug": "/care",
+      "name": "Care & Recovery",
+      "phase": "2",
+      "primary_persona": "The Person in a Hard Season",
+      "secondary_personas": [],
+      "purpose": "The Person in a Hard Season's primary page. 5 named programs (Celebrate Recovery, GriefShare, Overcome, Care 101, Cancer Care).",
+      "sort_order": 12,
+      "keywords": {
+        "primary": [
+          "Celebrate Recovery Kent Ohio",
+          "GriefShare Kent OH",
+          "Care ministry Kent church"
+        ],
+        "secondary": [
+          "Overcome group Riverwood",
+          "Cancer care ministry Kent",
+          "Crisis support Kent Ohio church",
+          "Recovery group Portage County",
+          "Biblical counseling Kent"
+        ],
+        "long_tail": [
+          "Is there a church in Kent with a recovery program",
+          "Where can I find GriefShare in Kent Ohio",
+          "Cancer care support Kent Ohio"
+        ],
+        "local": [
+          "Support groups Kent Ohio church",
+          "Portage County care ministry"
+        ]
+      }
+    },
+    {
+      "slug": "/outreach",
+      "name": "Local & Global Outreach",
+      "phase": "2",
+      "primary_persona": "The Established Member",
+      "secondary_personas": [
+        "The Suburban Family"
+      ],
+      "purpose": "The Established Member's primary page. Make Him Known mission pillar. Local (Food Pantry + 3 partners) + Global (10 missionary partnerships).",
+      "sort_order": 13,
+      "keywords": {
+        "primary": [
+          "Riverwood Chapel food pantry",
+          "Local outreach Kent Ohio",
+          "Mission partners Riverwood"
+        ],
+        "secondary": [
+          "Food pantry Kent OH Friday",
+          "Akron Pregnancy Services partner",
+          "Shepherd's House Portage County",
+          "Global mission partners Riverwood",
+          "Local outreach church Kent"
+        ],
+        "long_tail": [
+          "Where to get help with food in Kent Ohio",
+          "Riverwood Chapel missionaries",
+          "Local ministry partners Riverwood"
+        ],
+        "local": [
+          "Kent Ohio food pantry",
+          "Portage County church outreach"
+        ]
+      }
+    },
+    {
+      "slug": "/events",
+      "name": "Events",
+      "phase": "2",
+      "primary_persona": "All four",
+      "secondary_personas": [],
+      "purpose": "Current-state surface (per sitemap-strategy §6c). Planning Center embed.",
+      "sort_order": 14,
+      "keywords": {
+        "primary": [
+          "Riverwood Chapel events",
+          "Kent Ohio church events",
+          "Riverwood Chapel calendar"
+        ],
+        "secondary": [
+          "Community events Kent Ohio church",
+          "Riverwood VBS",
+          "Sports camp Kent OH",
+          "Church events Portage County"
+        ],
+        "long_tail": [
+          "What events are happening at Riverwood Chapel",
+          "Upcoming events Riverwood Chapel"
+        ],
+        "local": [
+          "Family events Kent Ohio church"
+        ]
+      }
+    }
+  ],
+  "nav_items": [
+    {
+      "label": "Plan a Visit",
+      "slug": "/visit",
+      "position": "header",
+      "sort_order": 1
+    },
+    {
+      "label": "About",
+      "position": "header",
+      "sort_order": 2,
+      "children": [
+        {
+          "label": "Our Story & Beliefs",
+          "slug": "/story-beliefs"
+        },
+        {
+          "label": "Leadership Team",
+          "slug": "/leadership"
+        }
+      ]
+    },
+    {
+      "label": "Connect",
+      "position": "header",
+      "sort_order": 3,
+      "children": [
+        {
+          "label": "Kids",
+          "slug": "/kids"
+        },
+        {
+          "label": "Students & College",
+          "slug": "/students-college"
+        },
+        {
+          "label": "Adult Studies",
+          "slug": "/adult-studies"
+        },
+        {
+          "label": "Discovery & Membership",
+          "slug": "/discovery-membership"
+        }
+      ]
+    },
+    {
+      "label": "Impact",
+      "position": "header",
+      "sort_order": 4,
+      "children": [
+        {
+          "label": "Care & Recovery",
+          "slug": "/care"
+        },
+        {
+          "label": "Local & Global Outreach",
+          "slug": "/outreach"
+        }
+      ]
+    },
+    {
+      "label": "Watch",
+      "slug": "/watch",
+      "position": "header",
+      "sort_order": 5
+    },
+    {
+      "label": "Give",
+      "slug": "/give",
+      "position": "header",
+      "sort_order": 6
+    },
+    {
+      "label": "Homepage",
+      "slug": "/",
+      "position": "footer",
+      "sort_order": 1
+    },
+    {
+      "label": "Events",
+      "slug": "/events",
+      "position": "footer",
+      "sort_order": 2
+    },
+    {
+      "label": "Contact",
+      "slug": "/visit",
+      "position": "footer",
+      "sort_order": 3,
+      "note": "Contact info section on Plan a Visit; no standalone Contact page"
+    },
+    {
+      "label": "Newsletter",
+      "position": "footer",
+      "sort_order": 4,
+      "external_url": "https://riverwoodchapel.us7.list-manage.com/subscribe"
+    }
+  ],
+  "absorbed_content": [
+    {
+      "original": "Membership",
+      "absorbed_into": "/discovery-membership",
+      "reason": "Single assimilation pathway. Per brief: Discovery class IS the front door to membership."
+    },
+    {
+      "original": "Baptism",
+      "absorbed_into": "/discovery-membership",
+      "reason": "Standard consolidation. Acts 2:39 + Matthew 3:11 + 5-step sign-up flow live on the page."
+    },
+    {
+      "original": "Local Outreach (standalone)",
+      "absorbed_into": "/outreach",
+      "reason": "Standard consolidation. Local + Global combined for unified Make Him Known pillar."
+    },
+    {
+      "original": "Global Outreach (standalone)",
+      "absorbed_into": "/outreach",
+      "reason": "Standard consolidation."
+    },
+    {
+      "original": "Contact (standalone page)",
+      "absorbed_into": "/visit",
+      "reason": "Contact section on Plan a Visit page. Riverwood's contact info is the same as their visit info; no standalone needed."
+    },
+    {
+      "original": "Cancer Care (standalone)",
+      "absorbed_into": "/care",
+      "reason": "Distinct named program within Care & Recovery."
+    },
+    {
+      "original": "Food Pantry (standalone)",
+      "absorbed_into": "/outreach",
+      "reason": "Distinct named program within Local outreach."
+    }
+  ],
+  "content_coverage_audit": [
+    {
+      "item": "1991 Began meeting in Kent Roosevelt High School",
+      "type": "milestone",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "1997 Moved to the current location on Fairchild Ave.",
+      "type": "milestone",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "2000 The church grew to the point of hiring full time youth ",
+      "type": "milestone",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "2006 The founding pastor left and began pastoring at a diffe",
+      "type": "milestone",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "2009 Church moved from having two morning services to three",
+      "type": "milestone",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "2011 Major work behind the scenes of paying down original de",
+      "type": "milestone",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "2015 Church became debt free and began examining a campus ex",
+      "type": "milestone",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "2019 Completed a gym/kitchen and classroom addition",
+      "type": "milestone",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "2024 Significant numerical growth period for the church and ",
+      "type": "milestone",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "God",
+      "type": "belief",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "Jesus Christ",
+      "type": "belief",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "The Holy Spirit",
+      "type": "belief",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "People &amp; Sin",
+      "type": "belief",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "Salvation",
+      "type": "belief",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "The Church",
+      "type": "belief",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "Ordinances (Baptism &amp; Communion)",
+      "type": "belief",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "Future Things (End Times)",
+      "type": "belief",
+      "status": "placed",
+      "page": "/story-beliefs"
+    },
+    {
+      "item": "Sunday 7:45",
+      "type": "service_time",
+      "status": "nested",
+      "page": "/visit",
+      "section_concept": "hero_inner"
+    },
+    {
+      "item": "Sunday 9:00",
+      "type": "service_time",
+      "status": "nested",
+      "page": "/visit",
+      "section_concept": "hero_inner"
+    },
+    {
+      "item": "Sunday 10:15",
+      "type": "service_time",
+      "status": "nested",
+      "page": "/visit",
+      "section_concept": "hero_inner"
+    },
+    {
+      "item": "Sunday 11:30",
+      "type": "service_time",
+      "status": "nested",
+      "page": "/visit",
+      "section_concept": "hero_inner"
+    },
+    {
+      "item": "Cole Tawney",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Tom Chamberlin",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Jim Bossler",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Jeff Haynes",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Nate Walker",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Josh Miller",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Cindy Bowser",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Josiah Keating",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Sarah Cord",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Maggie Kirbabas",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Nola Ruble",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Cora Gray",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Jodi Crawfis",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Amy Adkins",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Carol Gray",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Bryan Whitten",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Wayne Linder",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Scott Hubin",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Steven Kellhofer",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Erica Kellhofer",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Jocelyn O'Bryon",
+      "type": "staff",
+      "status": "placed",
+      "page": "/leadership"
+    },
+    {
+      "item": "Food Pantry",
+      "type": "ministry",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "Faithful Servant Care Center\nA Christian-based health care organization with a commitment to providing quality urgent health care services to the uninsured in the Greater Akron area. Services are provided at no cost to the patient by professional, licensed physicians and clinicians. For more information or to become involved, click the button below to contact us.",
+      "type": "ministry",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "Akron Pregnancy Services",
+      "type": "ministry",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "APS provides support and services for women and families in crisis pregnancies by providing material, physical, and spiritual assistance during pregnancy and after delivery. APS’s sister organization Eva also provides no-cost pregnancy tests, ultrasounds, and education on life options. For more information on how you can help, see more info.",
+      "type": "ministry",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "Shephard's House of Portage County\n\nSt. Joan of Arc (Streetsboro)\nhttps://www.sjoa-church.org › the-haven-of-portage-co...\nShepherd's House is a dedicated non-profit organization that provides shelter, support, and resources for individuals facing homelessness and crisis situations.",
+      "type": "ministry",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "Faithful Servant Care Center",
+      "type": "partnership_local",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "Akron Pregnancy Services",
+      "type": "partnership_local",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "Brad &amp; Sara",
+      "type": "partnership_global",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "Riley &amp; Alissa Brookings",
+      "type": "partnership_global",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "Andrea &amp; Blerta Clemente",
+      "type": "partnership_global",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "Del Rey Ministries",
+      "type": "partnership_global",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "John &amp; Jane Doe",
+      "type": "partnership_global",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "Jenny Haver",
+      "type": "partnership_global",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "Dan &amp; Jen",
+      "type": "partnership_global",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "Dale &amp; Jillian Liff",
+      "type": "partnership_global",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "PJ &amp; Lizzy",
+      "type": "partnership_global",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "Glenn &amp; Erin Niedergall",
+      "type": "partnership_global",
+      "status": "placed",
+      "page": "/outreach"
+    },
+    {
+      "item": "Sunday SchoolIt is our hope that the plan for childhood disc",
+      "type": "kids_ministry",
+      "status": "nested",
+      "page": "/kids",
+      "section_concept": "feature_card_grid"
+    },
+    {
+      "item": "Middle SchoolSunday Morning5th-6th Grades - 10:15-11:15am in",
+      "type": "kids_ministry",
+      "status": "nested",
+      "page": "/kids",
+      "section_concept": "feature_card_grid"
+    },
+    {
+      "item": "High SchoolSunday Morning&nbsp;10:15-11:15am in the Gatherin",
+      "type": "kids_ministry",
+      "status": "nested",
+      "page": "/kids",
+      "section_concept": "feature_card_grid"
+    },
+    {
+      "item": "CollegeSunday Morning10:15 - 11:15 AM in Room 115A time for ",
+      "type": "adult_ministry",
+      "status": "nested",
+      "page": "/adult-studies",
+      "section_concept": "feature_card_grid"
+    },
+    {
+      "item": "AdultsSunday MorningMen's Huddle - 9:00-10:15 AM in Room 114",
+      "type": "adult_ministry",
+      "status": "nested",
+      "page": "/adult-studies",
+      "section_concept": "feature_card_grid"
+    },
+    {
+      "item": "Care 101Thursdays 6:30-8pmRiverwood Chapel Room 114Leader: K",
+      "type": "care_ministry",
+      "status": "nested",
+      "page": "/care",
+      "section_concept": "feature_card_grid"
+    },
+    {
+      "item": "Grief ShareThursdays 6:30-8pmRiverwood Chapel in The Gatheri",
+      "type": "care_ministry",
+      "status": "nested",
+      "page": "/care",
+      "section_concept": "feature_card_grid"
+    },
+    {
+      "item": "OvercomeThursdays 6:30-8pmRiverwood Chapel Room 115Are you o",
+      "type": "care_ministry",
+      "status": "nested",
+      "page": "/care",
+      "section_concept": "feature_card_grid"
+    },
+    {
+      "item": "Celebrate RecoveryMondays 6:30pm in The Gathering SpaceLeade",
+      "type": "care_ministry",
+      "status": "nested",
+      "page": "/care",
+      "section_concept": "feature_card_grid"
+    },
+    {
+      "item": "Cancer CareThird Sunday of the month 10:15am Room 114Cancer ",
+      "type": "care_ministry",
+      "status": "nested",
+      "page": "/care",
+      "section_concept": "feature_card_grid"
+    }
+  ],
+  "_confidence_log": {
+    "/": "lifted_from_brief",
+    "/visit": "lifted_from_brief",
+    "/watch": "lifted_from_brief",
+    "/give": "lifted_from_brief",
+    "/kids": "lifted_from_brief",
+    "/story-beliefs": "lifted_from_brief",
+    "/leadership": "lifted_from_brief",
+    "/connect": "lifted_from_brief",
+    "/students-college": "lifted_from_brief",
+    "/adult-studies": "lifted_from_brief",
+    "/discovery-membership": "lifted_from_brief",
+    "/care": "lifted_from_brief",
+    "/outreach": "lifted_from_brief",
+    "/events": "lifted_from_brief"
+  },
+  "_unfilled_with_reason": {
+    "recommended_page_atoms": "Brief did not contain a recommended_page list. Phase 1 selection inferred from voice card persona critical_conversion_pages + sitemap-strategy.md §3 rules."
+  },
+  "_voice_match_audit": {
+    "labels_audited": [
+      "Plan a Visit",
+      "About",
+      "Connect",
+      "Impact",
+      "Watch",
+      "Give",
+      "Homepage",
+      "Events",
+      "Contact",
+      "Newsletter"
+    ],
+    "banned_term_collisions": []
+  },
+  "_validation": {
+    "phase_1_count": 6,
+    "phase_1_max": 7,
+    "phase_2_count": 8,
+    "total_pages": 14,
+    "total_max": 20,
+    "primary_nav_count": 6,
+    "primary_nav_max": 6,
+    "pages_in_brief_primacy_table_not_proposed": []
+  }
+}

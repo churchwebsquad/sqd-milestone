@@ -1,0 +1,907 @@
+{
+  "project_id": "3490-poc",
+  "compiled_at": "2026-05-20T20:04:23.215123Z",
+  "skill_version": "web_content_map_builder v1",
+  "dry_run": true,
+  "source_normalizer": "riverwood-normalizer-dry-run.json",
+  "topic_density": {
+    "other_volunteer_role": {
+      "atom_count": 0,
+      "fact_count": 40,
+      "total": 40,
+      "density_score": "high"
+    },
+    "staff": {
+      "atom_count": 0,
+      "fact_count": 21,
+      "total": 21,
+      "density_score": "high"
+    },
+    "branded_term": {
+      "atom_count": 0,
+      "fact_count": 13,
+      "total": 13,
+      "density_score": "high"
+    },
+    "partnership_global": {
+      "atom_count": 0,
+      "fact_count": 10,
+      "total": 10,
+      "density_score": "high"
+    },
+    "milestone": {
+      "atom_count": 0,
+      "fact_count": 9,
+      "total": 9,
+      "density_score": "high"
+    },
+    "belief": {
+      "atom_count": 0,
+      "fact_count": 8,
+      "total": 8,
+      "density_score": "high"
+    },
+    "small_group_branded_name": {
+      "atom_count": 7,
+      "fact_count": 0,
+      "total": 7,
+      "density_score": "high"
+    },
+    "church_value": {
+      "atom_count": 7,
+      "fact_count": 0,
+      "total": 7,
+      "density_score": "high"
+    },
+    "contact_method": {
+      "atom_count": 0,
+      "fact_count": 6,
+      "total": 6,
+      "density_score": "high"
+    },
+    "community_struggle": {
+      "atom_count": 5,
+      "fact_count": 0,
+      "total": 5,
+      "density_score": "high"
+    },
+    "ministry_local_outreach": {
+      "atom_count": 0,
+      "fact_count": 5,
+      "total": 5,
+      "density_score": "high"
+    },
+    "care_ministry": {
+      "atom_count": 5,
+      "fact_count": 0,
+      "total": 5,
+      "density_score": "high"
+    },
+    "ideal_experience": {
+      "atom_count": 5,
+      "fact_count": 0,
+      "total": 5,
+      "density_score": "high"
+    },
+    "service_time": {
+      "atom_count": 0,
+      "fact_count": 4,
+      "total": 4,
+      "density_score": "medium"
+    },
+    "engagement_lever": {
+      "atom_count": 3,
+      "fact_count": 0,
+      "total": 3,
+      "density_score": "medium"
+    },
+    "kids_ministry": {
+      "atom_count": 3,
+      "fact_count": 0,
+      "total": 3,
+      "density_score": "medium"
+    },
+    "adult_ministry": {
+      "atom_count": 2,
+      "fact_count": 0,
+      "total": 2,
+      "density_score": "medium"
+    },
+    "give_method": {
+      "atom_count": 2,
+      "fact_count": 0,
+      "total": 2,
+      "density_score": "medium"
+    },
+    "ministry_branded_name": {
+      "atom_count": 2,
+      "fact_count": 0,
+      "total": 2,
+      "density_score": "medium"
+    },
+    "service_experience": {
+      "atom_count": 2,
+      "fact_count": 0,
+      "total": 2,
+      "density_score": "medium"
+    },
+    "sermon_archive_url": {
+      "atom_count": 2,
+      "fact_count": 0,
+      "total": 2,
+      "density_score": "medium"
+    },
+    "partnership_local": {
+      "atom_count": 0,
+      "fact_count": 2,
+      "total": 2,
+      "density_score": "medium"
+    },
+    "newsletter_platform": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "volunteer_vocabulary": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "giving_campaign": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "other_do_you_have_any_member_testimonies_or_stories_that_we_could_": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "baptism_signup": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "baptism_verse_or_saying": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "local_outreach_saying": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "baptism_experience": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "office_hours": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "livestream_url": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "other_what_do_you_call_your_volunteers": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "sermon_vocabulary": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "small_group_purpose": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "church_origin": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "church_origin_rationale": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "global_outreach_saying": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "campus": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "other_would_you_like_to_include_a_page_with_pastors_deacons_or_sta": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "social_media_handle": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "location_detail": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "other_how_do_you_want_to_approach_analytics_for_your_website": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "small_group_leader_signup": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "other_which_of_the_following_applies_to_small_groups": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "baptism_why": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "small_group_contact": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "bulletin_contents": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "small_group_verse_or_saying": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "other_would_you_like_to_include_a_page_with_volunteer_opportunitie": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "give_note": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "other_do_you_have_a_church_wide_newsletter_that_site_visitors_can_": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "other_checkbox": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "staff_value": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "other_which_of_the_following_is_true_regarding_your_small_group_cu": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "volunteer_note": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "small_group_experience": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "next_steps_pathway": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "other_would_you_like_to_include_a_page_for_career_opportunities": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "audience": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "tagline": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "other_visitor_parking": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "volunteer_motivation": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "other_church_name": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "other_how_would_you_like_to_display_events_on_your_website": {
+      "atom_count": 0,
+      "fact_count": 1,
+      "total": 1,
+      "density_score": "low"
+    },
+    "newsletter_contents": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "give_rationale": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "local_outreach_purpose": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "global_outreach_purpose": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "campus_service_experience": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "give_verse_or_saying": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "class_or_discipleship_ministry": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    },
+    "wayfinding": {
+      "atom_count": 1,
+      "fact_count": 0,
+      "total": 1,
+      "density_score": "low"
+    }
+  },
+  "natural_pages": [
+    {
+      "proposed_slug": "/kids",
+      "proposed_name": "Kids",
+      "topic_grouping": [
+        "kids_ministry"
+      ],
+      "density_score": "medium",
+      "atom_count": 3,
+      "fact_count": 0,
+      "rationale": "Distinct audience (parents with children). Named kids ministries with curriculum + check-in process.",
+      "atom_external_ref_ids": [
+        "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_0",
+        "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_1",
+        "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_2"
+      ]
+    },
+    {
+      "proposed_slug": "/students-college",
+      "proposed_name": "Students & College",
+      "topic_grouping": [
+        "student_ministry",
+        "small_group_branded_name"
+      ],
+      "density_score": "high",
+      "atom_count": 7,
+      "fact_count": 0,
+      "rationale": "Distinct audience (Kent State students + middle/high schoolers). Multiple ministry tiers.",
+      "atom_external_ref_ids": [
+        "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_0",
+        "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_1",
+        "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_2",
+        "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_3",
+        "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_4",
+        "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_5",
+        "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_6"
+      ]
+    },
+    {
+      "proposed_slug": "/care",
+      "proposed_name": "Care & Recovery",
+      "topic_grouping": [
+        "care_ministry"
+      ],
+      "density_score": "high",
+      "atom_count": 5,
+      "fact_count": 0,
+      "rationale": "Named recovery and care programs. Audience-distinct (people in crisis).",
+      "atom_external_ref_ids": [
+        "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_0",
+        "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_1",
+        "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_2",
+        "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_3",
+        "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_4"
+      ]
+    },
+    {
+      "proposed_slug": "/adult-studies",
+      "proposed_name": "Adult Studies & Classes",
+      "topic_grouping": [
+        "adult_ministry",
+        "small_group_experience",
+        "small_group_purpose",
+        "small_group_verse_or_saying",
+        "small_group_leader_signup",
+        "small_group_contact",
+        "next_steps_pathway",
+        "class_or_discipleship_ministry"
+      ],
+      "density_score": "high",
+      "atom_count": 9,
+      "fact_count": 0,
+      "rationale": "Adult discipleship — Life Groups + Bible Studies + named classes (Men's Huddle, Women to Women).",
+      "atom_external_ref_ids": [
+        "contentsnare:ministries:adults:rfld_RqKznjHbDD83KG:repeater_0",
+        "contentsnare:ministries:adults:rfld_RqKznjHbDD83KG:repeater_1",
+        "contentsnare:discipleship-next-steps:small-groups:rfld_mzdXYltrxrb1g7",
+        "contentsnare:discipleship-next-steps:small-groups:rfld_1jLjoBfzjz9vdr",
+        "contentsnare:discipleship-next-steps:small-groups:rfld_E4Kl68cX5XJQd7",
+        "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7PBBg5",
+        "contentsnare:discipleship-next-steps:small-groups:rfld_GRgZ2XF0r7wPgP",
+        "contentsnare:discipleship-next-steps:next-steps-classes:rfld_RqKznjHbDD83KG:repeater_0",
+        "contentsnare:discipleship-next-steps:next-steps-classes:rfld_vRdJJeS58Nj0dM:repeater_0"
+      ]
+    },
+    {
+      "proposed_slug": "/local-outreach",
+      "proposed_name": "Local Outreach",
+      "topic_grouping": [
+        "local_outreach_purpose",
+        "local_outreach_saying",
+        "ministry_local_outreach",
+        "partnership_local",
+        "ministry_branded_name"
+      ],
+      "density_score": "high",
+      "atom_count": 4,
+      "fact_count": 7,
+      "rationale": "Local ministry partners + Food Pantry. Make Him Known mission pillar — local expression.",
+      "atom_external_ref_ids": [
+        "contentsnare:ministries:local-outreach:rfld_GoKMRwH6Y9x1LY",
+        "contentsnare:ministries:local-outreach:rfld_wOd96mc1MBZNgZ",
+        "contentsnare:ministries:local-outreach:rfld_v8gOGDCljevogm",
+        "contentsnare:ministries:global-outreach:rfld_v8gOGDCljevogm"
+      ]
+    },
+    {
+      "proposed_slug": "/global-outreach",
+      "proposed_name": "Global Outreach",
+      "topic_grouping": [
+        "global_outreach_purpose",
+        "global_outreach_saying",
+        "partnership_global"
+      ],
+      "density_score": "high",
+      "atom_count": 2,
+      "fact_count": 10,
+      "rationale": "10 missionary partnerships across regions. Make Him Known mission pillar — global expression.",
+      "atom_external_ref_ids": [
+        "contentsnare:ministries:global-outreach:rfld_GoKMRwH6Y9x1LY",
+        "contentsnare:ministries:global-outreach:rfld_wOd96mc1MBZNgZ"
+      ]
+    },
+    {
+      "proposed_slug": "/leadership",
+      "proposed_name": "Leadership Team",
+      "topic_grouping": [
+        "staff"
+      ],
+      "density_score": "high",
+      "atom_count": 0,
+      "fact_count": 21,
+      "rationale": "21 staff members with roles, emails, bios. Accessible Leadership value.",
+      "atom_external_ref_ids": []
+    },
+    {
+      "proposed_slug": "/discovery-membership",
+      "proposed_name": "Discovery & Membership",
+      "topic_grouping": [
+        "baptism_why",
+        "baptism_experience",
+        "baptism_signup",
+        "baptism_verse_or_saying"
+      ],
+      "density_score": "medium",
+      "atom_count": 4,
+      "fact_count": 0,
+      "rationale": "Discovery class is the assimilation pathway; Baptism is integrated. Single named class flow.",
+      "atom_external_ref_ids": [
+        "contentsnare:discipleship-next-steps:baptism:rfld_rzLr1DsxRNkRKp",
+        "contentsnare:discipleship-next-steps:baptism:rfld_84KYY7taxORaK6",
+        "contentsnare:discipleship-next-steps:baptism:rfld_qZKp7wHZjok7g2",
+        "contentsnare:discipleship-next-steps:baptism:rfld_04LWyjU21mOYg8"
+      ]
+    },
+    {
+      "proposed_slug": "/story-beliefs",
+      "proposed_name": "Our Story & Beliefs",
+      "topic_grouping": [
+        "church_origin",
+        "church_origin_rationale",
+        "church_value",
+        "belief",
+        "milestone",
+        "ideal_experience"
+      ],
+      "density_score": "high",
+      "atom_count": 14,
+      "fact_count": 17,
+      "rationale": "Theological substance (8 doctrines) + church history (9 milestones) + values + origin story. Trust-building page.",
+      "atom_external_ref_ids": [
+        "contentsnare:about-your-church:church-origins-common-lingo:rfld_EDKb5WhY4480gY",
+        "contentsnare:about-your-church:church-origins-common-lingo:rfld_wOd96mc1MMrwgZ",
+        "discovery:messaging.values.0",
+        "discovery:messaging.values.1",
+        "discovery:messaging.values.2",
+        "discovery:messaging.values.3",
+        "discovery:messaging.values.4",
+        "discovery:messaging.values.5",
+        "contentsnare:about-your-church:mission-beliefs:rfld_GRgvR3HQ0085g2",
+        "discovery:community.ideal_experience.0",
+        "discovery:community.ideal_experience.1",
+        "discovery:community.ideal_experience.2",
+        "discovery:community.ideal_experience.3",
+        "discovery:community.ideal_experience.4"
+      ]
+    }
+  ],
+  "consolidation_candidates": [
+    {
+      "type": "merge",
+      "candidates": [
+        "/local-outreach",
+        "/global-outreach"
+      ],
+      "into": "/outreach",
+      "reason": "Both serve the Make Him Known mission pillar. Combined density (23 atoms+facts) supports a single page with distinct local + global sections. Standard consolidation.",
+      "rule_source": "sitemap-strategy §3 standard consolidation"
+    },
+    {
+      "type": "absorb",
+      "candidates": [
+        "baptism_why",
+        "baptism_experience",
+        "baptism_signup",
+        "baptism_verse_or_saying"
+      ],
+      "into": "/discovery-membership",
+      "reason": "Baptism atoms (why, experience, signup, scripture) integrate with the Discovery & Membership assimilation pathway. Standard consolidation.",
+      "rule_source": "sitemap-strategy §3 standard consolidation"
+    },
+    {
+      "type": "absorb",
+      "candidates": [
+        "membership"
+      ],
+      "into": "/discovery-membership",
+      "reason": "Membership is the optional 5th-week add-on to the Discovery class per content collection. Single assimilation pathway.",
+      "rule_source": "sitemap-strategy §3 standard consolidation"
+    }
+  ],
+  "strategic_mandate_contributors": {
+    "/visit_contributors": [
+      "bulletin_contents",
+      "campus_service_experience",
+      "newsletter_contents",
+      "newsletter_platform",
+      "office_hours",
+      "parking",
+      "service_experience",
+      "social_media_handle",
+      "wayfinding"
+    ],
+    "/watch_contributors": [
+      "livestream_url",
+      "sermon_archive_location",
+      "sermon_archive_url",
+      "sermon_note",
+      "sermon_vocabulary"
+    ],
+    "/give_contributors": [
+      "give_method",
+      "give_note",
+      "give_rationale",
+      "give_verse_or_saying",
+      "giving_campaign"
+    ],
+    "/connect_contributors": [
+      "volunteer_motivation",
+      "volunteer_note",
+      "volunteer_vocabulary"
+    ],
+    "/story-beliefs_contributors": [
+      "church_origin",
+      "church_origin_rationale",
+      "church_value",
+      "community_struggle",
+      "engagement_lever",
+      "ideal_experience",
+      "tagline"
+    ]
+  },
+  "atom_to_topic_group": {
+    "discovery:community.struggles.0": "community_struggle",
+    "discovery:community.struggles.1": "community_struggle",
+    "discovery:community.struggles.2": "community_struggle",
+    "discovery:community.struggles.3": "community_struggle",
+    "discovery:community.struggles.4": "community_struggle",
+    "discovery:community.most_effective.0": "engagement_lever",
+    "discovery:community.most_effective.1": "engagement_lever",
+    "discovery:community.most_effective.2": "engagement_lever",
+    "discovery:community.ideal_experience.0": "ideal_experience",
+    "discovery:community.ideal_experience.1": "ideal_experience",
+    "discovery:community.ideal_experience.2": "ideal_experience",
+    "discovery:community.ideal_experience.3": "ideal_experience",
+    "discovery:community.ideal_experience.4": "ideal_experience",
+    "discovery:messaging.values.0": "church_value",
+    "discovery:messaging.values.1": "church_value",
+    "discovery:messaging.values.2": "church_value",
+    "discovery:messaging.values.3": "church_value",
+    "discovery:messaging.values.4": "church_value",
+    "discovery:messaging.values.5": "church_value",
+    "contentsnare:about-your-church:mission-beliefs:rfld_GRgvR3HQ0085g2": "church_value",
+    "contentsnare:the-details:contact-information:rfld_R3L8qYCyq60Xde": "office_hours",
+    "contentsnare:the-details:social-media-newsletter-bullet:rfld_vZLR9NFxR5DaK8:repeater_0": "social_media_handle",
+    "contentsnare:the-details:social-media-newsletter-bullet:rfld_J0KwyaUz16kOdk": "newsletter_contents",
+    "contentsnare:the-details:social-media-newsletter-bullet:rfld_wVd0y3UAJ6lAgZ": "newsletter_platform",
+    "contentsnare:the-details:social-media-newsletter-bullet:rfld_0Wd3yqUR4RYXKm": "bulletin_contents",
+    "contentsnare:about-your-church:church-origins-common-lingo:rfld_EDKb5WhY4480gY": "church_origin",
+    "contentsnare:about-your-church:church-origins-common-lingo:rfld_wOd96mc1MMrwgZ": "church_origin_rationale",
+    "contentsnare:about-your-church:church-origins-common-lingo:rfld_aRd14aixWWAaLr:repeater_0": "tagline",
+    "contentsnare:weekend-services:service-details:rfld_rzLr1DsxRRynKp": "service_experience",
+    "contentsnare:weekend-services:service-details:rfld_qZKp7wHZjjBjg2": "service_experience",
+    "contentsnare:weekend-services:service-details:rfld_GRgvR3HQ00Zlg2": "wayfinding",
+    "contentsnare:weekend-services:service-details:rfld_a9KneRI7z0Nngq:repeater_0": "campus_service_experience",
+    "contentsnare:weekend-services:sermons:rfld_9jgDrAFQYYx7LG:repeater_0": "livestream_url",
+    "contentsnare:weekend-services:sermons:rfld_PQLA3VSReeJwgJ": "sermon_vocabulary",
+    "contentsnare:weekend-services:sermons:rfld_8eLP0oH0XXnYLv:repeater_0": "sermon_archive_url",
+    "contentsnare:weekend-services:sermons:rfld_8eLP0oH0XXnYLv:repeater_1": "sermon_archive_url",
+    "contentsnare:staff-volunteers-testimonies:staff:rfld_9DdxaQfwGGVwgM:repeater_0": "staff_value",
+    "contentsnare:staff-volunteers-testimonies:volunteers:rfld_baLy9qF2RRODL9": "volunteer_motivation",
+    "contentsnare:staff-volunteers-testimonies:volunteers:rfld_J0KwyaUz11r2dk": "volunteer_vocabulary",
+    "contentsnare:staff-volunteers-testimonies:volunteers:rfld_wVd0y3UAJJ1VgZ": "volunteer_note",
+    "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_0": "small_group_branded_name",
+    "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_1": "small_group_branded_name",
+    "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_2": "small_group_branded_name",
+    "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_3": "small_group_branded_name",
+    "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_4": "small_group_branded_name",
+    "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_5": "small_group_branded_name",
+    "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7P4Mg5:repeater_6": "small_group_branded_name",
+    "contentsnare:discipleship-next-steps:small-groups:rfld_mzdXYltrxrb1g7": "small_group_experience",
+    "contentsnare:discipleship-next-steps:small-groups:rfld_1jLjoBfzjz9vdr": "small_group_purpose",
+    "contentsnare:discipleship-next-steps:small-groups:rfld_E4Kl68cX5XJQd7": "small_group_verse_or_saying",
+    "contentsnare:discipleship-next-steps:small-groups:rfld_W1K7ZXiP7PBBg5": "small_group_leader_signup",
+    "contentsnare:discipleship-next-steps:small-groups:rfld_GRgZ2XF0r7wPgP": "small_group_contact",
+    "contentsnare:discipleship-next-steps:next-steps-classes:rfld_RqKznjHbDD83KG:repeater_0": "next_steps_pathway",
+    "contentsnare:discipleship-next-steps:next-steps-classes:rfld_vRdJJeS58Nj0dM:repeater_0": "class_or_discipleship_ministry",
+    "contentsnare:discipleship-next-steps:baptism:rfld_rzLr1DsxRNkRKp": "baptism_why",
+    "contentsnare:discipleship-next-steps:baptism:rfld_84KYY7taxORaK6": "baptism_experience",
+    "contentsnare:discipleship-next-steps:baptism:rfld_04LWyjU21mOYg8": "baptism_verse_or_saying",
+    "contentsnare:discipleship-next-steps:baptism:rfld_qZKp7wHZjok7g2": "baptism_signup",
+    "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_0": "kids_ministry",
+    "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_1": "kids_ministry",
+    "contentsnare:ministries:kids-students:rfld_RqKznjHbDD83KG:repeater_2": "kids_ministry",
+    "contentsnare:ministries:adults:rfld_RqKznjHbDD83KG:repeater_0": "adult_ministry",
+    "contentsnare:ministries:adults:rfld_RqKznjHbDD83KG:repeater_1": "adult_ministry",
+    "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_0": "care_ministry",
+    "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_1": "care_ministry",
+    "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_2": "care_ministry",
+    "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_3": "care_ministry",
+    "contentsnare:ministries:care:rfld_RqKznjHbDD83KG:repeater_4": "care_ministry",
+    "contentsnare:ministries:local-outreach:rfld_v8gOGDCljevogm": "ministry_branded_name",
+    "contentsnare:ministries:global-outreach:rfld_v8gOGDCljevogm": "ministry_branded_name",
+    "contentsnare:ministries:local-outreach:rfld_GoKMRwH6Y9x1LY": "local_outreach_purpose",
+    "contentsnare:ministries:local-outreach:rfld_wOd96mc1MBZNgZ": "local_outreach_saying",
+    "contentsnare:ministries:global-outreach:rfld_GoKMRwH6Y9x1LY": "global_outreach_purpose",
+    "contentsnare:ministries:global-outreach:rfld_wOd96mc1MBZNgZ": "global_outreach_saying",
+    "contentsnare:giving:ways-to-give:rfld_a9KneRI7z0W0gq": "give_rationale",
+    "contentsnare:giving:ways-to-give:rfld_vRdJJeS58NVvdM": "give_verse_or_saying",
+    "contentsnare:giving:ways-to-give:rfld_R3L8qYCyq3vpde:repeater_0": "give_method",
+    "contentsnare:giving:ways-to-give:rfld_R3L8qYCyq3vpde:repeater_1": "give_method",
+    "contentsnare:giving:ways-to-give:rfld_mzdXYltx4pyyg7": "give_note",
+    "contentsnare:giving:giving-campaigns:rfld_NbgqjxhAR9ewKw:repeater_0": "giving_campaign"
+  },
+  "_confidence_log": {
+    "/kids": "lifted_from_normalizer",
+    "/students-college": "lifted_from_normalizer",
+    "/care": "lifted_from_normalizer",
+    "/adult-studies": "lifted_from_normalizer",
+    "/local-outreach": "lifted_from_normalizer",
+    "/global-outreach": "lifted_from_normalizer",
+    "/leadership": "lifted_from_normalizer",
+    "/discovery-membership": "lifted_from_normalizer",
+    "/story-beliefs": "lifted_from_normalizer"
+  },
+  "_unfilled_with_reason": {
+    "orphan_topics": "20 topics with content not placed in a natural page or strategic-mandate page contributor list. Sitemap_builder should review."
+  },
+  "_orphan_topics": [
+    {
+      "topic": "staff_value",
+      "atom_count": 1,
+      "fact_count": 0
+    },
+    {
+      "topic": "other_do_you_have_any_member_testimonies_or_stories_that_we_could_",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "other_what_do_you_call_your_volunteers",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "campus",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "other_would_you_like_to_include_a_page_with_pastors_deacons_or_sta",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "location_detail",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "other_how_do_you_want_to_approach_analytics_for_your_website",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "other_which_of_the_following_applies_to_small_groups",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "other_volunteer_role",
+      "atom_count": 0,
+      "fact_count": 40
+    },
+    {
+      "topic": "other_would_you_like_to_include_a_page_with_volunteer_opportunitie",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "other_do_you_have_a_church_wide_newsletter_that_site_visitors_can_",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "other_checkbox",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "other_which_of_the_following_is_true_regarding_your_small_group_cu",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "other_would_you_like_to_include_a_page_for_career_opportunities",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "audience",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "other_visitor_parking",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "other_church_name",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "other_how_would_you_like_to_display_events_on_your_website",
+      "atom_count": 0,
+      "fact_count": 1
+    },
+    {
+      "topic": "contact_method",
+      "atom_count": 0,
+      "fact_count": 6
+    },
+    {
+      "topic": "service_time",
+      "atom_count": 0,
+      "fact_count": 4
+    }
+  ]
+}

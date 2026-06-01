@@ -154,8 +154,8 @@ function Brief({
         </Accordion>
 
         <Accordion title="Visual scales" defaultOpen={open}>
-          <ScaleRow label="Simple ⇄ Elevated" value={row.visual_simple_to_elevated} max={5} />
-          <ScaleRow label="Traditional ⇄ Modern" value={row.visual_traditional_to_modern} max={5} />
+          <ScaleRow label="Simple ⇄ Intricate" value={row.visual_simple_to_intricate} max={5} />
+          <ScaleRow label="Classic ⇄ Modern" value={row.visual_classic_to_modern} max={5} />
           <ScaleRow label="Timeless ⇄ Trendy" value={row.visual_timeless_to_trendy} max={5} />
           <ScaleRow label="Function-First ⇄ Form-First" value={row.visual_function_to_form} max={5} />
           <ScaleRow label="Storytelling: Literal ⇄ Abstract" value={row.storytelling_literal_to_abstract} max={5} />

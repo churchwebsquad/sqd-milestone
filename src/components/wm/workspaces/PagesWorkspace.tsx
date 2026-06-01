@@ -47,6 +47,8 @@ import { PageBriefImportModal } from '../PageBriefImportModal'
 import { AddPageModal } from '../AddPageModal'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { PagePreview } from '../PagePreview'
+import { PageTextView } from './PageTextView'
+import { markOverride } from '../../../lib/webFieldProvenance'
 import { WMSegmentedToggle } from '../SegmentedToggle'
 import { SectionList } from '../sectioneditor/SectionList'
 import { useSectionDetailPublisher } from '../sectioneditor/SectionEditingContext'
@@ -62,6 +64,9 @@ import {
   emptyReconcileTelemetry, type BindSource,
 } from '../../../lib/webBindTelemetry'
 import { normalizeFieldValuesForTemplate } from '../../../lib/webCopywriterOutput'
+import {
+  extractDocument, bindDocumentToTemplate,
+} from '../../../lib/webContentDocument'
 import { extractSuggestedFamily, type PageBrief } from '../../../lib/webPageBrief'
 import {
   composeBind, findBriefSection, extractSectionIdFromNotes,
@@ -73,7 +78,7 @@ import { loadProjectReviewState, type ProjectReviewState } from '../../../lib/we
 import type { SnippetMap } from '../../../lib/webBrixiesRender'
 import type {
   StrategyWebProject, WebPage, WebSection, WebContentTemplate,
-  WebTemplateKind,
+  WebTemplateKind, FieldProvenanceMap,
 } from '../../../types/database'
 
 interface Props {
@@ -607,7 +612,7 @@ function PageEditor({
   // Edit ↔ Preview mode for the page editor body. Edit is the live-
   // assembly canvas; Preview renders the full page via the bound
   // templates' source_html with current copy substituted (iframe).
-  const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit')
+  const [viewMode, setViewMode] = useState<'text' | 'edit' | 'preview'>('edit')
   // The currently-selected section in the canvas — drives the
   // right-side details panel.
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null)
@@ -808,9 +813,40 @@ function PageEditor({
     await loadSections()
   }
 
-  const updateSection = async (sectionId: string, patch: Partial<WebSection>) => {
-    setSections(prev => prev.map(s => s.id === sectionId ? { ...s, ...patch } : s))
-    await supabase.from('web_sections').update(patch).eq('id', sectionId)
+  const updateSection = async (
+    sectionId: string,
+    patch: Partial<WebSection>,
+    opts: { markStaffOverride?: boolean } = {},
+  ) => {
+    let effectivePatch: Partial<WebSection> = { ...patch }
+
+    // When the SlotEditor saves a field edit, flip every changed slot's
+    // provenance to `override` so the next markdown re-flow preserves
+    // it via `applyOverridesOnRebind`. Other updateSection call paths
+    // (variant swap, unbind, sort_order changes, etc.) don't pass
+    // markStaffOverride and therefore don't pin fields they recompute.
+    if (opts.markStaffOverride && patch.field_values) {
+      const current = sections.find(s => s.id === sectionId)
+      if (current) {
+        const currentValues = (current.field_values ?? {}) as Record<string, unknown>
+        const newValues     = patch.field_values as Record<string, unknown>
+        const changed: string[] = []
+        for (const key of Object.keys(newValues)) {
+          if (key.startsWith('__')) continue  // skip __unmapped / __overflow_html
+          if (JSON.stringify(currentValues[key]) !== JSON.stringify(newValues[key])) {
+            changed.push(key)
+          }
+        }
+        if (changed.length > 0) {
+          let nextProv = (current.field_provenance ?? {}) as FieldProvenanceMap
+          for (const key of changed) nextProv = markOverride(nextProv, key)
+          effectivePatch.field_provenance = nextProv
+        }
+      }
+    }
+
+    setSections(prev => prev.map(s => s.id === sectionId ? { ...s, ...effectivePatch } : s))
+    await supabase.from('web_sections').update(effectivePatch).eq('id', sectionId)
     void markEdited()
   }
 
@@ -869,34 +905,21 @@ function PageEditor({
 
     if (sourceFieldValues && Object.keys(sourceFieldValues).length > 0) {
       // Source-of-truth path. Re-derive directly from the copywriter's
-      // original shape using the same three-phase reconcile the
-      // importer runs, then overlay any user edits to storedValues so
-      // post-import authoring isn't lost on swap.
-      const normalized = normalizeFieldValuesForTemplate(newTemplate, sourceFieldValues) as FieldValues
-      let shapeFilled: Record<string, unknown> = {}
-      try {
-        const shapeHtml = valuesToDocHtmlByShape(sourceFieldValues)
-        shapeFilled = docHtmlToFieldValues(
-          shapeHtml === '<p></p>' ? '<p></p>' : shapeHtml,
-          newTemplate,
-          sourceFieldValues,
-        ).field_values
-      } catch (err) {
-        console.warn('[bindSection] source-derive value-shape phase failed', err)
-      }
-      const fromSource = mergeFieldValuesPreferNonEmpty(normalized, shapeFilled, newTemplate) as FieldValues
-      const fromSourceReconciled = reconcileFieldValuesAcrossTemplates(
-        sourceFieldValues, newTemplate, fromSource, cardTemplates, reconcileTele,
+      // original shape via the ContentDocument IR, then overlay any
+      // user edits so post-import authoring isn't lost on swap.
+      const fromSource = bindDocumentToTemplate(
+        extractDocument({ field_values: sourceFieldValues }),
+        newTemplate,
+        cardTemplates,
       ) as FieldValues
 
-      // Overlay user edits on top of the source-derived base. We map
-      // storedValues through the new template's normalize first so the
-      // shape matches; empty edits don't clobber source-derived content
-      // because mergeFieldValuesPreferNonEmpty only takes non-empty
-      // values from `primary`.
-      const userEditsInNewShape = normalizeFieldValuesForTemplate(newTemplate, currentValues) as FieldValues
+      const userEditsInNewShape = bindDocumentToTemplate(
+        extractDocument({ field_values: currentValues }),
+        newTemplate,
+        cardTemplates,
+      ) as FieldValues
       nextValues = mergeFieldValuesPreferNonEmpty(
-        userEditsInNewShape, fromSourceReconciled, newTemplate,
+        userEditsInNewShape, fromSource, newTemplate,
       ) as FieldValues
 
       const priorOverflow = typeof currentValues.__overflow_html === 'string'
@@ -904,35 +927,17 @@ function PageEditor({
         : ''
       if (priorOverflow) overflowHtml = priorOverflow
     } else if (oldTemplate) {
-      // Three-phase bind so nested groups (card[].buttons_card,
-      // container_left[], slide[].card[], etc.) carry through the
-      // swap:
-      //   Phase 1 — normalize the raw values against the NEW
-      //   template's schema. When source keys match target keys
-      //   verbatim this populates everything with nested data intact.
-      //   Phase 2 — value-shape doc route fills any slots Phase 1
-      //   couldn't (semantic-name mapping for diverging keys).
-      //   Phase 3 — canonical-key reconcile for the long tail.
-      const normalized = normalizeFieldValuesForTemplate(newTemplate, currentValues) as FieldValues
-      let shapeFilled: Record<string, unknown> = {}
-      try {
-        let docHtml: string
-        try {
-          docHtml = fieldValuesToDocHtml(currentValues, oldTemplate)
-        } catch {
-          docHtml = ''
-        }
-        const shapeHtml = valuesToDocHtmlByShape(currentValues)
-        const combined = docHtml + (shapeHtml === '<p></p>' ? '' : shapeHtml)
-        shapeFilled = docHtmlToFieldValues(combined || '<p></p>', newTemplate, currentValues).field_values
-      } catch (err) {
-        console.warn('[bindSection] value-shape phase failed, keeping normalize only', err)
-      }
-      nextValues = mergeFieldValuesPreferNonEmpty(normalized, shapeFilled, newTemplate) as FieldValues
-      // Canonical-key fallback for any newTemplate slot still empty.
-      nextValues = reconcileFieldValuesAcrossTemplates(currentValues, newTemplate, nextValues, cardTemplates, reconcileTele) as FieldValues
-      // Carry the prior overflow forward — it's still the strategist's
-      // safety net for anything they're routing in.
+      // Variant swap from one bound template to another. Run the
+      // current values through the ContentDocument IR + binder so
+      // every editable slot on the NEW template's schema gets filled
+      // by intent match (not by key name) from the data we already
+      // have. Replaces the legacy three-phase normalize / shape-doc
+      // / reconcile pipeline.
+      nextValues = bindDocumentToTemplate(
+        extractDocument({ field_values: currentValues }),
+        newTemplate,
+        cardTemplates,
+      ) as FieldValues
       const priorOverflow = typeof currentValues.__overflow_html === 'string'
         ? currentValues.__overflow_html
         : ''
@@ -959,21 +964,14 @@ function PageEditor({
       const hasStructuredValues = structuralKeys.length > 0
 
       if (hasStructuredValues) {
-        // Same three-phase pattern as the bound→bound swap above:
-        // normalize source keys against newTemplate first (preserves
-        // nested data when keys match), then value-shape doc route
-        // fills any remaining empties, then canonical-key reconcile.
-        const normalized = normalizeFieldValuesForTemplate(newTemplate, currentValues) as FieldValues
-        let shapeFilled: Record<string, unknown> = {}
-        try {
-          const shapeHtml = valuesToDocHtmlByShape(currentValues)
-          const source = (sourceHtml || '') + (shapeHtml === '<p></p>' ? '' : shapeHtml)
-          shapeFilled = docHtmlToFieldValues(source || '<p></p>', newTemplate, currentValues).field_values
-        } catch (err) {
-          console.warn('[bindSection] freehand→bound shape route failed, falling back', err)
-        }
-        nextValues = mergeFieldValuesPreferNonEmpty(normalized, shapeFilled, newTemplate) as FieldValues
-        nextValues = reconcileFieldValuesAcrossTemplates(currentValues, newTemplate, nextValues, cardTemplates, reconcileTele) as FieldValues
+        // Initial bind from a freehand section with structured keys.
+        // Route through the ContentDocument IR + binder; replaces the
+        // legacy three-phase pipeline.
+        nextValues = bindDocumentToTemplate(
+          extractDocument({ field_values: currentValues }),
+          newTemplate,
+          cardTemplates,
+        ) as FieldValues
       } else {
         const briefSectionId = extractSectionIdFromNotes(section.notes)
         const briefSection = findBriefSection(pageBrief, briefSectionId)
@@ -1264,7 +1262,10 @@ function PageEditor({
       snippets,
       cardTemplates,
       pages: projectPages.map(p => ({ id: p.id, name: p.name, slug: p.slug })),
-      onChange: (patch) => void updateSection(selectedSection.id, patch),
+      // Staff field edits in the Layout view flip provenance to
+      // `override` for every changed slot — preserves them through the
+      // next markdown re-flow.
+      onChange: (patch) => void updateSection(selectedSection.id, patch, { markStaffOverride: true }),
       onClose: () => setSelectedSectionId(null),
       onChangeVariant: () => setBindingSection(selectedSection),
       onUnbind: () => void unbindSection(selectedSection.id),
@@ -1312,8 +1313,9 @@ function PageEditor({
         <div className="flex items-center gap-2">
           <WMSegmentedToggle
             options={[
-              { key: 'edit',    label: 'Edit',    icon: <Edit3 size={11} /> },
-              { key: 'preview', label: 'Preview', icon: <Eye   size={11} /> },
+              { key: 'text',    label: 'Text',    icon: <FileText size={11} /> },
+              { key: 'edit',    label: 'Layout',  icon: <Edit3    size={11} /> },
+              { key: 'preview', label: 'Preview', icon: <Eye      size={11} /> },
             ]}
             active={viewMode}
             onChange={setViewMode}
@@ -1418,6 +1420,23 @@ function PageEditor({
                 })
               }}
             />
+          ) : viewMode === 'text' ? (
+            loadingSections ? (
+              <div className="space-y-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="h-32 rounded-xl bg-wm-bg-hover animate-pulse" />
+                ))}
+              </div>
+            ) : (
+              <PageTextView
+                pageId={page.id}
+                sections={sections}
+                templates={templates}
+                snippets={snippets}
+                pageContext={{ page_slug: page.slug, page_title: page.name ?? undefined }}
+                onSectionsChanged={() => void loadSections()}
+              />
+            )
           ) : loadingSections ? (
             <div className="space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
