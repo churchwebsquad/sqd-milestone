@@ -37,6 +37,12 @@ export interface BaselineField {
   /** True if the topic's content satisfies this field. Pure function —
    *  no DB / network access. */
   detect: (topic: TopicRow) => boolean
+  /** Pull the concrete value out of the topic so the form field can
+   *  be prefilled. Returns null when nothing extractable was found
+   *  (the form renders an empty input + placeholder in that case).
+   *  Optional — fields without an extractor render with the topic's
+   *  first matching passage as a fallback prefill. */
+  extract?: (topic: TopicRow) => string | null
 }
 
 // ── Reusable detection helpers ────────────────────────────────────────
@@ -67,6 +73,36 @@ function itemsAny(topic: TopicRow, pred: (it: Item) => boolean): boolean {
   return (topic.items ?? []).some(pred)
 }
 
+/** Generic regex extractor — first match in any passage / item string. */
+function firstMatch(topic: TopicRow, re: RegExp): string | null {
+  const m = re.exec(passageText(topic))
+  return m ? m[0].trim() : null
+}
+
+/** First passage whose text contains any of the given keywords.
+ *  Trimmed + length-capped so the form field stays readable. */
+function firstPassageContaining(topic: TopicRow, ...keywords: string[]): string | null {
+  const lower = keywords.map(k => k.toLowerCase())
+  for (const p of (topic.passages ?? [])) {
+    const text = (p?.text ?? '').trim()
+    if (!text) continue
+    const t = text.toLowerCase()
+    if (lower.some(k => t.includes(k))) {
+      return text.length > 400 ? text.slice(0, 400).trim() + '…' : text
+    }
+  }
+  return null
+}
+
+/** First non-empty passage as a generic fallback prefill. */
+function firstPassage(topic: TopicRow): string | null {
+  for (const p of (topic.passages ?? [])) {
+    const text = (p?.text ?? '').trim()
+    if (text) return text.length > 400 ? text.slice(0, 400).trim() + '…' : text
+  }
+  return null
+}
+
 function topicHasMatch(topic: TopicRow, re: RegExp): boolean {
   return re.test(passageText(topic))
 }
@@ -94,24 +130,31 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
   // ── The Details ─────────────────────────────────────────────────────
   contact: [
     { key: 'church_name',    label: 'Church name',          description: 'The official name as it appears in branding.',
-      detect: t => Boolean(t.topic_label) || topicHasKeyword(t, 'church', 'ministry') },
+      detect: t => Boolean(t.topic_label) || topicHasKeyword(t, 'church', 'ministry'),
+      extract: t => t.topic_label || null },
     { key: 'phone',          label: 'General phone number', description: 'Main line site visitors can call.',
-      detect: t => topicHasMatch(t, RE_PHONE) },
+      detect:  t => topicHasMatch(t, RE_PHONE),
+      extract: t => firstMatch(t, RE_PHONE) },
     { key: 'email',          label: 'General contact email', description: 'Main inbox for site visitor questions.',
-      detect: t => topicHasMatch(t, RE_EMAIL) },
+      detect:  t => topicHasMatch(t, RE_EMAIL),
+      extract: t => firstMatch(t, RE_EMAIL) },
     { key: 'address',        label: 'Primary address',      description: 'Street address of the main campus.',
-      detect: t => topicHasMatch(t, RE_ADDRESS) },
+      detect:  t => topicHasMatch(t, RE_ADDRESS),
+      extract: t => firstMatch(t, RE_ADDRESS) },
     { key: 'office_hours',   label: 'Admin office hours',   description: 'When the office is open to walk-ins or calls.',
-      detect: t => topicHasKeyword(t, 'office hours', 'open hours', 'mon-fri', 'monday through') },
+      detect:  t => topicHasKeyword(t, 'office hours', 'open hours', 'mon-fri', 'monday through'),
+      extract: t => firstPassageContaining(t, 'office hours', 'open hours', 'mon-fri', 'monday through') },
     { key: 'campus_count',   label: 'Number of campuses',   description: 'How many physical locations the church operates.',
-      detect: t => topicHasKeyword(t, 'campus', 'location') },
+      detect:  t => topicHasKeyword(t, 'campus', 'location') },
   ],
 
   social_newsletter: [
     { key: 'social_links',     label: 'Social media accounts', description: 'Facebook, Instagram, YouTube, etc.',
-      detect: t => topicHasKeyword(t, 'facebook', 'instagram', 'youtube', 'tiktok') },
+      detect:  t => topicHasKeyword(t, 'facebook', 'instagram', 'youtube', 'tiktok'),
+      extract: t => firstPassageContaining(t, 'facebook', 'instagram', 'youtube', 'tiktok') },
     { key: 'newsletter_signup', label: 'Newsletter signup',    description: 'How site visitors subscribe to church-wide updates.',
-      detect: t => topicHasKeyword(t, 'newsletter', 'subscribe', 'sign up') },
+      detect:  t => topicHasKeyword(t, 'newsletter', 'subscribe', 'sign up'),
+      extract: t => firstPassageContaining(t, 'newsletter', 'subscribe', 'sign up') },
   ],
 
   branding_photos: [
@@ -128,13 +171,17 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
   // ── About Your Church ───────────────────────────────────────────────
   mission_beliefs: [
     { key: 'mission_statement', label: 'Mission statement', description: 'Why the church exists — the core purpose.',
-      detect: t => topicHasKeyword(t, 'our mission', 'mission is', 'mission statement', 'purpose is') },
+      detect:  t => topicHasKeyword(t, 'our mission', 'mission is', 'mission statement', 'purpose is'),
+      extract: t => firstPassageContaining(t, 'our mission', 'mission is', 'mission statement', 'purpose is') },
     { key: 'vision_statement',  label: 'Vision statement',  description: 'Where the church is going — the future picture.',
-      detect: t => topicHasKeyword(t, 'our vision', 'vision is', 'vision statement', 'where we', 'where we\'re going') },
+      detect:  t => topicHasKeyword(t, 'our vision', 'vision is', 'vision statement', 'where we', 'where we\'re going'),
+      extract: t => firstPassageContaining(t, 'our vision', 'vision is', 'vision statement', 'where we') },
     { key: 'values',            label: 'Church values',     description: 'The principles that guide behavior + decisions.',
-      detect: t => topicHasKeyword(t, 'our values', 'we value', 'core values') },
+      detect:  t => topicHasKeyword(t, 'our values', 'we value', 'core values'),
+      extract: t => firstPassageContaining(t, 'our values', 'we value', 'core values') },
     { key: 'beliefs',           label: 'Statement of beliefs', description: 'Theological convictions (God, Bible, salvation, etc.).',
-      detect: t => topicHasKeyword(t, 'we believe', 'statement of beliefs', 'doctrine', 'creed') },
+      detect:  t => topicHasKeyword(t, 'we believe', 'statement of beliefs', 'doctrine', 'creed'),
+      extract: t => firstPassageContaining(t, 'we believe', 'statement of beliefs', 'doctrine') },
   ],
 
   campuses: [
@@ -156,13 +203,17 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
   // ── Weekend Services ────────────────────────────────────────────────
   service_details: [
     { key: 'service_times',     label: 'Service times',           description: 'When weekend services happen.',
-      detect: t => topicHasMatch(t, RE_TIME) || itemKindMatches(t, 'service_time') },
+      detect:  t => topicHasMatch(t, RE_TIME) || itemKindMatches(t, 'service_time'),
+      extract: t => firstPassageContaining(t, 'sunday', 'service', 'am', 'pm') ?? firstMatch(t, RE_TIME) },
     { key: 'visitor_expect',    label: 'What visitors expect',    description: 'Service flow, length, vibe, dress code.',
-      detect: t => topicHasKeyword(t, 'what to expect', 'visitor', 'first time', 'service lasts', 'casual', 'experience') },
+      detect:  t => topicHasKeyword(t, 'what to expect', 'visitor', 'first time', 'service lasts', 'casual', 'experience'),
+      extract: t => firstPassageContaining(t, 'what to expect', 'visitor', 'first time', 'expect') },
     { key: 'parking',           label: 'Parking info',            description: 'Where to park, reserved visitor parking?',
-      detect: t => topicHasKeyword(t, 'parking', 'parking lot') },
+      detect:  t => topicHasKeyword(t, 'parking', 'parking lot'),
+      extract: t => firstPassageContaining(t, 'parking') },
     { key: 'sunday_directions', label: 'How visitors find their way', description: 'Signage, greeters, parking lot volunteers.',
-      detect: t => topicHasKeyword(t, 'welcome team', 'greeters', 'signage', 'volunteer') },
+      detect:  t => topicHasKeyword(t, 'welcome team', 'greeters', 'signage', 'volunteer'),
+      extract: t => firstPassageContaining(t, 'welcome team', 'greeters', 'signage') },
   ],
 
   visit_details: [
@@ -391,6 +442,12 @@ function buildMinistryBaselines(keys: string[]): Record<string, BaselineField[]>
 export interface BaselineCoverage {
   field:  BaselineField
   filled: boolean
+  /** First extracted value across the bucket's topics, when an
+   *  extractor is defined and returned something. Used to prefill the
+   *  form input. Null when no extractor / nothing found / extractor
+   *  threw. Falls back to first-non-empty passage when undefined and
+   *  detect=true so partners always see SOME context to work from. */
+  prefill: string | null
 }
 
 /** Compute fill status for every baseline field this bucket expects,
@@ -404,10 +461,11 @@ export function computeBaselineCoverage(
 ): BaselineCoverage[] {
   const baseline = BUCKET_BASELINES[bucketKey]
   if (!baseline || baseline.length === 0) return []
-  return baseline.map(field => ({
-    field,
-    filled: topics.some(t => safeDetect(field, t)),
-  }))
+  return baseline.map(field => {
+    const filled  = topics.some(t => safeDetect(field, t))
+    const prefill = safeExtract(field, topics)
+    return { field, filled, prefill }
+  })
 }
 
 function safeDetect(field: BaselineField, topic: TopicRow): boolean {
@@ -416,6 +474,31 @@ function safeDetect(field: BaselineField, topic: TopicRow): boolean {
   } catch {
     return false
   }
+}
+
+/** Walk topics, return the first non-null extractor result. Falls back
+ *  to first-non-empty passage when the field has no extractor but
+ *  detect=true on at least one topic — gives partners SOMETHING to
+ *  work from instead of a blank input. */
+function safeExtract(field: BaselineField, topics: TopicRow[]): string | null {
+  if (field.extract) {
+    for (const t of topics) {
+      try {
+        const v = field.extract(t)
+        if (v && v.trim()) return v.trim()
+      } catch { /* skip */ }
+    }
+    return null
+  }
+  // No explicit extractor — use the first passage of the first topic
+  // where the field was detected. Helps partners verify "we found
+  // something here" even when we can't isolate the exact value.
+  for (const t of topics) {
+    if (!safeDetect(field, t)) continue
+    const fallback = firstPassage(t)
+    if (fallback) return fallback
+  }
+  return null
 }
 
 // Re-export `Passage` so consumers don't need to import from

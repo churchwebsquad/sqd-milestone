@@ -323,27 +323,40 @@ function Step1Review({
   return (
     <div className="space-y-6">
       <div className="bg-white border border-lavender rounded-2xl p-5 md:p-6">
-        <p className="text-deep-plum font-semibold text-base md:text-lg mb-1">
-          What did we get right?
+        <p className="font-serif italic text-deep-plum text-lg md:text-xl mb-2">
+          Let&rsquo;s get you one step closer to your new website.
         </p>
         <p className="text-purple-gray text-sm leading-relaxed">
-          Below is everything we found on your current site, organized by section. For each
-          section or named program, tell us one of three things:
+          To start, we need to get to know everything about your church. We&rsquo;ve made it
+          easy by collecting the details from your current site — they&rsquo;re below.
         </p>
-        <ul className="mt-3 space-y-1.5 text-sm">
-          <li className="flex items-start gap-2">
-            <CheckCircle2 size={14} className="text-emerald-600 mt-0.5 shrink-0" />
-            <span className="text-deep-plum"><strong>Approved</strong> — accurate; rewrite for the new site.</span>
+        <ol className="mt-4 space-y-2 text-sm">
+          <li className="flex items-start gap-2.5">
+            <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-primary-purple/10 text-primary-purple text-[11px] font-bold shrink-0 mt-0.5">1</span>
+            <span className="text-deep-plum">
+              <strong>Review</strong> the information below — double-check that the details from your current site are still accurate and approved for our use.
+            </span>
           </li>
-          <li className="flex items-start gap-2">
-            <Edit3 size={14} className="text-amber-600 mt-0.5 shrink-0" />
-            <span className="text-deep-plum"><strong>Needs update</strong> — drop the new info in the note.</span>
+          <li className="flex items-start gap-2.5">
+            <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-primary-purple/10 text-primary-purple text-[11px] font-bold shrink-0 mt-0.5">2</span>
+            <span className="text-deep-plum">
+              <strong>Identify gaps</strong> — any missing information you&rsquo;d like to see represented.
+            </span>
           </li>
-          <li className="flex items-start gap-2">
-            <EyeOff size={14} className="text-primary-purple mt-0.5 shrink-0" />
-            <span className="text-deep-plum"><strong>Keep as-is</strong> — leave the wording untouched. We won&rsquo;t rewrite it.</span>
+          <li className="flex items-start gap-2.5">
+            <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-primary-purple/10 text-primary-purple text-[11px] font-bold shrink-0 mt-0.5">3</span>
+            <span className="text-deep-plum">
+              <strong>Answer a few outlying questions</strong> to help us get started.
+            </span>
           </li>
-        </ul>
+        </ol>
+        <div className="mt-4 pt-4 border-t border-lavender/60">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple mb-1">On deck</p>
+          <p className="text-purple-gray text-xs leading-relaxed italic">
+            Once you approve, we&rsquo;ll pair this with your goals + audience to build a website content strategy — so your new site serves your community through your unique voice and programs.
+          </p>
+        </div>
+        <p className="mt-4 text-deep-plum font-semibold text-sm">Let&rsquo;s get started! ↓</p>
       </div>
 
       <InventoryView
@@ -356,7 +369,7 @@ function Step1Review({
 
       <div className="bg-white border border-lavender rounded-2xl p-4 md:p-5 flex items-center justify-between gap-4 flex-wrap">
         <p className="text-deep-plum text-sm">
-          Done reviewing? Continue to a few more questions about how you&rsquo;d like the new site to work.
+          Done reviewing? A few more questions next.
         </p>
         <button
           type="button"

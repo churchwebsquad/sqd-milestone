@@ -24,7 +24,7 @@ import {
   Mic2, ClipboardList, Sparkles, HelpCircle, Quote, ArrowRight, BookOpen,
   ExternalLink, CheckCircle2, Edit3, Circle,
   Calendar, MapPin, MessageCircle, ListChecks, Hash, Plus,
-  ChevronDown, ChevronUp, AlertCircle,
+  ChevronDown, ChevronUp, AlertCircle, Loader2,
 } from 'lucide-react'
 import { PARTNER_GROUPS, type PartnerBucket } from '../../../lib/webPartnerGroups'
 import { computeBaselineCoverage, type BaselineCoverage } from '../../../lib/webPartnerBaselines'
@@ -127,26 +127,12 @@ export function InventoryView({
 
 // ── Partner-facing review accordion ──────────────────────────────────
 //
-// The Discovery Brief asked for: each group reviewed one at a time, but
-// with the option to review ahead. Implementation: one expanded group
-// at a time by default (the first un-reviewed), but every header is
-// clickable so the partner can jump ahead. Each group footer carries
-// "Approve" / "Mark for update" buttons that persist to
-// `strategy_content_collection_marks` via the existing saveMark.
-
-type GroupReviewStatus = 'approved' | 'needs_update' | null
-
-function groupReviewPath(groupKey: string): string {
-  return `group-review:${groupKey}`
-}
-
-function statusOfGroup(groupKey: string, marks?: Map<string, Mark>): GroupReviewStatus {
-  const m = marks?.get(groupReviewPath(groupKey))
-  if (!m) return null
-  if (m.status === 'approved' || m.status === 'approved_keep_as_is') return 'approved'
-  if (m.status === 'outdated') return 'needs_update'
-  return null
-}
+// Each section renders as a collapsible card. One open at a time by
+// default (first section), but every header is clickable so partners
+// can jump ahead. No per-section "approve" buttons — implicit approval
+// via edits. Partners signal updates by editing the form fields inside
+// each section; the Continue button at the bottom of Step 1 moves them
+// to Step 2 when ready.
 
 function ReviewAccordion({
   topicsByKey, snippetsByToken, marks, saveMark,
@@ -156,71 +142,18 @@ function ReviewAccordion({
   marks?:           Map<string, Mark>
   saveMark?:        SaveMark
 }) {
-  // Default open: the first un-reviewed group. Recomputes only when
-  // marks change (so toggling open/close stays stable while reviewing).
-  const initialOpenKey = useMemo(() => {
-    const firstUnreviewed = PARTNER_GROUPS.find(g => statusOfGroup(g.key, marks) === null)
-    return firstUnreviewed?.key ?? PARTNER_GROUPS[0]?.key ?? null
-    // Only re-derive when the marks Map identity changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [marks])
-  const [openKey, setOpenKey] = useState<string | null>(initialOpenKey)
-
-  // If the auto-default changes (marks loaded after first render),
-  // adopt it — but only once at mount; don't fight the partner's
-  // manual toggle after they've started reviewing.
-  useEffect(() => { setOpenKey(initialOpenKey) }, [initialOpenKey])
-
-  const reviewedCount = PARTNER_GROUPS.filter(g => statusOfGroup(g.key, marks) !== null).length
-  const totalCount    = PARTNER_GROUPS.length
-
-  const onApprove = async (groupKey: string) => {
-    if (!saveMark) return
-    await saveMark(groupReviewPath(groupKey), 'topic_item', 'approved', null)
-    // Auto-advance to the next un-reviewed group so the review flows.
-    const idx = PARTNER_GROUPS.findIndex(g => g.key === groupKey)
-    const nextUnreviewed = PARTNER_GROUPS
-      .slice(idx + 1)
-      .find(g => statusOfGroup(g.key, marks) === null)
-    setOpenKey(nextUnreviewed?.key ?? null)
-  }
-
-  const onMarkForUpdate = async (groupKey: string, note: string) => {
-    if (!saveMark) return
-    await saveMark(groupReviewPath(groupKey), 'topic_item', 'outdated', note.trim() || null)
-    // Stay on this group so partner can add details / comments. They
-    // can manually open the next group when ready.
-  }
+  // Default open: the first section. Partners can toggle / jump
+  // ahead by clicking any header.
+  const [openKey, setOpenKey] = useState<string | null>(PARTNER_GROUPS[0]?.key ?? null)
 
   return (
     <>
-      <div className="rounded-2xl bg-lavender-tint/30 border border-lavender px-4 py-3 mb-4 flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">Review progress</p>
-          <p className="font-serif italic text-base text-deep-plum mt-0.5">
-            {reviewedCount} of {totalCount} sections reviewed
-          </p>
-        </div>
-        {reviewedCount === totalCount ? (
-          <p className="text-sm font-semibold text-emerald-700 flex items-center gap-1.5">
-            <CheckCircle2 size={14} /> All sections reviewed
-          </p>
-        ) : (
-          <p className="text-xs text-purple-gray italic">
-            Review one section at a time, or jump ahead by tapping any header below.
-          </p>
-        )}
-      </div>
-
       {PARTNER_GROUPS.map(g => (
         <ReviewGroupAccordion
           key={g.key}
           group={g}
           isOpen={openKey === g.key}
           onToggle={() => setOpenKey(openKey === g.key ? null : g.key)}
-          status={statusOfGroup(g.key, marks)}
-          onApprove={() => onApprove(g.key)}
-          onMarkForUpdate={(note) => onMarkForUpdate(g.key, note)}
           topicsByKey={topicsByKey}
           snippetsByToken={snippetsByToken}
           marks={marks}
@@ -232,68 +165,20 @@ function ReviewAccordion({
 }
 
 function ReviewGroupAccordion({
-  group, isOpen, onToggle, status, onApprove, onMarkForUpdate,
-  topicsByKey, snippetsByToken, marks, saveMark,
+  group, isOpen, onToggle, topicsByKey, snippetsByToken, marks, saveMark,
 }: {
   group:           import('../../../lib/webPartnerGroups').PartnerGroup
   isOpen:          boolean
   onToggle:        () => void
-  status:          GroupReviewStatus
-  onApprove:       () => Promise<void>
-  onMarkForUpdate: (note: string) => Promise<void>
   topicsByKey:     Map<string, TopicRow>
   snippetsByToken?: Map<string, SnippetRow>
   marks?:          Map<string, Mark>
   saveMark?:       SaveMark
 }) {
-  const [busy, setBusy] = useState<'approve' | 'mark' | null>(null)
-  const [showMarkBox, setShowMarkBox] = useState(false)
-  const [markNote, setMarkNote] = useState(() => {
-    const m = marks?.get(groupReviewPath(group.key))
-    return m?.status === 'outdated' ? (m.client_note ?? '') : ''
-  })
-
-  // Visual cues per status — collapsed header carries the cue so the
-  // partner can scan the whole list at a glance.
-  const headerCls = status === 'approved'
-    ? 'bg-emerald-50 border-emerald-200'
-    : status === 'needs_update'
-      ? 'bg-amber-50 border-amber-200'
-      : 'bg-white border-lavender'
-
-  const StatusBadge = () => {
-    if (status === 'approved') {
-      return (
-        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
-          <CheckCircle2 size={12} /> Approved
-        </span>
-      )
-    }
-    if (status === 'needs_update') {
-      return (
-        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700">
-          <AlertCircle size={12} /> Marked for update
-        </span>
-      )
-    }
-    return (
-      <span className="text-[11px] italic text-purple-gray">Not yet reviewed</span>
-    )
-  }
-
-  const doApprove = async () => {
-    setBusy('approve')
-    try { await onApprove() } finally { setBusy(null) }
-  }
-  const doMark = async () => {
-    setBusy('mark')
-    try { await onMarkForUpdate(markNote); setShowMarkBox(false) } finally { setBusy(null) }
-  }
-
   return (
     <section
       id={`group:${group.key}`}
-      className={`scroll-mt-24 rounded-2xl border overflow-hidden transition-shadow ${headerCls} ${isOpen ? 'shadow-sm' : ''}`}
+      className={`scroll-mt-24 rounded-2xl border bg-white border-lavender overflow-hidden transition-shadow ${isOpen ? 'shadow-sm' : ''}`}
     >
       <button
         type="button"
@@ -301,13 +186,10 @@ function ReviewGroupAccordion({
         className="w-full px-4 md:px-5 py-3 md:py-4 flex items-center justify-between gap-3 text-left hover:bg-black/[0.02] transition-colors"
         aria-expanded={isOpen}
       >
-        <div className="min-w-0">
-          <h2 className="font-serif italic text-xl text-deep-plum">{group.label}</h2>
-          <div className="mt-0.5">
-            <StatusBadge />
-          </div>
-        </div>
-        {isOpen ? <ChevronUp size={18} className="text-purple-gray shrink-0" /> : <ChevronDown size={18} className="text-purple-gray shrink-0" />}
+        <h2 className="font-serif italic text-xl text-deep-plum min-w-0">{group.label}</h2>
+        {isOpen
+          ? <ChevronUp size={18} className="text-purple-gray shrink-0" />
+          : <ChevronDown size={18} className="text-purple-gray shrink-0" />}
       </button>
       {isOpen && (
         <div className="px-4 md:px-5 pb-4 md:pb-5 space-y-3 border-t border-lavender/50">
@@ -324,76 +206,6 @@ function ReviewGroupAccordion({
               />
             ))}
           </div>
-
-          {/* Per-group review footer — Approve / Mark for update.
-              Partners use these to walk through the review one
-              section at a time. */}
-          {saveMark && (
-            <div className="rounded-xl bg-cream/40 border border-lavender p-3 md:p-4 mt-3">
-              {showMarkBox ? (
-                <div className="space-y-2">
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-purple-gray">
-                    What needs updating in {group.label}?
-                  </label>
-                  <textarea
-                    value={markNote}
-                    onChange={e => setMarkNote(e.target.value)}
-                    placeholder="Describe what's wrong, missing, or outdated."
-                    rows={3}
-                    className="w-full rounded-lg border border-lavender bg-white px-3 py-2 text-sm text-deep-plum outline-none focus:border-primary-purple resize-y"
-                    autoFocus
-                  />
-                  <div className="flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => { setShowMarkBox(false); setBusy(null) }}
-                      className="text-xs font-semibold text-purple-gray hover:text-deep-plum"
-                      disabled={busy === 'mark'}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={doMark}
-                      disabled={busy === 'mark' || !markNote.trim()}
-                      className="inline-flex items-center gap-1 rounded-full bg-amber-600 text-white text-xs font-semibold px-3 py-1.5 hover:bg-amber-700 disabled:opacity-40"
-                    >
-                      Save notes
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <p className="text-xs text-purple-gray">
-                    Ready? Approve this section, or flag what needs an update.
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowMarkBox(true)}
-                      disabled={busy !== null}
-                      className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white text-xs font-semibold text-amber-700 px-3 py-1.5 hover:bg-amber-50 disabled:opacity-40"
-                    >
-                      <AlertCircle size={12} /> Mark for update
-                    </button>
-                    <button
-                      type="button"
-                      onClick={doApprove}
-                      disabled={busy !== null}
-                      className="inline-flex items-center gap-1 rounded-full bg-emerald-600 text-white text-xs font-semibold px-4 py-1.5 hover:bg-emerald-700 disabled:opacity-40"
-                    >
-                      <CheckCircle2 size={12} /> {status === 'approved' ? 'Approved' : 'Approve section'}
-                    </button>
-                  </div>
-                </div>
-              )}
-              {status === 'needs_update' && !showMarkBox && marks?.get(groupReviewPath(group.key))?.client_note && (
-                <p className="mt-2 text-[11px] italic text-amber-800 border-l-2 border-amber-300 pl-2">
-                  Your note: {marks.get(groupReviewPath(group.key))!.client_note}
-                </p>
-              )}
-            </div>
-          )}
         </div>
       )}
     </section>
@@ -617,6 +429,21 @@ function BucketBlock({
   const topics = bucket.topics.map(k => topicsByKey.get(k)).filter((t): t is TopicRow => !!t)
   const hasContent = topics.some(t => (t.passages?.length ?? 0) > 0 || (t.items?.length ?? 0) > 0)
 
+  // Partner-facing review now renders as a form (label + editable input
+  // per baseline field, prefilled from the crawl). Branches early so
+  // the staff-facing layout below stays unchanged.
+  if (reviewMode) {
+    return (
+      <BucketReviewCard
+        bucket={bucket}
+        topics={topics}
+        snippetsByToken={snippetsByToken}
+        marks={marks}
+        saveMark={saveMark}
+      />
+    )
+  }
+
   // Staff-supplied or empty buckets show a compact card
   if (!hasContent && bucket.staffSupplied) {
     return (
@@ -707,14 +534,200 @@ function BucketBlock({
   )
 }
 
-// ── Baseline checklist ───────────────────────────────────────────────
+// ── Partner-facing review form (one card per bucket) ─────────────────
 //
-// For each bucket, shows the partner-facing scaffold of fields we
-// always look for. Each field renders with a Found / Needed indicator
-// based on the simple detection heuristics in webPartnerBaselines.ts.
-// Purpose: turn the inventory review from "confirm what's accurate" to
-// "spot what's missing." If a field isn't here, it isn't being
-// intaked — and the partner can flag that immediately.
+// Each bucket renders as a small form: a header (label + helper text)
+// then one row per baseline field. Each row has a label + an editable
+// input prefilled with whatever value we extracted from the crawl.
+// Edits autosave via `saveMark` (path `answer:<bucket>/<field>`,
+// kind=topic_item, status=approved, client_note=value). Implicit
+// approval — no per-section "Approve" button. Below the form, a
+// collapsible "What we found on your current site" reveals the raw
+// crawl evidence (passages + named items) as reference context.
+
+function BucketReviewCard({
+  bucket, topics, snippetsByToken, marks, saveMark,
+}: {
+  bucket:           PartnerBucket
+  topics:           TopicRow[]
+  snippetsByToken?: Map<string, SnippetRow>
+  marks?:           Map<string, Mark>
+  saveMark?:        SaveMark
+}) {
+  const coverage = computeBaselineCoverage(bucket.key, topics)
+  const hasContext = topics.some(t => (t.passages?.length ?? 0) > 0 || (t.items?.length ?? 0) > 0)
+  const [contextOpen, setContextOpen] = useState(false)
+
+  // Buckets without a baseline scaffold (e.g. Branding & Photos —
+  // staff-supplied) fall back to a compact note + the inventoried
+  // context if any.
+  if (coverage.length === 0) {
+    return (
+      <article id={`bucket:${bucket.key}`} className="bg-white border border-lavender rounded-xl px-4 py-3 scroll-mt-24">
+        <p className="text-deep-plum font-semibold text-sm">{bucket.label}</p>
+        {bucket.helpText && <p className="text-purple-gray text-xs mt-0.5">{bucket.helpText}</p>}
+        {bucket.staffSupplied && (
+          <p className="mt-2 text-[11px] uppercase tracking-wider font-bold text-primary-purple">
+            Supplied during onboarding
+          </p>
+        )}
+        {saveMark && <AddMissingButton bucketKey={bucket.key} groupLabel={bucket.label} saveMark={saveMark} marks={marks} />}
+      </article>
+    )
+  }
+
+  return (
+    <article id={`bucket:${bucket.key}`} className="bg-white border border-lavender rounded-2xl overflow-hidden scroll-mt-24">
+      <header className="px-4 md:px-5 py-3 border-b border-lavender bg-lavender-tint/20">
+        <p className="text-deep-plum font-semibold">{bucket.label}</p>
+        {bucket.helpText && <p className="text-purple-gray text-xs mt-0.5">{bucket.helpText}</p>}
+      </header>
+      <div className="p-4 md:p-5 space-y-3">
+        {coverage.map(c => (
+          <BucketReviewField
+            key={c.field.key}
+            bucket={bucket}
+            coverage={c}
+            marks={marks}
+            saveMark={saveMark}
+          />
+        ))}
+
+        {/* Add something we missed — for buckets where the baseline
+            doesn't cover the partner's actual content. */}
+        {saveMark && (
+          <AddMissingButton
+            bucketKey={bucket.key}
+            groupLabel={bucket.label}
+            saveMark={saveMark}
+            marks={marks}
+          />
+        )}
+
+        {/* What-we-found context, collapsed by default — partners can
+            open it to verify where the prefilled value came from. */}
+        {hasContext && (
+          <div className="border-t border-lavender/60 pt-3">
+            <button
+              type="button"
+              onClick={() => setContextOpen(o => !o)}
+              className="text-[11px] font-semibold text-primary-purple hover:underline inline-flex items-center gap-1"
+            >
+              {contextOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+              {contextOpen ? 'Hide source context' : `Show what we found on your site (${topics.length})`}
+            </button>
+            {contextOpen && (
+              <div className="mt-3 space-y-3 opacity-90">
+                {topics.map(t => (
+                  <TopicCard
+                    key={t.topic_key}
+                    topic={t}
+                    programScope={bucket.programScope}
+                    snippetsByToken={snippetsByToken}
+                    reviewMode={true}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </article>
+  )
+}
+
+function BucketReviewField({
+  bucket, coverage, marks, saveMark,
+}: {
+  bucket:    PartnerBucket
+  coverage:  BaselineCoverage
+  marks?:    Map<string, Mark>
+  saveMark?: SaveMark
+}) {
+  const answerPath = `answer:${bucket.key}/${coverage.field.key}`
+  const existingMark = marks?.get(answerPath)
+  // Initial value priority: partner's saved answer > extracted prefill > empty.
+  const persisted = existingMark?.client_note ?? null
+  const [value,  setValue]  = useState(persisted ?? coverage.prefill ?? '')
+  const [saving, setSaving] = useState(false)
+  const [savedFlash, setSavedFlash] = useState(false)
+
+  // Re-sync if the mark changes externally (e.g. another tab saved).
+  useEffect(() => {
+    const next = existingMark?.client_note ?? coverage.prefill ?? ''
+    setValue(next)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existingMark?.client_note, coverage.prefill])
+
+  const save = async () => {
+    if (!saveMark) return
+    const trimmed = value.trim()
+    // Don't save if value matches the prefill AND no partner edit exists yet
+    // — implicit approval means "no edit needed."
+    const prefill = coverage.prefill ?? ''
+    if (!persisted && trimmed === prefill.trim()) return
+    if (persisted && trimmed === (persisted ?? '')) return
+    setSaving(true)
+    try {
+      await saveMark(answerPath, 'topic_item', 'approved', trimmed || null)
+      setSavedFlash(true)
+      setTimeout(() => setSavedFlash(false), 1500)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Auto-size: 1 line for short, up to 6 for long.
+  const lines = Math.max(1, Math.min(6, Math.ceil((value.length || 1) / 80)))
+  const isLongField = value.length > 60 || (coverage.prefill?.length ?? 0) > 60
+
+  return (
+    <div>
+      <label className="block text-[11px] uppercase tracking-wider font-bold text-purple-gray mb-1">
+        {coverage.field.label}
+      </label>
+      {isLongField ? (
+        <textarea
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onBlur={save}
+          rows={lines}
+          placeholder={coverage.field.description}
+          className="w-full rounded-lg border border-lavender bg-cream/40 px-3 py-2 text-sm text-deep-plum outline-none focus:border-primary-purple focus:bg-white resize-y"
+        />
+      ) : (
+        <input
+          type="text"
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onBlur={save}
+          placeholder={coverage.field.description}
+          className="w-full rounded-lg border border-lavender bg-cream/40 px-3 py-2 text-sm text-deep-plum outline-none focus:border-primary-purple focus:bg-white"
+        />
+      )}
+      <div className="flex items-center justify-between gap-2 mt-0.5 min-h-[14px]">
+        <p className="text-[10px] text-purple-gray italic truncate">
+          {!persisted && coverage.prefill && 'Prefilled from your current site — edit if needed.'}
+          {!persisted && !coverage.prefill && coverage.field.description}
+          {persisted && 'Saved.'}
+        </p>
+        {saving && <Loader2 size={10} className="animate-spin text-purple-gray shrink-0" />}
+        {savedFlash && !saving && (
+          <span className="text-[10px] text-emerald-700 inline-flex items-center gap-0.5 shrink-0">
+            <CheckCircle2 size={10} /> Saved
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Baseline checklist (staff CrawlInventory only) ──────────────────
+//
+// Kept around for the staff-facing CrawlInventory view (non-review
+// mode). Partner-facing review now uses BucketReviewCard above
+// instead. The staff side still benefits from the at-a-glance
+// "X of Y found" coverage scan.
 
 function BaselineChecklist({
   bucket, topics, reviewMode, saveMark, marks,
