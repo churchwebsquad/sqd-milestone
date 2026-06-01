@@ -637,6 +637,231 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
+/** On-color examples editor — staff curates WHICH brand colors get an
+ *  on-color logo example for the portal. Tiles render only for
+ *  colors with a logo uploaded; an "Add" affordance opens a palette
+ *  picker for staff to choose the next color to upload against, and a
+ *  Remove button per tile clears the example.
+ *
+ *  Storage stays the existing per-color `on_color_logo_url` /
+ *  `on_color_logo_scale_pct` columns — no new table. Adding == clicking
+ *  a color tile, which triggers the file upload for that color row.
+ *  Removing == setting the URL back to null. */
+function OnColorExamplesEditor({
+  draft, onColorIdx, pickOnColor, updateColor, onColorInputRef, handleOnColor,
+}: {
+  draft:           ColorDraft[]
+  onColorIdx:      number | null
+  pickOnColor:     (i: number) => void
+  updateColor:     (i: number, patch: Partial<ColorDraft>) => void
+  onColorInputRef: React.RefObject<HTMLInputElement | null>
+  handleOnColor:   (e: React.ChangeEvent<HTMLInputElement>) => void
+}) {
+  const [adding, setAdding] = useState(false)
+  // Reasonable pseudo-StrategyBrandColor list to feed the picker. We
+  // re-shape ColorDraft (which lacks `id` for new rows) so the picker's
+  // key-by-id contract stays consistent. New (unsaved) colors aren't
+  // pickable until they have an id from the DB save.
+  const pickableColors = draft.filter(c => c.id) as unknown as import('../types/database').StrategyBrandColor[]
+
+  const populated = draft
+    .map((c, i) => ({ c, i }))
+    .filter(({ c }) => Boolean(c.on_color_logo_url))
+
+  const onPickColorForAdd = (hex: string | null) => {
+    if (!hex) return
+    const targetIdx = draft.findIndex(d => d.hex && d.hex.toLowerCase() === hex.toLowerCase())
+    if (targetIdx === -1) return
+    pickOnColor(targetIdx)   // sets state + triggers file picker
+    setAdding(false)
+  }
+
+  return (
+    <div className="rounded-xl border border-lavender/60 bg-lavender-tint/20 p-3 mb-4">
+      <input ref={onColorInputRef} type="file" className="hidden" accept={LOGO_MIME.join(',')} onChange={handleOnColor} />
+      <p className="text-[10px] font-bold uppercase tracking-widest text-purple-gray mb-1">On-Color Logos</p>
+      <p className="text-[11px] text-purple-gray mb-3">
+        Show the logo as it should appear on specific brand colors. Add the colors that need a custom on-color logo — light logos on dark backgrounds, dark logos on light, etc. Colors without a tile here are skipped on the portal.
+      </p>
+
+      {populated.length === 0 && !adding && (
+        <p className="text-[11px] italic text-purple-gray mb-2">
+          No on-color examples yet.
+        </p>
+      )}
+
+      {populated.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 mb-2">
+          {populated.map(({ c, i }) => (
+            <div key={`onc-${c.id ?? i}`} className="flex items-center gap-2 rounded-lg border border-lavender/60 bg-white p-2">
+              <div
+                className="h-12 w-12 rounded shrink-0 flex items-center justify-center overflow-hidden border border-lavender/50"
+                style={{ backgroundColor: c.hex }}
+              >
+                {c.on_color_logo_url!.endsWith('.mp4')
+                  ? <video src={c.on_color_logo_url!} className="max-h-10 max-w-full" muted loop autoPlay playsInline />
+                  : <img src={c.on_color_logo_url!} alt="on-color logo" className="max-h-10 max-w-full object-contain" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-deep-plum truncate">{c.name ?? c.hex}</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => pickOnColor(i)}
+                    className="text-[11px] text-primary-purple hover:underline font-semibold inline-flex items-center gap-0.5"
+                  >
+                    {onColorIdx === i ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
+                    Replace
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateColor(i, { on_color_logo_url: null })}
+                    className="text-[11px] text-purple-gray hover:text-red-500 inline-flex items-center gap-0.5"
+                    title="Remove this on-color example"
+                  >
+                    <Trash2 size={10} /> Remove
+                  </button>
+                </div>
+                {/* Scale slider — 25-150% to balance varied logo sizes
+                    across the on-color grid. */}
+                <div className="mt-1 flex items-center gap-1.5">
+                  <label className="text-[10px] text-purple-gray uppercase tracking-wider font-bold">Scale</label>
+                  <input
+                    type="range"
+                    min={25}
+                    max={150}
+                    step={5}
+                    value={c.on_color_logo_scale_pct ?? 100}
+                    onChange={e => updateColor(i, { on_color_logo_scale_pct: parseInt(e.target.value, 10) })}
+                    className="flex-1 accent-primary-purple"
+                    title={`${c.on_color_logo_scale_pct ?? 100}%`}
+                  />
+                  <span className="text-[10px] text-purple-gray font-mono w-9 text-right">
+                    {c.on_color_logo_scale_pct ?? 100}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add affordance — palette swatch picker (only the colors not
+          already on the on-color list) → click a swatch opens the
+          file upload for that color row. */}
+      {adding ? (
+        <div className="rounded-lg border border-primary-purple/30 bg-white p-2.5">
+          <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-primary-purple">
+              Pick a brand color
+            </p>
+            <button
+              type="button"
+              onClick={() => setAdding(false)}
+              className="text-[11px] text-purple-gray hover:text-deep-plum"
+            >
+              Cancel
+            </button>
+          </div>
+          {pickableColors.filter(c => !c.on_color_logo_url).length === 0 ? (
+            <p className="text-[11px] italic text-purple-gray">
+              All brand colors already have an on-color logo. Remove one first to swap.
+            </p>
+          ) : (
+            <BrandPaletteSwatchPicker
+              value={null}
+              colors={pickableColors.filter(c => !c.on_color_logo_url)}
+              onChange={onPickColorForAdd}
+            />
+          )}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          disabled={pickableColors.filter(c => !c.on_color_logo_url).length === 0}
+          className="w-full rounded-lg border-2 border-dashed border-lavender py-2.5 text-xs font-semibold text-purple-gray hover:border-primary-purple hover:text-primary-purple transition-colors inline-flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+          title={pickableColors.filter(c => !c.on_color_logo_url).length === 0
+            ? 'All saved brand colors already have an on-color logo'
+            : undefined}
+        >
+          <Plus size={12} /> Add on-color example
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** Horizontal row of swatches sourced from the brand's color palette.
+ *  Click a swatch to set the value; click the currently selected one
+ *  again to clear (null). Includes a small "no color / default" tile
+ *  at the start so partners can explicitly opt out of a custom bg
+ *  without leaving the picker mid-state.
+ *
+ *  Used by:
+ *    • Logo display-background picker (LogosSection)
+ *    • On-color logo bg picker (ColorsSection)
+ *  Pulls from `bundle.colors` so the picker always reflects the
+ *  brand's current palette — colors added or removed in the Color
+ *  section appear/disappear here automatically. */
+function BrandPaletteSwatchPicker({
+  value, colors, onChange,
+}: {
+  value:    string | null
+  colors:   import('../types/database').StrategyBrandColor[]
+  onChange: (hex: string | null) => void
+}) {
+  const normalized = (value ?? '').toLowerCase()
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {/* Default / clear tile — gridded white with diagonal slash. */}
+      <button
+        type="button"
+        onClick={() => onChange(null)}
+        title="Default (white)"
+        aria-pressed={!value}
+        className={`relative h-8 w-8 rounded-full transition-all overflow-hidden ${
+          !value
+            ? 'ring-2 ring-primary-purple ring-offset-1 scale-110'
+            : 'ring-1 ring-lavender hover:ring-primary-purple/40'
+        }`}
+        style={{ background: '#ffffff' }}
+      >
+        <span
+          aria-hidden
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: 'linear-gradient(to top right, transparent 47%, rgba(168,168,184,0.7) 48%, rgba(168,168,184,0.7) 52%, transparent 53%)',
+          }}
+        />
+      </button>
+      {colors.length === 0 && (
+        <span className="text-[11px] italic text-purple-gray ml-1">
+          Add brand colors first to pick from your palette.
+        </span>
+      )}
+      {colors.map(c => {
+        const isSelected = c.hex && c.hex.toLowerCase() === normalized
+        return (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => onChange(isSelected ? null : c.hex)}
+            title={`${c.name ?? c.hex} (${c.hex})`}
+            aria-pressed={isSelected}
+            className={`h-8 w-8 rounded-full transition-all ${
+              isSelected
+                ? 'ring-2 ring-primary-purple ring-offset-1 scale-110'
+                : 'ring-1 ring-lavender hover:ring-primary-purple/40'
+            }`}
+            style={{ backgroundColor: c.hex }}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
 function SectionFooter({ dirty, saving, onSave, onReset }: {
   dirty: boolean
   saving: boolean
@@ -809,37 +1034,17 @@ function LogosSection({ bundle, staffName, onSaved, onError }: {
                   className="w-full rounded-lg border border-lavender px-3 py-1.5 text-sm text-deep-plum outline-none focus:border-primary-purple" />
               </Field>
               {/* Display background — render this logo against the
-                  chosen color on the public portal. Useful for light /
-                  inverse logos that would disappear against white. */}
+                  chosen color on the public portal. Picks from the
+                  brand palette so on-brand colors stay consistent
+                  across logo cards and on-color showcases. */}
               <Field label="Display background (optional)">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={row.background_color ?? '#ffffff'}
-                    onChange={e => updateRow(i, { background_color: e.target.value })}
-                    className="h-9 w-12 cursor-pointer rounded border border-lavender bg-white p-1"
-                    title="Pick background color"
-                  />
-                  <input
-                    type="text"
-                    value={row.background_color ?? ''}
-                    onChange={e => updateRow(i, { background_color: e.target.value || null })}
-                    placeholder="#1e2a44 — leave empty for white"
-                    className="flex-1 rounded-lg border border-lavender px-3 py-1.5 text-sm font-mono text-deep-plum outline-none focus:border-primary-purple"
-                  />
-                  {row.background_color && (
-                    <button
-                      type="button"
-                      onClick={() => updateRow(i, { background_color: null })}
-                      className="text-[11px] text-purple-gray hover:text-red-500"
-                      title="Clear background color"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
+                <BrandPaletteSwatchPicker
+                  value={row.background_color}
+                  colors={bundle.colors}
+                  onChange={hex => updateRow(i, { background_color: hex })}
+                />
                 <p className="mt-1 text-[11px] text-purple-gray/80">
-                  Defaults to white on the portal. Set a color when the logo needs contrast (e.g. white logo on navy).
+                  Defaults to white on the portal. Pick a brand color when the logo needs contrast (e.g. white logo on navy). Click the selected color again to clear.
                 </p>
               </Field>
               {/* Per-logo animation file. Optional — partners often
@@ -912,10 +1117,18 @@ function LogosSection({ bundle, staffName, onSaved, onError }: {
 
 // ── Colors ─────────────────────────────────────────────────────────────────
 
-const COLOR_TIERS: BrandColorTier[] = ['primary', 'secondary', 'accent', 'background', 'text', 'light', 'dark']
+// Partner-facing tier values only — `background` / `text` are now
+// staff-only `interface_role` flags (see ColorDraft.interface_role).
+const COLOR_TIERS: BrandColorTier[] = ['primary', 'secondary', 'accent', 'light', 'dark']
 const TIER_LABEL: Record<BrandColorTier, string> = {
   primary: 'Primary', secondary: 'Secondary', accent: 'Accent',
-  background: 'Background', text: 'Text', light: 'Light', dark: 'Dark',
+  light: 'Light', dark: 'Dark',
+}
+
+const INTERFACE_ROLES: Array<'background' | 'text'> = ['background', 'text']
+const INTERFACE_ROLE_LABEL: Record<'background' | 'text', string> = {
+  background: 'Page background',
+  text:       'Body text',
 }
 
 function ColorsSection({ bundle, parentBundle, onGuideChange, onSaved, onError }: {
@@ -1014,8 +1227,10 @@ function ColorsSection({ bundle, parentBundle, onGuideChange, onSaved, onError }
   const addColor = () => {
     if (!/^#[0-9a-fA-F]{6}$/.test(newHex)) return
     setDraft([...draft, {
-      name: newName.trim() || null, tier: newTier, hex: newHex.toLowerCase(),
-      cmyk: null, rgb: null, pms: null, proportion_pct: null, on_color_logo_url: null, on_color_logo_scale_pct: 100,
+      name: newName.trim() || null, tier: newTier, interface_role: null,
+      hex: newHex.toLowerCase(),
+      cmyk: null, rgb: null, pms: null, proportion_pct: null,
+      on_color_logo_url: null, on_color_logo_scale_pct: 100,
     }])
     setNewHex('#')
     setNewName('')
@@ -1024,15 +1239,17 @@ function ColorsSection({ bundle, parentBundle, onGuideChange, onSaved, onError }
   const removeColor = (i: number) => setDraft(draft.filter((_, idx) => idx !== i))
   const updateColor = (i: number, patch: Partial<ColorDraft>) => setDraft(draft.map((r, idx) => idx === i ? { ...r, ...patch } : r))
 
-  const hasBackground = draft.some(c => c.tier === 'background')
-  const hasText = draft.some(c => c.tier === 'text')
+  // Switched from tier='background'/'text' to interface_role —
+  // partner-facing tier and staff-only interface role are now decoupled.
+  const hasBackground = draft.some(c => c.interface_role === 'background')
+  const hasText       = draft.some(c => c.interface_role === 'text')
   const missingCore = !hasBackground || !hasText
 
   return (
     <SectionCard
       icon={Palette}
       title="Color Palette"
-      description="Tier drives hierarchy on the public portal and in the PDF. Primary / Secondary / Accent / Light / Dark carry the brand; Background / Text are required for the portal to theme itself correctly."
+      description="Tier drives the hierarchy partners see on the public portal (Primary / Secondary / Accent / Light / Dark). The per-color interface role (Page background / Body text) is a separate, staff-only setting that controls how the portal themes itself — it doesn't relabel the color on the public palette."
     >
       {parentBundle && (
         <LoadFromParentBar
@@ -1043,9 +1260,11 @@ function ColorsSection({ bundle, parentBundle, onGuideChange, onSaved, onError }
             setDraft(prev => [
               ...prev,
               ...parentBundle.colors.map(c => ({
-                name: c.name, tier: c.tier, hex: c.hex, cmyk: c.cmyk, rgb: c.rgb,
+                name: c.name, tier: c.tier, interface_role: c.interface_role,
+                hex: c.hex, cmyk: c.cmyk, rgb: c.rgb,
                 pms: c.pms, proportion_pct: c.proportion_pct,
                 on_color_logo_url: c.on_color_logo_url,
+                on_color_logo_scale_pct: c.on_color_logo_scale_pct,
               })),
             ])
           }}
@@ -1055,11 +1274,11 @@ function ColorsSection({ bundle, parentBundle, onGuideChange, onSaved, onError }
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 mb-4 flex items-start gap-2">
           <AlertCircle size={13} className="shrink-0 mt-0.5 text-amber-700" />
           <div>
-            <p className="font-semibold">Heads up — mark a background and text color.</p>
+            <p className="font-semibold">Heads up — set the interface role for one background + one text color.</p>
             <p className="mt-0.5">
-              The public brand guide uses the <span className="font-semibold">background</span> tier for its page color and the <span className="font-semibold">text</span> tier for body copy. Without these tiers set, the portal falls back to a neutral off-white and near-black, which usually isn't what you want.
-              {!hasBackground && <> <span className="font-semibold">Background is missing.</span></>}
-              {!hasText && <> <span className="font-semibold">Text is missing.</span></>}
+              The public portal uses these flags to theme itself (page background + body text). They don't change how the colors appear in the partner palette — pick whichever swatch should drive the portal's own chrome.
+              {!hasBackground && <> <span className="font-semibold">Background role unset.</span></>}
+              {!hasText && <> <span className="font-semibold">Text role unset.</span></>}
             </p>
           </div>
         </div>
@@ -1084,6 +1303,17 @@ function ColorsSection({ bundle, parentBundle, onGuideChange, onSaved, onError }
                 <input type="text" value={c.name ?? ''} onChange={e => updateColor(i, { name: e.target.value || null })}
                   placeholder="Name (optional)"
                   className="mt-1 w-24 text-center text-[10px] text-deep-plum bg-transparent outline-none focus:bg-lavender-tint/40 rounded px-1" />
+                {/* Staff-only interface role — does NOT affect the
+                    partner-facing tier label. */}
+                <select
+                  value={c.interface_role ?? ''}
+                  onChange={e => updateColor(i, { interface_role: (e.target.value || null) as ColorDraft['interface_role'] })}
+                  className="mt-1 text-[10px] text-purple-gray bg-transparent outline-none hover:text-deep-plum italic"
+                  title="Staff-only — flag this swatch as the portal's page background or body text color. Doesn't change the partner palette label."
+                >
+                  <option value="">No interface role</option>
+                  {INTERFACE_ROLES.map(r => <option key={r} value={r}>{INTERFACE_ROLE_LABEL[r]}</option>)}
+                </select>
                 <button type="button" onClick={() => removeColor(i)} className="opacity-0 group-hover:opacity-100 text-purple-gray hover:text-red-500 mt-1 transition-opacity">
                   <Trash2 size={11} />
                 </button>
@@ -1120,65 +1350,21 @@ function ColorsSection({ bundle, parentBundle, onGuideChange, onSaved, onError }
             </div>
           </div>
 
-          {/* On-Color Logos — per-color logo for the portal's On Color showcase */}
-          <div className="rounded-xl border border-lavender/60 bg-lavender-tint/20 p-3 mb-4">
-            <input ref={onColorInputRef} type="file" className="hidden" accept={LOGO_MIME.join(',')} onChange={handleOnColor} />
-            <p className="text-[10px] font-bold uppercase tracking-widest text-purple-gray mb-1">On-Color Logos</p>
-            <p className="text-[11px] text-purple-gray mb-3">
-              Pick which logo variant sits on each color. Upload a dark logo for light backgrounds and a light logo for dark ones so nothing vanishes into its background. Colors without an on-color logo are skipped in the portal's On Color showcase.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-              {draft.map((c, i) => (
-                <div key={`onc-${c.id ?? i}`} className="flex items-center gap-2 rounded-lg border border-lavender/60 bg-white p-2">
-                  <div
-                    className="h-12 w-12 rounded shrink-0 flex items-center justify-center overflow-hidden border border-lavender/50"
-                    style={{ backgroundColor: c.hex }}
-                  >
-                    {c.on_color_logo_url ? (
-                      c.on_color_logo_url.endsWith('.mp4')
-                        ? <video src={c.on_color_logo_url} className="max-h-10 max-w-full" muted loop autoPlay playsInline />
-                        : <img src={c.on_color_logo_url} alt="on-color logo" className="max-h-10 max-w-full object-contain" />
-                    ) : null}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs text-deep-plum truncate">{c.name ?? c.hex}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <button type="button" onClick={() => pickOnColor(i)}
-                        className="text-[11px] text-primary-purple hover:underline font-semibold inline-flex items-center gap-0.5">
-                        {onColorIdx === i ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
-                        {c.on_color_logo_url ? 'Replace' : 'Upload'}
-                      </button>
-                      {c.on_color_logo_url && (
-                        <button type="button" onClick={() => updateColor(i, { on_color_logo_url: null })}
-                          className="text-[10px] text-purple-gray hover:text-red-500">Clear</button>
-                      )}
-                    </div>
-                    {/* Scale slider — only meaningful when an on-color
-                        logo is set. Range 25-150% lets staff balance
-                        differently-sized logos across the on-color grid. */}
-                    {c.on_color_logo_url && (
-                      <div className="mt-1 flex items-center gap-1.5">
-                        <label className="text-[10px] text-purple-gray uppercase tracking-wider font-bold">Scale</label>
-                        <input
-                          type="range"
-                          min={25}
-                          max={150}
-                          step={5}
-                          value={c.on_color_logo_scale_pct ?? 100}
-                          onChange={e => updateColor(i, { on_color_logo_scale_pct: parseInt(e.target.value, 10) })}
-                          className="flex-1 accent-primary-purple"
-                          title={`${c.on_color_logo_scale_pct ?? 100}%`}
-                        />
-                        <span className="text-[10px] text-purple-gray font-mono w-9 text-right">
-                          {c.on_color_logo_scale_pct ?? 100}%
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          {/* On-Color Logos — partner picks WHICH brand colors get an
+              on-color logo example. Previously every color row showed
+              an upload slot which cluttered the editor when only a
+              couple of colors actually needed it. Now: tiles render
+              only for colors that HAVE a logo set, with a Remove
+              button per tile and a palette-picker affordance for
+              adding new on-color examples. */}
+          <OnColorExamplesEditor
+            draft={draft}
+            onColorIdx={onColorIdx}
+            pickOnColor={pickOnColor}
+            updateColor={updateColor}
+            onColorInputRef={onColorInputRef}
+            handleOnColor={handleOnColor}
+          />
         </>
       )}
 

@@ -56,6 +56,9 @@ export interface ColorDraft {
   id?: string
   name: string | null
   tier: import('../types/database').BrandColorTier
+  /** Staff-only flag: which palette swatch acts as page bg / body text
+   *  on the portal theme. Null for normal palette colors. */
+  interface_role: import('../types/database').BrandColorInterfaceRole | null
   hex: string
   cmyk: string | null
   rgb: string | null
@@ -427,7 +430,8 @@ export async function saveColors(
     if (r.id) {
       const { error } = await supabase.from('strategy_brand_colors')
         .update({
-          name: r.name, tier: r.tier, hex: r.hex, cmyk: r.cmyk, rgb: r.rgb,
+          name: r.name, tier: r.tier, interface_role: r.interface_role,
+          hex: r.hex, cmyk: r.cmyk, rgb: r.rgb,
           pms: r.pms, proportion_pct: r.proportion_pct,
           on_color_logo_url: r.on_color_logo_url,
           on_color_logo_scale_pct: r.on_color_logo_scale_pct,
@@ -437,7 +441,8 @@ export async function saveColors(
     } else {
       const { error } = await supabase.from('strategy_brand_colors').insert({
         brand_guide_id: guideId,
-        name: r.name, tier: r.tier, hex: r.hex, cmyk: r.cmyk, rgb: r.rgb,
+        name: r.name, tier: r.tier, interface_role: r.interface_role,
+        hex: r.hex, cmyk: r.cmyk, rgb: r.rgb,
         pms: r.pms, proportion_pct: r.proportion_pct,
         on_color_logo_url: r.on_color_logo_url,
         on_color_logo_scale_pct: r.on_color_logo_scale_pct,

@@ -153,8 +153,12 @@ interface PortalTheme {
 
 function deriveTheme(payload: BrandGuidePortalPayload): PortalTheme {
   const colors = payload.colors
-  const bg = colors.find(c => c.tier === 'background')
-  const txt = colors.find(c => c.tier === 'text')
+  // Theme bg + body text now driven by the staff-only `interface_role`
+  // flag (was `tier` before the split). Lets the partner-facing palette
+  // keep its natural primary/secondary/etc categorization while staff
+  // still mark which swatch should color the portal chrome.
+  const bg  = colors.find(c => c.interface_role === 'background')
+  const txt = colors.find(c => c.interface_role === 'text')
   const primary = colors.find(c => c.tier === 'primary')
   const secondary = colors.find(c => c.tier === 'secondary')
 
@@ -856,7 +860,9 @@ function LogoArtwork({ logo, maxHeight }: { logo: StrategyBrandLogo; maxHeight: 
 
 // ── COLOR SECTION ──────────────────────────────────────────────────────────
 
-const COLOR_TIER_ORDER = ['primary', 'secondary', 'accent', 'light', 'dark', 'background', 'text'] as const
+// Partner-facing tier order. `background` / `text` were dropped — they
+// became the staff-only `interface_role` flag (see BrandColorInterfaceRole).
+const COLOR_TIER_ORDER = ['primary', 'secondary', 'accent', 'light', 'dark'] as const
 
 function ColorSection({ colors, combinations, aseSwatchUrl, theme, onCopy }: {
   colors: StrategyBrandColor[]

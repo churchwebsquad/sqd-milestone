@@ -512,7 +512,18 @@ export interface CopyReviewPortalPayload {
 // ============================================================================
 
 export type BrandLogoKind = 'primary' | 'secondary' | 'badge' | 'icon'
-export type BrandColorTier = 'primary' | 'secondary' | 'accent' | 'background' | 'text' | 'light' | 'dark'
+/** Partner-facing categorization for a brand color. Surfaced as the
+ *  section heading on the portal palette. Staff-only "this color is
+ *  used for page background / body text" metadata lives on the
+ *  separate `interface_role` field — it's not partner-visible. */
+export type BrandColorTier = 'primary' | 'secondary' | 'accent' | 'light' | 'dark'
+
+/** Staff-only interface metadata — flags which palette swatch should
+ *  be used as the page background / body text on the portal theme
+ *  itself. Does NOT affect the partner-facing palette categorization
+ *  (that's `tier`). Nullable: most colors don't carry an interface
+ *  role; a brand typically has one of each at most. */
+export type BrandColorInterfaceRole = 'background' | 'text'
 export type BrandTypographyTier = 'primary' | 'subheading' | 'secondary' | 'accent'
 export type BrandElementKind = 'pattern' | 'texture' | 'application'
 
@@ -579,6 +590,11 @@ export interface StrategyBrandColor {
   brand_guide_id: string
   name: string | null
   tier: BrandColorTier
+  /** Staff-only interface metadata — null for most palette colors;
+   *  set to 'background' or 'text' to mark which swatch should drive
+   *  the portal theme's page bg / body text. NOT surfaced on the
+   *  partner palette display (tier handles that). */
+  interface_role: BrandColorInterfaceRole | null
   hex: string
   cmyk: string | null
   rgb: string | null
