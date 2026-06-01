@@ -401,10 +401,17 @@ function SectionTextCard({
           the textarea (it grew past `rows`), onScroll syncs the pre.
         */}
         <div className="relative w-full">
+          {/* Order matters: pre paints first (background + visible
+              text), textarea sits on top with `bg-transparent` so the
+              pre shows through. Previously the textarea had bg-wm-bg
+              which completely obscured the pre — making all typed
+              text invisible. Textarea text-color is transparent so
+              the pre's text reads as the visible glyph; caret stays
+              visible via the explicit `caretColor`. */}
           <pre
             ref={overlayRef}
             aria-hidden
-            className="absolute inset-0 m-0 p-3 text-[12px] font-mono leading-relaxed whitespace-pre-wrap break-words text-wm-text overflow-hidden pointer-events-none rounded-md"
+            className="absolute inset-0 m-0 p-3 text-[12px] font-mono leading-relaxed whitespace-pre-wrap break-words text-wm-text bg-wm-bg overflow-hidden pointer-events-none rounded-md"
             style={{ border: '1px solid transparent', boxSizing: 'border-box' }}
           >
             {renderHighlightedDraft(draft)}
@@ -426,7 +433,7 @@ function SectionTextCard({
                 : `Paste the writer's markdown for this section. Save will parse it, run the binder, and preserve any field you've already overridden in Layout.`
             }
             rows={Math.max(8, Math.min(40, (draft.match(/\n/g)?.length ?? 0) + 2))}
-            className="relative w-full text-[12px] font-mono leading-relaxed bg-wm-bg border border-wm-border rounded-md p-3 focus:outline-none focus:border-wm-border-focus focus:ring-1 focus:ring-wm-border-focus resize-y placeholder:text-wm-text-subtle"
+            className="relative w-full text-[12px] font-mono leading-relaxed bg-transparent border border-wm-border rounded-md p-3 focus:outline-none focus:border-wm-border-focus focus:ring-1 focus:ring-wm-border-focus resize-y placeholder:text-wm-text-subtle"
             style={{ color: 'transparent', caretColor: 'var(--color-wm-text)' }}
             spellCheck={false}
           />
@@ -446,7 +453,7 @@ function SectionTextCard({
         {result?.ok && result.preserved_overrides.length > 0 && (
           <p className="mt-2 text-[11px] text-amber-700 flex items-center gap-1.5">
             <Pin size={11} />
-            {result.preserved_overrides.length} pinned field{result.preserved_overrides.length === 1 ? '' : 's'} preserved from your Layout edits: {result.preserved_overrides.join(', ')}
+            {result.preserved_overrides.length} manually-edited field{result.preserved_overrides.length === 1 ? '' : 's'} preserved from your Layout edits: {result.preserved_overrides.join(', ')}
           </p>
         )}
 
@@ -697,17 +704,50 @@ function statusOfRow(row: BindRow): RowStatus {
 }
 
 function StatusBadge({ status }: { status: RowStatus }) {
-  const map: Record<RowStatus, { label: string; cls: string; icon: typeof Pin }> = {
-    auto:     { label: 'auto',     cls: 'text-emerald-700 bg-emerald-50 border-emerald-200', icon: CheckCircle2 },
-    override: { label: 'pinned',   cls: 'text-amber-700 bg-amber-50 border-amber-200',       icon: Pin },
-    default:  { label: 'default',  cls: 'text-wm-text-muted bg-wm-bg-elevated border-wm-border', icon: Tag },
-    unbound:  { label: 'unbound',  cls: 'text-red-700 bg-red-50 border-red-200',             icon: AlertCircle },
-    empty:    { label: 'empty',    cls: 'text-wm-text-subtle bg-wm-bg-elevated border-wm-border', icon: Tag },
+  // Plain-English labels — internal source name on the LEFT (the
+  // taxonomy in webFieldProvenance), partner-readable label on the
+  // RIGHT. Previously these surfaced as "auto" / "pinned" which
+  // forced staff to memorize the taxonomy. Tooltip carries the
+  // longer "what happens on rebind" explanation.
+  const map: Record<RowStatus, { label: string; tip: string; cls: string; icon: typeof Pin }> = {
+    auto: {
+      label: 'From text',
+      tip:   'Value came from the writer\'s markdown. Re-derived from text on every rebind.',
+      cls:   'text-emerald-700 bg-emerald-50 border-emerald-200',
+      icon:  CheckCircle2,
+    },
+    override: {
+      label: 'Manually edited',
+      tip:   'Staff edited this in Layout view. Preserved on rebind so writer markdown edits don\'t clobber it.',
+      cls:   'text-amber-700 bg-amber-50 border-amber-200',
+      icon:  Pin,
+    },
+    default: {
+      label: 'Template default',
+      tip:   'No value bound — the template\'s placeholder is filling in.',
+      cls:   'text-wm-text-muted bg-wm-bg-elevated border-wm-border',
+      icon:  Tag,
+    },
+    unbound: {
+      label: 'Missing',
+      tip:   'Template requires a value and nothing is bound. Needs content.',
+      cls:   'text-red-700 bg-red-50 border-red-200',
+      icon:  AlertCircle,
+    },
+    empty: {
+      label: 'Optional',
+      tip:   'Template allows this slot to be empty. No content required.',
+      cls:   'text-wm-text-subtle bg-wm-bg-elevated border-wm-border',
+      icon:  Tag,
+    },
   }
   const cfg = map[status]
   const Icon = cfg.icon
   return (
-    <span className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold border rounded-full px-1.5 py-0.5 ${cfg.cls}`}>
+    <span
+      className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold border rounded-full px-1.5 py-0.5 ${cfg.cls}`}
+      title={cfg.tip}
+    >
       <Icon size={10} />
       {cfg.label}
     </span>
@@ -986,7 +1026,7 @@ function CoverageGutter({
       )}
       {override > 0 && (
         <span className="inline-flex items-center gap-1 text-amber-700" title="Edited in Layout — preserved on rebind">
-          <Pin size={11} /> {override} pinned
+          <Pin size={11} /> {override} manually edited
         </span>
       )}
     </button>

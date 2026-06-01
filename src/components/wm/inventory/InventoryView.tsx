@@ -24,6 +24,7 @@ import {
   Mic2, ClipboardList, Sparkles, HelpCircle, Quote, ArrowRight, BookOpen,
   ExternalLink, CheckCircle2, Edit3, Circle,
   Calendar, MapPin, MessageCircle, ListChecks, Hash, Plus,
+  ChevronDown, ChevronUp, AlertCircle,
 } from 'lucide-react'
 import { PARTNER_GROUPS, type PartnerBucket } from '../../../lib/webPartnerGroups'
 import { computeBaselineCoverage, type BaselineCoverage } from '../../../lib/webPartnerBaselines'
@@ -84,30 +85,318 @@ export function InventoryView({
         saveMark={saveMark}
       />
       <div className="space-y-6 min-w-0">
-        {PARTNER_GROUPS.map(g => (
-          <section key={g.key} id={`group:${g.key}`} className="scroll-mt-24">
-            <h2 className={reviewMode
-                ? 'font-serif italic text-xl text-deep-plum mb-3'
-                : 'text-[11px] uppercase tracking-[0.14em] font-bold text-wm-text-muted mb-2 px-1'}>
-              {g.label}
-            </h2>
-            <div className="space-y-3">
-              {g.buckets.map(b => (
-                <BucketBlock
-                  key={b.key}
-                  bucket={b}
-                  topicsByKey={topicsByKey}
-                  snippetsByToken={snippetsByToken}
-                  reviewMode={reviewMode}
-                  marks={marks}
-                  saveMark={saveMark}
-                />
-              ))}
-            </div>
-          </section>
-        ))}
+        {reviewMode ? (
+          // Partner-facing review experience: accordion-style. One
+          // group expanded at a time by default; partner approves or
+          // marks-for-update at each group and the next un-reviewed
+          // group auto-opens. Headers stay clickable so the partner
+          // can also review ahead.
+          <ReviewAccordion
+            topicsByKey={topicsByKey}
+            snippetsByToken={snippetsByToken}
+            marks={marks}
+            saveMark={saveMark}
+          />
+        ) : (
+          // Staff view — keep everything expanded.
+          PARTNER_GROUPS.map(g => (
+            <section key={g.key} id={`group:${g.key}`} className="scroll-mt-24">
+              <h2 className="text-[11px] uppercase tracking-[0.14em] font-bold text-wm-text-muted mb-2 px-1">
+                {g.label}
+              </h2>
+              <div className="space-y-3">
+                {g.buckets.map(b => (
+                  <BucketBlock
+                    key={b.key}
+                    bucket={b}
+                    topicsByKey={topicsByKey}
+                    snippetsByToken={snippetsByToken}
+                    reviewMode={false}
+                    marks={marks}
+                    saveMark={saveMark}
+                  />
+                ))}
+              </div>
+            </section>
+          ))
+        )}
       </div>
     </div>
+  )
+}
+
+// ── Partner-facing review accordion ──────────────────────────────────
+//
+// The Discovery Brief asked for: each group reviewed one at a time, but
+// with the option to review ahead. Implementation: one expanded group
+// at a time by default (the first un-reviewed), but every header is
+// clickable so the partner can jump ahead. Each group footer carries
+// "Approve" / "Mark for update" buttons that persist to
+// `strategy_content_collection_marks` via the existing saveMark.
+
+type GroupReviewStatus = 'approved' | 'needs_update' | null
+
+function groupReviewPath(groupKey: string): string {
+  return `group-review:${groupKey}`
+}
+
+function statusOfGroup(groupKey: string, marks?: Map<string, Mark>): GroupReviewStatus {
+  const m = marks?.get(groupReviewPath(groupKey))
+  if (!m) return null
+  if (m.status === 'approved' || m.status === 'approved_keep_as_is') return 'approved'
+  if (m.status === 'outdated') return 'needs_update'
+  return null
+}
+
+function ReviewAccordion({
+  topicsByKey, snippetsByToken, marks, saveMark,
+}: {
+  topicsByKey:      Map<string, TopicRow>
+  snippetsByToken?: Map<string, SnippetRow>
+  marks?:           Map<string, Mark>
+  saveMark?:        SaveMark
+}) {
+  // Default open: the first un-reviewed group. Recomputes only when
+  // marks change (so toggling open/close stays stable while reviewing).
+  const initialOpenKey = useMemo(() => {
+    const firstUnreviewed = PARTNER_GROUPS.find(g => statusOfGroup(g.key, marks) === null)
+    return firstUnreviewed?.key ?? PARTNER_GROUPS[0]?.key ?? null
+    // Only re-derive when the marks Map identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marks])
+  const [openKey, setOpenKey] = useState<string | null>(initialOpenKey)
+
+  // If the auto-default changes (marks loaded after first render),
+  // adopt it — but only once at mount; don't fight the partner's
+  // manual toggle after they've started reviewing.
+  useEffect(() => { setOpenKey(initialOpenKey) }, [initialOpenKey])
+
+  const reviewedCount = PARTNER_GROUPS.filter(g => statusOfGroup(g.key, marks) !== null).length
+  const totalCount    = PARTNER_GROUPS.length
+
+  const onApprove = async (groupKey: string) => {
+    if (!saveMark) return
+    await saveMark(groupReviewPath(groupKey), 'topic_item', 'approved', null)
+    // Auto-advance to the next un-reviewed group so the review flows.
+    const idx = PARTNER_GROUPS.findIndex(g => g.key === groupKey)
+    const nextUnreviewed = PARTNER_GROUPS
+      .slice(idx + 1)
+      .find(g => statusOfGroup(g.key, marks) === null)
+    setOpenKey(nextUnreviewed?.key ?? null)
+  }
+
+  const onMarkForUpdate = async (groupKey: string, note: string) => {
+    if (!saveMark) return
+    await saveMark(groupReviewPath(groupKey), 'topic_item', 'outdated', note.trim() || null)
+    // Stay on this group so partner can add details / comments. They
+    // can manually open the next group when ready.
+  }
+
+  return (
+    <>
+      <div className="rounded-2xl bg-lavender-tint/30 border border-lavender px-4 py-3 mb-4 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">Review progress</p>
+          <p className="font-serif italic text-base text-deep-plum mt-0.5">
+            {reviewedCount} of {totalCount} sections reviewed
+          </p>
+        </div>
+        {reviewedCount === totalCount ? (
+          <p className="text-sm font-semibold text-emerald-700 flex items-center gap-1.5">
+            <CheckCircle2 size={14} /> All sections reviewed
+          </p>
+        ) : (
+          <p className="text-xs text-purple-gray italic">
+            Review one section at a time, or jump ahead by tapping any header below.
+          </p>
+        )}
+      </div>
+
+      {PARTNER_GROUPS.map(g => (
+        <ReviewGroupAccordion
+          key={g.key}
+          group={g}
+          isOpen={openKey === g.key}
+          onToggle={() => setOpenKey(openKey === g.key ? null : g.key)}
+          status={statusOfGroup(g.key, marks)}
+          onApprove={() => onApprove(g.key)}
+          onMarkForUpdate={(note) => onMarkForUpdate(g.key, note)}
+          topicsByKey={topicsByKey}
+          snippetsByToken={snippetsByToken}
+          marks={marks}
+          saveMark={saveMark}
+        />
+      ))}
+    </>
+  )
+}
+
+function ReviewGroupAccordion({
+  group, isOpen, onToggle, status, onApprove, onMarkForUpdate,
+  topicsByKey, snippetsByToken, marks, saveMark,
+}: {
+  group:           import('../../../lib/webPartnerGroups').PartnerGroup
+  isOpen:          boolean
+  onToggle:        () => void
+  status:          GroupReviewStatus
+  onApprove:       () => Promise<void>
+  onMarkForUpdate: (note: string) => Promise<void>
+  topicsByKey:     Map<string, TopicRow>
+  snippetsByToken?: Map<string, SnippetRow>
+  marks?:          Map<string, Mark>
+  saveMark?:       SaveMark
+}) {
+  const [busy, setBusy] = useState<'approve' | 'mark' | null>(null)
+  const [showMarkBox, setShowMarkBox] = useState(false)
+  const [markNote, setMarkNote] = useState(() => {
+    const m = marks?.get(groupReviewPath(group.key))
+    return m?.status === 'outdated' ? (m.client_note ?? '') : ''
+  })
+
+  // Visual cues per status — collapsed header carries the cue so the
+  // partner can scan the whole list at a glance.
+  const headerCls = status === 'approved'
+    ? 'bg-emerald-50 border-emerald-200'
+    : status === 'needs_update'
+      ? 'bg-amber-50 border-amber-200'
+      : 'bg-white border-lavender'
+
+  const StatusBadge = () => {
+    if (status === 'approved') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
+          <CheckCircle2 size={12} /> Approved
+        </span>
+      )
+    }
+    if (status === 'needs_update') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700">
+          <AlertCircle size={12} /> Marked for update
+        </span>
+      )
+    }
+    return (
+      <span className="text-[11px] italic text-purple-gray">Not yet reviewed</span>
+    )
+  }
+
+  const doApprove = async () => {
+    setBusy('approve')
+    try { await onApprove() } finally { setBusy(null) }
+  }
+  const doMark = async () => {
+    setBusy('mark')
+    try { await onMarkForUpdate(markNote); setShowMarkBox(false) } finally { setBusy(null) }
+  }
+
+  return (
+    <section
+      id={`group:${group.key}`}
+      className={`scroll-mt-24 rounded-2xl border overflow-hidden transition-shadow ${headerCls} ${isOpen ? 'shadow-sm' : ''}`}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full px-4 md:px-5 py-3 md:py-4 flex items-center justify-between gap-3 text-left hover:bg-black/[0.02] transition-colors"
+        aria-expanded={isOpen}
+      >
+        <div className="min-w-0">
+          <h2 className="font-serif italic text-xl text-deep-plum">{group.label}</h2>
+          <div className="mt-0.5">
+            <StatusBadge />
+          </div>
+        </div>
+        {isOpen ? <ChevronUp size={18} className="text-purple-gray shrink-0" /> : <ChevronDown size={18} className="text-purple-gray shrink-0" />}
+      </button>
+      {isOpen && (
+        <div className="px-4 md:px-5 pb-4 md:pb-5 space-y-3 border-t border-lavender/50">
+          <div className="pt-3 space-y-3">
+            {group.buckets.map(b => (
+              <BucketBlock
+                key={b.key}
+                bucket={b}
+                topicsByKey={topicsByKey}
+                snippetsByToken={snippetsByToken}
+                reviewMode={true}
+                marks={marks}
+                saveMark={saveMark}
+              />
+            ))}
+          </div>
+
+          {/* Per-group review footer — Approve / Mark for update.
+              Partners use these to walk through the review one
+              section at a time. */}
+          {saveMark && (
+            <div className="rounded-xl bg-cream/40 border border-lavender p-3 md:p-4 mt-3">
+              {showMarkBox ? (
+                <div className="space-y-2">
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-purple-gray">
+                    What needs updating in {group.label}?
+                  </label>
+                  <textarea
+                    value={markNote}
+                    onChange={e => setMarkNote(e.target.value)}
+                    placeholder="Describe what's wrong, missing, or outdated."
+                    rows={3}
+                    className="w-full rounded-lg border border-lavender bg-white px-3 py-2 text-sm text-deep-plum outline-none focus:border-primary-purple resize-y"
+                    autoFocus
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { setShowMarkBox(false); setBusy(null) }}
+                      className="text-xs font-semibold text-purple-gray hover:text-deep-plum"
+                      disabled={busy === 'mark'}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={doMark}
+                      disabled={busy === 'mark' || !markNote.trim()}
+                      className="inline-flex items-center gap-1 rounded-full bg-amber-600 text-white text-xs font-semibold px-3 py-1.5 hover:bg-amber-700 disabled:opacity-40"
+                    >
+                      Save notes
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <p className="text-xs text-purple-gray">
+                    Ready? Approve this section, or flag what needs an update.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowMarkBox(true)}
+                      disabled={busy !== null}
+                      className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white text-xs font-semibold text-amber-700 px-3 py-1.5 hover:bg-amber-50 disabled:opacity-40"
+                    >
+                      <AlertCircle size={12} /> Mark for update
+                    </button>
+                    <button
+                      type="button"
+                      onClick={doApprove}
+                      disabled={busy !== null}
+                      className="inline-flex items-center gap-1 rounded-full bg-emerald-600 text-white text-xs font-semibold px-4 py-1.5 hover:bg-emerald-700 disabled:opacity-40"
+                    >
+                      <CheckCircle2 size={12} /> {status === 'approved' ? 'Approved' : 'Approve section'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {status === 'needs_update' && !showMarkBox && marks?.get(groupReviewPath(group.key))?.client_note && (
+                <p className="mt-2 text-[11px] italic text-amber-800 border-l-2 border-amber-300 pl-2">
+                  Your note: {marks.get(groupReviewPath(group.key))!.client_note}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   )
 }
 

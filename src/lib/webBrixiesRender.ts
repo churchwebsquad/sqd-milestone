@@ -1215,22 +1215,52 @@ function sameLayer(a: string, b: string): boolean {
 // ── Snippet resolution ──────────────────────────────────────────────
 
 /** Replace every `{{token}}` occurrence in text nodes with its resolved
- *  value. Empty / missing values keep the literal `{{token}}` so the
- *  strategist can see what's unresolved. */
+ *  value, wrapping each substitution in `<span class="wm-snippet-token">`
+ *  so the partner-facing preview renders snippets in the brand's
+ *  distinctive purple. Empty / missing values keep the literal
+ *  `{{token}}` (also wrapped) so unresolved tokens stand out as
+ *  needing attention. The iframe's stylesheet (see PagePreview's
+ *  `buildIframeDoc`) provides the `.wm-snippet-token` color rule. */
 function resolveSnippetsInTree(root: Element, snippetMap: SnippetMap): void {
   const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   const re = /\{\{([\w.]+)\}\}/g
+  // Collect first, mutate after — replacing a text node during walk
+  // confuses the TreeWalker's cursor and skips siblings.
+  const pending: Array<{ node: Text; pieces: Array<string | { snippet: string }> }> = []
   let node = walker.nextNode() as Text | null
   while (node) {
     const text = node.nodeValue ?? ''
     if (text.includes('{{')) {
-      const next = text.replace(re, (_, token) => {
+      const pieces: Array<string | { snippet: string }> = []
+      let lastIdx = 0
+      const localRe = new RegExp(re.source, 'g')
+      let m: RegExpExecArray | null
+      while ((m = localRe.exec(text)) !== null) {
+        if (m.index > lastIdx) pieces.push(text.slice(lastIdx, m.index))
+        const token = m[1]
         const v = snippetMap[token]
-        return v ? v : `{{${token}}}`
-      })
-      if (next !== text) node.nodeValue = next
+        pieces.push({ snippet: v ? v : `{{${token}}}` })
+        lastIdx = localRe.lastIndex
+      }
+      if (lastIdx < text.length) pieces.push(text.slice(lastIdx))
+      if (pieces.some(p => typeof p !== 'string')) pending.push({ node, pieces })
     }
     node = walker.nextNode() as Text | null
+  }
+  for (const { node: textNode, pieces } of pending) {
+    const doc = textNode.ownerDocument
+    const frag = doc.createDocumentFragment()
+    for (const p of pieces) {
+      if (typeof p === 'string') {
+        frag.appendChild(doc.createTextNode(p))
+      } else {
+        const span = doc.createElement('span')
+        span.className = 'wm-snippet-token'
+        span.textContent = p.snippet
+        frag.appendChild(span)
+      }
+    }
+    textNode.parentNode?.replaceChild(frag, textNode)
   }
 }
 

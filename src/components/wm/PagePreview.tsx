@@ -177,6 +177,11 @@ function buildIframeDoc(html: string): string {
   body { width: 1512px; }
   img { max-width: 100%; height: auto; }
   a { color: inherit; text-decoration: none; }
+  /* Snippet tokens — resolveSnippetsInTree wraps each substituted
+     value in this class so the preview shows merge-field values in
+     the brand's vivid indigo. Unresolved tokens (the raw "{{token}}"
+     fallback) also wear the class so they stand out as needing fix. */
+  .wm-snippet-token { color: #3300FF; font-weight: 600; }
 </style>
 </head>
 <body>${html}</body>
