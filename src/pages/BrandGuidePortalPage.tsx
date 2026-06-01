@@ -137,6 +137,14 @@ interface PortalTheme {
   accent: string
   /** Secondary accent — secondary tier > accent. */
   secondary: string
+  /** Always-readable text/icon color for hyperlinks + accent-tinted UI
+   *  copy. Defaults to `accent`; falls back to `text` when the accent
+   *  doesn't have enough luminance gap vs. `pageBg` (e.g. pale brand
+   *  primaries on a near-white page). Use this for ANY ink color
+   *  inside body content — links, inline accent text, accent icons
+   *  next to text. Reserve `accent` for decorative non-text use:
+   *  borders, fills, the top-bar stripe. */
+  linkColor: string
   /** Top bar bg — text tier (usually the darkest). Falls back to deep plum. */
   topbarBg: string
   /** Text on top bar — opposite of topbarBg luminance. */
@@ -171,6 +179,14 @@ function deriveTheme(payload: BrandGuidePortalPayload): PortalTheme {
   const topbarBg = (txt && isDarkColor(txt.hex)) ? txt.hex : '#111111'
   const topbarText = contrastText(topbarBg)
 
+  // Link color: prefer the brand accent for expression, but fall back
+  // to `text` when accent doesn't differ enough in luminance from the
+  // page bg (pale-accent + light-page combos like cream-on-cream make
+  // links unreadable). 0.3 luminance gap is a rough WCAG-AA-ish floor
+  // for body-text-sized hyperlinks.
+  const accentGap = Math.abs(luminance(accent) - luminance(pageBg))
+  const linkColor = accentGap >= 0.3 ? accent : text
+
   // Font resolution — primary/secondary rows from the brand; Work Sans fallback.
   const heading = payload.typography.find(t => t.tier === 'primary')
   const body = payload.typography.find(t => t.tier === 'secondary')
@@ -179,7 +195,7 @@ function deriveTheme(payload: BrandGuidePortalPayload): PortalTheme {
   const { stack: bodyStack, fellBack: bodyFellBack } = resolveFontStack(body)
 
   return {
-    pageBg, text, accent, secondary: secondaryHex,
+    pageBg, text, accent, secondary: secondaryHex, linkColor,
     topbarBg, topbarText,
     headingFont: headingStack,
     bodyFont: bodyStack,
@@ -556,12 +572,12 @@ function Body({ payload, theme }: { payload: BrandGuidePortalPayload; theme: Por
                 <> · Last updated {new Date(payload.guide.last_updated_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</>
               )}
               {payload.guide.contact_name && payload.guide.contact_email && (
-                <> · Questions? Contact <a href={`mailto:${payload.guide.contact_email}`} className="font-semibold hover:underline" style={{ color: theme.accent }}>{payload.guide.contact_name}</a></>
+                <> · Questions? Contact <a href={`mailto:${payload.guide.contact_email}`} className="font-semibold hover:underline" style={{ color: theme.linkColor }}>{payload.guide.contact_name}</a></>
               )}
               {payload.guide.contact_name && !payload.guide.contact_email && (
-                <> · Questions? Contact <span className="font-semibold" style={{ color: theme.accent }}>{payload.guide.contact_name}</span></>
+                <> · Questions? Contact <span className="font-semibold" style={{ color: theme.linkColor }}>{payload.guide.contact_name}</span></>
               )}
-              <> · Created by <a href="https://churchmediasquad.com" target="_blank" rel="noopener noreferrer" className="font-semibold hover:underline" style={{ color: theme.accent }}>Church Media Squad</a></>
+              <> · Created by <a href="https://churchmediasquad.com" target="_blank" rel="noopener noreferrer" className="font-semibold hover:underline" style={{ color: theme.linkColor }}>Church Media Squad</a></>
             </footer>
           </main>
         </div>
@@ -1101,14 +1117,14 @@ function TypographySection({ typography, theme }: { typography: StrategyBrandTyp
                   {font.font_url && (
                     <a href={font.font_url} target="_blank" rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 hover:underline"
-                      style={{ color: theme.accent }}>
+                      style={{ color: theme.linkColor }}>
                       Open-source source <ExternalLink size={10} />
                     </a>
                   )}
                   {font.custom_font_purchase_url && (
                     <a href={font.custom_font_purchase_url} target="_blank" rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 hover:underline"
-                      style={{ color: theme.accent }}>
+                      style={{ color: theme.linkColor }}>
                       Purchase license <ExternalLink size={10} />
                     </a>
                   )}
@@ -1120,7 +1136,7 @@ function TypographySection({ typography, theme }: { typography: StrategyBrandTyp
                           {' · '}
                           <a href={font.free_alt_font_url} target="_blank" rel="noopener noreferrer"
                             className="hover:underline"
-                            style={{ color: theme.accent }}>
+                            style={{ color: theme.linkColor }}>
                             download
                           </a>
                         </>
@@ -1164,21 +1180,21 @@ function TypographySection({ typography, theme }: { typography: StrategyBrandTyp
                 {font.font_url && (
                   <a href={font.font_url} target="_blank" rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-[11px] hover:underline"
-                    style={{ color: theme.accent }}>
+                    style={{ color: theme.linkColor }}>
                     Source <ExternalLink size={10} />
                   </a>
                 )}
                 {font.custom_font_purchase_url && (
                   <a href={font.custom_font_purchase_url} target="_blank" rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-[11px] hover:underline"
-                    style={{ color: theme.accent }}>
+                    style={{ color: theme.linkColor }}>
                     Purchase <ExternalLink size={10} />
                   </a>
                 )}
                 {font.free_alt_font_url && (
                   <a href={font.free_alt_font_url} target="_blank" rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-[11px] hover:underline"
-                    style={{ color: theme.accent }}>
+                    style={{ color: theme.linkColor }}>
                     Free alt <ExternalLink size={10} />
                   </a>
                 )}
@@ -1249,7 +1265,7 @@ function ElementsSection({ elements, theme }: { elements: StrategyBrandElement[]
               {el.download_url && (
                 <a href={el.download_url} target="_blank" rel="noopener noreferrer"
                    className="mt-2 inline-flex items-center gap-1 text-[11px] hover:underline"
-                   style={{ color: theme.accent }}>
+                   style={{ color: theme.linkColor }}>
                   Download <ArrowRight size={10} />
                 </a>
               )}
@@ -1515,7 +1531,7 @@ function MinistriesSection({ subbrands, theme }: {
             style={{ borderColor: '#e5e7eb' }}
           >
             <span className="text-base font-semibold" style={{ fontFamily: theme.headingFont, color: theme.text }}>{sb.display_name}</span>
-            <ArrowRight size={14} style={{ color: theme.accent }} />
+            <ArrowRight size={14} style={{ color: theme.linkColor }} />
           </a>
         ))}
       </div>
@@ -1544,7 +1560,7 @@ function BrandFamilySection({ parent, siblings, theme }: {
             <p className="text-xs text-gray-500 mb-0.5">Main church brand</p>
             <p className="text-lg font-semibold truncate" style={{ fontFamily: theme.headingFont, color: theme.text }}>{parent.display_name}</p>
           </div>
-          <ArrowRight size={16} style={{ color: theme.accent }} />
+          <ArrowRight size={16} style={{ color: theme.linkColor }} />
         </a>
 
         {siblings.length > 0 && (
@@ -1558,7 +1574,7 @@ function BrandFamilySection({ parent, siblings, theme }: {
                   className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 px-4 py-3 hover:bg-gray-50 transition-colors"
                 >
                   <span className="text-sm font-semibold truncate" style={{ fontFamily: theme.headingFont, color: theme.text }}>{s.display_name}</span>
-                  <ArrowRight size={13} style={{ color: theme.accent }} />
+                  <ArrowRight size={13} style={{ color: theme.linkColor }} />
                 </a>
               ))}
             </div>
