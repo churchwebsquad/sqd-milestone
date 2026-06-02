@@ -753,16 +753,31 @@ function augmentGroup(group: WebGroupDef, sourceRoot: Element, globalLayers: Set
   markPaletteSubtrees(recursedSchema)
 
   // Don't re-add a slot whose layer IS the group's own layer UNLESS
-  // groupEl is a leaf text element (Hero 37 heading group whose
-  // source element itself carries the editable "Lorem").
+  // groupEl itself carries editable text. Two cases qualify:
+  //   • Leaf text (Hero 37 heading group whose source element itself
+  //     carries the "Lorem" text — no data-layer children).
+  //   • Mixed text + children (Content 80 Counter div carries "4+"
+  //     directly AND has Counter info as a data-layer child — the
+  //     matchingChild logic redirects itemEl to Counter info, so the
+  //     "4+" would be lost without this allowance).
   const groupOwnLayer = normalize(group.layer_name ?? group.key)
-  const groupElIsLeafText = itemEl === groupEl
-    && Array.from(itemEl.children).every(c => !c.hasAttribute('data-layer'))
-    && hasSubstantiveText(itemEl)
+  const groupElIsLeafText = hasSubstantiveText(groupEl)
 
   // Walk every text-bearing data-layer in itemEl's subtree (and itemEl
   // itself when it's a leaf with text).
   const candidates = collectTextCandidates(itemEl)
+
+  // When matchingChild redirected us into a sub-element (e.g. Counter
+  // group's itemEl became Counter info), groupEl's own direct text is
+  // outside that walk and would be lost — Content 80's "4+" lives on
+  // the Counter div itself, with Counter info as a separate child. Pull
+  // groupEl's own substantive text into the candidate list so it lands
+  // as a slot in the augmented item_schema.
+  if (itemEl !== groupEl && hasSubstantiveText(groupEl)) {
+    const groupLayer = groupEl.getAttribute('data-layer')
+    if (groupLayer) candidates.unshift({ layer: groupLayer, element: groupEl })
+  }
+
   const additions: WebSlotDef[] = []
   const seenKeys = new Set<string>()
   const seenLayers = new Set<string>()
