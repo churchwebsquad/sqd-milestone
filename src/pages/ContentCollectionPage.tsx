@@ -454,6 +454,10 @@ function Header({ partner, session, step, token }: { partner: PartnerCtx; sessio
             ? 'Step 1 of 2 — Review your site information and details.'
             : 'Step 2 of 2 — Managing your new website.'}
         </p>
+        <p className="text-cream/70 text-xs mt-1.5 inline-flex items-center gap-1.5">
+          <CheckCircle2 size={11} className="text-cream/80 shrink-0" />
+          Your responses save automatically. Close this tab any time and pick back up where you left off.
+        </p>
         <ProgressBar step={step} />
       </div>
     </header>
