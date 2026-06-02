@@ -38,6 +38,10 @@ interface SessionRow {
   events_wordpress_recurring_needed: string | null
   sermons_display_preference:        string | null
   sermons_external_url:              string | null
+  /** Multi-select of optional sermon-archive features partners want
+   *  included (discussion guides / notes / audio / filters). Stored as
+   *  a text[] so the option list can grow without re-encoding. */
+  sermon_archive_features:           string[] | null
   groups_display_preference:         string | null
   groups_external_url:               string | null
   groups_wordpress_source_of_truth:  string | null
@@ -401,6 +405,7 @@ function Step2Form({
       <MaintenanceContextSection session={session} recap={recap} saveField={saveField} />
       <EventsQuestion session={session} saveField={saveField} />
       <SermonsQuestion session={session} saveField={saveField} />
+      <SermonArchiveFeaturesQuestion session={session} saveField={saveField} />
       <GroupsQuestion session={session} saveField={saveField} />
       <ShortAnswerSection session={session} saveField={saveField} />
       <DomainSection session={session} saveField={saveField} />
@@ -577,6 +582,61 @@ function SermonsQuestion({
           label="Add and manage our sermon archive within WordPress"
           onChange={v => saveField('sermons_display_preference', v as SessionRow['sermons_display_preference'])}
         />
+      </div>
+    </section>
+  )
+}
+
+/** Multi-select sermon-archive setup question. Renders right after
+ *  the main sermons display-preference question on Step 2. Stored on
+ *  strategy_content_collection_sessions.sermon_archive_features
+ *  (text[]). Optional — partners can skip without blocking submit. */
+function SermonArchiveFeaturesQuestion({
+  session, saveField,
+}: {
+  session:   SessionRow
+  saveField: <K extends keyof SessionRow>(field: K, value: SessionRow[K]) => Promise<void>
+}) {
+  const OPTIONS: Array<{ value: string; label: string }> = [
+    { value: 'discussion_guides', label: 'Include Discussion Guides with each Sermon' },
+    { value: 'sermon_notes',      label: 'Include Sermon Notes with each Sermon' },
+    { value: 'audio_files',       label: 'Include Audio Files with each Sermon' },
+    { value: 'filters',           label: 'Create Filters based on Topic, Passage, Speaker, etc.' },
+  ]
+  const selected = new Set(session.sermon_archive_features ?? [])
+  const toggle = (v: string) => {
+    const next = new Set(selected)
+    if (next.has(v)) next.delete(v); else next.add(v)
+    saveField('sermon_archive_features', Array.from(next))
+  }
+  return (
+    <section className="bg-white border border-lavender rounded-2xl p-5 md:p-6">
+      <h2 className="font-semibold text-deep-plum text-base mb-1">
+        Let us know which of the following apply to your preferred sermon archive setup.
+      </h2>
+      <p className="text-purple-gray text-xs mb-3">Select all that apply</p>
+      <div className="space-y-2">
+        {OPTIONS.map(opt => {
+          const isSelected = selected.has(opt.value)
+          return (
+            <label
+              key={opt.value}
+              className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
+                isSelected
+                  ? 'border-primary-purple bg-lavender-tint/40'
+                  : 'border-lavender bg-white hover:border-primary-purple/40 hover:bg-cream/30'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={isSelected}
+                onChange={() => toggle(opt.value)}
+                className="mt-0.5 h-4 w-4 accent-primary-purple shrink-0 cursor-pointer"
+              />
+              <span className="text-sm text-deep-plum">{opt.label}</span>
+            </label>
+          )
+        })}
       </div>
     </section>
   )

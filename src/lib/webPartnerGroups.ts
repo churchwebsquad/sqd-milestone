@@ -45,9 +45,9 @@ export const PARTNER_GROUPS: PartnerGroup[] = [
       { key: 'social_newsletter', label: 'Social Media, Newsletter & Bulletin',
         topics: ['newsletter_bulletin', 'blog_news'],
         helpText: 'Newsletter, bulletin, blog. Social handles populate from globals.' },
-      { key: 'branding_photos', label: 'Branding & Photos',
+      { key: 'branding_photos', label: 'Photos',
         topics: [], staffSupplied: true,
-        helpText: 'Logo, brand guide, photo library — supplied during onboarding.' },
+        helpText: 'Photo library — Brand Squad manages logos + brand guide upstream.' },
     ],
   },
   {

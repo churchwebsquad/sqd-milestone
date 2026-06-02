@@ -76,6 +76,11 @@ export function InventoryView({
   topicsByKey, snippetsByToken, reviewMode = false, marks, saveMark,
 }: Props) {
   const tocEntries = useMemo(() => buildTocEntries(topicsByKey), [topicsByKey])
+  // Accordion open-key is shared between the side TOC and the
+  // accordion itself so TOC clicks can open the target group BEFORE
+  // scrolling — without this the bucket element doesn't exist in the
+  // DOM when collapsed, and scrollIntoView silently does nothing.
+  const [openGroupKey, setOpenGroupKey] = useState<string | null>(PARTNER_GROUPS[0]?.key ?? null)
   return (
     <div className="lg:grid lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-6 lg:items-start">
       <InventoryTOC
@@ -83,6 +88,7 @@ export function InventoryView({
         reviewMode={reviewMode}
         marks={marks}
         saveMark={saveMark}
+        onSelectGroup={reviewMode ? setOpenGroupKey : undefined}
       />
       <div className="space-y-6 min-w-0">
         {reviewMode ? (
@@ -92,6 +98,8 @@ export function InventoryView({
           // group auto-opens. Headers stay clickable so the partner
           // can also review ahead.
           <ReviewAccordion
+            openKey={openGroupKey}
+            setOpenKey={setOpenGroupKey}
             topicsByKey={topicsByKey}
             snippetsByToken={snippetsByToken}
             marks={marks}
@@ -135,16 +143,15 @@ export function InventoryView({
 // to Step 2 when ready.
 
 function ReviewAccordion({
-  topicsByKey, snippetsByToken, marks, saveMark,
+  openKey, setOpenKey, topicsByKey, snippetsByToken, marks, saveMark,
 }: {
+  openKey:          string | null
+  setOpenKey:       (key: string | null) => void
   topicsByKey:      Map<string, TopicRow>
   snippetsByToken?: Map<string, SnippetRow>
   marks?:           Map<string, Mark>
   saveMark?:        SaveMark
 }) {
-  // Default open: the first section. Partners can toggle / jump
-  // ahead by clicking any header.
-  const [openKey, setOpenKey] = useState<string | null>(PARTNER_GROUPS[0]?.key ?? null)
 
   return (
     <>
@@ -264,12 +271,15 @@ function summarizeBucket(topics: TopicRow[], programScope?: 'local' | 'global'):
 }
 
 function InventoryTOC({
-  entries, reviewMode, marks, saveMark,
+  entries, reviewMode, marks, saveMark, onSelectGroup,
 }: {
-  entries:    TocEntry[]
-  reviewMode: boolean
-  marks?:     Map<string, Mark>
-  saveMark?:  SaveMark
+  entries:        TocEntry[]
+  reviewMode:     boolean
+  marks?:         Map<string, Mark>
+  saveMark?:      SaveMark
+  /** Set by InventoryView in review mode: opens the bucket's parent
+   *  group BEFORE scrolling so the target exists in the DOM. */
+  onSelectGroup?: (groupKey: string) => void
 }) {
   const [activeId, setActiveId] = useState<string | null>(entries[0]?.domId ?? null)
   const lastIntersecting = useRef<string | null>(null)
@@ -310,8 +320,21 @@ function InventoryTOC({
   }
   const byGroup = (gk: string) => entries.filter(e => e.groupKey === gk)
 
-  const handleJump = (domId: string) => {
-    const el = document.getElementById(domId)
+  const handleJump = (entry: TocEntry) => {
+    // Review-mode accordion: open the parent group first so the
+    // target bucket exists in the DOM, then scroll once it's rendered.
+    if (onSelectGroup) {
+      onSelectGroup(entry.groupKey)
+      // Defer scroll to next paint so the newly-opened section is
+      // measurable. requestAnimationFrame chains twice — once for
+      // the state commit, once for the layout.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const el = document.getElementById(entry.domId)
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }))
+      return
+    }
+    const el = document.getElementById(entry.domId)
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
@@ -344,7 +367,7 @@ function InventoryTOC({
                     <li key={e.domId}>
                       <button
                         type="button"
-                        onClick={() => handleJump(e.domId)}
+                        onClick={() => handleJump(e)}
                         className={`w-full text-left text-[11px] px-2 py-1 rounded-md transition ${
                           isActive
                             ? (reviewMode ? 'bg-lavender-tint text-deep-plum font-bold' : 'bg-wm-accent-tint text-wm-text font-bold')
@@ -497,6 +520,21 @@ function BucketBlock({
 // collapsible "What we found on your current site" reveals the raw
 // crawl evidence (passages + named items) as reference context.
 
+/** Buckets that surface their items as program cards beneath the form.
+ *  Other buckets stay form-only and hide raw passages from the
+ *  partner-facing view (the data stays in the DB / inventoried items,
+ *  just not displayed under the form). */
+const PROGRAM_DISPLAY_BUCKETS = new Set([
+  'kids', 'students', 'college', 'adults', 'care',
+  'local_outreach', 'global_outreach', 'additional',
+  'next_steps', 'classes',
+])
+
+/** Buckets that surface staff items in a restored structured-card
+ *  view (faces + roles + bios) instead of joining everything into a
+ *  single text block. */
+const STAFF_DISPLAY_BUCKETS = new Set(['staff'])
+
 function BucketReviewCard({
   bucket, topics, snippetsByToken, marks, saveMark,
 }: {
@@ -507,15 +545,18 @@ function BucketReviewCard({
   saveMark?:        SaveMark
 }) {
   const coverage = computeBaselineCoverage(bucket.key, topics)
-  const hasContext = topics.some(t => (t.passages?.length ?? 0) > 0 || (t.items?.length ?? 0) > 0)
-  // When the bucket contains named programs (Mission Kids, Mission
-  // Students, etc.), surface them prominently as the section's
-  // primary content — the programs ARE the answer for ministry-type
-  // buckets, and showing them only inside a collapsed "what we found"
-  // toggle made it look like the data didn't exist.
-  const hasPrograms = topics.some(t =>
-    (t.items ?? []).some(it => it.kind === 'program' || it.kind === 'ministry'))
-  const [contextOpen, setContextOpen] = useState(false)
+  // Display mode is now opt-in per bucket rather than auto-derived
+  // from item kinds. Events have item kind="event" but we DON'T want
+  // the program-card display there — partners just need the form
+  // (events_link). Likewise sermons / weekend-services keep the form
+  // even when items exist, since the baseline form already covers
+  // what we need to confirm.
+  const showPrograms = PROGRAM_DISPLAY_BUCKETS.has(bucket.key)
+                      && topics.some(t => (t.items ?? []).some(it =>
+                        it.kind === 'program' || it.kind === 'ministry'))
+  const showStaff = STAFF_DISPLAY_BUCKETS.has(bucket.key)
+                   && topics.some(t => (t.items ?? []).some(it =>
+                     it.kind === 'staff' || it.kind === 'person' || it.kind === 'team_member'))
 
   // Buckets without a baseline scaffold (e.g. Branding & Photos —
   // staff-supplied) fall back to a compact note + the inventoried
@@ -561,10 +602,15 @@ function BucketReviewCard({
           />
         )}
 
-        {/* Program-bearing buckets show the program inventory as
-            primary content. Passages-only buckets keep the
-            collapsed "what we found" reveal so the form stays clean. */}
-        {hasPrograms ? (
+        {/* Display add-ons per bucket type. Most buckets show form
+            only — the raw passage / item content is kept on the
+            backend but hidden from the partner. Ministries get the
+            program-card view; Staff gets the restored structured
+            card view; everything else is form-only. */}
+        {showStaff && (
+          <StaffSection topics={topics} snippetsByToken={snippetsByToken} />
+        )}
+        {showPrograms && (
           <div className="border-t border-lavender/60 pt-4 space-y-3">
             <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">
               Programs we found on your site
@@ -579,35 +625,58 @@ function BucketReviewCard({
               />
             ))}
           </div>
-        ) : (
-          hasContext && (
-            <div className="border-t border-lavender/60 pt-3">
-              <button
-                type="button"
-                onClick={() => setContextOpen(o => !o)}
-                className="text-[11px] font-semibold text-primary-purple hover:underline inline-flex items-center gap-1"
-              >
-                {contextOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                {contextOpen ? 'Hide source context' : `Show what we found on your site (${topics.length})`}
-              </button>
-              {contextOpen && (
-                <div className="mt-3 space-y-3 opacity-90">
-                  {topics.map(t => (
-                    <TopicCard
-                      key={t.topic_key}
-                      topic={t}
-                      programScope={bucket.programScope}
-                      snippetsByToken={snippetsByToken}
-                      reviewMode={true}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )
         )}
       </div>
     </article>
+  )
+}
+
+/** Restored structured-card layout for the staff bucket — replaces
+ *  the text-block "Pastor Name — Role" join with a card per person
+ *  showing name, role, bio. Pulls from items where kind matches the
+ *  staff family. */
+function StaffSection({
+  topics, snippetsByToken: _snippets,
+}: {
+  topics:           TopicRow[]
+  snippetsByToken?: Map<string, SnippetRow>
+}) {
+  const staffItems: Item[] = []
+  for (const t of topics) {
+    for (const it of (t.items ?? [])) {
+      if (it.kind === 'staff' || it.kind === 'person' || it.kind === 'team_member') {
+        staffItems.push(it)
+      }
+    }
+  }
+  if (staffItems.length === 0) return null
+  return (
+    <div className="border-t border-lavender/60 pt-4 space-y-3">
+      <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">
+        Staff we found on your site
+      </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {staffItems.map((it, i) => {
+          const r = it as Record<string, unknown>
+          const name = typeof r.name === 'string' ? r.name : (typeof r.title === 'string' ? r.title : 'Staff member')
+          const role = typeof r.role === 'string' ? r.role : (typeof r.position === 'string' ? r.position : '')
+          const bio  = typeof r.bio === 'string' ? r.bio : ''
+          const email = typeof r.email === 'string' ? r.email : ''
+          return (
+            <div key={`staff-${i}`} className="rounded-lg border border-lavender bg-cream/30 p-3">
+              <p className="font-serif italic text-base text-deep-plum">{name}</p>
+              {role && <p className="text-[11px] uppercase tracking-wider font-bold text-primary-purple mt-0.5">{role}</p>}
+              {bio && <p className="text-xs text-deep-plum mt-2 leading-relaxed">{bio}</p>}
+              {email && (
+                <a href={`mailto:${email}`} className="mt-2 inline-block text-[11px] text-primary-purple hover:underline font-semibold">
+                  {email}
+                </a>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 

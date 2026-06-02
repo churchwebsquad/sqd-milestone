@@ -454,8 +454,17 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
   // ── About Your Church ───────────────────────────────────────────────
   mission_beliefs: [
     { key: 'mission_statement', label: 'Mission statement', description: 'Why the church exists — the core purpose.',
-      detect:  t => topicHasKeyword(t, 'our mission', 'mission is', 'mission statement', 'purpose is'),
-      extract: t => firstPassageContaining(t, 'our mission', 'mission is', 'mission statement', 'purpose is') },
+      // Broadened keyword set so "Desert Springs Church exists to
+      // connect people…" matches — the prior list only caught
+      // "Our mission" / "Mission statement" phrasings.
+      detect:  t => topicHasKeyword(t,
+        'our mission', 'mission is', 'mission statement', 'purpose is',
+        'exists to', 'we exist', 'we are called', 'our purpose',
+        'make disciples', 'reaching people'),
+      extract: t => firstPassageContaining(t,
+        'our mission', 'mission is', 'mission statement', 'purpose is',
+        'exists to', 'we exist', 'we are called', 'our purpose',
+        'make disciples', 'reaching people') },
     { key: 'vision_statement',  label: 'Vision statement',  description: 'Where the church is going — the future picture.',
       detect:  t => topicHasKeyword(t, 'our vision', 'vision is', 'vision statement', 'where we', 'where we\'re going'),
       extract: t => firstPassageContaining(t, 'our vision', 'vision is', 'vision statement', 'where we') },
@@ -511,19 +520,15 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
   ],
 
   sermons: [
+    // Dropped sermon_name + discussion_guides baselines per branding
+    // feedback — partners cover the same ground via the new Step 2
+    // "sermon archive setup" checkboxes.
     { key: 'livestream_url',  label: 'Livestream URL',        description: 'Where weekend services stream live.',
       detect:  t => topicHasKeyword(t, 'livestream', 'online church', 'youtube.com/@', 'live stream') || topicHasMatch(t, RE_URL),
       extract: t => firstMatch(t, RE_URL) },
     { key: 'archive_url',     label: 'Sermon archive',        description: 'Where past sermons are catalogued.',
       detect:  t => topicHasKeyword(t, 'sermon archive', 'past sermons', 'watch sermons', 'all sermons', 'messages'),
       extract: t => firstMatch(t, RE_URL) ?? firstPassageContaining(t, 'sermon archive', 'past sermons', 'all sermons') },
-    { key: 'sermon_name',     label: 'What sermons are called', description: '"Sermons", "Messages", "Teachings", etc.',
-      detect:  t => topicHasKeyword(t, 'messages', 'teachings', 'sermons'),
-      extract: t => firstPassageContaining(t, 'messages', 'teachings', 'sermons') },
-    { key: 'discussion_guides', label: 'Discussion guides + notes', description: 'Companion materials per sermon.',
-      detect:  t => topicHasKeyword(t, 'discussion guide', 'sermon notes', 'study guide'),
-      extract: t => firstPassageContaining(t, 'discussion guide', 'sermon notes', 'study guide'),
-      itemKinds: ['sermon', 'message', 'series'] },
   ],
 
   // ── Staff, Volunteers & Testimonies ─────────────────────────────────
