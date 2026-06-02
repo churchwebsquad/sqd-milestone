@@ -508,6 +508,13 @@ function BucketReviewCard({
 }) {
   const coverage = computeBaselineCoverage(bucket.key, topics)
   const hasContext = topics.some(t => (t.passages?.length ?? 0) > 0 || (t.items?.length ?? 0) > 0)
+  // When the bucket contains named programs (Mission Kids, Mission
+  // Students, etc.), surface them prominently as the section's
+  // primary content — the programs ARE the answer for ministry-type
+  // buckets, and showing them only inside a collapsed "what we found"
+  // toggle made it look like the data didn't exist.
+  const hasPrograms = topics.some(t =>
+    (t.items ?? []).some(it => it.kind === 'program' || it.kind === 'ministry'))
   const [contextOpen, setContextOpen] = useState(false)
 
   // Buckets without a baseline scaffold (e.g. Branding & Photos —
@@ -517,7 +524,6 @@ function BucketReviewCard({
     return (
       <article id={`bucket:${bucket.key}`} className="bg-white border border-lavender rounded-xl px-4 py-3 scroll-mt-24">
         <p className="text-deep-plum font-semibold text-sm">{bucket.label}</p>
-        {bucket.helpText && <p className="text-purple-gray text-xs mt-0.5">{bucket.helpText}</p>}
         {bucket.staffSupplied && (
           <p className="mt-2 text-[11px] uppercase tracking-wider font-bold text-primary-purple">
             Supplied during onboarding
@@ -532,7 +538,6 @@ function BucketReviewCard({
     <article id={`bucket:${bucket.key}`} className="bg-white border border-lavender rounded-2xl overflow-hidden scroll-mt-24">
       <header className="px-4 md:px-5 py-3 border-b border-lavender bg-lavender-tint/20">
         <p className="text-deep-plum font-semibold">{bucket.label}</p>
-        {bucket.helpText && <p className="text-purple-gray text-xs mt-0.5">{bucket.helpText}</p>}
       </header>
       <div className="p-4 md:p-5 space-y-3">
         {coverage.map(c => (
@@ -556,32 +561,50 @@ function BucketReviewCard({
           />
         )}
 
-        {/* What-we-found context, collapsed by default — partners can
-            open it to verify where the prefilled value came from. */}
-        {hasContext && (
-          <div className="border-t border-lavender/60 pt-3">
-            <button
-              type="button"
-              onClick={() => setContextOpen(o => !o)}
-              className="text-[11px] font-semibold text-primary-purple hover:underline inline-flex items-center gap-1"
-            >
-              {contextOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-              {contextOpen ? 'Hide source context' : `Show what we found on your site (${topics.length})`}
-            </button>
-            {contextOpen && (
-              <div className="mt-3 space-y-3 opacity-90">
-                {topics.map(t => (
-                  <TopicCard
-                    key={t.topic_key}
-                    topic={t}
-                    programScope={bucket.programScope}
-                    snippetsByToken={snippetsByToken}
-                    reviewMode={true}
-                  />
-                ))}
-              </div>
-            )}
+        {/* Program-bearing buckets show the program inventory as
+            primary content. Passages-only buckets keep the
+            collapsed "what we found" reveal so the form stays clean. */}
+        {hasPrograms ? (
+          <div className="border-t border-lavender/60 pt-4 space-y-3">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">
+              Programs we found on your site
+            </p>
+            {topics.map(t => (
+              <TopicCard
+                key={t.topic_key}
+                topic={t}
+                programScope={bucket.programScope}
+                snippetsByToken={snippetsByToken}
+                reviewMode={true}
+              />
+            ))}
           </div>
+        ) : (
+          hasContext && (
+            <div className="border-t border-lavender/60 pt-3">
+              <button
+                type="button"
+                onClick={() => setContextOpen(o => !o)}
+                className="text-[11px] font-semibold text-primary-purple hover:underline inline-flex items-center gap-1"
+              >
+                {contextOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                {contextOpen ? 'Hide source context' : `Show what we found on your site (${topics.length})`}
+              </button>
+              {contextOpen && (
+                <div className="mt-3 space-y-3 opacity-90">
+                  {topics.map(t => (
+                    <TopicCard
+                      key={t.topic_key}
+                      topic={t}
+                      programScope={bucket.programScope}
+                      snippetsByToken={snippetsByToken}
+                      reviewMode={true}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )
         )}
       </div>
     </article>
@@ -657,19 +680,16 @@ function BucketReviewField({
           className="w-full rounded-lg border border-lavender bg-cream/40 px-3 py-2 text-sm text-deep-plum outline-none focus:border-primary-purple focus:bg-white"
         />
       )}
-      <div className="flex items-center justify-between gap-2 mt-0.5 min-h-[14px]">
-        <p className="text-[10px] text-purple-gray italic truncate">
-          {!persisted && coverage.prefill && 'Prefilled from your current site — edit if needed.'}
-          {!persisted && !coverage.prefill && coverage.field.description}
-          {persisted && 'Saved.'}
-        </p>
-        {saving && <Loader2 size={10} className="animate-spin text-purple-gray shrink-0" />}
-        {savedFlash && !saving && (
-          <span className="text-[10px] text-emerald-700 inline-flex items-center gap-0.5 shrink-0">
-            <CheckCircle2 size={10} /> Saved
-          </span>
-        )}
-      </div>
+      {(saving || savedFlash) && (
+        <div className="flex items-center justify-end mt-0.5 min-h-[14px]">
+          {saving && <Loader2 size={10} className="animate-spin text-purple-gray" />}
+          {savedFlash && !saving && (
+            <span className="text-[10px] text-emerald-700 inline-flex items-center gap-0.5">
+              <CheckCircle2 size={10} /> Saved
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }

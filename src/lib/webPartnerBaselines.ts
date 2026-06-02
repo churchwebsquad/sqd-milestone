@@ -51,7 +51,11 @@ const RE_TIME       = /\b\d{1,2}:\d{2}\s*(?:am|pm)\b/i
 const RE_DAY        = /\b(sun|mon|tue|wed|thu|fri|sat)(?:day)?\b/i
 const RE_PHONE      = /(?:\+?\d[\d\s().-]{7,})/
 const RE_EMAIL      = /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i
-const RE_ADDRESS    = /\b\d+\s+\w+(?:\s+\w+)*\s+(?:road|rd|street|st|avenue|ave|blvd|boulevard|drive|dr|lane|ln|way)\b/i
+// Address regex tolerates abbreviated street prefixes with periods
+// (e.g. "S. McQueen Rd."), multi-word street names, optional `.` after
+// the street type, and optional trailing "City, ST 12345" tail so the
+// extracted address reads naturally instead of clipping mid-line.
+const RE_ADDRESS    = /\b\d{2,6}\s+(?:[A-Za-z][\w.'-]*\s+){0,6}(?:road|rd|street|st|avenue|ave|blvd|boulevard|drive|dr|lane|ln|way|pkwy|parkway|circle|cir|court|ct|highway|hwy|route|rte|trail|trl)\.?(?:\s*,?\s*[A-Za-z][\w\s]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?)?/i
 const RE_URL        = /\bhttps?:\/\/[^\s)]+/i
 const RE_BIBLE_REF  = /\b(?:[1-3]\s+)?[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+\d+:\d+(?:[-,]\d+)?/
 
@@ -77,6 +81,25 @@ function itemsAny(topic: TopicRow, pred: (it: Item) => boolean): boolean {
 function firstMatch(topic: TopicRow, re: RegExp): string | null {
   const m = re.exec(passageText(topic))
   return m ? m[0].trim() : null
+}
+
+/** Count distinct address matches across the topic's passages + items
+ *  text. Used to auto-fill "Number of campuses" — one address found
+ *  means one campus. Dedupes by the street-number prefix so a single
+ *  address repeated across multiple pages doesn't inflate the count. */
+function countAddresses(topic: TopicRow): number {
+  const text = passageText(topic)
+  const seen = new Set<string>()
+  const re = new RegExp(RE_ADDRESS.source, RE_ADDRESS.flags + 'g')
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    // Normalize by street number + first street word so "123 Main St"
+    // matches "123 Main St." even if punctuation/case differ.
+    const numMatch = m[0].match(/^\s*(\d+)\s+(\w+)/)
+    const key = numMatch ? `${numMatch[1]} ${numMatch[2].toLowerCase()}` : m[0].toLowerCase()
+    seen.add(key)
+  }
+  return seen.size
 }
 
 /** First passage whose text contains any of the given keywords.
@@ -189,9 +212,9 @@ function programsField(topic: TopicRow, ...fields: string[]): string | null {
 export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
   // ── The Details ─────────────────────────────────────────────────────
   contact: [
-    { key: 'church_name',    label: 'Church name',          description: 'The official name as it appears in branding.',
-      detect: t => Boolean(t.topic_label) || topicHasKeyword(t, 'church', 'ministry'),
-      extract: t => t.topic_label || null },
+    // church_name is omitted intentionally — we already know it from
+    // strategy_account_progress.church_name, so asking partners would
+    // be redundant noise.
     { key: 'phone',          label: 'General phone number', description: 'Main line site visitors can call.',
       detect:  t => topicHasMatch(t, RE_PHONE),
       extract: t => firstMatch(t, RE_PHONE) },
@@ -205,7 +228,14 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
       detect:  t => topicHasKeyword(t, 'office hours', 'open hours', 'mon-fri', 'monday through'),
       extract: t => firstPassageContaining(t, 'office hours', 'open hours', 'mon-fri', 'monday through') },
     { key: 'campus_count',   label: 'Number of campuses',   description: 'How many physical locations the church operates.',
-      detect:  t => topicHasKeyword(t, 'campus', 'location') },
+      detect:  t => topicHasKeyword(t, 'campus', 'location') || countAddresses(t) > 0,
+      // Auto-fill from the count of distinct addresses we found in
+      // the crawl — partners with one address shouldn't have to type
+      // "1" themselves.
+      extract: t => {
+        const n = countAddresses(t)
+        return n > 0 ? String(n) : null
+      } },
   ],
 
   social_newsletter: [
@@ -218,10 +248,8 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
   ],
 
   branding_photos: [
-    { key: 'logo',          label: 'Logo files',         description: 'Primary + alt logos delivered during onboarding.',
-      detect: () => false },
-    { key: 'brand_guide',   label: 'Brand guide',        description: 'Colors, type, voice — supplied separately.',
-      detect: () => false },
+    // Logo + brand guide deliberately omitted — the Brand Squad
+    // manages those upstream, so asking partners here is redundant.
     { key: 'photo_library', label: 'Photo library',      description: 'Library of campus + congregation photos.',
       detect: () => false },
     { key: 'mobile_app',    label: 'Mobile app links',   description: 'Apple / Google / Roku app store links if applicable.',
@@ -466,37 +494,16 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
  *  every ministry bucket (kids, students, adults, care, etc.). Built
  *  once and instantiated per bucket so each ministry section reads the
  *  same baseline. */
+/** Simplified ministry baseline: a single freeform "details" field
+ *  partners can use for anything that isn't already captured in the
+ *  Program cards (which render below the form). The named program
+ *  data (meeting time, leader, contact, etc.) is shown as cards
+ *  separately, so we don't duplicate those fields here. */
 function ministryBaseline(): BaselineField[] {
   return [
-    { key: 'ministry_name',  label: 'Ministry name',
-      description: 'What this ministry is called.',
-      detect:  t => itemKindMatches(t, 'program', 'ministry') || Boolean(t.topic_label),
-      extract: t => programsField(t, 'name', 'title', 'label') ?? t.topic_label ?? null },
-    { key: 'meeting_time',   label: 'Meeting time + location',
-      description: 'When + where this ministry gathers.',
-      detect:  t => topicHasMatch(t, RE_TIME) || programsHaveField(t, 'meeting_time') || programsHaveField(t, 'time'),
-      extract: t => programsField(t, 'meeting_time', 'time', 'when', 'schedule') ?? firstMatch(t, RE_TIME) },
-    { key: 'why_behind',     label: 'The why behind the ministry',
-      description: 'Purpose or mission of this ministry.',
-      detect:  t => programsHaveField(t, 'why') || programsHaveField(t, 'purpose') || programsHaveField(t, 'mission'),
-      extract: t => programsField(t, 'why', 'purpose', 'mission') },
-    { key: 'participation',  label: 'Description of participation',
-      description: 'What it looks like to get involved.',
-      detect:  t => programsHaveField(t, 'description') || programsHaveField(t, 'participation'),
-      extract: t => programsField(t, 'description', 'participation', 'about') },
-    { key: 'leader_name',    label: 'Ministry leader’s name',
-      description: 'Who leads this ministry.',
-      detect:  t => programsHaveField(t, 'leader') || programsHaveField(t, 'contact_name') || programsHaveField(t, 'leader_name'),
-      extract: t => programsField(t, 'leader', 'leader_name', 'contact_name', 'pastor') },
-    { key: 'contact',        label: 'Contact info',
-      description: 'Email, phone, or signup link.',
-      detect:  t => programsHaveField(t, 'contact_email') || programsHaveField(t, 'contact_phone') || programsHaveField(t, 'signup_url'),
-      extract: t => programsField(t, 'contact_email', 'email', 'contact_phone', 'phone', 'signup_url', 'url')
-                   ?? firstMatch(t, RE_EMAIL) ?? firstMatch(t, RE_PHONE) },
-    { key: 'campus_info',    label: 'Campus availability',
-      description: 'Which campuses offer this ministry.',
-      detect:  t => programsHaveField(t, 'campus') || programsHaveField(t, 'campus_info') || programsHaveField(t, 'location'),
-      extract: t => programsField(t, 'campus', 'campus_info', 'location') },
+    { key: 'ministry_details',  label: 'Additional ministry details',
+      description: 'Anything not already covered by the programs below — e.g. overall ministry intro, age groupings, leadership philosophy.',
+      detect:  () => false },
   ]
 }
 
