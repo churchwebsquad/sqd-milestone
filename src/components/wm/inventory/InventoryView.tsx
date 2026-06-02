@@ -1981,7 +1981,42 @@ function consolidateLabeledValues(
   }
   for (const d of detailItems) push(String(d.label ?? ''), String(d.value ?? ''))
   for (const e of extras) push(e.label, e.value)
-  return Array.from(byValue.values())
+  return dedupeTimeBearingEntries(Array.from(byValue.values()))
+}
+
+/** Time-aware second pass on consolidated detail entries. Multiple
+ *  detail rows often describe the same service-time schedule with
+ *  different formatting ("Service Times: 9 AM and 11 AM" vs
+ *  "Main Service Times: 9:00 AM & 11:00 AM"). Showing both misleads
+ *  copywriters into thinking the church has different schedules and
+ *  forces them to choose a format. This pass keeps only the entry
+ *  with the MOST distinct time mentions; ties prefer the longest
+ *  string (usually the more-completely-formatted version from the
+ *  crawl). All other time-bearing entries get dropped.
+ *
+ *  Non-time entries pass through untouched. */
+function dedupeTimeBearingEntries(entries: ConsolidatedEntry[]): ConsolidatedEntry[] {
+  const TIME_RE = /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/gi
+  const timeBearing = entries
+    .map((entry, idx) => {
+      const matches = entry.value.match(TIME_RE) ?? []
+      // Normalize each time to a comparable form so "9 AM" and
+      // "9:00 AM" count as the same distinct time. Otherwise the
+      // longer format would always "win" by virtue of formatting,
+      // not richness.
+      const normTimes = new Set(matches.map(m =>
+        m.toLowerCase().replace(/\s+/g, '').replace(/:00/, '')))
+      return { entry, idx, distinctTimes: normTimes.size, length: entry.value.length }
+    })
+    .filter(r => r.distinctTimes > 0)
+  if (timeBearing.length <= 1) return entries
+  // Pick the winner: most distinct times, then longest value as
+  // tiebreaker (richer formatting wins when count is equal).
+  timeBearing.sort((a, b) =>
+    (b.distinctTimes - a.distinctTimes) || (b.length - a.length))
+  const winner = timeBearing[0].entry
+  const losers = new Set(timeBearing.slice(1).map(r => r.entry))
+  return entries.filter(e => e === winner || !losers.has(e))
 }
 function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'untitled'

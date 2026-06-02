@@ -529,24 +529,12 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
   ],
 
   // ── Weekend Services ────────────────────────────────────────────────
-  service_details: [
-    { key: 'service_times',     label: 'Service times',           description: 'When weekend services happen.',
-      detect:  t => topicHasMatch(t, RE_TIME) || itemKindMatches(t, 'service_time'),
-      // Pick the passage with the MOST time mentions, not just the
-      // first matching one — copywriters need the complete schedule
-      // (e.g. "Sundays at 9am, 11am, and 6pm"), not a single time
-      // that misleads them into thinking the church only meets once.
-      extract: t => richestTimePassage(t) ?? firstMatch(t, RE_TIME) },
-    { key: 'visitor_expect',    label: 'What visitors expect',    description: 'Service flow, length, vibe, dress code.',
-      detect:  t => topicHasKeyword(t, 'what to expect', 'visitor', 'first time', 'service lasts', 'casual', 'experience'),
-      extract: t => firstPassageContaining(t, 'what to expect', 'visitor', 'first time', 'expect') },
-    { key: 'parking',           label: 'Parking info',            description: 'Where to park, reserved visitor parking?',
-      detect:  t => topicHasKeyword(t, 'parking', 'parking lot'),
-      extract: t => firstPassageContaining(t, 'parking') },
-    { key: 'sunday_directions', label: 'How visitors find their way', description: 'Signage, greeters, parking lot volunteers.',
-      detect:  t => topicHasKeyword(t, 'welcome team', 'greeters', 'signage', 'volunteer'),
-      extract: t => firstPassageContaining(t, 'welcome team', 'greeters', 'signage') },
-  ],
+  // No form fields. The found-on-site display (consolidated details
+  // + FAQs + sermon links + program cards) covers everything the
+  // form previously asked. Service times specifically get a
+  // dedicated dedupe pass in the consolidator so partners see only
+  // the richest schedule, not two variants of the same info.
+  service_details: [],
 
   // visit_details: no form. The plan-a-visit / first-time content
   // surfaces under the found-on-site display below the header.
