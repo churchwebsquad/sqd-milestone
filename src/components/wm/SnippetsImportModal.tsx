@@ -36,7 +36,7 @@ const PLACEHOLDER = `Paste a snippets JSON payload. Example:
     "city_state": "Kent, OH",
     "phone": "(330) 555-0101",
     "email": "hello@riverwoodchapel.org",
-    "primary_service_time": "Sundays 9, 10:15, 11:30am",
+    "all_service_times": "Sundays 9, 10:15, 11:30am",
     "social_facebook_url": "https://facebook.com/..."
   },
   "snippets": [

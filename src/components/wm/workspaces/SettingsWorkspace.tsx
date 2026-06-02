@@ -271,21 +271,25 @@ function ToggleRow({
   onChange:    (v: boolean) => void
   disabled?:   boolean
 }) {
+  // Switch geometry mirrors AutoCrawlSwitch in CrawlWorkspace so all
+  // toggles across the WM surface read at the same scale. Flex-based
+  // thumb positioning (instead of absolute + translate) keeps the on/
+  // off offsets symmetrical so the thumb sits centered in both states.
   return (
-    <label className="flex items-start gap-4 px-5 py-4 cursor-pointer hover:bg-lavender-tint/30 transition-colors">
+    <label className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-lavender-tint/30 transition-colors">
       <button
         type="button"
         role="switch"
         aria-checked={checked}
         disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`shrink-0 mt-0.5 w-9 h-5 rounded-full transition-colors relative ${
+        className={`shrink-0 relative inline-flex items-center h-6 w-11 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-purple focus-visible:ring-offset-2 focus-visible:ring-offset-white ${
           checked ? 'bg-primary-purple' : 'bg-lavender'
-        } disabled:opacity-50 disabled:cursor-not-allowed`}
+        }`}
       >
         <span
-          className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
-            checked ? 'translate-x-4' : 'translate-x-0.5'
+          className={`inline-block w-5 h-5 rounded-full bg-white shadow-sm transform transition-transform ${
+            checked ? 'translate-x-[22px]' : 'translate-x-0.5'
           }`}
         />
       </button>

@@ -24,6 +24,7 @@ import { uploadAttachment, removeAttachment } from '../../../lib/attachmentUploa
 import { fetchIntakeStatus } from '../../../lib/webIntake'
 import { CrawlWorkspace } from './CrawlWorkspace'
 import { CrawlInventory } from './CrawlInventory'
+import { ContentCollectionResponsesPanel } from './ContentCollectionResponsesPanel'
 import type { IntakeRowStatus, IntakeStatus } from '../../../lib/webIntake'
 import type { StrategyWebProject, WebIntakeCategory, WebIntakeDocument } from '../../../types/database'
 
@@ -192,6 +193,12 @@ export function IntakeWorkspace({ project, onChange }: Props) {
             checklist since intake + crawl together form the "what do
             we know about this church?" surface. */}
         <CrawlWorkspace project={project} />
+
+        {/* Partner Responses — what the partner answered on the
+            Content Collection portal. Sits between the crawl + the
+            inventory so staff sees the partner's voice alongside the
+            crawl's findings. Hides itself if no session exists. */}
+        <ContentCollectionResponsesPanel projectId={project.id} />
 
         {/* Crawl Inventory — topic-bucketed view of crawled content
             (voice signals on narrative topics, structured items on

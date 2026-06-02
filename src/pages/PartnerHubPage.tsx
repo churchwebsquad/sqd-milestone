@@ -37,14 +37,15 @@ interface AMContact {
 }
 
 function formatDue(iso: string | null): { label: string; tone: 'normal' | 'soon' | 'overdue' } {
-  if (!iso) return { label: 'No due date', tone: 'normal' }
+  if (!iso) return { label: 'No target submission date', tone: 'normal' }
   const due = new Date(iso)
   const now = new Date()
   const days = Math.floor((due.getTime() - now.getTime()) / 86400000)
-  if (days < 0)   return { label: `Overdue (${-days} ${-days === 1 ? 'day' : 'days'})`, tone: 'overdue' }
-  if (days === 0) return { label: 'Due today', tone: 'soon' }
-  if (days <= 3)  return { label: `Due in ${days} ${days === 1 ? 'day' : 'days'}`, tone: 'soon' }
-  return { label: `Due in ${days} days · ${due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`, tone: 'normal' }
+  const full = due.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
+  if (days < 0)   return { label: `Overdue: ${full}`, tone: 'overdue' }
+  if (days === 0) return { label: `Target Submission: ${full} (today)`, tone: 'soon' }
+  if (days <= 3)  return { label: `Target Submission: ${full} (${days}d)`, tone: 'soon' }
+  return { label: `Target Submission: ${full}`, tone: 'normal' }
 }
 
 export default function PartnerHubPage() {
@@ -250,7 +251,7 @@ function ContentCollectionCard({ session, token }: { session: OpenSession; token
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-deep-plum font-semibold">Content Collection</p>
+            <p className="text-deep-plum font-semibold">Website Content Collection</p>
             <span className={`inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
               due.tone === 'overdue' ? 'bg-red-100 text-red-700' :
               due.tone === 'soon'    ? 'bg-amber-100 text-amber-800' :

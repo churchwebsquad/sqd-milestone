@@ -361,8 +361,10 @@ function extractSignals(markdown: string, html: string): ExtractedSignal[] {
 
   const allTimes = Array.from(new Set(text.match(/Sunday[s]?\s+(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)/gi) ?? []))
   if (allTimes.length > 0) {
-    add('primary_service_time', 'Primary service time', allTimes[0])
-    if (allTimes.length > 1) add('all_service_times', 'All service times', allTimes.join(', '))
+    // Always emit all_service_times — even with one match — so the
+    // canonical service-times snippet stays single-sourced. The
+    // old primary_service_time variant is intentionally dropped.
+    add('all_service_times', 'Service times', allTimes.join(', '))
   }
 
   add('facebook_url',  'Facebook URL',   firstUrl(/https?:\/\/(?:www\.)?facebook\.com\/[\w\-./]+/i))

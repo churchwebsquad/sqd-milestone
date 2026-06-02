@@ -49,6 +49,11 @@ export interface BaselineField {
    *  which item types feed which baseline and let the generic
    *  formatter handle the rest. */
   itemKinds?: string[]
+  /** Render with the rich-text editor (TipTap) instead of a plain
+   *  textarea / input. Use for fields where partners need lists,
+   *  links, or basic formatting (e.g. "Additional classes"). The
+   *  stored value is HTML, not plain text. */
+  rich?: boolean
 }
 
 // ── Reusable detection helpers ────────────────────────────────────────
@@ -581,31 +586,14 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
 
   // ── Discipleship ────────────────────────────────────────────────────
   small_groups: [
-    { key: 'group_name',         label: 'What the church calls groups',
-      description: '"Small Groups", "Life Groups", "Community Groups", etc.',
-      detect:  t => topicHasKeyword(t, 'small group', 'life group', 'community group', 'connect group'),
-      extract: t => firstPassageContaining(t, 'small group', 'life group', 'community group', 'connect group') },
     { key: 'what_to_expect',     label: 'What to expect in a group',
       description: 'Size, format, where they meet, frequency.',
       detect:  t => topicHasKeyword(t, 'what to expect', 'meet', 'gather', 'study', 'home'),
       extract: t => firstPassageContaining(t, 'what to expect', 'meet', 'gather', 'study') },
-    { key: 'why_join',           label: 'Why someone should join',
-      description: 'Theological + relational rationale.',
-      detect:  t => topicHasKeyword(t, 'community', 'belonging', 'together', 'connect'),
-      extract: t => firstPassageContaining(t, 'community', 'belonging', 'together', 'connect') },
-    { key: 'bible_saying',       label: 'Bible verse or saying',
-      description: 'Anchor scripture or repeated phrase.',
-      detect:  t => topicHasMatch(t, RE_BIBLE_REF) || itemKindMatches(t, 'scripture', 'tagline'),
-      extract: t => firstMatch(t, RE_BIBLE_REF),
-      itemKinds: ['scripture', 'tagline', 'key_phrase'] },
     { key: 'contact',            label: 'Contact for more info',
       description: 'Who to email / call about groups.',
       detect:  t => topicHasMatch(t, RE_EMAIL) || topicHasMatch(t, RE_PHONE),
       extract: t => firstMatch(t, RE_EMAIL) ?? firstMatch(t, RE_PHONE) },
-    { key: 'signup',             label: 'How to find / join a group',
-      description: 'Link to PCO, ChurchCenter, or in-house finder.',
-      detect:  t => topicHasMatch(t, RE_URL),
-      extract: t => firstMatch(t, RE_URL) },
   ],
 
   // Next steps: no form fields — the found-on-site program cards
@@ -616,10 +604,11 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
   next_steps: [],
 
   classes: [
-    { key: 'class_list',  label: 'Named classes',
+    { key: 'class_list',  label: 'Additional classes',
       description: 'Membership, foundations, specialized courses.',
       detect: t => itemKindMatches(t, 'program', 'class'),
-      itemKinds: ['program', 'class'] },
+      itemKinds: ['program', 'class'],
+      rich: true },
   ],
 
   baptism: [

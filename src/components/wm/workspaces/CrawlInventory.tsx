@@ -7,7 +7,7 @@
  * before sending a Content Collection request.
  */
 import { useEffect, useState } from 'react'
-import { ListChecks, Loader2, Sparkles, Send, Copy, X, Link as LinkIcon, ExternalLink } from 'lucide-react'
+import { ListChecks, Loader2, Sparkles, Send, Copy, X, Link as LinkIcon, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { InventoryView, type TopicRow, type SnippetRow } from '../inventory/InventoryView'
 
@@ -129,7 +129,10 @@ export function CrawlInventory({ projectId }: Props) {
       )}
       {!loading && rows.length > 0 && (
         <div className="p-4 md:p-5">
-          <InventoryView topicsByKey={topicsByKey} snippetsByToken={snippetsByToken} reviewMode={false} />
+          {/* groupAccordion: same one-open-at-a-time UX partners see,
+              but without review pills/marks. Keeps this page
+              scrollable when the crawl returns 30+ topics. */}
+          <InventoryView topicsByKey={topicsByKey} snippetsByToken={snippetsByToken} reviewMode={false} groupAccordion />
         </div>
       )}
     </div>

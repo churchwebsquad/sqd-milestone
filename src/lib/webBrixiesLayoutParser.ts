@@ -155,12 +155,33 @@ export function summarizeSlotPresence(
     return c === 'cta' || c === 'ctas' || c.includes('button') || c.includes('action')
   }
 
+  // Recursively count image slots — image_grid / hero / card-with-photo
+  // groups bury their image slots inside item_schemas, and the previous
+  // pass only looked at top-level slots. For a hero with 5 image slots
+  // in a single-instance items group, this returns 5 (was 0). `filled`
+  // is intentionally always 0 — the user doesn't edit images in this
+  // builder; the count is the only surfaced signal.
+  const countImagesInSchema = (fields: ReadonlyArray<WebFieldDef>): number => {
+    let n = 0
+    for (const f of fields) {
+      if (f.kind === 'slot') {
+        if (f.type === 'image') n += 1
+      } else {
+        const per = countImagesInSchema(f.item_schema)
+        // Multiply by default_count when the group repeats — e.g. a
+        // 3-card group where each card has 1 image yields 3 images.
+        // single_instance_hint groups behave like default_count=1.
+        const multiplier = f.single_instance_hint ? 1 : Math.max(1, f.default_count ?? 1)
+        n += per * multiplier
+      }
+    }
+    return n
+  }
+  out.images.expected = countImagesInSchema(template.fields)
+
   for (const f of template.fields) {
     if (f.kind === 'slot') {
-      if (f.type === 'image') {
-        out.images.expected += 1
-        if (typeof values[f.key] === 'string' && values[f.key] !== '') out.images.filled += 1
-      } else if (f.type === 'cta') {
+      if (f.type === 'cta') {
         out.ctas.expected += 1
         const v = values[f.key]
         if (typeof v === 'object' && v !== null

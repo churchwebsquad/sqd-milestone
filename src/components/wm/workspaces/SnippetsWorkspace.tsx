@@ -45,8 +45,8 @@ const GLOBAL_FIELDS: GlobalFieldDef[] = [
   { column: 'email',                token: '{{email}}',                label: 'General contact email', placeholder: 'info@church.org',      type: 'email' },
   { column: 'denomination',         token: '{{denomination}}',         label: 'Denomination',          placeholder: 'Non-denominational' },
   { column: 'pastor_name',          token: '{{pastor_name}}',          label: 'Lead pastor name',      placeholder: 'Dr. Michael Hines' },
-  { column: 'primary_service_time', token: '{{primary_service_time}}', label: 'Primary service time',  placeholder: 'Sundays 10:15am' },
-  { column: 'all_service_times',    token: '{{all_service_times}}',    label: 'All service times',     placeholder: 'Sundays 10:15am · Wed 7pm' },
+  // primary_service_time row removed — consolidated into all_service_times.
+  { column: 'all_service_times',    token: '{{all_service_times}}',    label: 'Service times',         placeholder: 'Sundays 9 AM & 11 AM · Wed 7 PM' },
   { column: 'social_facebook_url',  token: '{{social_facebook_url}}',  label: 'Facebook',              placeholder: 'https://facebook.com/…', type: 'url' },
   { column: 'social_instagram_url', token: '{{social_instagram_url}}', label: 'Instagram',             placeholder: 'https://instagram.com/…', type: 'url' },
   { column: 'social_youtube_url',   token: '{{social_youtube_url}}',   label: 'YouTube',               placeholder: 'https://youtube.com/@…',  type: 'url' },

@@ -36,7 +36,9 @@ import type { StrategyWebProject, WebProjectSnippet } from '../types/database'
 export const IMPORTABLE_GLOBAL_KEYS = [
   'church_name', 'church_short_name', 'address', 'city_state',
   'phone', 'email', 'denomination', 'pastor_name',
-  'primary_service_time', 'all_service_times',
+  // primary_service_time intentionally dropped — service times live
+  // exclusively on all_service_times now.
+  'all_service_times',
   'social_facebook_url', 'social_instagram_url', 'social_youtube_url',
   'social_tiktok_url', 'social_twitter_url', 'social_linkedin_url',
 ] as const

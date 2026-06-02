@@ -31,8 +31,10 @@ const GLOBAL_FIELDS: GlobalFieldDef[] = [
   { column: 'email',                token: 'email',                label: 'General contact email' },
   { column: 'denomination',         token: 'denomination',         label: 'Denomination' },
   { column: 'pastor_name',          token: 'pastor_name',          label: 'Lead pastor' },
-  { column: 'primary_service_time', token: 'primary_service_time', label: 'Primary service time' },
-  { column: 'all_service_times',    token: 'all_service_times',    label: 'All service times' },
+  // primary_service_time intentionally omitted — consolidated into
+  // all_service_times so there's one canonical service-times snippet
+  // rather than two near-duplicates.
+  { column: 'all_service_times',    token: 'all_service_times',    label: 'Service times' },
   { column: 'social_facebook_url',  token: 'social_facebook_url',  label: 'Facebook URL' },
   { column: 'social_instagram_url', token: 'social_instagram_url', label: 'Instagram URL' },
   { column: 'social_youtube_url',   token: 'social_youtube_url',   label: 'YouTube URL' },

@@ -229,8 +229,12 @@ export function CrawlWorkspace({ project }: Props) {
   return (
     <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
       <header>
-        <div className="flex items-baseline justify-between gap-3 flex-wrap">
-          <div>
+        {/* items-center so the toggle vertically centers with the
+            heading + description block. Previously items-baseline
+            anchored to the H1's text-baseline, which put the toggle
+            visually above the description text. */}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
             <h1 className="text-xl font-bold text-wm-text mb-1">Website Crawl</h1>
             <p className="text-[13px] text-wm-text-muted">
               Auto-fired when the discovery questionnaire or AM handoff
@@ -508,11 +512,18 @@ export function CrawlWorkspace({ project }: Props) {
               Re-crawl
             </button>
           </div>
-          {jobs.map(job => (
+          {jobs.map(job => {
+            // Sub-page chip: distinguish partner-triggered crawls
+            // (Content Collection blog sub-form) and staff one-off
+            // section crawls from the main site crawl. Compare the
+            // job's target_url against the project's known site root
+            // — when the path is deeper than "/", flag it.
+            const sub = subPageLabelFor(job.target_url, defaultUrl)
+            return (
             <article key={job.id} className="rounded-xl border border-wm-border bg-wm-bg-elevated overflow-hidden">
               <header className="px-4 py-3 flex items-baseline justify-between gap-3">
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <StatusPill status={job.status} />
                     <span className="text-[12px] font-semibold text-wm-text">
                       {job.pages_crawled}/{job.pages_found ?? '?'} pages
@@ -522,6 +533,13 @@ export function CrawlWorkspace({ project }: Props) {
                         · {job.duration_seconds < 60
                             ? `${job.duration_seconds}s`
                             : `${Math.round(job.duration_seconds / 60)}m`}
+                      </span>
+                    )}
+                    {sub && (
+                      <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-wm-accent bg-wm-accent-tint border border-wm-accent/30 rounded-full px-2 py-0.5"
+                            title="This crawl targeted a specific path rather than the site root. Likely fired from the partner's Content Collection form (e.g. blog sub-crawl)."
+                      >
+                        {sub}
                       </span>
                     )}
                   </div>
@@ -553,11 +571,36 @@ export function CrawlWorkspace({ project }: Props) {
                 />
               )}
             </article>
-          ))}
+            )
+          })}
         </section>
       )}
     </div>
   )
+}
+
+/** Returns a short label when `targetUrl` points at a sub-page of the
+ *  project's main site (path deeper than "/"), or null when it's the
+ *  site root. Used by the crawl-jobs list to flag partner-triggered
+ *  sub-crawls (notably the Content Collection blog sub-form). */
+function subPageLabelFor(targetUrl: string, siteRoot: string): string | null {
+  if (!targetUrl) return null
+  let path = ''
+  try {
+    path = new URL(targetUrl).pathname.replace(/\/+$/, '')
+  } catch { return null }
+  if (!path || path === '/') return null
+  // /blog, /blog/, /blog/posts → "Blog sub-crawl"
+  if (/\/blog\b/i.test(path)) return 'Blog sub-crawl'
+  // Compare against the site root path. If the same root, it's just a
+  // section of that site — still flag as sub-page.
+  if (siteRoot) {
+    try {
+      const rootPath = new URL(siteRoot).pathname.replace(/\/+$/, '')
+      if (path !== rootPath && path.startsWith(rootPath || '/')) return 'Sub-page crawl'
+    } catch { /* fall through */ }
+  }
+  return 'Sub-page crawl'
 }
 
 /** Sidebar-style page picker for a persisted crawl job, plus a

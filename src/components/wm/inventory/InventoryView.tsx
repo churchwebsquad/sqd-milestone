@@ -19,7 +19,7 @@
  * No content is hidden behind "show more" — the partner can't approve
  * what they can't see. All passages, all items, expanded by default.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Mic2, ClipboardList, Sparkles, HelpCircle, Quote, ArrowRight, BookOpen,
   ExternalLink, CheckCircle2, Edit3, Circle,
@@ -28,6 +28,14 @@ import {
 } from 'lucide-react'
 import { PARTNER_GROUPS, type PartnerBucket } from '../../../lib/webPartnerGroups'
 import { computeBaselineCoverage, type BaselineCoverage } from '../../../lib/webPartnerBaselines'
+import { WMRichTextEditor } from '../RichTextEditor'
+import { FileUploadField } from '../../contentcollection/FileUploadField'
+import type { AttachmentMetadata } from '../../../lib/contentCollectionAttachments'
+import {
+  PartnerTextInput,
+  PartnerTextArea,
+  PartnerRichTextField,
+} from '../../contentcollection/PartnerField'
 
 // ── Public types ─────────────────────────────────────────────────────
 
@@ -62,18 +70,158 @@ export type SaveMark = (
   extra?: { proposed_program_name?: string | null; proposed_program_description?: string | null },
 ) => Promise<void>
 
+/** Attachment row shape — mirrors strategy_content_collection_attachments.
+ *  Kept local + minimal so this module doesn't take a dependency on the
+ *  ContentCollectionPage's full type. */
+export interface InventoryAttachment {
+  id:           string
+  session_id:   string
+  kind:         string
+  file_path:    string
+  file_name:    string
+  mime_type:    string | null
+  size_bytes:   number | null
+  target_path:  string | null
+  uploaded_at:  string
+}
+
+/** Context for "Add something we missed" attachment uploads. Set at
+ *  the InventoryView root in partner-review mode; nested AddMissing
+ *  buttons read from it via `useAttachmentContext()`. Null elsewhere. */
+interface AttachmentContextValue {
+  sessionId:   string
+  attachments: InventoryAttachment[]
+  onChange:    (updater: (prev: InventoryAttachment[]) => InventoryAttachment[]) => void
+}
+const AttachmentContext = createContext<AttachmentContextValue | null>(null)
+function useAttachmentContext() { return useContext(AttachmentContext) }
+
+/** Context for external prefills (e.g. photo library URL from
+ *  discovery). Keyed `bucketKey/fieldKey`. */
+const ExternalPrefillContext = createContext<Record<string, string>>({})
+function useExternalPrefill(bucketKey: string, fieldKey: string): string | undefined {
+  const map = useContext(ExternalPrefillContext)
+  return map[`${bucketKey}/${fieldKey}`]
+}
+
 interface Props {
   topicsByKey:      Map<string, TopicRow>
   snippetsByToken?: Map<string, SnippetRow>
   reviewMode?:      boolean
   marks?:           Map<string, Mark>
   saveMark?:        SaveMark
+  /** Required for the "Add something we missed" attachments feature.
+   *  When provided alongside `attachments` + `onAttachmentChange`,
+   *  the form lets partners attach CSVs / docs / images to each
+   *  missing-content mark. Omit on the staff side (read-only view). */
+  sessionId?:         string
+  attachments?:       InventoryAttachment[]
+  onAttachmentChange?: (updater: (prev: InventoryAttachment[]) => InventoryAttachment[]) => void
+  /** Per-field overrides keyed by `bucketKey/fieldKey`. When set,
+   *  the baseline form-field renders this value as its prefill
+   *  instead of whatever the crawl extracted. Used for fields whose
+   *  source of truth lives outside the crawl — e.g. the photo
+   *  library URL pulled from the discovery questionnaire / partner
+   *  account progress. */
+  externalPrefills?:  Record<string, string>
+  /** Staff-side: render groups in the same one-at-a-time accordion
+   *  pattern partners see, but WITHOUT the review-mode marks /
+   *  status pills. Lets staff scroll the full crawl without it
+   *  unrolling into an unwieldy wall. Ignored when reviewMode=true
+   *  (partner side already uses the accordion). */
+  groupAccordion?:    boolean
+}
+
+// ── Staff-side group accordion ───────────────────────────────────────
+//
+// Same shape as ReviewAccordion (one open at a time, scroll-to-top
+// on open, Next button at the bottom) but without partner review
+// affordances: no marks, no add-missing button, no per-section status
+// pills. Used by the staff Intake & Crawl page so the inventory
+// renders in scrollable chunks the way partners see it.
+
+function StaffGroupAccordion({
+  openKey, setOpenKey, topicsByKey, snippetsByToken,
+}: {
+  openKey:          string | null
+  setOpenKey:       (key: string | null) => void
+  topicsByKey:      Map<string, TopicRow>
+  snippetsByToken?: Map<string, SnippetRow>
+}) {
+  const scrollToGroup = (key: string) => {
+    queueMicrotask(() => {
+      const el = document.getElementById(`group:${key}`)
+      if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    })
+  }
+  const onOpenGroup = (key: string) => {
+    if (openKey === key) { setOpenKey(null); return }
+    setOpenKey(key)
+    scrollToGroup(key)
+  }
+  return (
+    <>
+      {PARTNER_GROUPS.map((g, idx) => {
+        const isOpen = openKey === g.key
+        const nextGroup = PARTNER_GROUPS[idx + 1] ?? null
+        return (
+          <section
+            key={g.key}
+            id={`group:${g.key}`}
+            className={`scroll-mt-24 rounded-2xl border bg-white border-lavender overflow-hidden transition-shadow ${isOpen ? 'shadow-sm' : ''}`}
+          >
+            <button
+              type="button"
+              onClick={() => onOpenGroup(g.key)}
+              className="w-full px-4 md:px-5 py-3 md:py-4 flex items-center justify-between gap-3 text-left hover:bg-black/[0.02] transition-colors"
+              aria-expanded={isOpen}
+            >
+              <h2 className="font-serif italic text-xl text-deep-plum min-w-0">{g.label}</h2>
+              {isOpen
+                ? <ChevronUp size={18} className="text-purple-gray shrink-0" />
+                : <ChevronDown size={18} className="text-purple-gray shrink-0" />}
+            </button>
+            {isOpen && (
+              <div className="px-4 md:px-5 pb-4 md:pb-5 space-y-3 border-t border-lavender/50">
+                <div className="pt-3 space-y-3">
+                  {g.buckets.map(b => (
+                    <BucketBlock
+                      key={b.key}
+                      bucket={b}
+                      topicsByKey={topicsByKey}
+                      snippetsByToken={snippetsByToken}
+                      reviewMode={false}
+                    />
+                  ))}
+                </div>
+                {nextGroup && (
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => onOpenGroup(nextGroup.key)}
+                      className="inline-flex items-center gap-2 rounded-full bg-deep-plum text-white px-4 py-2 text-[13px] font-semibold hover:bg-primary-purple transition-colors"
+                    >
+                      Next: {nextGroup.label}
+                      <ArrowRight size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        )
+      })}
+    </>
+  )
 }
 
 // ── Top-level component ──────────────────────────────────────────────
 
 export function InventoryView({
   topicsByKey, snippetsByToken, reviewMode = false, marks, saveMark,
+  sessionId, attachments, onAttachmentChange,
+  externalPrefills = {},
+  groupAccordion = false,
 }: Props) {
   const tocEntries = useMemo(() => buildTocEntries(topicsByKey), [topicsByKey])
   // Accordion open-key is shared between the side TOC and the
@@ -81,7 +229,13 @@ export function InventoryView({
   // scrolling — without this the bucket element doesn't exist in the
   // DOM when collapsed, and scrollIntoView silently does nothing.
   const [openGroupKey, setOpenGroupKey] = useState<string | null>(PARTNER_GROUPS[0]?.key ?? null)
+  const attachmentCtx: AttachmentContextValue | null =
+    sessionId && attachments && onAttachmentChange
+      ? { sessionId, attachments, onChange: onAttachmentChange }
+      : null
   return (
+    <AttachmentContext.Provider value={attachmentCtx}>
+    <ExternalPrefillContext.Provider value={externalPrefills}>
     <div className="lg:grid lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-6 lg:items-start">
       <InventoryTOC
         entries={tocEntries}
@@ -104,6 +258,17 @@ export function InventoryView({
             snippetsByToken={snippetsByToken}
             marks={marks}
             saveMark={saveMark}
+          />
+        ) : groupAccordion ? (
+          // Staff view, accordion-flavored: one group open at a time so
+          // the Intake & Crawl page stays scrollable. No marks / no
+          // status pills (those are partner-mode only). TOC clicks
+          // open the target group via the same openGroupKey state.
+          <StaffGroupAccordion
+            openKey={openGroupKey}
+            setOpenKey={setOpenGroupKey}
+            topicsByKey={topicsByKey}
+            snippetsByToken={snippetsByToken}
           />
         ) : (
           // Staff view — keep everything expanded.
@@ -130,6 +295,8 @@ export function InventoryView({
         )}
       </div>
     </div>
+    </ExternalPrefillContext.Provider>
+    </AttachmentContext.Provider>
   )
 }
 
@@ -178,30 +345,56 @@ function ReviewAccordion({
       .filter(g => g.buckets.length > 0)
   }, [topicsByKey])
 
+  // Opening a group: set the key, then scroll its top into view on the
+  // next frame so the partner lands at the section header — without
+  // this, collapsing the prior section above shifts scroll position
+  // and the user gets stranded mid-content / at the bottom.
+  const scrollToGroup = (key: string) => {
+    queueMicrotask(() => {
+      const el = document.getElementById(`group:${key}`)
+      if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    })
+  }
+  const onOpenGroup = (key: string) => {
+    if (openKey === key) { setOpenKey(null); return }
+    setOpenKey(key)
+    scrollToGroup(key)
+  }
+
   return (
     <>
-      {filteredGroups.map(g => (
-        <ReviewGroupAccordion
-          key={g.key}
-          group={g}
-          isOpen={openKey === g.key}
-          onToggle={() => setOpenKey(openKey === g.key ? null : g.key)}
-          topicsByKey={topicsByKey}
-          snippetsByToken={snippetsByToken}
-          marks={marks}
-          saveMark={saveMark}
-        />
-      ))}
+      {filteredGroups.map((g, idx) => {
+        const nextGroup = filteredGroups[idx + 1] ?? null
+        return (
+          <ReviewGroupAccordion
+            key={g.key}
+            group={g}
+            isOpen={openKey === g.key}
+            onToggle={() => onOpenGroup(g.key)}
+            nextGroup={nextGroup}
+            onGoToNext={nextGroup ? () => onOpenGroup(nextGroup.key) : undefined}
+            topicsByKey={topicsByKey}
+            snippetsByToken={snippetsByToken}
+            marks={marks}
+            saveMark={saveMark}
+          />
+        )
+      })}
     </>
   )
 }
 
 function ReviewGroupAccordion({
-  group, isOpen, onToggle, topicsByKey, snippetsByToken, marks, saveMark,
+  group, isOpen, onToggle, nextGroup, onGoToNext,
+  topicsByKey, snippetsByToken, marks, saveMark,
 }: {
   group:           import('../../../lib/webPartnerGroups').PartnerGroup
   isOpen:          boolean
   onToggle:        () => void
+  /** The next group in the accordion, used to render a "Next" button
+   *  at the bottom that closes this section and opens the next one. */
+  nextGroup?:      import('../../../lib/webPartnerGroups').PartnerGroup | null
+  onGoToNext?:     () => void
   topicsByKey:     Map<string, TopicRow>
   snippetsByToken?: Map<string, SnippetRow>
   marks?:          Map<string, Mark>
@@ -238,6 +431,18 @@ function ReviewGroupAccordion({
               />
             ))}
           </div>
+          {nextGroup && onGoToNext && (
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={onGoToNext}
+                className="inline-flex items-center gap-2 rounded-full bg-deep-plum text-white px-4 py-2 text-[13px] font-semibold hover:bg-primary-purple transition-colors"
+              >
+                Next: {nextGroup.label}
+                <ArrowRight size={14} />
+              </button>
+            </div>
+          )}
         </div>
       )}
     </section>
@@ -573,8 +778,13 @@ function BucketReviewCard({
   // entirely the found-on-site section in that case, so hiding it
   // behind a toggle would leave the card empty. Buckets that DO have
   // form fields keep the collapse default so partners see the form
-  // first and can opt in to verify the inventory.
-  const [foundOpen, setFoundOpen] = useState(coverage.length === 0)
+  // first and can opt in to verify the inventory. Exception:
+  // `small_groups` — its short form (2 fields) leaves plenty of room
+  // for the crawl evidence and partners need it visible to answer
+  // those fields well.
+  const [foundOpen, setFoundOpen] = useState(
+    coverage.length === 0 || bucket.key === 'small_groups'
+  )
 
   // Empty-baseline + staff-supplied + no inventory → compact note
   // (e.g. Photos bucket when Brand Squad hasn't shipped anything yet).
@@ -683,26 +893,29 @@ function BucketReviewField({
 }) {
   const answerPath = `answer:${bucket.key}/${coverage.field.key}`
   const existingMark = marks?.get(answerPath)
-  // Initial value priority: partner's saved answer > extracted prefill > empty.
+  // External prefill (e.g. photo library URL from discovery /
+  // strategy_account_progress) wins over crawl extraction when set.
+  const external = useExternalPrefill(bucket.key, coverage.field.key)
+  const effectivePrefill = external ?? coverage.prefill ?? ''
+  // Initial value priority: partner's saved answer > external prefill > crawl prefill > empty.
   const persisted = existingMark?.client_note ?? null
-  const [value,  setValue]  = useState(persisted ?? coverage.prefill ?? '')
+  const [value,  setValue]  = useState(persisted ?? effectivePrefill)
   const [saving, setSaving] = useState(false)
   const [savedFlash, setSavedFlash] = useState(false)
 
   // Re-sync if the mark changes externally (e.g. another tab saved).
   useEffect(() => {
-    const next = existingMark?.client_note ?? coverage.prefill ?? ''
+    const next = existingMark?.client_note ?? effectivePrefill
     setValue(next)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [existingMark?.client_note, coverage.prefill])
+  }, [existingMark?.client_note, effectivePrefill])
 
   const save = async () => {
     if (!saveMark) return
     const trimmed = value.trim()
     // Don't save if value matches the prefill AND no partner edit exists yet
     // — implicit approval means "no edit needed."
-    const prefill = coverage.prefill ?? ''
-    if (!persisted && trimmed === prefill.trim()) return
+    if (!persisted && trimmed === effectivePrefill.trim()) return
     if (persisted && trimmed === (persisted ?? '')) return
     setSaving(true)
     try {
@@ -717,42 +930,59 @@ function BucketReviewField({
   // Auto-size: 1 line for short, up to 6 for long.
   const lines = Math.max(1, Math.min(6, Math.ceil((value.length || 1) / 80)))
   const isLongField = value.length > 60 || (coverage.prefill?.length ?? 0) > 60
+  const isRich = coverage.field.rich === true
 
-  return (
-    <div>
-      <label className="block text-[11px] uppercase tracking-wider font-bold text-purple-gray mb-1">
-        {coverage.field.label}
-      </label>
-      {isLongField ? (
-        <textarea
-          value={value}
-          onChange={e => setValue(e.target.value)}
-          onBlur={save}
-          rows={lines}
-          placeholder={coverage.field.description}
-          className="w-full rounded-lg border border-lavender bg-cream/40 px-3 py-2 text-sm text-deep-plum outline-none focus:border-primary-purple focus:bg-white resize-y"
-        />
-      ) : (
-        <input
-          type="text"
-          value={value}
-          onChange={e => setValue(e.target.value)}
-          onBlur={save}
-          placeholder={coverage.field.description}
-          className="w-full rounded-lg border border-lavender bg-cream/40 px-3 py-2 text-sm text-deep-plum outline-none focus:border-primary-purple focus:bg-white"
-        />
+  const labelAdornment = (saving || savedFlash) ? (
+    <span className="text-[10px] inline-flex items-center gap-1">
+      {saving && <Loader2 size={10} className="animate-spin text-purple-gray" />}
+      {savedFlash && !saving && (
+        <span className="text-emerald-700 inline-flex items-center gap-0.5">
+          <CheckCircle2 size={10} /> Saved
+        </span>
       )}
-      {(saving || savedFlash) && (
-        <div className="flex items-center justify-end mt-0.5 min-h-[14px]">
-          {saving && <Loader2 size={10} className="animate-spin text-purple-gray" />}
-          {savedFlash && !saving && (
-            <span className="text-[10px] text-emerald-700 inline-flex items-center gap-0.5">
-              <CheckCircle2 size={10} /> Saved
-            </span>
-          )}
+    </span>
+  ) : null
+
+  if (isRich) {
+    return (
+      <PartnerRichTextField
+        label={coverage.field.label}
+        labelAdornment={labelAdornment}
+        minHeight={120}
+      >
+        <div onBlur={save}>
+          <WMRichTextEditor
+            value={value}
+            onChange={setValue}
+            placeholder={coverage.field.description}
+            compact
+          />
         </div>
-      )}
-    </div>
+      </PartnerRichTextField>
+    )
+  }
+  if (isLongField) {
+    return (
+      <PartnerTextArea
+        label={coverage.field.label}
+        labelAdornment={labelAdornment}
+        placeholder={coverage.field.description}
+        value={value}
+        onChange={setValue}
+        onBlur={save}
+        rows={lines}
+      />
+    )
+  }
+  return (
+    <PartnerTextInput
+      label={coverage.field.label}
+      labelAdornment={labelAdornment}
+      placeholder={coverage.field.description}
+      value={value}
+      onChange={setValue}
+      onBlur={save}
+    />
   )
 }
 
@@ -788,12 +1018,12 @@ function BaselineChecklist({
         <p className={reviewMode
             ? 'text-[11px] uppercase tracking-widest font-bold text-primary-purple'
             : 'text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong'}>
-          We always collect
+          Required baseline fields
         </p>
         <p className={reviewMode
             ? 'text-xs font-semibold text-deep-plum'
             : 'text-[11px] font-semibold text-wm-text'}>
-          {filled} of {total} found
+          {filled} of {total} found in crawl
         </p>
       </header>
       <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1.5">
@@ -894,6 +1124,14 @@ function TopicCard({
   snippetsByToken?: Map<string, SnippetRow>
   reviewMode:       boolean
 }) {
+  // Partner's own site host — pulled from the `site_url` snippet the
+  // crawl writes during fire-crawl-trigger. Used to demote same-domain
+  // absolute CTAs (e.g. https://desertspringschurch.com/team) to
+  // "internal" so they don't pollute the partner-facing inventory.
+  const selfHost = useMemo(
+    () => hostFromUrl(snippetsByToken?.get('site_url')?.expansion ?? ''),
+    [snippetsByToken],
+  )
   // Partition items by kind
   const { programs, details, faqs, keyPhrases, ctas, scriptures, sermons, events, staff, testimonies, newsletterIssues, contacts, locations, meetingTimes, otherItems } = useMemo(() => {
     const programs:   Item[]    = []
@@ -927,7 +1165,7 @@ function TopicCard({
         case 'tier':
         case 'doctrine':          keyPhrases.push(it); break
         case 'cta':
-        case 'link':              if (!isBrokenCta(it) && (!reviewMode || isExternalCta(it))) ctas.push(it); break
+        case 'link':              if (!isBrokenCta(it) && (!reviewMode || isExternalCta(it, selfHost))) ctas.push(it); break
         case 'scripture':         scriptures.push(it); break
         case 'sermon':            sermons.push(it); break
         case 'event':             events.push(it); break
@@ -950,7 +1188,7 @@ function TopicCard({
       scriptures, sermons, events, staff, testimonies, newsletterIssues,
       contacts, locations, meetingTimes, otherItems,
     }
-  }, [topic.items, programScope, reviewMode])
+  }, [topic.items, programScope, reviewMode, selfHost])
 
   // Snippets tied to this topic (label-value Details)
   const topicSnippets = useMemo(() => {
@@ -1053,7 +1291,7 @@ function TopicCard({
     <article
       data-topic-key={topic.topic_key}
       data-topic-label={topic.topic_label}
-      className={reviewMode ? 'border-l-4 border-primary-purple/30 pl-4 md:pl-5' : 'border-l-2 border-wm-accent/30 pl-3'}
+      className={reviewMode ? '' : 'border-l-2 border-wm-accent/30 pl-3'}
     >
       <h3 className={titleCls}>{topic.topic_label}</h3>
 
@@ -1097,6 +1335,7 @@ function TopicCard({
                 key={`prog-${i}`}
                 program={p}
                 reviewMode={reviewMode}
+                selfHost={selfHost}
               />
             ))}
           </div>
@@ -1255,10 +1494,14 @@ function MarkNoteBox({
 // ── Program dossier ──────────────────────────────────────────────────
 
 function ProgramDossier({
-  program, reviewMode,
+  program, reviewMode, selfHost,
 }: {
   program:    Item
   reviewMode: boolean
+  /** Partner's own site host. When set, CTAs pointing at this host
+   *  are treated as internal and filtered out of partner-facing
+   *  inventory. Sub-programs receive the same value. */
+  selfHost?:  string
 }) {
   const name = String(program.name ?? 'Untitled program')
   const desc = String(program.description ?? '')
@@ -1274,7 +1517,9 @@ function ProgramDossier({
   const locations     = nestedItems.filter(i => i.kind === 'location_info')
   const contacts      = nestedItems.filter(i => i.kind === 'contact_block')
   const programFaqs   = nestedItems.filter(i => i.kind === 'faq')
-  const programCtas   = nestedItems.filter(i => i.kind === 'cta' || i.kind === 'link')
+  const programCtas   = nestedItems
+    .filter(i => i.kind === 'cta' || i.kind === 'link')
+    .filter(i => !isBrokenCta(i) && (!reviewMode || isExternalCta(i, selfHost)))
   const programSteps  = nestedItems.filter(i => i.kind === 'step')
   const programScrips = nestedItems.filter(i => i.kind === 'scripture')
   const programTiers  = nestedItems.filter(i => i.kind === 'tier')
@@ -1390,7 +1635,7 @@ function ProgramDossier({
         <DossierSlot icon={Sparkles} title={`Sub-programs (${subPrograms.length})`} reviewMode={reviewMode}>
           <div className="space-y-2">
             {subPrograms.map((sp, i) => (
-              <ProgramDossier key={`sp-${i}`} program={sp} reviewMode={reviewMode} />
+              <ProgramDossier key={`sp-${i}`} program={sp} reviewMode={reviewMode} selfHost={selfHost} />
             ))}
           </div>
         </DossierSlot>
@@ -1673,6 +1918,7 @@ function AddMissingButton({
   const [open, setOpen] = useState(false)
   const [name, setName] = useState(prefillField?.label ?? '')
   const [desc, setDesc] = useState('')
+  const attCtx = useAttachmentContext()
 
   // Path scopes the uniqueness check — baseline-tied additions cluster
   // under their own prefix so a partner can add multiple entries to
@@ -1682,13 +1928,24 @@ function AddMissingButton({
     : `missing:${bucketKey}/`
   const counter = Array.from(marks?.keys() ?? []).filter(k => k.startsWith(pathPrefix)).length
 
+  // Pre-compute the target_path so partners can attach files BEFORE
+  // they hit Save — the saved mark uses this same path. Files upload
+  // immediately to the bucket with this path baked in.
+  const provisionalPath = useMemo(() => {
+    return prefillField
+      ? `${pathPrefix}${counter + 1}`
+      : `missing:${bucketKey}/${slugify(name || 'untitled')}-${counter + 1}`
+    // intentionally not depending on `name` to keep target_path stable
+    // for files attached before the partner finalizes the title
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathPrefix, counter, prefillField, bucketKey])
+
+  const myAttachments = (attCtx?.attachments ?? []).filter(a => a.target_path === provisionalPath)
+
   const canSubmit = name.trim().length > 0 && desc.trim().length > 0
   const submit = async () => {
     if (!canSubmit) return
-    const path = prefillField
-      ? `${pathPrefix}${counter + 1}`
-      : `missing:${bucketKey}/${slugify(name)}-${counter + 1}`
-    await saveMark(path, 'missing_program', 'outdated', desc.trim(), {
+    await saveMark(provisionalPath, 'missing_program', 'outdated', desc.trim(), {
       proposed_program_name: name.trim(),
       proposed_program_description: desc.trim(),
     })
@@ -1719,32 +1976,40 @@ function AddMissingButton({
               Tagged to <span className="font-semibold text-deep-plum">{prefillField.label}</span> in {groupLabel}.
             </p>
           )}
-          <div>
-            <label className="block text-[11px] font-bold text-deep-plum mb-1">
-              What's it called? <span className="text-amber-600">*</span>
-            </label>
-            <input
-              type="text" value={name} onChange={e => setName(e.target.value)}
-              placeholder={prefillField?.label ?? 'e.g. Wednesday Youth Night'}
-              className="w-full text-sm border border-lavender bg-cream/30 rounded-md px-3 py-2 text-deep-plum focus:outline-none focus:border-primary-purple"
-            />
-          </div>
-          <div>
-            <label className="block text-[11px] font-bold text-deep-plum mb-1">
-              Tell us about it <span className="text-amber-600">*</span>
-            </label>
-            <textarea
-              value={desc} onChange={e => setDesc(e.target.value)}
+          <PartnerTextInput
+            label="What's it called?"
+            required
+            placeholder={prefillField?.label ?? 'e.g. Wednesday Youth Night'}
+            value={name}
+            onChange={setName}
+          />
+          <PartnerRichTextField
+            label="Tell us about it"
+            required
+            minHeight={120}
+          >
+            <WMRichTextEditor
+              value={desc}
+              onChange={setDesc}
               placeholder={prefillField?.description
                 ? `${prefillField.description}`
                 : 'Who it\'s for, when it meets, where, and any key details you want included on the new site.'}
-              rows={3}
-              className="w-full text-sm border border-lavender bg-cream/30 rounded-md px-3 py-2 text-deep-plum focus:outline-none focus:border-primary-purple"
+              compact
             />
-            <p className="text-[11px] text-purple-gray mt-1">
-              The more you share, the less back-and-forth later — we need this to write it up.
-            </p>
-          </div>
+          </PartnerRichTextField>
+          {attCtx && (
+            <FileUploadField
+              sessionId={attCtx.sessionId}
+              kind="missing"
+              targetPath={provisionalPath}
+              attachments={myAttachments as unknown as AttachmentMetadata[]}
+              onUploaded={(a) => attCtx.onChange(prev => [a as unknown as InventoryAttachment, ...prev])}
+              onDeleted={(id) => attCtx.onChange(prev => prev.filter(x => x.id !== id))}
+              label="Attach a file (optional)"
+              help="CSV, Word doc, or image — for things like staff rosters, schedules, or photos that aren't on your current site."
+              compact
+            />
+          )}
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setOpen(false)} className="text-xs text-purple-gray font-semibold">Cancel</button>
             <button
@@ -1923,21 +2188,47 @@ function dedupeByKey<T>(items: T[], keyFn: (item: T) => string): T[] {
   return out
 }
 
-function isExternalCta(item: Item): boolean {
+function isExternalCta(item: Item, selfHost?: string): boolean {
   const url = String(item.url ?? '').trim().toLowerCase()
   if (!url) return false
   if (url.startsWith('mailto:') || url.startsWith('tel:')) return true
-  // Absolute http(s) urls are external by definition.
-  if (/^https?:\/\//.test(url)) return true
+  // Absolute http(s) urls: external ONLY when their host differs
+  // from the partner's own site. desertspringschurch.com/team is
+  // internal even though it parses as absolute, because it points
+  // back at the same site partners are migrating away from.
+  if (/^https?:\/\//.test(url)) {
+    const h = hostFromUrl(url)
+    if (selfHost && h && h === selfHost) return false
+    return true
+  }
   // Anything else (/path, #anchor, relative) is internal.
   return false
 }
 
+/** Normalize a URL string to its lower-case host, stripping `www.`
+ *  so `https://www.example.com/x` and `https://example.com/y` compare
+ *  equal. Returns empty string on parse failure (caller treats the
+ *  URL as "host unknown" — typically falls back to external). */
+function hostFromUrl(raw: string): string {
+  if (!raw) return ''
+  try {
+    const u = new URL(raw)
+    return u.host.toLowerCase().replace(/^www\./, '')
+  } catch {
+    return ''
+  }
+}
+
 /** Item kinds where we filter out seasonal / one-off items in
- *  partner review (volunteers + events). Ministry programs can still
- *  legitimately reference seasonal terms in their description without
- *  being filtered. */
+ *  partner review. Easter / Christmas / VBS / etc. surface as
+ *  low-status findings — partners don't want them elevated to
+ *  ongoing-ministry status. Filter at the kinds where the elevation
+ *  happens: programs and details, plus the volunteer / event kinds
+ *  that originally needed it. Doctrines / staff / scriptures stay
+ *  unfiltered (a "Christmas doctrine" doesn't exist; a "Christmas
+ *  pastor" doesn't either). */
 const SEASONAL_FILTERED_KINDS = new Set([
+  'program', 'detail',
   'volunteer_role', 'serve_role', 'role',
   'event', 'opportunity',
 ])
