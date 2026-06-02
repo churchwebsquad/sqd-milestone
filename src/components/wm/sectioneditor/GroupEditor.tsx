@@ -126,6 +126,17 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardT
   // item's fields.
   const isFixed = group.single_instance_hint === true
 
+  // Image-shaped groups (Image, Photo, Picture, Graphic, Logo) suppress
+  // ONLY the Add button — count is fixed by the layout's source HTML
+  // (Hero 37 ships 2 image frames, Hero 44 ships 3). The strategist
+  // still sees and edits each image's text labels, but can't grow the
+  // count past what the layout supports. Doesn't trigger isFixed's
+  // single-item unwrap — multi-image groups still iterate all items.
+  const isImageShapedGroup = /image|photo|picture|graphic|logo/i.test(
+    `${group.layer_name ?? ''} ${group.key}`,
+  )
+  const suppressAdd = isFixed || isImageShapedGroup
+
   // For fixed (single-instance) groups, unwrap: render the one item's
   // fields directly without the group's card/header. Without this the
   // user sees a "No items yet — click Add item" hint that has no Add
@@ -175,7 +186,7 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardT
         ].join(' ')}>
           {groupTitle}{items.length > 0 ? ` · ${items.length}` : ''}
         </p>
-        {!isFixed && (
+        {!suppressAdd && (
           <button
             type="button"
             onClick={addItem}

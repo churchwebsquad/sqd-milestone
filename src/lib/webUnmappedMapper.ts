@@ -298,19 +298,27 @@ export function applyPlacement(
   }
   setAtPath(out, placement.slot_path, converted)
 
-  // Remove from __unmapped if present.
-  const um = out.__unmapped
-  if (um && typeof um === 'object' && !Array.isArray(um)) {
-    const next: Record<string, unknown> = { ...(um as Record<string, unknown>) }
-    delete next[key]
-    out.__unmapped = Object.keys(next).length > 0 ? next : undefined
-    if (out.__unmapped === undefined) delete out.__unmapped
+  // Only retire the source key when the converted value is non-empty.
+  // If conversion produced undefined / null / empty (e.g. shape mismatch
+  // with no extractable text), KEEP the original `__unmapped[key]` so
+  // the strategist still has the raw value to redirect — otherwise the
+  // click silently destroys their content. Previous behavior deleted
+  // unconditionally and lost the data on every misfire.
+  const placedSomething = !isEmptyValue(converted)
+  if (placedSomething) {
+    const um = out.__unmapped
+    if (um && typeof um === 'object' && !Array.isArray(um)) {
+      const next: Record<string, unknown> = { ...(um as Record<string, unknown>) }
+      delete next[key]
+      out.__unmapped = Object.keys(next).length > 0 ? next : undefined
+      if (out.__unmapped === undefined) delete out.__unmapped
+    }
+    // Also drop the raw top-level copy of `key` if it was hanging around
+    // (legacy imports sometimes left the raw key alongside the
+    // __unmapped stash). Without this, dropping into a slot leaves the
+    // original ghost in the field_values tree.
+    if (key in out && key !== '__unmapped') delete out[key]
   }
-  // Also drop the raw top-level copy of `key` if it was hanging around
-  // (legacy imports sometimes left the raw key alongside the
-  // __unmapped stash). Without this, dropping into a slot leaves the
-  // original ghost in the field_values tree.
-  if (key in out && key !== '__unmapped') delete out[key]
   return { fieldValues: out }
 }
 
