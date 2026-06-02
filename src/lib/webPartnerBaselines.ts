@@ -38,11 +38,17 @@ export interface BaselineField {
    *  no DB / network access. */
   detect: (topic: TopicRow) => boolean
   /** Pull the concrete value out of the topic so the form field can
-   *  be prefilled. Returns null when nothing extractable was found
-   *  (the form renders an empty input + placeholder in that case).
-   *  Optional — fields without an extractor render with the topic's
-   *  first matching passage as a fallback prefill. */
+   *  be prefilled. Returns null when nothing extractable was found.
+   *  Runs before the itemKinds fallback. */
   extract?: (topic: TopicRow) => string | null
+  /** Item kinds whose entries semantically belong to this baseline.
+   *  When `extract` is undefined or returns null, the system joins
+   *  matching items (`items[]` where `kind` is in this list) into a
+   *  display list via `formatItemForList`. This is the lever the user
+   *  asked for — instead of bespoke extractors per field, declare
+   *  which item types feed which baseline and let the generic
+   *  formatter handle the rest. */
+  itemKinds?: string[]
 }
 
 // ── Reusable detection helpers ────────────────────────────────────────
@@ -124,6 +130,195 @@ function firstPassage(topic: TopicRow): string | null {
     if (text) return text.length > 400 ? text.slice(0, 400).trim() + '…' : text
   }
   return null
+}
+
+// ── Universal item → display-text formatter ─────────────────────────
+//
+// The systematic answer to "we have the data but the form is blank":
+// instead of a bespoke `extract` function per baseline, each baseline
+// can declare which `item.kind` values map to it. The formatter below
+// knows how to render each kind into a readable line — Name + Role for
+// staff, Question + Answer for FAQs, Reference + Text for scripture,
+// etc. Adding new item kinds = adding one switch case here, not a
+// new extractor per baseline that surfaces them.
+
+function asString(it: Item, field: string): string {
+  const v = (it as Record<string, unknown>)[field]
+  return typeof v === 'string' ? v.trim() : ''
+}
+
+function formatItemForList(it: Item): string | null {
+  switch (it.kind) {
+    case 'staff':
+    case 'person':
+    case 'team_member': {
+      const name = asString(it, 'name') || asString(it, 'title') || asString(it, 'label')
+      const role = asString(it, 'role') || asString(it, 'position')
+      if (name && role && name.toLowerCase() !== role.toLowerCase()) return `${name} — ${role}`
+      return name || null
+    }
+    case 'testimony':
+    case 'story': {
+      const name = asString(it, 'member_name') || asString(it, 'name')
+      const ministry = asString(it, 'ministry') || asString(it, 'topic')
+      const summary = asString(it, 'story') || asString(it, 'description') || asString(it, 'text')
+      const parts: string[] = []
+      if (name) parts.push(name)
+      if (ministry) parts.push(`(${ministry})`)
+      const head = parts.join(' ')
+      if (head && summary) {
+        const trim = summary.length > 160 ? summary.slice(0, 160).trim() + '…' : summary
+        return `${head} — ${trim}`
+      }
+      return head || (summary && (summary.length > 200 ? summary.slice(0, 200).trim() + '…' : summary)) || null
+    }
+    case 'faq':
+    case 'question': {
+      const q = asString(it, 'question') || asString(it, 'title')
+      const a = asString(it, 'answer') || asString(it, 'text')
+      if (q && a) {
+        const trim = a.length > 300 ? a.slice(0, 300).trim() + '…' : a
+        return `${q} — ${trim}`
+      }
+      return q || a || null
+    }
+    case 'partner':
+    case 'organization': {
+      const name = asString(it, 'organization') || asString(it, 'name') || asString(it, 'title')
+      const desc = asString(it, 'description') || asString(it, 'about')
+      if (name && desc) {
+        const trim = desc.length > 200 ? desc.slice(0, 200).trim() + '…' : desc
+        return `${name} — ${trim}`
+      }
+      return name || null
+    }
+    case 'event':
+    case 'opportunity':
+    case 'camp':
+    case 'retreat': {
+      const title = asString(it, 'title') || asString(it, 'name')
+      const when  = asString(it, 'date_time') || asString(it, 'date') || asString(it, 'when')
+      const desc  = asString(it, 'description')
+      if (title && when) return `${title} (${when})`
+      if (title && desc) {
+        const trim = desc.length > 160 ? desc.slice(0, 160).trim() + '…' : desc
+        return `${title} — ${trim}`
+      }
+      return title || null
+    }
+    case 'program':
+    case 'ministry':
+    case 'step':
+    case 'pathway_step':
+    case 'class':
+    case 'campaign': {
+      const name = asString(it, 'name') || asString(it, 'title') || asString(it, 'label')
+      const desc = asString(it, 'description') || asString(it, 'about')
+      if (name && desc) {
+        const trim = desc.length > 160 ? desc.slice(0, 160).trim() + '…' : desc
+        return `${name} — ${trim}`
+      }
+      return name || null
+    }
+    case 'cta':
+    case 'button': {
+      const label = asString(it, 'label') || asString(it, 'text')
+      const url   = asString(it, 'url')
+      if (label && url) return `${label} → ${url}`
+      return label || url || null
+    }
+    case 'tagline':
+    case 'key_phrase':
+    case 'tier':
+    case 'doctrine': {
+      return asString(it, 'text') || asString(it, 'label') || asString(it, 'title') || null
+    }
+    case 'scripture': {
+      const ref  = asString(it, 'reference') || asString(it, 'verse')
+      const text = asString(it, 'text')
+      if (ref && text) {
+        const trim = text.length > 200 ? text.slice(0, 200).trim() + '…' : text
+        return `${ref} — ${trim}`
+      }
+      return ref || text || null
+    }
+    case 'volunteer_role':
+    case 'serve_role':
+    case 'role': {
+      const role = asString(it, 'role') || asString(it, 'name') || asString(it, 'title')
+      const team = asString(it, 'team') || asString(it, 'ministry')
+      if (role && team) return `${role} (${team})`
+      return role || null
+    }
+    case 'sermon':
+    case 'message':
+    case 'series': {
+      const title = asString(it, 'title') || asString(it, 'name')
+      const speaker = asString(it, 'speaker')
+      const url = asString(it, 'url')
+      if (title && speaker) return `${title} — ${speaker}`
+      if (title && url) return `${title} (${url})`
+      return title || null
+    }
+    case 'newsletter':
+    case 'newsletter_issue': {
+      const title = asString(it, 'title') || asString(it, 'name')
+      const date  = asString(it, 'date')
+      if (title && date) return `${title} (${date})`
+      return title || null
+    }
+    case 'location':
+    case 'campus': {
+      const name = asString(it, 'name') || asString(it, 'label')
+      const addr = asString(it, 'address')
+      if (name && addr) return `${name} — ${addr}`
+      return name || addr || null
+    }
+    case 'detail': {
+      const label = asString(it, 'label')
+      const value = asString(it, 'value') || asString(it, 'text')
+      if (label && value) return `${label}: ${value}`
+      return value || label || null
+    }
+    case 'contact': {
+      const name = asString(it, 'name')
+      const role = asString(it, 'role')
+      const email = asString(it, 'email')
+      const phone = asString(it, 'phone')
+      const head = name && role ? `${name} (${role})` : (name || role)
+      const tail = email || phone
+      if (head && tail) return `${head} — ${tail}`
+      return head || tail || null
+    }
+    default: {
+      // Unknown kind — try the most common display fields. Better to
+      // surface SOMETHING than render the form blank when items clearly
+      // exist.
+      return asString(it, 'name')
+          || asString(it, 'title')
+          || asString(it, 'label')
+          || asString(it, 'organization')
+          || asString(it, 'text')
+          || null
+    }
+  }
+}
+
+/** Join all items whose `kind` matches one of `kinds` into a display
+ *  list. Used as the system-wide fallback extractor — when an extract
+ *  function isn't defined (or returns null) but a baseline declares
+ *  `itemKinds`, this fills the form input with matching items'
+ *  formatted text. */
+function itemsAsDisplayList(topic: TopicRow, kinds: ReadonlyArray<string>): string | null {
+  const set = new Set(kinds)
+  const matches = (topic.items ?? []).filter(it => set.has(String(it.kind ?? '')))
+  if (matches.length === 0) return null
+  const lines = matches
+    .slice(0, 30)
+    .map(formatItemForList)
+    .filter((s): s is string => Boolean(s))
+  if (lines.length === 0) return null
+  return lines.join('\n')
 }
 
 /** FAQ items whose question reads like a "what we believe" item.
@@ -317,27 +512,49 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
 
   sermons: [
     { key: 'livestream_url',  label: 'Livestream URL',        description: 'Where weekend services stream live.',
-      detect: t => topicHasKeyword(t, 'livestream', 'online church', 'youtube.com/@', 'live stream') || topicHasMatch(t, RE_URL) },
+      detect:  t => topicHasKeyword(t, 'livestream', 'online church', 'youtube.com/@', 'live stream') || topicHasMatch(t, RE_URL),
+      extract: t => firstMatch(t, RE_URL) },
     { key: 'archive_url',     label: 'Sermon archive',        description: 'Where past sermons are catalogued.',
-      detect: t => topicHasKeyword(t, 'sermon archive', 'past sermons', 'watch sermons', 'all sermons', 'messages') },
+      detect:  t => topicHasKeyword(t, 'sermon archive', 'past sermons', 'watch sermons', 'all sermons', 'messages'),
+      extract: t => firstMatch(t, RE_URL) ?? firstPassageContaining(t, 'sermon archive', 'past sermons', 'all sermons') },
     { key: 'sermon_name',     label: 'What sermons are called', description: '"Sermons", "Messages", "Teachings", etc.',
-      detect: t => topicHasKeyword(t, 'messages', 'teachings', 'sermons') },
+      detect:  t => topicHasKeyword(t, 'messages', 'teachings', 'sermons'),
+      extract: t => firstPassageContaining(t, 'messages', 'teachings', 'sermons') },
     { key: 'discussion_guides', label: 'Discussion guides + notes', description: 'Companion materials per sermon.',
-      detect: t => topicHasKeyword(t, 'discussion guide', 'sermon notes', 'study guide') },
+      detect:  t => topicHasKeyword(t, 'discussion guide', 'sermon notes', 'study guide'),
+      extract: t => firstPassageContaining(t, 'discussion guide', 'sermon notes', 'study guide'),
+      itemKinds: ['sermon', 'message', 'series'] },
   ],
 
   // ── Staff, Volunteers & Testimonies ─────────────────────────────────
   staff: [
     { key: 'staff_list',      label: 'Staff / pastor list', description: 'Named pastors + staff with roles.',
-      detect: t => itemKindMatches(t, 'staff', 'person', 'team_member') || topicHasKeyword(t, 'pastor', 'staff') },
+      detect: t => itemKindMatches(t, 'staff', 'person', 'team_member') || topicHasKeyword(t, 'pastor', 'staff'),
+      itemKinds: ['staff', 'person', 'team_member'] },
     { key: 'leader_bio',      label: 'Leader bios',         description: 'Short bio per named staff member.',
-      detect: t => itemsAny(t, it => typeof (it as Record<string, unknown>).bio === 'string') },
+      detect: t => itemsAny(t, it => typeof (it as Record<string, unknown>).bio === 'string'),
+      // Bios are surfaced via the staff items' bio field — the
+      // generic formatter doesn't include `bio` in its primary
+      // displays, so use a tailored extract here.
+      extract: t => {
+        const bios = (t.items ?? [])
+          .filter(it => ['staff','person','team_member'].includes(String(it.kind ?? '')))
+          .map(it => {
+            const name = asString(it, 'name') || asString(it, 'title')
+            const bio  = asString(it, 'bio')
+            if (name && bio) return `${name} — ${bio}`
+            return bio || null
+          })
+          .filter((s): s is string => Boolean(s))
+        return bios.length > 0 ? bios.join('\n\n') : null
+      } },
   ],
 
   careers: [
     { key: 'openings_or_decision', label: 'Open positions OR decision to skip',
       description: 'Listed positions OR an explicit "we\'re not hiring publicly" decision.',
-      detect: () => false },
+      detect: t => itemKindMatches(t, 'career', 'job', 'opening'),
+      itemKinds: ['career', 'job', 'opening'] },
   ],
 
   volunteers: [
@@ -346,80 +563,102 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
       detect: t => topicHasKeyword(t, 'volunteer', 'serve team', 'dream team', 'serving') },
     { key: 'why_volunteer',          label: 'Why someone should volunteer',
       description: 'The motivation pitch for getting involved.',
-      detect: t => topicHasKeyword(t, 'why serve', 'why volunteer', 'serve because') },
+      detect:  t => topicHasKeyword(t, 'why serve', 'why volunteer', 'serve because'),
+      extract: t => firstPassageContaining(t, 'why serve', 'why volunteer', 'serve because') },
     { key: 'volunteer_signup',       label: 'Signup form / path',
       description: 'How someone applies or signs up to serve.',
-      detect: t => topicHasMatch(t, RE_URL) && topicHasKeyword(t, 'sign up', 'apply', 'form', 'serve') },
+      detect:  t => topicHasMatch(t, RE_URL) && topicHasKeyword(t, 'sign up', 'apply', 'form', 'serve'),
+      extract: t => firstMatch(t, RE_URL) },
     { key: 'volunteer_opportunities', label: 'Specific roles or teams',
       description: 'Named volunteer opportunities (or explicit "via form only" decision).',
-      detect: t => itemKindMatches(t, 'volunteer_role', 'serve_role') },
+      detect: t => itemKindMatches(t, 'volunteer_role', 'serve_role', 'role'),
+      itemKinds: ['volunteer_role', 'serve_role', 'role'] },
   ],
 
   testimonies: [
     { key: 'testimony_stories', label: 'Member testimony stories',
       description: 'Written or video stories of life-change.',
-      detect: t => itemKindMatches(t, 'testimony', 'story') || (t.passages?.length ?? 0) > 0 },
+      detect: t => itemKindMatches(t, 'testimony', 'story') || (t.passages?.length ?? 0) > 0,
+      itemKinds: ['testimony', 'story'] },
     { key: 'story_form',        label: 'Story submission form',
       description: 'How visitors can share their own story.',
-      detect: t => topicHasKeyword(t, 'share your story', 'tell us your story', 'submit your story') },
+      detect:  t => topicHasKeyword(t, 'share your story', 'tell us your story', 'submit your story'),
+      extract: t => firstMatch(t, RE_URL) ?? firstPassageContaining(t, 'share your story', 'tell us your story', 'submit your story') },
   ],
 
   // ── Discipleship ────────────────────────────────────────────────────
   small_groups: [
     { key: 'group_name',         label: 'What the church calls groups',
       description: '"Small Groups", "Life Groups", "Community Groups", etc.',
-      detect: t => topicHasKeyword(t, 'small group', 'life group', 'community group', 'connect group') },
+      detect:  t => topicHasKeyword(t, 'small group', 'life group', 'community group', 'connect group'),
+      extract: t => firstPassageContaining(t, 'small group', 'life group', 'community group', 'connect group') },
     { key: 'what_to_expect',     label: 'What to expect in a group',
       description: 'Size, format, where they meet, frequency.',
-      detect: t => topicHasKeyword(t, 'what to expect', 'meet', 'gather', 'study', 'home') },
+      detect:  t => topicHasKeyword(t, 'what to expect', 'meet', 'gather', 'study', 'home'),
+      extract: t => firstPassageContaining(t, 'what to expect', 'meet', 'gather', 'study') },
     { key: 'why_join',           label: 'Why someone should join',
       description: 'Theological + relational rationale.',
-      detect: t => topicHasKeyword(t, 'community', 'belonging', 'together', 'connect') },
+      detect:  t => topicHasKeyword(t, 'community', 'belonging', 'together', 'connect'),
+      extract: t => firstPassageContaining(t, 'community', 'belonging', 'together', 'connect') },
     { key: 'bible_saying',       label: 'Bible verse or saying',
       description: 'Anchor scripture or repeated phrase.',
-      detect: t => topicHasMatch(t, RE_BIBLE_REF) || itemKindMatches(t, 'scripture', 'tagline') },
+      detect:  t => topicHasMatch(t, RE_BIBLE_REF) || itemKindMatches(t, 'scripture', 'tagline'),
+      extract: t => firstMatch(t, RE_BIBLE_REF),
+      itemKinds: ['scripture', 'tagline', 'key_phrase'] },
     { key: 'contact',            label: 'Contact for more info',
       description: 'Who to email / call about groups.',
-      detect: t => topicHasMatch(t, RE_EMAIL) || topicHasMatch(t, RE_PHONE) },
+      detect:  t => topicHasMatch(t, RE_EMAIL) || topicHasMatch(t, RE_PHONE),
+      extract: t => firstMatch(t, RE_EMAIL) ?? firstMatch(t, RE_PHONE) },
     { key: 'signup',             label: 'How to find / join a group',
       description: 'Link to PCO, ChurchCenter, or in-house finder.',
-      detect: t => topicHasMatch(t, RE_URL) },
+      detect:  t => topicHasMatch(t, RE_URL),
+      extract: t => firstMatch(t, RE_URL) },
   ],
 
   next_steps: [
     { key: 'pathway_steps',     label: 'Discipleship pathway steps',
       description: 'Sequential steps (Starting Point → Membership → Serve → Lead).',
-      detect: t => itemKindMatches(t, 'program', 'step', 'pathway_step') || (t.passages?.length ?? 0) > 1 },
+      detect: t => itemKindMatches(t, 'program', 'step', 'pathway_step') || (t.passages?.length ?? 0) > 1,
+      itemKinds: ['program', 'step', 'pathway_step', 'class'] },
     { key: 'audience',          label: 'Target audience per step',
       description: 'Who each step is for (new believers, members, etc.).',
-      detect: t => topicHasKeyword(t, 'new believer', 'new to', 'first time', 'member', 'leader') },
+      detect:  t => topicHasKeyword(t, 'new believer', 'new to', 'first time', 'member', 'leader'),
+      extract: t => firstPassageContaining(t, 'new believer', 'first time', 'new to', 'member') },
     { key: 'registration',      label: 'Registration links',
       description: 'How to sign up for each step.',
-      detect: t => topicHasMatch(t, RE_URL) },
+      detect:  t => topicHasMatch(t, RE_URL),
+      extract: t => firstMatch(t, RE_URL) },
     { key: 'frequency_location', label: 'Frequency + location',
       description: 'When + where each step happens.',
-      detect: t => topicHasMatch(t, RE_TIME) || topicHasMatch(t, RE_DAY) },
+      detect:  t => topicHasMatch(t, RE_TIME) || topicHasMatch(t, RE_DAY),
+      extract: t => firstMatch(t, RE_TIME) ?? firstMatch(t, RE_DAY) },
   ],
 
   classes: [
     { key: 'class_list',  label: 'Named classes',
       description: 'Membership, foundations, specialized courses.',
-      detect: t => itemKindMatches(t, 'program', 'class') },
+      detect: t => itemKindMatches(t, 'program', 'class'),
+      itemKinds: ['program', 'class'] },
   ],
 
   baptism: [
     { key: 'why_baptize',  label: 'Why someone should be baptized',
       description: 'Theology of baptism.',
-      detect: t => topicHasKeyword(t, 'why', 'baptism', 'baptize', 'public declaration', 'obedience') },
+      detect:  t => topicHasKeyword(t, 'why', 'baptism', 'baptize', 'public declaration', 'obedience'),
+      extract: t => firstPassageContaining(t, 'why', 'baptism', 'baptize', 'public declaration', 'obedience') },
     { key: 'how',          label: 'What baptism looks like',
       description: 'Method (full immersion vs sprinkling, where, with whom).',
-      detect: t => topicHasKeyword(t, 'immersion', 'sprinkling', 'water', 'baptistry') },
+      detect:  t => topicHasKeyword(t, 'immersion', 'sprinkling', 'water', 'baptistry'),
+      extract: t => firstPassageContaining(t, 'immersion', 'sprinkling', 'water', 'baptistry') },
     { key: 'scripture',    label: 'Anchor Bible verses',
       description: 'Key passages cited for baptism.',
-      detect: t => topicHasMatch(t, RE_BIBLE_REF) },
+      detect:  t => topicHasMatch(t, RE_BIBLE_REF) || itemKindMatches(t, 'scripture'),
+      extract: t => firstMatch(t, RE_BIBLE_REF),
+      itemKinds: ['scripture'] },
     { key: 'signup',       label: 'Baptism signup',
       description: 'Form or contact to be baptized.',
-      detect: t => topicHasMatch(t, RE_URL) },
+      detect:  t => topicHasMatch(t, RE_URL),
+      extract: t => firstMatch(t, RE_URL) },
   ],
 
   // ── Ministries ──────────────────────────────────────────────────────
@@ -433,58 +672,73 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
     ...ministryBaseline(),
     { key: 'partners_list',  label: 'Local ministry partners',
       description: 'Organizations the church partners with locally.',
-      detect: t => itemKindMatches(t, 'partner', 'organization') },
+      detect: t => itemKindMatches(t, 'partner', 'organization'),
+      itemKinds: ['partner', 'organization'] },
     { key: 'opportunities',  label: 'Local outreach opportunities',
       description: 'Recurring + one-time service events.',
-      detect: t => itemKindMatches(t, 'event', 'opportunity') },
+      detect: t => itemKindMatches(t, 'event', 'opportunity'),
+      itemKinds: ['event', 'opportunity'] },
   ],
 
   global_outreach: [
     ...ministryBaseline(),
     { key: 'partners_list',  label: 'Global ministry partners',
       description: 'Missionaries + organizations supported globally.',
-      detect: t => itemKindMatches(t, 'partner', 'organization', 'missionary') },
+      detect: t => itemKindMatches(t, 'partner', 'organization', 'missionary'),
+      itemKinds: ['partner', 'organization', 'missionary'] },
     { key: 'opportunities',  label: 'Global outreach opportunities',
       description: 'Mission trips, sponsorships, prayer partnerships.',
-      detect: t => itemKindMatches(t, 'event', 'opportunity', 'trip') },
+      detect: t => itemKindMatches(t, 'event', 'opportunity', 'trip'),
+      itemKinds: ['event', 'opportunity', 'trip'] },
   ],
 
   // ── Events ──────────────────────────────────────────────────────────
   events: [
     { key: 'events_link',     label: 'Events calendar',
       description: 'Calendar URL (PCO, ChurchCenter, embedded, etc.).',
-      detect: t => topicHasMatch(t, RE_URL) || topicHasKeyword(t, 'calendar', 'upcoming events') },
+      detect:  t => topicHasMatch(t, RE_URL) || topicHasKeyword(t, 'calendar', 'upcoming events'),
+      extract: t => firstMatch(t, RE_URL) },
     { key: 'recurring_events', label: 'Recurring events',
       description: 'Standing events on the calendar (e.g. Wednesday night).',
-      detect: t => itemKindMatches(t, 'event') && topicHasMatch(t, RE_DAY) },
+      detect: t => itemKindMatches(t, 'event') && topicHasMatch(t, RE_DAY),
+      itemKinds: ['event'] },
     { key: 'camps_retreats',  label: 'Camps + retreats',
       description: 'Annual or seasonal away events.',
-      detect: t => topicHasKeyword(t, 'camp', 'retreat', 'getaway') },
+      detect: t => topicHasKeyword(t, 'camp', 'retreat', 'getaway')
+                 || itemKindMatches(t, 'camp', 'retreat'),
+      itemKinds: ['camp', 'retreat'] },
   ],
 
   // ── Giving ──────────────────────────────────────────────────────────
   ways_to_give: [
     { key: 'platform',     label: 'Giving platform',
       description: 'Where online gifts get processed (Subsplash, PCO, etc.).',
-      detect: t => topicHasKeyword(t, 'subsplash', 'planning center', 'tithely', 'pushpay') || topicHasMatch(t, RE_URL) },
+      detect:  t => topicHasKeyword(t, 'subsplash', 'planning center', 'tithely', 'pushpay') || topicHasMatch(t, RE_URL),
+      extract: t => firstMatch(t, RE_URL) ?? firstPassageContaining(t, 'subsplash', 'planning center', 'tithely', 'pushpay') },
     { key: 'methods',      label: 'Ways to give',
       description: 'Online, recurring, in-person, app, stocks, etc.',
-      detect: t => topicHasKeyword(t, 'recurring', 'in person', 'in-person', 'app', 'online', 'check', 'stock') },
+      detect:  t => topicHasKeyword(t, 'recurring', 'in person', 'in-person', 'app', 'online', 'check', 'stock'),
+      extract: t => firstPassageContaining(t, 'recurring', 'in person', 'app', 'online', 'check') },
     { key: 'why_give',     label: 'Why someone should give',
       description: 'Mission-tied rationale for generosity.',
-      detect: t => topicHasKeyword(t, 'because of your', 'your gift', 'generosity', 'tithe', 'why give') },
+      detect:  t => topicHasKeyword(t, 'because of your', 'your gift', 'generosity', 'tithe', 'why give'),
+      extract: t => firstPassageContaining(t, 'because of your', 'your gift', 'generosity', 'tithe', 'why give') },
     { key: 'scripture',    label: 'Anchor scripture',
       description: 'Bible verses or sayings about giving.',
-      detect: t => topicHasMatch(t, RE_BIBLE_REF) },
+      detect:  t => topicHasMatch(t, RE_BIBLE_REF) || itemKindMatches(t, 'scripture'),
+      extract: t => firstMatch(t, RE_BIBLE_REF),
+      itemKinds: ['scripture'] },
   ],
 
   campaigns: [
     { key: 'active_campaigns', label: 'Active or upcoming campaigns',
       description: 'Capital, building, vision, end-of-year campaigns.',
-      detect: t => itemKindMatches(t, 'campaign', 'program') || topicHasKeyword(t, 'campaign') },
+      detect: t => itemKindMatches(t, 'campaign', 'program') || topicHasKeyword(t, 'campaign'),
+      itemKinds: ['campaign', 'program'] },
     { key: 'campaign_purpose', label: 'Campaign purpose + goal',
       description: 'What each campaign is funding.',
-      detect: t => (t.passages?.length ?? 0) > 0 },
+      detect:  t => (t.passages?.length ?? 0) > 0,
+      extract: t => firstPassageContaining(t, 'campaign', 'goal', 'fund', 'capital', 'building') },
   ],
 }
 
@@ -553,19 +807,32 @@ function safeDetect(field: BaselineField, topic: TopicRow): boolean {
   }
 }
 
-/** Walk topics, return the first non-null extractor result. Returns
- *  null when no explicit extractor exists — better to render an empty
- *  input with placeholder than to repeat the same generic passage
- *  across unrelated fields (which was the prior bug — every
- *  Ministry/Why/Description prefilled identical text). Fields that
- *  need a prefill MUST declare an `extract` function. */
+/** Walk topics, return the first non-null extractor result. Two-stage:
+ *
+ *   1. Explicit `extract` function — for fields with custom extraction
+ *      logic (regex patterns, keyword-anchored passages, etc.).
+ *   2. `itemKinds` fallback — declared item types get auto-formatted
+ *      into a display list via `formatItemForList`. This is the
+ *      system-wide answer to "we have the data but the form is blank"
+ *      — instead of writing a bespoke extractor for every list-style
+ *      baseline (staff, testimonies, partners, events, etc.), each
+ *      baseline declares which item kinds belong to it.
+ *
+ *  Returns null only when BOTH paths fail. */
 function safeExtract(field: BaselineField, topics: TopicRow[]): string | null {
-  if (!field.extract) return null
-  for (const t of topics) {
-    try {
-      const v = field.extract(t)
-      if (v && v.trim()) return v.trim()
-    } catch { /* skip */ }
+  if (field.extract) {
+    for (const t of topics) {
+      try {
+        const v = field.extract(t)
+        if (v && v.trim()) return v.trim()
+      } catch { /* skip */ }
+    }
+  }
+  if (field.itemKinds && field.itemKinds.length > 0) {
+    for (const t of topics) {
+      const v = itemsAsDisplayList(t, field.itemKinds)
+      if (v) return v
+    }
   }
   return null
 }
