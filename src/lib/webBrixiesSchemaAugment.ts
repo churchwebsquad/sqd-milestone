@@ -847,7 +847,11 @@ function collectTextCandidates(root: Element): TextCandidate[] {
 
 /** Element has its own substantive text — at least one direct text
  *  node with non-whitespace, non-trivial content. Excludes pure
- *  decorative numbers ("01") and dimension placeholders ("504×378"). */
+ *  decorative numbers ("01"), dimension placeholders ("504×378"),
+ *  Brixies placeholder labels where the rendered text just echoes
+ *  the data-layer name ("Tagline" inside <div data-layer="Tagline">
+ *  — present in nearly every catalog template as un-styled scaffolding
+ *  the strategist never fills), and recognizable lorem-ipsum boilerplate. */
 function hasSubstantiveText(el: Element): boolean {
   let total = ''
   for (const child of Array.from(el.childNodes)) {
@@ -858,6 +862,13 @@ function hasSubstantiveText(el: Element): boolean {
   if (/^\d{1,3}$/.test(trimmed)) return false
   if (/^Step\s+\d{1,3}$/i.test(trimmed)) return false
   if (/^\d{2,5}\s*[×x*]\s*\d{2,5}$/i.test(trimmed)) return false
+  // Echo-the-layer placeholders: <div data-layer="Tagline">Tagline</div>.
+  const layer = el.getAttribute('data-layer')?.trim() ?? ''
+  if (layer && trimmed.toLowerCase() === layer.toLowerCase()) return false
+  // Lorem-ipsum boilerplate (≥3 latin filler words). These ship in the
+  // canonical templates and should never be captured as real content
+  // candidates — they're placeholder copy the strategist replaces.
+  if (/\b(lorem ipsum|consectetur adipisicing|adipiscing elit)\b/i.test(trimmed)) return false
   return true
 }
 
