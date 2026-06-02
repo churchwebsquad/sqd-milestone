@@ -610,11 +610,27 @@ function BucketReviewCard({
           />
         ))}
 
-        {/* "What we found on your site" — collapsed by default.
-            Partners toggle it open per section to verify the
-            inventory backing the form. Sermons + Events skip this
-            section entirely (per HIDE_FOUND_ON_SITE). */}
-        {showFoundOnSite && (
+        {/* "What we found on your site". Two render modes:
+              • No form fields → no toggle. The bucket IS the
+                inventory, so we render the topic cards directly.
+              • Has form fields → collapsed toggle. Partner sees the
+                form first; opening verifies the source content.
+            Sermons + Events skip this section entirely (per
+            HIDE_FOUND_ON_SITE). */}
+        {showFoundOnSite && coverage.length === 0 && (
+          <div className="space-y-3">
+            {topics.map(t => (
+              <TopicCard
+                key={t.topic_key}
+                topic={t}
+                programScope={bucket.programScope}
+                snippetsByToken={snippetsByToken}
+                reviewMode={true}
+              />
+            ))}
+          </div>
+        )}
+        {showFoundOnSite && coverage.length > 0 && (
           <div className="border-t border-lavender/60 pt-3">
             <button
               type="button"
