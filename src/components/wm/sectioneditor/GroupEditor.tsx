@@ -11,7 +11,7 @@
  */
 import { useState } from 'react'
 import {
-  ChevronDown, ChevronRight, Plus, Trash2, ArrowUp, ArrowDown,
+  ChevronDown, ChevronRight, Plus, Trash2, ArrowUp, ArrowDown, Check,
 } from 'lucide-react'
 import { SlotEditor } from './SlotEditor'
 import type { WMSnippetOption } from '../RichTextEditor'
@@ -332,21 +332,56 @@ function PaletteGroupEditor({
             <Plus size={11} /> Add
           </button>
         </div>
-        <label className="block">
-          <span className="text-[10px] uppercase tracking-[0.08em] font-bold text-wm-text-muted block mb-1">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.08em] font-bold text-wm-text-muted mb-1.5">
             Card template
-          </span>
-          <select
-            value={templateId ?? ''}
-            onChange={(e) => onPickTemplate(e.target.value)}
-            className="w-full text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated focus:border-wm-accent focus:outline-none"
-          >
-            <option value="">— Pick a {group.referenced_family ?? 'card'} —</option>
-            {cardList.map(t => (
-              <option key={t.id} value={t.id}>{t.layer_name}</option>
-            ))}
-          </select>
-        </label>
+          </p>
+          {/* Visual grid of card variants, mirroring the section-level
+              "Change variant" picker so the strategist can see each
+              card's layout rather than guessing from a name dropdown. */}
+          <div className="grid grid-cols-2 gap-1.5 max-h-72 overflow-y-auto pr-1">
+            {cardList.map(t => {
+              const isSelected = t.id === templateId
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => onPickTemplate(t.id)}
+                  title={t.layer_name}
+                  className={[
+                    'rounded-md overflow-hidden border bg-white text-left transition-colors',
+                    isSelected
+                      ? 'border-wm-accent ring-2 ring-wm-accent/30'
+                      : 'border-wm-border hover:border-wm-border-focus',
+                  ].join(' ')}
+                >
+                  <div className="relative aspect-[4/3] bg-wm-bg-hover">
+                    {t.preview_image_url ? (
+                      <img src={t.preview_image_url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    ) : (
+                      <div className="absolute inset-0 grid place-items-center text-[9px] text-wm-text-subtle">
+                        no preview
+                      </div>
+                    )}
+                    {isSelected && (
+                      <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-wm-accent text-white inline-flex items-center justify-center">
+                        <Check size={10} />
+                      </span>
+                    )}
+                  </div>
+                  <p className="px-2 py-1 text-[10px] font-semibold text-wm-text truncate">
+                    {t.layer_name}
+                  </p>
+                </button>
+              )
+            })}
+          </div>
+          {cardList.length === 0 && (
+            <p className="text-[11px] text-wm-text-subtle italic">
+              No {group.referenced_family ?? 'card'} templates loaded.
+            </p>
+          )}
+        </div>
       </div>
 
       {!selectedCard ? (

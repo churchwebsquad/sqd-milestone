@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Cog, Download, FileText, AlertCircle, Globe, Link as LinkIcon, ExternalLink, AlertTriangle } from 'lucide-react'
+import { Cog, Download, FileText, AlertCircle, Globe, Link as LinkIcon, ExternalLink, AlertTriangle, FolderOpen } from 'lucide-react'
 import { WMButton } from '../Button'
 import { WMCard } from '../Card'
 import { supabase } from '../../../lib/supabase'
@@ -161,6 +161,41 @@ export function DevHandoffWorkspace({ project }: Props) {
         </header>
 
         <div className="space-y-5">
+          {/* ── Organized images folder ────────────────────────── */}
+          {/* Authored on the Design Handoff tab; mirrored here so the dev
+              team has the same link one click away without bouncing
+              tabs. Read-only view — editing happens on Design. */}
+          <WMCard padding="loose">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+                  <FolderOpen size={13} />
+                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
+                    Organized images folder
+                  </h2>
+                </div>
+                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+                  Prepared imagery for this build (Drive, Dropbox, Notion).
+                  Authored on the Design Handoff tab.
+                </p>
+              </div>
+              {spec.organized_images_folder_url ? (
+                <a
+                  href={spec.organized_images_folder_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-wm-accent text-white text-[12px] font-semibold px-3 py-1.5 hover:bg-wm-accent-hover transition-colors shrink-0"
+                >
+                  <ExternalLink size={12} /> Open folder
+                </a>
+              ) : (
+                <span className="text-[11px] text-wm-text-subtle italic shrink-0">
+                  Not yet set
+                </span>
+              )}
+            </div>
+          </WMCard>
+
           {/* ── ACSS variables export ──────────────────────────── */}
           <WMCard padding="loose">
             <div className="flex items-start justify-between gap-4 mb-3">

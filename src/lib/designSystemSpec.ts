@@ -91,6 +91,12 @@ export interface DesignSystemSpec {
    *  same file and walks `.findAll()` by name.
    */
   figma?: FigmaBinding
+  /** External URL of an organized-images folder for this project
+   *  (Drive, Dropbox, Notion gallery, etc.). Shown on both the Design
+   *  Handoff and Dev Handoff workspaces so designers and engineers
+   *  pull imagery from one canonical place. Optional; staff fills it
+   *  in when assets are prepped. */
+  organized_images_folder_url?: string
   meta: {
     updated_at: string  // ISO
   }

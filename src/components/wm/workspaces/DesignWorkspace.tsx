@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Palette, Plus, Trash2, Download, Save, Loader2, Type, Move, Square,
   Sparkles, ExternalLink, Check, AlertCircle, Layers, FileCode, FileText,
+  FolderOpen,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { WMButton } from '../Button'
@@ -298,6 +299,7 @@ export function DesignWorkspace({ project, onChange }: Props) {
           <SpacingSection spec={spec} onChange={update} />
           <RadiusSection spec={spec} onChange={update} />
           <FigmaStyleGuideSection projectId={project.id} spec={spec} onChange={update} onAutoSave={autoSave} />
+          <OrganizedImagesFolderSection spec={spec} onAutoSave={autoSave} />
           <FigmaPluginGeneratorSection project={project} spec={spec} />
         </div>
       </div>
@@ -1325,6 +1327,82 @@ function Section({
       </div>
       {children}
     </WMCard>
+  )
+}
+
+// ── Organized images folder ────────────────────────────────────────
+//
+// A single external URL pointing to the project's prepared imagery —
+// Drive, Dropbox, Notion, etc. Shown on both Design Handoff (here) and
+// Dev Handoff (via OrganizedImagesFolderCard) so the same link is one
+// click away no matter which role opens the workspace.
+
+function OrganizedImagesFolderSection({
+  spec, onAutoSave,
+}: {
+  spec: DesignSystemSpec
+  onAutoSave: (s: DesignSystemSpec) => Promise<void>
+}) {
+  const [draft, setDraft] = useState(spec.organized_images_folder_url ?? '')
+  const [focused, setFocused] = useState(false)
+  useEffect(() => {
+    if (!focused) setDraft(spec.organized_images_folder_url ?? '')
+  }, [spec.organized_images_folder_url, focused])
+
+  const trimmed = draft.trim()
+  const looksUrl = /^https?:\/\//i.test(trimmed)
+
+  const commit = () => {
+    void onAutoSave({ ...spec, organized_images_folder_url: trimmed || undefined })
+  }
+
+  return (
+    <Section title="Organized images folder" icon={<FolderOpen size={13} />}>
+      <p className="text-[12px] text-wm-text-muted mb-3">
+        One link to the prepared imagery for this project (Drive, Dropbox,
+        Notion gallery, etc.). Surfaced on Dev Handoff as well so the same
+        URL is one click away no matter who's pulling assets.
+      </p>
+      <label className="block">
+        <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
+          Folder URL
+        </span>
+        <input
+          type="url"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => { setFocused(false); commit() }}
+          placeholder="https://drive.google.com/drive/folders/…"
+          className={[
+            'mt-1 w-full text-[12px] font-mono px-2.5 py-1.5 rounded-md border bg-wm-bg-elevated focus:outline-none',
+            !trimmed
+              ? 'border-wm-border focus:border-wm-accent'
+              : looksUrl
+                ? 'border-wm-success/40 focus:border-wm-success'
+                : 'border-wm-danger focus:border-wm-danger',
+          ].join(' ')}
+        />
+        <div className="mt-1 flex items-center gap-2 text-[11px]">
+          {!trimmed ? (
+            <span className="text-wm-text-subtle italic">
+              Paste the folder URL when imagery is organized.
+            </span>
+          ) : looksUrl ? (
+            <a
+              href={trimmed}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-wm-accent-strong hover:underline"
+            >
+              <ExternalLink size={10} /> Open folder
+            </a>
+          ) : (
+            <span className="text-wm-danger">URL must start with http(s)://</span>
+          )}
+        </div>
+      </label>
+    </Section>
   )
 }
 
