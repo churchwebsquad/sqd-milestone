@@ -103,6 +103,43 @@ function firstPassage(topic: TopicRow): string | null {
   return null
 }
 
+/** FAQ items whose question reads like a "what we believe" item.
+ *  Partners often store their statement of beliefs as FAQ entries
+ *  ("Who is God?", "What do you believe about the Bible?"). This
+ *  catches them so the Beliefs baseline field doesn't read "needed"
+ *  when the content is actually present, just mis-categorized. */
+const BELIEF_QUESTION_RE = /\b(believe|belief|bible|god|jesus|christ|holy\s+spirit|salvation|trinity|baptism|doctrine|creed|scripture)\b/i
+
+function faqItemsAboutBeliefs(topic: TopicRow): Item[] {
+  return (topic.items ?? []).filter(it => {
+    if (it.kind !== 'faq') return false
+    const q = typeof (it as Record<string, unknown>).question === 'string'
+      ? (it as { question: string }).question : ''
+    const a = typeof (it as Record<string, unknown>).answer === 'string'
+      ? (it as { answer: string }).answer : ''
+    return BELIEF_QUESTION_RE.test(q) || BELIEF_QUESTION_RE.test(a)
+  })
+}
+
+/** Join FAQ-as-beliefs entries into one prefill string the partner can
+ *  edit. Returns null when there are no belief-shaped FAQ entries. */
+function joinFaqBeliefs(topic: TopicRow): string | null {
+  const items = faqItemsAboutBeliefs(topic)
+  if (items.length === 0) return null
+  const lines: string[] = []
+  for (const it of items) {
+    const q = typeof (it as Record<string, unknown>).question === 'string'
+      ? (it as { question: string }).question.trim() : ''
+    const a = typeof (it as Record<string, unknown>).answer === 'string'
+      ? (it as { answer: string }).answer.trim() : ''
+    if (q && a) lines.push(`${q} — ${a}`)
+    else if (a) lines.push(a)
+    else if (q) lines.push(q)
+  }
+  const joined = lines.join('\n\n')
+  return joined.length > 1200 ? joined.slice(0, 1200).trim() + '…' : joined
+}
+
 function topicHasMatch(topic: TopicRow, re: RegExp): boolean {
   return re.test(passageText(topic))
 }
@@ -122,6 +159,29 @@ function programsHaveField(topic: TopicRow, field: string): boolean {
     const v = (it as Record<string, unknown>)[field]
     return typeof v === 'string' ? v.trim() !== '' : Boolean(v)
   })
+}
+
+/** Pull a specific structured field from the first program/ministry
+ *  item that carries it. Used by ministry-bucket extractors so the
+ *  Ministry Name / Meeting Time / Leader fields render distinct
+ *  values from the same item, instead of repeating the same passage.
+ *  Joins multiple programs with " · " when more than one carries the
+ *  field (so partners see e.g. "Mission Kids · Mission Students" for
+ *  Ministry Name in a bucket with both). */
+function programsField(topic: TopicRow, ...fields: string[]): string | null {
+  const items = (topic.items ?? []).filter(it => it.kind === 'program' || it.kind === 'ministry')
+  if (items.length === 0) return null
+  const values: string[] = []
+  for (const it of items) {
+    for (const f of fields) {
+      const v = (it as Record<string, unknown>)[f]
+      if (typeof v === 'string' && v.trim()) { values.push(v.trim()); break }
+    }
+  }
+  if (values.length === 0) return null
+  // Dedupe — multiple programs may share the same leader / campus.
+  const uniq = Array.from(new Set(values))
+  return uniq.join(' · ')
 }
 
 // ── Baselines per bucket key ──────────────────────────────────────────
@@ -180,8 +240,10 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
       detect:  t => topicHasKeyword(t, 'our values', 'we value', 'core values'),
       extract: t => firstPassageContaining(t, 'our values', 'we value', 'core values') },
     { key: 'beliefs',           label: 'Statement of beliefs', description: 'Theological convictions (God, Bible, salvation, etc.).',
-      detect:  t => topicHasKeyword(t, 'we believe', 'statement of beliefs', 'doctrine', 'creed'),
-      extract: t => firstPassageContaining(t, 'we believe', 'statement of beliefs', 'doctrine') },
+      detect:  t => topicHasKeyword(t, 'we believe', 'statement of beliefs', 'doctrine', 'creed')
+                  || faqItemsAboutBeliefs(t).length > 0,
+      extract: t => firstPassageContaining(t, 'we believe', 'statement of beliefs', 'doctrine')
+                  ?? joinFaqBeliefs(t) },
   ],
 
   campuses: [
@@ -408,25 +470,33 @@ function ministryBaseline(): BaselineField[] {
   return [
     { key: 'ministry_name',  label: 'Ministry name',
       description: 'What this ministry is called.',
-      detect: t => itemKindMatches(t, 'program', 'ministry') || Boolean(t.topic_label) },
+      detect:  t => itemKindMatches(t, 'program', 'ministry') || Boolean(t.topic_label),
+      extract: t => programsField(t, 'name', 'title', 'label') ?? t.topic_label ?? null },
     { key: 'meeting_time',   label: 'Meeting time + location',
       description: 'When + where this ministry gathers.',
-      detect: t => topicHasMatch(t, RE_TIME) || programsHaveField(t, 'meeting_time') || programsHaveField(t, 'time') },
+      detect:  t => topicHasMatch(t, RE_TIME) || programsHaveField(t, 'meeting_time') || programsHaveField(t, 'time'),
+      extract: t => programsField(t, 'meeting_time', 'time', 'when', 'schedule') ?? firstMatch(t, RE_TIME) },
     { key: 'why_behind',     label: 'The why behind the ministry',
       description: 'Purpose or mission of this ministry.',
-      detect: t => topicHasKeyword(t, 'why', 'purpose', 'because', 'mission', 'so that') },
+      detect:  t => programsHaveField(t, 'why') || programsHaveField(t, 'purpose') || programsHaveField(t, 'mission'),
+      extract: t => programsField(t, 'why', 'purpose', 'mission') },
     { key: 'participation',  label: 'Description of participation',
       description: 'What it looks like to get involved.',
-      detect: t => topicHasKeyword(t, 'what to expect', 'get involved', 'join', 'participate', 'experience') },
+      detect:  t => programsHaveField(t, 'description') || programsHaveField(t, 'participation'),
+      extract: t => programsField(t, 'description', 'participation', 'about') },
     { key: 'leader_name',    label: 'Ministry leader’s name',
       description: 'Who leads this ministry.',
-      detect: t => programsHaveField(t, 'leader') || programsHaveField(t, 'contact_name') || topicHasKeyword(t, 'pastor', 'leader') },
+      detect:  t => programsHaveField(t, 'leader') || programsHaveField(t, 'contact_name') || programsHaveField(t, 'leader_name'),
+      extract: t => programsField(t, 'leader', 'leader_name', 'contact_name', 'pastor') },
     { key: 'contact',        label: 'Contact info',
       description: 'Email, phone, or signup link.',
-      detect: t => topicHasMatch(t, RE_EMAIL) || topicHasMatch(t, RE_PHONE) || topicHasMatch(t, RE_URL) },
+      detect:  t => programsHaveField(t, 'contact_email') || programsHaveField(t, 'contact_phone') || programsHaveField(t, 'signup_url'),
+      extract: t => programsField(t, 'contact_email', 'email', 'contact_phone', 'phone', 'signup_url', 'url')
+                   ?? firstMatch(t, RE_EMAIL) ?? firstMatch(t, RE_PHONE) },
     { key: 'campus_info',    label: 'Campus availability',
       description: 'Which campuses offer this ministry.',
-      detect: t => topicHasKeyword(t, 'campus', 'location', 'main') || (t.passages?.length ?? 0) > 0 },
+      detect:  t => programsHaveField(t, 'campus') || programsHaveField(t, 'campus_info') || programsHaveField(t, 'location'),
+      extract: t => programsField(t, 'campus', 'campus_info', 'location') },
   ]
 }
 
@@ -476,27 +546,19 @@ function safeDetect(field: BaselineField, topic: TopicRow): boolean {
   }
 }
 
-/** Walk topics, return the first non-null extractor result. Falls back
- *  to first-non-empty passage when the field has no extractor but
- *  detect=true on at least one topic — gives partners SOMETHING to
- *  work from instead of a blank input. */
+/** Walk topics, return the first non-null extractor result. Returns
+ *  null when no explicit extractor exists — better to render an empty
+ *  input with placeholder than to repeat the same generic passage
+ *  across unrelated fields (which was the prior bug — every
+ *  Ministry/Why/Description prefilled identical text). Fields that
+ *  need a prefill MUST declare an `extract` function. */
 function safeExtract(field: BaselineField, topics: TopicRow[]): string | null {
-  if (field.extract) {
-    for (const t of topics) {
-      try {
-        const v = field.extract(t)
-        if (v && v.trim()) return v.trim()
-      } catch { /* skip */ }
-    }
-    return null
-  }
-  // No explicit extractor — use the first passage of the first topic
-  // where the field was detected. Helps partners verify "we found
-  // something here" even when we can't isolate the exact value.
+  if (!field.extract) return null
   for (const t of topics) {
-    if (!safeDetect(field, t)) continue
-    const fallback = firstPassage(t)
-    if (fallback) return fallback
+    try {
+      const v = field.extract(t)
+      if (v && v.trim()) return v.trim()
+    } catch { /* skip */ }
   }
   return null
 }

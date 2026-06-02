@@ -317,19 +317,13 @@ function InventoryTOC({
 
   return (
     <aside className="hidden lg:block lg:sticky lg:top-6 lg:self-start lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
-      {/* Active topic action card */}
-      {reviewMode && saveMark && active && (
-        <ActiveTopicCard
-          entry={active}
-          marks={marks}
-          saveMark={saveMark}
-        />
-      )}
-
-      {/* Full TOC */}
+      {/* Pure jump-navigation. The previous active-topic card with
+          approve / needs-update / add-missing buttons was removed —
+          approval is implicit (edits in the form == approval), so the
+          sticky panel is now navigation only. */}
       <nav className={reviewMode
-          ? 'bg-white border border-lavender rounded-2xl p-3 mt-3'
-          : 'bg-wm-bg-elevated border border-wm-border rounded-xl p-3 mt-3'}>
+          ? 'bg-white border border-lavender rounded-2xl p-3'
+          : 'bg-wm-bg-elevated border border-wm-border rounded-xl p-3'}>
         <p className={reviewMode
             ? 'text-[10px] uppercase tracking-widest font-bold text-purple-gray mb-2 px-1'
             : 'text-[10px] uppercase tracking-widest font-bold text-wm-text-muted mb-2 px-1'}>
@@ -346,21 +340,18 @@ function InventoryTOC({
               <ul className="space-y-0.5">
                 {byGroup(g.key).map(e => {
                   const isActive = e.domId === activeId
-                  const m = marks?.get(e.domId)
                   return (
                     <li key={e.domId}>
                       <button
                         type="button"
                         onClick={() => handleJump(e.domId)}
-                        className={`w-full text-left text-[11px] px-2 py-1 rounded-md transition flex items-center gap-1.5 ${
+                        className={`w-full text-left text-[11px] px-2 py-1 rounded-md transition ${
                           isActive
                             ? (reviewMode ? 'bg-lavender-tint text-deep-plum font-bold' : 'bg-wm-accent-tint text-wm-text font-bold')
                             : (reviewMode ? 'text-purple-gray hover:bg-lavender-tint/40 hover:text-deep-plum' : 'text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text')
                         }`}
                       >
-                        <span className="flex-1 min-w-0 truncate">{e.label}</span>
-                        {m?.status === 'approved' && <CheckCircle2 size={11} className="text-emerald-500 shrink-0" />}
-                        {m?.status === 'outdated' && <Edit3 size={11} className="text-amber-500 shrink-0" />}
+                        <span className="truncate block">{e.label}</span>
                       </button>
                     </li>
                   )
@@ -371,45 +362,6 @@ function InventoryTOC({
         </div>
       </nav>
     </aside>
-  )
-}
-
-function ActiveTopicCard({
-  entry, marks, saveMark,
-}: {
-  entry:    TocEntry
-  marks?:   Map<string, Mark>
-  saveMark: SaveMark
-}) {
-  const bucketPath = entry.domId
-  const m = marks?.get(bucketPath)
-  return (
-    <div className="bg-white border border-lavender rounded-2xl p-4 shadow-sm">
-      <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple mb-1">
-        {entry.groupLabel}
-      </p>
-      <h3 className="font-serif italic text-base text-deep-plum leading-tight">{entry.label}</h3>
-      {entry.summary && (
-        <p className="text-[11px] text-purple-gray mt-1 leading-snug">{entry.summary}</p>
-      )}
-      <div className="mt-3">
-        <StatusPicker
-          current={m?.status ?? null}
-          onPick={s => saveMark(bucketPath, 'topic_item', s, s === 'outdated' ? (m?.client_note ?? null) : null)}
-        />
-      </div>
-      {m?.status === 'outdated' && (
-        <div className="mt-2">
-          <MarkNoteBox path={bucketPath} kind="topic_item" marks={marks} saveMark={saveMark} />
-        </div>
-      )}
-      <AddMissingButton
-        bucketKey={entry.bucketKey}
-        groupLabel={entry.label}
-        saveMark={saveMark}
-        marks={marks}
-      />
-    </div>
   )
 }
 
