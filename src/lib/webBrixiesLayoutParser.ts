@@ -133,7 +133,7 @@ export interface SlotPresenceSummary {
 }
 
 export function summarizeSlotPresence(
-  template: { fields: ReadonlyArray<WebFieldDef> },
+  template: { fields: ReadonlyArray<WebFieldDef>; source_html?: string | null },
   values: Record<string, unknown>,
 ): SlotPresenceSummary {
   const out: SlotPresenceSummary = {
@@ -155,29 +155,32 @@ export function summarizeSlotPresence(
     return c === 'cta' || c === 'ctas' || c.includes('button') || c.includes('action')
   }
 
-  // Recursively count image slots — image_grid / hero / card-with-photo
-  // groups bury their image slots inside item_schemas, and the previous
-  // pass only looked at top-level slots. For a hero with 5 image slots
-  // in a single-instance items group, this returns 5 (was 0). `filled`
-  // is intentionally always 0 — the user doesn't edit images in this
-  // builder; the count is the only surfaced signal.
-  const countImagesInSchema = (fields: ReadonlyArray<WebFieldDef>): number => {
+  // Count actual image elements in the rendered output. The Brixies
+  // import is sometimes lossy — the schema may declare 1 image slot
+  // when the source HTML actually contains 2-3 placeholder elements
+  // (Hero 32, Hero 44) — so counting schema slots underreports what
+  // a partner will actually see in the layout. Use the source_html
+  // when available and count <img> tags + image-shaped data-layer
+  // divs; fall back to a schema walk when source_html isn't passed.
+  out.images.expected = countImagesInSourceHtml(template.source_html)
+    ?? countImagesInSchema(template.fields)
+
+  /** Walk template.fields recursively summing image slots, multiplied
+   *  by each group's default_count. Used as the fallback when no
+   *  source_html is available. */
+  function countImagesInSchema(fields: ReadonlyArray<WebFieldDef>): number {
     let n = 0
     for (const f of fields) {
       if (f.kind === 'slot') {
         if (f.type === 'image') n += 1
       } else {
         const per = countImagesInSchema(f.item_schema)
-        // Multiply by default_count when the group repeats — e.g. a
-        // 3-card group where each card has 1 image yields 3 images.
-        // single_instance_hint groups behave like default_count=1.
         const multiplier = f.single_instance_hint ? 1 : Math.max(1, f.default_count ?? 1)
         n += per * multiplier
       }
     }
     return n
   }
-  out.images.expected = countImagesInSchema(template.fields)
 
   for (const f of template.fields) {
     if (f.kind === 'slot') {
@@ -266,4 +269,47 @@ function stripHtml(s: string): string {
   const div = document.createElement('div')
   div.innerHTML = s
   return (div.textContent ?? '').trim()
+}
+
+/** Count rendered image placeholders by walking the template's
+ *  source_html. Returns `null` when no source_html is provided so the
+ *  caller knows to fall back to the schema walk.
+ *
+ *  Matches three patterns that the Brixies catalog uses:
+ *    1. Direct `<img>` tags (most common — a real image placeholder).
+ *    2. Layered `data-layer="Image"` divs (background-image-only
+ *       placeholders without an inner `<img>`).
+ *    3. Sibling-group descendants ("Image 1", "Image 2", ...) — Brixies
+ *       sometimes numbers them inside a wrapper rather than reusing
+ *       the same name.
+ *
+ *  Deduplicates by element identity so a `<div data-layer="Image">`
+ *  wrapping an `<img>` is counted once, not twice. */
+export function countImagesInSourceHtml(html: string | null | undefined): number | null {
+  if (typeof html !== 'string' || !html.trim()) return null
+  if (typeof window === 'undefined' || typeof DOMParser === 'undefined') return null
+  let doc: Document
+  try { doc = new DOMParser().parseFromString(html, 'text/html') }
+  catch { return null }
+  const root = doc.body.firstElementChild
+  if (!root) return null
+
+  // Use a Set of element references to avoid double-counting an outer
+  // wrapper + its inner <img>.
+  const counted = new Set<Element>()
+
+  // (1) <img> tags
+  for (const img of Array.from(root.querySelectorAll('img'))) {
+    counted.add(img)
+  }
+  // (2) data-layer="Image" / "Image 1" / "Image 2" containers that
+  //     don't already contain a counted <img>.
+  for (const el of Array.from(root.querySelectorAll('[data-layer]'))) {
+    const layer = (el.getAttribute('data-layer') ?? '').trim()
+    if (!/^image(\s+\d+)?$/i.test(layer)) continue
+    // If this div wraps an <img> we already counted, skip it.
+    if (Array.from(el.querySelectorAll('img')).some(img => counted.has(img))) continue
+    counted.add(el)
+  }
+  return counted.size
 }
