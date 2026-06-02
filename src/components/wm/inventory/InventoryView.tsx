@@ -103,6 +103,9 @@ function useExternalPrefill(bucketKey: string, fieldKey: string): string | undef
   const map = useContext(ExternalPrefillContext)
   return map[`${bucketKey}/${fieldKey}`]
 }
+function useExternalPrefillMap(): Record<string, string> {
+  return useContext(ExternalPrefillContext)
+}
 
 interface Props {
   topicsByKey:      Map<string, TopicRow>
@@ -633,6 +636,7 @@ function BucketBlock({
   // Gather topics in this bucket
   const topics = bucket.topics.map(k => topicsByKey.get(k)).filter((t): t is TopicRow => !!t)
   const hasContent = topics.some(t => (t.passages?.length ?? 0) > 0 || (t.items?.length ?? 0) > 0)
+  const externalPrefillCtx = useExternalPrefillMap()
 
   // Partner-facing review now renders as a form (label + editable input
   // per baseline field, prefilled from the crawl). Branches early so
@@ -649,8 +653,18 @@ function BucketBlock({
     )
   }
 
-  // Staff-supplied or empty buckets show a compact card
+  // Staff-supplied or empty buckets show a compact card. When external
+  // prefills (from discovery / account_progress) are available for
+  // this bucket's baseline fields, render those as labeled rows so
+  // staff sees the actual photo URL / mission text instead of just a
+  // "Supplied during onboarding" pill.
   if (!hasContent && bucket.staffSupplied) {
+    const externalRows: { label: string; value: string }[] = []
+    const coverage = computeBaselineCoverage(bucket.key, topics)
+    for (const c of coverage) {
+      const v = externalPrefillCtx[`${bucket.key}/${c.field.key}`]
+      if (v && v.trim()) externalRows.push({ label: c.field.label, value: v })
+    }
     return (
       <article className={reviewMode ? 'bg-white/60 border border-dashed border-lavender rounded-xl px-4 py-3' : 'bg-wm-bg-elevated border border-dashed border-wm-border rounded-lg px-4 py-3'}>
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -662,6 +676,22 @@ function BucketBlock({
             Supplied during onboarding
           </span>
         </div>
+        {externalRows.length > 0 && (
+          <dl className="mt-2.5 space-y-1.5">
+            {externalRows.map(r => (
+              <div key={r.label} className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 items-baseline">
+                <dt className={reviewMode ? 'text-[10px] font-bold uppercase tracking-wider text-purple-gray' : 'text-[10px] font-bold uppercase tracking-wider text-wm-text-muted'}>
+                  {r.label}
+                </dt>
+                <dd className={reviewMode ? 'text-[12px] text-deep-plum break-words whitespace-pre-line' : 'text-[12px] text-wm-text break-words whitespace-pre-line'}>
+                  {/^https?:\/\//i.test(r.value)
+                    ? <a href={r.value} target="_blank" rel="noopener noreferrer" className={reviewMode ? 'text-primary-purple hover:underline break-all' : 'text-wm-accent hover:underline break-all'}>{r.value}</a>
+                    : r.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
         {reviewMode && saveMark && (
           <AddMissingButton bucketKey={bucket.key} groupLabel={bucket.label} saveMark={saveMark} marks={marks} />
         )}

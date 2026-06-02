@@ -25,6 +25,7 @@ import { InventoryView, type TopicRow, type SnippetRow, type Mark as InvMark, ty
 import { WMRichTextEditor } from '../components/wm/RichTextEditor'
 import { FileUploadField } from '../components/contentcollection/FileUploadField'
 import type { AttachmentMetadata, AttachmentKind } from '../lib/contentCollectionAttachments'
+import { loadStrategyBriefSections, strategyBriefToExternalPrefills } from '../lib/webStrategyBrief'
 import {
   PartnerTextInput,
   PartnerTextArea,
@@ -181,6 +182,11 @@ export default function ContentCollectionPage() {
   const [recap, setRecap]         = useState<DiscoveryRecap | null>(null)
   const [partner, setPartner]     = useState<PartnerCtx | null>(null)
   const [attachments, setAttachments] = useState<AttachmentRow[]>([])
+  // Strategy brief sections (Mission / Vision / Values) parsed from
+  // the uploaded markdown. Beats discovery_questionnaire.mission_
+  // vision_statement when present — the brief is the AM-curated
+  // canonical version.
+  const [strategyBriefPrefills, setStrategyBriefPrefills] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!token || !sessionId) { setNotFound(true); setLoading(false); return }
@@ -248,6 +254,14 @@ export default function ContentCollectionPage() {
         const recapData = (recapRes.data ?? null) as DiscoveryRecap | null
         setRecap(recapData)
         setAttachments((attRes.data ?? []) as AttachmentRow[])
+
+        // Fire-and-forget strategy-brief load. Runs after the initial
+        // page render so the partner sees the form fast; the brief
+        // prefills swap in once parsed (~1-2s for a typical brief).
+        void loadStrategyBriefSections((s as SessionRow).web_project_id).then(brief => {
+          if (cancelled) return
+          setStrategyBriefPrefills(strategyBriefToExternalPrefills(brief))
+        })
         const photoUrl = (recapData?.photo_library_url
           ?? (p as Record<string, unknown>).photos_link
           ?? (p as Record<string, unknown>).legacy_photo_library
@@ -403,18 +417,18 @@ export default function ContentCollectionPage() {
                 ...(partner.sermon_channel_url
                   ? { 'sermons/archive_url': partner.sermon_channel_url }
                   : {}),
-                // Mission + Vision: partners typically state these
-                // during discovery / the strategy brief, not on their
-                // public site. Use the combined discovery field as
-                // the prefill — partner can split / refine on the
-                // form. Beats whatever fuzzy passage the crawler
-                // would otherwise scrape.
+                // Mission + Vision + Values come from the AM-curated
+                // strategy brief (markdown file). Falls back to the
+                // partner's raw discovery answer when no brief exists.
+                // The brief is the authoritative source — listed
+                // LAST so it overrides the discovery prefill below.
                 ...(recap?.mission_vision_statement
                   ? {
                       'mission_beliefs/mission_statement': recap.mission_vision_statement,
                       'mission_beliefs/vision_statement':  recap.mission_vision_statement,
                     }
                   : {}),
+                ...strategyBriefPrefills,
               }}
               onContinue={() => setStep(2)}
             />

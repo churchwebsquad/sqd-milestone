@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import { ListChecks, Loader2, Sparkles, Send, Copy, X, Link as LinkIcon, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { InventoryView, type TopicRow, type SnippetRow } from '../inventory/InventoryView'
+import { loadStrategyBriefSections, strategyBriefToExternalPrefills } from '../../../lib/webStrategyBrief'
 
 interface Props {
   projectId: string
@@ -21,6 +22,12 @@ export function CrawlInventory({ projectId }: Props) {
   const [loading, setLoading]           = useState(true)
   const [error, setError]               = useState<string | null>(null)
   const [activeShareUrl, setActiveShareUrl] = useState<string | null>(null)
+
+  // Off-crawl prefills (photo library URL, social handles, mission &
+  // vision from discovery) so staff sees actual values in the
+  // bucket cards rather than placeholder rollups like "Supplied
+  // during onboarding."
+  const [externalPrefills, setExternalPrefills] = useState<Record<string, string>>({})
 
   const load = async () => {
     setLoading(true); setError(null)
@@ -39,9 +46,10 @@ export function CrawlInventory({ projectId }: Props) {
     setSnippets(m)
 
     // Active partner-share link (latest non-closed session for this project)
+    // + off-crawl prefills assembled the same way ContentCollectionPage does.
     const member = projRes.data?.member ?? null
     if (member != null) {
-      const [sessionRes, tokenRes] = await Promise.all([
+      const [sessionRes, apRes, discRes] = await Promise.all([
         supabase
           .from('strategy_content_collection_sessions')
           .select('id')
@@ -52,15 +60,51 @@ export function CrawlInventory({ projectId }: Props) {
           .maybeSingle(),
         supabase
           .from('strategy_account_progress')
-          .select('portal_token')
+          .select('portal_token, photos_link, legacy_photo_library, photos_from_all_in_discovery_form, facebook, facebook_link, instagram, instagram_link, youtube')
           .eq('member', member)
           .maybeSingle(),
+        supabase
+          .from('strategy_discovery_questionnaire')
+          .select('photo_library_url, mission_vision_statement')
+          .eq('member', member)
+          .order('submitted_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
       ])
-      if (sessionRes.data?.id && tokenRes.data?.portal_token) {
-        setActiveShareUrl(`${window.location.origin}/portal/${tokenRes.data.portal_token}/hub/content-collection/${sessionRes.data.id}`)
+      if (sessionRes.data?.id && apRes.data?.portal_token) {
+        setActiveShareUrl(`${window.location.origin}/portal/${apRes.data.portal_token}/hub/content-collection/${sessionRes.data.id}`)
       } else {
         setActiveShareUrl(null)
       }
+      const ap = (apRes.data ?? {}) as Record<string, string | null>
+      const disc = (discRes.data ?? {}) as Record<string, string | null>
+      const photoUrl = disc.photo_library_url ?? ap.photos_link ?? ap.legacy_photo_library ?? ap.photos_from_all_in_discovery_form ?? null
+      const fb = ap.facebook_link ?? ap.facebook ?? null
+      const ig = ap.instagram_link ?? ap.instagram ?? null
+      const yt = ap.youtube ?? null
+      const socialLines = [
+        fb ? `Facebook: ${fb}` : null,
+        ig ? `Instagram: ${ig}` : null,
+        yt ? `YouTube: ${yt}` : null,
+      ].filter(Boolean)
+      // Strategy-brief parsed sections override discovery's combined
+      // mission_vision_statement when present — the brief is the
+      // AM-curated authoritative version.
+      const brief = await loadStrategyBriefSections(projectId)
+      const briefPrefills = strategyBriefToExternalPrefills(brief)
+      setExternalPrefills({
+        ...(photoUrl ? { 'branding_photos/photo_library': photoUrl } : {}),
+        ...(socialLines.length > 0 ? { 'social_newsletter/social_links': socialLines.join('\n') } : {}),
+        ...(disc.mission_vision_statement
+          ? {
+              'mission_beliefs/mission_statement': disc.mission_vision_statement,
+              'mission_beliefs/vision_statement':  disc.mission_vision_statement,
+            }
+          : {}),
+        ...briefPrefills,
+      })
+    } else {
+      setExternalPrefills({})
     }
     setLoading(false)
   }
@@ -132,7 +176,13 @@ export function CrawlInventory({ projectId }: Props) {
           {/* groupAccordion: same one-open-at-a-time UX partners see,
               but without review pills/marks. Keeps this page
               scrollable when the crawl returns 30+ topics. */}
-          <InventoryView topicsByKey={topicsByKey} snippetsByToken={snippetsByToken} reviewMode={false} groupAccordion />
+          <InventoryView
+            topicsByKey={topicsByKey}
+            snippetsByToken={snippetsByToken}
+            reviewMode={false}
+            groupAccordion
+            externalPrefills={externalPrefills}
+          />
         </div>
       )}
     </div>
