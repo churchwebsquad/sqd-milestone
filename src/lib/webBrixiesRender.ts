@@ -865,6 +865,26 @@ function expandGroup(groupEl: Element, group: WebGroupDef, raw: unknown): void {
     return
   }
   const items = Array.isArray(raw) ? raw as Array<Record<string, unknown>> : []
+  const itemSchema = Array.isArray(group.item_schema) ? group.item_schema : []
+
+  // GUARD — schema-empty image / decoration groups.
+  // When item_schema is empty, the group has no slots to fill: it's
+  // purely a structural marker the schema extractor created from a
+  // repeating wrapper (e.g. Hero 32's "Image" group counts 2 placeholder
+  // images, Hero 44's "Image" group counts 5). The Brixies source HTML
+  // already contains every placeholder element in its final position;
+  // attempting to "expand" by cloning groupEl N times produces visible
+  // duplication (stacked images, overlapping cards). Leave the source
+  // in place — neutralizePlaceholderImages() will scrub the gray
+  // dimensions afterward.
+  //
+  // This also rescues schemas with duplicate `image` keys (the
+  // augmenter occasionally emits two groups with the same key but
+  // empty item_schemas and conflicting default_counts) — neither
+  // attempts a destructive expansion, and the original markup is
+  // preserved exactly.
+  if (itemSchema.length === 0) return
+
   // Honor items.length when the strategist has supplied items; fall
   // back to the template's design-time default_count for unbound
   // groups so the section preserves its visual structure (rows of
@@ -878,7 +898,6 @@ function expandGroup(groupEl: Element, group: WebGroupDef, raw: unknown): void {
     while (groupEl.firstChild) groupEl.removeChild(groupEl.firstChild)
     return
   }
-  const itemSchema = Array.isArray(group.item_schema) ? group.item_schema : []
   const itemBinding = indexByLayer(itemSchema)
 
   // When the source already has 2+ siblings of the same data-layer
