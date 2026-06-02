@@ -141,6 +141,11 @@ interface DiscoveryRecap {
   /** Photo-library URL the partner shared during discovery — used to
    *  prefill the Photos bucket's photo_library baseline field. */
   photo_library_url:                string | null
+  /** Partner-submitted mission + vision combined into one field on
+   *  the discovery questionnaire. Used as the prefill for the About
+   *  Your Church → Mission statement baseline (and a fallback for
+   *  Vision statement when the partner hasn't split them yet). */
+  mission_vision_statement:         string | null
 }
 
 interface PartnerCtx {
@@ -220,7 +225,7 @@ export default function ContentCollectionPage() {
             .eq('archived', false),
           supabase.from('strategy_content_collection_marks').select('*').eq('session_id', sessionId),
           supabase.from('strategy_discovery_questionnaire')
-            .select('top_website_priority, top_3_website_goals, copy_approach, ideal_website_experience, best_outreach_methods, audience_voice_style, words_tones_to_avoid, inspirational_websites, weekly_maintenance_hours, high_maintenance_pages, software_in_use, initial_web_support_preferences, photo_library_url')
+            .select('top_website_priority, top_3_website_goals, copy_approach, ideal_website_experience, best_outreach_methods, audience_voice_style, words_tones_to_avoid, inspirational_websites, weekly_maintenance_hours, high_maintenance_pages, software_in_use, initial_web_support_preferences, photo_library_url, mission_vision_statement')
             .eq('member', p.member)
             .order('submitted_at', { ascending: false })
             .limit(1)
@@ -397,6 +402,18 @@ export default function ContentCollectionPage() {
                 // strategy_web_projects.social_youtube_url.
                 ...(partner.sermon_channel_url
                   ? { 'sermons/archive_url': partner.sermon_channel_url }
+                  : {}),
+                // Mission + Vision: partners typically state these
+                // during discovery / the strategy brief, not on their
+                // public site. Use the combined discovery field as
+                // the prefill — partner can split / refine on the
+                // form. Beats whatever fuzzy passage the crawler
+                // would otherwise scrape.
+                ...(recap?.mission_vision_statement
+                  ? {
+                      'mission_beliefs/mission_statement': recap.mission_vision_statement,
+                      'mission_beliefs/vision_statement':  recap.mission_vision_statement,
+                    }
                   : {}),
               }}
               onContinue={() => setStep(2)}
