@@ -311,5 +311,22 @@ export function countImagesInSourceHtml(html: string | null | undefined): number
     if (Array.from(el.querySelectorAll('img')).some(img => counted.has(img))) continue
     counted.add(el)
   }
+  // (3) Background-image divs — Brixies sometimes uses
+  //     `background-image: url(...)` for decorative photos instead
+  //     of an `<img>`. Count those too unless they're a known UI
+  //     gradient (mask / overlay / button background).
+  for (const el of Array.from(root.querySelectorAll('[style*="background-image"]'))) {
+    if (counted.has(el)) continue
+    const style = el.getAttribute('style') ?? ''
+    if (!/background-image\s*:\s*url\(/i.test(style)) continue
+    // Skip gradients-only and decorative masks/overlays.
+    if (/linear-gradient|radial-gradient/i.test(style) && !/url\(/i.test(style.replace(/linear-gradient\([^)]*\)|radial-gradient\([^)]*\)/gi, ''))) continue
+    const layer = (el.getAttribute('data-layer') ?? '').toLowerCase()
+    if (/^(mask|overlay|gradient|vignette)/i.test(layer)) continue
+    // Skip if a counted <img> lives inside (avoid double-count of a
+    // wrapper around an explicit image element).
+    if (Array.from(el.querySelectorAll('img')).some(img => counted.has(img))) continue
+    counted.add(el)
+  }
   return counted.size
 }

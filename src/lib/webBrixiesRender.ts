@@ -1325,9 +1325,27 @@ function indexByLayer(fields: ReadonlyArray<WebFieldDef>): Map<string, WebFieldD
   if (!Array.isArray(fields)) return m
   for (const f of fields) {
     const layer = f.layer_name ?? f.key
+    const existing = m.get(layer)
+    // Schema augmenter occasionally emits duplicate fields under the
+    // same layer — Content Section 16 has a `description` SLOT AND an
+    // empty `description` GROUP both with layer_name "Description".
+    // Picking arbitrarily lets the empty group win and the slot's
+    // value binding never runs (lorem stays). Prefer the more
+    // specific field: a real slot beats an empty group; a group with
+    // a populated item_schema beats any slot. */
+    if (existing && fieldSpecificity(f) <= fieldSpecificity(existing)) continue
     m.set(layer, f)
   }
   return m
+}
+
+function fieldSpecificity(f: WebFieldDef): number {
+  if (f.kind === 'slot') return 2 // any typed slot
+  if (f.kind === 'group') {
+    const items = Array.isArray(f.item_schema) ? f.item_schema.length : 0
+    return items > 0 ? 3 : 1 // populated group beats slot; empty group loses to slot
+  }
+  return 0
 }
 
 function lookup(map: Map<string, WebFieldDef>, layerName: string): WebFieldDef | undefined {

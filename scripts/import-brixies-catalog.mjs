@@ -465,12 +465,45 @@ function lookupPostTemplatePair(family, taxonomy) {
 }
 
 // ── source_html trimming — keep one instance per group ───────────────
+//
+// EXCEPT for image-shaped sibling groups. Brixies hero / CTA / feature
+// sections often have N identical-but-positioned image placeholders
+// (Hero Section 32 has 5: 2 in Frame 287, 3 in Frame 288; Hero
+// Section 44 has 3; many CTAs have 2-4). The renderer can't visually
+// reconstruct N placeholders from one — it would clone the single
+// remaining `<img>` and stack the clones at the same absolute
+// position. Result: a single image where the catalog expects a fan
+// of multiple, plus brittle group bookkeeping (duplicate `image`
+// keys with empty item_schemas).
+//
+// So: detect siblings the usual way to drive default_count on the
+// schema, but only STRIP siblings whose layer is NOT image-shaped.
+// Image siblings are kept in source_html exactly as Brixies authored
+// them. The renderer's `siblings.length >= 2` path then substitutes
+// in-place rather than cloning a single template.
+
+/** True when the sibling group represents image placeholders — those
+ *  must stay intact in source_html so the renderer ships every visual
+ *  placeholder the partner saw in the Brixies catalog. */
+function isImageSiblingGroup(siblings) {
+  if (!siblings || siblings.length === 0) return false
+  return siblings.every(el => {
+    if (!el?.tagName) return false
+    const layer = (el.getAttribute?.('data-layer') ?? '').trim()
+    if (/^image(\s+\d+)?$/i.test(layer)) return true
+    // Some catalog templates wrap a single <img> in a Frame whose
+    // only meaningful descendant is that image. Treat as image group.
+    if (el.tagName.toLowerCase() === 'img') return true
+    return false
+  })
+}
 
 function trimSourceHtml(rootNode, taxonomy) {
   function walk(node) {
     if (!node.childNodes) return
     const groups = detectSiblingGroups(node, taxonomy)
     for (const siblings of groups.values()) {
+      if (isImageSiblingGroup(siblings)) continue
       for (let i = 1; i < siblings.length; i++) siblings[i].remove()
     }
     for (const child of node.childNodes) {
