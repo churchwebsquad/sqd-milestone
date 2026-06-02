@@ -545,6 +545,13 @@ function BucketBlock({
 // collapsible "What we found on your current site" reveals the raw
 // crawl evidence (passages + named items) as reference context.
 
+/** Buckets where the found-on-site section is suppressed entirely
+ *  in partner review mode. Sermons → the partner just needs to
+ *  confirm livestream + archive URLs; raw sermon items would clutter.
+ *  Events → individual event items aren't useful at the partner level
+ *  (they belong on the live calendar). */
+const HIDE_FOUND_ON_SITE = new Set(['sermons', 'events'])
+
 function BucketReviewCard({
   bucket, topics, snippetsByToken, marks, saveMark,
 }: {
@@ -561,6 +568,8 @@ function BucketReviewCard({
   // structured items (programs, FAQs, staff, scripture, etc.) still
   // show, and the form prefills cover the rest.
   const hasInventory = topics.some(t => (t.items ?? []).length > 0)
+  const showFoundOnSite = hasInventory && !HIDE_FOUND_ON_SITE.has(bucket.key)
+  const [foundOpen, setFoundOpen] = useState(false)
 
   // Empty-baseline + staff-supplied + no inventory → compact note
   // (e.g. Photos bucket when Brand Squad hasn't shipped anything yet).
@@ -596,8 +605,40 @@ function BucketReviewCard({
           />
         ))}
 
-        {/* Add something we missed — for buckets where the baseline
-            doesn't cover the partner's actual content. */}
+        {/* "What we found on your site" — collapsed by default.
+            Partners toggle it open per section to verify the
+            inventory backing the form. Sermons + Events skip this
+            section entirely (per HIDE_FOUND_ON_SITE). */}
+        {showFoundOnSite && (
+          <div className="border-t border-lavender/60 pt-3">
+            <button
+              type="button"
+              onClick={() => setFoundOpen(o => !o)}
+              className="text-[11px] font-semibold text-primary-purple hover:underline inline-flex items-center gap-1"
+              aria-expanded={foundOpen}
+            >
+              {foundOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+              {foundOpen ? 'Hide what we found on your site' : 'Show what we found on your site'}
+            </button>
+            {foundOpen && (
+              <div className="mt-3 space-y-3">
+                {topics.map(t => (
+                  <TopicCard
+                    key={t.topic_key}
+                    topic={t}
+                    programScope={bucket.programScope}
+                    snippetsByToken={snippetsByToken}
+                    reviewMode={true}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Add something we missed — always at the bottom of the
+            bucket so the partner sees their content first, then has
+            the affordance to flag anything we missed. */}
         {saveMark && (
           <AddMissingButton
             bucketKey={bucket.key}
@@ -605,29 +646,6 @@ function BucketReviewCard({
             saveMark={saveMark}
             marks={marks}
           />
-        )}
-
-        {/* "What we found on your site" — always shown when the
-            bucket has inventoried items. Raw passage quotes are
-            filtered inside TopicCard via reviewMode (they were the
-            noisy "/next-steps/  ·  ‘Ready to take your next steps?’"
-            blocks); structured items (programs, FAQs, staff,
-            scripture, key phrases, etc.) still surface. */}
-        {hasInventory && (
-          <div className="border-t border-lavender/60 pt-4 space-y-3">
-            <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">
-              What we found on your site
-            </p>
-            {topics.map(t => (
-              <TopicCard
-                key={t.topic_key}
-                topic={t}
-                programScope={bucket.programScope}
-                snippetsByToken={snippetsByToken}
-                reviewMode={true}
-              />
-            ))}
-          </div>
         )}
       </div>
     </article>
@@ -873,6 +891,13 @@ function TopicCard({
     const meetingTimes: Item[]   = []
     const otherItems: Item[]    = []
     for (const it of topic.items ?? []) {
+      // In review mode, drop seasonal / one-off event items from
+      // volunteer + event-shaped kinds so partners don't see e.g.
+      // "Easter Egg Hunt Volunteers" treated as an ongoing role.
+      // Restricted to those kinds — programs / ministries can
+      // legitimately reference seasonal terms (e.g. "Christmas Eve
+      // service") without being filtered.
+      if (reviewMode && SEASONAL_FILTERED_KINDS.has(String(it.kind ?? '')) && looksSeasonal(it)) continue
       switch (it.kind) {
         case 'program':           if (!programScope || it.scope === programScope) programs.push(it); break
         case 'detail':            details.push(it); break
@@ -881,7 +906,7 @@ function TopicCard({
         case 'tier':
         case 'doctrine':          keyPhrases.push(it); break
         case 'cta':
-        case 'link':              if (!isBrokenCta(it)) ctas.push(it); break
+        case 'link':              if (!isBrokenCta(it) && (!reviewMode || isExternalCta(it))) ctas.push(it); break
         case 'scripture':         scriptures.push(it); break
         case 'sermon':            sermons.push(it); break
         case 'event':             events.push(it); break
@@ -894,8 +919,17 @@ function TopicCard({
         default:                  otherItems.push(it)
       }
     }
-    return { programs, details, faqs, keyPhrases, ctas, scriptures, sermons, events, staff, testimonies, newsletterIssues, contacts, locations, meetingTimes, otherItems }
-  }, [topic.items, programScope])
+    return {
+      programs, details, faqs, keyPhrases,
+      // Dedupe CTAs by destination URL (case-insensitive). "Get
+      // Directions" can appear once as a header CTA and again in a
+      // section card pointing at the same Google Maps link — only
+      // one should surface. CTAs to DIFFERENT urls stay distinct.
+      ctas:  dedupeByKey(ctas, c => String(c.url ?? '').trim().toLowerCase() || `__${(c.label ?? '')}`),
+      scriptures, sermons, events, staff, testimonies, newsletterIssues,
+      contacts, locations, meetingTimes, otherItems,
+    }
+  }, [topic.items, programScope, reviewMode])
 
   // Snippets tied to this topic (label-value Details)
   const topicSnippets = useMemo(() => {
@@ -1843,6 +1877,57 @@ function isBrokenCta(item: Item): boolean {
   if (url && !isUrl(url)) return true  // CTAs must point at a real URL
   if (label && isBrokenValue(label)) return true
   return false
+}
+
+/** External CTAs only — partner review filters out internal-route
+ *  links (e.g. /visit, /give, #contact). Those duplicate nav items
+ *  that partners already see on their own site; the value of the
+ *  CTA inventory in review is "these are the off-site destinations
+ *  we'll be linking to" (Subsplash, ChurchCenter, YouTube, etc.). */
+/** Generic dedupe that preserves first occurrence. Used for CTAs by
+ *  URL — "Directions → maps.google…" appearing once at the top and
+ *  again in a card collapses to one row. Different URLs stay
+ *  distinct, so a North Campus map link and a South Campus map link
+ *  both render. */
+function dedupeByKey<T>(items: T[], keyFn: (item: T) => string): T[] {
+  const seen = new Set<string>()
+  const out: T[] = []
+  for (const it of items) {
+    const k = keyFn(it)
+    if (!k) { out.push(it); continue }
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(it)
+  }
+  return out
+}
+
+function isExternalCta(item: Item): boolean {
+  const url = String(item.url ?? '').trim().toLowerCase()
+  if (!url) return false
+  if (url.startsWith('mailto:') || url.startsWith('tel:')) return true
+  // Absolute http(s) urls are external by definition.
+  if (/^https?:\/\//.test(url)) return true
+  // Anything else (/path, #anchor, relative) is internal.
+  return false
+}
+
+/** Item kinds where we filter out seasonal / one-off items in
+ *  partner review (volunteers + events). Ministry programs can still
+ *  legitimately reference seasonal terms in their description without
+ *  being filtered. */
+const SEASONAL_FILTERED_KINDS = new Set([
+  'volunteer_role', 'serve_role', 'role',
+  'event', 'opportunity',
+])
+
+const SEASONAL_RE = /\b(easter|christmas|thanksgiving|good\s+friday|advent|halloween|vbs|vacation\s+bible|summer\s+camp|mother'?s?\s+day|father'?s?\s+day|fall\s+festival|spring\s+break|new\s+year'?s)\b/i
+
+function looksSeasonal(item: Item): boolean {
+  const r = item as Record<string, unknown>
+  const name = String(r.name ?? r.title ?? r.label ?? r.role ?? '').trim()
+  if (!name) return false
+  return SEASONAL_RE.test(name)
 }
 
 /**

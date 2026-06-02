@@ -55,7 +55,15 @@ export interface BaselineField {
 
 const RE_TIME       = /\b\d{1,2}:\d{2}\s*(?:am|pm)\b/i
 const RE_DAY        = /\b(sun|mon|tue|wed|thu|fri|sat)(?:day)?\b/i
-const RE_PHONE      = /(?:\+?\d[\d\s().-]{7,})/
+// Strict US-style phone with required 3-3-4 grouping + visible
+// separator. Previous looser pattern matched coordinate-style decimals
+// (e.g. "33.3025596") because it only required 8 consecutive
+// digits/separators. Now requires:
+//   • optional country prefix (+1 / 1)
+//   • optional parens around area code
+//   • visible separator between area code, exchange, line
+//   • exactly 3 + 3 + 4 digits
+const RE_PHONE      = /(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/
 const RE_EMAIL      = /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i
 // Address regex tolerates abbreviated street prefixes with periods
 // (e.g. "S. McQueen Rd."), multi-word street names, optional `.` after
@@ -87,6 +95,32 @@ function itemsAny(topic: TopicRow, pred: (it: Item) => boolean): boolean {
 function firstMatch(topic: TopicRow, re: RegExp): string | null {
   const m = re.exec(passageText(topic))
   return m ? m[0].trim() : null
+}
+
+/** Pick the passage with the MOST time mentions. Service-time
+ *  copy varies — some pages list one service ("Sundays at 9am"),
+ *  others list the full schedule ("Sundays at 9am, 11am, and 6pm").
+ *  We want the complete schedule, not the first match. Returns the
+ *  text of the passage that contains the most distinct time strings
+ *  (after dedupe). Returns null when no passage has any time. */
+function richestTimePassage(topic: TopicRow): string | null {
+  const candidates = (topic.passages ?? [])
+    .map(p => {
+      const text = (p?.text ?? '').trim()
+      if (!text) return null
+      const matches = text.match(new RegExp(RE_TIME.source, 'gi')) ?? []
+      const distinctTimes = new Set(matches.map(m => m.trim().toLowerCase()))
+      return { text, count: distinctTimes.size }
+    })
+    .filter((c): c is { text: string; count: number } => c !== null && c.count > 0)
+    .sort((a, b) => b.count - a.count)
+  if (candidates.length === 0) return null
+  // Tie-breaker: prefer the SHORTER text when counts are equal so we
+  // don't surface a sprawling page when a tight service-times card
+  // exists.
+  const best = candidates[0]
+  const truncated = best.text.length > 400 ? best.text.slice(0, 400).trim() + '…' : best.text
+  return truncated
 }
 
 /** Count distinct address matches across the topic's passages + items
@@ -498,7 +532,11 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
   service_details: [
     { key: 'service_times',     label: 'Service times',           description: 'When weekend services happen.',
       detect:  t => topicHasMatch(t, RE_TIME) || itemKindMatches(t, 'service_time'),
-      extract: t => firstPassageContaining(t, 'sunday', 'service', 'am', 'pm') ?? firstMatch(t, RE_TIME) },
+      // Pick the passage with the MOST time mentions, not just the
+      // first matching one — copywriters need the complete schedule
+      // (e.g. "Sundays at 9am, 11am, and 6pm"), not a single time
+      // that misleads them into thinking the church only meets once.
+      extract: t => richestTimePassage(t) ?? firstMatch(t, RE_TIME) },
     { key: 'visitor_expect',    label: 'What visitors expect',    description: 'Service flow, length, vibe, dress code.',
       detect:  t => topicHasKeyword(t, 'what to expect', 'visitor', 'first time', 'service lasts', 'casual', 'experience'),
       extract: t => firstPassageContaining(t, 'what to expect', 'visitor', 'first time', 'expect') },
@@ -510,14 +548,9 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
       extract: t => firstPassageContaining(t, 'welcome team', 'greeters', 'signage') },
   ],
 
-  visit_details: [
-    { key: 'plan_visit_form',   label: 'Plan-a-visit form',  description: 'Pre-arrival form that flags first-time guests.',
-      detect: t => topicHasKeyword(t, 'plan your visit', 'plan a visit', 'first time form') },
-    { key: 'what_to_wear',      label: 'What to wear / dress', description: 'Dress code expectations for guests.',
-      detect: t => topicHasKeyword(t, 'what to wear', 'casual', 'dress') },
-    { key: 'arrival_directions', label: 'Arrival directions', description: 'Step-by-step what happens when a guest arrives.',
-      detect: t => topicHasKeyword(t, 'when you arrive', 'getting here', 'directions') },
-  ],
+  // visit_details: no form. The plan-a-visit / first-time content
+  // surfaces under the found-on-site display below the header.
+  visit_details: [],
 
   sermons: [
     // Dropped sermon_name + discussion_guides baselines per branding
@@ -544,23 +577,8 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
       itemKinds: ['career', 'job', 'opening'] },
   ],
 
-  volunteers: [
-    { key: 'volunteer_term',         label: 'What volunteers are called',
-      description: '"Volunteers", "Serve Team", "Dream Team", etc.',
-      detect: t => topicHasKeyword(t, 'volunteer', 'serve team', 'dream team', 'serving') },
-    { key: 'why_volunteer',          label: 'Why someone should volunteer',
-      description: 'The motivation pitch for getting involved.',
-      detect:  t => topicHasKeyword(t, 'why serve', 'why volunteer', 'serve because'),
-      extract: t => firstPassageContaining(t, 'why serve', 'why volunteer', 'serve because') },
-    { key: 'volunteer_signup',       label: 'Signup form / path',
-      description: 'How someone applies or signs up to serve.',
-      detect:  t => topicHasMatch(t, RE_URL) && topicHasKeyword(t, 'sign up', 'apply', 'form', 'serve'),
-      extract: t => firstMatch(t, RE_URL) },
-    { key: 'volunteer_opportunities', label: 'Specific roles or teams',
-      description: 'Named volunteer opportunities (or explicit "via form only" decision).',
-      detect: t => itemKindMatches(t, 'volunteer_role', 'serve_role', 'role'),
-      itemKinds: ['volunteer_role', 'serve_role', 'role'] },
-  ],
+  // volunteers: no form. Found-on-site roles + serve teams carry it.
+  volunteers: [],
 
   testimonies: [
     { key: 'testimony_stories', label: 'Member testimony stories',
@@ -643,29 +661,10 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
     'kids', 'students', 'college', 'adults', 'care', 'additional',
   ]),
 
-  local_outreach: [
-    ...ministryBaseline(),
-    { key: 'partners_list',  label: 'Local ministry partners',
-      description: 'Organizations the church partners with locally.',
-      detect: t => itemKindMatches(t, 'partner', 'organization'),
-      itemKinds: ['partner', 'organization'] },
-    { key: 'opportunities',  label: 'Local outreach opportunities',
-      description: 'Recurring + one-time service events.',
-      detect: t => itemKindMatches(t, 'event', 'opportunity'),
-      itemKinds: ['event', 'opportunity'] },
-  ],
-
-  global_outreach: [
-    ...ministryBaseline(),
-    { key: 'partners_list',  label: 'Global ministry partners',
-      description: 'Missionaries + organizations supported globally.',
-      detect: t => itemKindMatches(t, 'partner', 'organization', 'missionary'),
-      itemKinds: ['partner', 'organization', 'missionary'] },
-    { key: 'opportunities',  label: 'Global outreach opportunities',
-      description: 'Mission trips, sponsorships, prayer partnerships.',
-      detect: t => itemKindMatches(t, 'event', 'opportunity', 'trip'),
-      itemKinds: ['event', 'opportunity', 'trip'] },
-  ],
+  // local/global outreach: no form. Partner organization + program
+  // cards in the found-on-site display carry it.
+  local_outreach: [],
+  global_outreach: [],
 
   // ── Events ──────────────────────────────────────────────────────────
   // Only the calendar link — recurring events and camps + retreats
@@ -679,25 +678,9 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
   ],
 
   // ── Giving ──────────────────────────────────────────────────────────
-  ways_to_give: [
-    { key: 'platform',     label: 'Giving platform',
-      description: 'Where online gifts get processed (Subsplash, PCO, etc.).',
-      detect:  t => topicHasKeyword(t, 'subsplash', 'planning center', 'tithely', 'pushpay') || topicHasMatch(t, RE_URL),
-      extract: t => firstMatch(t, RE_URL) ?? firstPassageContaining(t, 'subsplash', 'planning center', 'tithely', 'pushpay') },
-    { key: 'methods',      label: 'Ways to give',
-      description: 'Online, recurring, in-person, app, stocks, etc.',
-      detect:  t => topicHasKeyword(t, 'recurring', 'in person', 'in-person', 'app', 'online', 'check', 'stock'),
-      extract: t => firstPassageContaining(t, 'recurring', 'in person', 'app', 'online', 'check') },
-    { key: 'why_give',     label: 'Why someone should give',
-      description: 'Mission-tied rationale for generosity.',
-      detect:  t => topicHasKeyword(t, 'because of your', 'your gift', 'generosity', 'tithe', 'why give'),
-      extract: t => firstPassageContaining(t, 'because of your', 'your gift', 'generosity', 'tithe', 'why give') },
-    { key: 'scripture',    label: 'Anchor scripture',
-      description: 'Bible verses or sayings about giving.',
-      detect:  t => topicHasMatch(t, RE_BIBLE_REF) || itemKindMatches(t, 'scripture'),
-      extract: t => firstMatch(t, RE_BIBLE_REF),
-      itemKinds: ['scripture'] },
-  ],
+  // ways_to_give: no form. The found-on-site CTAs + key phrases +
+  // scripture items carry it.
+  ways_to_give: [],
 
   campaigns: [
     { key: 'active_campaigns', label: 'Active or upcoming campaigns',
