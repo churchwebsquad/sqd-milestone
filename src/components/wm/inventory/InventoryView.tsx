@@ -569,7 +569,12 @@ function BucketReviewCard({
   // show, and the form prefills cover the rest.
   const hasInventory = topics.some(t => (t.items ?? []).length > 0)
   const showFoundOnSite = hasInventory && !HIDE_FOUND_ON_SITE.has(bucket.key)
-  const [foundOpen, setFoundOpen] = useState(false)
+  // Default open when there are NO form fields — the bucket is
+  // entirely the found-on-site section in that case, so hiding it
+  // behind a toggle would leave the card empty. Buckets that DO have
+  // form fields keep the collapse default so partners see the form
+  // first and can opt in to verify the inventory.
+  const [foundOpen, setFoundOpen] = useState(coverage.length === 0)
 
   // Empty-baseline + staff-supplied + no inventory → compact note
   // (e.g. Photos bucket when Brand Squad hasn't shipped anything yet).
