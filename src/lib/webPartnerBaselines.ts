@@ -532,28 +532,10 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
   ],
 
   // ── Staff, Volunteers & Testimonies ─────────────────────────────────
-  staff: [
-    { key: 'staff_list',      label: 'Staff / pastor list', description: 'Named pastors + staff with roles.',
-      detect: t => itemKindMatches(t, 'staff', 'person', 'team_member') || topicHasKeyword(t, 'pastor', 'staff'),
-      itemKinds: ['staff', 'person', 'team_member'] },
-    { key: 'leader_bio',      label: 'Leader bios',         description: 'Short bio per named staff member.',
-      detect: t => itemsAny(t, it => typeof (it as Record<string, unknown>).bio === 'string'),
-      // Bios are surfaced via the staff items' bio field — the
-      // generic formatter doesn't include `bio` in its primary
-      // displays, so use a tailored extract here.
-      extract: t => {
-        const bios = (t.items ?? [])
-          .filter(it => ['staff','person','team_member'].includes(String(it.kind ?? '')))
-          .map(it => {
-            const name = asString(it, 'name') || asString(it, 'title')
-            const bio  = asString(it, 'bio')
-            if (name && bio) return `${name} — ${bio}`
-            return bio || null
-          })
-          .filter((s): s is string => Boolean(s))
-        return bios.length > 0 ? bios.join('\n\n') : null
-      } },
-  ],
+  // Staff: no form fields — the found-on-site cards below the bucket
+  // already show name + role + bio + email per person, which is
+  // exactly the form we'd otherwise ask the partner to retype.
+  staff: [],
 
   careers: [
     { key: 'openings_or_decision', label: 'Open positions OR decision to skip',
@@ -620,24 +602,12 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
       extract: t => firstMatch(t, RE_URL) },
   ],
 
-  next_steps: [
-    { key: 'pathway_steps',     label: 'Discipleship pathway steps',
-      description: 'Sequential steps (Starting Point → Membership → Serve → Lead).',
-      detect: t => itemKindMatches(t, 'program', 'step', 'pathway_step') || (t.passages?.length ?? 0) > 1,
-      itemKinds: ['program', 'step', 'pathway_step', 'class'] },
-    { key: 'audience',          label: 'Target audience per step',
-      description: 'Who each step is for (new believers, members, etc.).',
-      detect:  t => topicHasKeyword(t, 'new believer', 'new to', 'first time', 'member', 'leader'),
-      extract: t => firstPassageContaining(t, 'new believer', 'first time', 'new to', 'member') },
-    { key: 'registration',      label: 'Registration links',
-      description: 'How to sign up for each step.',
-      detect:  t => topicHasMatch(t, RE_URL),
-      extract: t => firstMatch(t, RE_URL) },
-    { key: 'frequency_location', label: 'Frequency + location',
-      description: 'When + where each step happens.',
-      detect:  t => topicHasMatch(t, RE_TIME) || topicHasMatch(t, RE_DAY),
-      extract: t => firstMatch(t, RE_TIME) ?? firstMatch(t, RE_DAY) },
-  ],
+  // Next steps: no form fields — the found-on-site program cards
+  // (Starting Point, Next Steps class, baptism class, etc.) carry the
+  // full pathway. If a church bundles groups or baptism under their
+  // next-steps pathway, those standalone buckets are also suppressed
+  // upstream in InventoryView.
+  next_steps: [],
 
   classes: [
     { key: 'class_list',  label: 'Named classes',
@@ -698,20 +668,14 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
   ],
 
   // ── Events ──────────────────────────────────────────────────────────
+  // Only the calendar link — recurring events and camps + retreats
+  // were dropped per branding feedback (partners just need to confirm
+  // the calendar URL; specific events live there).
   events: [
     { key: 'events_link',     label: 'Events calendar',
       description: 'Calendar URL (PCO, ChurchCenter, embedded, etc.).',
       detect:  t => topicHasMatch(t, RE_URL) || topicHasKeyword(t, 'calendar', 'upcoming events'),
       extract: t => firstMatch(t, RE_URL) },
-    { key: 'recurring_events', label: 'Recurring events',
-      description: 'Standing events on the calendar (e.g. Wednesday night).',
-      detect: t => itemKindMatches(t, 'event') && topicHasMatch(t, RE_DAY),
-      itemKinds: ['event'] },
-    { key: 'camps_retreats',  label: 'Camps + retreats',
-      description: 'Annual or seasonal away events.',
-      detect: t => topicHasKeyword(t, 'camp', 'retreat', 'getaway')
-                 || itemKindMatches(t, 'camp', 'retreat'),
-      itemKinds: ['camp', 'retreat'] },
   ],
 
   // ── Giving ──────────────────────────────────────────────────────────
@@ -753,17 +717,14 @@ export const BUCKET_BASELINES: Record<string, BaselineField[]> = {
  *  every ministry bucket (kids, students, adults, care, etc.). Built
  *  once and instantiated per bucket so each ministry section reads the
  *  same baseline. */
-/** Simplified ministry baseline: a single freeform "details" field
- *  partners can use for anything that isn't already captured in the
- *  Program cards (which render below the form). The named program
- *  data (meeting time, leader, contact, etc.) is shown as cards
- *  separately, so we don't duplicate those fields here. */
+/** Ministry baseline is now empty — the program cards rendered
+ *  beneath the bucket (Mission Kids, Mission Students, etc.) already
+ *  surface the structured data partners would otherwise fill in.
+ *  Adding form fields on top of those cards was duplicating the
+ *  review experience. Partners still get an "Add something we
+ *  missed" affordance for content the crawl didn't pick up. */
 function ministryBaseline(): BaselineField[] {
-  return [
-    { key: 'ministry_details',  label: 'Additional ministry details',
-      description: 'Anything not already covered by the programs below — e.g. overall ministry intro, age groupings, leadership philosophy.',
-      detect:  () => false },
-  ]
+  return []
 }
 
 function buildMinistryBaselines(keys: string[]): Record<string, BaselineField[]> {

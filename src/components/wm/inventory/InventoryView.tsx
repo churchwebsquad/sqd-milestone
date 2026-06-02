@@ -152,10 +152,35 @@ function ReviewAccordion({
   marks?:           Map<string, Mark>
   saveMark?:        SaveMark
 }) {
+  // Some churches roll groups + baptism INTO their next-steps
+  // pathway (Mission Viejo, etc.) so we'd be double-asking by
+  // showing standalone small_groups / baptism buckets. Detect by
+  // scanning the next_steps topic's items for group / baptism-shaped
+  // program names; when present, drop the standalone buckets.
+  const filteredGroups = useMemo(() => {
+    const ns = topicsByKey.get('next_steps')
+    const nsNames = (ns?.items ?? []).map(it => {
+      const r = it as Record<string, unknown>
+      return String(r.name ?? r.title ?? r.label ?? '').toLowerCase()
+    })
+    const nsCoversGroups  = nsNames.some(n => /\b(life\s*group|small\s*group|community\s*group|connect\s*group)\b/.test(n))
+    const nsCoversBaptism = nsNames.some(n => /bapti[sz]/.test(n))
+    if (!nsCoversGroups && !nsCoversBaptism) return PARTNER_GROUPS
+    return PARTNER_GROUPS
+      .map(g => ({
+        ...g,
+        buckets: g.buckets.filter(b => {
+          if (b.key === 'small_groups' && nsCoversGroups)  return false
+          if (b.key === 'baptism'      && nsCoversBaptism) return false
+          return true
+        }),
+      }))
+      .filter(g => g.buckets.length > 0)
+  }, [topicsByKey])
 
   return (
     <>
-      {PARTNER_GROUPS.map(g => (
+      {filteredGroups.map(g => (
         <ReviewGroupAccordion
           key={g.key}
           group={g}
@@ -520,21 +545,6 @@ function BucketBlock({
 // collapsible "What we found on your current site" reveals the raw
 // crawl evidence (passages + named items) as reference context.
 
-/** Buckets that surface their items as program cards beneath the form.
- *  Other buckets stay form-only and hide raw passages from the
- *  partner-facing view (the data stays in the DB / inventoried items,
- *  just not displayed under the form). */
-const PROGRAM_DISPLAY_BUCKETS = new Set([
-  'kids', 'students', 'college', 'adults', 'care',
-  'local_outreach', 'global_outreach', 'additional',
-  'next_steps', 'classes',
-])
-
-/** Buckets that surface staff items in a restored structured-card
- *  view (faces + roles + bios) instead of joining everything into a
- *  single text block. */
-const STAFF_DISPLAY_BUCKETS = new Set(['staff'])
-
 function BucketReviewCard({
   bucket, topics, snippetsByToken, marks, saveMark,
 }: {
@@ -545,23 +555,18 @@ function BucketReviewCard({
   saveMark?:        SaveMark
 }) {
   const coverage = computeBaselineCoverage(bucket.key, topics)
-  // Display mode is now opt-in per bucket rather than auto-derived
-  // from item kinds. Events have item kind="event" but we DON'T want
-  // the program-card display there — partners just need the form
-  // (events_link). Likewise sermons / weekend-services keep the form
-  // even when items exist, since the baseline form already covers
-  // what we need to confirm.
-  const showPrograms = PROGRAM_DISPLAY_BUCKETS.has(bucket.key)
-                      && topics.some(t => (t.items ?? []).some(it =>
-                        it.kind === 'program' || it.kind === 'ministry'))
-  const showStaff = STAFF_DISPLAY_BUCKETS.has(bucket.key)
-                   && topics.some(t => (t.items ?? []).some(it =>
-                     it.kind === 'staff' || it.kind === 'person' || it.kind === 'team_member'))
+  // Always surface inventoried items beneath the form when they
+  // exist. The raw passage quote rows that previously cluttered the
+  // view are filtered out inside TopicCard via reviewMode now — the
+  // structured items (programs, FAQs, staff, scripture, etc.) still
+  // show, and the form prefills cover the rest.
+  const hasInventory = topics.some(t => (t.items ?? []).length > 0)
 
-  // Buckets without a baseline scaffold (e.g. Branding & Photos —
-  // staff-supplied) fall back to a compact note + the inventoried
-  // context if any.
-  if (coverage.length === 0) {
+  // Empty-baseline + staff-supplied + no inventory → compact note
+  // (e.g. Photos bucket when Brand Squad hasn't shipped anything yet).
+  // Otherwise we always render the full card so the found-on-site
+  // display below has somewhere to live.
+  if (coverage.length === 0 && !hasInventory) {
     return (
       <article id={`bucket:${bucket.key}`} className="bg-white border border-lavender rounded-xl px-4 py-3 scroll-mt-24">
         <p className="text-deep-plum font-semibold text-sm">{bucket.label}</p>
@@ -602,18 +607,16 @@ function BucketReviewCard({
           />
         )}
 
-        {/* Display add-ons per bucket type. Most buckets show form
-            only — the raw passage / item content is kept on the
-            backend but hidden from the partner. Ministries get the
-            program-card view; Staff gets the restored structured
-            card view; everything else is form-only. */}
-        {showStaff && (
-          <StaffSection topics={topics} snippetsByToken={snippetsByToken} />
-        )}
-        {showPrograms && (
+        {/* "What we found on your site" — always shown when the
+            bucket has inventoried items. Raw passage quotes are
+            filtered inside TopicCard via reviewMode (they were the
+            noisy "/next-steps/  ·  ‘Ready to take your next steps?’"
+            blocks); structured items (programs, FAQs, staff,
+            scripture, key phrases, etc.) still surface. */}
+        {hasInventory && (
           <div className="border-t border-lavender/60 pt-4 space-y-3">
             <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">
-              Programs we found on your site
+              What we found on your site
             </p>
             {topics.map(t => (
               <TopicCard
@@ -628,55 +631,6 @@ function BucketReviewCard({
         )}
       </div>
     </article>
-  )
-}
-
-/** Restored structured-card layout for the staff bucket — replaces
- *  the text-block "Pastor Name — Role" join with a card per person
- *  showing name, role, bio. Pulls from items where kind matches the
- *  staff family. */
-function StaffSection({
-  topics, snippetsByToken: _snippets,
-}: {
-  topics:           TopicRow[]
-  snippetsByToken?: Map<string, SnippetRow>
-}) {
-  const staffItems: Item[] = []
-  for (const t of topics) {
-    for (const it of (t.items ?? [])) {
-      if (it.kind === 'staff' || it.kind === 'person' || it.kind === 'team_member') {
-        staffItems.push(it)
-      }
-    }
-  }
-  if (staffItems.length === 0) return null
-  return (
-    <div className="border-t border-lavender/60 pt-4 space-y-3">
-      <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">
-        Staff we found on your site
-      </p>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {staffItems.map((it, i) => {
-          const r = it as Record<string, unknown>
-          const name = typeof r.name === 'string' ? r.name : (typeof r.title === 'string' ? r.title : 'Staff member')
-          const role = typeof r.role === 'string' ? r.role : (typeof r.position === 'string' ? r.position : '')
-          const bio  = typeof r.bio === 'string' ? r.bio : ''
-          const email = typeof r.email === 'string' ? r.email : ''
-          return (
-            <div key={`staff-${i}`} className="rounded-lg border border-lavender bg-cream/30 p-3">
-              <p className="font-serif italic text-base text-deep-plum">{name}</p>
-              {role && <p className="text-[11px] uppercase tracking-wider font-bold text-primary-purple mt-0.5">{role}</p>}
-              {bio && <p className="text-xs text-deep-plum mt-2 leading-relaxed">{bio}</p>}
-              {email && (
-                <a href={`mailto:${email}`} className="mt-2 inline-block text-[11px] text-primary-purple hover:underline font-semibold">
-                  {email}
-                </a>
-              )}
-            </div>
-          )
-        })}
-      </div>
-    </div>
   )
 }
 
@@ -1059,15 +1013,19 @@ function TopicCard({
         </Section>
       )}
 
-      {/* Details — consolidated detail items + snippets + passages */}
-      {(consolidatedDetails.length > 0 || dedupedPassages.length > 0) && (
+      {/* Details — consolidated detail items + snippets + passages.
+          Raw passages (PassageRow) are hidden in reviewMode because
+          they were the noisy "/url/  ·  ‘quoted text’" rows that
+          didn't map to any baseline field. The values that DO matter
+          already feed the form prefills via baseline extractors. */}
+      {(consolidatedDetails.length > 0 || (!reviewMode && dedupedPassages.length > 0)) && (
         <Section reviewMode={reviewMode} icon={ClipboardList} title="Details">
           {consolidatedDetails.length > 0 && (
             <div className="space-y-2">
               {consolidatedDetails.map((d, i) => <ConsolidatedDetailRow key={`d-${i}`} entry={d} reviewMode={reviewMode} />)}
             </div>
           )}
-          {dedupedPassages.length > 0 && (
+          {!reviewMode && dedupedPassages.length > 0 && (
             <div className={(consolidatedDetails.length > 0 ? 'mt-3' : '') + ' space-y-2'}>
               {dedupedPassages.map((p, i) => <PassageRow key={`p-${i}`} passage={p} reviewMode={reviewMode} />)}
             </div>
