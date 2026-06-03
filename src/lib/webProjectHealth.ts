@@ -124,6 +124,17 @@ export interface HealthInputs {
    *  in vacation overrides downstream if the caller wants. */
   joshWeeklyCapacity: number
   today: Date
+  /** Optional dev-queue slot from `computeDevQueue`. When provided,
+   *  the slot's devEndDate replaces the per-project capacity-based
+   *  projection — queue position trumps optimistic isolation math.
+   *  P3 doesn't get to claim "ships in 2 weeks" when P1 + P2 own
+   *  the dev's next 8 weeks. */
+  queueSlot?: {
+    devStartDate:        string
+    devEndDate:          string
+    hoursBeforeStart:    number
+    remainingDevHours:   number
+  }
 }
 
 export interface HealthResult {
@@ -349,18 +360,34 @@ export function computeProjectHealth(i: HealthInputs): HealthResult {
     capProjectionDate.setDate(capProjectionDate.getDate() + daysNeeded)
     const capProjection = toIsoDate(capProjectionDate)
 
-    // Pick the EARLIER of the two when both exist; the allocation-
-    // based one only wins when bookings are realistic.
-    const candidates: string[] = []
-    if (allocProjection) candidates.push(allocProjection)
-    candidates.push(capProjection)
-    candidates.sort()
-    projection = candidates[0]
+    // Queue-based candidate — when a dev-queue slot is supplied the
+    // queue's devEndDate is the authoritative projection. It already
+    // factors in higher-priority work consuming the dev's calendar
+    // first; capacity-based math would lie by assuming the dev
+    // starts THIS project today.
+    const queueProjection = i.queueSlot?.devEndDate ?? null
 
-    if (allocProjection && capProjection < allocProjection) {
-      reasons.push(
-        `Booked allocations finish ${fmtDate(allocProjection)}, but ${remaining.toFixed(1)}h at ${cap}h/week could finish by ${fmtDate(capProjection)} if reshuffled.`,
-      )
+    // Pick the projection. Queue wins when available — it's the only
+    // candidate that respects priority order. Otherwise pick the
+    // EARLIER of allocation-based + capacity-based, same as before.
+    if (queueProjection) {
+      projection = queueProjection
+      if (i.queueSlot && i.queueSlot.hoursBeforeStart > 0) {
+        reasons.push(
+          `Queue: ${i.queueSlot.hoursBeforeStart.toFixed(0)}h of higher-priority work first; dev picks this up ${fmtDate(i.queueSlot.devStartDate)}.`,
+        )
+      }
+    } else {
+      const candidates: string[] = []
+      if (allocProjection) candidates.push(allocProjection)
+      candidates.push(capProjection)
+      candidates.sort()
+      projection = candidates[0]
+      if (allocProjection && capProjection < allocProjection) {
+        reasons.push(
+          `Booked allocations finish ${fmtDate(allocProjection)}, but ${remaining.toFixed(1)}h at ${cap}h/week could finish by ${fmtDate(capProjection)} if reshuffled.`,
+        )
+      }
     }
   }
 

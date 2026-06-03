@@ -38,6 +38,14 @@ interface Props {
   allocations: Array<{ week_starting: string; hours: number }>
   pageCount?:  number
   completedProjectCount?: number
+  /** When supplied, the feasibility math respects queue position
+   *  (devEndDate beats the optimistic per-project projection). */
+  queueSlot?:  {
+    devStartDate:      string
+    devEndDate:        string
+    hoursBeforeStart:  number
+    remainingDevHours: number
+  } | null
 }
 
 const VERDICT_TONE: Record<FeasibilityResult['verdict'],
@@ -55,7 +63,7 @@ const VERDICT_LABEL: Record<FeasibilityResult['verdict'], string> = {
 }
 
 export function FeasibilityPanel({
-  project, milestones, allocations, pageCount, completedProjectCount,
+  project, milestones, allocations, pageCount, completedProjectCount, queueSlot,
 }: Props) {
   const [target, setTarget] = useState<string>(() => {
     const d = fromIsoDate(project.launch_date)
@@ -79,8 +87,9 @@ export function FeasibilityPanel({
       targetDate: target,
       pageCount,
       completedProjectCount,
+      queueSlot: queueSlot ?? undefined,
     })
-  }, [target, project, milestones, allocations, pageCount, completedProjectCount])
+  }, [target, project, milestones, allocations, pageCount, completedProjectCount, queueSlot])
 
   const pulledLevers: Lever[] = result
     ? result.leversAvailable.filter(l => pulled.has(l.lever))

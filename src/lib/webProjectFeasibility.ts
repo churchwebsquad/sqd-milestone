@@ -76,6 +76,15 @@ export interface FeasibilityInputs {
   /** Optional — count of completed projects to set confidence.
    *  ≥10 = high, 5–9 = medium, <5 = low. */
   completedProjectCount?: number
+  /** Optional dev-queue slot. Pass-through to computeProjectHealth
+   *  so the projection respects queue position instead of the per-
+   *  project capacity optimistic case. */
+  queueSlot?:          {
+    devStartDate:      string
+    devEndDate:        string
+    hoursBeforeStart:  number
+    remainingDevHours: number
+  }
 }
 
 // Tunables — could move to strategy_app_config later. Keep the
@@ -97,6 +106,7 @@ export function computeProjectFeasibility(i: FeasibilityInputs): FeasibilityResu
     allocations: i.allocations,
     joshWeeklyCapacity: i.joshWeeklyCapacity,
     today: i.today,
+    queueSlot: i.queueSlot,
   } as HealthInputs)
 
   // ── How much capacity sits between today and the AM's target? ──

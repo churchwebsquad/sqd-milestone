@@ -15,6 +15,7 @@ import {
   type HealthMilestoneRow,
   type HealthResult,
 } from '../lib/webProjectHealth'
+import { computeDevQueue, type QueueSlot } from '../lib/webDevQueue'
 import type {
   StrategyWebProject,
   StrategyDevWeeklyAllocation,
@@ -26,6 +27,7 @@ export interface ProjectRowVM extends StrategyWebProject {
   milestones:            HealthMilestoneRow[]
   allocations:           StrategyDevWeeklyAllocation[]
   health:                HealthResult
+  queueSlot:             QueueSlot | null
 }
 
 interface UseProjectsWithHealthResult {
@@ -142,9 +144,16 @@ export function useProjectsWithHealth(options?: {
         allocsByProject.get(a.web_project_id)!.push(a)
       }
 
+      // Dev queue — sequential capacity walk across all active
+      // projects. Each row's slot becomes the authoritative source
+      // for the launch projection (computeProjectHealth respects it
+      // when supplied).
+      const queue = computeDevQueue(projectRows, DEFAULT_DEV_CAPACITY, today)
+
       const built: ProjectRowVM[] = projectRows.map(p => {
         const milestones  = subsByMember.get(p.member) ?? []
         const allocations = allocsByProject.get(p.id) ?? []
+        const queueSlot   = queue.get(p.id) ?? null
         const health = computeProjectHealth({
           project: p,
           milestones,
@@ -154,6 +163,7 @@ export function useProjectsWithHealth(options?: {
           })),
           joshWeeklyCapacity: DEFAULT_DEV_CAPACITY,
           today,
+          queueSlot: queueSlot ?? undefined,
         })
         return {
           ...p,
@@ -162,6 +172,7 @@ export function useProjectsWithHealth(options?: {
           milestones,
           allocations,
           health,
+          queueSlot,
         }
       })
 

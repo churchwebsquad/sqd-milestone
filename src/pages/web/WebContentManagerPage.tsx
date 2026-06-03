@@ -84,7 +84,11 @@ export default function WebContentManagerPage() {
   const [error, setError] = useState<string | null>(null)
   const [railOpen, setRailOpen] = useState(true)
 
-  const loadProject = async (silent = false) => {
+  // Silent by default — in-app mutations that call onChange refetch
+  // without flipping the loading spinner, which would unmount the
+  // tab body and read as a page refresh to the user. Only the
+  // initial mount + project change flip the spinner.
+  const loadProject = async (silent = true) => {
     if (!projectId) return
     if (!silent) setLoading(true)
     const { data, error: err } = await supabase
@@ -97,7 +101,7 @@ export default function WebContentManagerPage() {
     if (!silent) setLoading(false)
   }
 
-  useEffect(() => { void loadProject() }, [projectId])
+  useEffect(() => { void loadProject(false) }, [projectId])
 
   // Project polling was removed: it ran every 5 seconds and replaced
   // the `project` object reference even when nothing changed, which

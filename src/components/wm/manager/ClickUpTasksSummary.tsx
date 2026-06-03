@@ -32,7 +32,6 @@ const ACTIVE_STATUSES = new Set([
 interface TaskRow {
   task_id: string
   name: string
-  url: string | null
   status: string | null
   due_date: string | null
 }
@@ -87,30 +86,38 @@ export function ClickUpTasksSummary({ member }: Props) {
         setListId(list.id)
         setListName(list.name)
 
-        // 2) Fetch tasks for that list (mirrors ClickUpTasksSection's
-        //    pattern: tasks + latest status + filter out deletions).
+        // 2) Fetch tasks for that list. public.tasks doesn't carry
+        //    a `url` column — we synthesize one from task_id at
+        //    render time (`/t/<task_id>` works for any clickup task).
+        //    Selecting a non-existent column makes PostgREST reject
+        //    the whole query, which is the bug that read as
+        //    "0 active tasks."
         const { data: rawTasks } = await supabase
           .from('tasks')
-          .select('task_id, name, url')
+          .select('task_id, name')
           .eq('list_id', list.id)
           .or('task_archived.is.null,task_archived.eq.false')
-        const all = (rawTasks ?? []) as Array<{ task_id: string; name: string; url: string | null }>
+        const all = (rawTasks ?? []) as Array<{ task_id: string; name: string }>
         if (all.length === 0) {
           if (!cancelled) { setTasks([]); setLoading(false); }
           return
         }
         const taskIds = all.map(t => t.task_id)
+        // task_deletions stores the deleted task_id in `id` (no
+        // separate task_id column). Reading `task_id` here returned
+        // null + error from PostgREST; using `id` gets the actual
+        // list of deleted task ids.
         const [statusRes, deletionsRes, dueRes] = await Promise.all([
           supabase.from('status_history')
             .select('task_id, status_after, changed_at')
             .in('task_id', taskIds)
             .order('changed_at', { ascending: false }),
-          supabase.from('task_deletions').select('task_id').in('task_id', taskIds),
+          supabase.from('task_deletions').select('id').in('id', taskIds),
           supabase.from('view_latest_due_dates' as 'tasks')
             .select('task_id, due_date_after')
             .in('task_id', taskIds),
         ])
-        const deleted = new Set((deletionsRes.data ?? []).map((d: { task_id: string }) => d.task_id))
+        const deleted = new Set((deletionsRes.data ?? []).map((d: { id: string }) => d.id))
         const latestStatus = new Map<string, string>()
         for (const r of (statusRes.data ?? []) as Array<{ task_id: string; status_after: string }>) {
           if (!latestStatus.has(r.task_id)) latestStatus.set(r.task_id, r.status_after)
@@ -124,7 +131,6 @@ export function ClickUpTasksSummary({ member }: Props) {
           .map(t => ({
             task_id: t.task_id,
             name: t.name,
-            url: t.url,
             status: latestStatus.get(t.task_id) ?? null,
             due_date: latestDue.get(t.task_id) ?? null,
           }))
@@ -227,7 +233,7 @@ export function ClickUpTasksSummary({ member }: Props) {
           {highlight.map(t => (
             <li key={t.task_id}>
               <a
-                href={t.url ?? `https://app.clickup.com/t/${t.task_id}`}
+                href={`https://app.clickup.com/t/${CLICKUP_TEAM_ID}/${t.task_id}`}
                 target="_blank"
                 rel="noreferrer"
                 className="flex items-center justify-between gap-2 text-[11px] py-0.5 group"
