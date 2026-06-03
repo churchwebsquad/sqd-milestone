@@ -196,12 +196,13 @@ export function PlanningWorkspace({ project, onChange }: Props) {
     return merged
   }, [draft.phase_progress, inference])
 
-  // ClickUp-derived dev-phase remaining hours. Null when no engaged
-  // dev tasks exist — the math then falls back to dev_hours_estimate.
+  // ClickUp-derived dev-phase remaining hours. Anchored on
+  // dev_hours_estimate so unstarted projects don't read 0h when
+  // most planned tasks are still in template-"Open" status.
   const inferredDevHours = useMemo<number | null>(() => {
     if (!inference) return null
-    return inferredDevRemainingHours(inference)
-  }, [inference])
+    return inferredDevRemainingHours(inference, draft.dev_hours_estimate ?? null)
+  }, [inference, draft.dev_hours_estimate])
 
   const queueSlot = useMemo<QueueSlot | null>(() => {
     if (queueRows.length === 0) return null

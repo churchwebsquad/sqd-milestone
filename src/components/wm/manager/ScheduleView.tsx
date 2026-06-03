@@ -134,6 +134,17 @@ export function ScheduleView({ rows, loading, onSelect, capacityPerWeek = DEFAUL
     )
   }
 
+  // Which project is the dev actively in (today between queueSlot
+  // devStart and devEnd)? Used for the "current sprint" highlight
+  // banner above the grid.
+  const todayDate = new Date()
+  const currentSprint = rows.find(r => {
+    if (!r.queueSlot) return false
+    const s = fromIsoDate(r.queueSlot.devStartDate)
+    const e = fromIsoDate(r.queueSlot.devEndDate)
+    return s && e && s <= todayDate && todayDate <= e
+  }) ?? null
+
   // Sticky-left grid: column 1 (project list) is sticky; columns 2..N
   // are week cells. Use `display: grid` with a fixed left-col width
   // and per-week 64px columns for a Gantt feel.
@@ -141,6 +152,50 @@ export function ScheduleView({ rows, loading, onSelect, capacityPerWeek = DEFAUL
 
   return (
     <div className="space-y-3">
+      {/* Current sprint — which project the dev is actually inside
+          this week. Helps the team answer "where is dev right now?"
+          without scanning the grid. */}
+      {currentSprint?.queueSlot && (() => {
+        const slot = currentSprint.queueSlot
+        const start = fromIsoDate(slot.devStartDate)
+        const end   = fromIsoDate(slot.devEndDate)
+        const weeksDur = start && end
+          ? Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (7 * 86400000)))
+          : null
+        const completed = (currentSprint.dev_hours_estimate ?? 0)
+                        - (slot.remainingDevHours ?? 0)
+        const pct = currentSprint.dev_hours_estimate
+          ? Math.max(0, Math.min(100, Math.round(100 * completed / Number(currentSprint.dev_hours_estimate))))
+          : null
+        return (
+          <div className="rounded-lg border border-wm-accent/40 bg-wm-accent-tint px-3 py-2">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">
+                  Sprint in progress · P{currentSprint.priority_order ?? '?'}
+                </p>
+                <p className="text-[13px] font-semibold text-wm-text">
+                  {currentSprint.church_name ?? `Member ${currentSprint.member}`}
+                  {' · '}
+                  {currentSprint.name}
+                </p>
+              </div>
+              <div className="text-right text-[11px] text-wm-text-muted">
+                <p>
+                  Window: {formatMonthDay(start as Date)}
+                  {' → '}{formatMonthDay(end as Date)}
+                  {weeksDur && ` · ${weeksDur}w`}
+                </p>
+                <p className="font-mono tabular-nums text-wm-text">
+                  {slot.remainingDevHours.toFixed(1)}h left
+                  {pct != null ? ` · ${pct}% done` : ''}
+                </p>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Horizon toggle + capacity legend */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <WMSegmentedToggle<Horizon>
@@ -154,9 +209,9 @@ export function ScheduleView({ rows, loading, onSelect, capacityPerWeek = DEFAUL
         />
         <p className="text-[11px] text-wm-text-muted">
           Capacity: <span className="font-semibold text-wm-text">{capacityPerWeek}h/wk</span>
-          {' '}· Solid cells = queue-allocated hours
-          {' '}· Faded cells = queue window (dev's scheduled to be here)
-          {' '}· Red total = over capacity
+          {' '}· Each row = one project sprint
+          {' '}· Solid cells = booked hours
+          {' '}· Faded cells = queue window
         </p>
       </div>
 
@@ -236,38 +291,45 @@ function ProjectRow({ row, weeks, weekIso, todayIso, cells, onSelect }: RowProps
       ? toIsoDate(weekStart(fromIsoDate(row.launch_date) as Date))
       : null
     : null
-  // Queue dev window for at-a-glance "when does dev pick this up"
-  // — only when the slot has real hours.
-  const devStart = row.queueSlot?.devStartDate
-    ? formatMonthDay(fromIsoDate(row.queueSlot.devStartDate) as Date)
+  // Sprint window — render as a single contiguous block per project.
+  const slot = row.queueSlot
+  const startDate = slot?.devStartDate ? fromIsoDate(slot.devStartDate) : null
+  const endDate   = slot?.devEndDate   ? fromIsoDate(slot.devEndDate)   : null
+  const devStartWeekIso = startDate ? toIsoDate(weekStart(startDate)) : null
+  const devEndWeekIso   = endDate   ? toIsoDate(weekStart(endDate))   : null
+  const sprintWeeks = startDate && endDate
+    ? Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / (7 * 86400000)))
     : null
-  const devEnd = row.queueSlot?.devEndDate
-    ? formatMonthDay(fromIsoDate(row.queueSlot.devEndDate) as Date)
-    : null
-  const devWindow = devStart && devEnd && row.queueSlot && row.queueSlot.remainingDevHours > 0
-    ? `Dev: ${devStart} → ${devEnd}`
-    : null
-  const devStartWeekIso = row.queueSlot?.devStartDate
-    ? toIsoDate(weekStart(fromIsoDate(row.queueSlot.devStartDate) as Date))
-    : null
-  const devEndWeekIso = row.queueSlot?.devEndDate
-    ? toIsoDate(weekStart(fromIsoDate(row.queueSlot.devEndDate) as Date))
+  const remainingH = slot?.remainingDevHours ?? 0
+  const totalH = Number(row.dev_hours_estimate ?? 0)
+  const completedH = Math.max(0, totalH - remainingH)
+  const pct = totalH > 0
+    ? Math.max(0, Math.min(100, Math.round(100 * completedH / totalH)))
     : null
 
   return (
     <>
-      {/* Frozen left cell — project label */}
+      {/* Frozen left cell — sprint summary */}
       <button
         type="button"
         onClick={() => onSelect(row.id)}
         className="sticky left-0 z-10 bg-wm-bg-elevated border-b border-r border-wm-border px-3 py-2 text-left hover:bg-wm-bg-hover transition-colors"
       >
         <p className="text-[10px] uppercase tracking-[0.08em] font-bold text-wm-text-subtle truncate">
-          {row.priority_order ? `P${row.priority_order} · ` : ''}{churchLine}
+          {row.priority_order ? `Sprint ${row.priority_order} · ` : ''}{churchLine}
         </p>
         <p className="text-[12px] font-semibold text-wm-text truncate">{row.name}</p>
-        {devWindow ? (
-          <p className="text-[10px] text-wm-accent mt-0.5 truncate">{devWindow}</p>
+        {slot && startDate && endDate ? (
+          <div className="mt-1">
+            <p className="text-[10px] text-wm-accent-strong truncate">
+              {formatMonthDay(startDate)} → {formatMonthDay(endDate)}
+              {sprintWeeks ? ` · ${sprintWeeks}w` : ''}
+            </p>
+            <p className="text-[10px] text-wm-text-muted font-mono tabular-nums">
+              {remainingH.toFixed(1)}h left of {totalH || remainingH}h
+              {pct != null && totalH > 0 ? ` · ${pct}%` : ''}
+            </p>
+          </div>
         ) : (
           <p className="text-[10px] text-wm-text-muted mt-0.5">
             {row.dev_hours_estimate ?? 0}h budget · no queue slot

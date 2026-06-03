@@ -231,7 +231,10 @@ export function useProjectsWithHealth(options?: {
         }
         return {
           project: { ...p, phase_progress: mergedProgress },
-          inferredDevRemainingHours: inferredDevRemainingHours(inf),
+          inferredDevRemainingHours: inferredDevRemainingHours(
+            inf,
+            p.dev_hours_estimate ?? null,
+          ),
         }
       })
 

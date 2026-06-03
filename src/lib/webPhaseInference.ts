@@ -27,6 +27,10 @@ export interface PhaseInference {
   perPhase:                 PhaseProgress
   /** Σ time_estimate_minutes of incomplete engaged tasks, per phase. */
   perPhaseRemainingMinutes: Partial<Record<WebProjectPhase, number>>
+  /** Σ time_estimate_minutes of complete tasks, per phase. The
+   *  "what's actually shipped" signal — independent of how the team
+   *  uses the Open/Engaged status convention. */
+  perPhaseCompletedMinutes: Partial<Record<WebProjectPhase, number>>
   /** Σ time_estimate_minutes of all engaged tasks, per phase. */
   perPhaseTotalMinutes:     Partial<Record<WebProjectPhase, number>>
   /** Σ time_estimate_minutes of non-complete tasks across all phases. */
@@ -175,9 +179,10 @@ export function inferProgressFromTasks(rows: ClickUpTaskRow[]): PhaseInference {
     return true
   })
 
-  const perPhaseTotals   : Partial<Record<WebProjectPhase, number>> = {}
-  const perPhaseComplete : Partial<Record<WebProjectPhase, number>> = {}
-  const perPhaseRemaining: Partial<Record<WebProjectPhase, number>> = {}
+  const perPhaseTotals    : Partial<Record<WebProjectPhase, number>> = {}
+  const perPhaseCompleteWt: Partial<Record<WebProjectPhase, number>> = {}
+  const perPhaseCompleteEst: Partial<Record<WebProjectPhase, number>> = {}
+  const perPhaseRemaining : Partial<Record<WebProjectPhase, number>> = {}
   let remainingMinutes = 0
   let totalMinutes     = 0
   const unclassifiedNames: string[] = []
@@ -192,15 +197,15 @@ export function inferProgressFromTasks(rows: ClickUpTaskRow[]): PhaseInference {
       unclassifiedNames.push(r.task_name)
       continue
     }
-    // Use est for the weighted math; fall back to 1 unit when an
-    // estimate is missing so the task still contributes to counts.
+    // Weighted progress uses max(est, 1) so 0-estimate tasks still
+    // contribute equally to the bar fill. But the actual minutes
+    // (`est`) are tracked separately for completed/remaining sums.
     const weight = Math.max(est, 1)
     perPhaseTotals[phase] = (perPhaseTotals[phase] ?? 0) + weight
     if (done) {
-      perPhaseComplete[phase] = (perPhaseComplete[phase] ?? 0) + weight
+      perPhaseCompleteWt[phase]  = (perPhaseCompleteWt[phase]  ?? 0) + weight
+      perPhaseCompleteEst[phase] = (perPhaseCompleteEst[phase] ?? 0) + est
     } else if (est > 0) {
-      // Only count actual minutes toward remaining — a 0-estimate
-      // task can't credibly inflate the projection.
       perPhaseRemaining[phase] = (perPhaseRemaining[phase] ?? 0) + est
     }
   }
@@ -209,13 +214,14 @@ export function inferProgressFromTasks(rows: ClickUpTaskRow[]): PhaseInference {
   for (const [phase, total] of Object.entries(perPhaseTotals)) {
     const t = Number(total ?? 0)
     if (t <= 0) continue
-    const c = Number(perPhaseComplete[phase as WebProjectPhase] ?? 0)
+    const c = Number(perPhaseCompleteWt[phase as WebProjectPhase] ?? 0)
     perPhase[phase as WebProjectPhase] = Math.min(1, c / t)
   }
 
   return {
     perPhase,
     perPhaseRemainingMinutes: perPhaseRemaining,
+    perPhaseCompletedMinutes: perPhaseCompleteEst,
     perPhaseTotalMinutes:     perPhaseTotals,
     remainingMinutes,
     totalMinutes,
@@ -225,12 +231,32 @@ export function inferProgressFromTasks(rows: ClickUpTaskRow[]): PhaseInference {
   }
 }
 
-/** Best-shot "remaining DEV hours" from inference. Returns null when
- *  there's no engaged dev-phase task data to lean on — the caller
- *  should fall back to dev_hours_estimate × (1 - dev_progress) in
- *  that case. The cleanest signal for the queue, since dev hours are
- *  what the queue actually consumes. */
-export function inferredDevRemainingHours(inf: PhaseInference): number | null {
+/** Best-shot "remaining DEV hours" from inference.
+ *
+ *  Anchors on `dev_hours_estimate - completed_dev_minutes/60` so a
+ *  project whose dev work hasn't started yet (most tasks in "Open"
+ *  template state, filtered out) doesn't read 0h remaining. The
+ *  team's CSV-imported estimate IS the planned total; inference
+ *  tells us what's actually shipped against it.
+ *
+ *  Falls back to engaged-only inferred remaining when no estimate
+ *  exists, and returns null when there's no signal at all.
+ *
+ *  @param inf     PhaseInference from `inferProgressFromTasks`
+ *  @param devEst  dev_hours_estimate from the project row
+ */
+export function inferredDevRemainingHours(
+  inf: PhaseInference,
+  devEst?: number | null,
+): number | null {
+  const completedMin = Number(inf.perPhaseCompletedMinutes.dev ?? 0)
+  const completedHours = completedMin / 60
+  if (devEst != null && devEst > 0) {
+    // Estimate-anchored: planned total minus what's been completed.
+    // Floor at 0 (over-completed projects don't get negative remainder).
+    return Math.max(0, Math.round((devEst - completedHours) * 10) / 10)
+  }
+  // No estimate — fall back to engaged-only inferred remaining.
   const totalMin = Number(inf.perPhaseTotalMinutes.dev ?? 0)
   if (totalMin <= 0) return null
   const remMin = Number(inf.perPhaseRemainingMinutes.dev ?? 0)
