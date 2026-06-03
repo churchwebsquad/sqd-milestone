@@ -7,6 +7,7 @@ import ChurchesDashboardPage from './pages/ChurchesDashboardPage'
 import ChurchDetailPage from './pages/ChurchDetailPage'
 import DiscoveryBriefPage from './pages/DiscoveryBriefPage'
 import WebProjectsPage from './pages/web/WebProjectsPage'
+import AmQuestionsPage from './pages/web/AmQuestionsPage'
 import WebTemplatesPage from './pages/web/WebTemplatesPage'
 import WebContentManagerPage from './pages/web/WebContentManagerPage'
 import CopyReviewAdminPage from './pages/CopyReviewAdminPage'
@@ -123,6 +124,7 @@ export default function App() {
                 links (/intake, /content, /design, /dev, /reviews) redirect
                 to the corresponding tab on the unified page. */}
             <Route path="/web" element={<WebProjectsPage />} />
+            <Route path="/web/am-questions" element={<AmQuestionsPage />} />
             <Route path="/web/templates" element={<WebTemplatesPage />} />
             <Route path="/web/:projectId" element={<WebContentManagerPage />} />
             <Route path="/web/:projectId/content"  element={<WebContentManagerPage />} />

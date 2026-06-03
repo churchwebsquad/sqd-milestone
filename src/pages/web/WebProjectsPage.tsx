@@ -14,7 +14,7 @@
 
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { ChevronDown, ChevronRight, Library, Plus, Search, Settings, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Library, MessageCircle, Plus, Search, Settings, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { SettingsWorkspace } from '../../components/wm/workspaces/SettingsWorkspace'
 import { WMSegmentedToggle } from '../../components/wm/SegmentedToggle'
@@ -133,6 +133,14 @@ export default function WebProjectsPage() {
               Settings
               {settingsOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
             </button>
+            <Link
+              to="/web/am-questions"
+              className="inline-flex items-center gap-1.5 rounded-full border border-lavender bg-white text-xs font-semibold text-deep-plum px-3 py-1.5 hover:border-primary-purple hover:text-primary-purple transition-colors"
+              title="Paste an AM message about launch timelines — get an evidence-backed draft response per church mentioned."
+            >
+              <MessageCircle size={12} />
+              AM questions
+            </Link>
             <Link
               to="/web/templates"
               className="inline-flex items-center gap-1.5 rounded-full border border-lavender bg-white text-xs font-semibold text-deep-plum px-3 py-1.5 hover:border-primary-purple hover:text-primary-purple transition-colors"
