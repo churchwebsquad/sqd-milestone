@@ -986,6 +986,46 @@ export interface StrategyWebPhaseMap {
   phase:       WebProjectPhase
 }
 
+// ── v59 Feasibility + AM Q&A scaffolding ──────────────────
+export type TalkingPointCategory =
+  | 'process_value'
+  | 'value_prop'
+  | 'cadence'
+  | 'objections'
+  | 'differentiator'
+
+export interface StrategyTalkingPoint {
+  id:           string
+  category:     TalkingPointCategory
+  title:        string
+  body:         string                          // markdown
+  tags:         string[]
+  applies_when: Record<string, unknown>
+  is_active:    boolean
+  sort_order:   number
+  updated_by:   string | null
+  updated_at:   string
+  created_at:   string
+}
+
+export interface DetectedProjectRef {
+  member_id:        number | null
+  church_name:      string | null
+  matched_project_id: string | null
+  confidence:       'high' | 'medium' | 'low'
+  target_dates:     Array<{ iso: string | null; raw: string; hardness: 'hard' | 'ideal' | 'soft' }>
+}
+
+export interface StrategyAmQuestionDraft {
+  id:                  string
+  employee_id:         string | null
+  message_in:          string
+  response_md:         string
+  projects:            DetectedProjectRef[]
+  talking_points_used: string[]
+  created_at:          string
+}
+
 export type WebProjectKind = 'redesign' | 'audit' | 'new_build' | string
 export type WebProjectPhase = 'intake' | 'content' | 'design' | 'dev' | 'review' | 'launched' | string
 

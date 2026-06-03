@@ -20,6 +20,7 @@ import { Loader2 } from 'lucide-react'
 import { WMFlyoutPanel } from '../FlyoutPanel'
 import { WMSegmentedToggle } from '../SegmentedToggle'
 import { WMStatusPill } from '../StatusPill'
+import { FeasibilityPanel } from './FeasibilityPanel'
 import { supabase } from '../../../lib/supabase'
 import {
   computeProjectHealth,
@@ -290,6 +291,21 @@ export function ProjectEditPanel({ projectId, onClose, onSaved }: Props) {
               })}
             </div>
           </section>
+
+          {/* ── Feasibility check ──────────────────── */}
+          <FeasibilityPanel
+            project={{
+              id: project.id,
+              current_phase: project.current_phase,
+              launch_date: draft.launch_date,
+              phase_estimates: draft.phase_estimates,
+              ai_assist_multipliers: draft.ai_assist_multipliers,
+              dev_hours_estimate: draft.dev_hours_estimate,
+              archived: project.archived,
+            }}
+            milestones={milestones}
+            allocations={allocations}
+          />
 
           {/* ── Computed ───────────────────────────── */}
           {computed && (

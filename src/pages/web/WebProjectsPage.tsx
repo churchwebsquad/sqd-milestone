@@ -22,6 +22,7 @@ import { BoardView } from '../../components/wm/manager/BoardView'
 import { ScheduleView } from '../../components/wm/manager/ScheduleView'
 import { FilterChip } from '../../components/wm/manager/FilterChip'
 import { ProjectEditPanel } from '../../components/wm/manager/ProjectEditPanel'
+import { SalesQuoteCard } from '../../components/wm/manager/SalesQuoteCard'
 import { useProjectsWithHealth } from '../../hooks/useProjectsWithHealth'
 import type { ProjectRowVM } from '../../hooks/useProjectsWithHealth'
 import type { ProjectSubStatus, WebProjectPhase } from '../../types/database'
@@ -165,6 +166,12 @@ export default function WebProjectsPage() {
             <SettingsWorkspace />
           </div>
         )}
+
+        {/* Sales-quote one-liner — only renders when there's launched-
+            project history to baseline from. */}
+        <div className="mb-4">
+          <SalesQuoteCard rows={rows} />
+        </div>
 
         {/* Toolbar: view toggle + search + archived */}
         <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
