@@ -2,6 +2,16 @@
 // completion, normalizes pages, runs the snippet extractor, writes
 // results to web-hub.crawl_jobs.
 //
+// Repeat-prefix expansion: after the initial crawl completes, the
+// trigger inspects the URL set. If 3+ pages share a 2-segment path
+// prefix (e.g. `/leadership/jane`, `/leadership/john`, `/leadership/
+// kate`) — a sign that detail-page enumeration ate the cap — and the
+// crawl hit its page limit, the trigger fires a SECOND crawl with
+// that prefix added to excludePaths and the cap bumped to 50. The
+// second crawl's pages are merged with the first; the snippet
+// extractor sees both. Caps out at one expansion per job to avoid
+// runaway loops on sites with many such patterns.
+//
 // IMPORTANT field-mapping fix vs prior versions:
 //   Firecrawl v1 returns each page as { url, markdown, html, links,
 //   metadata: { title, ... } }. Older code wrote result.title and
@@ -57,20 +67,27 @@ Deno.serve(async (req) => {
       return json({ error: "FIRECRAWL_API_KEY missing" }, 500);
     }
 
-    try {
+    // Wrapper for one Firecrawl crawl call (polled to completion).
+    // Returns { pages, hitCap } where hitCap is true when Firecrawl
+    // returned ≥ requested limit (detail-page enumeration likely
+    // soaked it all up). Throws on permanent failure.
+    const runFirecrawl = async (limit, excludePathsForRun) => {
       const startRes = await fetch("https://api.firecrawl.dev/v1/crawl", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${fireCrawlApiKey}` },
         body: JSON.stringify({
-          url: payload.target_url, limit: maxPages, maxDepth, excludePaths,
+          url: payload.target_url, limit, maxDepth, excludePaths: excludePathsForRun,
           allowBackwardLinks: false, allowExternalLinks: false,
-          scrapeOptions: { formats: ["markdown", "html", "links"], onlyMainContent: true },
+          // onlyMainContent:false includes footer + header chrome so
+          // the LLM categorizer can pick up site-wide details (address,
+          // phone, social links) that live in the footer on most
+          // church sites. The downstream LLM filters nav noise.
+          scrapeOptions: { formats: ["markdown", "html", "links"], onlyMainContent: false },
         }),
       });
       if (!startRes.ok) {
         const t = await startRes.text();
-        await supabase.schema("web-hub").from("crawl_jobs").update({ status: "failed", error_message: `API: ${t}` }).eq("id", crawlJob.id);
-        return json({ error: "Firecrawl error", details: t }, 500);
+        throw new Error(`Firecrawl start: ${t}`);
       }
       const startData = await startRes.json();
 
@@ -87,14 +104,75 @@ Deno.serve(async (req) => {
         if (!statRes.ok) break;
         const stat = await statRes.json();
         await supabase.schema("web-hub").from("crawl_jobs")
-          .update({ pages_crawled: stat.completed || 0, pages_found: stat.total || maxPages })
+          .update({ pages_crawled: stat.completed || 0, pages_found: stat.total || limit })
           .eq("id", crawlJob.id);
         if (stat.status === "completed") { done = true; pages = stat.data || []; }
         else if (stat.status === "failed") throw new Error("Firecrawl job failed");
       }
       if (!done) {
+        return { pages, hitCap: false, timedOut: true };
+      }
+      return { pages, hitCap: pages.length >= limit, timedOut: false };
+    };
+
+    try {
+      const initial = await runFirecrawl(maxPages, excludePaths);
+      if (initial.timedOut) {
         await supabase.schema("web-hub").from("crawl_jobs").update({ status: "in_progress", error_message: "Polling timed out" }).eq("id", crawlJob.id);
         return json({ success: true, crawl_job_id: crawlJob.id, message: "in_progress" }, 202);
+      }
+      let pages = initial.pages;
+
+      // Repeat-prefix detection. Bucket URLs by their first two path
+      // segments. If any prefix has ≥3 URLs (likely detail-page
+      // enumeration: /leadership/jane, /leadership/john, …) AND the
+      // crawl filled its cap, do ONE expansion pass — exclude those
+      // prefixes and crawl again at the EXPANDED cap so the
+      // categorizer sees the next layer of pages instead.
+      if (initial.hitCap) {
+        const prefixCounts = new Map();
+        for (const p of pages) {
+          const u = p.url || (p.metadata && p.metadata.sourceURL) || "";
+          let pathOnly = "";
+          try { pathOnly = new URL(u).pathname; } catch { continue; }
+          const segs = pathOnly.split("/").filter(Boolean);
+          if (segs.length < 2) continue;
+          const prefix = "/" + segs[0];
+          prefixCounts.set(prefix, (prefixCounts.get(prefix) || 0) + 1);
+        }
+        const heavyPrefixes = [];
+        for (const [prefix, count] of prefixCounts.entries()) {
+          // Skip prefixes that are already excluded by default.
+          const alreadyExcluded = excludePaths.some(rule =>
+            rule.includes(prefix.replace(/^\//, "")) || rule.includes(prefix),
+          );
+          if (alreadyExcluded) continue;
+          if (count >= 3) heavyPrefixes.push({ prefix, count });
+        }
+        if (heavyPrefixes.length > 0) {
+          console.log("Repeat-prefix expansion:", heavyPrefixes);
+          const expandedExcludes = [
+            ...excludePaths,
+            ...heavyPrefixes.map(p => `^${p.prefix}/[^/]+/?$`),
+          ];
+          const expandedLimit = 50;
+          try {
+            const expanded = await runFirecrawl(expandedLimit, expandedExcludes);
+            if (!expanded.timedOut && expanded.pages.length > 0) {
+              // Merge by URL — keep first occurrence (initial wins on
+              // duplicates). The expanded pass should mostly add new
+              // URLs since heavy prefixes are now excluded.
+              const seen = new Set(pages.map(p => p.url || (p.metadata && p.metadata.sourceURL) || ""));
+              for (const p of expanded.pages) {
+                const u = p.url || (p.metadata && p.metadata.sourceURL) || "";
+                if (u && !seen.has(u)) { pages.push(p); seen.add(u); }
+              }
+            }
+          } catch (e) {
+            console.error("Expansion crawl failed:", e?.message ?? e);
+            // Soft-fail — initial pages still ship.
+          }
+        }
       }
 
       // Map Firecrawl's actual response to our canonical storage shape.
