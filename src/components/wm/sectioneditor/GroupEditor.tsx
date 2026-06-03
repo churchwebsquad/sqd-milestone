@@ -14,6 +14,7 @@ import {
   ChevronDown, ChevronRight, Plus, Trash2, ArrowUp, ArrowDown, Check,
 } from 'lucide-react'
 import { SlotEditor } from './SlotEditor'
+import type { SlotAiContext } from './SlotEditor'
 import type { WMSnippetOption } from '../RichTextEditor'
 import type { WebGroupDef, WebFieldDef, WebContentTemplate } from '../../../types/database'
 
@@ -25,9 +26,11 @@ interface Props {
   depth?: number
   /** Card-family templates for palette-referenced groups. */
   cardTemplates?: Record<string, WebContentTemplate>
+  /** AI-suggest grounding — passed through to nested SlotEditors. */
+  aiContext?: SlotAiContext
 }
 
-export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardTemplates }: Props) {
+export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardTemplates, aiContext }: Props) {
   // Palette-referenced groups (item_template_ref): the user picks
   // which Card template renders each item; items use the SELECTED
   // Card's fields as their item_schema.
@@ -160,6 +163,7 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardT
               value={single[field.key]}
               onChange={(v) => setField(field.key, v)}
               snippets={snippets}
+              aiContext={aiContext}
             />
           ) : (
             <GroupEditor
@@ -169,6 +173,7 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardT
               onChange={(v) => setField(field.key, v)}
               snippets={snippets}
               depth={depth + 1}
+              aiContext={aiContext}
               cardTemplates={cardTemplates}
             />
           )

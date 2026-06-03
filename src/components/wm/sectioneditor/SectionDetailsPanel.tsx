@@ -18,9 +18,10 @@ import { useEffect, useRef, useState } from 'react'
 import {
   X, Image as ImageIcon, LayoutGrid, MousePointerClick, FormInput,
   ChevronDown, ChevronRight, RotateCw, Archive, Trash2,
-  MessageSquarePlus, Clock, AlertTriangle,
+  MessageSquarePlus, Clock, AlertTriangle, Sparkles, Loader2,
 } from 'lucide-react'
 import { SlotEditor } from './SlotEditor'
+import type { SlotAiContext } from './SlotEditor'
 import { GroupEditor } from './GroupEditor'
 import { GridEditor, detectGridChain } from './GridEditor'
 import { SnippetMenu } from './SnippetMenu'
@@ -96,6 +97,24 @@ export function SectionDetailsPanel({
   const presence = template ? summarizeSlotPresence(template, values) : null
   const fields: WebFieldDef[] = template?.fields ?? []
   const visibleFields = fields.filter(isEditableField)
+
+  // Grounding context the AI suggest-copy button passes to the edge
+  // function so it can write on-brand, in-context copy. siblings
+  // captures the current section's top-level slot values so e.g. a
+  // heading suggestion knows what the description already says.
+  const aiContext = {
+    section_layer: template?.layer_name ?? undefined,
+    church_name: project?.church_short_name ?? project?.church_name ?? project?.name ?? undefined,
+    siblings: fields
+      .filter(f => f.kind === 'slot' && typeof values[f.key] === 'string' && (values[f.key] as string).trim())
+      .slice(0, 12)
+      .map(f => ({
+        layer_name: f.layer_name ?? f.key,
+        value: typeof values[f.key] === 'string'
+          ? (values[f.key] as string).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+          : '',
+      })),
+  }
 
   // Roll up every slot whose entered text exceeds its max_chars
   // budget. The CharCounter on each individual slot makes the local
@@ -184,24 +203,12 @@ export function SectionDetailsPanel({
             field and how many chars over budget it is. */}
         {template && overflowingSlots.length > 0 && (
           <Section title={`Layout budget · ${overflowingSlots.length} field${overflowingSlots.length === 1 ? '' : 's'} over`} defaultOpen>
-            <div className="rounded-md border border-wm-warning/40 bg-wm-warning-bg p-3">
-              <p className="text-[11px] text-wm-text leading-snug mb-2">
-                Copy exceeds the layout's natural character budget — the
-                rendered preview will spill or wrap unexpectedly. Trim
-                where possible, or swap to a denser variant via Change
-                variant if the content genuinely needs more room.
-              </p>
-              <ul className="space-y-1">
-                {overflowingSlots.map(o => (
-                  <li key={o.path} className="flex items-center justify-between gap-2 text-[11px]">
-                    <span className="font-mono text-wm-text-muted truncate">{o.label}</span>
-                    <span className="font-mono tabular-nums text-wm-danger font-semibold shrink-0">
-                      +{o.over} chars
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <TightenAllPanel
+              overflowingSlots={overflowingSlots}
+              aiContext={aiContext}
+              fieldValues={values}
+              onApplyAll={(nextValues) => onChange({ field_values: nextValues })}
+            />
           </Section>
         )}
 
@@ -218,6 +225,7 @@ export function SectionDetailsPanel({
                       value={values[field.key]}
                       onChange={(v) => setValue(field.key, v)}
                       snippets={snippets}
+                      aiContext={aiContext}
                     />
                   )
                 }
@@ -243,6 +251,7 @@ export function SectionDetailsPanel({
                     onChange={(v) => setValue(field.key, v)}
                     snippets={snippets}
                     cardTemplates={cardTemplates}
+                    aiContext={aiContext}
                   />
                 )
               })}
@@ -416,7 +425,22 @@ export function SectionDetailsPanel({
 
 // ── Layout-budget overflow ─────────────────────────────────────────
 
-interface OverflowingSlot { path: string; label: string; over: number }
+interface OverflowingSlot {
+  /** Dotted path for display ("card[1].heading"). */
+  path: string
+  /** Humanized label for the rollup row. */
+  label: string
+  /** Chars over the budget. */
+  over: number
+  /** Slot def — fed back to the AI suggest call. */
+  slot: WebSlotDef
+  /** Current value (raw — richtext keeps HTML). */
+  current: string
+  /** Ordered path-walk segments. For arrays, segment is a number
+   *  (index); for objects, a string (key). Used by setNestedSlotValue
+   *  to write back the suggested copy. */
+  pathSegments: Array<string | number>
+}
 
 /** Walk every text-bearing slot in the section (top-level + nested
  *  group items) and report ones whose entered text exceeds the
@@ -431,6 +455,7 @@ function collectOverflowingSlots(
     schema: ReadonlyArray<WebFieldDef>,
     valueAt: unknown,
     pathPrefix: string[],
+    pathSegments: Array<string | number>,
   ): void => {
     if (!Array.isArray(schema)) return
     for (const f of schema) {
@@ -447,7 +472,11 @@ function collectOverflowingSlots(
         if (used > max) {
           const path = [...pathPrefix, f.key].join('.')
           const label = humanizeSlotPath([...pathPrefix, f.layer_name ?? f.key])
-          out.push({ path, label, over: used - max })
+          out.push({
+            path, label, over: used - max,
+            slot: f, current: v,
+            pathSegments: [...pathSegments, f.key],
+          })
         }
         continue
       }
@@ -461,12 +490,68 @@ function collectOverflowingSlots(
             ? ((groupValueRaw as Record<string, unknown>).items as Array<Record<string, unknown>>)
             : [])
       for (let i = 0; i < items.length; i++) {
-        visit(f.item_schema as WebFieldDef[], items[i], [...pathPrefix, `${f.key}[${i + 1}]`])
+        // For palette-shaped groups, items live under `items`; for
+        // native groups, the array IS the value. Use the same path
+        // segments at runtime via setNestedSlotValue.
+        const innerSegments: Array<string | number> = Array.isArray(groupValueRaw)
+          ? [...pathSegments, f.key, i]
+          : [...pathSegments, f.key, 'items', i]
+        visit(f.item_schema as WebFieldDef[], items[i],
+          [...pathPrefix, `${f.key}[${i + 1}]`], innerSegments)
       }
     }
   }
-  visit(fields, values, [])
+  visit(fields, values, [], [])
   return out
+}
+
+/** Deep-set a value into a copy of `root` at the given path segments,
+ *  creating intermediate objects/arrays as needed. Returns the new
+ *  root. Used by the "Tighten all" bulk action to write AI
+ *  suggestions back into deeply-nested group item slots. */
+function setNestedSlotValue(
+  root: Record<string, unknown>,
+  segments: Array<string | number>,
+  value: unknown,
+): Record<string, unknown> {
+  if (segments.length === 0) return root
+  const cloneRoot: Record<string, unknown> = { ...root }
+  let cur: Record<string, unknown> | unknown[] = cloneRoot
+  for (let i = 0; i < segments.length - 1; i++) {
+    const seg = segments[i]
+    const nextSeg = segments[i + 1]
+    const nextIsIndex = typeof nextSeg === 'number'
+    if (Array.isArray(cur)) {
+      const idx = seg as number
+      const cloneArr = [...cur]
+      const child = cloneArr[idx]
+      if (child == null || typeof child !== 'object') {
+        cloneArr[idx] = nextIsIndex ? [] : {}
+      } else {
+        cloneArr[idx] = Array.isArray(child) ? [...child] : { ...(child as Record<string, unknown>) }
+      }
+      // Splice the cloned array back into the parent.
+      // The previous-level clone reference is still held; mutate it.
+      ;(cur as unknown as unknown[]).length = 0
+      ;(cur as unknown as unknown[]).push(...cloneArr)
+      cur = cloneArr[idx] as Record<string, unknown> | unknown[]
+    } else {
+      const key = seg as string
+      const child = (cur as Record<string, unknown>)[key]
+      if (child == null || typeof child !== 'object') {
+        ;(cur as Record<string, unknown>)[key] = nextIsIndex ? [] : {}
+      } else {
+        ;(cur as Record<string, unknown>)[key] = Array.isArray(child)
+          ? [...child]
+          : { ...(child as Record<string, unknown>) }
+      }
+      cur = (cur as Record<string, unknown>)[key] as Record<string, unknown> | unknown[]
+    }
+  }
+  const last = segments[segments.length - 1]
+  if (Array.isArray(cur)) (cur as unknown as unknown[])[last as number] = value
+  else (cur as Record<string, unknown>)[last as string] = value
+  return cloneRoot
 }
 
 function humanizeSlotPath(parts: ReadonlyArray<string>): string {
@@ -605,6 +690,147 @@ function Section({
       {open && <div>{children}</div>}
     </section>
   )
+}
+
+/** "Tighten all" bulk action UI. Fires slot-copy-suggest in parallel
+ *  for every overflowing slot with action='tighten', then writes the
+ *  first returned suggestion back into field_values via setNestedSlot
+ *  Value. Single onChange call at the end so the undo stack treats
+ *  the bulk pass as one operation. */
+function TightenAllPanel({
+  overflowingSlots, aiContext, fieldValues, onApplyAll,
+}: {
+  overflowingSlots: OverflowingSlot[]
+  aiContext: SlotAiContext
+  fieldValues: Record<string, unknown>
+  onApplyAll: (next: Record<string, unknown>) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [lastResult, setLastResult] = useState<{ applied: number; skipped: number } | null>(null)
+
+  const runTightenAll = async () => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    setLastResult(null)
+    setProgress({ done: 0, total: overflowingSlots.length })
+
+    try {
+      // Fire all suggest calls in parallel, but settle individually so
+      // one failure doesn't abort the whole pass.
+      const tasks = overflowingSlots.map(async (o) => {
+        try {
+          const currentPlain = o.slot.type === 'richtext'
+            ? o.current.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
+            : o.current
+          const { data, error: invokeErr } = await supabase.functions.invoke('slot-copy-suggest', {
+            body: {
+              slot: {
+                layer_name: o.slot.layer_name,
+                type: o.slot.type,
+                max_chars: o.slot.max_chars,
+                scope: o.slot.scope,
+                heading_level: o.slot.heading_level,
+              },
+              current: currentPlain,
+              action: 'tighten',
+              context: aiContext,
+            },
+          })
+          if (invokeErr) throw invokeErr
+          const suggestions: string[] = Array.isArray(data?.suggestions) ? data.suggestions : []
+          // Prefer the SHORTEST suggestion that still fits the budget;
+          // falls back to the first if all are over.
+          const max = o.slot.max_chars ?? Infinity
+          const sorted = [...suggestions].sort((a, b) => a.length - b.length)
+          const pick = sorted.find(s => s.length <= max) ?? sorted[0]
+          if (!pick) return null
+          // Wrap in <p> for richtext slots so TipTap normalizes cleanly.
+          const wrapped = o.slot.type === 'richtext' ? `<p>${escapeHtml(pick)}</p>` : pick
+          return { o, value: wrapped }
+        } catch {
+          return null
+        } finally {
+          setProgress(p => p ? { done: p.done + 1, total: p.total } : null)
+        }
+      })
+
+      const results = await Promise.all(tasks)
+      let next = { ...fieldValues }
+      let applied = 0
+      let skipped = 0
+      for (const r of results) {
+        if (!r) { skipped++; continue }
+        next = setNestedSlotValue(next, r.o.pathSegments, r.value)
+        applied++
+      }
+      onApplyAll(next)
+      setLastResult({ applied, skipped })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+      setProgress(null)
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-wm-warning/40 bg-wm-warning-bg p-3">
+      <div className="flex items-start gap-2 mb-2">
+        <p className="text-[11px] text-wm-text leading-snug flex-1">
+          Copy exceeds the layout's natural character budget — the
+          rendered preview will spill or wrap unexpectedly. Trim where
+          possible, swap to a denser variant, or let the AI take a
+          first pass.
+        </p>
+        <button
+          type="button"
+          onClick={runTightenAll}
+          disabled={busy}
+          className={[
+            'inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-[11px] font-semibold transition-colors shrink-0',
+            busy
+              ? 'bg-wm-bg-hover text-wm-text-subtle cursor-not-allowed'
+              : 'bg-wm-accent text-white hover:bg-wm-accent-hover',
+          ].join(' ')}
+        >
+          {busy
+            ? <><Loader2 size={11} className="animate-spin" />Tightening…</>
+            : <><Sparkles size={11} />Tighten all</>}
+        </button>
+      </div>
+      {progress && (
+        <p className="text-[10px] text-wm-text-muted mb-2 font-mono">
+          {progress.done}/{progress.total} processed
+        </p>
+      )}
+      {lastResult && (
+        <p className="text-[10px] text-wm-text-muted mb-2">
+          Applied {lastResult.applied} suggestion{lastResult.applied === 1 ? '' : 's'}
+          {lastResult.skipped > 0 && ` · ${lastResult.skipped} skipped (no AI suggestion fit)`}.
+        </p>
+      )}
+      {error && (
+        <p className="text-[10px] text-wm-danger mb-2">{error}</p>
+      )}
+      <ul className="space-y-1">
+        {overflowingSlots.map(o => (
+          <li key={o.path} className="flex items-center justify-between gap-2 text-[11px]">
+            <span className="font-mono text-wm-text-muted truncate">{o.label}</span>
+            <span className="font-mono tabular-nums text-wm-danger font-semibold shrink-0">
+              +{o.over} chars
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
 function CounterChip({

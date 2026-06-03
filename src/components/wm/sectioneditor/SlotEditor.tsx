@@ -24,15 +24,30 @@ import {
 } from '../../../lib/cta'
 import type { WebSlotDef, CtaKind, CtaValue } from '../../../types/database'
 
+/** Context the SuggestCopyButton uses to ground its prompt. Threaded
+ *  in from the section panel because individual slots have no way to
+ *  reach the project / template / siblings without it. All fields are
+ *  optional — the edge function falls back to type-only heuristics
+ *  when context is missing. */
+export interface SlotAiContext {
+  section_layer?: string
+  church_name?: string
+  brand_voice?: string
+  /** Surrounding TOP-LEVEL slot values for the same section. Lets the
+   *  AI write a heading that fits the description, etc. */
+  siblings?: Array<{ layer_name?: string; value?: string }>
+}
+
 interface Props {
   slot: WebSlotDef
   value: unknown
   onChange: (v: unknown) => void
   snippets: readonly WMSnippetOption[]
   depth?: number
+  aiContext?: SlotAiContext
 }
 
-export function SlotEditor({ slot, value, onChange, snippets, depth = 0 }: Props) {
+export function SlotEditor({ slot, value, onChange, snippets, depth = 0, aiContext }: Props) {
   // Image slots aren't editable in v4 — the count appears in the
   // panel's bottom "Contents" chip.
   if (slot.type === 'image') return null
@@ -91,6 +106,7 @@ export function SlotEditor({ slot, value, onChange, snippets, depth = 0 }: Props
               }}
               current={currentForAi}
               onApply={applySuggestion}
+              context={aiContext}
             />
           )}
           {wantsSnippetMenu && !isButton && snippets.length > 0 && (
