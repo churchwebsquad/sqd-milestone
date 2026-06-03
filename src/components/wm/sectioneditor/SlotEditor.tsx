@@ -50,7 +50,10 @@ export function SlotEditor({ slot, value, onChange, snippets, depth = 0 }: Props
         </div>
         <div className="flex items-center gap-1.5">
           {slot.max_chars && typeof value === 'string' && (
-            <CharCounter used={value.length} max={slot.max_chars} />
+            <CharCounter
+              used={slot.type === 'richtext' ? plainLength(value) : value.length}
+              max={slot.max_chars}
+            />
           )}
           {wantsSnippetMenu && !isButton && snippets.length > 0 && (
             <SnippetMenu snippets={snippets} slotKey={slot.key} compact />
@@ -108,18 +111,25 @@ function TextInput({
     : 'text'
   const isHeading = slot.heading_level === 1
   const isSubhead = slot.heading_level === 2 || slot.heading_level === 3
+  // max_chars on the schema is the layout's NATURAL budget, surfaced
+  // via the CharCounter meter — but we no longer enforce it as a hard
+  // browser maxLength. Hard truncation mid-keystroke (or mid-paste of
+  // AI-generated copy) is more disorienting than a clear visual
+  // overflow warning, and the AI copywriter needs the freedom to
+  // overshoot when content genuinely demands it.
+  const over = !!(slot.max_chars && stringVal.length > slot.max_chars)
   return (
     <input
       type={inputType}
       value={stringVal}
-      maxLength={slot.max_chars}
       onChange={e => onChange(e.target.value)}
       onFocus={e => focus.registerInput(slot.key, e.currentTarget)}
       onBlur={() => focus.clear(slot.key)}
       placeholder={slot.description ?? slot.default_value ?? ''}
       className={[
-        'w-full bg-wm-bg-elevated text-wm-text px-3 py-2 rounded-md border border-wm-border outline-none',
-        'focus:border-wm-accent focus:ring-2 focus:ring-wm-accent/15 transition-colors',
+        'w-full bg-wm-bg-elevated text-wm-text px-3 py-2 rounded-md border outline-none',
+        'focus:ring-2 focus:ring-wm-accent/15 transition-colors',
+        over ? 'border-wm-danger/60 focus:border-wm-danger' : 'border-wm-border focus:border-wm-accent',
         isHeading ? 'text-[16px] font-bold leading-tight'
           : isSubhead ? 'text-[14px] font-semibold leading-snug'
           : 'text-[13px]',
@@ -226,12 +236,16 @@ function ButtonInput({
       <input
         type="text"
         value={cta.label}
-        maxLength={slot.max_chars}
         onChange={e => patch({ label: e.target.value })}
         onFocus={e => focus.registerInput(slot.key + ':label', e.currentTarget)}
         onBlur={() => focus.clear(slot.key + ':label')}
         placeholder="Button label"
-        className="w-full bg-wm-bg-elevated text-wm-text px-3 py-2 rounded-md border border-wm-border outline-none focus:border-wm-accent focus:ring-2 focus:ring-wm-accent/15 transition-colors text-[13px] font-semibold"
+        className={[
+          'w-full bg-wm-bg-elevated text-wm-text px-3 py-2 rounded-md border outline-none focus:ring-2 focus:ring-wm-accent/15 transition-colors text-[13px] font-semibold',
+          slot.max_chars && cta.label.length > slot.max_chars
+            ? 'border-wm-danger/60 focus:border-wm-danger'
+            : 'border-wm-border focus:border-wm-accent',
+        ].join(' ')}
       />
       <div className="flex items-center gap-1.5">
         <select
@@ -409,15 +423,66 @@ function SlotLabel({ slot, tone }: { slot: WebSlotDef; tone: SlotKind }) {
   )
 }
 
+/** Plain-text length of a richtext HTML string. The richtext editor
+ *  stores HTML, so a raw `.length` would count tags ("<strong>") as
+ *  characters — making the budget meter under-represent headroom on
+ *  formatted copy. Strip tags + collapse whitespace before counting
+ *  so the strategist sees what the layout actually has to render. */
+function plainLength(html: string): number {
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&[a-z]+;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .length
+}
+
+/** Layout-budget meter for a slot.
+ *
+ *  max_chars on each schema slot is the layout's natural ceiling —
+ *  the count past which the rendered preview starts looking
+ *  squished. We surface it as a visible progress bar (not just an
+ *  X/Y readout) so the strategist sees AT A GLANCE how much
+ *  headroom they have. Three states:
+ *
+ *    • Under 85% → muted gray bar, neutral
+ *    • 85-100%   → warning yellow bar, "near limit"
+ *    • Over 100% → danger red bar with overflow amount, "overflowing"
+ *
+ *  Intentionally NOT a hard cap. The strategist (and the AI copywriter
+ *  downstream) needs the freedom to overshoot when content demands it
+ *  and accept the visual consequence, rather than being silently
+ *  truncated mid-thought by the browser's maxLength attribute. */
 function CharCounter({ used, max }: { used: number; max: number }) {
   const over = used > max
-  const warn = used > max * 0.85
+  const warn = !over && used > max * 0.85
+  const pct = Math.min(100, Math.round((used / max) * 100))
+  const overflow = over ? used - max : 0
   return (
-    <span className={[
-      'text-[10px] font-mono tabular-nums',
-      over ? 'text-wm-danger font-semibold' : warn ? 'text-wm-warning' : 'text-wm-text-subtle',
-    ].join(' ')}>
-      {used}/{max}
-    </span>
+    <div
+      className="flex items-center gap-1.5"
+      title={
+        over
+          ? `${used} chars · ${overflow} over the layout's natural ${max}-char budget`
+          : `${used} of ${max} chars`
+      }
+    >
+      <div className="h-1.5 w-12 rounded-full bg-wm-bg-hover overflow-hidden">
+        <div
+          className={[
+            'h-full transition-all duration-200',
+            over ? 'bg-wm-danger' : warn ? 'bg-wm-warning' : 'bg-wm-text-subtle/60',
+          ].join(' ')}
+          style={{ width: over ? '100%' : `${pct}%` }}
+        />
+      </div>
+      <span className={[
+        'text-[10px] font-mono tabular-nums',
+        over ? 'text-wm-danger font-semibold' : warn ? 'text-wm-warning' : 'text-wm-text-subtle',
+      ].join(' ')}>
+        {over ? `+${overflow}` : `${used}/${max}`}
+      </span>
+    </div>
   )
 }

@@ -97,6 +97,14 @@ export function SectionDetailsPanel({
   const fields: WebFieldDef[] = template?.fields ?? []
   const visibleFields = fields.filter(isEditableField)
 
+  // Roll up every slot whose entered text exceeds its max_chars
+  // budget. The CharCounter on each individual slot makes the local
+  // overflow visible — this summary makes the section-level total
+  // visible so the strategist (or AI copywriter) can see at a glance
+  // when the layout is being asked to render more text than it was
+  // designed for.
+  const overflowingSlots = template ? collectOverflowingSlots(fields, values) : []
+
   return (
     <ProjectPagesProvider pages={pages ?? []}>
     <aside className="w-full h-full flex flex-col bg-wm-bg-elevated min-h-0">
@@ -168,6 +176,33 @@ export function SectionDetailsPanel({
             reviewsById={reviewsById ?? {}}
             onCommentsChange={onCommentsChange ?? (async () => {})}
           />
+        )}
+
+        {/* Layout-budget overflow rollup — shown above the field
+            editors so the strategist sees overflow before scrolling
+            through individual char counters. Each entry names the
+            field and how many chars over budget it is. */}
+        {template && overflowingSlots.length > 0 && (
+          <Section title={`Layout budget · ${overflowingSlots.length} field${overflowingSlots.length === 1 ? '' : 's'} over`} defaultOpen>
+            <div className="rounded-md border border-wm-warning/40 bg-wm-warning-bg p-3">
+              <p className="text-[11px] text-wm-text leading-snug mb-2">
+                Copy exceeds the layout's natural character budget — the
+                rendered preview will spill or wrap unexpectedly. Trim
+                where possible, or swap to a denser variant via Change
+                variant if the content genuinely needs more room.
+              </p>
+              <ul className="space-y-1">
+                {overflowingSlots.map(o => (
+                  <li key={o.path} className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="font-mono text-wm-text-muted truncate">{o.label}</span>
+                    <span className="font-mono tabular-nums text-wm-danger font-semibold shrink-0">
+                      +{o.over} chars
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </Section>
         )}
 
         {/* Field editors */}
@@ -377,6 +412,67 @@ export function SectionDetailsPanel({
     </aside>
     </ProjectPagesProvider>
   )
+}
+
+// ── Layout-budget overflow ─────────────────────────────────────────
+
+interface OverflowingSlot { path: string; label: string; over: number }
+
+/** Walk every text-bearing slot in the section (top-level + nested
+ *  group items) and report ones whose entered text exceeds the
+ *  layout's natural character budget. Plain-text length is used for
+ *  richtext so HTML markup doesn't get counted. */
+function collectOverflowingSlots(
+  fields: ReadonlyArray<WebFieldDef>,
+  values: Record<string, unknown>,
+): OverflowingSlot[] {
+  const out: OverflowingSlot[] = []
+  const visit = (
+    schema: ReadonlyArray<WebFieldDef>,
+    valueAt: unknown,
+    pathPrefix: string[],
+  ): void => {
+    if (!Array.isArray(schema)) return
+    for (const f of schema) {
+      if (f.kind === 'slot') {
+        const max = f.max_chars
+        if (!max) continue
+        const v = (valueAt && typeof valueAt === 'object')
+          ? (valueAt as Record<string, unknown>)[f.key]
+          : undefined
+        if (typeof v !== 'string' || !v) continue
+        const used = f.type === 'richtext'
+          ? v.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim().length
+          : v.length
+        if (used > max) {
+          const path = [...pathPrefix, f.key].join('.')
+          const label = humanizeSlotPath([...pathPrefix, f.layer_name ?? f.key])
+          out.push({ path, label, over: used - max })
+        }
+        continue
+      }
+      // Group — recurse into each item's values against item_schema.
+      const groupValueRaw = (valueAt && typeof valueAt === 'object')
+        ? (valueAt as Record<string, unknown>)[f.key]
+        : undefined
+      const items: Array<Record<string, unknown>> = Array.isArray(groupValueRaw)
+        ? (groupValueRaw as Array<Record<string, unknown>>)
+        : (groupValueRaw && typeof groupValueRaw === 'object' && 'items' in (groupValueRaw as Record<string, unknown>)
+            ? ((groupValueRaw as Record<string, unknown>).items as Array<Record<string, unknown>>)
+            : [])
+      for (let i = 0; i < items.length; i++) {
+        visit(f.item_schema as WebFieldDef[], items[i], [...pathPrefix, `${f.key}[${i + 1}]`])
+      }
+    }
+  }
+  visit(fields, values, [])
+  return out
+}
+
+function humanizeSlotPath(parts: ReadonlyArray<string>): string {
+  return parts
+    .map(p => p.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))
+    .join(' › ')
 }
 
 // ── Visibility rules ────────────────────────────────────────────────
