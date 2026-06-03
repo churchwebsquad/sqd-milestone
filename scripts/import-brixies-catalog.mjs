@@ -66,7 +66,7 @@ function parseArgs(argv) {
 
 // ── Taxonomy loader ───────────────────────────────────────────────────
 
-function loadTaxonomy() {
+export function loadTaxonomy() {
   const raw = JSON.parse(fs.readFileSync(TAXONOMY_PATH, 'utf-8'))
 
   // Slots — lowercase key → config (case-insensitive lookup)
@@ -287,7 +287,7 @@ function computeScopeQualifier(parentChain, taxonomy) {
   return null
 }
 
-function walkNode(node, taxonomy, parentChain, discovery) {
+export function walkNode(node, taxonomy, parentChain, discovery) {
   const fields = []
   if (!node.childNodes) return fields
 
@@ -498,7 +498,7 @@ function isImageSiblingGroup(siblings) {
   })
 }
 
-function trimSourceHtml(rootNode, taxonomy) {
+export function trimSourceHtml(rootNode, taxonomy) {
   function walk(node) {
     if (!node.childNodes) return
     const groups = detectSiblingGroups(node, taxonomy)
@@ -764,4 +764,13 @@ async function main() {
   }
 }
 
-main().catch(err => { console.error(err); process.exit(1) })
+// Only run main() when this file is the script entry point. When
+// another script `import`s helpers from here we must NOT trigger the
+// CLI flow (which calls parseArgs against the caller's process.argv).
+const isMain = (() => {
+  try {
+    return import.meta.url === `file://${process.argv[1]}` ||
+           import.meta.url.endsWith(path.basename(process.argv[1]))
+  } catch { return false }
+})()
+if (isMain) main().catch(err => { console.error(err); process.exit(1) })

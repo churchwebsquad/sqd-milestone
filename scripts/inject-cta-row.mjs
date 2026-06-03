@@ -121,8 +121,31 @@ let skipped = 0
 let errors = 0
 
 for (const t of templates) {
-  if (t.source_html?.includes(MARKER)) { alreadyHas++; continue }
-  if (hasButtonsField(t.fields)) { alreadyHas++; continue }
+  const htmlHasMarker = t.source_html?.includes(MARKER)
+  const fieldsHaveButtons = hasButtonsField(t.fields)
+
+  // Case 1: HTML has marker AND fields have buttons — fully done.
+  if (htmlHasMarker && fieldsHaveButtons) { alreadyHas++; continue }
+
+  // Case 2: HTML has marker but fields lack buttons (e.g. after a
+  // schema-restore wiped the field but the source_html injection
+  // persisted). Re-add the field WITHOUT touching HTML.
+  if (htmlHasMarker && !fieldsHaveButtons) {
+    const newFields = [...t.fields, BUTTON_FIELD]
+    const { error: updErr } = await supabase
+      .from('web_content_templates')
+      .update({ fields: newFields })
+      .eq('id', t.id)
+    if (updErr) { console.error(`[FAIL] ${t.layer_name}: ${updErr.message}`); errors++ }
+    else { injected++ }
+    continue
+  }
+
+  // Case 3: Fields have buttons already (probably native to the
+  // template) — no work needed.
+  if (fieldsHaveButtons) { alreadyHas++; continue }
+
+  // Case 4: Fresh template — needs both HTML + fields injection.
   if (!hasDescription(t.fields)) { skipped++; continue }
   if (!t.source_html?.includes('data-layer="Description"')) { skipped++; continue }
 
