@@ -214,6 +214,46 @@ async function main() {
   const memberIds = projects.map(p => p.memberId)
   const { memberToChurch, churchToMember, memberToProject } = await loadMemberLookup(memberIds)
 
+  // ── Stub creation for missing projects ───────────────────
+  // Partners present in the CSV but missing a strategy_web_projects
+  // row get a stub created here (kind='redesign', phase='intake').
+  // Skipped in --dry-run.
+  const stubsToCreate = []
+  for (const proj of projects) {
+    if (!memberToProject.has(proj.memberId)) {
+      stubsToCreate.push({
+        member: proj.memberId,
+        name: `${proj.churchName} Redesign`,
+        kind: 'redesign',
+        current_phase: 'intake',
+      })
+    }
+  }
+  if (stubsToCreate.length > 0) {
+    if (dryRun) {
+      console.log(`[dry-run] Would create ${stubsToCreate.length} stub projects:`)
+      for (const s of stubsToCreate) console.log(`  • member ${s.member}: ${s.name}`)
+    } else {
+      console.log(`Creating ${stubsToCreate.length} stub projects...`)
+      const { data: created, error: stubErr } = await supabase
+        .from('strategy_web_projects')
+        .insert(stubsToCreate)
+        .select('id, member')
+      if (stubErr) {
+        console.error(`[fail] stub insert: ${stubErr.message}`)
+      } else {
+        for (const c of created ?? []) {
+          memberToProject.set(c.member, c.id)
+          churchToMember.set(
+            normalizeName(projects.find(p => p.memberId === c.member)?.churchName ?? ''),
+            c.member,
+          )
+        }
+        console.log(`Created ${created?.length ?? 0} stub projects.`)
+      }
+    }
+  }
+
   // ── Project rows ─────────────────────────────────────────
   const projUpdates = []
   for (const proj of projects) {
