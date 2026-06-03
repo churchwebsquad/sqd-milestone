@@ -159,13 +159,15 @@ export function ScheduleView({ rows, loading, onSelect, capacityPerWeek = DEFAUL
         const slot = currentSprint.queueSlot
         const start = fromIsoDate(slot.devStartDate)
         const end   = fromIsoDate(slot.devEndDate)
-        const weeksDur = start && end
-          ? Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (7 * 86400000)))
-          : null
-        const completed = (currentSprint.dev_hours_estimate ?? 0)
-                        - (slot.remainingDevHours ?? 0)
-        const pct = currentSprint.dev_hours_estimate
-          ? Math.max(0, Math.min(100, Math.round(100 * completed / Number(currentSprint.dev_hours_estimate))))
+        if (!start || !end) return null
+        const weeksDur = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (7 * 86400000)))
+        // dev_hours_estimate comes back as string from Postgres numeric;
+        // coerce explicitly before any arithmetic to avoid NaN crashes.
+        const totalH = Number(currentSprint.dev_hours_estimate ?? 0)
+        const remaining = Number(slot.remainingDevHours ?? 0)
+        const completed = Math.max(0, totalH - remaining)
+        const pct = totalH > 0
+          ? Math.max(0, Math.min(100, Math.round(100 * completed / totalH)))
           : null
         return (
           <div className="rounded-lg border border-wm-accent/40 bg-wm-accent-tint px-3 py-2">
@@ -182,12 +184,12 @@ export function ScheduleView({ rows, loading, onSelect, capacityPerWeek = DEFAUL
               </div>
               <div className="text-right text-[11px] text-wm-text-muted">
                 <p>
-                  Window: {formatMonthDay(start as Date)}
-                  {' → '}{formatMonthDay(end as Date)}
-                  {weeksDur && ` · ${weeksDur}w`}
+                  Window: {formatMonthDay(start)}
+                  {' → '}{formatMonthDay(end)}
+                  {' · '}{weeksDur}w
                 </p>
                 <p className="font-mono tabular-nums text-wm-text">
-                  {slot.remainingDevHours.toFixed(1)}h left
+                  {remaining.toFixed(1)}h left
                   {pct != null ? ` · ${pct}% done` : ''}
                 </p>
               </div>
@@ -199,12 +201,12 @@ export function ScheduleView({ rows, loading, onSelect, capacityPerWeek = DEFAUL
       {/* Horizon toggle + capacity legend */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <WMSegmentedToggle<Horizon>
-          value={horizon}
+          active={horizon}
           onChange={setHorizon}
           options={[
-            { value: '8',  label: 'Next 8w'  },
-            { value: '16', label: 'Next 16w' },
-            { value: '26', label: 'Next 26w' },
+            { key: '8',  label: 'Next 8w'  },
+            { key: '16', label: 'Next 16w' },
+            { key: '26', label: 'Next 26w' },
           ]}
         />
         <p className="text-[11px] text-wm-text-muted">
@@ -300,7 +302,7 @@ function ProjectRow({ row, weeks, weekIso, todayIso, cells, onSelect }: RowProps
   const sprintWeeks = startDate && endDate
     ? Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / (7 * 86400000)))
     : null
-  const remainingH = slot?.remainingDevHours ?? 0
+  const remainingH = Number(slot?.remainingDevHours ?? 0)
   const totalH = Number(row.dev_hours_estimate ?? 0)
   const completedH = Math.max(0, totalH - remainingH)
   const pct = totalH > 0

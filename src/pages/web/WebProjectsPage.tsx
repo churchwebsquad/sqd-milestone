@@ -189,11 +189,11 @@ export default function WebProjectsPage() {
         {/* Toolbar: view toggle + search + archived */}
         <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
           <WMSegmentedToggle<ManagerView>
-            value={view}
+            active={view}
             onChange={(v) => setParam('view', v === 'board' ? null : v)}
             options={[
-              { value: 'board',    label: 'Board' },
-              { value: 'schedule', label: 'Schedule' },
+              { key: 'board',    label: 'Board' },
+              { key: 'schedule', label: 'Schedule' },
             ]}
           />
 
