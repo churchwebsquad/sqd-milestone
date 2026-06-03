@@ -56,7 +56,7 @@ export default function WebProjectsPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  const { rows, loading, error } = useProjectsWithHealth({ includeArchived: showArchived })
+  const { rows, loading, error, refetch } = useProjectsWithHealth({ includeArchived: showArchived })
 
   // Filter / search before passing to the view.
   const visible = useMemo<ProjectRowVM[]>(() => {
@@ -276,6 +276,20 @@ export default function WebProjectsPage() {
             rows={visible}
             loading={loading}
             onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
+            onReorder={async (orderedIds) => {
+              // Renumber priority_order 1..N for the reordered set.
+              // Touches every reordered row; the rest keep their
+              // existing priority (queue position is derived from
+              // the column on next refetch). Optimistic UI via
+              // immediate refetch after the batch update lands.
+              const updates = orderedIds.map((id, i) =>
+                supabase.from('strategy_web_projects')
+                  .update({ priority_order: i + 1, updated_at: new Date().toISOString() })
+                  .eq('id', id),
+              )
+              await Promise.all(updates)
+              await refetch()
+            }}
           />
         )}
 

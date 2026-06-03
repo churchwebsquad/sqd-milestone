@@ -15,7 +15,7 @@
  * applies the chosen levers via the regular ProjectEditPanel fields
  * (AI multipliers, page count, etc.) once they've decided.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { WMStatusPill } from '../StatusPill'
 import {
   computeProjectFeasibility,
@@ -65,7 +65,16 @@ const VERDICT_LABEL: Record<FeasibilityResult['verdict'], string> = {
 export function FeasibilityPanel({
   project, milestones, allocations, pageCount, completedProjectCount, queueSlot,
 }: Props) {
+  // Persist target launch per-project in localStorage so the value
+  // survives reloads. The target is a per-project conversation tool
+  // (what the AM is asking about), so per-project scope is the right
+  // resolution. Per-user-per-browser is fine — this is staff-only.
+  const targetStorageKey = `wm:feasibility_target:${project.id}`
   const [target, setTarget] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = window.localStorage.getItem(targetStorageKey)
+      if (saved) return saved
+    }
     const d = fromIsoDate(project.launch_date)
     if (!d) return ''
     // Default to two weeks BEFORE the current launch_date so the
@@ -74,6 +83,11 @@ export function FeasibilityPanel({
     d.setDate(d.getDate() - 14)
     return d.toISOString().slice(0, 10)
   })
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (target) window.localStorage.setItem(targetStorageKey, target)
+    else window.localStorage.removeItem(targetStorageKey)
+  }, [target, targetStorageKey])
   const [pulled, setPulled] = useState<Set<string>>(new Set())
 
   const result = useMemo<FeasibilityResult | null>(() => {

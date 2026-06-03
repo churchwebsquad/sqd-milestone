@@ -36,6 +36,11 @@ import {
   type HealthMilestoneRow,
 } from '../../../lib/webProjectHealth'
 import { computeDevQueue, type QueueSlot } from '../../../lib/webDevQueue'
+import {
+  inferProgressFromTasks,
+  type ClickUpTaskRow,
+  type PhaseInference,
+} from '../../../lib/webPhaseInference'
 import { fromIsoDate } from '../../../lib/dateRange'
 import type {
   StrategyWebProject,
@@ -72,6 +77,7 @@ export function PlanningWorkspace({ project, onChange }: Props) {
   const [milestones, setMilestones] = useState<HealthMilestoneRow[]>([])
   const [allocations, setAllocations] = useState<Array<{ week_starting: string; hours: number }>>([])
   const [queueRows, setQueueRows] = useState<Parameters<typeof computeDevQueue>[0]>([])
+  const [inference, setInference] = useState<PhaseInference | null>(null)
   const [savingKey, setSavingKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -101,12 +107,14 @@ export function PlanningWorkspace({ project, onChange }: Props) {
 
   // Load the allocations + milestone submissions once per project,
   // plus every active project row so we can compute this project's
-  // slot in the dev queue. The slot drives the launch projection in
-  // the same way the board's hook does.
+  // slot in the dev queue. Also fetches task_details from ClickUp
+  // for the project's Website list and runs phase inference — when
+  // the team hasn't typed manual phase progress / remaining, ClickUp
+  // tasks become the source of truth.
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const [allocsRes, subsRes, queueRowsRes] = await Promise.all([
+      const [allocsRes, subsRes, queueRowsRes, folderRes] = await Promise.all([
         supabase.from('strategy_dev_weekly_allocations')
           .select('week_starting, hours')
           .eq('web_project_id', project.id),
@@ -120,6 +128,15 @@ export function PlanningWorkspace({ project, onChange }: Props) {
         supabase.from('strategy_web_projects')
           .select('id, priority_order, archived, current_phase, manual_remaining_hours, phase_estimates, phase_progress, dev_hours_estimate')
           .eq('archived', false),
+        // Resolve the ClickUp Website list for this member's folder,
+        // then pull task_details. Same shape as ClickUpTasksSummary —
+        // could refactor into a shared helper later.
+        supabase.from('clickup_folders')
+          .select('id')
+          .eq('space_id', 90171129510)
+          .ilike('name', `${project.member} -%`)
+          .limit(1)
+          .maybeSingle(),
       ])
       if (cancelled) return
       setAllocations((allocsRes.data ?? []) as Array<{ week_starting: string; hours: number }>)
@@ -141,34 +158,71 @@ export function PlanningWorkspace({ project, onChange }: Props) {
       })
       setMilestones(enriched)
       setQueueRows((queueRowsRes.data ?? []) as Parameters<typeof computeDevQueue>[0])
+
+      // ── ClickUp task inference ────────────────────────────────
+      const folderId = (folderRes.data as { id: number } | null)?.id ?? null
+      if (folderId) {
+        const { data: lists } = await supabase
+          .from('clickup_lists')
+          .select('id')
+          .eq('space', 90171129510)
+          .eq('folder', folderId)
+          .ilike('name', '%website%')
+          .limit(1)
+        const listId = (lists?.[0] as { id: number } | undefined)?.id ?? null
+        if (listId) {
+          const { data: tasks } = await supabase
+            .from('task_details' as 'tasks')
+            .select('task_name, current_status, time_estimate_minutes, task_archived')
+            .eq('list_id', listId)
+          if (!cancelled && tasks) {
+            setInference(inferProgressFromTasks(tasks as unknown as ClickUpTaskRow[]))
+          }
+        }
+      }
     })()
     return () => { cancelled = true }
   }, [project.id, project.member])
 
-  // Recompute the queue every render with the draft applied to THIS
-  // project's row — keeps the projection card honest while the user
-  // drags sliders or types in manual remaining hours. Without this
-  // overlay the queue would lag the draft until next refetch.
+  // Effective phase_progress: user's manual entry wins per phase; when
+  // a phase is blank, inferred from ClickUp tasks. Same idea for
+  // remaining hours — manual override > inferred > stored estimate.
+  const effectiveProgress: PhaseProgress = useMemo(() => {
+    const merged: PhaseProgress = { ...(inference?.perPhase ?? {}) }
+    for (const [k, v] of Object.entries(draft.phase_progress ?? {})) {
+      if (v != null) merged[k as WebProjectPhase] = v
+    }
+    return merged
+  }, [draft.phase_progress, inference])
+
+  const effectiveManualRemaining: number | null = useMemo(() => {
+    if (draft.manual_remaining_hours != null) return draft.manual_remaining_hours
+    if (inference && inference.remainingMinutes > 0) {
+      return Math.round((inference.remainingMinutes / 60) * 10) / 10
+    }
+    return null
+  }, [draft.manual_remaining_hours, inference])
+
   const queueSlot = useMemo<QueueSlot | null>(() => {
     if (queueRows.length === 0) return null
     const today = new Date()
     const overlay = queueRows.map(r => r.id === project.id ? {
       ...r,
-      manual_remaining_hours: draft.manual_remaining_hours,
+      manual_remaining_hours: effectiveManualRemaining,
       phase_estimates:        draft.phase_estimates,
-      phase_progress:         draft.phase_progress,
+      phase_progress:         effectiveProgress,
       dev_hours_estimate:     draft.dev_hours_estimate,
     } : r)
     return computeDevQueue(overlay, DEFAULT_DEV_CAPACITY, today).get(project.id) ?? null
-  }, [queueRows, project.id, draft])
+  }, [queueRows, project.id, effectiveManualRemaining, draft.phase_estimates, effectiveProgress, draft.dev_hours_estimate])
 
   const computed = useMemo(() => computeProjectHealth({
     project: {
       ...project,
       launch_date:            draft.launch_date,
       phase_estimates:        draft.phase_estimates,
-      phase_progress:         draft.phase_progress,
-      manual_remaining_hours: draft.manual_remaining_hours,
+      phase_progress:         effectiveProgress,
+      manual_remaining_hours: effectiveManualRemaining,
       dev_hours_estimate:     draft.dev_hours_estimate,
     },
     milestones,
@@ -176,7 +230,7 @@ export function PlanningWorkspace({ project, onChange }: Props) {
     joshWeeklyCapacity: DEFAULT_DEV_CAPACITY,
     today: new Date(),
     queueSlot: queueSlot ?? undefined,
-  }), [project, draft, milestones, allocations, queueSlot])
+  }), [project, draft, effectiveProgress, effectiveManualRemaining, milestones, allocations, queueSlot])
 
   const save = useCallback(async <K extends keyof typeof draft>(
     key: K, value: (typeof draft)[K],
@@ -284,13 +338,24 @@ export function PlanningWorkspace({ project, onChange }: Props) {
         <WMCard padding="loose">
           <SectionLabel>Phase progress</SectionLabel>
           <p className="text-[11px] text-wm-text-muted mb-2">
-            Manual % complete per phase. Beats milestone-derived
-            progress when set. Use this when work happened outside
-            the milestone workflow.
+            ClickUp tasks drive these by default — completed-hours over
+            total-hours per phase. Drag a slider to override; leave it
+            untouched to let ClickUp keep it fresh.
           </p>
+          {inference && (
+            <p className="text-[11px] text-wm-accent mb-2">
+              Inferred from {inference.totalTasks} ClickUp tasks ·
+              {' '}{Math.round(inference.remainingMinutes / 60)}h remaining
+            </p>
+          )}
           <div className="space-y-2">
             {PHASE_ORDER.filter(p => p !== 'launched').map(p => {
-              const pct = Math.round(((draft.phase_progress[p] ?? 0) * 100))
+              const manualSet  = draft.phase_progress[p] != null
+              const inferred   = inference?.perPhase[p] ?? null
+              const effective  = manualSet
+                ? Number(draft.phase_progress[p])
+                : (inferred ?? 0)
+              const pct = Math.round(effective * 100)
               return (
                 <div key={p} className="flex items-center gap-3">
                   <span className="text-[12px] font-semibold text-wm-text w-28 shrink-0">
@@ -305,8 +370,10 @@ export function PlanningWorkspace({ project, onChange }: Props) {
                     onChange={(e) => {
                       const v = Number(e.target.value) / 100
                       const next: PhaseProgress = { ...draft.phase_progress }
-                      if (v === 0) delete next[p]
-                      else next[p] = v
+                      // Don't delete on 0 — explicit "0%" should override
+                      // a non-zero inferred value. Clearing is via the
+                      // "Use ClickUp value" button below.
+                      next[p] = v
                       setDraft(prev => ({ ...prev, phase_progress: next }))
                     }}
                     onMouseUp={() => save('phase_progress', draft.phase_progress)}
@@ -316,10 +383,46 @@ export function PlanningWorkspace({ project, onChange }: Props) {
                   <span className="text-[11px] font-mono tabular-nums text-wm-text-muted w-10 text-right">
                     {pct}%
                   </span>
+                  {manualSet ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next: PhaseProgress = { ...draft.phase_progress }
+                        delete next[p]
+                        setDraft(prev => ({ ...prev, phase_progress: next }))
+                        void save('phase_progress', next)
+                      }}
+                      title="Stop overriding — let ClickUp drive this phase"
+                      className="text-[10px] text-wm-text-muted hover:text-wm-accent underline shrink-0"
+                    >
+                      use clickup
+                    </button>
+                  ) : inferred != null ? (
+                    <span className="text-[10px] text-wm-text-subtle shrink-0" title="From ClickUp tasks">
+                      auto
+                    </span>
+                  ) : <span className="w-12 shrink-0" />}
                 </div>
               )
             })}
           </div>
+          {inference && inference.unclassifiedNames.length > 0 && (
+            <details className="mt-3">
+              <summary className="text-[11px] text-wm-text-muted cursor-pointer">
+                {inference.unclassifiedNames.length} unclassified task{inference.unclassifiedNames.length === 1 ? '' : 's'}
+              </summary>
+              <ul className="mt-1 ml-3 space-y-0.5 text-[11px] text-wm-text-subtle">
+                {inference.unclassifiedNames.slice(0, 8).map((n, i) => (
+                  <li key={i}>• {n}</li>
+                ))}
+                {inference.unclassifiedNames.length > 8 && (
+                  <li className="italic">
+                    +{inference.unclassifiedNames.length - 8} more
+                  </li>
+                )}
+              </ul>
+            </details>
+          )}
         </WMCard>
 
         {/* Manual override + status note */}

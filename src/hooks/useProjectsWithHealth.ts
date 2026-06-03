@@ -16,9 +16,15 @@ import {
   type HealthResult,
 } from '../lib/webProjectHealth'
 import { computeDevQueue, type QueueSlot } from '../lib/webDevQueue'
+import {
+  inferProgressFromTasks,
+  type ClickUpTaskRow,
+  type PhaseInference,
+} from '../lib/webPhaseInference'
 import type {
   StrategyWebProject,
   StrategyDevWeeklyAllocation,
+  PhaseProgress,
 } from '../types/database'
 
 export interface ProjectRowVM extends StrategyWebProject {
@@ -28,6 +34,9 @@ export interface ProjectRowVM extends StrategyWebProject {
   allocations:           StrategyDevWeeklyAllocation[]
   health:                HealthResult
   queueSlot:             QueueSlot | null
+  /** ClickUp task inference for this project's Website list. Null
+   *  when no matching folder/list exists in ClickUp. */
+  inference:             PhaseInference | null
 }
 
 interface UseProjectsWithHealthResult {
@@ -80,6 +89,7 @@ export function useProjectsWithHealth(options?: {
         { data: churches },
         { data: subs },
         { data: allocs },
+        { data: folders },
       ] = await Promise.all([
         supabase
           .from('strategy_account_progress')
@@ -99,6 +109,13 @@ export function useProjectsWithHealth(options?: {
           .select('*')
           .in('web_project_id', projectIds)
           .gte('week_starting', todayIso),
+        // ClickUp folders for the Website space — match by member ID
+        // prefix on the folder name ("1802 - Mosaic"). One query for
+        // every project's folder beats N queries per row.
+        supabase
+          .from('clickup_folders')
+          .select('id, name')
+          .eq('space_id', 90171129510),
       ])
 
       const churchByMember = new Map<number, string | null>()
@@ -144,18 +161,89 @@ export function useProjectsWithHealth(options?: {
         allocsByProject.get(a.web_project_id)!.push(a)
       }
 
-      // Dev queue — sequential capacity walk across all active
-      // projects. Each row's slot becomes the authoritative source
-      // for the launch projection (computeProjectHealth respects it
-      // when supplied).
-      const queue = computeDevQueue(projectRows, DEFAULT_DEV_CAPACITY, today)
+      // ── ClickUp inference per member ─────────────────────────
+      // Resolve member → folder via name-prefix match, then folder →
+      // Website list, then bulk-fetch task_details for every list.
+      // Three queries cover all projects (vs N×3 per project).
+      const folderByMember = new Map<number, number>()
+      type FolderRow = { id: number; name: string }
+      for (const f of ((folders ?? []) as FolderRow[])) {
+        const m = /^(\d+)\s*-/.exec(f.name)
+        const mid = m ? Number(m[1]) : NaN
+        if (Number.isFinite(mid) && memberIds.includes(mid) && !folderByMember.has(mid)) {
+          folderByMember.set(mid, f.id)
+        }
+      }
+      const folderIds = Array.from(folderByMember.values())
+      const inferenceByMember = new Map<number, PhaseInference>()
+      if (folderIds.length > 0) {
+        const { data: lists } = await supabase
+          .from('clickup_lists')
+          .select('id, folder')
+          .eq('space', 90171129510)
+          .in('folder', folderIds)
+          .ilike('name', '%website%')
+        type ListRow = { id: number; folder: number }
+        const listByFolder = new Map<number, number>()
+        for (const l of ((lists ?? []) as ListRow[])) {
+          if (!listByFolder.has(l.folder)) listByFolder.set(l.folder, l.id)
+        }
+        const listIds = Array.from(listByFolder.values())
+        if (listIds.length > 0) {
+          const { data: tasks } = await supabase
+            .from('task_details' as 'tasks')
+            .select('task_name, current_status, time_estimate_minutes, task_archived, list_id')
+            .in('list_id', listIds)
+          type TaskRow = ClickUpTaskRow & { list_id: number }
+          const tasksByList = new Map<number, ClickUpTaskRow[]>()
+          for (const t of ((tasks ?? []) as TaskRow[])) {
+            if (!tasksByList.has(t.list_id)) tasksByList.set(t.list_id, [])
+            tasksByList.get(t.list_id)!.push(t)
+          }
+          for (const [member, folderId] of folderByMember) {
+            const listId = listByFolder.get(folderId)
+            if (!listId) continue
+            const rows = tasksByList.get(listId) ?? []
+            inferenceByMember.set(member, inferProgressFromTasks(rows))
+          }
+        }
+      }
 
-      const built: ProjectRowVM[] = projectRows.map(p => {
-        const milestones  = subsByMember.get(p.member) ?? []
-        const allocations = allocsByProject.get(p.id) ?? []
-        const queueSlot   = queue.get(p.id) ?? null
+      // Build "effective" projects for the queue + health pass —
+      // manual values trump inferred, but when manual is blank we
+      // splice ClickUp's numbers in so the queue stops trusting a
+      // stale dev_hours_estimate when the real work picture is different.
+      const projectsForMath = projectRows.map(p => {
+        const inf = inferenceByMember.get(p.member) ?? null
+        if (!inf) return p
+        const mergedProgress: PhaseProgress = { ...(inf.perPhase ?? {}) }
+        const storedProgress = (p.phase_progress ?? {}) as PhaseProgress
+        for (const [k, v] of Object.entries(storedProgress)) {
+          if (v != null) mergedProgress[k as keyof PhaseProgress] = v
+        }
+        const inferredHours = inf.remainingMinutes > 0
+          ? Math.round((inf.remainingMinutes / 60) * 10) / 10
+          : null
+        const effectiveManual = p.manual_remaining_hours ?? inferredHours
+        return {
+          ...p,
+          phase_progress:         mergedProgress,
+          manual_remaining_hours: effectiveManual,
+        }
+      })
+
+      // Dev queue — sequential capacity walk across all active
+      // projects, using effective (ClickUp-aware) remaining hours.
+      const queue = computeDevQueue(projectsForMath, DEFAULT_DEV_CAPACITY, today)
+
+      const built: ProjectRowVM[] = projectRows.map((p, idx) => {
+        const milestones    = subsByMember.get(p.member) ?? []
+        const allocations   = allocsByProject.get(p.id) ?? []
+        const queueSlot     = queue.get(p.id) ?? null
+        const effective     = projectsForMath[idx]
+        const inferenceRow  = inferenceByMember.get(p.member) ?? null
         const health = computeProjectHealth({
-          project: p,
+          project: effective,
           milestones,
           allocations: allocations.map(a => ({
             week_starting: a.week_starting,
@@ -173,6 +261,7 @@ export function useProjectsWithHealth(options?: {
           allocations,
           health,
           queueSlot,
+          inference: inferenceRow,
         }
       })
 

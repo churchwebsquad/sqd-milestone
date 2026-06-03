@@ -11,7 +11,8 @@
  * this component is presentational and receives a sorted, filtered
  * `rows` array.
  */
-import { ArrowRight, ChevronRight } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowRight, ChevronRight, GripVertical } from 'lucide-react'
 import { WMStatusPill } from '../StatusPill'
 import { LaunchDateCell } from './LaunchDateCell'
 import { MiniCapacityBar } from './MiniCapacityBar'
@@ -25,6 +26,10 @@ interface Props {
   /** Called when the user clicks a row. The page routes to the
    *  project's Planning tab via /web/:id?tab=planning. */
   onSelect: (projectId: string) => void
+  /** Optional. When supplied, rows are draggable; the handler
+   *  receives the new id-ordering after a drop. Caller persists
+   *  priority_order 1..N. */
+  onReorder?: (orderedIds: string[]) => void | Promise<void>
 }
 
 // ── Phase + sub-status tone maps ─────────────────────────────
@@ -65,7 +70,12 @@ const SUB_LABEL: Record<ProjectSubStatus, string> = {
 
 // ── Component ───────────────────────────────────────────────
 
-export function BoardView({ rows, loading, onSelect }: Props) {
+export function BoardView({ rows, loading, onSelect, onReorder }: Props) {
+  // Track the drag in component state so we can highlight drop
+  // targets + reorder visually before the server round-trip.
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [overId, setOverId]         = useState<string | null>(null)
+
   if (loading) {
     return (
       <div className="space-y-2">
@@ -86,6 +96,25 @@ export function BoardView({ rows, loading, onSelect }: Props) {
     )
   }
 
+  const handleDrop = (targetId: string) => {
+    if (!onReorder || !draggingId || draggingId === targetId) {
+      setDraggingId(null); setOverId(null)
+      return
+    }
+    const ids = rows.map(r => r.id)
+    const from = ids.indexOf(draggingId)
+    const to   = ids.indexOf(targetId)
+    if (from < 0 || to < 0) {
+      setDraggingId(null); setOverId(null)
+      return
+    }
+    const next = [...ids]
+    next.splice(from, 1)
+    next.splice(to, 0, draggingId)
+    setDraggingId(null); setOverId(null)
+    void onReorder(next)
+  }
+
   return (
     <ul className="space-y-1.5">
       {rows.map(r => (
@@ -93,6 +122,14 @@ export function BoardView({ rows, loading, onSelect }: Props) {
           key={r.id}
           row={r}
           onSelect={onSelect}
+          draggable={!!onReorder}
+          isDragging={draggingId === r.id}
+          isDropTarget={overId === r.id && draggingId !== null && draggingId !== r.id}
+          onDragStart={() => setDraggingId(r.id)}
+          onDragOver={() => setOverId(r.id)}
+          onDragLeave={() => setOverId(prev => prev === r.id ? null : prev)}
+          onDragEnd={() => { setDraggingId(null); setOverId(null) }}
+          onDrop={() => handleDrop(r.id)}
         />
       ))}
     </ul>
@@ -102,24 +139,69 @@ export function BoardView({ rows, loading, onSelect }: Props) {
 // ── One row ──────────────────────────────────────────────────
 
 interface RowProps {
-  row:      ProjectRowVM
-  onSelect: (id: string) => void
+  row:          ProjectRowVM
+  onSelect:     (id: string) => void
+  draggable?:   boolean
+  isDragging?:  boolean
+  isDropTarget?:boolean
+  onDragStart?: () => void
+  onDragOver?:  () => void
+  onDragLeave?: () => void
+  onDragEnd?:   () => void
+  onDrop?:      () => void
 }
 
-function ProjectRow({ row, onSelect }: RowProps) {
+function ProjectRow({
+  row, onSelect,
+  draggable, isDragging, isDropTarget,
+  onDragStart, onDragOver, onDragLeave, onDragEnd, onDrop,
+}: RowProps) {
   const phase = (row.current_phase || 'intake') as WebProjectPhase
   const sub   = row.health.subStatus
   const hoursRemain = row.health.remainingHoursAdjusted
   const hoursTotal  = Number(row.dev_hours_estimate ?? 0)
   const churchLine  = row.church_name || `Member ${row.member}`
   return (
-    <li>
+    <li
+      draggable={draggable}
+      onDragStart={(e) => {
+        // Stash the row id on the event so the browser's drag
+        // image works; the handler runs on dragstart bubbled up.
+        e.dataTransfer.setData('text/plain', row.id)
+        e.dataTransfer.effectAllowed = 'move'
+        onDragStart?.()
+      }}
+      onDragOver={(e) => {
+        if (!draggable) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        onDragOver?.()
+      }}
+      onDragLeave={() => onDragLeave?.()}
+      onDragEnd={() => onDragEnd?.()}
+      onDrop={(e) => { e.preventDefault(); onDrop?.() }}
+      className={[
+        isDragging  ? 'opacity-40' : '',
+        isDropTarget ? 'ring-2 ring-wm-accent ring-offset-1 rounded-lg' : '',
+      ].join(' ')}
+    >
       <button
         type="button"
         onClick={() => onSelect(row.id)}
         className="w-full text-left rounded-lg border border-wm-border bg-wm-bg-elevated hover:border-wm-border-focus transition-colors px-3 py-2"
       >
-        <div className="grid grid-cols-[36px_minmax(180px,1fr)_120px_120px_140px_140px_28px] items-center gap-3">
+        <div className="grid grid-cols-[20px_36px_minmax(180px,1fr)_120px_120px_140px_140px_28px] items-center gap-3">
+          {/* Drag handle — only visible when reordering is wired */}
+          {draggable ? (
+            <span
+              aria-hidden
+              className="text-wm-text-subtle hover:text-wm-text cursor-grab active:cursor-grabbing flex items-center justify-center"
+              title="Drag to reorder priority"
+            >
+              <GripVertical size={13} />
+            </span>
+          ) : <span />}
+
           {/* Priority chip */}
           <PriorityChip n={row.priority_order} />
 
@@ -182,7 +264,7 @@ function ProjectRow({ row, onSelect }: RowProps) {
             present) is the source of truth; risk reason is only
             surfaced when no status note exists. */}
         {(row.status_note || row.health.riskReasons[0]) && (
-          <p className="mt-1 ml-12 text-[11px] text-wm-text-muted italic line-clamp-2">
+          <p className="mt-1 ml-[68px] text-[11px] text-wm-text-muted italic line-clamp-2">
             <ChevronRight size={10} className="inline -mt-0.5" />
             {' '}{row.status_note || row.health.riskReasons[0]}
           </p>

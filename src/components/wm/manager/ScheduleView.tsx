@@ -22,6 +22,7 @@ import { WMSegmentedToggle } from '../SegmentedToggle'
 import {
   addWeeks, formatMonthDay, fromIsoDate, toIsoDate, weekStart,
 } from '../../../lib/dateRange'
+import { DEFAULT_DEV_CAPACITY } from '../../../lib/webProjectHealth'
 import type { ProjectRowVM } from '../../../hooks/useProjectsWithHealth'
 import type { WebProjectPhase } from '../../../types/database'
 
@@ -43,7 +44,7 @@ const PHASE_TINT: Record<WebProjectPhase, string> = {
   launched: 'bg-wm-success-bg       text-wm-success',
 }
 
-export function ScheduleView({ rows, loading, onSelect, capacityPerWeek = 30 }: Props) {
+export function ScheduleView({ rows, loading, onSelect, capacityPerWeek = DEFAULT_DEV_CAPACITY }: Props) {
   const [horizon, setHorizon] = useState<Horizon>('16')
 
   const weeks = useMemo(() => {
@@ -54,20 +55,53 @@ export function ScheduleView({ rows, loading, onSelect, capacityPerWeek = 30 }: 
   const weekIso = useMemo(() => weeks.map(toIsoDate), [weeks])
   const todayIso = useMemo(() => toIsoDate(weekStart(new Date())), [])
 
-  // Pre-bucket each project's allocations by week_starting for
-  // O(1) cell lookups. {projectId -> {iso -> hours}}
+  // Per-project per-week hours. Manual allocations (typed into the
+  // Planning workspace grid) take priority; for any week the user
+  // hasn't explicitly set, fall back to the queue's auto-allocation —
+  // walk capacityPerWeek across each project's [devStartDate,
+  // devEndDate] window in priority order. This is what makes the
+  // grid useful out-of-the-box: no allocations to enter, schedule
+  // still shows where the dev's calendar lives.
   const buckets = useMemo(() => {
     const out = new Map<string, Map<string, number>>()
-    for (const r of rows) {
+    // Iterate by priority for the queue fallback. The queue slot
+    // already encodes the start/end, but we still need to fill the
+    // per-week split. Walk weeks within [start, end] and assign
+    // capacity-per-week, capped by remaining queue hours.
+    const ordered = [...rows].sort((a, b) => {
+      const pa = a.priority_order ?? Number.POSITIVE_INFINITY
+      const pb = b.priority_order ?? Number.POSITIVE_INFINITY
+      return pa - pb
+    })
+    for (const r of ordered) {
       const inner = new Map<string, number>()
+      // Queue auto-fill.
+      if (r.queueSlot) {
+        const start = fromIsoDate(r.queueSlot.devStartDate)
+        const end   = fromIsoDate(r.queueSlot.devEndDate)
+        let remaining = Number(r.queueSlot.remainingDevHours ?? 0)
+        if (start && end && remaining > 0) {
+          const startWeek = weekStart(start)
+          const endWeek   = weekStart(end)
+          let cur = startWeek
+          while (cur <= endWeek && remaining > 0) {
+            const iso = toIsoDate(cur)
+            const take = Math.min(remaining, capacityPerWeek)
+            inner.set(iso, take)
+            remaining -= take
+            cur = addWeeks(cur, 1)
+          }
+        }
+      }
+      // Manual entries override queue auto-fill.
       for (const a of r.allocations) {
         const iso = a.week_starting.slice(0, 10)
-        inner.set(iso, (inner.get(iso) ?? 0) + Number(a.hours))
+        inner.set(iso, Number(a.hours))
       }
       out.set(r.id, inner)
     }
     return out
-  }, [rows])
+  }, [rows, capacityPerWeek])
 
   // Per-week capacity utilization across the whole queue.
   const weekTotals = useMemo(() => {
