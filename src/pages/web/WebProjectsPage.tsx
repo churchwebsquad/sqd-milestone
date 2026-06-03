@@ -19,7 +19,9 @@ import { supabase } from '../../lib/supabase'
 import { SettingsWorkspace } from '../../components/wm/workspaces/SettingsWorkspace'
 import { WMSegmentedToggle } from '../../components/wm/SegmentedToggle'
 import { BoardView } from '../../components/wm/manager/BoardView'
+import { ScheduleView } from '../../components/wm/manager/ScheduleView'
 import { FilterChip } from '../../components/wm/manager/FilterChip'
+import { ProjectEditPanel } from '../../components/wm/manager/ProjectEditPanel'
 import { useProjectsWithHealth } from '../../hooks/useProjectsWithHealth'
 import type { ProjectRowVM } from '../../hooks/useProjectsWithHealth'
 import type { ProjectSubStatus, WebProjectPhase } from '../../types/database'
@@ -54,7 +56,7 @@ export default function WebProjectsPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  const { rows, loading, error } = useProjectsWithHealth({ includeArchived: showArchived })
+  const { rows, loading, error, refetch } = useProjectsWithHealth({ includeArchived: showArchived })
 
   // Filter / search before passing to the view.
   const visible = useMemo<ProjectRowVM[]>(() => {
@@ -258,28 +260,20 @@ export default function WebProjectsPage() {
         )}
 
         {view === 'schedule' && (
-          <div className="rounded-xl border border-dashed border-lavender bg-white/50 px-4 py-12 text-center">
-            <p className="text-sm font-semibold text-deep-plum">Schedule view — coming next turn.</p>
-            <p className="text-xs text-purple-gray mt-1">
-              Week-by-week Josh capacity grid renders here. Use the Board view in the meantime.
-            </p>
-          </div>
+          <ScheduleView
+            rows={visible}
+            loading={loading}
+            onSelect={(id) => setParam('edit', id)}
+          />
         )}
 
-        {/* Stash editingId for the side panel that lands next turn. */}
-        {editingId && (
-          <div className="fixed bottom-4 right-4 max-w-sm rounded-xl border border-lavender bg-white shadow-lg px-4 py-3 text-xs text-purple-gray z-50">
-            Edit panel for <span className="font-mono text-deep-plum">{editingId}</span> coming next turn.
-            <button
-              type="button"
-              onClick={() => setParam('edit', null)}
-              className="ml-2 inline-flex items-center text-deep-plum hover:text-primary-purple"
-            >
-              <X size={12} />
-            </button>
-          </div>
-        )}
       </div>
+
+      <ProjectEditPanel
+        projectId={editingId}
+        onClose={() => setParam('edit', null)}
+        onSaved={() => { void refetch() }}
+      />
 
       {createOpen && (
         <CreateProjectModal
