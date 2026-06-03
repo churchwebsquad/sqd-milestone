@@ -15,6 +15,7 @@ import { Link2, AlertTriangle } from 'lucide-react'
 import { WMRichTextEditor } from '../RichTextEditor'
 import type { WMSnippetOption } from '../RichTextEditor'
 import { SnippetMenu } from './SnippetMenu'
+import { SuggestCopyButton } from './SuggestCopyButton'
 import { useSnippetFocus } from './SnippetFocusContext'
 import { useProjectPages } from './ProjectPagesContext'
 import {
@@ -41,6 +42,30 @@ export function SlotEditor({ slot, value, onChange, snippets, depth = 0 }: Props
     || slot.type === 'url' || slot.type === 'email'
   const isButton = isButtonShaped(slot)
 
+  // "Suggest copy" only applies to text-ish slots and the button's
+  // own label (cta-shaped). Skip url/email/phone/datetime/boolean —
+  // the AI would hallucinate URLs.
+  const wantsSuggest = slot.type === 'text' || slot.type === 'richtext' || slot.type === 'cta'
+  const currentForAi = isButton
+    ? ctaLabelFromValue(value)
+    : slot.type === 'richtext' && typeof value === 'string'
+      ? plainLengthString(value)
+      : typeof value === 'string' ? value : ''
+  const applySuggestion = (text: string) => {
+    if (isButton) {
+      const cta = normalizeCtaValue(value)
+      onChange({ ...cta, label: text })
+      return
+    }
+    if (slot.type === 'richtext') {
+      // Wrap the AI's plain prose in a single `<p>`. The TipTap editor
+      // will normalize it on the next focus pass.
+      onChange(`<p>${escapeHtml(text)}</p>`)
+      return
+    }
+    onChange(text)
+  }
+
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2 min-h-[20px]">
@@ -55,6 +80,19 @@ export function SlotEditor({ slot, value, onChange, snippets, depth = 0 }: Props
               max={slot.max_chars}
             />
           )}
+          {wantsSuggest && (
+            <SuggestCopyButton
+              slot={{
+                layer_name: slot.layer_name,
+                type: slot.type,
+                max_chars: slot.max_chars,
+                scope: slot.scope,
+                heading_level: slot.heading_level,
+              }}
+              current={currentForAi}
+              onApply={applySuggestion}
+            />
+          )}
           {wantsSnippetMenu && !isButton && snippets.length > 0 && (
             <SnippetMenu snippets={snippets} slotKey={slot.key} compact />
           )}
@@ -63,6 +101,28 @@ export function SlotEditor({ slot, value, onChange, snippets, depth = 0 }: Props
       <SlotInput slot={slot} value={value} onChange={onChange} snippets={snippets} depth={depth} isButton={isButton} />
     </div>
   )
+}
+
+function ctaLabelFromValue(v: unknown): string {
+  const c = normalizeCtaValue(v)
+  return c.label ?? ''
+}
+
+function plainLengthString(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&[a-z]+;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }
 
 // ── Body dispatch ───────────────────────────────────────────────────
