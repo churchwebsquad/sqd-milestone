@@ -135,6 +135,11 @@ export interface HealthInputs {
     hoursBeforeStart:    number
     remainingDevHours:   number
   }
+  /** Optional ClickUp-derived "dev hours remaining" for this project.
+   *  Used as a fallback when manual_remaining_hours is null. Keeps
+   *  the inferred value out of the "manual override" reason text so
+   *  the user can tell the difference. */
+  inferredDevRemainingHours?: number | null
 }
 
 export interface HealthResult {
@@ -211,6 +216,12 @@ export function computeProjectHealth(i: HealthInputs): HealthResult {
     reasons.push(
       `Using manual remaining override (${remaining}h).`,
     )
+  } else if (typeof i.inferredDevRemainingHours === 'number'
+             && i.inferredDevRemainingHours >= 0) {
+    remaining = i.inferredDevRemainingHours
+    reasons.push(
+      `Inferred from ClickUp dev tasks (${remaining}h remaining).`,
+    )
   } else {
     for (const p of PHASE_ORDER) {
       if (phaseRank(p) < currentRank) continue
@@ -241,12 +252,15 @@ export function computeProjectHealth(i: HealthInputs): HealthResult {
   }
 
   // ── Available capacity to target ─────────────────────────
-  // Explicit per-project allocations first; when none are entered we
-  // fall back to capacity-based hours (Josh's weekly hours × weeks
-  // until launch). Without this fallback a partner with no schedule
-  // grid entry reads "0h available" even though the dev's calendar
-  // is wide open — which is exactly why a 4h-remainder project was
-  // showing as "15 days behind."
+  // Priority of sources:
+  //   1. Manual allocations (entered into the Planning grid). These
+  //      override everything; the team is telling us "this week is
+  //      booked for this project."
+  //   2. Queue slot — when present, the dev only gets THIS project
+  //      starting at devStartDate. Capacity before devStart belongs
+  //      to higher-priority projects. (launch - devStart) × cap.
+  //   3. Fallback capacity — (today → launch) × cap when nothing
+  //      else is available; treats Josh's calendar as wide open.
   const launchDate = fromIsoDate(i.project.launch_date)
   let allocatedHours = 0
   if (launchDate) {
@@ -260,8 +274,15 @@ export function computeProjectHealth(i: HealthInputs): HealthResult {
   }
   let availableHours = allocatedHours
   if (availableHours === 0 && launchDate) {
-    const days = Math.max(0, daysBetween(today, launchDate))
-    availableHours = (days / 7) * Math.max(i.joshWeeklyCapacity, 0)
+    const cap = Math.max(i.joshWeeklyCapacity, 0)
+    let windowStart: Date = today
+    if (i.queueSlot) {
+      const devStart = fromIsoDate(i.queueSlot.devStartDate)
+      if (devStart && devStart > today) windowStart = devStart
+      reasons.push(`Queue-aware capacity: dev picks this up ${fmtDate(i.queueSlot.devStartDate)}.`)
+    }
+    const days = Math.max(0, daysBetween(windowStart, launchDate))
+    availableHours = (days / 7) * cap
   }
 
   // ── Blocked check ────────────────────────────────────────

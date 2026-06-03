@@ -18,6 +18,7 @@ import {
 import { computeDevQueue, type QueueSlot } from '../lib/webDevQueue'
 import {
   inferProgressFromTasks,
+  inferredDevRemainingHours,
   type ClickUpTaskRow,
   type PhaseInference,
 } from '../lib/webPhaseInference'
@@ -210,37 +211,45 @@ export function useProjectsWithHealth(options?: {
       }
 
       // Build "effective" projects for the queue + health pass —
-      // manual values trump inferred, but when manual is blank we
-      // splice ClickUp's numbers in so the queue stops trusting a
-      // stale dev_hours_estimate when the real work picture is different.
-      const projectsForMath = projectRows.map(p => {
+      // manual phase_progress always wins per phase, but when a
+      // phase has no manual value we splice ClickUp's inferred
+      // progress in. The dev-remaining hours flow through a
+      // separate field (inferredDevRemainingHours) so the reason
+      // text can distinguish "manual override" from "inferred from
+      // ClickUp dev tasks" instead of conflating the two.
+      type InferenceMeta = {
+        project:                        StrategyWebProject
+        inferredDevRemainingHours:      number | null
+      }
+      const projectsForMath: InferenceMeta[] = projectRows.map(p => {
         const inf = inferenceByMember.get(p.member) ?? null
-        if (!inf) return p
+        if (!inf) return { project: p, inferredDevRemainingHours: null }
         const mergedProgress: PhaseProgress = { ...(inf.perPhase ?? {}) }
         const storedProgress = (p.phase_progress ?? {}) as PhaseProgress
         for (const [k, v] of Object.entries(storedProgress)) {
           if (v != null) mergedProgress[k as keyof PhaseProgress] = v
         }
-        const inferredHours = inf.remainingMinutes > 0
-          ? Math.round((inf.remainingMinutes / 60) * 10) / 10
-          : null
-        const effectiveManual = p.manual_remaining_hours ?? inferredHours
         return {
-          ...p,
-          phase_progress:         mergedProgress,
-          manual_remaining_hours: effectiveManual,
+          project: { ...p, phase_progress: mergedProgress },
+          inferredDevRemainingHours: inferredDevRemainingHours(inf),
         }
       })
 
-      // Dev queue — sequential capacity walk across all active
-      // projects, using effective (ClickUp-aware) remaining hours.
-      const queue = computeDevQueue(projectsForMath, DEFAULT_DEV_CAPACITY, today)
+      // Dev queue — feed the inferred dev hours into the slot's
+      // own "remaining" field via a synthetic project shape that
+      // preserves manual override priority.
+      const queueInput = projectsForMath.map(({ project, inferredDevRemainingHours: inf }) =>
+        inf != null && project.manual_remaining_hours == null
+          ? { ...project, manual_remaining_hours: inf }
+          : project,
+      )
+      const queue = computeDevQueue(queueInput, DEFAULT_DEV_CAPACITY, today)
 
       const built: ProjectRowVM[] = projectRows.map((p, idx) => {
         const milestones    = subsByMember.get(p.member) ?? []
         const allocations   = allocsByProject.get(p.id) ?? []
         const queueSlot     = queue.get(p.id) ?? null
-        const effective     = projectsForMath[idx]
+        const { project: effective, inferredDevRemainingHours: infH } = projectsForMath[idx]
         const inferenceRow  = inferenceByMember.get(p.member) ?? null
         const health = computeProjectHealth({
           project: effective,
@@ -252,6 +261,7 @@ export function useProjectsWithHealth(options?: {
           joshWeeklyCapacity: DEFAULT_DEV_CAPACITY,
           today,
           queueSlot: queueSlot ?? undefined,
+          inferredDevRemainingHours: infH,
         })
         return {
           ...p,

@@ -24,17 +24,23 @@ export interface ClickUpTaskRow {
 export interface PhaseInference {
   /** Per-phase 0-1 progress derived from completed-task-hours over
    *  total-task-hours. Empty object when no tasks match. */
-  perPhase:           PhaseProgress
-  /** Σ time_estimate_minutes of non-complete tasks across all phases.
-   *  Use as a fallback for `manual_remaining_hours`. */
-  remainingMinutes:   number
-  /** Σ time_estimate_minutes for all tasks (complete + not). */
-  totalMinutes:       number
-  /** Total task count across all phases. */
-  totalTasks:         number
+  perPhase:                 PhaseProgress
+  /** Σ time_estimate_minutes of incomplete engaged tasks, per phase. */
+  perPhaseRemainingMinutes: Partial<Record<WebProjectPhase, number>>
+  /** Σ time_estimate_minutes of all engaged tasks, per phase. */
+  perPhaseTotalMinutes:     Partial<Record<WebProjectPhase, number>>
+  /** Σ time_estimate_minutes of non-complete tasks across all phases. */
+  remainingMinutes:         number
+  /** Σ time_estimate_minutes for all engaged tasks (complete + not). */
+  totalMinutes:             number
+  /** Total engaged task count across all phases. */
+  totalTasks:               number
   /** Tasks that didn't match any phase pattern — useful for debugging
    *  the keyword table when something looks off. */
-  unclassifiedNames:  string[]
+  unclassifiedNames:        string[]
+  /** Tasks excluded as parent-bucket umbrella rows. Tracked so the
+   *  user sees them filtered out instead of silently dropped. */
+  excludedBucketNames:      string[]
 }
 
 // "Complete" statuses — case-insensitive. ClickUp uses lowercase
@@ -53,6 +59,26 @@ const ENGAGED_STATUSES = new Set([
   'sqd review', 'needs an update', 'waiting feedback',
   'dependent', 'in_revision', 'more info need',
 ])
+
+// Parent / umbrella tasks that hold sub-tasks but don't represent
+// actual work themselves. Counting them double-counts the phase.
+// Match by exact lowercase normalization (whitespace collapsed).
+const BUCKET_NAME_PATTERNS: RegExp[] = [
+  /^website redesign$/i,
+  /^website refresh$/i,
+  /^website[: ]+final$/i,
+  /^web[: ]+site refresh$/i,
+  /^current site refresh$/i,
+  /^microsite$/i,
+  /^microsite build$/i,
+  /^microsite design$/i,
+  /^lessons learned[: ]+website redesign$/i,
+]
+
+function isBucketTask(name: string): boolean {
+  const norm = name.replace(/\s+/g, ' ').trim()
+  return BUCKET_NAME_PATTERNS.some(p => p.test(norm))
+}
 
 // Phase-by-keyword. Order matters: the FIRST matching pattern wins,
 // so list specific patterns before generic ones. Review/launch are
@@ -132,35 +158,50 @@ export function classifyTaskByPhase(name: string): WebProjectPhase | null {
 }
 
 export function inferProgressFromTasks(rows: ClickUpTaskRow[]): PhaseInference {
-  // Skip archived tasks entirely — they were either completed-and-
-  // closed or removed; don't count them either way.
-  // ALSO skip tasks still in default "Open" / "open" status. The
-  // team uses "ready to start" for real to-do work; "Open" is just
-  // a template stub from project setup that may or may not get
-  // worked. Counting them all would 10x the remaining-hours number.
-  const active = rows.filter(r =>
-    !r.task_archived && isEngaged(r.current_status),
-  )
-  const perPhaseTotals  : Partial<Record<WebProjectPhase, number>> = {}
-  const perPhaseComplete: Partial<Record<WebProjectPhase, number>> = {}
+  // Three filters:
+  //   • archived  — completed-and-closed or removed; never counts.
+  //   • not engaged — "Open" template stubs the team never touched.
+  //   • bucket — "Website Redesign" / "Microsite Build" / etc. are
+  //     parent umbrella tasks that hold sub-tasks but don't carry
+  //     real work. Counting them double-counts the phase.
+  const excludedBucketNames: string[] = []
+  const active = rows.filter(r => {
+    if (r.task_archived) return false
+    if (!isEngaged(r.current_status)) return false
+    if (isBucketTask(r.task_name)) {
+      excludedBucketNames.push(r.task_name)
+      return false
+    }
+    return true
+  })
+
+  const perPhaseTotals   : Partial<Record<WebProjectPhase, number>> = {}
+  const perPhaseComplete : Partial<Record<WebProjectPhase, number>> = {}
+  const perPhaseRemaining: Partial<Record<WebProjectPhase, number>> = {}
   let remainingMinutes = 0
   let totalMinutes     = 0
   const unclassifiedNames: string[] = []
 
   for (const r of active) {
     const phase = classifyTaskByPhase(r.task_name)
-    // Even unclassified tasks contribute to the rough remaining-
-    // minutes total. They just don't move any individual phase's bar.
     const est = Number(r.time_estimate_minutes ?? 0)
     totalMinutes += est
-    if (!isComplete(r.current_status)) remainingMinutes += est
+    const done = isComplete(r.current_status)
+    if (!done) remainingMinutes += est
     if (!phase) {
       unclassifiedNames.push(r.task_name)
       continue
     }
-    perPhaseTotals[phase]   = (perPhaseTotals[phase]   ?? 0) + Math.max(est, 1)
-    if (isComplete(r.current_status)) {
-      perPhaseComplete[phase] = (perPhaseComplete[phase] ?? 0) + Math.max(est, 1)
+    // Use est for the weighted math; fall back to 1 unit when an
+    // estimate is missing so the task still contributes to counts.
+    const weight = Math.max(est, 1)
+    perPhaseTotals[phase] = (perPhaseTotals[phase] ?? 0) + weight
+    if (done) {
+      perPhaseComplete[phase] = (perPhaseComplete[phase] ?? 0) + weight
+    } else if (est > 0) {
+      // Only count actual minutes toward remaining — a 0-estimate
+      // task can't credibly inflate the projection.
+      perPhaseRemaining[phase] = (perPhaseRemaining[phase] ?? 0) + est
     }
   }
 
@@ -174,9 +215,24 @@ export function inferProgressFromTasks(rows: ClickUpTaskRow[]): PhaseInference {
 
   return {
     perPhase,
+    perPhaseRemainingMinutes: perPhaseRemaining,
+    perPhaseTotalMinutes:     perPhaseTotals,
     remainingMinutes,
     totalMinutes,
     totalTasks: active.length,
     unclassifiedNames,
+    excludedBucketNames,
   }
+}
+
+/** Best-shot "remaining DEV hours" from inference. Returns null when
+ *  there's no engaged dev-phase task data to lean on — the caller
+ *  should fall back to dev_hours_estimate × (1 - dev_progress) in
+ *  that case. The cleanest signal for the queue, since dev hours are
+ *  what the queue actually consumes. */
+export function inferredDevRemainingHours(inf: PhaseInference): number | null {
+  const totalMin = Number(inf.perPhaseTotalMinutes.dev ?? 0)
+  if (totalMin <= 0) return null
+  const remMin = Number(inf.perPhaseRemainingMinutes.dev ?? 0)
+  return Math.round((remMin / 60) * 10) / 10
 }

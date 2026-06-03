@@ -153,8 +153,10 @@ export function ScheduleView({ rows, loading, onSelect, capacityPerWeek = DEFAUL
           ]}
         />
         <p className="text-[11px] text-wm-text-muted">
-          Capacity baseline: <span className="font-semibold text-wm-text">{capacityPerWeek}h/wk</span>
-          {' '}· Red column = over capacity
+          Capacity: <span className="font-semibold text-wm-text">{capacityPerWeek}h/wk</span>
+          {' '}· Solid cells = queue-allocated hours
+          {' '}· Faded cells = queue window (dev's scheduled to be here)
+          {' '}· Red total = over capacity
         </p>
       </div>
 
@@ -234,6 +236,23 @@ function ProjectRow({ row, weeks, weekIso, todayIso, cells, onSelect }: RowProps
       ? toIsoDate(weekStart(fromIsoDate(row.launch_date) as Date))
       : null
     : null
+  // Queue dev window for at-a-glance "when does dev pick this up"
+  // — only when the slot has real hours.
+  const devStart = row.queueSlot?.devStartDate
+    ? formatMonthDay(fromIsoDate(row.queueSlot.devStartDate) as Date)
+    : null
+  const devEnd = row.queueSlot?.devEndDate
+    ? formatMonthDay(fromIsoDate(row.queueSlot.devEndDate) as Date)
+    : null
+  const devWindow = devStart && devEnd && row.queueSlot && row.queueSlot.remainingDevHours > 0
+    ? `Dev: ${devStart} → ${devEnd}`
+    : null
+  const devStartWeekIso = row.queueSlot?.devStartDate
+    ? toIsoDate(weekStart(fromIsoDate(row.queueSlot.devStartDate) as Date))
+    : null
+  const devEndWeekIso = row.queueSlot?.devEndDate
+    ? toIsoDate(weekStart(fromIsoDate(row.queueSlot.devEndDate) as Date))
+    : null
 
   return (
     <>
@@ -247,9 +266,13 @@ function ProjectRow({ row, weeks, weekIso, todayIso, cells, onSelect }: RowProps
           {row.priority_order ? `P${row.priority_order} · ` : ''}{churchLine}
         </p>
         <p className="text-[12px] font-semibold text-wm-text truncate">{row.name}</p>
-        <p className="text-[10px] text-wm-text-muted mt-0.5">
-          {row.dev_hours_estimate ?? 0}h budget
-        </p>
+        {devWindow ? (
+          <p className="text-[10px] text-wm-accent mt-0.5 truncate">{devWindow}</p>
+        ) : (
+          <p className="text-[10px] text-wm-text-muted mt-0.5">
+            {row.dev_hours_estimate ?? 0}h budget · no queue slot
+          </p>
+        )}
       </button>
 
       {/* Week cells */}
@@ -258,6 +281,14 @@ function ProjectRow({ row, weeks, weekIso, todayIso, cells, onSelect }: RowProps
         const hours = cells.get(iso) ?? 0
         const isToday  = iso === todayIso
         const isLaunch = iso === launchIso
+        // A cell is part of the queue window when it sits between
+        // dev start + dev end inclusive — even if hours collapsed
+        // to 0 due to rounding. Tints the band so the user sees
+        // "the dev IS scheduled for this project these weeks."
+        const inDevWindow = !!(
+          devStartWeekIso && devEndWeekIso
+          && iso >= devStartWeekIso && iso <= devEndWeekIso
+        )
         return (
           <button
             key={iso}
@@ -266,13 +297,15 @@ function ProjectRow({ row, weeks, weekIso, todayIso, cells, onSelect }: RowProps
             title={
               hours > 0
                 ? `${hours.toFixed(1)}h · ${phase}`
-                : 'No allocation this week'
+                : (inDevWindow ? `Queue window · ${phase}` : 'Outside queue')
             }
             className={[
               'border-b border-wm-border/60 h-[52px] grid place-items-center text-[11px] font-mono tabular-nums transition-colors',
               isToday ? 'border-l-2 border-l-wm-tone-orange' : '',
               isLaunch ? 'ring-2 ring-inset ring-wm-success' : '',
-              hours > 0 ? `${tint} font-semibold hover:opacity-90` : 'bg-wm-bg hover:bg-wm-bg-hover',
+              hours > 0 ? `${tint} font-semibold hover:opacity-90`
+                : inDevWindow ? `${tint} opacity-40 hover:opacity-60`
+                : 'bg-wm-bg hover:bg-wm-bg-hover',
             ].join(' ')}
           >
             {hours > 0 ? `${hours.toFixed(0)}h` : ''}

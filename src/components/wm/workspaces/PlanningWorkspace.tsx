@@ -38,6 +38,7 @@ import {
 import { computeDevQueue, type QueueSlot } from '../../../lib/webDevQueue'
 import {
   inferProgressFromTasks,
+  inferredDevRemainingHours,
   type ClickUpTaskRow,
   type PhaseInference,
 } from '../../../lib/webPhaseInference'
@@ -195,26 +196,34 @@ export function PlanningWorkspace({ project, onChange }: Props) {
     return merged
   }, [draft.phase_progress, inference])
 
-  const effectiveManualRemaining: number | null = useMemo(() => {
-    if (draft.manual_remaining_hours != null) return draft.manual_remaining_hours
-    if (inference && inference.remainingMinutes > 0) {
-      return Math.round((inference.remainingMinutes / 60) * 10) / 10
-    }
-    return null
-  }, [draft.manual_remaining_hours, inference])
+  // ClickUp-derived dev-phase remaining hours. Null when no engaged
+  // dev tasks exist — the math then falls back to dev_hours_estimate.
+  const inferredDevHours = useMemo<number | null>(() => {
+    if (!inference) return null
+    return inferredDevRemainingHours(inference)
+  }, [inference])
 
   const queueSlot = useMemo<QueueSlot | null>(() => {
     if (queueRows.length === 0) return null
     const today = new Date()
-    const overlay = queueRows.map(r => r.id === project.id ? {
-      ...r,
-      manual_remaining_hours: effectiveManualRemaining,
-      phase_estimates:        draft.phase_estimates,
-      phase_progress:         effectiveProgress,
-      dev_hours_estimate:     draft.dev_hours_estimate,
-    } : r)
+    const overlay = queueRows.map(r => {
+      if (r.id !== project.id) return r
+      // Pass inferred dev hours through manual_remaining_hours ONLY
+      // when the user hasn't typed a manual override — same priority
+      // ladder as the hook applies for the board.
+      const manualOrInf = draft.manual_remaining_hours
+        ?? inferredDevHours
+        ?? null
+      return {
+        ...r,
+        manual_remaining_hours: manualOrInf,
+        phase_estimates:        draft.phase_estimates,
+        phase_progress:         effectiveProgress,
+        dev_hours_estimate:     draft.dev_hours_estimate,
+      }
+    })
     return computeDevQueue(overlay, DEFAULT_DEV_CAPACITY, today).get(project.id) ?? null
-  }, [queueRows, project.id, effectiveManualRemaining, draft.phase_estimates, effectiveProgress, draft.dev_hours_estimate])
+  }, [queueRows, project.id, draft.manual_remaining_hours, inferredDevHours, draft.phase_estimates, effectiveProgress, draft.dev_hours_estimate])
 
   const computed = useMemo(() => computeProjectHealth({
     project: {
@@ -222,7 +231,7 @@ export function PlanningWorkspace({ project, onChange }: Props) {
       launch_date:            draft.launch_date,
       phase_estimates:        draft.phase_estimates,
       phase_progress:         effectiveProgress,
-      manual_remaining_hours: effectiveManualRemaining,
+      manual_remaining_hours: draft.manual_remaining_hours,
       dev_hours_estimate:     draft.dev_hours_estimate,
     },
     milestones,
@@ -230,7 +239,8 @@ export function PlanningWorkspace({ project, onChange }: Props) {
     joshWeeklyCapacity: DEFAULT_DEV_CAPACITY,
     today: new Date(),
     queueSlot: queueSlot ?? undefined,
-  }), [project, draft, effectiveProgress, effectiveManualRemaining, milestones, allocations, queueSlot])
+    inferredDevRemainingHours: inferredDevHours,
+  }), [project, draft, effectiveProgress, milestones, allocations, queueSlot, inferredDevHours])
 
   const save = useCallback(async <K extends keyof typeof draft>(
     key: K, value: (typeof draft)[K],
