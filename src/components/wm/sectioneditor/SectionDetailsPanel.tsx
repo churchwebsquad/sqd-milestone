@@ -25,6 +25,7 @@ import type { SlotAiContext } from './SlotEditor'
 import { GroupEditor } from './GroupEditor'
 import { GridEditor, detectGridChain } from './GridEditor'
 import { SnippetMenu } from './SnippetMenu'
+import { BindHealthPanel } from './BindHealthPanel'
 import { CommentActions } from './CommentActions'
 import { FeedbackCard } from '../feedback/FeedbackCard'
 import { SaveToLibraryButton } from './SaveToLibraryButton'
@@ -208,6 +209,29 @@ export function SectionDetailsPanel({
               aiContext={aiContext}
               fieldValues={values}
               onApplyAll={(nextValues) => onChange({ field_values: nextValues })}
+            />
+          </Section>
+        )}
+
+        {/* Bind health — shows empty text slots + offers nested-pull
+            suggestions when content of the same canonical type exists
+            in a group item. Self-hides on a clean section. */}
+        {template && (
+          <Section title="Bind health" defaultOpen>
+            <BindHealthPanel
+              template={template}
+              fieldValues={values}
+              onPullSuggestion={(slotKey, raw, sourceType) => {
+                // Coerce nested-richtext → top-level richtext: already
+                // HTML, paste through. Plain-text → richtext: wrap in <p>.
+                // Plain-text → plain-text: pass through unchanged.
+                let next = raw
+                const isHtml = typeof raw === 'string' && /<[a-z][^>]*>/i.test(raw)
+                if (sourceType === 'richtext' && !isHtml && typeof raw === 'string') {
+                  next = `<p>${escapeHtml(raw)}</p>`
+                }
+                setValue(slotKey, next)
+              }}
             />
           </Section>
         )}
