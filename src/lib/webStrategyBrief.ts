@@ -20,6 +20,15 @@ export interface StrategyBriefSections {
   mission?:  string
   vision?:   string
   values?:   string
+  /** How and why the church started — typically lives under
+   *  "Historical Reflections" or "Founding Story" / "Our Story" /
+   *  "History" headings. Falls back to first match across that list. */
+  founding_story?: string
+  /** Short slogans / tagline-shaped sentences the church reuses.
+   *  Sourced from "Brand Statement" + "Value Proposition" sections
+   *  joined with a blank line so the partner sees both as candidate
+   *  taglines and can edit down to the one(s) they actually repeat. */
+  taglines?: string
   /** Full markdown of all sections we found, keyed by lowercased
    *  heading title — useful for future prefill additions. */
   byHeading: Record<string, string>
@@ -115,6 +124,38 @@ export function parseStrategyBriefSections(md: string): StrategyBriefSections {
   out.mission = out.byHeading['mission'] ?? undefined
   out.vision  = out.byHeading['vision']  ?? undefined
   out.values  = out.byHeading['values']  ?? undefined
+
+  // Founding story: prefer explicit headings, fall back to common
+  // brief synonyms. First non-empty wins.
+  for (const key of [
+    'founding story', 'our story', 'origin story', 'history',
+    'historical reflections',
+  ]) {
+    const body = out.byHeading[key]
+    if (body) { out.founding_story = body; break }
+  }
+
+  // Taglines: most briefs don't carry a literal "Repeated taglines"
+  // heading, but the Brand Statement + Value Proposition sections
+  // both encode short tagline-shaped sentences the church repeats
+  // across messaging. Join with a blank line so the partner sees
+  // both as candidate taglines and trims down to what they actually
+  // use. Falls back to an explicit "Taglines" / "Slogans" section if
+  // a brief ships one.
+  const explicitTaglines =
+    out.byHeading['repeated taglines'] ??
+    out.byHeading['taglines'] ??
+    out.byHeading['slogans']
+  if (explicitTaglines) {
+    out.taglines = explicitTaglines
+  } else {
+    const brandStatement = out.byHeading['brand statement']
+    const valueProp      = out.byHeading['value proposition']
+    const elevatorPitch  = out.byHeading['elevator pitch']
+    const parts = [brandStatement, valueProp, elevatorPitch].filter(Boolean) as string[]
+    if (parts.length > 0) out.taglines = parts.join('\n\n')
+  }
+
   return out
 }
 
@@ -141,8 +182,10 @@ function trimBlockBody(text: string): string {
 export function strategyBriefToExternalPrefills(brief: StrategyBriefSections | null): Record<string, string> {
   if (!brief) return {}
   const out: Record<string, string> = {}
-  if (brief.mission) out['mission_beliefs/mission_statement'] = brief.mission
-  if (brief.vision)  out['mission_beliefs/vision_statement']  = brief.vision
-  if (brief.values)  out['mission_beliefs/values']            = brief.values
+  if (brief.mission)        out['mission_beliefs/mission_statement'] = brief.mission
+  if (brief.vision)         out['mission_beliefs/vision_statement']  = brief.vision
+  if (brief.values)         out['mission_beliefs/values']            = brief.values
+  if (brief.founding_story) out['origins_lingo/founding_story']      = brief.founding_story
+  if (brief.taglines)       out['origins_lingo/taglines']            = brief.taglines
   return out
 }
