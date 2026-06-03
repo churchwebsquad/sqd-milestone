@@ -408,8 +408,12 @@ const ENUM_LABELS: Record<string, Record<string, string>> = {
     none:     'Do not display events on our website',
   },
   sermons_display_preference: {
-    external: 'Direct viewers to YouTube/Vimeo; only host the most recent sermon on the site',
-    wordpress:'Add and manage our sermon archive within WordPress',
+    // Legacy 'external' rows migrated to 'embed_latest' in v61; keep
+    // the key for safety on any straggling pre-migration values.
+    external:    'Embed the most-recent sermon on the Watch page (Recommended — legacy label)',
+    cta_only:    'CTA button linking to our YouTube / Vimeo channel (Easiest)',
+    embed_latest:'Embed the most-recent sermon on the Watch page (Recommended)',
+    wordpress:   'List our entire sermon archive on our website with a page per sermon (Most Complex)',
   },
   groups_display_preference: {
     external: 'Direct visitors to an external platform (Planning Center / Breeze / CCB)',
@@ -498,7 +502,11 @@ function buildStep2Rows(s: SessionRow): Step2Row[] {
   push('sermons_pref', 'How would you like to manage sermons on your website?',
        expandEnum('sermons_display_preference', s.sermons_display_preference),
        { detail: s.sermons_external_url ?? undefined, span: 2 })
-  if (s.sermons_display_preference === 'external') {
+  // YouTube playlist follow-up applies to both the legacy 'external'
+  // and the v61 'embed_latest' tier — both keep YouTube as the canonical
+  // archive, so the playlist question is relevant for either.
+  if (s.sermons_display_preference === 'external'
+   || s.sermons_display_preference === 'embed_latest') {
     push('yt_playlist', 'Do you have a YouTube playlist set up to store your messages?',
          yn(s.sermon_youtube_playlist_exists),
          { detail: s.sermon_youtube_playlist_url ?? undefined })

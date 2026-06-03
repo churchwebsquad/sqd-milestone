@@ -11,7 +11,6 @@
  * this component is presentational and receives a sorted, filtered
  * `rows` array.
  */
-import { useNavigate } from 'react-router-dom'
 import { ArrowRight, ChevronRight } from 'lucide-react'
 import { WMStatusPill } from '../StatusPill'
 import { LaunchDateCell } from './LaunchDateCell'
@@ -21,9 +20,11 @@ import type { ProjectRowVM } from '../../../hooks/useProjectsWithHealth'
 import type { ProjectSubStatus, WebProjectPhase } from '../../../types/database'
 
 interface Props {
-  rows:           ProjectRowVM[]
-  loading:        boolean
-  onSelect:       (projectId: string) => void
+  rows:    ProjectRowVM[]
+  loading: boolean
+  /** Called when the user clicks a row. The page routes to the
+   *  project's Planning tab via /web/:id?tab=planning. */
+  onSelect: (projectId: string) => void
 }
 
 // ── Phase + sub-status tone maps ─────────────────────────────
@@ -65,8 +66,6 @@ const SUB_LABEL: Record<ProjectSubStatus, string> = {
 // ── Component ───────────────────────────────────────────────
 
 export function BoardView({ rows, loading, onSelect }: Props) {
-  const navigate = useNavigate()
-
   if (loading) {
     return (
       <div className="space-y-2">
@@ -94,7 +93,6 @@ export function BoardView({ rows, loading, onSelect }: Props) {
           key={r.id}
           row={r}
           onSelect={onSelect}
-          onOpen={() => navigate(`/web/${r.id}`)}
         />
       ))}
     </ul>
@@ -106,10 +104,9 @@ export function BoardView({ rows, loading, onSelect }: Props) {
 interface RowProps {
   row:      ProjectRowVM
   onSelect: (id: string) => void
-  onOpen:   () => void
 }
 
-function ProjectRow({ row, onSelect, onOpen }: RowProps) {
+function ProjectRow({ row, onSelect }: RowProps) {
   const phase = (row.current_phase || 'intake') as WebProjectPhase
   const sub   = row.health.subStatus
   const hoursRemain = row.health.remainingHoursAdjusted
@@ -122,7 +119,7 @@ function ProjectRow({ row, onSelect, onOpen }: RowProps) {
         onClick={() => onSelect(row.id)}
         className="w-full text-left rounded-lg border border-wm-border bg-wm-bg-elevated hover:border-wm-border-focus transition-colors px-3 py-2"
       >
-        <div className="grid grid-cols-[36px_minmax(180px,1fr)_120px_120px_140px_140px_64px] items-center gap-3">
+        <div className="grid grid-cols-[36px_minmax(180px,1fr)_120px_120px_140px_140px_28px] items-center gap-3">
           {/* Priority chip */}
           <PriorityChip n={row.priority_order} />
 
@@ -171,16 +168,14 @@ function ProjectRow({ row, onSelect, onOpen }: RowProps) {
             )}
           </div>
 
-          {/* Open project workspace */}
-          <button
-            type="button"
-            title="Open project workspace (Intake / Pages / Design / Dev / Review)"
-            onClick={(e) => { e.stopPropagation(); onOpen() }}
-            className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[10px] font-semibold text-wm-accent-strong border border-wm-accent/30 bg-wm-accent-tint hover:bg-wm-accent/15 transition-colors"
+          {/* Open arrow — the whole row navigates to the project's
+              Planning tab; this just makes the affordance obvious. */}
+          <span
+            aria-hidden
+            className="inline-flex items-center justify-center h-7 w-7 rounded-md text-wm-accent-strong"
           >
-            Open
-            <ArrowRight size={11} />
-          </button>
+            <ArrowRight size={13} />
+          </span>
         </div>
 
         {/* Status note + first risk reason inline. Status note (when

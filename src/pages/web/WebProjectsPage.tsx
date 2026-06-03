@@ -21,7 +21,6 @@ import { WMSegmentedToggle } from '../../components/wm/SegmentedToggle'
 import { BoardView } from '../../components/wm/manager/BoardView'
 import { ScheduleView } from '../../components/wm/manager/ScheduleView'
 import { FilterChip } from '../../components/wm/manager/FilterChip'
-import { ProjectEditPanel } from '../../components/wm/manager/ProjectEditPanel'
 import { SalesQuoteCard } from '../../components/wm/manager/SalesQuoteCard'
 import { PaceDashboard } from '../../components/wm/manager/PaceDashboard'
 import { useProjectsWithHealth } from '../../hooks/useProjectsWithHealth'
@@ -53,12 +52,11 @@ export default function WebProjectsPage() {
   const phaseFilter = (params.get('phase') || '').split(',').filter(Boolean) as WebProjectPhase[]
   const subFilter   = (params.get('health') || '').split(',').filter(Boolean) as ProjectSubStatus[]
   const query       = params.get('q') ?? ''
-  const editingId   = params.get('edit')
 
   const [createOpen, setCreateOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  const { rows, loading, error, refetch } = useProjectsWithHealth({ includeArchived: showArchived })
+  const { rows, loading, error } = useProjectsWithHealth({ includeArchived: showArchived })
 
   // Filter / search before passing to the view.
   const visible = useMemo<ProjectRowVM[]>(() => {
@@ -277,7 +275,7 @@ export default function WebProjectsPage() {
           <BoardView
             rows={visible}
             loading={loading}
-            onSelect={(id) => setParam('edit', id)}
+            onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
           />
         )}
 
@@ -285,17 +283,11 @@ export default function WebProjectsPage() {
           <ScheduleView
             rows={visible}
             loading={loading}
-            onSelect={(id) => setParam('edit', id)}
+            onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
           />
         )}
 
       </div>
-
-      <ProjectEditPanel
-        projectId={editingId}
-        onClose={() => setParam('edit', null)}
-        onSaved={() => { void refetch() }}
-      />
 
       {createOpen && (
         <CreateProjectModal

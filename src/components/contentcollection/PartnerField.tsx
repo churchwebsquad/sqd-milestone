@@ -229,6 +229,10 @@ export interface PartnerRadioOption<T extends string> {
    *  a follow-up field. Keeps related questions visually grouped. */
   followUp?: ReactNode
   disabled?: boolean
+  /** Inline pill next to the label — used by sermon/event tier
+   *  questions to signal complexity ("Easiest" / "Recommended" /
+   *  "Most Complex") at the same level as the option text. */
+  badge?: { label: string; tone: 'green' | 'purple' | 'amber' }
 }
 
 export interface PartnerRadioGroupProps<T extends string> {
@@ -283,7 +287,21 @@ export function PartnerRadioGroup<T extends string>({
                   className="sr-only"
                 />
                 <div className="flex-1 min-w-0">
-                  <p className="text-[14px] text-deep-plum">{opt.label}</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-[14px] text-deep-plum">{opt.label}</p>
+                    {opt.badge && (
+                      <span className={[
+                        'inline-flex items-center rounded-full text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 border',
+                        opt.badge.tone === 'green'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : opt.badge.tone === 'purple'
+                            ? 'bg-primary-purple/10 text-primary-purple border-primary-purple/20'
+                            : 'bg-amber-50 text-amber-800 border-amber-200',
+                      ].join(' ')}>
+                        {opt.badge.label}
+                      </span>
+                    )}
+                  </div>
                   {opt.help && (
                     <p className="text-[12px] text-purple-gray mt-0.5 leading-snug">{opt.help}</p>
                   )}

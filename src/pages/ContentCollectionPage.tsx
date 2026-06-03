@@ -894,18 +894,48 @@ function SermonsQuestion({
   return (
     <section className="bg-white border border-lavender rounded-2xl p-5 md:p-6">
       <h2 className="font-semibold text-deep-plum text-base mb-1">How would you like to manage sermons on your website?</h2>
-      <p className="text-purple-gray text-xs mb-3">Required</p>
+      <p className="text-purple-gray text-xs mb-3">Required — pick the level of complexity that fits how you want to maintain this section.</p>
       <div className="space-y-2">
+        {/* Tier 1 — Easiest. Just a CTA button; no embed on the site. */}
         <Radio
           name="sermons"
-          value="external"
+          value="cta_only"
           current={choice}
-          label="Direct viewers to YouTube/Vimeo and only host the most recent sermon on our website (Recommended)"
+          label="CTA button linking to our YouTube / Vimeo channel"
+          tierLabel="Easiest"
+          tierTone="green"
           onChange={v => saveField('sermons_display_preference', v as SessionRow['sermons_display_preference'])}
         />
-        {choice === 'external' && (
+        {choice === 'cta_only' && (
           <div className="pl-8 space-y-3">
-            <FieldShort label="Link to your sermon channel" placeholder="https://youtube.com/..." value={session.sermons_external_url} onChange={v => saveField('sermons_external_url', v)} />
+            <FieldShort
+              label="Link to your sermon channel"
+              placeholder="https://youtube.com/..."
+              value={session.sermons_external_url}
+              onChange={v => saveField('sermons_external_url', v)}
+            />
+          </div>
+        )}
+
+        {/* Tier 2 — Recommended. Embed the most recent sermon on the
+            Watch page; everything else still lives on YouTube/Vimeo. */}
+        <Radio
+          name="sermons"
+          value="embed_latest"
+          current={choice}
+          label="Embed the most-recent sermon on our Watch page (everything else stays on YouTube)"
+          tierLabel="Recommended"
+          tierTone="purple"
+          onChange={v => saveField('sermons_display_preference', v as SessionRow['sermons_display_preference'])}
+        />
+        {choice === 'embed_latest' && (
+          <div className="pl-8 space-y-3">
+            <FieldShort
+              label="Link to your sermon channel"
+              placeholder="https://youtube.com/..."
+              value={session.sermons_external_url}
+              onChange={v => saveField('sermons_external_url', v)}
+            />
             <YesNoField
               label="Do you have a YouTube playlist set up to store your messages?"
               value={session.sermon_youtube_playlist_exists}
@@ -921,11 +951,16 @@ function SermonsQuestion({
             )}
           </div>
         )}
+
+        {/* Tier 3 — Most Complex. Full WordPress archive with per-
+            sermon pages; archive-features question fires next. */}
         <Radio
           name="sermons"
           value="wordpress"
           current={choice}
-          label="Add and manage our sermon archive within WordPress"
+          label="List our entire sermon archive on our website with a single page for each sermon"
+          tierLabel="Most Complex"
+          tierTone="amber"
           onChange={v => saveField('sermons_display_preference', v as SessionRow['sermons_display_preference'])}
         />
       </div>
@@ -1654,14 +1689,18 @@ function HostingSection({
 // switching the visuals over to the Essential Forms kit geometry.
 
 function Radio({
-  name, value, current, label, help, onChange,
+  name, value, current, label, help, onChange, tierLabel, tierTone,
 }: {
-  name:    string
-  value:   string
-  current: string | null
-  label:   string
-  help?:   string
-  onChange: (v: string) => void
+  name:       string
+  value:      string
+  current:    string | null
+  label:      string
+  help?:      string
+  onChange:   (v: string) => void
+  /** Optional complexity badge ("Easiest" / "Recommended" / "Most
+   *  Complex") shown next to the label. */
+  tierLabel?: string
+  tierTone?:  'green' | 'purple' | 'amber'
 }) {
   // One-option group — used by question sections that build their
   // radio list manually. PartnerRadioGroup is also exported and
@@ -1672,7 +1711,10 @@ function Radio({
       name={name}
       value={current}
       onChange={onChange}
-      options={[{ value, label, help }]}
+      options={[{
+        value, label, help,
+        ...(tierLabel && tierTone ? { badge: { label: tierLabel, tone: tierTone } } : {}),
+      }]}
     />
   )
 }
