@@ -2228,25 +2228,47 @@ function isExternalCta(item: Item, selfHost?: string): boolean {
   // back at the same site partners are migrating away from.
   if (/^https?:\/\//.test(url)) {
     const h = hostFromUrl(url)
-    if (selfHost && h && h === selfHost) return false
+    if (selfHost && h && hostsMatch(h, selfHost)) return false
     return true
   }
   // Anything else (/path, #anchor, relative) is internal.
   return false
 }
 
+/** True when two normalized hostnames represent the same site —
+ *  exact equality OR one is a subdomain of the other. Lets
+ *  `m.paradoxredlands.com` count as internal against
+ *  `paradoxredlands.com` and vice-versa. */
+function hostsMatch(a: string, b: string): boolean {
+  if (a === b) return true
+  return a.endsWith('.' + b) || b.endsWith('.' + a)
+}
+
 /** Normalize a URL string to its lower-case host, stripping `www.`
  *  so `https://www.example.com/x` and `https://example.com/y` compare
- *  equal. Returns empty string on parse failure (caller treats the
- *  URL as "host unknown" — typically falls back to external). */
+ *  equal. Accepts bare hostnames too — the `site_url` snippet is
+ *  often stored without an `https://` prefix, which would otherwise
+ *  trip `new URL()` and leak every absolute CTA through the
+ *  same-site filter. Returns empty string only when the input is
+ *  blank or genuinely unparseable. */
 function hostFromUrl(raw: string): string {
   if (!raw) return ''
-  try {
-    const u = new URL(raw)
-    return u.host.toLowerCase().replace(/^www\./, '')
-  } catch {
-    return ''
+  const candidates = /^https?:\/\//i.test(raw) ? [raw] : [`https://${raw}`, raw]
+  for (const c of candidates) {
+    try {
+      const u = new URL(c)
+      const h = u.host.toLowerCase().replace(/^www\./, '')
+      if (h) return h
+    } catch { /* try next candidate */ }
   }
+  // Last-ditch: input is something like `paradoxredlands.com/foo`
+  // and BOTH parse attempts above failed. Split on `/` and treat
+  // the first segment as the host.
+  const bare = raw.toLowerCase().trim()
+    .replace(/^[a-z]+:\/\//, '')
+    .replace(/^www\./, '')
+    .split(/[/?#]/)[0]
+  return bare || ''
 }
 
 /** Item kinds where we filter out seasonal / one-off items in
