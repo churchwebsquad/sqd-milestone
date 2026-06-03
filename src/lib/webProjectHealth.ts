@@ -32,6 +32,7 @@ import type {
   WebProjectPhase,
   PhaseEstimates,
   AiAssistMultipliers,
+  PhaseProgress,
   StrategyMilestoneSubmission,
 } from '../types/database'
 
@@ -62,7 +63,8 @@ export interface HealthInputs {
   project: Pick<
     StrategyWebProject,
     'id' | 'current_phase' | 'launch_date' | 'phase_estimates' |
-    'ai_assist_multipliers' | 'dev_hours_estimate' | 'archived'
+    'ai_assist_multipliers' | 'dev_hours_estimate' | 'archived' |
+    'phase_progress' | 'manual_remaining_hours'
   >
   /** Active submissions for this project's member, newest first.
    *  Caller filters by `is_active=true` if relevant. */
@@ -118,27 +120,51 @@ export function computeProjectHealth(i: HealthInputs): HealthResult {
   }
 
   // ── Effective remaining hours ────────────────────────────
+  // Three sources, in priority order:
+  //   1. manual_remaining_hours — explicit "trust me" override
+  //   2. phase_estimates × (1 - phase_progress)   — when both present
+  //   3. dev_hours_estimate × fraction_unstarted   — fallback
+  //
+  // The AI multipliers from v58 are still respected when no other
+  // override is set, but the side panel no longer exposes them and
+  // they default to 1.0 — keeping the math additive so existing
+  // values don't break.
   const currentRank = phaseRank(phase)
+  const progress: PhaseProgress = i.project.phase_progress ?? {}
   let remaining = 0
-  for (const p of PHASE_ORDER) {
-    if (phaseRank(p) < currentRank) continue
-    if (p === 'launched') continue                   // terminal, no work
-    const base = Number(phaseEst[p] ?? 0)
-    const mult = clampMultiplier(multipliers[p])
-    remaining += base * mult
-  }
 
-  // Fallback when phase_estimates is empty (project not yet sized):
-  // distribute dev_hours_estimate across remaining phases evenly.
-  if (remaining === 0 && i.project.dev_hours_estimate) {
-    const phasesLeft = PHASE_ORDER.filter(p =>
-      phaseRank(p) >= currentRank && p !== 'launched',
-    ).length
-    if (phasesLeft > 0) {
-      remaining = Number(i.project.dev_hours_estimate)
-      reasons.push(
-        `Estimate is unphased — using overall dev_hours_estimate (${remaining}h).`,
+  if (typeof i.project.manual_remaining_hours === 'number'
+      && i.project.manual_remaining_hours >= 0) {
+    remaining = Number(i.project.manual_remaining_hours)
+    reasons.push(
+      `Using manual remaining override (${remaining}h).`,
+    )
+  } else {
+    for (const p of PHASE_ORDER) {
+      if (phaseRank(p) < currentRank) continue
+      if (p === 'launched') continue                     // terminal, no work
+      const base = Number(phaseEst[p] ?? 0)
+      const mult = clampMultiplier(multipliers[p])
+      const prog = clampProgress(progress[p])
+      remaining += base * mult * (1 - prog)
+    }
+
+    // Fallback when phase_estimates is empty (project not yet
+    // sized): distribute dev_hours_estimate across remaining
+    // phases, reduced by the average progress on those phases.
+    if (remaining === 0 && i.project.dev_hours_estimate) {
+      const phasesLeft = PHASE_ORDER.filter(p =>
+        phaseRank(p) >= currentRank && p !== 'launched',
       )
+      if (phasesLeft.length > 0) {
+        const avgProgress = phasesLeft.reduce(
+          (s, p) => s + clampProgress(progress[p]), 0,
+        ) / phasesLeft.length
+        remaining = Number(i.project.dev_hours_estimate) * (1 - avgProgress)
+        reasons.push(
+          `Estimate is unphased — using dev_hours_estimate × ${(1 - avgProgress).toFixed(2)} = ${remaining.toFixed(1)}h.`,
+        )
+      }
     }
   }
 
@@ -251,6 +277,11 @@ export function computeProjectHealth(i: HealthInputs): HealthResult {
 
 function clampMultiplier(v: unknown): number {
   if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return 1
+  return Math.min(1, v)
+}
+
+function clampProgress(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return 0
   return Math.min(1, v)
 }
 

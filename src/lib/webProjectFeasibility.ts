@@ -28,9 +28,6 @@ export type FeasibilityVerdict = 'achievable' | 'tight' | 'unachievable'
 export type Confidence         = 'high' | 'medium' | 'low'
 
 export type LeverKind =
-  | 'enable_ai_content'
-  | 'enable_ai_design'
-  | 'enable_ai_dev'
   | 'reduce_pages'
   | 'shorten_partner_reviews'
   | 'add_capacity'
@@ -61,7 +58,8 @@ export interface FeasibilityInputs {
   project: Pick<
     StrategyWebProject,
     'id' | 'current_phase' | 'launch_date' | 'phase_estimates' |
-    'ai_assist_multipliers' | 'dev_hours_estimate' | 'archived'
+    'ai_assist_multipliers' | 'dev_hours_estimate' | 'archived' |
+    'phase_progress' | 'manual_remaining_hours'
   >
   milestones:          HealthMilestoneRow[]
   allocations:         Array<{ week_starting: string; hours: number }>
@@ -79,9 +77,6 @@ export interface FeasibilityInputs {
 
 // Tunables — could move to strategy_app_config later. Keep the
 // numbers conservative so we don't over-promise on speed-ups.
-const AI_CONTENT_SAVING_FRACTION = 0.50    // 50% of content phase saved
-const AI_DESIGN_SAVING_FRACTION  = 0.30    // 30% of design phase saved
-const AI_DEV_SAVING_FRACTION     = 0.10    // 10% of dev phase saved
 const SHORT_REVIEW_SAVING_DAYS   = 5       // skip one partner-review round
 const REDUCE_PAGE_HOURS_PER_PAGE = 3.3     // 1.5 copy + 1.0 design + 0.8 dev
 const ADD_CAPACITY_BONUS_HRS_PER_WEEK = 10 // adding a part-time helper
@@ -159,27 +154,7 @@ export function computeProjectFeasibility(i: FeasibilityInputs): FeasibilityResu
 
   // ── Levers — only emit when there's actual headroom to gain.
   const levers: Lever[] = []
-  const mults = (i.project.ai_assist_multipliers ?? {}) as AiAssistMultipliers
-  const phaseEst = (i.project.phase_estimates ?? {}) as PhaseEstimates
   const dayPerHour = (1 / Math.max(i.joshWeeklyCapacity, 1)) * 7  // calendar days saved per hour
-
-  const tryLeverAi = (phase: WebProjectPhase, fraction: number, kind: LeverKind, label: string) => {
-    const current = mults[phase] ?? 1.0
-    if (current < 0.99) return                                   // already on
-    const baseline = phaseEst[phase] ?? 0
-    if (baseline <= 0) return
-    const hoursSaved = baseline * fraction
-    const daysSaved  = Math.round(hoursSaved * dayPerHour)
-    if (daysSaved <= 0) return
-    levers.push({
-      lever: kind,
-      impactDays: daysSaved,
-      description: `Turn on AI ${label} — cuts ${label} hours by ~${Math.round(fraction * 100)}% (saves ~${hoursSaved.toFixed(0)}h, ${daysSaved}d).`,
-    })
-  }
-  tryLeverAi('content', AI_CONTENT_SAVING_FRACTION, 'enable_ai_content', 'copywriting')
-  tryLeverAi('design',  AI_DESIGN_SAVING_FRACTION,  'enable_ai_design',  'design')
-  tryLeverAi('dev',     AI_DEV_SAVING_FRACTION,     'enable_ai_dev',     'dev')
 
   if (i.pageCount && i.pageCount > 10) {
     const reducible = Math.min(i.pageCount - 8, 4)               // cap suggestion at 4
@@ -250,7 +225,7 @@ export function computeProjectFeasibility(i: FeasibilityInputs): FeasibilityResu
 function pickBottleneckPhase(
   current: WebProjectPhase,
   est: PhaseEstimates,
-  mults: AiAssistMultipliers,
+  mults: AiAssistMultipliers, // retained for parity; mults default to 1
 ): WebProjectPhase | null {
   const rank = (p: WebProjectPhase) =>
     PHASE_ORDER.indexOf(p)

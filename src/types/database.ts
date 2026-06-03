@@ -951,6 +951,8 @@ export interface StrategyDiscoveryQuestionnaire {
 // the shape stays flexible.
 export type PhaseEstimates = Partial<Record<WebProjectPhase, number>>
 export type AiAssistMultipliers = Partial<Record<WebProjectPhase, number>>
+/** Per-phase fraction complete (0..1). 0 = not started, 1 = done. */
+export type PhaseProgress = Partial<Record<WebProjectPhase, number>>
 
 export type ProjectSubStatus =
   | 'on_track'
@@ -1114,6 +1116,17 @@ export interface StrategyWebProject {
   ai_assist_multipliers:      AiAssistMultipliers
   owner_employee_id:          string | null
   sub_status:                 ProjectSubStatus | null
+
+  // ── v60 — manual progress overrides ────────────────────
+  // Fraction complete per phase (0..1). When set, beats the
+  // milestone-derived progress. Missing key = 0.
+  phase_progress:             PhaseProgress
+  // Explicit override that wins over the phase math. When set,
+  // computeProjectHealth uses this number as `remaining` directly.
+  manual_remaining_hours:     number | null
+  // Markdown the strategist writes about "what's done, what's left,
+  // what's blocking." Surfaced on the side panel + board row.
+  status_note:                string | null
 
   [key: string]: unknown
 }

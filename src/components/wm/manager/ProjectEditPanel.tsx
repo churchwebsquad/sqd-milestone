@@ -16,11 +16,12 @@
  * milestones / allocations.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, ExternalLink, ListChecks } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { WMFlyoutPanel } from '../FlyoutPanel'
-import { WMSegmentedToggle } from '../SegmentedToggle'
 import { WMStatusPill } from '../StatusPill'
 import { FeasibilityPanel } from './FeasibilityPanel'
+import { ClickUpTasksSummary } from './ClickUpTasksSummary'
 import { supabase } from '../../../lib/supabase'
 import {
   computeProjectHealth,
@@ -32,7 +33,7 @@ import type {
   StrategyWebProject,
   WebProjectPhase,
   PhaseEstimates,
-  AiAssistMultipliers,
+  PhaseProgress,
   ProjectSubStatus,
 } from '../../../types/database'
 
@@ -47,13 +48,6 @@ const PHASE_LABEL: Record<WebProjectPhase, string> = {
   intake: 'Intake', content: 'Copywriting', design: 'Design',
   dev: 'Dev', review: 'Final review', launched: 'Launched',
 }
-
-// Multiplier presets shown in the AI-assist segmented toggle.
-const MULTIPLIER_PRESETS = [
-  { value: 0.4, label: 'Heavy AI' },
-  { value: 0.7, label: 'Light AI' },
-  { value: 1.0, label: 'No AI' },
-] as const
 
 const SUB_LABEL: Record<ProjectSubStatus, string> = {
   on_track:  'On track',
@@ -81,11 +75,13 @@ export function ProjectEditPanel({ projectId, onClose, onSaved }: Props) {
   // Local edit buffer — used to drive the live "computed" block AND
   // saved per-field on blur.
   const [draft, setDraft] = useState<{
-    launch_date:           string | null
-    priority_order:        number | null
-    dev_hours_estimate:    number | null
-    phase_estimates:       PhaseEstimates
-    ai_assist_multipliers: AiAssistMultipliers
+    launch_date:            string | null
+    priority_order:         number | null
+    dev_hours_estimate:     number | null
+    phase_estimates:        PhaseEstimates
+    phase_progress:         PhaseProgress
+    manual_remaining_hours: number | null
+    status_note:            string | null
   } | null>(null)
 
   const load = useCallback(async (id: string) => {
@@ -103,11 +99,13 @@ export function ProjectEditPanel({ projectId, onClose, onSaved }: Props) {
       const p = proj as StrategyWebProject
       setProject(p)
       setDraft({
-        launch_date:           p.launch_date ?? null,
-        priority_order:        p.priority_order ?? null,
-        dev_hours_estimate:    p.dev_hours_estimate ?? null,
-        phase_estimates:       (p.phase_estimates as PhaseEstimates) ?? {},
-        ai_assist_multipliers: (p.ai_assist_multipliers as AiAssistMultipliers) ?? {},
+        launch_date:            p.launch_date ?? null,
+        priority_order:         p.priority_order ?? null,
+        dev_hours_estimate:     p.dev_hours_estimate ?? null,
+        phase_estimates:        (p.phase_estimates as PhaseEstimates) ?? {},
+        phase_progress:         (p.phase_progress as PhaseProgress) ?? {},
+        manual_remaining_hours: p.manual_remaining_hours ?? null,
+        status_note:            p.status_note ?? null,
       })
       setAllocations(((allocsRes.data ?? []) as Array<{ week_starting: string; hours: number }>))
 
@@ -139,10 +137,11 @@ export function ProjectEditPanel({ projectId, onClose, onSaved }: Props) {
     return computeProjectHealth({
       project: {
         ...project,
-        launch_date:           draft.launch_date,
-        phase_estimates:       draft.phase_estimates,
-        ai_assist_multipliers: draft.ai_assist_multipliers,
-        dev_hours_estimate:    draft.dev_hours_estimate,
+        launch_date:            draft.launch_date,
+        phase_estimates:        draft.phase_estimates,
+        phase_progress:         draft.phase_progress,
+        manual_remaining_hours: draft.manual_remaining_hours,
+        dev_hours_estimate:     draft.dev_hours_estimate,
       },
       milestones,
       allocations,
@@ -258,38 +257,102 @@ export function ProjectEditPanel({ projectId, onClose, onSaved }: Props) {
             </div>
           </section>
 
-          {/* ── AI assist ──────────────────────────── */}
+          {/* ── Phase progress ────────────────────── */}
           <section>
-            <SectionLabel>AI assist</SectionLabel>
+            <SectionLabel>Phase progress</SectionLabel>
             <p className="text-[11px] text-wm-text-muted mb-2">
-              Cuts a phase's effective hours when AI tooling is engaged.
-              Heavy = 40%, Light = 70%, Off = 100% (no help).
+              Manual % complete per phase. Beats milestone-derived
+              progress when set. Use this when work happened outside
+              the milestone workflow.
             </p>
             <div className="space-y-2">
-              {(['content', 'design', 'dev'] as WebProjectPhase[]).map(p => {
-                const current = draft.ai_assist_multipliers[p] ?? 1.0
+              {PHASE_ORDER.filter(p => p !== 'launched').map(p => {
+                const pct = Math.round(((draft.phase_progress[p] ?? 0) * 100))
                 return (
-                  <div key={p} className="flex items-center justify-between gap-3">
+                  <div key={p} className="flex items-center gap-3">
                     <span className="text-[12px] font-semibold text-wm-text w-24 shrink-0">
                       {PHASE_LABEL[p]}
                     </span>
-                    <WMSegmentedToggle<number>
-                      value={
-                        MULTIPLIER_PRESETS.find(m => Math.abs(m.value - current) < 0.05)?.value
-                        ?? 1.0
-                      }
-                      onChange={(v) => {
-                        const next: AiAssistMultipliers = { ...draft.ai_assist_multipliers }
-                        if (v === 1.0) delete next[p]
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={5}
+                      value={pct}
+                      onChange={(e) => {
+                        const v = Number(e.target.value) / 100
+                        const next: PhaseProgress = { ...draft.phase_progress }
+                        if (v === 0) delete next[p]
                         else next[p] = v
-                        void save('ai_assist_multipliers', next)
+                        setDraft({ ...draft, phase_progress: next })
                       }}
-                      options={MULTIPLIER_PRESETS.map(m => ({ value: m.value, label: m.label }))}
+                      onMouseUp={() => save('phase_progress', draft.phase_progress)}
+                      onTouchEnd={() => save('phase_progress', draft.phase_progress)}
+                      className="flex-1 accent-wm-accent"
                     />
+                    <span className="text-[11px] font-mono tabular-nums text-wm-text-muted w-10 text-right">
+                      {pct}%
+                    </span>
                   </div>
                 )
               })}
             </div>
+          </section>
+
+          {/* ── Manual override + Status note ───────── */}
+          <section>
+            <SectionLabel>Manual override + status note</SectionLabel>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <FieldNumber
+                label="Manual remaining hours"
+                value={draft.manual_remaining_hours}
+                min={0}
+                step={1}
+                onCommit={(v) => save('manual_remaining_hours', v)}
+                saving={savingKey === 'manual_remaining_hours'}
+              />
+              <div className="grid place-items-center text-[10px] text-wm-text-muted italic px-2">
+                When set, this beats the phase math entirely. Use it when
+                you just know how much is left.
+              </div>
+            </div>
+            <FieldTextArea
+              label="Status note"
+              placeholder="Where this project is right now in plain language — what's done, what's pending, what's blocking."
+              value={draft.status_note}
+              onCommit={(v) => save('status_note', v)}
+              saving={savingKey === 'status_note'}
+            />
+          </section>
+
+          {/* ── Workspace shortcuts ───────────────── */}
+          <section>
+            <SectionLabel>Open in workspace</SectionLabel>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { tab: '',          label: 'Overview'      },
+                { tab: 'intake',    label: 'Intake & Crawl' },
+                { tab: 'pages',     label: 'Pages'          },
+                { tab: 'design',    label: 'Design Handoff' },
+                { tab: 'devhandoff', label: 'Dev Handoff'   },
+                { tab: 'review',    label: 'Review'         },
+              ].map(l => (
+                <Link
+                  key={l.tab || 'overview'}
+                  to={l.tab ? `/web/${project.id}?tab=${l.tab}` : `/web/${project.id}`}
+                  className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-semibold border border-wm-border bg-wm-bg-elevated text-wm-text hover:border-wm-border-focus hover:text-wm-accent-strong transition-colors"
+                >
+                  {l.label}
+                  <ExternalLink size={10} />
+                </Link>
+              ))}
+            </div>
+          </section>
+
+          {/* ── ClickUp tasks summary ─────────────── */}
+          <section>
+            <SectionLabel>ClickUp · Website list</SectionLabel>
+            <ClickUpTasksSummary member={project.member} />
           </section>
 
           {/* ── Feasibility check ──────────────────── */}
@@ -299,9 +362,11 @@ export function ProjectEditPanel({ projectId, onClose, onSaved }: Props) {
               current_phase: project.current_phase,
               launch_date: draft.launch_date,
               phase_estimates: draft.phase_estimates,
-              ai_assist_multipliers: draft.ai_assist_multipliers,
+              ai_assist_multipliers: project.ai_assist_multipliers,
               dev_hours_estimate: draft.dev_hours_estimate,
               archived: project.archived,
+              phase_progress: draft.phase_progress,
+              manual_remaining_hours: draft.manual_remaining_hours,
             }}
             milestones={milestones}
             allocations={allocations}
@@ -411,6 +476,34 @@ function FieldNumber({
           if (next !== value) onCommit(Number.isFinite(next as number) ? next : null)
         }}
         className="mt-1 w-full text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated font-mono tabular-nums focus:border-wm-accent focus:outline-none"
+      />
+    </label>
+  )
+}
+
+function FieldTextArea({
+  label, value, placeholder, onCommit, saving,
+}: {
+  label: string
+  value: string | null
+  placeholder?: string
+  onCommit: (v: string | null) => void
+  saving?: boolean
+}) {
+  const [v, setV] = useState(value ?? '')
+  useEffect(() => { setV(value ?? '') }, [value])
+  return (
+    <label className="block">
+      <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle flex items-center gap-1">
+        {label} {saving && <Loader2 size={9} className="animate-spin" />}
+      </span>
+      <textarea
+        value={v}
+        onChange={e => setV(e.target.value)}
+        onBlur={() => { if (v !== (value ?? '')) onCommit(v.trim() === '' ? null : v) }}
+        placeholder={placeholder}
+        rows={3}
+        className="mt-1 w-full text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated focus:border-wm-accent focus:outline-none resize-vertical leading-snug"
       />
     </label>
   )

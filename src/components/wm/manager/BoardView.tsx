@@ -122,7 +122,7 @@ function ProjectRow({ row, onSelect, onOpen }: RowProps) {
         onClick={() => onSelect(row.id)}
         className="w-full text-left rounded-lg border border-wm-border bg-wm-bg-elevated hover:border-wm-border-focus transition-colors px-3 py-2"
       >
-        <div className="grid grid-cols-[36px_minmax(180px,1fr)_120px_120px_140px_140px_28px] items-center gap-3">
+        <div className="grid grid-cols-[36px_minmax(180px,1fr)_120px_120px_140px_140px_64px] items-center gap-3">
           {/* Priority chip */}
           <PriorityChip n={row.priority_order} />
 
@@ -171,22 +171,25 @@ function ProjectRow({ row, onSelect, onOpen }: RowProps) {
             )}
           </div>
 
-          {/* Open project chevron */}
+          {/* Open project workspace */}
           <button
             type="button"
-            title="Open project"
+            title="Open project workspace (Intake / Pages / Design / Dev / Review)"
             onClick={(e) => { e.stopPropagation(); onOpen() }}
-            className="h-7 w-7 grid place-items-center rounded-md text-wm-text-subtle hover:bg-wm-bg-hover hover:text-wm-accent-strong transition-colors"
+            className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[10px] font-semibold text-wm-accent-strong border border-wm-accent/30 bg-wm-accent-tint hover:bg-wm-accent/15 transition-colors"
           >
-            <ArrowRight size={13} />
+            Open
+            <ArrowRight size={11} />
           </button>
         </div>
 
-        {/* Reasoning row — first risk reason shown inline */}
-        {row.health.riskReasons[0] && (
-          <p className="mt-1 ml-12 text-[11px] text-wm-text-muted italic">
+        {/* Status note + first risk reason inline. Status note (when
+            present) is the source of truth; risk reason is only
+            surfaced when no status note exists. */}
+        {(row.status_note || row.health.riskReasons[0]) && (
+          <p className="mt-1 ml-12 text-[11px] text-wm-text-muted italic line-clamp-2">
             <ChevronRight size={10} className="inline -mt-0.5" />
-            {' '}{row.health.riskReasons[0]}
+            {' '}{row.status_note || row.health.riskReasons[0]}
           </p>
         )}
       </button>
