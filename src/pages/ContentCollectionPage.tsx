@@ -26,6 +26,7 @@ import { WMRichTextEditor } from '../components/wm/RichTextEditor'
 import { FileUploadField } from '../components/contentcollection/FileUploadField'
 import type { AttachmentMetadata, AttachmentKind } from '../lib/contentCollectionAttachments'
 import { loadStrategyBriefSections, strategyBriefToExternalPrefills } from '../lib/webStrategyBrief'
+import { sanitizeTopicsForPartner } from '../lib/sanitizeInventoryForPartner'
 import {
   PartnerTextInput,
   PartnerTextArea,
@@ -1443,21 +1444,35 @@ function MinistriesToGrowSection({
   saveField:   <K extends keyof SessionRow>(field: K, value: SessionRow[K]) => Promise<void>
 }) {
   // Build a chip list of ministry / program names found in the crawl,
-  // filtered hard so the list reads as actual ministries — not
-  // logistical details like "service times" or "check-in process" or
-  // duplicate variants like "DSC Kids" + "More about DSC Kids".
+  // filtered hard so the list reads as actual ongoing ministries —
+  // not dated services, merch, sermon-series titles, agency
+  // references, or duplicate variants.
   //
   // Rules:
-  //   • Only kind='program' items count. Details / faqs / passages
-  //     drop out — those describe a ministry, they aren't one.
-  //   • Drop generic / logistics terms via NON_MINISTRY_RE.
+  //   • Topics first run through sanitizeTopicsForPartner so Church
+  //     Media Squad / TheSquad / dated services already get dropped
+  //     before the chip walk.
+  //   • Only kind='program' items count.
+  //   • Reject dated names ("03.16.24 …", "Jun 1 …", "06/01 …").
+  //   • Reject merch-shaped names (hat / tee / hoodie / mug / bottle
+  //     / sticker / apparel — captures Paradox's "Be A More Loving
+  //     Person Hat", "32oz Paradox Mug", etc.).
+  //   • Reject sermon-series-style names with a ` | ` separator
+  //     ("Why I Love Paradox | Jon Arellano-Jackson").
+  //   • Reject one-off / generic logistics names via NON_MINISTRY_RE.
   //   • Normalize for dedup: lower-case, strip "more about" /
   //     "learn about" / leading articles, collapse whitespace.
   //   • When two names normalize to the same root, keep the SHORTER
   //     one — "DSC Kids" beats "More about DSC Kids".
   const programNames = useMemo(() => {
+    const sanitized = sanitizeTopicsForPartner(topicsByKey)
     const ministryTopics = ['kids', 'students', 'college', 'adults', 'care', 'missions', 'school', 'other', 'serve', 'connect_groups']
     const NON_MINISTRY_RE = /\b(service\s+times?|service\s+schedule|check[-\s]?in|check[-\s]?in\s+process|driving\s+directions?|directions?|parking|visit|first[-\s]?time|plan\s+a\s+visit|new\s+here|sermon\s+series|watch|livestream|live\s+stream|give|giving|donate|tithe|map|location|address|hours|faq|frequently|about|connect|next\s+step|info|information|details?|page|home|sign[-\s]?up|register|registration|contact|email|phone)\b/i
+    const DATED_NAME_RE = /^\s*(?:\d{1,2}[.\-/]\d{1,2}(?:[.\-/]\d{2,4})?|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*\d{1,2})\b/i
+    const MERCH_NAME_RE = /\b(tee|t-?shirt|long\s*sleeve|hoodie|sweatshirt|crewneck|sweater|hat|cap|beanie|mug|tumbler|water\s*bottle|sticker|tote|apparel|merch|merchandise|swag|unisex|kids?\s+unisex)\b/i
+    const SERMON_PIPE_RE = /\s[|–—]\s/
+    const TIME_PHRASE_RE = /\b(?:coffee|brunch|breakfast|lunch|dinner)\s+with\s+(?:pastor|the\s+pastor)/i
+
     const normalizeRoot = (s: string): string =>
       s.toLowerCase()
         .replace(/^(more|learn|read)\s+(about|more\s+about)\s+/i, '')
@@ -1465,16 +1480,30 @@ function MinistriesToGrowSection({
         .replace(/[^\w\s]/g, '')
         .replace(/\s+/g, ' ')
         .trim()
+
     // Map: normalized root → best (shortest, non-truncated) candidate.
     const best = new Map<string, string>()
     for (const tk of ministryTopics) {
-      const t = topicsByKey.get(tk)
+      const t = sanitized.get(tk)
       for (const it of (t?.items ?? [])) {
         const r = it as Record<string, unknown>
         if (String(r.kind ?? '') !== 'program') continue
         const name = String(r.name ?? r.title ?? r.label ?? '').trim()
         if (!name || name.length < 3 || name.length > 60) continue
         if (NON_MINISTRY_RE.test(name)) continue
+        if (DATED_NAME_RE.test(name)) continue
+        if (MERCH_NAME_RE.test(name)) continue
+        if (SERMON_PIPE_RE.test(name)) continue
+        if (TIME_PHRASE_RE.test(name)) continue
+        // Single-word names are usually staff first names ("Darise",
+        // "Hannah") that slipped from leadership into other topics —
+        // reject unless the word is long + camelCased / suggests a
+        // program ("ParaTots", "KidsMin").
+        const wordCount = name.trim().split(/\s+/).length
+        if (wordCount === 1) {
+          const hasInternalCaps = /[a-z][A-Z]/.test(name)
+          if (!hasInternalCaps) continue
+        }
         const root = normalizeRoot(name)
         if (!root) continue
         const prev = best.get(root)
