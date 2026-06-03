@@ -942,6 +942,50 @@ export interface StrategyDiscoveryQuestionnaire {
  *  Phase 1 of the Web Manager build only consumes the basics; later
  *  phases attach Brixies content templates, pages, and per-tool
  *  outputs to this `id`. */
+// ── Website Manager scheduler (v58) ──────────────────────────
+// Per-phase hour baselines + AI-assist multipliers live as JSONB on
+// strategy_web_projects. Multiplier is a fraction of baseline hours
+// remaining when AI tooling is engaged for that phase (1.0 = no AI
+// help, 0.4 = AI cuts the phase to 40% of baseline). 0 < value <= 1
+// enforced at write-time in the editor, not by a DB constraint, so
+// the shape stays flexible.
+export type PhaseEstimates = Partial<Record<WebProjectPhase, number>>
+export type AiAssistMultipliers = Partial<Record<WebProjectPhase, number>>
+
+export type ProjectSubStatus =
+  | 'on_track'
+  | 'ahead'
+  | 'off_track'
+  | 'blocked'
+  | 'complete'
+
+export interface StrategyDevWeeklyAllocation {
+  id:             string
+  week_starting:  string          // date ISO
+  web_project_id: string
+  hours:          number
+  slot:           'primary' | 'secondary' | 'tertiary'
+  notes:          string | null
+  created_at:     string
+  updated_at:     string
+}
+
+export interface StrategyDevCapacityOverride {
+  id:              string
+  week_starting:   string
+  employee_id:     string
+  hours_available: number
+  note:            string | null
+  created_at:      string
+  updated_at:      string
+}
+
+export interface StrategyWebPhaseMap {
+  pathway:     string
+  step_number: number
+  phase:       WebProjectPhase
+}
+
 export type WebProjectKind = 'redesign' | 'audit' | 'new_build' | string
 export type WebProjectPhase = 'intake' | 'content' | 'design' | 'dev' | 'review' | 'launched' | string
 
@@ -1015,6 +1059,21 @@ export interface StrategyWebProject {
   project_writing_rules:      string | null
   denominational_filter:      string | null
   personas:                   WebPersona[]
+
+  // ── v58 — Website Manager scheduler ────────────────────────
+  // Target launch date (the calendar promise to the partner) and
+  // overall dev-hours budget. Phase-level estimates + AI-assist
+  // multipliers live in JSONB so the shape can evolve without
+  // adding columns. owner_employee_id assigns a Web team member;
+  // sub_status caches the last computed health pill so list-page
+  // queries don't have to recompute on every render.
+  launch_date:                string | null    // date (ISO yyyy-mm-dd)
+  priority_order:             number | null
+  dev_hours_estimate:         number | null
+  phase_estimates:            PhaseEstimates
+  ai_assist_multipliers:      AiAssistMultipliers
+  owner_employee_id:          string | null
+  sub_status:                 ProjectSubStatus | null
 
   [key: string]: unknown
 }
