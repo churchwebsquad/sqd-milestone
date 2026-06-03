@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { Plus, Trash2, Upload, Loader2, RefreshCw, AlertCircle, FileText } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Plus, Trash2, Upload, Loader2, RefreshCw, AlertCircle, FileText, Link2 } from 'lucide-react'
 import type { StepProps, AssetRow } from './types'
 import { ASSET_TYPES, ASSET_TYPE_LABELS } from './types'
 import type { AssetType } from '../../types/database'
@@ -7,6 +7,9 @@ import StepNav from './StepNav'
 import {
   uploadAttachment, removeAttachment, pathFromPublicUrl, AttachmentError,
 } from '../../lib/attachmentUpload'
+import { fetchPartnerReviewLinks, type PartnerReviewLink } from '../../lib/partnerReviewLinks'
+
+const PRL_VALUE_PREFIX = '__prl__'
 
 const ACCEPT_ATTACHMENT = 'image/jpeg,image/png,image/webp,image/gif,application/pdf'
 
@@ -51,6 +54,24 @@ export default function Step5Assets({ formData, updateForm, onNext, onBack }: St
 
   // Per-row upload state; keyed by row id.
   const [uploadState, setUploadState] = useState<Record<string, UploadState>>({})
+
+  // Live partner-facing review portals for this member. The asset
+  // type dropdown surfaces these as a quick-pick optgroup so the
+  // staffer can attach (e.g.) "Website Content Collection" without
+  // bouncing to the WM workspace to grab the URL. Refreshes when
+  // the partner is changed in Step 1.
+  const [partnerReviewLinks, setPartnerReviewLinks] = useState<PartnerReviewLink[]>([])
+  useEffect(() => {
+    if (memberNumber <= 0) {
+      setPartnerReviewLinks([])
+      return
+    }
+    let cancelled = false
+    fetchPartnerReviewLinks(memberNumber).then(links => {
+      if (!cancelled) setPartnerReviewLinks(links)
+    })
+    return () => { cancelled = true }
+  }, [memberNumber])
 
   const addRow = () => updateForm({ assets: [...assets, newRow()] })
 
@@ -133,9 +154,8 @@ export default function Step5Assets({ formData, updateForm, onNext, onBack }: St
               index={idx}
               state={uploadState[asset.id]}
               memberNumber={memberNumber}
-              onType={(type) => updateRow(asset.id, { type })}
-              onUrl={(url) => updateRow(asset.id, { url })}
-              onLabel={(label) => updateRow(asset.id, { label })}
+              partnerReviewLinks={partnerReviewLinks}
+              onPatch={(patch) => updateRow(asset.id, patch)}
               onFile={(file) => handleFilePicked(asset.id, file)}
               onClearUpload={() => {
                 const path = asset.url ? pathFromPublicUrl(asset.url) : null
@@ -173,17 +193,48 @@ interface RowProps {
   index: number
   state: UploadState | undefined
   memberNumber: number
-  onType: (type: AssetType) => void
-  onUrl: (url: string) => void
-  onLabel: (label: string) => void
+  partnerReviewLinks: PartnerReviewLink[]
+  onPatch: (patch: Partial<AssetRow>) => void
   onFile: (file: File) => void
   onClearUpload: () => void
   onRemove: () => void
 }
 
-function AssetRowCard({ asset, index, state, memberNumber, onType, onUrl, onLabel, onFile, onClearUpload, onRemove }: RowProps) {
+function AssetRowCard({
+  asset, index, state, memberNumber, partnerReviewLinks,
+  onPatch, onFile, onClearUpload, onRemove,
+}: RowProps) {
   const urlInvalid = asset.url && asset.type !== 'attachment' && !isValidUrl(asset.url)
   const isAttachment = asset.type === 'attachment'
+
+  // If the row is already pointed at one of the live review links,
+  // surface that as the selected option; otherwise the regular type
+  // value drives the select. A type=partner_review_link row whose
+  // URL no longer matches any live link (e.g. session closed since
+  // it was added) falls through to the generic Partner Review Link
+  // entry — the row still works, the user just can't re-pick that
+  // exact link.
+  const matchedReviewLink = asset.type === 'partner_review_link'
+    ? partnerReviewLinks.find(l => l.url === asset.url) ?? null
+    : null
+  const selectValue = matchedReviewLink
+    ? `${PRL_VALUE_PREFIX}${matchedReviewLink.id}`
+    : asset.type
+
+  const handleSelectChange = (value: string) => {
+    if (value.startsWith(PRL_VALUE_PREFIX)) {
+      const id = value.slice(PRL_VALUE_PREFIX.length)
+      const link = partnerReviewLinks.find(l => l.id === id)
+      if (link) {
+        onPatch({ type: 'partner_review_link', url: link.url, label: link.label })
+        return
+      }
+    }
+    // Plain type change — preserve url/label.
+    onPatch({ type: value as AssetType })
+  }
+
+  const isPrefilledLink = matchedReviewLink !== null
 
   return (
     <div className="rounded-xl border border-lavender p-4 space-y-3">
@@ -205,13 +256,24 @@ function AssetRowCard({ asset, index, state, memberNumber, onType, onUrl, onLabe
         <div>
           <label className="block text-xs font-medium text-purple-gray mb-1">Type</label>
           <select
-            value={asset.type}
-            onChange={e => onType(e.target.value as AssetType)}
+            value={selectValue}
+            onChange={e => handleSelectChange(e.target.value)}
             className="w-full rounded-lg border border-lavender px-2.5 py-2 text-sm text-deep-plum bg-white outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20"
           >
-            {ASSET_TYPES.map(t => (
-              <option key={t} value={t}>{ASSET_TYPE_LABELS[t]}</option>
-            ))}
+            {partnerReviewLinks.length > 0 && (
+              <optgroup label="Partner review links">
+                {partnerReviewLinks.map(link => (
+                  <option key={link.id} value={`${PRL_VALUE_PREFIX}${link.id}`}>
+                    {link.label}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label="Asset types">
+              {ASSET_TYPES.map(t => (
+                <option key={t} value={t}>{ASSET_TYPE_LABELS[t]}</option>
+              ))}
+            </optgroup>
           </select>
         </div>
 
@@ -230,7 +292,7 @@ function AssetRowCard({ asset, index, state, memberNumber, onType, onUrl, onLabe
               <input
                 type="url"
                 value={asset.url}
-                onChange={e => onUrl(e.target.value)}
+                onChange={e => onPatch({ url: e.target.value })}
                 placeholder="https://…"
                 className={[
                   'w-full rounded-lg border px-3 py-2 text-sm text-deep-plum placeholder-purple-gray/50 outline-none focus:ring-2 transition',
@@ -241,6 +303,11 @@ function AssetRowCard({ asset, index, state, memberNumber, onType, onUrl, onLabe
               />
               {urlInvalid && (
                 <p className="text-xs text-red-600 mt-0.5">Must be a valid http/https URL.</p>
+              )}
+              {isPrefilledLink && (
+                <p className="mt-1 inline-flex items-center gap-1 text-[11px] text-primary-purple">
+                  <Link2 size={11} /> Prefilled from {matchedReviewLink?.label}
+                </p>
               )}
             </>
           )}
@@ -254,7 +321,7 @@ function AssetRowCard({ asset, index, state, memberNumber, onType, onUrl, onLabe
         <input
           type="text"
           value={asset.label}
-          onChange={e => onLabel(e.target.value)}
+          onChange={e => onPatch({ label: e.target.value })}
           placeholder={isAttachment ? 'e.g. Homepage hero mockup' : 'e.g. Homepage Loom Walkthrough'}
           className="w-full rounded-lg border border-lavender px-3 py-2 text-sm text-deep-plum placeholder-purple-gray/50 outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20"
         />

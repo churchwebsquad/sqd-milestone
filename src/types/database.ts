@@ -17,6 +17,7 @@ export type AssetType =
   | 'vista_social'
   | 'form'
   | 'attachment'
+  | 'partner_review_link'
   | 'other'
 
 /** ClickUp message delivery status (did the message send successfully?) */

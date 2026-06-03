@@ -141,6 +141,7 @@ export const ASSET_TYPE_LABELS: Record<AssetType, string> = {
   vista_social: 'Vista Social',
   form: 'Form',
   attachment: 'Attachment',
+  partner_review_link: 'Partner Review Link',
   other: 'Other',
 }
 
