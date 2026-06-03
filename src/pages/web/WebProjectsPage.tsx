@@ -12,79 +12,95 @@
  * a Phase 2 polish.
  */
 
-import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, ChevronDown, ChevronRight, Library, Plus, Search, Settings, X } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { ChevronDown, ChevronRight, Library, Plus, Search, Settings, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { SettingsWorkspace } from '../../components/wm/workspaces/SettingsWorkspace'
-import type { StrategyWebProject } from '../../types/database'
+import { WMSegmentedToggle } from '../../components/wm/SegmentedToggle'
+import { BoardView } from '../../components/wm/manager/BoardView'
+import { FilterChip } from '../../components/wm/manager/FilterChip'
+import { useProjectsWithHealth } from '../../hooks/useProjectsWithHealth'
+import type { ProjectRowVM } from '../../hooks/useProjectsWithHealth'
+import type { ProjectSubStatus, WebProjectPhase } from '../../types/database'
 
-interface ProjectRow extends StrategyWebProject {
-  church_name: string | null
+type ManagerView = 'board' | 'schedule'
+
+const PHASE_FILTERS: WebProjectPhase[] = [
+  'intake', 'content', 'design', 'dev', 'review', 'launched',
+]
+const SUB_FILTERS: ProjectSubStatus[] = [
+  'on_track', 'ahead', 'off_track', 'blocked', 'complete',
+]
+const PHASE_LABEL: Record<WebProjectPhase, string> = {
+  intake: 'Intake', content: 'Copywriting', design: 'Design',
+  dev: 'Dev', review: 'Final review', launched: 'Launched',
+}
+const SUB_LABEL: Record<ProjectSubStatus, string> = {
+  on_track: 'On track', ahead: 'Ahead', off_track: 'Off track',
+  blocked: 'Blocked', complete: 'Complete',
 }
 
 export default function WebProjectsPage() {
   const navigate = useNavigate()
-  const [rows, setRows] = useState<ProjectRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [query, setQuery] = useState('')
-  const [showArchived, setShowArchived] = useState(false)
+  const [params, setParams] = useSearchParams()
+  const view: ManagerView = (params.get('view') === 'schedule' ? 'schedule' : 'board')
+  const showArchived = params.get('archived') === '1'
+  const phaseFilter = (params.get('phase') || '').split(',').filter(Boolean) as WebProjectPhase[]
+  const subFilter   = (params.get('health') || '').split(',').filter(Boolean) as ProjectSubStatus[]
+  const query       = params.get('q') ?? ''
+  const editingId   = params.get('edit')
+
   const [createOpen, setCreateOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  const load = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      // Two queries — projects, then a name lookup against
-      // strategy_account_progress for the partners those projects
-      // belong to. Joining client-side keeps the read simple and
-      // sidesteps any RLS-edge-cases on a Postgres FK join.
-      const { data: projects, error: projErr } = await supabase
-        .from('strategy_web_projects')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(500)
-      if (projErr) throw projErr
+  const { rows, loading, error } = useProjectsWithHealth({ includeArchived: showArchived })
 
-      const memberIds = [...new Set(((projects ?? []) as StrategyWebProject[]).map(p => p.member))]
-      const churchByMember = new Map<number, string | null>()
-      if (memberIds.length > 0) {
-        const { data: churches } = await supabase
-          .from('strategy_account_progress')
-          .select('member, church_name')
-          .in('member', memberIds)
-        for (const c of (churches ?? []) as { member: number; church_name: string | null }[]) {
-          churchByMember.set(c.member, c.church_name)
-        }
-      }
-
-      setRows(((projects ?? []) as StrategyWebProject[]).map(p => ({
-        ...p,
-        church_name: churchByMember.get(p.member) ?? null,
-      })))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { void load() }, [])
-
-  const visible = useMemo(() => {
+  // Filter / search before passing to the view.
+  const visible = useMemo<ProjectRowVM[]>(() => {
     const q = query.trim().toLowerCase()
     return rows.filter(r => {
       if (!showArchived && r.archived) return false
       if (showArchived && !r.archived) return false
+      if (phaseFilter.length > 0 && !phaseFilter.includes(r.current_phase as WebProjectPhase)) return false
+      if (subFilter.length > 0 && !subFilter.includes(r.health.subStatus)) return false
       if (!q) return true
       const hay = [r.church_name, r.name, String(r.member)].filter(Boolean).join(' ').toLowerCase()
       return hay.includes(q)
     })
-  }, [rows, query, showArchived])
+  }, [rows, query, showArchived, phaseFilter, subFilter])
+
+  const phaseCounts = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const r of rows) {
+      const p = r.current_phase || 'intake'
+      out[p] = (out[p] ?? 0) + 1
+    }
+    return out
+  }, [rows])
+  const subCounts = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const r of rows) {
+      out[r.health.subStatus] = (out[r.health.subStatus] ?? 0) + 1
+    }
+    return out
+  }, [rows])
 
   const archivedCount = rows.filter(r => r.archived).length
+
+  const setParam = (key: string, value: string | null) => {
+    const next = new URLSearchParams(params)
+    if (value === null || value === '') next.delete(key)
+    else next.set(key, value)
+    setParams(next, { replace: true })
+  }
+  const toggleInList = (key: string, value: string) => {
+    const current = (params.get(key) || '').split(',').filter(Boolean)
+    const next = current.includes(value)
+      ? current.filter(v => v !== value)
+      : [...current, value]
+    setParam(key, next.join(',') || null)
+  }
 
   return (
     <div className="min-h-full py-6 px-4 md:px-6">
@@ -148,109 +164,119 @@ export default function WebProjectsPage() {
           </div>
         )}
 
-        {/* Search */}
-        <div className="relative mb-4">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-purple-gray/60" />
-          <input
-            type="text"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Search by church, project name, or member number…"
-            className="w-full rounded-full border border-lavender bg-white pl-9 pr-10 py-2.5 text-sm text-deep-plum placeholder-purple-gray/60 outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20"
+        {/* Toolbar: view toggle + search + archived */}
+        <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
+          <WMSegmentedToggle<ManagerView>
+            value={view}
+            onChange={(v) => setParam('view', v === 'board' ? null : v)}
+            options={[
+              { value: 'board',    label: 'Board' },
+              { value: 'schedule', label: 'Schedule' },
+            ]}
           />
-          {query && (
-            <button
-              type="button"
-              onClick={() => setQuery('')}
-              aria-label="Clear search"
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-purple-gray hover:text-deep-plum"
-            >
-              <X size={14} />
-            </button>
-          )}
-        </div>
 
-        {/* Toolbar */}
-        <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
-          <p className="text-xs text-purple-gray">
-            {visible.length} {visible.length === 1 ? 'project' : 'projects'}
-            {showArchived && archivedCount > 0 ? ' (archived)' : ''}
-          </p>
+          <div className="relative flex-1 min-w-[280px] max-w-md">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-purple-gray/60" />
+            <input
+              type="text"
+              value={query}
+              onChange={e => setParam('q', e.target.value || null)}
+              placeholder="Search by church, project, or member…"
+              className="w-full rounded-full border border-lavender bg-white pl-9 pr-10 py-2 text-sm text-deep-plum placeholder-purple-gray/60 outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setParam('q', null)}
+                aria-label="Clear search"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-purple-gray hover:text-deep-plum"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
           {archivedCount > 0 && (
-            <label className="inline-flex items-center gap-1.5 text-xs text-purple-gray cursor-pointer select-none">
+            <label className="inline-flex items-center gap-1.5 text-xs text-purple-gray cursor-pointer select-none shrink-0">
               <input
                 type="checkbox"
                 checked={showArchived}
-                onChange={e => setShowArchived(e.target.checked)}
+                onChange={e => setParam('archived', e.target.checked ? '1' : null)}
                 className="accent-deep-plum"
               />
-              Show archived ({archivedCount})
+              Archived ({archivedCount})
             </label>
           )}
         </div>
 
-        {loading && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="h-28 bg-lavender-tint/40 rounded-xl animate-pulse" />
+        {/* Filter chips */}
+        <div className="mb-4 flex flex-col gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] uppercase tracking-widest font-bold text-purple-gray shrink-0">Phase</span>
+            {PHASE_FILTERS.map(p => (
+              <FilterChip
+                key={p}
+                active={phaseFilter.includes(p)}
+                onToggle={() => toggleInList('phase', p)}
+                count={phaseCounts[p] ?? 0}
+              >
+                {PHASE_LABEL[p]}
+              </FilterChip>
             ))}
           </div>
-        )}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] uppercase tracking-widest font-bold text-purple-gray shrink-0">Health</span>
+            {SUB_FILTERS.map(s => (
+              <FilterChip
+                key={s}
+                active={subFilter.includes(s)}
+                onToggle={() => toggleInList('health', s)}
+                count={subCounts[s] ?? 0}
+              >
+                {SUB_LABEL[s]}
+              </FilterChip>
+            ))}
+          </div>
+        </div>
+
+        <p className="text-xs text-purple-gray mb-3">
+          {visible.length} {visible.length === 1 ? 'project' : 'projects'}
+        </p>
+
         {error && !loading && (
-          <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+          <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 mb-3">
             Couldn't load projects: {error}
           </div>
         )}
-        {!loading && !error && visible.length === 0 && (
+
+        {view === 'board' && (
+          <BoardView
+            rows={visible}
+            loading={loading}
+            onSelect={(id) => setParam('edit', id)}
+          />
+        )}
+
+        {view === 'schedule' && (
           <div className="rounded-xl border border-dashed border-lavender bg-white/50 px-4 py-12 text-center">
-            <p className="text-sm font-semibold text-deep-plum">
-              {rows.length === 0 ? 'No web projects yet.' : 'No projects match your search.'}
+            <p className="text-sm font-semibold text-deep-plum">Schedule view — coming next turn.</p>
+            <p className="text-xs text-purple-gray mt-1">
+              Week-by-week Josh capacity grid renders here. Use the Board view in the meantime.
             </p>
-            {rows.length === 0 && (
-              <>
-                <p className="text-xs text-purple-gray mt-1">
-                  Spin up a project to start an intake — every project anchors a Brixies-bound copy + design + dev pipeline for one church.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setCreateOpen(true)}
-                  className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-deep-plum text-white text-xs font-semibold px-3.5 py-2 hover:bg-primary-purple transition-colors"
-                >
-                  <Plus size={11} />
-                  Start the first project
-                </button>
-              </>
-            )}
           </div>
         )}
 
-        {!loading && !error && visible.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {visible.map(p => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => navigate(`/web/${p.id}`)}
-                className={`text-left rounded-xl border p-4 transition-all flex items-center justify-between gap-4 ${
-                  p.archived
-                    ? 'border-purple-gray/30 bg-white/60 opacity-70 hover:opacity-100'
-                    : 'border-lavender bg-white hover:border-primary-purple hover:shadow-sm'
-                }`}
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="text-[10px] font-bold text-primary-purple uppercase tracking-widest mb-0.5">
-                    {p.church_name ?? `Member #${p.member}`}
-                  </p>
-                  <h3 className="text-base font-semibold text-deep-plum truncate">{p.name}</h3>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                    <Pill label={p.kind} tone="lavender" />
-                    <Pill label={`Phase: ${p.current_phase}`} tone="amber" />
-                    {p.archived && <Pill label="Archived" tone="muted" />}
-                  </div>
-                </div>
-                <ArrowRight size={14} className="text-primary-purple shrink-0" />
-              </button>
-            ))}
+        {/* Stash editingId for the side panel that lands next turn. */}
+        {editingId && (
+          <div className="fixed bottom-4 right-4 max-w-sm rounded-xl border border-lavender bg-white shadow-lg px-4 py-3 text-xs text-purple-gray z-50">
+            Edit panel for <span className="font-mono text-deep-plum">{editingId}</span> coming next turn.
+            <button
+              type="button"
+              onClick={() => setParam('edit', null)}
+              className="ml-2 inline-flex items-center text-deep-plum hover:text-primary-purple"
+            >
+              <X size={12} />
+            </button>
           </div>
         )}
       </div>
@@ -265,19 +291,6 @@ export default function WebProjectsPage() {
         />
       )}
     </div>
-  )
-}
-
-function Pill({ label, tone }: { label: string; tone: 'lavender' | 'amber' | 'muted' }) {
-  const styles = {
-    lavender: 'bg-primary-purple/10 text-primary-purple border-primary-purple/20',
-    amber:    'bg-amber-100 text-amber-800 border-amber-200',
-    muted:    'bg-lavender-tint text-purple-gray border-lavender',
-  }[tone]
-  return (
-    <span className={`inline-flex items-center rounded-full text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 border ${styles}`}>
-      {label}
-    </span>
   )
 }
 
