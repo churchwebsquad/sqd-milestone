@@ -35,6 +35,7 @@ interface SessionRow {
   events_wordpress_frustration:      string | null
   events_wordpress_recurring_needed: string | null
   events_display_format:             string | null
+  merch_store_url:                   string | null
   sermons_display_preference:        string | null
   sermons_external_url:              string | null
   sermon_archive_features:           string[] | null
@@ -527,6 +528,11 @@ function buildStep2Rows(s: SessionRow): Step2Row[] {
          s.groups_wordpress_source_of_truth, { span: 2 })
     push('groups_wp_pain',   'What causes the most frustration with your current group management system?',
          s.groups_wordpress_frustration, { span: 2 })
+  }
+  // ── Merch / Shop ──────────────────────────────────────────────────
+  if (s.merch_store_url && s.merch_store_url.trim()) {
+    push('merch_store', 'Link to your merch / shop store',
+         s.merch_store_url, { span: 2 })
   }
   // ── CMS / Blog ────────────────────────────────────────────────────
   if (s.cms_managed_types && s.cms_managed_types.length > 0) {

@@ -88,6 +88,10 @@ interface SessionRow {
    *  the Direct-to-YouTube/Vimeo sermon display choice. */
   sermon_youtube_playlist_exists:    boolean | null
   sermon_youtube_playlist_url:       string | null
+  /** External merch / shop store URL. The new site can link visitors
+   *  out to the partner's store but doesn't host ecommerce under
+   *  the subscription. v62. */
+  merch_store_url:                   string | null
   /** Rich-text (HTML) list of ministries offered at the church. */
   ministries_list_html:              string | null
   /** Rich-text (HTML) description of the next-steps / discipleship pathway. */
@@ -714,6 +718,11 @@ function Step2Form({
           <SermonArchiveFeaturesQuestion session={session} saveField={saveField} />
         )}
         <GroupsQuestion session={session} saveField={saveField} />
+        <MerchQuestion
+          session={session}
+          topicsByKey={topicsByKey}
+          saveField={saveField}
+        />
         <MinistriesToGrowSection
           session={session}
           topicsByKey={topicsByKey}
@@ -1011,6 +1020,74 @@ function SermonArchiveFeaturesQuestion({
       />
     </section>
   )
+}
+
+/** Optional merch-store question. Surfaces always (so partners with
+ *  un-crawled stores can still answer), with a prominent note when
+ *  the crawl found merch evidence. Prefills from the merch topic's
+ *  first CTA URL OR from any item whose name/url mentions merch keywords. */
+function MerchQuestion({
+  session, topicsByKey, saveField,
+}: {
+  session:     SessionRow
+  topicsByKey: Map<string, TopicRow>
+  saveField:   <K extends keyof SessionRow>(field: K, value: SessionRow[K]) => Promise<void>
+}) {
+  const detectedUrl = useMemo(() => detectMerchUrl(topicsByKey), [topicsByKey])
+  const hasDetection = !!detectedUrl
+  return (
+    <section className="bg-white border border-lavender rounded-2xl p-5 md:p-6">
+      <h2 className="font-semibold text-deep-plum text-base mb-1">
+        Do you have a merch / online store?
+      </h2>
+      <p className="text-purple-gray text-xs mb-3">Optional</p>
+      <div className="rounded-md border border-lavender bg-lavender-tint/30 px-3 py-2 mb-3 text-[12px] text-deep-plum leading-snug">
+        Heads up: the new site can <strong>link visitors out</strong> to
+        your existing merch store (Shopify, Printful, etc.) but our
+        subscription doesn&rsquo;t include ecommerce hosting. Drop the
+        URL below and we&rsquo;ll wire it up as a CTA.
+      </div>
+      {hasDetection && (
+        <p className="text-purple-gray text-[12px] mb-2">
+          We found what looks like a merch link on your current site —
+          confirm or replace it below.
+        </p>
+      )}
+      <FieldShort
+        label="Link to your merch / shop store"
+        placeholder={detectedUrl ?? 'https://your-store.com or your-church.printful.me'}
+        value={session.merch_store_url ?? detectedUrl}
+        onChange={v => saveField('merch_store_url', v)}
+      />
+    </section>
+  )
+}
+
+/** Walks every topic looking for a URL that smells like a merch
+ *  store — match on host (printful, shopify, redbubble, etc.) OR on
+ *  path / label keywords (/shop, /store, /merch, "apparel", "swag"). */
+function detectMerchUrl(topicsByKey: Map<string, TopicRow>): string | null {
+  const MERCH_HOSTS = /printful|shopify|bigcartel|redbubble|teespring|spreadshop|printify|squareup\.com|square\.online|wix\.com.*\/shop/i
+  const MERCH_KEYWORDS = /\b(shop|store|merch|apparel|swag|merchandise|gear|t-?shirt|hoodie)\b/i
+  const seen = new Set<string>()
+  for (const topic of topicsByKey.values()) {
+    for (const item of topic.items ?? []) {
+      const url = String(item.url ?? '').trim()
+      if (url && /^https?:\/\//i.test(url)) {
+        if (MERCH_HOSTS.test(url)) return url
+        if (!seen.has(url)) {
+          // Path-based fallback — only when the label / name also
+          // looks merch-ish, since /shop alone could be a generic page.
+          const labelOrName = String(item.label ?? item.name ?? '')
+          if (MERCH_KEYWORDS.test(url) && MERCH_KEYWORDS.test(labelOrName)) {
+            return url
+          }
+          seen.add(url)
+        }
+      }
+    }
+  }
+  return null
 }
 
 function GroupsQuestion({

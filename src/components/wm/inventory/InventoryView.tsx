@@ -28,6 +28,7 @@ import {
 } from 'lucide-react'
 import { PARTNER_GROUPS, type PartnerBucket } from '../../../lib/webPartnerGroups'
 import { computeBaselineCoverage, type BaselineCoverage } from '../../../lib/webPartnerBaselines'
+import { sanitizeTopicsForPartner } from '../../../lib/sanitizeInventoryForPartner'
 import { WMRichTextEditor } from '../RichTextEditor'
 import { FileUploadField } from '../../contentcollection/FileUploadField'
 import type { AttachmentMetadata } from '../../../lib/contentCollectionAttachments'
@@ -221,11 +222,19 @@ function StaffGroupAccordion({
 // ── Top-level component ──────────────────────────────────────────────
 
 export function InventoryView({
-  topicsByKey, snippetsByToken, reviewMode = false, marks, saveMark,
+  topicsByKey: rawTopicsByKey, snippetsByToken, reviewMode = false, marks, saveMark,
   sessionId, attachments, onAttachmentChange,
   externalPrefills = {},
   groupAccordion = false,
 }: Props) {
+  // Partner-facing view: dedupe items that landed in multiple topics
+  // (Paradox Youth → kids + students; Young Adults → students +
+  // college) and gate out any Church-Media-Squad references so they
+  // never reach the partner. Staff view keeps the raw map.
+  const topicsByKey = useMemo(
+    () => reviewMode ? sanitizeTopicsForPartner(rawTopicsByKey) : rawTopicsByKey,
+    [rawTopicsByKey, reviewMode],
+  )
   const tocEntries = useMemo(() => buildTocEntries(topicsByKey), [topicsByKey])
   // Accordion open-key is shared between the side TOC and the
   // accordion itself so TOC clicks can open the target group BEFORE

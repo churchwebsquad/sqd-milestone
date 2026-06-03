@@ -139,9 +139,12 @@ export const PARTNER_GROUPS: PartnerGroup[] = [
       { key: 'global_outreach', label: 'Global Outreach',
         topics: ['missions'], programScope: 'global',
         helpText: 'Global missions partnerships and trips (scope:global).' },
+      { key: 'merch', label: 'Merch / Shop',
+        topics: ['merch'],
+        helpText: 'External merch / apparel store. Linked from the new site but ecommerce is not part of the subscription.' },
       { key: 'additional', label: 'Additional Information',
         topics: ['school', 'other'],
-        helpText: 'School/preschool affiliations, merch / shop links, podcasts, and anything else the classifier didn’t fit elsewhere.' },
+        helpText: 'School/preschool affiliations, podcasts, and anything else the classifier didn’t fit elsewhere.' },
     ],
   },
   {

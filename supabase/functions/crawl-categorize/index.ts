@@ -83,6 +83,7 @@ const TAXONOMY = [
   { key:'newsletter_bulletin', label:'Newsletter & Bulletin', group:'logistics', inventory_kind:'fact_rich', url_patterns:[/^\/(newsletter|bulletin|weekly-update|enews|e-news)\/?/i,/^\/(newsletter|bulletin)\//i], item_fields:['title','date','link','excerpt'], description:'Newsletter / bulletin entries.' },
   { key:'giving',          label:'Giving',               group:'conversion',inventory_kind:'voice_rich', url_patterns:[/^\/(give|giving|donate|stewardship|tithe)\/?/i], description:'Giving + stewardship.' },
   { key:'capital_campaign', label:'Capital Campaign',    group:'conversion',inventory_kind:'voice_rich', url_patterns:[/^\/(campaign|capital-campaign|building|growth-campaign)\/?/i], description:'Capital campaigns.' },
+  { key:'merch',           label:'Merch / Shop',         group:'logistics', inventory_kind:'fact_rich', url_patterns:[/^\/(merch|shop|store|apparel|swag|merchandise|gear)\/?/i,/^\/(merch|shop|store)\//i], item_fields:['name','url','description','price'], description:'External merch store (Shopify / Printful / etc.). Capture CTAs + the store URL only — we link out, we do not run ecommerce.' },
   { key:'other',           label:'Other / Unclassified', group:'other',     inventory_kind:'voice_rich', url_patterns:[], description:'Catch-all.' },
 ];
 
