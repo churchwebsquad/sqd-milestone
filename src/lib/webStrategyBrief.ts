@@ -60,11 +60,15 @@ export async function loadStrategyBriefSections(webProjectId: string): Promise<S
   }
 }
 
-/** Split markdown into sections by `### ` heading (level-3). The
- *  user's strategy brief uses `# Mission + Vision + Values` (level-1)
- *  as the parent, then `### Mission` / `### Vision` / `### Values`
- *  as children, with `---` horizontal rules between them. We treat
- *  both `### Heading` lines AND `---` as boundaries.
+/** Split markdown into sections by any level-2-or-deeper heading
+ *  (##, ###, ####). Earlier versions only matched `### ` and missed
+ *  briefs where Notion exports inconsistently rendered Vision /
+ *  Values as `## ` siblings — those sections were silently absent
+ *  from the prefill set and partners never saw them. We treat any
+ *  `##+ Heading` line AND `---` as a boundary; the title is
+ *  normalized (lowercased, markdown-bold/italic stripped, trimmed)
+ *  before keying so `## **Values**` and `### Values` both map to
+ *  `values`.
  *
  *  Returned `mission` / `vision` / `values` are the trimmed body of
  *  each matching section, markdown intact (blockquotes, bullets, etc.). */
@@ -76,7 +80,7 @@ export function parseStrategyBriefSections(md: string): StrategyBriefSections {
   // so the split below isn't tripped by CRLF or stray spaces.
   const lines = md.replace(/\r\n/g, '\n').split('\n')
 
-  // Walk lines, tracking the current ### heading. When a new heading
+  // Walk lines, tracking the current heading. When a new heading
   // (or "---" rule) is hit, flush the buffer to the previous section.
   let currentTitle: string | null = null
   let buffer: string[] = []
@@ -84,16 +88,17 @@ export function parseStrategyBriefSections(md: string): StrategyBriefSections {
   const flush = () => {
     if (!currentTitle) return
     const body = trimBlockBody(buffer.join('\n'))
-    if (body) out.byHeading[currentTitle.toLowerCase()] = body
+    const key = normalizeHeading(currentTitle)
+    if (body && key) out.byHeading[key] = body
     buffer = []
   }
 
   for (const raw of lines) {
     const line = raw
-    const m = line.match(/^###\s+(.+?)\s*$/)
+    const m = line.match(/^(#{2,6})\s+(.+?)\s*$/)
     if (m) {
       flush()
-      currentTitle = m[1].trim()
+      currentTitle = m[2].trim()
       continue
     }
     // `---` horizontal rule between sections ends the current section.
@@ -111,6 +116,19 @@ export function parseStrategyBriefSections(md: string): StrategyBriefSections {
   out.vision  = out.byHeading['vision']  ?? undefined
   out.values  = out.byHeading['values']  ?? undefined
   return out
+}
+
+/** Heading text → normalized key. Strips markdown bold/italic
+ *  (`**Values**` → `values`), lowercases, trims. Returns empty for
+ *  titles that look like icon-decorated section anchors (`#
+ *  :heart-icon: Your Community`) so they don't pollute the heading
+ *  map. */
+function normalizeHeading(s: string): string {
+  return s
+    .replace(/[*_`]+/g, '')           // strip markdown emphasis markers
+    .replace(/:[\w-]+:/g, '')          // strip Notion `:icon-name:` shortcodes
+    .trim()
+    .toLowerCase()
 }
 
 /** Strip leading / trailing blank lines, leave inner markdown alone. */

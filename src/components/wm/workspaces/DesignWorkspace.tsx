@@ -135,16 +135,19 @@ export function DesignWorkspace({ project, onChange }: Props) {
       // the member as `member`. Find the matching brand guide first;
       // if multiple guides exist for the member, prefer the published
       // one, then the most recently updated.
+      // A single member can carry multiple brand_guides rows (legacy
+      // duplicates, drafts the AM never deleted, etc.). Date-based
+      // tie-breaking is unreliable — a more-recently-touched row may
+      // be the WIP scratch guide while the canonical, colors-filled
+      // one is older. Score every candidate by (a) published status,
+      // (b) how many color rows it has filled in, (c) date as final
+      // tiebreaker. The "most complete" guide wins.
       const { data: guides, error: guideErr } = await supabase
         .from('strategy_brand_guides')
         .select('id, is_published, last_updated_at, updated_at')
         .eq('member', project.member)
-        .order('is_published', { ascending: false })
-        .order('last_updated_at', { ascending: false, nullsFirst: false })
-        .order('updated_at', { ascending: false, nullsFirst: false })
       if (guideErr) throw new Error(guideErr.message)
-      const guide = guides?.[0]
-      if (!guide) {
+      if (!guides || guides.length === 0) {
         setPopulateStatus({
           kind: 'empty',
           summary: [],
@@ -152,6 +155,25 @@ export function DesignWorkspace({ project, onChange }: Props) {
         })
         return
       }
+
+      const guideIds = guides.map(g => g.id)
+      const { data: colorRowsForRank } = await supabase
+        .from('strategy_brand_colors')
+        .select('brand_guide_id')
+        .in('brand_guide_id', guideIds)
+      const colorCount = new Map<string, number>()
+      for (const r of (colorRowsForRank ?? []) as Array<{ brand_guide_id: string }>) {
+        colorCount.set(r.brand_guide_id, (colorCount.get(r.brand_guide_id) ?? 0) + 1)
+      }
+      const scored = guides.map(g => ({
+        g,
+        score:
+          (g.is_published ? 1_000_000 : 0) +
+          (colorCount.get(g.id) ?? 0) * 1_000 +
+          new Date(g.last_updated_at ?? g.updated_at ?? 0).getTime() / 1_000_000_000,
+      }))
+      scored.sort((a, b) => b.score - a.score)
+      const guide = scored[0].g
 
       const [{ data: colors, error: colorsErr }, { data: typography, error: typeErr }] =
         await Promise.all([
