@@ -23,6 +23,7 @@ import { ScheduleView } from '../../components/wm/manager/ScheduleView'
 import { FilterChip } from '../../components/wm/manager/FilterChip'
 import { ProjectEditPanel } from '../../components/wm/manager/ProjectEditPanel'
 import { SalesQuoteCard } from '../../components/wm/manager/SalesQuoteCard'
+import { PaceDashboard } from '../../components/wm/manager/PaceDashboard'
 import { useProjectsWithHealth } from '../../hooks/useProjectsWithHealth'
 import type { ProjectRowVM } from '../../hooks/useProjectsWithHealth'
 import type { ProjectSubStatus, WebProjectPhase } from '../../types/database'
@@ -174,6 +175,12 @@ export default function WebProjectsPage() {
             <SettingsWorkspace />
           </div>
         )}
+
+        {/* Team pace strip — collapsible. Most-recent + forward-
+            looking signals + drill-downs into the at-risk filter. */}
+        <div className="mb-3">
+          <PaceDashboard rows={rows} />
+        </div>
 
         {/* Sales-quote one-liner — only renders when there's launched-
             project history to baseline from. */}
