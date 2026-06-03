@@ -12,16 +12,19 @@
  */
 import {
   computeProjectHealth,
+  phaseFromMilestones,
+  phaseRank,
   type HealthInputs,
   type HealthMilestoneRow,
   PHASE_ORDER,
 } from './webProjectHealth'
-import { daysBetween, fromIsoDate, toIsoDate, weekStart } from './dateRange'
+import { daysBetween, fromIsoDate } from './dateRange'
 import type {
   StrategyWebProject,
   WebProjectPhase,
   PhaseEstimates,
   AiAssistMultipliers,
+  PhaseProgress,
 } from '../types/database'
 
 export type FeasibilityVerdict = 'achievable' | 'tight' | 'unachievable'
@@ -97,15 +100,25 @@ export function computeProjectFeasibility(i: FeasibilityInputs): FeasibilityResu
   } as HealthInputs)
 
   // ── How much capacity sits between today and the AM's target? ──
-  const targetIso = toIsoDate(weekStart(target))
-  let availableToTarget = 0
+  // Two sources: explicit per-project allocations (when the team has
+  // staffed the project on the schedule), and a capacity-based fall-
+  // back (Josh's full weekly hours times weeks-to-target). When no
+  // allocations are entered we fall back to capacity so a small
+  // remainder doesn't read "0h available" just because the schedule
+  // grid is empty.
+  let allocatedToTarget = 0
   for (const a of i.allocations) {
     const w = fromIsoDate(a.week_starting)
     if (!w) continue
     if (w < i.today) continue
     if (w > target) continue
-    availableToTarget += Number(a.hours)
+    allocatedToTarget += Number(a.hours)
   }
+  const daysToTarget = Math.max(0, daysBetween(i.today, target))
+  const capacityToTarget = (daysToTarget / 7) * Math.max(i.joshWeeklyCapacity, 0)
+  const availableToTarget = allocatedToTarget > 0
+    ? allocatedToTarget
+    : capacityToTarget
 
   // ── Verdict, confidence, gap ────────────────────────────
   const launchDate = fromIsoDate(i.project.launch_date)
@@ -114,12 +127,27 @@ export function computeProjectFeasibility(i: FeasibilityInputs): FeasibilityResu
 
   const targetGapDays = projection ? daysBetween(projection, target) : null
   let verdict: FeasibilityVerdict
-  if (targetGapDays != null && targetGapDays >= 7) {
+  if (health.subStatus === 'blocked') {
+    verdict = 'unachievable'
+    reasoning.push('Project is currently blocked; unblock before promising the new date.')
+  } else if (
+    targetGapDays != null
+    && targetGapDays >= 0
+    && health.remainingHoursAdjusted <= availableToTarget
+  ) {
+    // Projection lands on or before the target AND capacity covers
+    // the work — call it achievable. Removes the old 7-day cushion
+    // that wrote off small-remainder projects ("4h needed, 28h
+    // available, 5d cushion") as merely tight.
     verdict = 'achievable'
-    reasoning.push(`Current plan projects ${formatDate(projection)} — already ${targetGapDays}d before target.`)
+    if (targetGapDays > 0) {
+      reasoning.push(`Current plan projects ${formatDate(projection)} — ${targetGapDays}d before target.`)
+    } else {
+      reasoning.push(`Current plan projects ${formatDate(projection)} — lands on the target.`)
+    }
   } else if (
     health.remainingHoursAdjusted <= availableToTarget * 1.1
-    && health.subStatus !== 'blocked'
+    && (targetGapDays == null || targetGapDays >= -3)
   ) {
     verdict = 'tight'
     reasoning.push(
@@ -127,13 +155,9 @@ export function computeProjectFeasibility(i: FeasibilityInputs): FeasibilityResu
     )
   } else {
     verdict = 'unachievable'
-    if (health.subStatus === 'blocked') {
-      reasoning.push('Project is currently blocked; unblock before promising the new date.')
-    } else {
-      reasoning.push(
-        `Plan needs ${health.remainingHoursAdjusted.toFixed(1)}h but only ${availableToTarget.toFixed(1)}h are allocated by ${formatDate(target)}.`,
-      )
-    }
+    reasoning.push(
+      `Plan needs ${health.remainingHoursAdjusted.toFixed(1)}h but only ${availableToTarget.toFixed(1)}h are available by ${formatDate(target)}.`,
+    )
   }
 
   const sample = i.completedProjectCount ?? 0
@@ -146,10 +170,24 @@ export function computeProjectFeasibility(i: FeasibilityInputs): FeasibilityResu
   }
 
   // ── Bottleneck phase ──────────────────────────────────────
+  // "Bottleneck" = the phase that's actually consuming the remaining
+  // work, NOT just the highest-estimate phase. Skip phases the team
+  // has marked 100% complete via phase_progress — those can't bottle-
+  // neck anything. When all remaining phases have zero estimate (the
+  // user is leaning on manual_remaining_hours instead of per-phase
+  // baselines), fall back to the EARLIEST not-100%-complete phase
+  // since that's whatever the team is actively working on.
+  const storedPhase = (i.project.current_phase || 'intake') as WebProjectPhase
+  const milestonePhase = phaseFromMilestones(i.milestones)
+  const effectivePhase: WebProjectPhase =
+    (milestonePhase && phaseRank(milestonePhase) > phaseRank(storedPhase))
+      ? milestonePhase
+      : storedPhase
   const bottleneck = pickBottleneckPhase(
-    (i.project.current_phase || 'intake') as WebProjectPhase,
+    effectivePhase,
     (i.project.phase_estimates ?? {}) as PhaseEstimates,
     (i.project.ai_assist_multipliers ?? {}) as AiAssistMultipliers,
+    (i.project.phase_progress ?? {}) as PhaseProgress,
   )
 
   // ── Levers — only emit when there's actual headroom to gain.
@@ -184,7 +222,7 @@ export function computeProjectFeasibility(i: FeasibilityInputs): FeasibilityResu
     })
   }
 
-  if (verdict === 'unachievable' && (i.project.current_phase as WebProjectPhase) === 'intake') {
+  if (verdict === 'unachievable' && effectivePhase === 'intake') {
     levers.push({
       lever: 'cut_scope_to_audit',
       impactDays: 30,                                            // rough
@@ -225,18 +263,31 @@ export function computeProjectFeasibility(i: FeasibilityInputs): FeasibilityResu
 function pickBottleneckPhase(
   current: WebProjectPhase,
   est: PhaseEstimates,
-  mults: AiAssistMultipliers, // retained for parity; mults default to 1
+  mults: AiAssistMultipliers,
+  progress: PhaseProgress,
 ): WebProjectPhase | null {
-  const rank = (p: WebProjectPhase) =>
-    PHASE_ORDER.indexOf(p)
-  let bestPhase: WebProjectPhase | null = null
+  const rank = (p: WebProjectPhase) => PHASE_ORDER.indexOf(p)
+  const isDone = (p: WebProjectPhase) => Number(progress[p] ?? 0) >= 1
+  // Only phases at-or-after current AND not 100% complete are eligible.
+  const candidates = PHASE_ORDER.filter(p =>
+    p !== 'launched' && rank(p) >= rank(current) && !isDone(p),
+  )
+  if (candidates.length === 0) return null
+
+  // Prefer the phase with the largest residual work (estimate × mult
+  // × (1 - progress)). Ties broken by lower rank (earlier phase wins
+  // — that's what's actively blocking).
+  let bestPhase: WebProjectPhase = candidates[0]
   let bestHours = -Infinity
-  for (const p of PHASE_ORDER) {
-    if (p === 'launched') continue
-    if (rank(p) < rank(current)) continue
-    const h = (est[p] ?? 0) * (mults[p] ?? 1)
-    if (h > bestHours) { bestHours = h; bestPhase = p }
+  for (const p of candidates) {
+    const residual = (est[p] ?? 0) * (mults[p] ?? 1)
+                   * (1 - Number(progress[p] ?? 0))
+    if (residual > bestHours) { bestHours = residual; bestPhase = p }
   }
+  // No phase carries non-zero residual hours (the team is leaning on
+  // manual_remaining_hours) — pick the earliest not-done phase since
+  // that's where work is actually happening right now.
+  if (bestHours <= 0) return candidates[0]
   return bestPhase
 }
 

@@ -40,6 +40,11 @@ export const PHASE_ORDER: WebProjectPhase[] = [
   'intake', 'content', 'design', 'dev', 'review', 'launched',
 ]
 
+/** Josh's dedicatable hours per week. Was 30; bumped to 32.75 per
+ *  Ashley 2026-06-03 to reflect his actual schedule. Single source
+ *  of truth — every health/feasibility callsite imports this. */
+export const DEFAULT_DEV_CAPACITY = 32.75
+
 export function phaseRank(p: WebProjectPhase | string | null | undefined): number {
   switch (p) {
     case 'intake':   return 1
@@ -53,11 +58,54 @@ export function phaseRank(p: WebProjectPhase | string | null | undefined): numbe
 }
 
 /** Milestone fields the health calc reads. Keep this loose so callers
- *  don't have to fetch the whole row. */
+ *  don't have to fetch the whole row. When the caller can supply
+ *  squad/pathway/step_number, phaseFromMilestones() uses them to
+ *  derive an effective phase that beats a stale stored current_phase
+ *  (e.g. step 9 "Review: Final Website" sent → effective phase =
+ *  'review' even if the project row still says 'intake'). */
 export type HealthMilestoneRow = Pick<
   StrategyMilestoneSubmission,
   'milestone_id' | 'milestone_status' | 'submitted_at'
->
+> & {
+  squad?:       string | null
+  pathway?:     string | null
+  step_number?: number | null
+}
+
+/** Web-Redesign step number → project phase. Mirrors the
+ *  strategy_web_phase_map seed from the original plan; lives in code
+ *  for now since the table never landed. Other pathways (audit,
+ *  refresh) get no mapping — their submissions don't move the phase. */
+const WEB_REDESIGN_STEP_TO_PHASE: Record<number, WebProjectPhase> = {
+  1: 'intake',
+  2: 'content',  3: 'content',  4: 'content',  5: 'content',
+  6: 'design',   7: 'design',
+  8: 'dev',
+  9: 'review',
+ 10: 'launched',
+}
+
+/** Highest phase implied by the partner's milestone submissions for
+ *  the Web Redesign pathway. Returns null when no web-redesign
+ *  submission exists. "Implied" = the milestone was sent or moved
+ *  beyond — drafts don't count. */
+export function phaseFromMilestones(
+  milestones: HealthMilestoneRow[],
+): WebProjectPhase | null {
+  let best: WebProjectPhase | null = null
+  let bestRank = 0
+  for (const m of milestones) {
+    if (m.squad !== 'web') continue
+    if (m.pathway !== 'redesign') continue
+    if (m.step_number == null) continue
+    if (m.milestone_status === 'draft') continue
+    const ph = WEB_REDESIGN_STEP_TO_PHASE[m.step_number]
+    if (!ph) continue
+    const r = phaseRank(ph)
+    if (r > bestRank) { bestRank = r; best = ph }
+  }
+  return best
+}
 
 export interface HealthInputs {
   project: Pick<
@@ -100,11 +148,24 @@ const BLOCKED_WAITING_DAYS = 7
 const AHEAD_SLACK_FACTOR = 1.2
 
 export function computeProjectHealth(i: HealthInputs): HealthResult {
-  const phase = (i.project.current_phase || 'intake') as WebProjectPhase
+  const storedPhase = (i.project.current_phase || 'intake') as WebProjectPhase
+  // Milestone-derived phase beats stored current_phase when it's
+  // further along. So a project whose row still says 'intake' but
+  // whose team has already sent "Review: Final Website" reads as
+  // 'review' — which is what the team actually cares about.
+  const milestonePhase = phaseFromMilestones(i.milestones)
+  const phase: WebProjectPhase =
+    (milestonePhase && phaseRank(milestonePhase) > phaseRank(storedPhase))
+      ? milestonePhase
+      : storedPhase
   const phaseEst: PhaseEstimates = i.project.phase_estimates ?? {}
   const multipliers: AiAssistMultipliers = i.project.ai_assist_multipliers ?? {}
   const today = i.today
   const reasons: string[] = []
+  if (milestonePhase && milestonePhase !== storedPhase
+      && phaseRank(milestonePhase) > phaseRank(storedPhase)) {
+    reasons.push(`Phase ${milestonePhase} inferred from milestone submissions.`)
+  }
 
   // ── Complete short-circuit ───────────────────────────────
   if (phase === 'launched') {
@@ -169,16 +230,27 @@ export function computeProjectHealth(i: HealthInputs): HealthResult {
   }
 
   // ── Available capacity to target ─────────────────────────
+  // Explicit per-project allocations first; when none are entered we
+  // fall back to capacity-based hours (Josh's weekly hours × weeks
+  // until launch). Without this fallback a partner with no schedule
+  // grid entry reads "0h available" even though the dev's calendar
+  // is wide open — which is exactly why a 4h-remainder project was
+  // showing as "15 days behind."
   const launchDate = fromIsoDate(i.project.launch_date)
-  let availableHours = 0
+  let allocatedHours = 0
   if (launchDate) {
     for (const a of i.allocations) {
       const w = fromIsoDate(a.week_starting)
       if (!w) continue
       if (w < today) continue
       if (w > launchDate) continue
-      availableHours += Number(a.hours)
+      allocatedHours += Number(a.hours)
     }
+  }
+  let availableHours = allocatedHours
+  if (availableHours === 0 && launchDate) {
+    const days = Math.max(0, daysBetween(today, launchDate))
+    availableHours = (days / 7) * Math.max(i.joshWeeklyCapacity, 0)
   }
 
   // ── Blocked check ────────────────────────────────────────
@@ -267,10 +339,14 @@ export function computeProjectHealth(i: HealthInputs): HealthResult {
     // an OPTIMISTIC estimate. It's the "best-case if we drop other
     // commitments" answer, useful as a sanity bound on the booked
     // projection.
+    //
+    // Math is in DAYS (not whole weeks) so a 4-hour remainder doesn't
+    // push the projection a full week. ceil(remaining × 7 / capacity)
+    // gives the smallest whole-day chunk that covers the work.
     const cap = Math.max(i.joshWeeklyCapacity, 1)
-    const weeksNeeded = Math.max(1, Math.ceil(remaining / cap))
+    const daysNeeded = Math.max(1, Math.ceil((remaining * 7) / cap))
     const capProjectionDate = new Date(today)
-    capProjectionDate.setDate(capProjectionDate.getDate() + weeksNeeded * 7)
+    capProjectionDate.setDate(capProjectionDate.getDate() + daysNeeded)
     const capProjection = toIsoDate(capProjectionDate)
 
     // Pick the EARLIER of the two when both exist; the allocation-

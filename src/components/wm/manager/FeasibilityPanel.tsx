@@ -26,7 +26,7 @@ import { fromIsoDate, daysBetween } from '../../../lib/dateRange'
 import type {
   StrategyWebProject,
 } from '../../../types/database'
-import type { HealthMilestoneRow } from '../../../lib/webProjectHealth'
+import { DEFAULT_DEV_CAPACITY, type HealthMilestoneRow } from '../../../lib/webProjectHealth'
 
 interface Props {
   project:     Pick<
@@ -74,7 +74,7 @@ export function FeasibilityPanel({
       project,
       milestones,
       allocations,
-      joshWeeklyCapacity: 30,
+      joshWeeklyCapacity: DEFAULT_DEV_CAPACITY,
       today: new Date(),
       targetDate: target,
       pageCount,

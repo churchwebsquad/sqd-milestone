@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import {
   computeProjectHealth,
+  DEFAULT_DEV_CAPACITY,
   type HealthMilestoneRow,
   type HealthResult,
 } from '../lib/webProjectHealth'
@@ -18,8 +19,6 @@ import type {
   StrategyWebProject,
   StrategyDevWeeklyAllocation,
 } from '../types/database'
-
-const JOSH_DEFAULT_CAPACITY = 30  // h/week; overridable via strategy_app_config
 
 export interface ProjectRowVM extends StrategyWebProject {
   church_name:           string | null
@@ -86,7 +85,10 @@ export function useProjectsWithHealth(options?: {
           .in('member', memberIds),
         supabase
           .from('strategy_milestone_submissions')
-          .select('id, member, milestone_id, milestone_status, submitted_at')
+          .select(`
+            id, member, milestone_id, milestone_status, submitted_at,
+            milestone:strategy_milestone_definitions ( squad, pathway, step_number )
+          `)
           .in('member', memberIds)
           .eq('is_active', true)
           .order('submitted_at', { ascending: false }),
@@ -102,14 +104,32 @@ export function useProjectsWithHealth(options?: {
         churchByMember.set(c.member, c.church_name)
       }
 
+      type EnrichedSubRow = HealthMilestoneRow & {
+        member: number
+        // Supabase returns either a single related row or an array
+        // depending on the FK shape; we normalize below.
+        milestone?: {
+          squad?:       string | null
+          pathway?:     string | null
+          step_number?: number | null
+        } | Array<{
+          squad?:       string | null
+          pathway?:     string | null
+          step_number?: number | null
+        }> | null
+      }
       const subsByMember = new Map<number, HealthMilestoneRow[]>()
       const latestByMember = new Map<number, string>()
-      for (const s of (subs ?? []) as Array<HealthMilestoneRow & { member: number }>) {
+      for (const s of (subs ?? []) as EnrichedSubRow[]) {
         if (!subsByMember.has(s.member)) subsByMember.set(s.member, [])
+        const def = Array.isArray(s.milestone) ? s.milestone[0] : s.milestone
         subsByMember.get(s.member)!.push({
           milestone_id:     s.milestone_id,
           milestone_status: s.milestone_status,
           submitted_at:     s.submitted_at,
+          squad:            def?.squad       ?? null,
+          pathway:          def?.pathway     ?? null,
+          step_number:      def?.step_number ?? null,
         })
         if (!latestByMember.has(s.member)) latestByMember.set(s.member, s.submitted_at)
       }
@@ -132,7 +152,7 @@ export function useProjectsWithHealth(options?: {
             week_starting: a.week_starting,
             hours: Number(a.hours),
           })),
-          joshWeeklyCapacity: JOSH_DEFAULT_CAPACITY,
+          joshWeeklyCapacity: DEFAULT_DEV_CAPACITY,
           today,
         })
         return {

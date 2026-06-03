@@ -122,7 +122,7 @@ function TimelineNode({ item, isLast }: { item: TimelineItem; isLast: boolean })
 
         {latestSubmittedAt && (isCompleted || isCurrent) && (
           <p className="text-xs text-purple-gray mt-0.5">
-            {isCompleted ? 'Completed ' : 'Last updated '}
+            {isCompleted ? 'Shared ' : 'Last updated '}
             {formatDate(latestSubmittedAt)}
           </p>
         )}

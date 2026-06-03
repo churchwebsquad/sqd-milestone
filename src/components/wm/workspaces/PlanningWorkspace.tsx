@@ -31,6 +31,7 @@ import { ClickUpTasksSummary } from '../manager/ClickUpTasksSummary'
 import { supabase } from '../../../lib/supabase'
 import {
   computeProjectHealth,
+  DEFAULT_DEV_CAPACITY,
   PHASE_ORDER,
   type HealthMilestoneRow,
 } from '../../../lib/webProjectHealth'
@@ -105,13 +106,32 @@ export function PlanningWorkspace({ project, onChange }: Props) {
           .select('week_starting, hours')
           .eq('web_project_id', project.id),
         supabase.from('strategy_milestone_submissions')
-          .select('milestone_id, milestone_status, submitted_at')
+          .select(`
+            milestone_id, milestone_status, submitted_at,
+            milestone:strategy_milestone_definitions ( squad, pathway, step_number )
+          `)
           .eq('member', project.member)
           .eq('is_active', true),
       ])
       if (cancelled) return
       setAllocations((allocsRes.data ?? []) as Array<{ week_starting: string; hours: number }>)
-      setMilestones((subsRes.data ?? []) as HealthMilestoneRow[])
+      type Raw = HealthMilestoneRow & {
+        milestone?: { squad?: string | null; pathway?: string | null; step_number?: number | null }
+                  | Array<{ squad?: string | null; pathway?: string | null; step_number?: number | null }>
+                  | null
+      }
+      const enriched = ((subsRes.data ?? []) as Raw[]).map(s => {
+        const def = Array.isArray(s.milestone) ? s.milestone[0] : s.milestone
+        return {
+          milestone_id:     s.milestone_id,
+          milestone_status: s.milestone_status,
+          submitted_at:     s.submitted_at,
+          squad:            def?.squad       ?? null,
+          pathway:          def?.pathway     ?? null,
+          step_number:      def?.step_number ?? null,
+        } satisfies HealthMilestoneRow
+      })
+      setMilestones(enriched)
     })()
     return () => { cancelled = true }
   }, [project.id, project.member])
@@ -127,7 +147,7 @@ export function PlanningWorkspace({ project, onChange }: Props) {
     },
     milestones,
     allocations,
-    joshWeeklyCapacity: 30,
+    joshWeeklyCapacity: DEFAULT_DEV_CAPACITY,
     today: new Date(),
   }), [project, draft, milestones, allocations])
 
