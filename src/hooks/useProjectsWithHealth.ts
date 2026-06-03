@@ -17,6 +17,7 @@ import {
 } from '../lib/webProjectHealth'
 import { computeDevQueue, type QueueSlot } from '../lib/webDevQueue'
 import {
+  classifyTaskByPhase,
   inferProgressFromTasks,
   inferredDevRemainingHours,
   type ClickUpTaskRow,
@@ -28,6 +29,22 @@ import type {
   PhaseProgress,
 } from '../types/database'
 
+/** Dev-classified ClickUp task for the schedule view. Carries
+ *  enough metadata to place it on a calendar (due_date_after) and
+ *  link out to ClickUp (task_id). status drives the chip color. */
+export interface DevTaskRow {
+  task_id:                 string
+  task_name:               string
+  current_status:          string | null
+  time_estimate_minutes:   number | null
+  due_date_after:          string | null    // ISO yyyy-mm-dd
+  /** Synthesized — true when current_status normalizes to complete. */
+  isComplete:              boolean
+  /** Synthesized — true when status is in the engaged set
+   *  (in progress / ready to start / sqd review / etc.). */
+  isEngaged:               boolean
+}
+
 export interface ProjectRowVM extends StrategyWebProject {
   church_name:           string | null
   latest_milestone_at:   string | null      // most recent submitted_at
@@ -38,7 +55,19 @@ export interface ProjectRowVM extends StrategyWebProject {
   /** ClickUp task inference for this project's Website list. Null
    *  when no matching folder/list exists in ClickUp. */
   inference:             PhaseInference | null
+  /** Dev-classified ClickUp tasks for this project. Rendered as
+   *  chips in the Schedule view; ordered by due_date_after asc
+   *  (nulls last). Empty when no ClickUp folder is matched. */
+  devTasks:              DevTaskRow[]
 }
+
+const COMPLETE = new Set(['complete', 'closed', 'done'])
+const ENGAGED = new Set([
+  'complete', 'closed', 'done',
+  'in progress', 'received', 'ready to start',
+  'sqd review', 'needs an update', 'waiting feedback',
+  'dependent', 'in_revision', 'more info need',
+])
 
 interface UseProjectsWithHealthResult {
   rows:    ProjectRowVM[]
@@ -177,6 +206,7 @@ export function useProjectsWithHealth(options?: {
       }
       const folderIds = Array.from(folderByMember.values())
       const inferenceByMember = new Map<number, PhaseInference>()
+      const devTasksByMember  = new Map<number, DevTaskRow[]>()
       if (folderIds.length > 0) {
         const { data: lists } = await supabase
           .from('clickup_lists')
@@ -191,21 +221,61 @@ export function useProjectsWithHealth(options?: {
         }
         const listIds = Array.from(listByFolder.values())
         if (listIds.length > 0) {
+          // Need due dates for the schedule view's task chips. Join
+          // task_details with the latest-due-date view in JS — both
+          // are filterable by task_id / list_id.
           const { data: tasks } = await supabase
             .from('task_details' as 'tasks')
-            .select('task_name, current_status, time_estimate_minutes, task_archived, list_id')
+            .select('task_id, task_name, current_status, time_estimate_minutes, task_archived, list_id')
             .in('list_id', listIds)
-          type TaskRow = ClickUpTaskRow & { list_id: number }
-          const tasksByList = new Map<number, ClickUpTaskRow[]>()
+          type TaskRow = ClickUpTaskRow & { task_id: string; list_id: number }
+          const tasksByList = new Map<number, TaskRow[]>()
           for (const t of ((tasks ?? []) as TaskRow[])) {
             if (!tasksByList.has(t.list_id)) tasksByList.set(t.list_id, [])
             tasksByList.get(t.list_id)!.push(t)
+          }
+          // Bulk-fetch due dates for every task we'll render.
+          const allTaskIds = ((tasks ?? []) as TaskRow[]).map(t => t.task_id)
+          const dueByTask = new Map<string, string | null>()
+          if (allTaskIds.length > 0) {
+            const { data: dues } = await supabase
+              .from('view_latest_due_dates' as 'tasks')
+              .select('task_id, due_date_after')
+              .in('task_id', allTaskIds)
+            for (const d of ((dues ?? []) as Array<{ task_id: string; due_date_after: string | null }>)) {
+              dueByTask.set(d.task_id, d.due_date_after)
+            }
           }
           for (const [member, folderId] of folderByMember) {
             const listId = listByFolder.get(folderId)
             if (!listId) continue
             const rows = tasksByList.get(listId) ?? []
             inferenceByMember.set(member, inferProgressFromTasks(rows))
+            // Dev-only task subset for the schedule view chips.
+            const devTasks: DevTaskRow[] = rows
+              .filter(r => !r.task_archived && classifyTaskByPhase(r.task_name) === 'dev')
+              .map(r => {
+                const status = (r.current_status ?? '').toLowerCase().trim()
+                return {
+                  task_id:               r.task_id,
+                  task_name:             r.task_name,
+                  current_status:        r.current_status,
+                  time_estimate_minutes: r.time_estimate_minutes,
+                  due_date_after:        dueByTask.get(r.task_id) ?? null,
+                  isComplete:            COMPLETE.has(status),
+                  isEngaged:             ENGAGED.has(status),
+                }
+              })
+              .sort((a, b) => {
+                // Nulls last by due_date_after; complete tasks last among same date.
+                if (a.due_date_after && b.due_date_after) {
+                  return a.due_date_after.localeCompare(b.due_date_after)
+                }
+                if (a.due_date_after) return -1
+                if (b.due_date_after) return 1
+                return 0
+              })
+            devTasksByMember.set(member, devTasks)
           }
         }
       }
@@ -275,6 +345,7 @@ export function useProjectsWithHealth(options?: {
           health,
           queueSlot,
           inference: inferenceRow,
+          devTasks: devTasksByMember.get(p.member) ?? [],
         }
       })
 

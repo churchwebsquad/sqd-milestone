@@ -2,23 +2,22 @@
  * Dev queue — sequential capacity projection across every active
  * project, ordered by priority.
  *
- * The dev is a serial resource (one project at a time on the build
- * side). Each project consumes hours in priority order; the dev
- * finishes P1, then immediately picks up P2, and so on. This pure
- * helper walks the queue once and stamps each project with:
+ * The dev is a serial resource; each project consumes hours in
+ * priority order, drawing from a SHARED weekly capacity pool. When
+ * P1 only needs 4h of a 32.75h-week, P2 picks up the leftover 28.75h
+ * the same week instead of waiting for the next one — that's the
+ * "Sprint 4 could start earlier" behavior the team kept asking for.
  *
- *   • devStartDate   — when the dev picks this project up
- *   • devEndDate     — projected dev completion
- *   • designDeadline — same as devStartDate. Backwards chaining: the
- *                      designer needs to be done with THIS project's
- *                      design by then so dev can start on schedule.
+ * Output per project: which weeks the dev is on it, how many hours
+ * each week, and a flat devStart/devEnd window for callers that
+ * just want the band.
  *
  * Pure — no I/O. Consumed by `useProjectsWithHealth` (board) and
  * `PlanningWorkspace` (single project view). Both call
  * `computeProjectHealth` with the slot, which uses devEndDate as the
  * launch projection instead of the per-project capacity fallback.
  */
-import { fromIsoDate, toIsoDate } from './dateRange'
+import { fromIsoDate, toIsoDate, weekStart, addWeeks } from './dateRange'
 import {
   phaseRank,
   type WebProjectPhase,
@@ -47,6 +46,10 @@ export interface QueueSlot {
   designDeadline:      string
   /** True when manual_remaining_hours drove the queue contribution. */
   usedManualRemaining: boolean
+  /** Per-week hours this project consumes from the dev's shared
+   *  capacity pool. Keys are ISO week-start dates (Sun-based). The
+   *  schedule view renders these directly instead of re-deriving. */
+  weeklyHours:         Record<string, number>
 }
 
 type QueueProject = Pick<
@@ -107,32 +110,74 @@ export function computeDevQueue(
     return a.id.localeCompare(b.id)
   })
 
-  const out      = new Map<string, QueueSlot>()
-  const capDay   = Math.max(capacityPerWeek, 0) / 7
-  if (capDay <= 0) return out  // no capacity, no schedule
+  const out = new Map<string, QueueSlot>()
+  const cap = Math.max(capacityPerWeek, 0)
+  if (cap <= 0) return out
 
-  let cursor = 0
+  // Shared weekly pool — hours already claimed across all higher-
+  // priority projects, keyed by week-start ISO. Drains as each
+  // project consumes capacity in order.
+  const weeklyClaims   = new Map<string, number>()
+  let cursorWeek       = weekStart(today)
+  let cumulativeHours  = 0
+
   for (const p of ordered) {
     const { hours, usedManual } = remainingDevHoursFor(p)
-    const startOffsetDays = Math.floor(cursor / capDay)
-    // End needs at least 1 day past start when there's any work,
-    // even if rounding would collapse it to zero.
-    const endOffsetDays   = hours > 0
-      ? Math.max(startOffsetDays + 1, Math.ceil((cursor + hours) / capDay))
-      : startOffsetDays
-    const startDate = addDays(today, startOffsetDays)
-    const endDate   = addDays(today, endOffsetDays)
+    const weeklyHours: Record<string, number> = {}
+    let needed = hours
+    let firstWeekIso: string | null = null
+    let lastWeekIso:  string | null = null
+    // Step forward week-by-week, draining the free capacity in the
+    // current week before rolling to the next. The cursor never
+    // moves backward — once a week is full, it stays full.
+    let w = cursorWeek
+    if (needed > 0) {
+      // Hard guard: never loop forever. Two years is far past any
+      // real planning horizon and protects us from divide-by-zero
+      // bugs upstream.
+      for (let i = 0; i < 104; i++) {
+        const wIso    = toIsoDate(w)
+        const claimed = weeklyClaims.get(wIso) ?? 0
+        const free    = Math.max(0, cap - claimed)
+        if (free <= 0) {
+          w = addWeeks(w, 1)
+          continue
+        }
+        const take = Math.min(needed, free)
+        weeklyClaims.set(wIso, claimed + take)
+        weeklyHours[wIso] = (weeklyHours[wIso] ?? 0) + take
+        if (firstWeekIso == null) firstWeekIso = wIso
+        lastWeekIso = wIso
+        needed -= take
+        // Update the cursor — next project starts from this same
+        // week if there's any leftover, otherwise the next week.
+        if (free - take <= 0) {
+          w = addWeeks(w, 1)
+        }
+        if (needed <= 0) break
+      }
+    }
+
+    // Roll the shared cursor forward to the earliest week that still
+    // has free capacity. Projects that need ZERO hours don't move it.
+    if (firstWeekIso != null && lastWeekIso != null) {
+      cursorWeek = (weeklyClaims.get(lastWeekIso) ?? 0) >= cap
+        ? addWeeks(fromIsoDate(lastWeekIso) as Date, 1)
+        : fromIsoDate(lastWeekIso) as Date
+    }
+
     out.set(p.id, {
       projectId:           p.id,
       priority:            p.priority_order ?? null,
       remainingDevHours:   round1(hours),
-      hoursBeforeStart:    round1(cursor),
-      devStartDate:        toIsoDate(startDate),
-      devEndDate:          toIsoDate(endDate),
-      designDeadline:      toIsoDate(startDate),
+      hoursBeforeStart:    round1(cumulativeHours),
+      devStartDate:        firstWeekIso ?? toIsoDate(cursorWeek),
+      devEndDate:          lastWeekIso  ?? toIsoDate(cursorWeek),
+      designDeadline:      firstWeekIso ?? toIsoDate(cursorWeek),
       usedManualRemaining: usedManual,
+      weeklyHours,
     })
-    cursor += hours
+    cumulativeHours += hours
   }
   return out
 }
@@ -147,12 +192,6 @@ export function activeQueueProjectId(slots: Map<string, QueueSlot>, today: Date)
     if (start <= today && today < end) return s.projectId
   }
   return null
-}
-
-function addDays(d: Date, days: number): Date {
-  const out = new Date(d)
-  out.setDate(out.getDate() + days)
-  return out
 }
 
 function round1(n: number): number {

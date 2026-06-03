@@ -18,19 +18,28 @@
  * for v1, week edits go through the panel. The grid is read-mostly.
  */
 import { useMemo, useState } from 'react'
+import { ExternalLink } from 'lucide-react'
 import { WMSegmentedToggle } from '../SegmentedToggle'
 import {
   addWeeks, formatMonthDay, fromIsoDate, toIsoDate, weekStart,
 } from '../../../lib/dateRange'
 import { DEFAULT_DEV_CAPACITY } from '../../../lib/webProjectHealth'
-import type { ProjectRowVM } from '../../../hooks/useProjectsWithHealth'
+import type { ProjectRowVM, DevTaskRow } from '../../../hooks/useProjectsWithHealth'
 import type { WebProjectPhase } from '../../../types/database'
+
+// Team ID is constant per the org's ClickUp workspace; task URLs are
+// `/t/<team>/<task_id>`. Defined here (vs imported from ClickUpTasksSummary)
+// to keep the schedule view a leaf component.
+const CLICKUP_TEAM_ID = 1235435
 
 interface Props {
   rows:     ProjectRowVM[]
   loading:  boolean
   onSelect: (projectId: string) => void
   capacityPerWeek?: number
+  /** Persist a project's dev_hours_estimate edit. Returns once the
+   *  write lands so the parent can refetch. */
+  onUpdateDevHours?: (projectId: string, hours: number | null) => void | Promise<void>
 }
 
 type Horizon = '8' | '16' | '26'
@@ -44,7 +53,10 @@ const PHASE_TINT: Record<WebProjectPhase, string> = {
   launched: 'bg-wm-success-bg       text-wm-success',
 }
 
-export function ScheduleView({ rows, loading, onSelect, capacityPerWeek = DEFAULT_DEV_CAPACITY }: Props) {
+export function ScheduleView({
+  rows, loading, onSelect, capacityPerWeek = DEFAULT_DEV_CAPACITY,
+  onUpdateDevHours,
+}: Props) {
   const [horizon, setHorizon] = useState<Horizon>('16')
 
   const weeks = useMemo(() => {
@@ -55,45 +67,20 @@ export function ScheduleView({ rows, loading, onSelect, capacityPerWeek = DEFAUL
   const weekIso = useMemo(() => weeks.map(toIsoDate), [weeks])
   const todayIso = useMemo(() => toIsoDate(weekStart(new Date())), [])
 
-  // Per-project per-week hours. Manual allocations (typed into the
-  // Planning workspace grid) take priority; for any week the user
-  // hasn't explicitly set, fall back to the queue's auto-allocation —
-  // walk capacityPerWeek across each project's [devStartDate,
-  // devEndDate] window in priority order. This is what makes the
-  // grid useful out-of-the-box: no allocations to enter, schedule
-  // still shows where the dev's calendar lives.
+  // Per-project per-week hours. The queue's weeklyHours is the
+  // source of truth — it's computed once with a shared weekly pool
+  // so leftover capacity in one project's week rolls into the next.
+  // Manual allocations (entered in the Planning grid) override per
+  // (project, week).
   const buckets = useMemo(() => {
     const out = new Map<string, Map<string, number>>()
-    // Iterate by priority for the queue fallback. The queue slot
-    // already encodes the start/end, but we still need to fill the
-    // per-week split. Walk weeks within [start, end] and assign
-    // capacity-per-week, capped by remaining queue hours.
-    const ordered = [...rows].sort((a, b) => {
-      const pa = a.priority_order ?? Number.POSITIVE_INFINITY
-      const pb = b.priority_order ?? Number.POSITIVE_INFINITY
-      return pa - pb
-    })
-    for (const r of ordered) {
+    for (const r of rows) {
       const inner = new Map<string, number>()
-      // Queue auto-fill.
-      if (r.queueSlot) {
-        const start = fromIsoDate(r.queueSlot.devStartDate)
-        const end   = fromIsoDate(r.queueSlot.devEndDate)
-        let remaining = Number(r.queueSlot.remainingDevHours ?? 0)
-        if (start && end && remaining > 0) {
-          const startWeek = weekStart(start)
-          const endWeek   = weekStart(end)
-          let cur = startWeek
-          while (cur <= endWeek && remaining > 0) {
-            const iso = toIsoDate(cur)
-            const take = Math.min(remaining, capacityPerWeek)
-            inner.set(iso, take)
-            remaining -= take
-            cur = addWeeks(cur, 1)
-          }
+      if (r.queueSlot?.weeklyHours) {
+        for (const [iso, h] of Object.entries(r.queueSlot.weeklyHours)) {
+          inner.set(iso, Number(h))
         }
       }
-      // Manual entries override queue auto-fill.
       for (const a of r.allocations) {
         const iso = a.week_starting.slice(0, 10)
         inner.set(iso, Number(a.hours))
@@ -101,7 +88,27 @@ export function ScheduleView({ rows, loading, onSelect, capacityPerWeek = DEFAUL
       out.set(r.id, inner)
     }
     return out
-  }, [rows, capacityPerWeek])
+  }, [rows])
+
+  // Group dev tasks by week-start ISO for cell-level rendering. Tasks
+  // without a due_date_after are skipped here — they're rendered in
+  // the queue-projected blocks instead.
+  const tasksByProjectWeek = useMemo(() => {
+    const out = new Map<string, Map<string, DevTaskRow[]>>()
+    for (const r of rows) {
+      const inner = new Map<string, DevTaskRow[]>()
+      for (const t of r.devTasks) {
+        if (!t.due_date_after) continue
+        const d = fromIsoDate(t.due_date_after)
+        if (!d) continue
+        const wIso = toIsoDate(weekStart(d))
+        if (!inner.has(wIso)) inner.set(wIso, [])
+        inner.get(wIso)!.push(t)
+      }
+      out.set(r.id, inner)
+    }
+    return out
+  }, [rows])
 
   // Per-week capacity utilization across the whole queue.
   const weekTotals = useMemo(() => {
@@ -210,10 +217,11 @@ export function ScheduleView({ rows, loading, onSelect, capacityPerWeek = DEFAUL
           ]}
         />
         <p className="text-[11px] text-wm-text-muted">
-          Capacity: <span className="font-semibold text-wm-text">{capacityPerWeek}h/wk</span>
-          {' '}· Each row = one project sprint
-          {' '}· Solid cells = booked hours
-          {' '}· Faded cells = queue window
+          <span className="font-semibold text-wm-text">{capacityPerWeek}h/wk</span> capacity
+          {' '}· <span className="inline-block w-2 h-2 rounded-sm bg-wm-tone-blue-bg border border-wm-tone-blue/40 align-middle" /> in-progress ClickUp
+          {' '}· <span className="inline-block w-2 h-2 rounded-sm bg-wm-success-bg border border-wm-success/30 align-middle" /> complete
+          {' '}· faded cell = projected (no ClickUp task yet)
+          {' '}· <span className="inline-block w-3 h-2 border-r-2 border-r-wm-success align-middle" /> launch week
         </p>
       </div>
 
@@ -264,7 +272,9 @@ export function ScheduleView({ rows, loading, onSelect, capacityPerWeek = DEFAUL
               weekIso={weekIso}
               todayIso={todayIso}
               cells={buckets.get(r.id) ?? new Map()}
+              tasksByWeek={tasksByProjectWeek.get(r.id) ?? new Map()}
               onSelect={onSelect}
+              onUpdateDevHours={onUpdateDevHours}
             />
           ))}
         </div>
@@ -281,10 +291,16 @@ interface RowProps {
   weekIso:  string[]
   todayIso: string
   cells:    Map<string, number>
+  /** Dev tasks bucketed by week_start ISO. Pre-computed by the
+   *  parent so each row doesn't repeat the grouping work. */
+  tasksByWeek: Map<string, DevTaskRow[]>
   onSelect: (id: string) => void
+  onUpdateDevHours?: (projectId: string, hours: number | null) => void | Promise<void>
 }
 
-function ProjectRow({ row, weeks, weekIso, todayIso, cells, onSelect }: RowProps) {
+function ProjectRow({
+  row, weeks, weekIso, todayIso, cells, tasksByWeek, onSelect, onUpdateDevHours,
+}: RowProps) {
   const phase = (row.current_phase || 'intake') as WebProjectPhase
   const tint = PHASE_TINT[phase] ?? PHASE_TINT.intake
   const churchLine = row.church_name || `Member ${row.member}`
@@ -311,33 +327,37 @@ function ProjectRow({ row, weeks, weekIso, todayIso, cells, onSelect }: RowProps
 
   return (
     <>
-      {/* Frozen left cell — sprint summary */}
-      <button
-        type="button"
-        onClick={() => onSelect(row.id)}
-        className="sticky left-0 z-10 bg-wm-bg-elevated border-b border-r border-wm-border px-3 py-2 text-left hover:bg-wm-bg-hover transition-colors"
-      >
-        <p className="text-[10px] uppercase tracking-[0.08em] font-bold text-wm-text-subtle truncate">
-          {row.priority_order ? `Sprint ${row.priority_order} · ` : ''}{churchLine}
-        </p>
-        <p className="text-[12px] font-semibold text-wm-text truncate">{row.name}</p>
-        {slot && startDate && endDate ? (
-          <div className="mt-1">
-            <p className="text-[10px] text-wm-accent-strong truncate">
+      {/* Frozen left cell — sprint summary + inline dev-hours edit */}
+      <div className="sticky left-0 z-10 bg-wm-bg-elevated border-b border-r border-wm-border px-3 py-2">
+        <button
+          type="button"
+          onClick={() => onSelect(row.id)}
+          className="w-full text-left hover:opacity-80 transition-opacity"
+        >
+          <p className="text-[10px] uppercase tracking-[0.08em] font-bold text-wm-text-subtle truncate">
+            {row.priority_order ? `Sprint ${row.priority_order} · ` : ''}{churchLine}
+          </p>
+          <p className="text-[12px] font-semibold text-wm-text truncate">{row.name}</p>
+          {slot && startDate && endDate && (
+            <p className="text-[10px] text-wm-accent-strong truncate mt-0.5">
               {formatMonthDay(startDate)} → {formatMonthDay(endDate)}
               {sprintWeeks ? ` · ${sprintWeeks}w` : ''}
             </p>
-            <p className="text-[10px] text-wm-text-muted font-mono tabular-nums">
-              {remainingH.toFixed(1)}h left of {totalH || remainingH}h
-              {pct != null && totalH > 0 ? ` · ${pct}%` : ''}
-            </p>
-          </div>
-        ) : (
-          <p className="text-[10px] text-wm-text-muted mt-0.5">
-            {row.dev_hours_estimate ?? 0}h budget · no queue slot
-          </p>
-        )}
-      </button>
+          )}
+        </button>
+        <div className="mt-0.5 flex items-center gap-1 text-[10px] text-wm-text-muted font-mono tabular-nums">
+          <span>{remainingH.toFixed(1)}h left of</span>
+          {onUpdateDevHours ? (
+            <DevHoursInline
+              value={totalH}
+              onCommit={(v) => onUpdateDevHours(row.id, v)}
+            />
+          ) : (
+            <span>{totalH}h</span>
+          )}
+          {pct != null && totalH > 0 && <span>· {pct}%</span>}
+        </div>
+      </div>
 
       {/* Week cells */}
       {weeks.map((_, i) => {
@@ -345,37 +365,172 @@ function ProjectRow({ row, weeks, weekIso, todayIso, cells, onSelect }: RowProps
         const hours = cells.get(iso) ?? 0
         const isToday  = iso === todayIso
         const isLaunch = iso === launchIso
-        // A cell is part of the queue window when it sits between
-        // dev start + dev end inclusive — even if hours collapsed
-        // to 0 due to rounding. Tints the band so the user sees
-        // "the dev IS scheduled for this project these weeks."
         const inDevWindow = !!(
           devStartWeekIso && devEndWeekIso
           && iso >= devStartWeekIso && iso <= devEndWeekIso
         )
+        const weekTasks = tasksByWeek.get(iso) ?? []
         return (
-          <button
+          <ScheduleCell
             key={iso}
-            type="button"
-            onClick={() => onSelect(row.id)}
-            title={
-              hours > 0
-                ? `${hours.toFixed(1)}h · ${phase}`
-                : (inDevWindow ? `Queue window · ${phase}` : 'Outside queue')
-            }
-            className={[
-              'border-b border-wm-border/60 h-[52px] grid place-items-center text-[11px] font-mono tabular-nums transition-colors',
-              isToday ? 'border-l-2 border-l-wm-tone-orange' : '',
-              isLaunch ? 'ring-2 ring-inset ring-wm-success' : '',
-              hours > 0 ? `${tint} font-semibold hover:opacity-90`
-                : inDevWindow ? `${tint} opacity-40 hover:opacity-60`
-                : 'bg-wm-bg hover:bg-wm-bg-hover',
-            ].join(' ')}
-          >
-            {hours > 0 ? `${hours.toFixed(0)}h` : ''}
-          </button>
+            weekIso={iso}
+            phase={phase}
+            tint={tint}
+            hours={hours}
+            isToday={isToday}
+            isLaunch={isLaunch}
+            inDevWindow={inDevWindow}
+            tasks={weekTasks}
+            onSelect={() => onSelect(row.id)}
+          />
         )
       })}
     </>
+  )
+}
+
+// ── Cell ─────────────────────────────────────────────────────
+
+interface CellProps {
+  weekIso:     string
+  phase:       WebProjectPhase
+  tint:        string
+  hours:       number
+  isToday:     boolean
+  isLaunch:    boolean
+  inDevWindow: boolean
+  tasks:       DevTaskRow[]
+  onSelect:    () => void
+}
+
+function ScheduleCell({
+  weekIso, phase, tint, hours, isToday, isLaunch, inDevWindow, tasks, onSelect,
+}: CellProps) {
+  // Click on the cell background (not on a chip) navigates to the
+  // project's planning page. The chips are individually clickable
+  // and stopPropagation so they don't bubble to this handler.
+  void weekIso  // available for future per-cell features (drag, edit)
+  const visible    = tasks.slice(0, 3)
+  const extraCount = Math.max(0, tasks.length - visible.length)
+
+  return (
+    <div
+      onClick={onSelect}
+      title={
+        tasks.length > 0
+          ? `${tasks.length} dev task${tasks.length === 1 ? '' : 's'} this week`
+          : hours > 0
+            ? `${hours.toFixed(1)}h projected · ${phase}`
+            : (inDevWindow ? `Queue window · ${phase}` : 'Outside queue')
+      }
+      className={[
+        'relative border-b border-wm-border/60 h-[52px] px-1 py-1 cursor-pointer transition-colors',
+        // Visual cues for today / launch
+        isToday  ? 'border-l-2 border-l-wm-tone-orange'  : '',
+        isLaunch ? 'border-r-[3px] border-r-wm-success ring-1 ring-inset ring-wm-success/40' : '',
+        // Background fill priority: actual tasks > projected hours > queue window > empty
+        tasks.length > 0
+          ? 'bg-wm-bg-elevated hover:bg-wm-bg-hover'
+          : hours > 0
+            ? `${tint} font-semibold hover:opacity-90`
+            : inDevWindow
+              ? `${tint} opacity-40 hover:opacity-60`
+              : 'bg-wm-bg hover:bg-wm-bg-hover',
+      ].join(' ')}
+    >
+      {/* Task chips — actual ClickUp work due this week */}
+      {tasks.length > 0 ? (
+        <div className="flex flex-col gap-[2px]">
+          {visible.map(t => (
+            <TaskChip key={t.task_id} task={t} />
+          ))}
+          {extraCount > 0 && (
+            <span className="text-[9px] text-wm-text-subtle font-mono leading-none">
+              +{extraCount}
+            </span>
+          )}
+        </div>
+      ) : (
+        hours > 0 && (
+          <p className="text-[11px] font-mono tabular-nums text-center">
+            {hours.toFixed(0)}h
+          </p>
+        )
+      )}
+    </div>
+  )
+}
+
+// ── Inline editable dev-hours number ─────────────────────────
+
+function DevHoursInline({
+  value, onCommit,
+}: {
+  value: number
+  onCommit: (v: number | null) => void | Promise<void>
+}) {
+  const [v, setV] = useState(String(value || ''))
+  const [editing, setEditing] = useState(false)
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => { setV(String(value || '')); setEditing(true) }}
+        title="Click to edit total dev hours"
+        className="px-1 -mx-1 rounded hover:bg-wm-accent-tint hover:text-wm-accent-strong"
+      >
+        {value || 0}h
+      </button>
+    )
+  }
+  const commit = () => {
+    setEditing(false)
+    const num = v.trim() === '' ? null : Number(v)
+    const next = Number.isFinite(num as number) ? num : null
+    if (next !== value) void onCommit(next)
+  }
+  return (
+    <input
+      type="number"
+      min={0}
+      step={1}
+      value={v}
+      autoFocus
+      onChange={e => setV(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => {
+        if (e.key === 'Enter') { e.currentTarget.blur() }
+        if (e.key === 'Escape') { setEditing(false); setV(String(value || '')) }
+      }}
+      onClick={e => e.stopPropagation()}
+      className="w-12 text-[10px] font-mono tabular-nums px-1 py-px rounded border border-wm-accent bg-wm-bg-elevated focus:outline-none"
+    />
+  )
+}
+
+function TaskChip({ task }: { task: DevTaskRow }) {
+  const cls = task.isComplete
+    ? 'bg-wm-success-bg text-wm-success border-wm-success/30'
+    : task.isEngaged
+      ? 'bg-wm-tone-blue-bg text-wm-tone-blue border-wm-tone-blue/40 font-semibold'
+      : 'bg-wm-bg text-wm-text-muted border-wm-border'
+  const minutes = Number(task.time_estimate_minutes ?? 0)
+  const label = minutes > 0 ? `${Math.round(minutes / 60 * 10) / 10}h` : ''
+  return (
+    <a
+      href={`https://app.clickup.com/t/${CLICKUP_TEAM_ID}/${task.task_id}`}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      title={`${task.task_name} · ${task.current_status ?? 'no status'}${label ? ` · ${label}` : ''}`}
+      className={[
+        'inline-flex items-center justify-between gap-1 rounded-[3px] border px-1 py-[1px] truncate',
+        'text-[9px] leading-none hover:brightness-110',
+        cls,
+      ].join(' ')}
+    >
+      <span className="truncate">{task.task_name}</span>
+      <ExternalLink size={8} className="shrink-0 opacity-70" />
+    </a>
   )
 }

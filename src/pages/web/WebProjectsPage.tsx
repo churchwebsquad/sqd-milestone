@@ -298,6 +298,12 @@ export default function WebProjectsPage() {
             rows={visible}
             loading={loading}
             onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
+            onUpdateDevHours={async (id, hours) => {
+              await supabase.from('strategy_web_projects')
+                .update({ dev_hours_estimate: hours, updated_at: new Date().toISOString() })
+                .eq('id', id)
+              await refetch()
+            }}
           />
         )}
 
