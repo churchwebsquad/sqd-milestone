@@ -43,6 +43,7 @@
  *   {key: val, …}     → group with 1 item
  */
 import { isButtonShapedSlot, normalizeCtaValue, type CtaValue } from './cta'
+import { BRIEF_KEY_ALIAS_GROUPS } from './briefKeyAliases'
 import type {
   WebContentTemplate, WebFieldDef, WebSlotDef, WebGroupDef,
 } from '../types/database'
@@ -929,17 +930,14 @@ function nameMatchBoost(unmappedKey: string, field: WebFieldDef): number {
   return 0
 }
 
-const NAME_ALIASES: Array<Set<string>> = [
-  new Set(['description', 'body', 'content', 'paragraph', 'info', 'detail', 'summary', 'caption']),
-  new Set(['heading', 'title', 'subtitle', 'subheading', 'h1', 'h2']),
-  new Set(['tagline', 'eyebrow', 'kicker', 'pretitle']),
-  new Set(['image', 'photo', 'picture', 'thumbnail', 'avatar']),
-  new Set(['cta', 'button', 'buttons', 'action', 'link']),
-  new Set(['cards', 'grid', 'tiles', 'items', 'list']),
-  new Set(['name', 'fullname', 'full_name']),
-  new Set(['containerleft', 'container_left', 'left', 'left_column', 'leftcolumn']),
-  new Set(['containerright', 'container_right', 'right', 'right_column', 'rightcolumn']),
-]
+// Synonym groups now come from src/lib/briefKeyAliases.ts so the
+// first-pass auto-bind and this fallback share the same dictionary.
+// Each shared group is converted to a normalized Set for the
+// existing per-pair has-check that runs inside `nameMatchBoost` and
+// `pickAliasSource`.
+const NAME_ALIASES: Array<Set<string>> = BRIEF_KEY_ALIAS_GROUPS.map(
+  group => new Set(group.map(k => k.toLowerCase().replace(/[\s_\-]+/g, ''))),
+)
 
 function canon(s: string): string {
   return s.toLowerCase().replace(/[\s_-]+/g, '')

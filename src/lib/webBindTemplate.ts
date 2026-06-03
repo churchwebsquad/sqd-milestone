@@ -20,6 +20,11 @@ import type {
 import { sectionId as briefSectionId, sectionFields as briefSectionFields } from './webPageBrief'
 import { isNarrowUseFamily } from './webBrixiesFamilies'
 import type { PageBrief, BriefSection } from './webPageBrief'
+import {
+  canonicalAliasFor,
+  canonicalKeyString,
+  keysAreAliases,
+} from './briefKeyAliases'
 
 export interface BindMappingResult {
   /** field_values to write to the bound section. */
@@ -40,63 +45,24 @@ export interface BindMappingResult {
  *  brief variants like primary_cta / secondary_cta / cta_inline) so a
  *  template's `buttons` group matches a brief's `primary_cta` + `cta`,
  *  and a template's `cards` group matches `items` / `features`. */
-const SYNONYM_GROUPS: string[][] = [
-  ['heading', 'h', 'h1', 'h2', 'h3', 'title', 'headline'],
-  ['tagline', 'eyebrow', 'kicker', 'overline', 'pretitle'],
-  ['body', 'content', 'd', 'description', 'copy', 'text', 'paragraph', 'subtext', 'subheading', 'subhead', 'intro', 'closer'],
-  ['image', 'hero_image', 'photo', 'illustration', 'picture'],
-  ['images', 'photos', 'gallery'],
-  ['cta', 'ctas', 'button', 'buttons', 'link', 'links', 'action', 'actions', 'primary_cta', 'secondary_cta', 'cta_inline', 'inline_cta'],
-  ['cards', 'card', 'items', 'item', 'features', 'feature', 'tiles', 'tile', 'blocks', 'block', 'list', 'rows'],
-  ['steps', 'step', 'process_steps'],
-  ['events', 'event'],
-  ['quote', 'testimonial'],
-  ['author', 'author_name', 'name', 'attribution'],
-]
+// The synonym groups + canonical-resolution logic lifted into
+// src/lib/briefKeyAliases.ts so the unmapped-fallback ("Move to →")
+// and the first-pass auto-bind share the same dictionary. The
+// permissive set there picks up cowork-style key names like
+// `primary_cta`, `staff_cards`, `featured_image`, `eyebrow`,
+// `name → heading`, `bio → description`, etc. that previously
+// fell out at bind time and landed in `__unmapped`.
 
 function normalizeKey(k: string): string {
-  return k.toLowerCase().replace(/[\s_\-]/g, '')
+  return canonicalKeyString(k)
 }
 
-/** Build a synonym lookup once. Maps every normalized variant to its
- *  canonical key so `matchesSlot()` runs O(1). */
-const SYNONYM_INDEX: Map<string, string> = (() => {
-  const m = new Map<string, string>()
-  for (const group of SYNONYM_GROUPS) {
-    const canonicalKey = normalizeKey(group[0])
-    for (const variant of group) m.set(normalizeKey(variant), canonicalKey)
-  }
-  return m
-})()
-
-/** Map a key (potentially scope-suffixed/prefixed like `heading_card` or
- *  `primary_cta`) to its canonical concept. Tries:
- *    1. Direct synonym lookup on the normalized key.
- *    2. Strip trailing scope segments (heading_card → heading).
- *    3. Strip leading scope segments (primary_cta → cta).
- *  Falls back to the normalized key when nothing matches. */
 function canonical(k: string): string {
-  const n = normalizeKey(k)
-  if (SYNONYM_INDEX.has(n)) return SYNONYM_INDEX.get(n)!
-  const parts = k.toLowerCase().split(/[_\s-]+/).filter(Boolean)
-  if (parts.length > 1) {
-    // Suffix-strip (drop from the right): heading_card, buttons_card.
-    for (let cut = 1; cut < parts.length; cut++) {
-      const candidate = normalizeKey(parts.slice(0, parts.length - cut).join(''))
-      if (SYNONYM_INDEX.has(candidate)) return SYNONYM_INDEX.get(candidate)!
-    }
-    // Prefix-strip (drop from the left): primary_cta, secondary_cta.
-    for (let cut = 1; cut < parts.length; cut++) {
-      const candidate = normalizeKey(parts.slice(cut).join(''))
-      if (SYNONYM_INDEX.has(candidate)) return SYNONYM_INDEX.get(candidate)!
-    }
-  }
-  return n
+  return canonicalAliasFor(k)
 }
 
-/** Two keys "match" if their canonical forms agree. */
 function keysMatch(a: string, b: string): boolean {
-  return canonical(a) === canonical(b)
+  return keysAreAliases(a, b)
 }
 
 // ── Brief / section lookup ──────────────────────────────────────────
