@@ -18,6 +18,11 @@ import { Loader2, ExternalLink, ListChecks } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 
 const WEBSITE_SPACE_ID = 90171129510
+// Team / workspace ID for the org's ClickUp account — used as the
+// first segment of every app.clickup.com URL (`/<team_id>/v/...`).
+// Hardcoded rather than derived from space_id; the two are
+// unrelated identifiers and the team ID stays the same forever.
+const CLICKUP_TEAM_ID = 1235435
 
 const ACTIVE_STATUSES = new Set([
   'in progress', 'received', 'ready to start',
@@ -179,7 +184,7 @@ export function ClickUpTasksSummary({ member }: Props) {
           </span>
         </div>
         <a
-          href={`https://app.clickup.com/${WEBSITE_SPACE_ID.toString().slice(0, 7)}/v/li/${listId}`}
+          href={`https://app.clickup.com/${CLICKUP_TEAM_ID}/v/li/${listId}`}
           target="_blank"
           rel="noreferrer"
           title="Open list in ClickUp"

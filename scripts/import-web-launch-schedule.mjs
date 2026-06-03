@@ -128,8 +128,12 @@ function parseCsv(content) {
 // ── Date conversion ──────────────────────────────────────────
 
 /** Convert CSV date strings ("May 18" or "2026-11-09") to ISO
- *  yyyy-mm-dd in local time. Current calendar year; if the parsed
- *  date is in the past (before today), roll forward one year. */
+ *  yyyy-mm-dd in local time. Year-less dates use the current year;
+ *  if that date is MORE THAN A MONTH in the past, roll forward a
+ *  year (the catalog might be staged for next year's planning).
+ *  Within the trailing month we KEEP the current year — those are
+ *  recently-completed weeks that the schedule view + health math
+ *  should still see, not work that's being deferred 12 months. */
 function toIsoDate(raw, today = new Date()) {
   const trimmed = String(raw).trim()
   // Already ISO?
@@ -146,8 +150,14 @@ function toIsoDate(raw, today = new Date()) {
   const monthIdx = months.indexOf(monthName.slice(0, 3).toLowerCase())
   if (monthIdx === -1) return null
   let d = new Date(year, monthIdx, day, 12, 0, 0)
-  if (!m[3] && d < today) {
-    d = new Date(year + 1, monthIdx, day, 12, 0, 0)
+  if (!m[3]) {
+    // Roll forward only when the bare-year date is well in the past —
+    // ≥31 days ago. Within the last month, keep the current year so
+    // recently-spent weeks land correctly on the schedule.
+    const daysAgo = (today.getTime() - d.getTime()) / (24 * 60 * 60 * 1000)
+    if (daysAgo > 31) {
+      d = new Date(year + 1, monthIdx, day, 12, 0, 0)
+    }
   }
   const y = d.getFullYear()
   const mm = String(d.getMonth() + 1).padStart(2, '0')

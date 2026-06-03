@@ -229,29 +229,62 @@ export function computeProjectHealth(i: HealthInputs): HealthResult {
   }
 
   // ── Launch projection ────────────────────────────────────
-  // Walk the allocation calendar forward from today, week by week,
-  // until cumulative allocated hours covers `remaining`. The week
-  // where it crosses over is the projected launch week.
+  // Two independent estimates; the EARLIER of the two wins:
+  //
+  //   • Allocation-based — walk the project's future weekly
+  //     allocations until cumulative hours covers `remaining`. The
+  //     week where it crosses over is the booked projection.
+  //   • Capacity-based — `today + ceil(remaining / capacity)` weeks.
+  //     The "if Josh starts today and works straight through" number.
+  //     Catches the case where allocations are sparse, missing, or
+  //     stale, so a tiny remaining doesn't get pushed to whatever
+  //     distant week happens to carry the first booking.
+  //
+  // We use the earlier of the two so a 10h remaining doesn't read
+  // "ships in 12 months" just because someone scheduled hours that
+  // far out.
   let projection: string | null = i.project.launch_date
-  if (remaining > 0 && i.allocations.length > 0) {
-    const sorted = [...i.allocations]
-      .filter(a => {
-        const w = fromIsoDate(a.week_starting)
-        return w && w >= todayMidnight(today)
-      })
-      .sort((a, b) => a.week_starting.localeCompare(b.week_starting))
-    let acc = 0
-    for (const a of sorted) {
-      acc += Number(a.hours)
-      if (acc >= remaining) {
-        projection = a.week_starting
-        break
+  if (remaining > 0) {
+    // Allocation-based candidate.
+    let allocProjection: string | null = null
+    if (i.allocations.length > 0) {
+      const sorted = [...i.allocations]
+        .filter(a => {
+          const w = fromIsoDate(a.week_starting)
+          return w && w >= todayMidnight(today)
+        })
+        .sort((a, b) => a.week_starting.localeCompare(b.week_starting))
+      let acc = 0
+      for (const a of sorted) {
+        acc += Number(a.hours)
+        if (acc >= remaining) { allocProjection = a.week_starting; break }
       }
     }
-    // Ran out of allocations without satisfying remaining → no
-    // projection from data alone; fall back to launch_date.
-    if (acc < remaining && i.project.launch_date) {
-      projection = i.project.launch_date
+
+    // Capacity-based candidate — uses Josh's default weekly capacity
+    // as the ceiling. If allocations exist they're typically less
+    // than capacity (other projects sharing the week), so this is
+    // an OPTIMISTIC estimate. It's the "best-case if we drop other
+    // commitments" answer, useful as a sanity bound on the booked
+    // projection.
+    const cap = Math.max(i.joshWeeklyCapacity, 1)
+    const weeksNeeded = Math.max(1, Math.ceil(remaining / cap))
+    const capProjectionDate = new Date(today)
+    capProjectionDate.setDate(capProjectionDate.getDate() + weeksNeeded * 7)
+    const capProjection = toIsoDate(capProjectionDate)
+
+    // Pick the EARLIER of the two when both exist; the allocation-
+    // based one only wins when bookings are realistic.
+    const candidates: string[] = []
+    if (allocProjection) candidates.push(allocProjection)
+    candidates.push(capProjection)
+    candidates.sort()
+    projection = candidates[0]
+
+    if (allocProjection && capProjection < allocProjection) {
+      reasons.push(
+        `Booked allocations finish ${fmtDate(allocProjection)}, but ${remaining.toFixed(1)}h at ${cap}h/week could finish by ${fmtDate(capProjection)} if reshuffled.`,
+      )
     }
   }
 
