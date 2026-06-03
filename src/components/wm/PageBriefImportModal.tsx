@@ -45,7 +45,7 @@ import {
   type SectionFitDiagnostic,
 } from '../../lib/webCopywriterOutput'
 import type { SectionPairResult } from '../../lib/webBrixiesPairer'
-import { importSnippets, type SnippetsImportPayload } from '../../lib/webSnippetsImport'
+import { importSnippets, isSnippetsImportPayload, type SnippetsImportPayload } from '../../lib/webSnippetsImport'
 import type { StrategyWebProject } from '../../types/database'
 
 interface Props {
@@ -248,6 +248,12 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
   // (so {{token}} references in field_values actually resolve at
   // render time after the pages land).
   const [pendingSnippetsManifest, setPendingSnippetsManifest] = useState<SnippetsImportPayload | null>(null)
+  // Snippets-only paste — when the strategist pastes `{ globals, snippets }`
+  // without any pages, treat it as a project-level snippet hydration
+  // instead of erroring out with "page_slug is required". Surfaced as
+  // a confirmation card with what would be written + an Import button.
+  const [snippetsOnlyPayload, setSnippetsOnlyPayload] = useState<SnippetsImportPayload | null>(null)
+  const [snippetsOnlyResult, setSnippetsOnlyResult] = useState<{ globalsUpdated: number; snippetsArchived: number; snippetsInserted: number } | null>(null)
   // Pre-import shape diagnostics — dry-run bind per section so the
   // strategist can see "this template will drop content" BEFORE
   // hitting Import. Keyed by pageIdx → sort_order → fit. Recomputed
@@ -309,6 +315,8 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
     setPairerCollapsed(false)
     setBundleProgress(null)
     setPendingSnippetsManifest(null)
+    setSnippetsOnlyPayload(null)
+    setSnippetsOnlyResult(null)
     setBundleFit(null)
     setSingleFit(null)
   }
@@ -461,6 +469,8 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
     setBundle(null)
     setCopyOutput(null)
     setCopyReport(null)
+    setSnippetsOnlyPayload(null)
+    setSnippetsOnlyResult(null)
     let parsed: unknown
     try {
       // Cowork includes // line and /* block */ comments as human-readable
@@ -556,6 +566,29 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
     if (isPageBriefBundle(parsed)) {
       setBundle(parsed)
       return
+    }
+    // Snippets-only paste — { globals, snippets } with no pages. Route
+    // to the project-level snippet hydration path instead of erroring
+    // with "page_slug required". Detection is BELOW the bundle / copy-
+    // writer checks because those shapes can also carry a snippets
+    // manifest; this branch only fires when there's NOTHING else to
+    // import.
+    if (isSnippetsImportPayload(parsed)) {
+      const p = parsed as Record<string, unknown>
+      const hasPages = Array.isArray((p as { pages?: unknown }).pages)
+      const hasSections = Array.isArray((p as { sections?: unknown }).sections)
+      if (!hasPages && !hasSections) {
+        const payload: SnippetsImportPayload = {
+          globals:  (p.globals  && typeof p.globals  === 'object')
+            ? p.globals  as SnippetsImportPayload['globals']
+            : undefined,
+          snippets: Array.isArray(p.snippets)
+            ? p.snippets as SnippetsImportPayload['snippets']
+            : undefined,
+        }
+        setSnippetsOnlyPayload(payload)
+        return
+      }
     }
     const single = parsed as PageBrief
     setBrief(single)
@@ -1469,6 +1502,105 @@ export function PageBriefImportModal({ project, open, onClose, onImported }: Pro
                   </ul>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Snippets-only paste — confirmation card. The payload
+              hydrates project globals + snippet rows without creating
+              a page. Reuses the same importSnippets() the copywriter
+              bundle uses internally. */}
+          {snippetsOnlyPayload && (
+            <div className="mt-4 rounded-md border border-wm-accent/30 bg-wm-accent-tint p-3">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong mb-2">
+                Snippets-only import detected
+              </p>
+              <p className="text-[12px] text-wm-text mb-3">
+                This payload carries project-level <strong>globals</strong> and
+                <strong> snippets</strong> but no pages. Importing will update the
+                project's global merge fields and insert the listed snippets into
+                <span className="font-mono"> web_project_snippets</span>.
+              </p>
+
+              {snippetsOnlyPayload.globals && Object.keys(snippetsOnlyPayload.globals).length > 0 && (
+                <div className="mb-3">
+                  <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">
+                    Globals ({Object.values(snippetsOnlyPayload.globals).filter(v => v != null && v !== '').length} non-null of {Object.keys(snippetsOnlyPayload.globals).length})
+                  </p>
+                  <ul className="space-y-0.5 text-[11px]">
+                    {Object.entries(snippetsOnlyPayload.globals).slice(0, 12).map(([k, v]) => (
+                      <li key={k} className="flex items-baseline gap-2">
+                        <span className="font-mono text-wm-text-muted shrink-0">{k}</span>
+                        <span className="text-wm-text truncate">
+                          {v == null || v === '' ? <em className="text-wm-text-subtle">— null —</em> : v}
+                        </span>
+                      </li>
+                    ))}
+                    {Object.keys(snippetsOnlyPayload.globals).length > 12 && (
+                      <li className="text-[11px] text-wm-text-subtle italic">
+                        +{Object.keys(snippetsOnlyPayload.globals).length - 12} more…
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              )}
+
+              {snippetsOnlyPayload.snippets && snippetsOnlyPayload.snippets.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">
+                    Snippets ({snippetsOnlyPayload.snippets.length})
+                  </p>
+                  <ul className="space-y-0.5 text-[11px]">
+                    {snippetsOnlyPayload.snippets.slice(0, 12).map((s, i) => (
+                      <li key={i} className="flex items-baseline gap-2">
+                        <span className="font-mono text-wm-text-muted shrink-0">{s.token}</span>
+                        <span className="text-wm-text truncate">{s.expansion}</span>
+                      </li>
+                    ))}
+                    {snippetsOnlyPayload.snippets.length > 12 && (
+                      <li className="text-[11px] text-wm-text-subtle italic">
+                        +{snippetsOnlyPayload.snippets.length - 12} more…
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              )}
+
+              {snippetsOnlyResult && (
+                <div className="rounded border border-wm-success/30 bg-wm-success-bg px-3 py-2 mb-2">
+                  <p className="text-[12px] text-wm-success">
+                    Imported {snippetsOnlyResult.globalsUpdated} global{snippetsOnlyResult.globalsUpdated === 1 ? '' : 's'}
+                    {' · '}
+                    {snippetsOnlyResult.snippetsInserted} snippet{snippetsOnlyResult.snippetsInserted === 1 ? '' : 's'} inserted
+                    {snippetsOnlyResult.snippetsArchived > 0 ? ` · ${snippetsOnlyResult.snippetsArchived} archived` : ''}.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setImporting(true)
+                    setImportMsg(null)
+                    try {
+                      const r = await importSnippets(snippetsOnlyPayload, project)
+                      if (r.error) {
+                        setImportMsg(`Error: ${r.error}`)
+                      } else {
+                        setSnippetsOnlyResult(r.result)
+                        setImportMsg(`Snippets imported · ${r.result?.globalsUpdated ?? 0} globals, ${r.result?.snippetsInserted ?? 0} snippets.`)
+                        onImported()
+                      }
+                    } finally {
+                      setImporting(false)
+                    }
+                  }}
+                  disabled={importing || !!snippetsOnlyResult}
+                  className="inline-flex items-center gap-1.5 h-8 px-4 rounded-full text-[12px] font-semibold bg-wm-accent text-white hover:bg-wm-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {snippetsOnlyResult ? 'Imported' : (importing ? 'Importing…' : 'Import snippets')}
+                </button>
+              </div>
             </div>
           )}
 
