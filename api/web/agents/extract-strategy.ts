@@ -387,7 +387,7 @@ export default async function handler(req: any, res: any) {
 
 // ── System prompt ─────────────────────────────────────────────────────
 
-function buildSystemPrompt(): string {
+export function buildSystemPrompt(): string {
   return `You are the Strategy Extractor for Church Media Squad's Content Manager. You synthesize a partner church's intake materials into a structured strategic foundation that downstream agents (sitemap, user journey, per-page roadmap, copywriter) will build on.
 
 # Source priority
@@ -445,7 +445,7 @@ interface UserContentInputs {
   previousStage1?: Record<string, unknown> | null
 }
 
-function buildUserContent(inputs: UserContentInputs): unknown[] {
+export function buildUserContent(inputs: UserContentInputs): unknown[] {
   const blocks: unknown[] = []
 
   // Project meta
@@ -580,7 +580,7 @@ function redactNulls(obj: any): any {
 
 // ── Structured output tool ────────────────────────────────────────────
 
-const EXTRACTION_TOOL = {
+export const EXTRACTION_TOOL = {
   name: 'submit_strategy_extraction',
   description: 'Submit the synthesized strategic foundation for this church website project.',
   input_schema: {

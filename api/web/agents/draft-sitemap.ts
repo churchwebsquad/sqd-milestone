@@ -38,7 +38,7 @@ export const maxDuration = 300
 // Beliefs" that Opus catches as malformed). With the lean schema (~5K
 // output target) Opus has plenty of headroom under its output cap.
 const MODEL = 'anthropic/claude-opus-4-7'
-const MAX_OUTPUT_TOKENS = 12000
+const MAX_OUTPUT_TOKENS = 16000  // 12k was hitting the ceiling for ~20+ page sitemaps with per-page AEO targets
 
 const TEXT_FORMATS = new Set([
   'text/plain', 'text/markdown', 'text/x-markdown', 'text/csv',
@@ -303,7 +303,7 @@ export default async function handler(req: any, res: any) {
 
 // ── System prompt ─────────────────────────────────────────────────────
 
-function buildSystemPrompt(): string {
+export function buildSystemPrompt(): string {
   return `You are the Sitemap Architect for Church Media Squad's Content Manager pipeline. Stage 2 of 5.
 
 # CORE INVARIANTS — VIOLATING THESE IS FAILURE
@@ -628,7 +628,7 @@ interface UserContentInputs {
   previousStage2: Record<string, unknown> | null | undefined
 }
 
-function buildUserContent(inputs: UserContentInputs): unknown[] {
+export function buildUserContent(inputs: UserContentInputs): unknown[] {
   const blocks: unknown[] = []
 
   blocks.push({
@@ -763,7 +763,7 @@ function stripMeta(obj: Record<string, unknown>): Record<string, unknown> {
 
 // ── Structured output tool ────────────────────────────────────────────
 
-const SITEMAP_TOOL = {
+export const SITEMAP_TOOL = {
   name: 'submit_sitemap',
   description: 'Submit the proposed strategic sitemap for this church website project.',
   input_schema: {
