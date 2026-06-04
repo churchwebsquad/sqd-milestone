@@ -804,6 +804,366 @@ function fieldValuesToMarkdownLite(values: Record<string, unknown>): string {
   return parts.join('\n\n')
 }
 
+// ── STAGE 6 — Coverage QA ──────────────────────────────────────
+// Audits whether every atom + fact landed somewhere in the bound
+// sections. Read-only — just reports landed / partial / orphaned.
+async function runStage6() {
+  console.log(`\n━━━ Stage 6 — Coverage QA ━━━`)
+
+  const { data: project } = await sb.from('strategy_web_projects').select('*').eq('id', PROJECT_ID).maybeSingle()
+  if (!project) throw new Error('Project not found')
+
+  const [atomsRes, factsRes, pagesRes] = await Promise.all([
+    sb.from('content_atoms').select('id, topic, body').eq('web_project_id', PROJECT_ID),
+    sb.from('church_facts').select('id, topic, data').eq('web_project_id', PROJECT_ID),
+    sb.from('web_pages').select('id, slug, name').eq('web_project_id', PROJECT_ID),
+  ])
+  const atoms   = (atomsRes.data ?? []) as any[]
+  const facts   = (factsRes.data ?? []) as any[]
+  const pages   = (pagesRes.data ?? []) as any[]
+  const pageIds = pages.map(p => p.id)
+  if (pageIds.length === 0) throw new Error('No bound pages — run Stage 5 first.')
+
+  const { data: sections } = await sb.from('web_sections')
+    .select('id, web_page_id, content_template_id, field_values, sort_order')
+    .in('web_page_id', pageIds)
+    .order('sort_order')
+  const sectionsArr = (sections ?? []) as any[]
+  console.log(`Auditing: ${atoms.length} atoms · ${facts.length} facts · ${sectionsArr.length} bound sections across ${pages.length} pages`)
+
+  const TOOL_SCHEMA: any = {
+    type: 'object',
+    properties: {
+      landed:           { type: 'array', items: { type: 'object',
+        properties: { source_id: { type: 'string' }, source_kind: { type: 'string', enum: ['atom','fact'] },
+          landed_in: { type: 'array', items: { type: 'object',
+            properties: { web_section_id: { type: 'string' }, field_key: { type: 'string' }, snippet: { type: 'string' } },
+            required: ['web_section_id','field_key','snippet'] } } },
+        required: ['source_id','source_kind','landed_in'] } },
+      partially_landed: { type: 'array', items: { type: 'object',
+        properties: { source_id: { type: 'string' }, source_kind: { type: 'string', enum: ['atom','fact'] },
+          landed_in: { type: 'array', items: { type: 'object', properties: {
+            web_section_id: { type: 'string' }, field_key: { type: 'string' }, snippet: { type: 'string' } },
+            required: ['web_section_id','field_key','snippet'] } },
+          missing_info: { type: 'string' } },
+        required: ['source_id','source_kind','landed_in','missing_info'] } },
+      orphaned:         { type: 'array', items: { type: 'object',
+        properties: { source_id: { type: 'string' }, source_kind: { type: 'string', enum: ['atom','fact'] },
+          rationale: { type: 'string' },
+          suggested_remedy: { type: 'string', enum: ['reroute','request_partner_content','archive','add_new_section'] } },
+        required: ['source_id','source_kind','rationale','suggested_remedy'] } },
+      total_score: { type: 'number' },
+    },
+    required: ['landed','partially_landed','orphaned','total_score'],
+  }
+
+  // Only consider atoms/facts that were routed in Stage 3 to one of
+  // our 5 bound pages. Atoms routed to unbound pages aren't fair to
+  // count as orphans in this limited test run.
+  const boundSlugs = new Set(pages.map(p => p.slug))
+  const stage3 = (project.roadmap_state as any).stage_3 ?? {}
+  const atomPlacements = (stage3.atom_placements ?? []) as Array<{ source_id: string; primary_page_slug: string }>
+  const factPlacements = (stage3.fact_placements ?? []) as Array<{ source_id: string; primary_page_slug: string }>
+  const inScopeAtomIds = new Set(atomPlacements.filter(p => boundSlugs.has(p.primary_page_slug)).map(p => p.source_id))
+  const inScopeFactIds = new Set(factPlacements.filter(p => boundSlugs.has(p.primary_page_slug)).map(p => p.source_id))
+  const atomsToAudit   = atoms.filter(a => inScopeAtomIds.has(a.id))
+  const factsToAudit   = facts.filter(f => inScopeFactIds.has(f.id))
+  console.log(`In-scope (placed on bound pages): ${atomsToAudit.length} atoms · ${factsToAudit.length} facts`)
+
+  const userText = [
+    `# Bound pages\n${JSON.stringify(pages, null, 2)}`,
+    `# Bound sections (id, page_id, template_id, field_values)\n${JSON.stringify(sectionsArr, null, 2)}`,
+    `# Atoms placed on bound pages (Stage 3)\n${JSON.stringify(atomsToAudit, null, 2)}`,
+    `# Facts placed on bound pages (Stage 3)\n${JSON.stringify(factsToAudit, null, 2)}`,
+  ].join('\n\n')
+
+  console.log('Calling anthropic/claude-opus-4-7…')
+  const t0 = Date.now()
+  const result = await generateText({
+    model: 'anthropic/claude-opus-4-7',
+    maxOutputTokens: 16000,
+    system: FALLBACK_PROMPTS.coverage_qa,
+    messages: [{ role: 'user', content: userText }],
+    tools: {
+      submit_coverage_audit: tool({
+        description: 'Submit coverage audit results.',
+        inputSchema: jsonSchema(TOOL_SCHEMA),
+      }),
+    },
+    toolChoice: { type: 'tool', toolName: 'submit_coverage_audit' },
+    maxRetries: 3,
+  })
+  console.log(`Returned in ${((Date.now()-t0)/1000).toFixed(1)}s  · in=${result.usage?.inputTokens}  out=${result.usage?.outputTokens}`)
+
+  const out = result.toolCalls?.[0]?.input as any
+  if (!out) throw new Error('No tool call returned')
+
+  await sb.from('strategy_web_projects').update({
+    roadmap_state: {
+      ...(project.roadmap_state ?? {}),
+      stage_6: {
+        ...out,
+        _meta: {
+          status: 'draft',
+          generated_at: new Date().toISOString(),
+          model: 'anthropic/claude-opus-4-7',
+          usage: { input_tokens: result.usage?.inputTokens, output_tokens: result.usage?.outputTokens },
+          source: 'test-pipeline-stages script (limited to bound pages)',
+          atoms_audited: atomsToAudit.length,
+          facts_audited: factsToAudit.length,
+        },
+      },
+    },
+  }).eq('id', PROJECT_ID)
+
+  console.log(`\nStage 6 summary:`)
+  console.log(`  landed:           ${(out.landed ?? []).length}`)
+  console.log(`  partially landed: ${(out.partially_landed ?? []).length}`)
+  console.log(`  orphaned:         ${(out.orphaned ?? []).length}`)
+  console.log(`  total score:      ${out.total_score}%`)
+  return out
+}
+
+// ── STAGE 7 — Voice pass ───────────────────────────────────────
+// For each bound page, the model rewrites text/richtext slot values
+// to better match the project's voice card. Two-step: (1) generate
+// the rewrite manifest per page, (2) apply non-override rewrites to
+// web_sections. Per-page to keep prompts manageable.
+async function runStage7() {
+  console.log(`\n━━━ Stage 7 — Voice pass ━━━`)
+
+  const { data: project } = await sb.from('strategy_web_projects').select('*').eq('id', PROJECT_ID).maybeSingle()
+  if (!project) throw new Error('Project not found')
+  const roadmapState = (project.roadmap_state ?? {}) as any
+  if (!roadmapState.stage_1) throw new Error('Stage 7 needs stage_1 voice card')
+
+  const voiceCard = roadmapState.stage_1.voice_characteristics
+  const personas  = roadmapState.stage_1.personas
+
+  const { data: brandGuide } = await sb.from('strategy_brand_guides')
+    .select('voice_overview, brand_statement').eq('member', project.member).eq('is_published', true).maybeSingle()
+  const brandHandoff = (await sb.from('strategy_account_progress').select('handoff_brand_form').eq('member', project.member).maybeSingle()).data?.handoff_brand_form
+
+  const { data: pages } = await sb.from('web_pages').select('id, slug, name').eq('web_project_id', PROJECT_ID).order('sort_order')
+  const pagesArr = (pages ?? []) as any[]
+  if (pagesArr.length === 0) throw new Error('No bound pages — run Stage 5 first.')
+
+  const allRewrites: Array<{ web_section_id: string; field_key: string; old_value: string; new_value: string; voice_alignment_score: number; rationale: string }> = []
+  const allSkipped:  Array<{ web_section_id: string; field_key: string; reason: string }> = []
+  let totalIn = 0, totalOut = 0
+
+  const TOOL_SCHEMA: any = {
+    type: 'object',
+    properties: {
+      rewrites: { type: 'array', items: { type: 'object',
+        properties: {
+          web_section_id: { type: 'string' }, field_key: { type: 'string' },
+          old_value: { type: 'string' }, new_value: { type: 'string' },
+          voice_alignment_score: { type: 'number' }, rationale: { type: 'string' },
+        },
+        required: ['web_section_id','field_key','old_value','new_value','voice_alignment_score','rationale'] } },
+      skipped: { type: 'array', items: { type: 'object',
+        properties: {
+          web_section_id: { type: 'string' }, field_key: { type: 'string' },
+          reason: { type: 'string', enum: ['already_on_voice','override_locked','over_budget_after_rewrite'] },
+        },
+        required: ['web_section_id','field_key','reason'] } },
+    },
+    required: ['rewrites','skipped'],
+  }
+
+  for (let i = 0; i < pagesArr.length; i++) {
+    const page = pagesArr[i]
+    const { data: pageSections } = await sb.from('web_sections')
+      .select('id, content_template_id, field_values, field_provenance, sort_order')
+      .eq('web_page_id', page.id).order('sort_order')
+
+    process.stdout.write(`  [${i+1}/${pagesArr.length}] /${page.slug} ... `)
+    const t0 = Date.now()
+    try {
+      const result = await generateText({
+        model: 'anthropic/claude-opus-4-7',
+        maxOutputTokens: 12000,
+        system: FALLBACK_PROMPTS.voice_pass,
+        messages: [{ role: 'user', content: [
+          `# Voice card\n${JSON.stringify(voiceCard, null, 2)}`,
+          `# Personas\n${JSON.stringify(personas, null, 2)}`,
+          brandGuide ? `# Brand guide\n${JSON.stringify(brandGuide, null, 2)}` : '',
+          brandHandoff ? `# Brand handoff (AM intake)\n${JSON.stringify(brandHandoff, null, 2)}` : '',
+          `# Page being polished: ${page.name} (/${page.slug})`,
+          `# Sections (with current field_values + provenance)\n${JSON.stringify(pageSections, null, 2)}`,
+        ].filter(Boolean).join('\n\n') }],
+        tools: {
+          submit_voice_rewrites: tool({
+            description: 'Submit voice-pass rewrites + skips for one page.',
+            inputSchema: jsonSchema(TOOL_SCHEMA),
+          }),
+        },
+        toolChoice: { type: 'tool', toolName: 'submit_voice_rewrites' },
+        maxRetries: 3,
+      })
+      totalIn  += result.usage?.inputTokens  ?? 0
+      totalOut += result.usage?.outputTokens ?? 0
+      const out = result.toolCalls?.[0]?.input as any
+      const r = (out?.rewrites ?? []) as typeof allRewrites
+      const s = (out?.skipped  ?? []) as typeof allSkipped
+      allRewrites.push(...r)
+      allSkipped.push(...s)
+      console.log(`${r.length} rewrites · ${s.length} skipped (${((Date.now()-t0)/1000).toFixed(1)}s, out=${result.usage?.outputTokens})`)
+    } catch (e) {
+      console.log(`FAILED — ${e instanceof Error ? e.message : 'unknown'}`)
+    }
+  }
+
+  // Persist the manifest
+  await sb.from('strategy_web_projects').update({
+    roadmap_state: {
+      ...(project.roadmap_state ?? {}),
+      stage_7: {
+        rewrites: allRewrites,
+        skipped:  allSkipped,
+        _meta: {
+          status: 'draft',
+          generated_at: new Date().toISOString(),
+          model: 'anthropic/claude-opus-4-7',
+          usage: { input_tokens: totalIn, output_tokens: totalOut },
+          source: 'test-pipeline-stages script',
+        },
+      },
+    },
+  }).eq('id', PROJECT_ID)
+
+  // Apply: write each rewrite back to web_sections.field_values, skipping
+  // any field marked field_provenance='override'.
+  console.log(`\nApplying ${allRewrites.length} rewrites to web_sections…`)
+  let applied = 0, blockedByOverride = 0, failed = 0
+  for (const r of allRewrites) {
+    const { data: sec } = await sb.from('web_sections')
+      .select('field_values, field_provenance').eq('id', r.web_section_id).maybeSingle()
+    if (!sec) { failed++; continue }
+    const prov = (sec.field_provenance ?? {}) as Record<string, { source?: string }>
+    if (prov[r.field_key]?.source === 'override') { blockedByOverride++; continue }
+    const nextValues = { ...(sec.field_values as Record<string, unknown>), [r.field_key]: r.new_value }
+    const nextProv   = { ...prov, [r.field_key]: { ...(prov[r.field_key] ?? {}), source: 'voice_pass' } }
+    const { error } = await sb.from('web_sections')
+      .update({ field_values: nextValues, field_provenance: nextProv })
+      .eq('id', r.web_section_id)
+    if (error) failed++; else applied++
+  }
+
+  console.log(`\nStage 7 summary:`)
+  console.log(`  total rewrites:   ${allRewrites.length}`)
+  console.log(`  applied:          ${applied}`)
+  console.log(`  blocked override: ${blockedByOverride}`)
+  console.log(`  failed:           ${failed}`)
+  console.log(`  skipped (model):  ${allSkipped.length}`)
+  return { rewrites: allRewrites, skipped: allSkipped }
+}
+
+// ── STAGE 8 — Final QA ─────────────────────────────────────────
+async function runStage8() {
+  console.log(`\n━━━ Stage 8 — Final QA ━━━`)
+
+  const { data: project } = await sb.from('strategy_web_projects').select('*').eq('id', PROJECT_ID).maybeSingle()
+  if (!project) throw new Error('Project not found')
+  const roadmapState = (project.roadmap_state ?? {}) as any
+
+  const { data: pages } = await sb.from('web_pages').select('id, slug, name, seo').eq('web_project_id', PROJECT_ID).order('sort_order')
+  const pagesArr = (pages ?? []) as any[]
+  const pageIds = pagesArr.map(p => p.id)
+  const { data: sections } = await sb.from('web_sections')
+    .select('id, web_page_id, content_template_id, field_values, sort_order')
+    .in('web_page_id', pageIds)
+    .order('sort_order')
+
+  const TOOL_SCHEMA: any = {
+    type: 'object',
+    properties: {
+      findings: { type: 'array', items: { type: 'object',
+        properties: {
+          severity:       { type: 'string', enum: ['blocker','warning','nit'] },
+          page_slug:      { type: ['string','null'] },
+          web_section_id: { type: ['string','null'] },
+          category:       { type: 'string', enum: ['nav_parity','persona_coverage','voice_drift','merge_field','seo'] },
+          issue:          { type: 'string' },
+          suggested_fix:  { type: 'string' },
+        },
+        required: ['severity','category','issue','suggested_fix'] } },
+      scores: { type: 'object',
+        properties: {
+          nav_parity:             { type: 'number' },
+          persona_coverage:       { type: 'number' },
+          voice_consistency:      { type: 'number' },
+          merge_field_resolution: { type: 'number' },
+          seo_completeness:       { type: 'number' },
+          overall:                { type: 'number' },
+        },
+        required: ['nav_parity','persona_coverage','voice_consistency','merge_field_resolution','seo_completeness','overall'] },
+    },
+    required: ['findings','scores'],
+  }
+
+  const userText = [
+    `# Stage 1 strategy\n${JSON.stringify(roadmapState.stage_1, null, 2)}`,
+    `# Stage 2 sitemap (note: only ${pagesArr.length} of these pages are actually bound for this test)\n${JSON.stringify(roadmapState.stage_2, null, 2)}`,
+    `# Bound pages (${pagesArr.length})\n${JSON.stringify(pagesArr, null, 2)}`,
+    `# Bound sections (${(sections ?? []).length})\n${JSON.stringify(sections, null, 2)}`,
+  ].join('\n\n')
+
+  console.log('Calling anthropic/claude-opus-4-7…')
+  const t0 = Date.now()
+  const result = await generateText({
+    model: 'anthropic/claude-opus-4-7',
+    maxOutputTokens: 8000,
+    system: FALLBACK_PROMPTS.final_qa,
+    messages: [{ role: 'user', content: userText }],
+    tools: {
+      submit_final_qa: tool({
+        description: 'Submit final-QA findings + scores.',
+        inputSchema: jsonSchema(TOOL_SCHEMA),
+      }),
+    },
+    toolChoice: { type: 'tool', toolName: 'submit_final_qa' },
+    maxRetries: 3,
+  })
+  console.log(`Returned in ${((Date.now()-t0)/1000).toFixed(1)}s  · in=${result.usage?.inputTokens}  out=${result.usage?.outputTokens}`)
+
+  const out = result.toolCalls?.[0]?.input as any
+  if (!out) throw new Error('No tool call returned')
+
+  await sb.from('strategy_web_projects').update({
+    roadmap_state: {
+      ...(project.roadmap_state ?? {}),
+      stage_8: {
+        ...out,
+        _meta: {
+          status: 'draft',
+          generated_at: new Date().toISOString(),
+          model: 'anthropic/claude-opus-4-7',
+          usage: { input_tokens: result.usage?.inputTokens, output_tokens: result.usage?.outputTokens },
+          source: 'test-pipeline-stages script (limited scope)',
+        },
+      },
+    },
+  }).eq('id', PROJECT_ID)
+
+  const findings = (out.findings ?? []) as any[]
+  const scores = out.scores ?? {}
+  console.log(`\nStage 8 summary:`)
+  console.log(`  findings:              ${findings.length}`)
+  console.log(`    blockers:            ${findings.filter((f: any) => f.severity === 'blocker').length}`)
+  console.log(`    warnings:            ${findings.filter((f: any) => f.severity === 'warning').length}`)
+  console.log(`    nits:                ${findings.filter((f: any) => f.severity === 'nit').length}`)
+  console.log(`  scores:`)
+  console.log(`    nav parity:          ${scores.nav_parity}%`)
+  console.log(`    persona coverage:    ${scores.persona_coverage}%`)
+  console.log(`    voice consistency:   ${scores.voice_consistency}%`)
+  console.log(`    merge field:         ${scores.merge_field_resolution}%`)
+  console.log(`    seo completeness:    ${scores.seo_completeness}%`)
+  console.log(`    overall:             ${scores.overall}%`)
+  return out
+}
+
 // ── STAGE 1 ────────────────────────────────────────────────────
 async function runStage1() {
   console.log(`\n━━━ Stage 1 — Synthesize ━━━`)
@@ -982,6 +1342,9 @@ async function runStage2(stage1: any) {
       const limit = limitArg ? Number(limitArg) : undefined
       await runStage5(Number.isFinite(limit) && limit! > 0 ? limit : undefined)
     }
+    if (want('coverage_qa',    '6')) await runStage6()
+    if (want('voice_pass',     '7')) await runStage7()
+    if (want('final_qa',       '8')) await runStage8()
     console.log('\n✓ Done.')
     process.exit(0)
   } catch (e) {
