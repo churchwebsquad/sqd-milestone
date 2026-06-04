@@ -508,6 +508,302 @@ async function runStage4() {
   return { page_outlines: pageOutlines }
 }
 
+// ── STAGE 5 — Bind to Brixies ──────────────────────────────────
+// Picks a Brixies template per section + rephrases the section's
+// Stage 4 content_summary into field_values that fit the template's
+// slots. Writes web_pages + web_sections so the result is renderable
+// in the Pages workspace immediately.
+//
+// One model call per page (page-scoped batch — manageable output
+// size since each page is ~4-9 sections). Limited to the first N
+// pages via argv[4] for test runs.
+async function runStage5(limit?: number) {
+  console.log(`\n━━━ Stage 5 — Bind to Brixies ━━━`)
+
+  const { data: project } = await sb.from('strategy_web_projects').select('*').eq('id', PROJECT_ID).maybeSingle()
+  if (!project) throw new Error('Project not found')
+  const roadmapState = (project.roadmap_state ?? {}) as any
+  if (!roadmapState.stage_4) throw new Error('Stage 5 requires stage_4 outlines.')
+
+  const allOutlines = (roadmapState.stage_4.page_outlines ?? []) as any[]
+  const outlines = limit ? allOutlines.slice(0, limit) : allOutlines
+  console.log(`Binding ${outlines.length}/${allOutlines.length} pages…`)
+
+  // Display kind → Brixies family. Used to filter the candidate pool
+  // per section before passing to the model.
+  const KIND_TO_FAMILY: Record<string, string[]> = {
+    cta_hero:        ['Hero Section', 'CTA Section', 'Banner Section'],
+    split_column:    ['Content Section', 'Intro Section', 'Feature Section'],
+    rich_text_long:  ['Content Section', 'Intro Section'],
+    card_grid:       ['Feature Section'],
+    feature_strip:   ['Feature Section', 'Banner Section'],
+    accordion:       ['FAQ Section'],
+    tabs:            ['Feature Section'],
+    timeline:        ['Timeline Section', 'Process Section'],
+    process_steps:   ['Process Section'],
+    staff_grid:      ['Team Section'],
+    gallery:         ['Gallery Section', 'Feature Section'],
+  }
+
+  // Idempotent reset of any prior Stage 5 output for the chosen pages.
+  const pageSlugs = outlines.map(o => o.page_slug)
+  const { data: existingPages } = await sb.from('web_pages')
+    .select('id, slug').eq('web_project_id', PROJECT_ID).in('slug', pageSlugs)
+  if (existingPages?.length) {
+    const ids = existingPages.map(p => p.id as string)
+    await sb.from('web_sections').delete().in('web_page_id', ids)
+    await sb.from('web_pages').delete().in('id', ids)
+  }
+
+  // Fetch full template catalog (content kind only) so we can filter
+  // per section. Includes the `fields` schema so the model can emit
+  // slot-valid field_values.
+  const { data: templatesRaw } = await sb.from('web_content_templates')
+    .select('id, layer_name, family, variant, fields')
+    .eq('is_published', true)
+    .eq('kind', 'content')
+  type Template = { id: string; layer_name: string; family: string; variant: string | null; fields: any[] }
+  const templates = (templatesRaw ?? []) as Template[]
+  const templatesByFamily = new Map<string, Template[]>()
+  for (const t of templates) {
+    if (!templatesByFamily.has(t.family)) templatesByFamily.set(t.family, [])
+    templatesByFamily.get(t.family)!.push(t)
+  }
+
+  // Pool size cap per section — keeps the model's input manageable.
+  const POOL_PER_SECTION = 5
+
+  type PerPageResult = { page_slug: string; web_page_id: string; sections: any[]; error?: string }
+  const pageResults: PerPageResult[] = []
+
+  // Load atoms once for atom-body lookups across all pages.
+  const { data: atomsAll } = await sb.from('content_atoms')
+    .select('id, body').eq('web_project_id', PROJECT_ID)
+  const atomById = new Map((atomsAll ?? []).map((a: any) => [a.id, a.body as string]))
+
+  for (let i = 0; i < outlines.length; i++) {
+    const outline = outlines[i]
+    const slug = outline.page_slug
+    const stage2Page = (roadmapState.stage_2.pages ?? []).find((p: any) => p.slug === slug)
+    if (!stage2Page) {
+      pageResults.push({ page_slug: slug, web_page_id: '', sections: [], error: 'no stage_2 page found' })
+      continue
+    }
+
+    process.stdout.write(`  [${i+1}/${outlines.length}] /${slug} ... `)
+
+    // Insert the page row first; sections reference its id.
+    const { data: newPage, error: pageErr } = await sb.from('web_pages').insert({
+      web_project_id:   PROJECT_ID,
+      name:             stage2Page.name,
+      slug,
+      phase:            stage2Page.phase ?? '1',
+      sort_order:       i + 1,
+      content_status:   'draft',
+      ai_drafted_at:    new Date().toISOString(),
+      ai_drafted_by_stage: 'bind',
+    }).select('id').single()
+    if (pageErr || !newPage) {
+      console.log(`page insert FAILED: ${pageErr?.message}`)
+      pageResults.push({ page_slug: slug, web_page_id: '', sections: [], error: pageErr?.message })
+      continue
+    }
+    const pageId = newPage.id as string
+
+    // Build per-section candidate pools.
+    type SectionInput = {
+      section_id:      string
+      section_job:     string
+      content_summary: string
+      atoms_used:      string[]
+      atom_bodies:     string[]
+      voice_notes:     string | null
+      candidates:      Array<{ id: string; layer_name: string; family: string; fields: any[] }>
+    }
+    const sectionInputs: SectionInput[] = []
+    for (const s of (outline.sections ?? [])) {
+      const firstKind = s.display_options?.[0]?.kind as string | undefined
+      const families = firstKind ? KIND_TO_FAMILY[firstKind] ?? ['Content Section'] : ['Content Section']
+      const candidates: Template[] = []
+      for (const fam of families) {
+        const pool = (templatesByFamily.get(fam) ?? []).slice(0, POOL_PER_SECTION - candidates.length)
+        candidates.push(...pool)
+        if (candidates.length >= POOL_PER_SECTION) break
+      }
+      sectionInputs.push({
+        section_id:      s.section_id,
+        section_job:     s.section_job,
+        content_summary: s.content_summary,
+        atoms_used:      s.atoms_used ?? [],
+        atom_bodies:     (s.atoms_used ?? []).map((id: string) => atomById.get(id)).filter(Boolean) as string[],
+        voice_notes:     s.voice_notes ?? null,
+        candidates,
+      })
+    }
+
+    if (sectionInputs.length === 0) {
+      console.log('no sections in outline')
+      pageResults.push({ page_slug: slug, web_page_id: pageId, sections: [] })
+      continue
+    }
+
+    // Per-page bind tool: one pick per section + field_values.
+    const PAGE_BIND_TOOL: any = {
+      type: 'object',
+      properties: {
+        section_picks: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              section_id:    { type: 'string' },
+              template_id:   { type: 'string' },
+              rationale:     { type: 'string' },
+              field_values:  { type: 'object', additionalProperties: true },
+            },
+            required: ['section_id','template_id','field_values'],
+          },
+        },
+      },
+      required: ['section_picks'],
+    }
+
+    const userText = [
+      `# Page: ${stage2Page.name} (/${slug})`,
+      `# Sections to bind (${sectionInputs.length})`,
+      sectionInputs.map(s => {
+        const candidatesSlim = s.candidates.map(c => ({
+          id: c.id,
+          layer_name: c.layer_name,
+          family: c.family,
+          // Strip palette refs + heavy nested item_schemas to keep the
+          // prompt small. Keep slot keys + types + max_chars + labels.
+          slots: (c.fields ?? []).map((f: any) => ({
+            key: f.key,
+            kind: f.kind,
+            type: f.type,
+            label: f.label,
+            max_chars: f.max_chars,
+            required: f.required,
+          })),
+        }))
+        return [
+          `## Section ${s.section_id}`,
+          `Job: ${s.section_job}`,
+          `Content summary: ${s.content_summary}`,
+          s.voice_notes ? `Voice notes: ${s.voice_notes}` : '',
+          `Atoms placed here (${s.atom_bodies.length}):\n${s.atom_bodies.slice(0, 8).map((b, i) => `  ${i+1}. ${b.slice(0, 200)}`).join('\n')}`,
+          `Candidate templates:\n${JSON.stringify(candidatesSlim, null, 2)}`,
+        ].filter(Boolean).join('\n')
+      }).join('\n\n---\n\n'),
+    ].join('\n\n')
+
+    const t0 = Date.now()
+    try {
+      const result = await generateText({
+        model: 'anthropic/claude-opus-4-7',
+        maxOutputTokens: 8000,
+        system: FALLBACK_PROMPTS.bind,
+        messages: [{ role: 'user', content: userText }],
+        tools: {
+          submit_page_bind: tool({
+            description: 'Submit template picks + field_values for every section on this page.',
+            inputSchema: jsonSchema(PAGE_BIND_TOOL),
+          }),
+        },
+        toolChoice: { type: 'tool', toolName: 'submit_page_bind' },
+        maxRetries: 3,
+      })
+      const out = result.toolCalls?.[0]?.input as any
+      const picks = (out?.section_picks ?? []) as Array<{ section_id: string; template_id: string; field_values: Record<string, unknown>; rationale?: string }>
+
+      // Write web_sections in the same order as the outline.
+      const rows = sectionInputs.map((s, idx) => {
+        const pick = picks.find(p => p.section_id === s.section_id)
+        if (!pick) return null
+        const fv = pick.field_values ?? {}
+        // Build a minimal source_markdown from the field_values'
+        // text/richtext leaves. Stage 5 isn't running through the
+        // ContentDocument round-trip, so we synthesize a readable
+        // dump for the Text view here.
+        const md = fieldValuesToMarkdownLite(fv)
+        return {
+          web_page_id:         pageId,
+          content_template_id: pick.template_id,
+          field_values:        fv,
+          source_field_values: fv,
+          source_markdown:     md,
+          sort_order:          idx,
+          content_status:      'draft',
+        }
+      }).filter(Boolean)
+
+      if (rows.length > 0) {
+        const { error: secErr } = await sb.from('web_sections').insert(rows as never)
+        if (secErr) {
+          console.log(`sections insert FAILED: ${secErr.message}`)
+          pageResults.push({ page_slug: slug, web_page_id: pageId, sections: [], error: secErr.message })
+          continue
+        }
+      }
+      console.log(`${rows.length}/${sectionInputs.length} sections bound (${((Date.now()-t0)/1000).toFixed(1)}s, out=${result.usage?.outputTokens})`)
+      pageResults.push({ page_slug: slug, web_page_id: pageId, sections: picks })
+    } catch (e) {
+      console.log(`FAILED — ${e instanceof Error ? e.message : 'unknown'}`)
+      pageResults.push({ page_slug: slug, web_page_id: pageId, sections: [], error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  // Persist Stage 5 _meta.
+  await sb.from('strategy_web_projects').update({
+    roadmap_state: {
+      ...(project.roadmap_state ?? {}),
+      stage_5: {
+        page_results: pageResults,
+        _meta: {
+          status: 'draft',
+          generated_at: new Date().toISOString(),
+          model: 'anthropic/claude-opus-4-7',
+          source: 'test-pipeline-stages script (per-page bind, test limit)',
+          limited_to_pages: outlines.length,
+        },
+      },
+    },
+  }).eq('id', PROJECT_ID)
+
+  const totalSections = pageResults.reduce((sum, r) => sum + (r.sections?.length ?? 0), 0)
+  console.log(`\nStage 5 summary:`)
+  console.log(`  pages bound:       ${pageResults.filter(r => !r.error).length}/${pageResults.length}`)
+  console.log(`  sections written:  ${totalSections}`)
+  console.log(`  pages with errors: ${pageResults.filter(r => r.error).length}`)
+  return { page_results: pageResults }
+}
+
+/** Minimal field_values → markdown. Walks text/richtext slot values
+ *  and concatenates them with headings. Used only by Stage 5 since
+ *  this script doesn't go through computeSectionBind's IR pipeline. */
+function fieldValuesToMarkdownLite(values: Record<string, unknown>): string {
+  const parts: string[] = []
+  for (const [key, value] of Object.entries(values ?? {})) {
+    if (typeof value === 'string' && value.trim()) {
+      const looksLikeHeading = /^(heading|title|tagline)/i.test(key)
+      parts.push(looksLikeHeading ? `## ${value.trim()}` : value.trim())
+    } else if (Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item === 'string' && item.trim()) parts.push(`- ${item.trim()}`)
+        else if (item && typeof item === 'object') {
+          const itemMd = fieldValuesToMarkdownLite(item as Record<string, unknown>)
+          if (itemMd) parts.push(itemMd)
+        }
+      }
+    } else if (value && typeof value === 'object') {
+      const objMd = fieldValuesToMarkdownLite(value as Record<string, unknown>)
+      if (objMd) parts.push(objMd)
+    }
+  }
+  return parts.join('\n\n')
+}
+
 // ── STAGE 1 ────────────────────────────────────────────────────
 async function runStage1() {
   console.log(`\n━━━ Stage 1 — Synthesize ━━━`)
@@ -680,6 +976,12 @@ async function runStage2(stage1: any) {
     }
     if (want('page_inventory', '3')) await runStage3()
     if (want('outlines',       '4')) await runStage4()
+    if (want('bind',           '5')) {
+      // Optional page limit for test runs — argv[4]
+      const limitArg = process.argv[4]
+      const limit = limitArg ? Number(limitArg) : undefined
+      await runStage5(Number.isFinite(limit) && limit! > 0 ? limit : undefined)
+    }
     console.log('\n✓ Done.')
     process.exit(0)
   } catch (e) {
