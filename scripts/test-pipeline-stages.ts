@@ -705,9 +705,16 @@ async function runStage5(limit?: number) {
     // the right topic cluster to this page when emitting page_seo.
     const stage1SeoTargets = (roadmapState.stage_1?.seo_aeo_geo_targets ?? [])
     const pageAeoKeywords  = (stage2Page.aeo_keywords ?? [])
+    // The full slug list from the Stage 2 sitemap. Used to enforce the
+    // "no broken internal links" rule in the system prompt — every
+    // internal href in field_values must reference one of these.
+    const validSlugs = ((roadmapState.stage_2.pages ?? []) as any[])
+      .map(p => p.slug)
+      .filter(Boolean)
 
     const userText = [
       `# Page: ${stage2Page.name} (/${slug})`,
+      `# valid_slugs — every internal href MUST point to one of these (anchor "#section" optional)\n${JSON.stringify(validSlugs, null, 2)}`,
       `# Stage 1 SEO/AEO/GEO targets (compose page_seo from the most relevant entries)\n${JSON.stringify(stage1SeoTargets, null, 2)}`,
       `# Page-level AEO keywords (from Stage 2 sitemap)\n${JSON.stringify(pageAeoKeywords, null, 2)}`,
       `# Sections to bind (${sectionInputs.length})`,

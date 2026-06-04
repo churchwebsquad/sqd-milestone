@@ -219,6 +219,17 @@ For each section:
   for a slot, leave it blank — Stage 7 + manual review will fill the
   meaningful gaps.
 
+- ALL internal URLs must point to a slug that exists in the Stage 2
+  sitemap's pages[]. The user content includes a valid_slugs list —
+  every internal href in field_values (button urls, card urls, CTA urls,
+  nav references) MUST start with "/" + one of those slugs, optionally
+  followed by "#anchor". When the partner has a topic that was
+  consolidated into another page (e.g. "Outreach" absorbed into the
+  "/ministries" hub), link to the absorbing page's slug + an anchor like
+  "/ministries#outreach", never to the absorbed topic's slug directly.
+  External URLs (http/https, mailto:, tel:) are fine and don't need to
+  match the slug list.
+
 - Per page, emit a page_seo object alongside section_picks:
     seo: { title, meta_description, focus_keywords[] }
     aeo: { answer_intent, structured_qa[] }   // optional
