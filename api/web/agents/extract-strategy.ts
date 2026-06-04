@@ -177,13 +177,16 @@ export default async function handler(req: any, res: any) {
   // ── Load intake from DB ─────────────────────────────────────────────
   const member = project.member as number
   const [accountRes, brandRes, discoveryRes, intakeDocsRes] = await Promise.all([
-    sb.from('strategy_account_progress').select('member, handoff_web_form').eq('member', member).maybeSingle(),
+    // handoff_brand_form is the AM's rich brand intake — used as the
+    // brand source when no published strategy_brand_guides row exists.
+    sb.from('strategy_account_progress').select('member, handoff_web_form, handoff_brand_form').eq('member', member).maybeSingle(),
     sb.from('strategy_brand_guides').select('*').eq('member', member).eq('is_published', true).order('last_updated_at', { ascending: false }).limit(1).maybeSingle(),
     sb.from('strategy_discovery_questionnaire').select('*').eq('member', member).order('submitted_at', { ascending: false }).limit(1).maybeSingle(),
     sb.from('web_intake_documents').select('*').eq('web_project_id', projectId).eq('archived', false).order('uploaded_at', { ascending: false }),
   ])
 
   const accountHandoff = accountRes.data?.handoff_web_form ?? null
+  const brandHandoffForm = accountRes.data?.handoff_brand_form ?? null
   const brandGuide = brandRes.data ?? null
   const discoveryQuestionnaire = discoveryRes.data ?? null
   const intakeDocs = intakeDocsRes.data ?? []
@@ -193,7 +196,13 @@ export default async function handler(req: any, res: any) {
   if (!discoveryQuestionnaire && !intakeDocs.some(d => d.category === 'discovery_questionnaire_supplemental')) {
     missing_sources.push('Discovery questionnaire (DB row or supplemental upload)')
   }
-  if (!brandGuide) missing_sources.push('Brand handoff (no published strategy_brand_guides row)')
+  // Brand source can be EITHER a published Brand-Squad guide OR the
+  // AM's handoff_brand_form (rich brand notes captured during AM
+  // intake). Intake-stage projects often have the latter but not yet
+  // the former — accept either so Stage 1 can run from the AM notes.
+  if (!brandGuide && !brandHandoffForm) {
+    missing_sources.push('Brand source (no published strategy_brand_guides row AND no handoff_brand_form)')
+  }
   if (!intakeDocs.some(d => d.category === 'strategy_brief')) {
     missing_sources.push('Strategy brief (no uploaded file)')
   }
@@ -273,7 +282,8 @@ export default async function handler(req: any, res: any) {
     ? buildSystemPrompt()
     : resolved.systemPrompt
   const userContent = buildUserContent({
-    project, accountHandoff, brandGuide, discoveryQuestionnaire,
+    project, accountHandoff, brandGuide, brandHandoffForm,
+    discoveryQuestionnaire,
     filesLoaded: preflight.files_loaded,
     redoContext, previousStage1,
   })
@@ -427,6 +437,7 @@ interface UserContentInputs {
   project: any
   accountHandoff: unknown
   brandGuide: any
+  brandHandoffForm: unknown            // jsonb from strategy_account_progress.handoff_brand_form
   discoveryQuestionnaire: any
   filesLoaded: PreflightFile[]
   redoContext: string
@@ -474,12 +485,15 @@ Current phase: ${inputs.project.current_phase ?? 'intake'}`,
   }
   appendCategoryFiles(blocks, inputs.filesLoaded, 'discovery_questionnaire_supplemental', 'Discovery Questionnaire supplemental upload')
 
-  // Brand handoff
+  // Brand handoff — prefer the Brand-Squad's published guide; otherwise
+  // surface the AM's handoff_brand_form (rich intake notes captured
+  // before a formal guide exists). Intake-stage projects routinely have
+  // the latter but not yet the former.
   if (inputs.brandGuide) {
     const guide = inputs.brandGuide
     blocks.push({
       type: 'text',
-      text: `# Source: Brand Handoff (Brand Squad)
+      text: `# Source: Brand Handoff (Brand Squad — published guide)
 Display name: ${guide.display_name ?? '—'}
 Style tags: ${(guide.style_tags ?? []).join(', ') || '—'}
 Brand statement: ${guide.brand_statement ?? '—'}
@@ -490,8 +504,14 @@ ${guide.voice_overview ?? '(none)'}
 Handoff notes:
 ${guide.handoff_notes ?? '(none)'}`,
     })
+  } else if (inputs.brandHandoffForm && typeof inputs.brandHandoffForm === 'object'
+             && Object.keys(inputs.brandHandoffForm as Record<string, unknown>).length > 0) {
+    blocks.push({
+      type: 'text',
+      text: `# Source: Brand Handoff (AM intake form — Brand Squad hasn't published a guide yet)\n\n\`\`\`json\n${JSON.stringify(inputs.brandHandoffForm, null, 2)}\n\`\`\``,
+    })
   } else {
-    blocks.push({ type: 'text', text: '# Source: Brand Handoff\n\n(No published brand guide row)' })
+    blocks.push({ type: 'text', text: '# Source: Brand Handoff\n\n(No brand guide AND no handoff_brand_form on file)' })
   }
 
   // Content collection (highest detail volume)
