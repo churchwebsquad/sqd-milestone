@@ -647,7 +647,8 @@ async function runStage5(limit?: number) {
       continue
     }
 
-    // Per-page bind tool: one pick per section + field_values.
+    // Per-page bind tool: one pick per section + field_values, plus
+    // a page-level seo object derived from Stage 1's targets.
     const PAGE_BIND_TOOL: any = {
       type: 'object',
       properties: {
@@ -664,12 +665,51 @@ async function runStage5(limit?: number) {
             required: ['section_id','template_id','field_values'],
           },
         },
+        page_seo: {
+          type: 'object',
+          properties: {
+            seo: {
+              type: 'object',
+              properties: {
+                title:            { type: 'string' },
+                meta_description: { type: 'string' },
+                focus_keywords:   { type: 'array', items: { type: 'string' } },
+              },
+              required: ['title','meta_description'],
+            },
+            aeo: {
+              type: 'object',
+              properties: {
+                answer_intent:  { type: 'string' },
+                structured_qa:  { type: 'array', items: { type: 'object',
+                  properties: { question: { type: 'string' }, answer: { type: 'string' } },
+                  required: ['question','answer'] } },
+              },
+            },
+            geo: {
+              type: 'object',
+              properties: {
+                service_areas:   { type: 'array', items: { type: 'string' } },
+                local_keywords:  { type: 'array', items: { type: 'string' } },
+                local_landmarks: { type: 'array', items: { type: 'string' } },
+              },
+            },
+          },
+          required: ['seo'],
+        },
       },
-      required: ['section_picks'],
+      required: ['section_picks','page_seo'],
     }
+
+    // Pass Stage 1's full seo_aeo_geo_targets so the model can match
+    // the right topic cluster to this page when emitting page_seo.
+    const stage1SeoTargets = (roadmapState.stage_1?.seo_aeo_geo_targets ?? [])
+    const pageAeoKeywords  = (stage2Page.aeo_keywords ?? [])
 
     const userText = [
       `# Page: ${stage2Page.name} (/${slug})`,
+      `# Stage 1 SEO/AEO/GEO targets (compose page_seo from the most relevant entries)\n${JSON.stringify(stage1SeoTargets, null, 2)}`,
+      `# Page-level AEO keywords (from Stage 2 sitemap)\n${JSON.stringify(pageAeoKeywords, null, 2)}`,
       `# Sections to bind (${sectionInputs.length})`,
       sectionInputs.map(s => {
         const candidatesSlim = s.candidates.map(c => ({
@@ -716,12 +756,26 @@ async function runStage5(limit?: number) {
       })
       const out = result.toolCalls?.[0]?.input as any
       const picks = (out?.section_picks ?? []) as Array<{ section_id: string; template_id: string; field_values: Record<string, unknown>; rationale?: string }>
+      const pageSeo = out?.page_seo ?? null
+
+      // Write seo onto the page row. Belt-and-suspenders alongside
+      // the per-page emission requirement — if the model returns
+      // nothing here, we leave the page without seo and let Stage 8
+      // flag it.
+      if (pageSeo) {
+        await sb.from('web_pages').update({ seo: pageSeo }).eq('id', pageId)
+      }
 
       // Write web_sections in the same order as the outline.
       const rows = sectionInputs.map((s, idx) => {
         const pick = picks.find(p => p.section_id === s.section_id)
         if (!pick) return null
-        const fv = pick.field_values ?? {}
+        // Belt-and-suspenders defense: even with the prompt rule, scrub
+        // any stray {{merge_field}} tokens from string-valued slots
+        // before persisting. Image-shaped tokens turn into empty
+        // strings (the renderer treats blank as "no image"); other
+        // tokens we keep in case they ARE legitimate snippet refs.
+        const fv = scrubUnresolvedTokens(pick.field_values ?? {})
         // Build a minimal source_markdown from the field_values'
         // text/richtext leaves. Stage 5 isn't running through the
         // ContentDocument round-trip, so we synthesize a readable
@@ -777,6 +831,41 @@ async function runStage5(limit?: number) {
   console.log(`  sections written:  ${totalSections}`)
   console.log(`  pages with errors: ${pageResults.filter(r => r.error).length}`)
   return { page_results: pageResults }
+}
+
+/** Strip unresolved {{merge_field}} tokens from string-shaped slot
+ *  values. Image-likely keys (image, photo, video, src, url) get
+ *  blanked entirely when their value is JUST a token — leaving the
+ *  template to render its placeholder. Text-likely keys keep the
+ *  token only when it's likely a real snippet ref (lowercase
+ *  underscore_case with no asset hints in the name). The fall-back
+ *  is conservative: when in doubt, prefer blank over a literal
+ *  "{{...}}" rendering on the page. */
+function scrubUnresolvedTokens<T>(values: T): T {
+  if (Array.isArray(values)) {
+    return values.map(v => scrubUnresolvedTokens(v)) as unknown as T
+  }
+  if (values && typeof values === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(values as Record<string, unknown>)) {
+      out[k] = scrubField(k, v as never)
+    }
+    return out as T
+  }
+  return values
+}
+
+function scrubField(key: string, value: unknown): unknown {
+  if (typeof value === 'string') {
+    const justAToken = /^\s*\{\{[^}]+\}\}\s*$/.test(value)
+    const looksLikeAsset = /image|photo|video|src|url|file|asset/i.test(key)
+    if (justAToken && looksLikeAsset) return ''
+    if (justAToken) return ''  // stay conservative — blank is safer than literal "{{x}}"
+  }
+  if (Array.isArray(value) || (value && typeof value === 'object')) {
+    return scrubUnresolvedTokens(value as never)
+  }
+  return value
 }
 
 /** Minimal field_values → markdown. Walks text/richtext slot values

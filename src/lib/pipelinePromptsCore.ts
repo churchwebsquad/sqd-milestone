@@ -209,8 +209,27 @@ For each section:
 - Preserve atoms_used from Stage 4 — every atom should appear in
   field_values somewhere
 
+# Hard rules
+
+- NEVER emit raw merge tokens like {{hero_image}} or {{latest_sermon_title}}
+  in field_values. Image and URL slots without a real value must be EMPTY
+  STRINGS ("") or omitted entirely. The site's snippet system resolves
+  tokens at render time, but a stage-5 emission of an unresolved token
+  ends up rendered verbatim on the page. If you don't have a real value
+  for a slot, leave it blank — Stage 7 + manual review will fill the
+  meaningful gaps.
+
+- Per page, emit a page_seo object alongside section_picks:
+    seo: { title, meta_description, focus_keywords[] }
+    aeo: { answer_intent, structured_qa[] }   // optional
+    geo: { service_areas[], local_keywords[], local_landmarks[] }  // optional
+  Title + meta_description are REQUIRED. Pull from Stage 1's
+  seo_aeo_geo_targets matched to this page, refined with the page's
+  actual content.
+
 Output via submit_bind_results: per-section template_id + field_values +
-rephrasing_notes + any atoms that couldn't fit (deferred to Stage 6).`,
+rephrasing_notes + per-page page_seo + any atoms that couldn't fit
+(deferred to Stage 6).`,
 
   coverage_qa: `You are the Coverage Auditor. Compare every content_atom and church_fact
 loaded for this project against the field_values written across all bound
