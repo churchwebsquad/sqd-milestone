@@ -45,6 +45,12 @@ export function PipelineWorkspace({ project, onChange }: Props) {
   const [running,  setRunning]  = useState<PipelineStage | null>(null)
   const [drawer,   setDrawer]   = useState<PipelineStage | null>(null)
   const [error,    setError]    = useState<string | null>(null)
+  // Voice-pass apply is a separate post-manifest step. Tracks its own
+  // in-flight + result so the card can show "applied X / blocked Y".
+  const [applyingVoice, setApplyingVoice] = useState(false)
+  const [voiceApplyResult, setVoiceApplyResult] = useState<
+    { applied: number; blocked_by_override: number } | null
+  >(null)
 
   const roadmapState = (project.roadmap_state ?? {}) as Record<string, any>
 
@@ -102,6 +108,36 @@ export function PipelineWorkspace({ project, onChange }: Props) {
     }
   }, [project.id, onChange])
 
+  // Voice-pass two-step: the agent's first call writes the rewrite
+  // manifest; this second call (apply=true) walks the manifest and
+  // writes new_value back into web_sections.field_values, skipping
+  // any field marked field_provenance='override' so locked-by-
+  // strategist content survives.
+  const applyVoicePass = useCallback(async () => {
+    setApplyingVoice(true); setError(null); setVoiceApplyResult(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const jwt = session?.access_token
+      if (!jwt) throw new Error('Not authenticated')
+      const res = await fetch('/api/web/agents/voice-pass', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
+        body:    JSON.stringify({ projectId: project.id, apply: true }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
+      setVoiceApplyResult({
+        applied:             Number(json.applied ?? 0),
+        blocked_by_override: Number(json.blocked_by_override ?? 0),
+      })
+      await onChange()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Apply failed')
+    } finally {
+      setApplyingVoice(false)
+    }
+  }, [project.id, onChange])
+
   const approveStage = useCallback(async (stage: PipelineStage) => {
     const key = `stage_${STAGE_NUMBER[stage]}`
     const current = roadmapState[key] ?? {}
@@ -150,21 +186,52 @@ export function PipelineWorkspace({ project, onChange }: Props) {
           </WMCard>
         )}
 
+        {voiceApplyResult && (
+          <div className="rounded-md border border-wm-success/30 bg-wm-success-bg px-3 py-2 text-[12px] text-wm-success">
+            Voice rewrites applied: <strong>{voiceApplyResult.applied}</strong> field
+            {voiceApplyResult.applied === 1 ? '' : 's'} updated
+            {voiceApplyResult.blocked_by_override > 0 && (
+              <> · <strong>{voiceApplyResult.blocked_by_override}</strong> skipped
+                (field_provenance='override' protected)</>
+            )}.
+          </div>
+        )}
+
         <div className="space-y-2">
-          {stages.map(s => (
-            <StageCard
-              key={s.stage}
-              stage={s.stage}
-              state={s.state}
-              output={s.output}
-              redoCount={s.redoCount}
-              promptSource={s.promptSource}
-              hasAddendum={s.hasAddendum}
-              onRun={(fb) => runStage(s.stage, fb)}
-              onApprove={s.state === 'draft' ? () => approveStage(s.stage) : undefined}
-              onEditPrompt={() => setDrawer(s.stage)}
-            />
-          ))}
+          {stages.map(s => {
+            // Voice-pass gets a secondary CTA that writes the
+            // manifest's rewrites back into web_sections. Available
+            // only when a draft manifest exists.
+            const isVoice = s.stage === 'voice_pass'
+            const hasManifest = isVoice && s.output
+              && Array.isArray((s.output as any).rewrites)
+              && (s.output as any).rewrites.length > 0
+            const extraAction = isVoice && hasManifest
+              ? {
+                  label: applyingVoice
+                    ? 'Applying…'
+                    : `Apply ${(s.output as any).rewrites.length} rewrites`,
+                  title: 'Write the manifest into web_sections.field_values. Fields marked override are skipped.',
+                  loading: applyingVoice,
+                  onClick: applyVoicePass,
+                }
+              : undefined
+            return (
+              <StageCard
+                key={s.stage}
+                stage={s.stage}
+                state={s.state}
+                output={s.output}
+                redoCount={s.redoCount}
+                promptSource={s.promptSource}
+                hasAddendum={s.hasAddendum}
+                onRun={(fb) => runStage(s.stage, fb)}
+                onApprove={s.state === 'draft' ? () => approveStage(s.stage) : undefined}
+                onEditPrompt={() => setDrawer(s.stage)}
+                extraAction={extraAction}
+              />
+            )
+          })}
         </div>
 
         {running && (

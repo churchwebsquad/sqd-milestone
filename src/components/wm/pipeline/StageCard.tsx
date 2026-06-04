@@ -30,6 +30,16 @@ interface Props {
   onRun:        (feedback?: string) => void
   onApprove?:   () => void
   onEditPrompt: () => void
+  /** Optional stage-specific secondary action — used by voice_pass to
+   *  surface "Apply rewrites" alongside the standard Run/Approve.
+   *  Renders only when supplied AND the stage is in 'draft' or
+   *  'approved' state (i.e. the artifact exists to act on). */
+  extraAction?: {
+    label:   string
+    title?:  string
+    loading?: boolean
+    onClick: () => void
+  }
   /** Render a stage-specific output preview. Hidden until the user
    *  expands the card. */
   renderPreview?: (output: Record<string, unknown>) => React.ReactNode
@@ -37,7 +47,7 @@ interface Props {
 
 export function StageCard({
   stage, state, output, redoCount, promptSource, hasAddendum,
-  onRun, onApprove, onEditPrompt, renderPreview,
+  onRun, onApprove, onEditPrompt, extraAction, renderPreview,
 }: Props) {
   const [expanded, setExpanded] = useState(state === 'draft')
   const [redoText, setRedoText] = useState('')
@@ -116,6 +126,20 @@ export function StageCard({
               >
                 <RotateCw size={11} /> Redo
               </button>
+              {extraAction && (
+                <button
+                  type="button"
+                  onClick={extraAction.onClick}
+                  title={extraAction.title}
+                  disabled={extraAction.loading}
+                  className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-semibold border border-wm-accent text-wm-accent-strong bg-wm-bg-elevated hover:bg-wm-accent-tint disabled:opacity-40"
+                >
+                  {extraAction.loading
+                    ? <Loader2 size={11} className="animate-spin" />
+                    : null}
+                  {extraAction.label}
+                </button>
+              )}
               {state === 'draft' && onApprove && (
                 <button
                   type="button"
