@@ -28,6 +28,35 @@ export interface StageMeta {
   redo_count:    number                  // # of redos before this draft
 }
 
+// ─── Stage 0 — Normalize intake ────────────────────────────────
+
+export type AtomTopic =
+  | 'persona' | 'voice_rule' | 'mission_statement' | 'vision_statement'
+  | 'x_factor' | 'denominational_signal' | 'recommended_page'
+  | 'tone_descriptor' | 'prose_snippet' | 'voice_sample' | 'ethos'
+  | 'story' | 'value_statement'
+
+export type FactTopic =
+  | 'service_time' | 'campus' | 'ministry' | 'staff' | 'belief'
+  | 'program' | 'milestone' | 'contact_method' | 'branded_term'
+  | 'audience' | 'location_detail' | 'partnership' | 'testimonial'
+
+export type IntakeSourceKind =
+  | 'strategy_brief' | 'brand_handoff' | 'discovery_questionnaire'
+  | 'am_handoff' | 'content_collection'
+
+export interface Stage0Output {
+  summary: {
+    atom_count_by_topic?: Record<string, number>
+    fact_count_by_topic?: Record<string, number>
+    gaps_noted?:          string[]
+  } | null
+  _meta: StageMeta & {
+    atom_count: number
+    fact_count: number
+  }
+}
+
 // ─── Stage 1 — Synthesize ──────────────────────────────────────
 
 export interface Stage1Persona {
@@ -289,6 +318,7 @@ export interface Stage8Output {
 // ─── Roadmap state container ──────────────────────────────────
 
 export interface RoadmapState {
+  stage_0?: Stage0Output
   stage_1?: Stage1Output
   stage_2?: Stage2Output
   stage_3?: Stage3Output
@@ -312,6 +342,7 @@ export function stageKey(stage: PipelineStage): keyof RoadmapState {
 }
 
 const STAGE_TO_NUMBER: Record<PipelineStage, number> = {
+  normalize:      0,
   synthesize:     1,
   sitemap:        2,
   page_inventory: 3,

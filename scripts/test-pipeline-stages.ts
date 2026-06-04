@@ -38,6 +38,7 @@ import {
   buildUserContent as buildStage2Content,
   SITEMAP_TOOL,
 } from '../api/web/agents/draft-sitemap'
+import { FALLBACK_PROMPTS } from '../src/lib/pipelinePromptsCore'
 
 const PROJECT_ID = process.argv[2]
 if (!PROJECT_ID) {
@@ -83,6 +84,150 @@ async function loadIntakeFiles(docs: any[]) {
     }
   }))
   return loaded
+}
+
+// ── STAGE 0 — Normalize intake ─────────────────────────────────
+async function runStage0() {
+  console.log(`\n━━━ Stage 0 — Normalize intake ━━━`)
+
+  const { data: project } = await sb.from('strategy_web_projects').select('*').eq('id', PROJECT_ID).maybeSingle()
+  if (!project) throw new Error('Project not found')
+
+  const member = project.member as number
+  const [accountRes, brandRes, discoveryRes, intakeDocsRes] = await Promise.all([
+    sb.from('strategy_account_progress').select('member, handoff_web_form, handoff_brand_form').eq('member', member).maybeSingle(),
+    sb.from('strategy_brand_guides').select('*').eq('member', member).eq('is_published', true).order('last_updated_at', { ascending: false }).limit(1).maybeSingle(),
+    sb.from('strategy_discovery_questionnaire').select('*').eq('member', member).order('submitted_at', { ascending: false }).limit(1).maybeSingle(),
+    sb.from('web_intake_documents').select('*').eq('web_project_id', PROJECT_ID).eq('archived', false),
+  ])
+
+  const filesLoaded = await loadIntakeFiles(intakeDocsRes.data ?? [])
+  const brandHandoffForm = accountRes.data?.handoff_brand_form ?? null
+  const brandGuide       = brandRes.data ?? null
+
+  const userBlocks: any[] = []
+  userBlocks.push({ type: 'text', text: `# Project\n${JSON.stringify({
+    id: project.id, member: project.member, name: project.name, kind: project.kind,
+  }, null, 2)}` })
+  if (accountRes.data?.handoff_web_form) {
+    userBlocks.push({ type: 'text', text: `# AM handoff (web)\n\`\`\`json\n${JSON.stringify(accountRes.data.handoff_web_form, null, 2)}\n\`\`\`` })
+  }
+  if (brandGuide) {
+    userBlocks.push({ type: 'text', text: `# Brand guide (Brand Squad)\n\`\`\`json\n${JSON.stringify(brandGuide, null, 2)}\n\`\`\`` })
+  } else if (brandHandoffForm) {
+    userBlocks.push({ type: 'text', text: `# Brand handoff (AM intake)\n\`\`\`json\n${JSON.stringify(brandHandoffForm, null, 2)}\n\`\`\`` })
+  }
+  if (discoveryRes.data) {
+    userBlocks.push({ type: 'text', text: `# Discovery questionnaire\n\`\`\`json\n${JSON.stringify(discoveryRes.data, null, 2)}\n\`\`\`` })
+  }
+  for (const f of filesLoaded) {
+    if (f.text) userBlocks.push({ type: 'text', text: `# Intake file (${f.category}): ${f.filename}\n\n${f.text}` })
+    else if (f.base64) userBlocks.push({ type: 'file', data: f.base64, mediaType: f.mime_type ?? 'application/pdf' })
+  }
+
+  const TOOL_INPUT_SCHEMA: any = {
+    type: 'object',
+    properties: {
+      atoms: { type: 'array', items: { type: 'object',
+        properties: {
+          topic: { type: 'string', enum:
+            ['persona','voice_rule','mission_statement','vision_statement','x_factor','denominational_signal','recommended_page','tone_descriptor','prose_snippet','voice_sample','ethos','story','value_statement'] },
+          body: { type: 'string' }, metadata: { type: 'object', additionalProperties: true },
+          source_kind: { type: 'string', enum:
+            ['strategy_brief','brand_handoff','discovery_questionnaire','am_handoff','content_collection'] },
+          source_ref: { type: 'string' }, verbatim: { type: 'boolean' },
+          confidence: { type: 'number', minimum: 0, maximum: 1 },
+        },
+        required: ['topic','body','source_kind','verbatim','confidence'],
+      }},
+      facts: { type: 'array', items: { type: 'object',
+        properties: {
+          topic: { type: 'string', enum:
+            ['service_time','campus','ministry','staff','belief','program','milestone','contact_method','branded_term','audience','location_detail','partnership','testimonial'] },
+          data: { type: 'object', additionalProperties: true },
+          source_kind: { type: 'string' }, source_ref: { type: 'string' },
+        },
+        required: ['topic','data','source_kind'],
+      }},
+      summary: { type: 'object', properties: {
+        atom_count_by_topic: { type: 'object', additionalProperties: { type: 'number' } },
+        fact_count_by_topic: { type: 'object', additionalProperties: { type: 'number' } },
+        gaps_noted: { type: 'array', items: { type: 'string' } },
+      }},
+    },
+    required: ['atoms','facts'],
+  }
+
+  console.log('Calling anthropic/claude-opus-4-7…')
+  const t0 = Date.now()
+  const result = await generateText({
+    model: 'anthropic/claude-opus-4-7',
+    maxOutputTokens: 24000,
+    system: FALLBACK_PROMPTS.normalize,
+    messages: [{ role: 'user', content: userBlocks as any }],
+    tools: {
+      submit_normalized_intake: tool({
+        description: 'Submit normalized intake — atoms + facts.',
+        inputSchema: jsonSchema(TOOL_INPUT_SCHEMA),
+      }),
+    },
+    toolChoice: { type: 'tool', toolName: 'submit_normalized_intake' },
+  })
+  console.log(`Returned in ${((Date.now()-t0)/1000).toFixed(1)}s  · in=${result.usage?.inputTokens}  out=${result.usage?.outputTokens}`)
+
+  const out = result.toolCalls?.[0]?.input as any
+  if (!out) throw new Error('No tool call returned')
+
+  // Idempotent reset
+  await sb.from('content_atoms').delete().eq('web_project_id', PROJECT_ID)
+  await sb.from('church_facts').delete().eq('web_project_id', PROJECT_ID)
+
+  const atomRows = (out.atoms ?? []).map((a: any) => ({
+    web_project_id: PROJECT_ID,
+    topic: a.topic, body: a.body, metadata: a.metadata ?? null,
+    source_kind: a.source_kind, source_ref: a.source_ref ?? null,
+    verbatim: a.verbatim === true,
+    confidence: typeof a.confidence === 'number' ? a.confidence : null,
+  }))
+  const factRows = (out.facts ?? []).map((f: any) => ({
+    web_project_id: PROJECT_ID,
+    topic: f.topic, data: f.data,
+    source_kind: f.source_kind ?? null, source_ref: f.source_ref ?? null,
+  }))
+
+  if (atomRows.length) {
+    const { error } = await sb.from('content_atoms').insert(atomRows as never)
+    if (error) throw new Error(`atoms insert: ${error.message}`)
+  }
+  if (factRows.length) {
+    const { error } = await sb.from('church_facts').insert(factRows as never)
+    if (error) throw new Error(`facts insert: ${error.message}`)
+  }
+
+  await sb.from('strategy_web_projects').update({
+    roadmap_state: {
+      ...(project.roadmap_state ?? {}),
+      stage_0: {
+        summary: out.summary ?? null,
+        _meta: {
+          status: 'draft',
+          generated_at: new Date().toISOString(),
+          model: 'anthropic/claude-opus-4-7',
+          usage: { input_tokens: result.usage?.inputTokens, output_tokens: result.usage?.outputTokens },
+          source: 'test-pipeline-stages script',
+          atom_count: atomRows.length,
+          fact_count: factRows.length,
+        },
+      },
+    },
+  }).eq('id', PROJECT_ID)
+
+  console.log(`\nStage 0 summary:`)
+  console.log(`  atoms inserted: ${atomRows.length}`)
+  console.log(`  facts inserted: ${factRows.length}`)
+  if (out.summary?.gaps_noted?.length) {
+    console.log(`  gaps noted:     ${out.summary.gaps_noted.length}`)
+  }
 }
 
 // ── STAGE 1 ────────────────────────────────────────────────────
@@ -245,9 +390,23 @@ async function runStage2(stage1: any) {
 // ── Main ────────────────────────────────────────────────────────
 ;(async () => {
   try {
-    const stage1 = await runStage1()
-    const stage2 = await runStage2(stage1)
-    console.log('\n✓ Both stages completed.')
+    // Stage selection via argv[3] — defaults to all (0, 1, 2).
+    const onlyStage = process.argv[3]
+    if (!onlyStage || onlyStage === 'normalize' || onlyStage === '0') {
+      await runStage0()
+    }
+    if (!onlyStage || onlyStage === 'synthesize' || onlyStage === '1') {
+      const stage1 = await runStage1()
+      if (!onlyStage || onlyStage === 'sitemap' || onlyStage === '2') {
+        await runStage2(stage1)
+      }
+    } else if (onlyStage === 'sitemap' || onlyStage === '2') {
+      const { data: project } = await sb.from('strategy_web_projects').select('roadmap_state').eq('id', PROJECT_ID).maybeSingle()
+      const stage1 = (project?.roadmap_state as any)?.stage_1
+      if (!stage1) throw new Error('Stage 2 needs stage_1 already in roadmap_state')
+      await runStage2(stage1)
+    }
+    console.log('\n✓ Done.')
     process.exit(0)
   } catch (e) {
     console.error('\n✗ FAILED:', e instanceof Error ? e.message : e)

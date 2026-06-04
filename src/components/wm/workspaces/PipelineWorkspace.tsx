@@ -31,6 +31,7 @@ interface Props {
 
 // Map each stage to its API endpoint slug.
 const STAGE_ENDPOINTS: Record<PipelineStage, string> = {
+  normalize:      '/api/web/agents/normalize-intake',
   synthesize:     '/api/web/agents/extract-strategy',
   sitemap:        '/api/web/agents/draft-sitemap',
   page_inventory: '/api/web/agents/page-inventory',

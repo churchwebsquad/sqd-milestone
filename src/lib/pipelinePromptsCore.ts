@@ -11,6 +11,7 @@
  */
 
 export type PipelineStage =
+  | 'normalize'
   | 'synthesize'
   | 'sitemap'
   | 'page_inventory'
@@ -21,6 +22,7 @@ export type PipelineStage =
   | 'final_qa'
 
 export const PIPELINE_STAGES: PipelineStage[] = [
+  'normalize',
   'synthesize',
   'sitemap',
   'page_inventory',
@@ -32,6 +34,7 @@ export const PIPELINE_STAGES: PipelineStage[] = [
 ]
 
 export const STAGE_LABELS: Record<PipelineStage, string> = {
+  normalize:      'Normalize intake',
   synthesize:     'Synthesize',
   sitemap:        'Sitemap + nav',
   page_inventory: 'Page inventory',
@@ -43,6 +46,7 @@ export const STAGE_LABELS: Record<PipelineStage, string> = {
 }
 
 export const STAGE_NUMBER: Record<PipelineStage, number> = {
+  normalize:      0,
   synthesize:     1,
   sitemap:        2,
   page_inventory: 3,
@@ -54,6 +58,7 @@ export const STAGE_NUMBER: Record<PipelineStage, number> = {
 }
 
 export const STAGE_DESCRIPTIONS: Record<PipelineStage, string> = {
+  normalize:      'Atomize raw intake — strategy brief, brand handoff, discovery, content collection — into content_atoms + church_facts that later stages route to specific pages.',
   synthesize:     'Read discovery, brief, content inventory + collection. Solidify goals, page count, SEO/AEO/GEO targets.',
   sitemap:        'Draft a unique navigation + sitemap structure from the page list.',
   page_inventory: 'Map every content atom to a primary page (with optional reference pages and CTA placement).',
@@ -69,6 +74,45 @@ export const STAGE_DESCRIPTIONS: Record<PipelineStage, string> = {
 export const PLACEHOLDER_MARKER = 'placeholder'
 
 export const FALLBACK_PROMPTS: Record<PipelineStage, string> = {
+  normalize: `You are the Intake Normalizer. You read every available intake source
+for a church website project — strategy brief, brand handoff form, discovery
+questionnaire, content collection, AM handoff notes — and atomize them into
+two outputs that downstream stages route to specific pages and sections:
+
+1. content_atoms — prose snippets. Each atom is ONE COMPLETE UNIT OF MEANING
+   that could land on its own in a section. Examples: a mission statement, a
+   persona's stated fear, a voice rule, a value statement, a sample sentence,
+   a denominational signal, a recommended page rationale.
+
+2. church_facts — typed structured data. Service times, campuses, ministries,
+   staff members, beliefs, programs, milestones, contact methods.
+
+Per atom: pick a topic from {persona, voice_rule, mission_statement,
+vision_statement, x_factor, denominational_signal, recommended_page,
+tone_descriptor, prose_snippet, voice_sample, ethos, story, value_statement}.
+Mark verbatim=true if the body is lifted directly from the source; false if
+you paraphrased to fit atom boundaries. Quote the source_ref (filename or
+JSON path). Confidence is 0-1.
+
+Per fact: pick a topic from {service_time, campus, ministry, staff, belief,
+program, milestone, contact_method, branded_term, audience, location_detail,
+partnership}. Populate the data jsonb with the structured fields the topic
+implies (e.g. service_time: {day, time, label, location?}).
+
+Rules:
+- Do NOT invent. If a fact isn't in the intake, omit it.
+- Do NOT collapse distinct facts into one atom. Separate atoms preserve
+  granularity for later routing.
+- Do NOT atomize raw form-data noise (null fields, "no answer", placeholder
+  text). Skip silently.
+- Voice samples from the brand handoff should land as atoms with topic
+  'voice_sample' and verbatim=true.
+- Personas land as atoms with topic 'persona' and metadata={persona_name,
+  need, goal, voice_resonance}.
+
+Output via the submit_normalized_intake tool. The downstream stages will
+treat your output as canonical — be thorough.`,
+
   synthesize: `You are the Strategy Synthesizer. You read every intake source for a church
 website project (discovery questionnaire, content inventory crawl, content
 collection submissions, strategy brief, brand guide, AM handoff notes) and
