@@ -1530,11 +1530,43 @@ async function runStage1() {
 }
 
 // ── STAGE 2 ────────────────────────────────────────────────────
-async function runStage2(stage1: any) {
+async function runStage2(stage1: any, opts: { redoContext?: string; cycleBack?: 'gaps' | 'orphans' } = {}) {
   console.log(`\n━━━ Stage 2 — Sitemap ━━━`)
 
   const { data: project } = await sb.from('strategy_web_projects').select('*').eq('id', PROJECT_ID).maybeSingle()
   if (!project) throw new Error('Project not found')
+
+  // Cycle-back: build redo_context from Stage 2.5 gaps or Stage 6 orphans.
+  let redoContext = opts.redoContext ?? ''
+  let previousStage2: any = null
+  if (opts.cycleBack) {
+    const roadmap = (project.roadmap_state ?? {}) as any
+    const lines: string[] = []
+    if (opts.cycleBack === 'gaps') {
+      const gaps = roadmap.stage_2_5?.gaps ?? []
+      if (gaps.length === 0) throw new Error('Cycle-back: stage_2_5.gaps is empty.')
+      lines.push(
+        `The Sitemap Coverage Audit (Stage 2.5) surfaced the following gaps. Each one is a topic with content but no clear home or no findable nav path. Update the sitemap so each gap is addressed — either by promoting it to a dedicated page, adding a clearly-anchored section on a hub page with a real nav surface, or documenting why it was intentionally rejected. Do NOT drop the underlying content.`,
+        ``,
+      )
+      for (const g of gaps) {
+        lines.push(
+          `- ${g.topic_label ?? g.topic_key ?? '(unknown)'} [${g.importance ?? 'unknown'}]`,
+          `  Why a gap: ${g.why_a_gap ?? '—'}`,
+          `  Suggested fix: ${g.suggested_fix ?? '—'}`,
+        )
+      }
+      console.log(`Cycle-back: ${gaps.length} gaps from Stage 2.5`)
+    } else {
+      const orphans = roadmap.stage_6?.orphaned ?? []
+      if (orphans.length === 0) throw new Error('Cycle-back: stage_6.orphaned is empty.')
+      lines.push(`The Coverage QA (Stage 6) surfaced orphaned atoms. Update the sitemap so each has a home.`, ``)
+      for (const o of orphans) lines.push(`- ${o.source_kind} ${o.source_id}: ${o.rationale ?? '—'}`)
+      console.log(`Cycle-back: ${orphans.length} orphans from Stage 6`)
+    }
+    redoContext = lines.join('\n')
+    previousStage2 = roadmap.stage_2 ?? null
+  }
 
   const member = project.member as number
   const [accountRes, brandRes, discoveryRes, intakeDocsRes, accountChurchRes] = await Promise.all([
@@ -1555,8 +1587,8 @@ async function runStage2(stage1: any) {
     discoveryQuestionnaire: discoveryRes.data ?? null,
     stage1,
     filesLoaded,
-    redoContext: '',
-    previousStage2: null,
+    redoContext,
+    previousStage2,
   })
 
   console.log(`Calling ${STAGE2_MODEL}…`)
@@ -1617,7 +1649,13 @@ async function runStage2(stage1: any) {
       const { data: project } = await sb.from('strategy_web_projects').select('roadmap_state').eq('id', PROJECT_ID).maybeSingle()
       const stage1 = (project?.roadmap_state as any)?.stage_1
       if (!stage1) throw new Error('Stage 2 needs stage_1')
-      await runStage2(stage1)
+      // argv[4] supports cycle-back: 'cycle-gaps' uses stage_2_5.gaps,
+      // 'cycle-orphans' uses stage_6.orphaned as redo_context.
+      const flag = process.argv[4]
+      const cycleBack = flag === 'cycle-gaps' ? 'gaps'
+                      : flag === 'cycle-orphans' ? 'orphans'
+                      : undefined
+      await runStage2(stage1, cycleBack ? { cycleBack } : {})
     }
     if (want('sitemap_coverage','2.5')) await runStage2_5()
     if (want('page_inventory', '3')) await runStage3()
