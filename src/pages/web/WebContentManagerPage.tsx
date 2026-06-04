@@ -24,7 +24,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import {
-  ClipboardList, LayoutGrid, FileText, Palette, Cog, Eye, Loader2, CalendarClock,
+  ClipboardList, LayoutGrid, FileText, Palette, Cog, Eye, Loader2, CalendarClock, Workflow,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { WebManagerShell } from '../../components/wm'
@@ -38,10 +38,12 @@ import { DevHandoffWorkspace } from '../../components/wm/workspaces/DevHandoffWo
 import { IntakeWorkspace } from '../../components/wm/workspaces/IntakeWorkspace'
 import { ReviewWorkspace } from '../../components/wm/workspaces/ReviewWorkspace'
 import { PlanningWorkspace } from '../../components/wm/workspaces/PlanningWorkspace'
+import { PipelineWorkspace } from '../../components/wm/workspaces/PipelineWorkspace'
 import type { StrategyWebProject } from '../../types/database'
 
 type TabKey =
   | 'planning'
+  | 'pipeline'
   | 'intake'
   | 'library'
   | 'pages'
@@ -51,6 +53,7 @@ type TabKey =
 
 const TABS: readonly WMTabItem<TabKey>[] = [
   { key: 'planning',   label: 'Planning',        icon: <CalendarClock size={13} /> },
+  { key: 'pipeline',   label: 'Copywriting',     icon: <Workflow      size={13} /> },
   { key: 'intake',     label: 'Intake & Crawl',  icon: <ClipboardList size={13} /> },
   { key: 'library',    label: 'Site Library',    icon: <LayoutGrid    size={13} /> },
   { key: 'pages',      label: 'Pages',           icon: <FileText      size={13} /> },
@@ -75,7 +78,7 @@ export default function WebContentManagerPage() {
     }
     if (rawTab === 'settings') return DEFAULT_TAB   // moved to /web (org-wide)
     if (rawTab === 'crawl')    return 'intake'      // merged into intake
-    const known: ReadonlyArray<TabKey> = ['planning','intake','library','pages','design','devhandoff','review']
+    const known: ReadonlyArray<TabKey> = ['planning','pipeline','intake','library','pages','design','devhandoff','review']
     return (known as readonly string[]).includes(rawTab) ? (rawTab as TabKey) : DEFAULT_TAB
   })()
 
@@ -154,6 +157,7 @@ export default function WebContentManagerPage() {
         onRailToggle={setRailOpen}
       >
         {activeTab === 'planning'   && <PlanningWorkspace project={project} onChange={loadProject} />}
+        {activeTab === 'pipeline'   && <PipelineWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'intake'     && <IntakeWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'library'    && <GlobalElementsWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'pages'      && <PagesWorkspace project={project} onChange={loadProject} />}

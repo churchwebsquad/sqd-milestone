@@ -16,6 +16,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, AlertTriangle, Globe } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
+import { GlobalPromptsAdmin } from '../pipeline/GlobalPromptsAdmin'
 
 interface CrawlConfig {
   id:                number
@@ -183,6 +184,10 @@ export function SettingsWorkspace() {
           </span>
           <span className="shrink-0">{cfg.exclude_paths.length} exclude patterns</span>
         </footer>
+      </section>
+
+      <section className="rounded-xl border border-lavender bg-white p-5">
+        <GlobalPromptsAdmin />
       </section>
     </div>
   )
