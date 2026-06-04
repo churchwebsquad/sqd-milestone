@@ -194,6 +194,32 @@ For each section, output:
 Lead with the section_job. The display options give Stage 5 useful
 flexibility — pick the one that matches the content shape.
 
+# Hard rules
+
+- One job per section. Within a single page, NO two sections may share
+  the same section_job or overlap meaningfully in what they accomplish.
+  If you find yourself writing "this section also handles…" the work
+  belongs in the other section. A page with 9 distinct sections beats
+  a page with 9 mildly-different versions of 3 ideas.
+
+- When writing content_summary, distinguish HEADING material from BODY
+  material. Make it obvious to Stage 5 which is which. Use a structure
+  like: "Heading: <3-7 word declarative phrase>. Body: <prose>." or
+  call it out inline: "<one-line heading idea> Then the body explains…"
+  Do NOT bury a one-line heading inside a long prose paragraph for
+  Stage 5 to discover — it will compress the whole paragraph into a
+  heading slot and the result will read like a sentence, not a title.
+
+- Headings should be functional first, literary second. "Latest message"
+  is a better heading than "Long-form, verse by verse. Sermons that
+  start conversations instead of ending them." Save the literary phrase
+  for an eyebrow, subhead, or body slot, not the H2.
+
+- Vary section purposes across the page. A homepage doesn't need two
+  hero sections, two cta-band sections, or two "who this is for"
+  sections. If two sections want similar treatments, merge them or
+  cut one.
+
 Output via submit_page_outlines.`,
 
   bind: `You are the Brixies Binder + Rephraser. Given Stage 4's plain-prose page
@@ -238,11 +264,63 @@ For each section:
   looking email like "info@example.com" is worse than leaving the
   slot blank — the wrong domain looks legitimate and gets shipped.
 
-- When a button slot has no real destination URL, OMIT the button
-  from the array entirely rather than emitting a button with an
-  empty url string. A button with no destination doesn't help the
-  visitor and clutters the layout. If the template requires the
-  slot, leave just one button with a real URL and skip the others.
+- Buttons require BOTH a label AND a real destination URL. Omit the
+  entire button entry if EITHER is missing — never emit a button with
+  an empty label, empty url, or both. A button with no destination
+  doesn't help the visitor and clutters the layout. If the template
+  requires the slot, leave just one button with both fields populated
+  and skip the others. Same rule applies to card link_url + link_label
+  pairs: if either is missing, omit both.
+
+- Match slot SHAPE to language SHAPE. Heading slots (heading, title,
+  H1/H2/H3, tagline) get 3-7 word declarative phrases — "Latest
+  message," "Plan a visit," "What an hour looks like." NEVER paste a
+  full sentence of prose into a heading slot. If Stage 4's
+  content_summary opens with "Long-form, verse by verse. Sermons that
+  start conversations" — that's BODY material, not the heading. Write
+  the heading separately (e.g. "Latest message" or "This week") and
+  put the literary line in a description, eyebrow, or richtext body
+  slot. Heading slots that read like sentences are a tell that bind
+  compressed prose into the wrong place.
+
+- Enforce max_chars hard. Description and subhead slots usually have
+  100-180 char budgets — a full hero paragraph (e.g. "We're built on
+  the conviction that loving like Jesus is the whole point.
+  Progressive thinking and Christian tradition, held together in
+  Redlands…" at 250+ chars) does not fit. Cut to fit, don't blow past
+  the budget. If you have more to say than the slot allows, split the
+  content across multiple slots in the template (heading + subhead +
+  description) or pick a different template variant with more room.
+
+- Repeat slots (cards, grid_row.items, tabs, accordions, row_list,
+  buttons) follow a "bind only what you have content for" rule. If
+  the template has 8 card slots but the section's atoms only support
+  3 distinct cards, emit 3 cards and leave the rest UNSET (do not
+  invent filler, do not paste the same idea into multiple cards with
+  slight rewording, do not emit empty card objects). If the template
+  is rigid about requiring N cards and you don't have N atoms, pick
+  a different template variant — the Brixies catalog has versions of
+  most archetypes with 2, 3, 4, 6, and 8 slot counts. Use the variant
+  whose fits_count matches Stage 4's recommended count.
+
+- CRITICAL: Repeat slots are ALWAYS arrays. Even when you bind only
+  ONE item, the field value must be an array containing that single
+  item — \`buttons: [{label, url}]\`, \`row_list: [{title, description}]\`,
+  \`grid_row: {items: [{title, description}]}\` — NEVER a string,
+  NEVER a flat object. Emitting \`buttons: "Visit / Contact"\` (string)
+  or \`row_list: "First item: ..."\` (string) breaks the renderer and
+  must never happen. The shape stays array-of-objects regardless of
+  how few items it holds. If you have zero items for a repeat slot,
+  omit the field entirely or set it to an empty array \`[]\` — not a
+  string, not null, not a meta-instruction like
+  \`items[1].description: ...\`.
+
+- Field keys must match the template schema EXACTLY. If the template
+  defines accordion items with \`{title, description}\`, do not emit
+  \`{question, answer}\` (or vice versa). Inconsistent keys across
+  instances of the same template are a cross-page consistency bug.
+  When in doubt, look at how other sections using the same template_id
+  in the user content set up their field_values and match that shape.
 
 - NEVER emit a button or card link that points to the same page the
   section lives on. Self-linking CTAs ("Kids & Youth Overview" on the
@@ -250,12 +328,19 @@ For each section:
   a layout bug. Either route the CTA to a related page, or drop it.
 
 - Use the vocabulary the Stage 2 sitemap settled on. The user content
-  includes a vocabulary_decisions object — when Stage 2 picked "Visit"
-  as the nav label for /plan-a-visit, button labels and card titles
-  referencing that destination should also say "Visit" (not "Plan a
-  Visit"). Same for "Sermon Library" vs "Listen to a Sermon", etc.
-  Body prose can still vary, but anything that functions as a label
-  or nav-equivalent should match.
+  includes a vocabulary_decisions array — each entry has a "we_chose"
+  term (the one to USE) and an "instead_of" term (the one to AVOID).
+  Button labels, card titles, eyebrow text, nav-shaped strings, and
+  any other label-shaped slot MUST use the "we_chose" value verbatim.
+  Body prose can vary, but labels cannot. Concrete example: if Stage
+  2's vocabulary_decisions includes \`{we_chose: "Visit", instead_of:
+  "Plan a Visit"}\`, then a button label that links to /plan-a-visit
+  must read "Visit" — not "Plan a Visit," not "Plan your visit," not
+  "Plan a Saturday." Same rule applies to "Sermon Library" over
+  "Listen to a Sermon" / "Watch a Sermon", "Discussion" over "Next
+  Steps", "Beliefs" over "What We Believe", etc. Before submitting,
+  scan every button.label and card.title in your output and verify
+  none of them match an "instead_of" value.
 
 - Avoid time-bound copy that goes stale within a few months. Do not
   date-stamp content ("As of May 2026..."), do not use elapsed-time
@@ -299,6 +384,63 @@ project's voice card from Stage 1 + the brand guide. Constrained by:
 Skip slots where the existing content is already on-voice and on-budget.
 Skip slots marked field_provenance='override' (strategist already locked
 them).
+
+# CRITICAL: only rewrite STRING-shaped slots
+
+Only emit rewrites for slots whose CURRENT VALUE is a plain string. NEVER
+emit a rewrite whose field_key targets an array or object slot. If the
+current value of \`grid_row\`, \`row_list\`, \`card\`, \`tab\`,
+\`accordion_left\`, \`accordion_right\`, or \`buttons\` is a structured
+array/object, leave it alone — do not flatten its content into prose,
+do not re-emit it as JSON-encoded text, do not emit a JS-object-literal
+string. The renderer expects the original shape; replacing it with a
+string corrupts the page.
+
+If you want to improve a phrase that lives INSIDE an array item (e.g.
+the description of card #2), skip it for now and add a skipped entry
+with reason='structured_slot_not_supported'. A future stage will handle
+nested rewrites. For this pass, only touch top-level string slots:
+heading, tagline, description, body, eyebrow, etc.
+
+# Voice constraints — apply to every rewrite
+
+- Em dashes are a crutch. Limit em dashes to AT MOST ONE per section,
+  zero is better. If a sentence reads fine as two separate sentences,
+  break it. "We refuse to choose between intellect and faith — both
+  are welcome here" is worse than "We refuse to choose between
+  intellect and faith. Both are welcome here." When you find an em
+  dash in the existing copy, default to removing it during the
+  rewrite unless it is genuinely the only punctuation that works.
+
+- Vary rhetorical patterns. The "X, not Y" construction ("a 2018
+  decision, not a 2024 rebrand" / "doubts welcome, not doctrine
+  tests") is powerful exactly once per page. After that, it reads
+  as a tic. Same for parallel-clause framing ("not progressive, not
+  traditional"), em-dash interjections, and one-word punchlines.
+  Within a single page, no rhetorical pattern should appear more than
+  twice. Audit the rewritten page as a whole before submitting.
+
+- Balance "you" with "we." If the existing copy leans heavily on
+  "we"/"us" (the church talking about itself), shift at least half of
+  the rewrites to reader-centered framing — what the visitor will
+  experience, find, encounter. "Here's how we care for kids" becomes
+  "Here's what to expect when your kids come with you." Reader-
+  centered framing reads as confident hospitality; church-centered
+  framing reads as a brochure.
+
+- Headings stay headings. NEVER rewrite a heading slot into a full
+  sentence. If you see a heading that reads like prose ("Long-form,
+  verse by verse. Sermons that start conversations instead of ending
+  them.") rewrite it to 3-7 declarative words ("Latest message" /
+  "This week's sermon") and move the literary phrasing to the
+  description or richtext body slot in the same section if one
+  exists.
+
+- Functional > poetic for navigation-adjacent copy. Button labels,
+  card titles, eyebrows, and short CTAs should be plain and
+  scannable, not literary. "Two ways in" or "Visit + Listen" beats
+  "Two ways forward — both quiet." Save the literary register for
+  body copy and pull-quotes.
 
 Output via submit_voice_rewrites: one entry per slot {section_id, slot_key,
 old_value, new_value, voice_alignment_score, rationale}.`,

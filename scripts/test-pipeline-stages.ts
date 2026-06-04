@@ -711,10 +711,15 @@ async function runStage5(limit?: number) {
     const validSlugs = ((roadmapState.stage_2.pages ?? []) as any[])
       .map(p => p.slug)
       .filter(Boolean)
+    // Vocabulary decisions from Stage 2 (e.g. nav uses "Visit" not
+    // "Plan a Visit"). Bind agent must apply these to button labels,
+    // card titles, and other label-shaped slots.
+    const vocabularyDecisions = roadmapState.stage_2?.vocabulary_decisions ?? []
 
     const userText = [
       `# Page: ${stage2Page.name} (/${slug})`,
       `# valid_slugs — every internal href MUST point to one of these (anchor "#section" optional)\n${JSON.stringify(validSlugs, null, 2)}`,
+      `# vocabulary_decisions — button labels, card titles, and nav-shaped slots MUST use the "we_chose" term, not "instead_of"\n${JSON.stringify(vocabularyDecisions, null, 2)}`,
       `# Stage 1 SEO/AEO/GEO targets (compose page_seo from the most relevant entries)\n${JSON.stringify(stage1SeoTargets, null, 2)}`,
       `# Page-level AEO keywords (from Stage 2 sitemap)\n${JSON.stringify(pageAeoKeywords, null, 2)}`,
       `# Sections to bind (${sectionInputs.length})`,
@@ -1061,7 +1066,7 @@ async function runStage7() {
       skipped: { type: 'array', items: { type: 'object',
         properties: {
           web_section_id: { type: 'string' }, field_key: { type: 'string' },
-          reason: { type: 'string', enum: ['already_on_voice','override_locked','over_budget_after_rewrite'] },
+          reason: { type: 'string', enum: ['already_on_voice','override_locked','over_budget_after_rewrite','structured_slot_not_supported'] },
         },
         required: ['web_section_id','field_key','reason'] } },
     },
@@ -1130,16 +1135,28 @@ async function runStage7() {
   }).eq('id', PROJECT_ID)
 
   // Apply: write each rewrite back to web_sections.field_values, skipping
-  // any field marked field_provenance='override'.
+  // any field marked field_provenance='override'. Also reject any
+  // rewrite that would clobber an array or object slot with a string —
+  // the voice agent occasionally emits a rewrite for a structured slot
+  // (grid_row, row_list, accordion) which would corrupt the renderer.
   console.log(`\nApplying ${allRewrites.length} rewrites to web_sections…`)
-  let applied = 0, blockedByOverride = 0, failed = 0
+  let applied = 0, blockedByOverride = 0, blockedByShape = 0, failed = 0
   for (const r of allRewrites) {
     const { data: sec } = await sb.from('web_sections')
       .select('field_values, field_provenance').eq('id', r.web_section_id).maybeSingle()
     if (!sec) { failed++; continue }
     const prov = (sec.field_provenance ?? {}) as Record<string, { source?: string }>
     if (prov[r.field_key]?.source === 'override') { blockedByOverride++; continue }
-    const nextValues = { ...(sec.field_values as Record<string, unknown>), [r.field_key]: r.new_value }
+    const fv = sec.field_values as Record<string, unknown>
+    const existing = fv[r.field_key]
+    // Defense: only rewrite slots whose current value is a string (or
+    // missing). Array/object slots have structured shapes that a string
+    // rewrite would destroy.
+    if (existing !== undefined && existing !== null && typeof existing !== 'string') {
+      blockedByShape++
+      continue
+    }
+    const nextValues = { ...fv, [r.field_key]: r.new_value }
     const nextProv   = { ...prov, [r.field_key]: { ...(prov[r.field_key] ?? {}), source: 'voice_pass' } }
     const { error } = await sb.from('web_sections')
       .update({ field_values: nextValues, field_provenance: nextProv })
@@ -1151,6 +1168,7 @@ async function runStage7() {
   console.log(`  total rewrites:   ${allRewrites.length}`)
   console.log(`  applied:          ${applied}`)
   console.log(`  blocked override: ${blockedByOverride}`)
+  console.log(`  blocked shape:    ${blockedByShape}`)
   console.log(`  failed:           ${failed}`)
   console.log(`  skipped (model):  ${allSkipped.length}`)
   return { rewrites: allRewrites, skipped: allSkipped }
