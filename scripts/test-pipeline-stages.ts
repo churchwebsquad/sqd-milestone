@@ -230,6 +230,126 @@ async function runStage0() {
   }
 }
 
+// ── STAGE 3 — Page inventory ───────────────────────────────────
+async function runStage3() {
+  console.log(`\n━━━ Stage 3 — Page inventory ━━━`)
+
+  const { data: project } = await sb.from('strategy_web_projects').select('*').eq('id', PROJECT_ID).maybeSingle()
+  if (!project) throw new Error('Project not found')
+  const roadmapState = (project.roadmap_state ?? {}) as any
+  if (!roadmapState.stage_1 || !roadmapState.stage_2) {
+    throw new Error('Stage 3 requires stage_1 + stage_2 to be present.')
+  }
+
+  const [atomsRes, factsRes] = await Promise.all([
+    sb.from('content_atoms').select('id, topic, body, source_kind, confidence').eq('web_project_id', PROJECT_ID),
+    sb.from('church_facts').select('id, topic, data').eq('web_project_id', PROJECT_ID),
+  ])
+  const atoms = (atomsRes.data ?? []) as any[]
+  const facts = (factsRes.data ?? []) as any[]
+  if (atoms.length === 0 && facts.length === 0) {
+    throw new Error('No atoms or facts found. Run Stage 0 first.')
+  }
+  console.log(`Inputs: ${atoms.length} atoms · ${facts.length} facts · ${(roadmapState.stage_2.pages ?? []).length} pages`)
+
+  const TOOL_INPUT_SCHEMA: any = {
+    type: 'object',
+    properties: {
+      atom_placements: { type: 'array', items: { type: 'object',
+        properties: {
+          source_id: { type: 'string' }, source_kind: { type: 'string', enum: ['atom'] },
+          primary_page_slug: { type: 'string' },
+          reference_pages: { type: 'array', items: { type: 'object',
+            properties: { slug: { type: 'string' },
+              treatment: { type: 'string', enum: ['hero_anchor','section_body','card_in_grid','sidebar_callout','footer_link','cta_button','schema_only'] } },
+            required: ['slug','treatment'] } },
+          suggested_treatment: { type: 'string', enum:
+            ['hero_anchor','section_body','card_in_grid','sidebar_callout','footer_link','cta_button','schema_only'] },
+          rationale: { type: 'string' },
+        },
+        required: ['source_id','source_kind','primary_page_slug','suggested_treatment','rationale'],
+      }},
+      fact_placements: { type: 'array', items: { type: 'object',
+        properties: {
+          source_id: { type: 'string' }, source_kind: { type: 'string', enum: ['fact'] },
+          primary_page_slug: { type: 'string' },
+          reference_pages: { type: 'array', items: { type: 'object',
+            properties: { slug: { type: 'string' }, treatment: { type: 'string' } },
+            required: ['slug','treatment'] } },
+          suggested_treatment: { type: 'string' },
+          rationale: { type: 'string' },
+        },
+        required: ['source_id','source_kind','primary_page_slug','suggested_treatment','rationale'],
+      }},
+      orphans: { type: 'array', items: { type: 'object',
+        properties: {
+          source_id: { type: 'string' }, source_kind: { type: 'string', enum: ['atom','fact'] },
+          rationale: { type: 'string' },
+          suggested_action: { type: 'string', enum: ['archive','request_more_content','reroute_to_global_snippet'] },
+        },
+        required: ['source_id','source_kind','rationale','suggested_action'],
+      }},
+      per_page_atom_count: { type: 'object', additionalProperties: { type: 'number' } },
+    },
+    required: ['atom_placements','fact_placements','orphans','per_page_atom_count'],
+  }
+
+  const userText = [
+    `# Project\n${JSON.stringify({ id: project.id, member: project.member, name: project.name }, null, 2)}`,
+    `# Stage 1 — Strategy\n${JSON.stringify(roadmapState.stage_1, null, 2)}`,
+    `# Stage 2 — Sitemap\n${JSON.stringify(roadmapState.stage_2, null, 2)}`,
+    `# Content atoms (${atoms.length})\n${JSON.stringify(atoms, null, 2)}`,
+    `# Church facts (${facts.length})\n${JSON.stringify(facts, null, 2)}`,
+  ].join('\n\n')
+
+  console.log('Calling anthropic/claude-opus-4-7…')
+  const t0 = Date.now()
+  const result = await generateText({
+    model: 'anthropic/claude-opus-4-7',
+    maxOutputTokens: 24000,
+    system: FALLBACK_PROMPTS.page_inventory,
+    messages: [{ role: 'user', content: userText }],
+    tools: {
+      submit_page_inventory: tool({
+        description: 'Submit the page-inventory mapping for this project.',
+        inputSchema: jsonSchema(TOOL_INPUT_SCHEMA),
+      }),
+    },
+    toolChoice: { type: 'tool', toolName: 'submit_page_inventory' },
+  })
+  console.log(`Returned in ${((Date.now()-t0)/1000).toFixed(1)}s  · in=${result.usage?.inputTokens}  out=${result.usage?.outputTokens}`)
+
+  const out = result.toolCalls?.[0]?.input as any
+  if (!out) throw new Error('No tool call returned')
+
+  await sb.from('strategy_web_projects').update({
+    roadmap_state: {
+      ...(project.roadmap_state ?? {}),
+      stage_3: {
+        ...out,
+        _meta: {
+          status: 'draft',
+          generated_at: new Date().toISOString(),
+          model: 'anthropic/claude-opus-4-7',
+          usage: { input_tokens: result.usage?.inputTokens, output_tokens: result.usage?.outputTokens },
+          source: 'test-pipeline-stages script',
+        },
+      },
+    },
+  }).eq('id', PROJECT_ID)
+
+  console.log(`\nStage 3 summary:`)
+  console.log(`  atoms placed:  ${(out.atom_placements ?? []).length}`)
+  console.log(`  facts placed:  ${(out.fact_placements ?? []).length}`)
+  console.log(`  orphans:       ${(out.orphans ?? []).length}`)
+  console.log(`  per-page counts:`)
+  const counts = out.per_page_atom_count ?? {}
+  for (const [slug, n] of Object.entries(counts).sort((a, b) => (b[1] as number) - (a[1] as number))) {
+    console.log(`    ${slug.padEnd(28)} ${n}`)
+  }
+  return out
+}
+
 // ── STAGE 1 ────────────────────────────────────────────────────
 async function runStage1() {
   console.log(`\n━━━ Stage 1 — Synthesize ━━━`)
@@ -390,22 +510,17 @@ async function runStage2(stage1: any) {
 // ── Main ────────────────────────────────────────────────────────
 ;(async () => {
   try {
-    // Stage selection via argv[3] — defaults to all (0, 1, 2).
     const onlyStage = process.argv[3]
-    if (!onlyStage || onlyStage === 'normalize' || onlyStage === '0') {
-      await runStage0()
-    }
-    if (!onlyStage || onlyStage === 'synthesize' || onlyStage === '1') {
-      const stage1 = await runStage1()
-      if (!onlyStage || onlyStage === 'sitemap' || onlyStage === '2') {
-        await runStage2(stage1)
-      }
-    } else if (onlyStage === 'sitemap' || onlyStage === '2') {
+    const want = (stage: string, num: string) => !onlyStage || onlyStage === stage || onlyStage === num
+    if (want('normalize',      '0')) await runStage0()
+    if (want('synthesize',     '1')) await runStage1()
+    if (want('sitemap',        '2')) {
       const { data: project } = await sb.from('strategy_web_projects').select('roadmap_state').eq('id', PROJECT_ID).maybeSingle()
       const stage1 = (project?.roadmap_state as any)?.stage_1
-      if (!stage1) throw new Error('Stage 2 needs stage_1 already in roadmap_state')
+      if (!stage1) throw new Error('Stage 2 needs stage_1')
       await runStage2(stage1)
     }
+    if (want('page_inventory', '3')) await runStage3()
     console.log('\n✓ Done.')
     process.exit(0)
   } catch (e) {
