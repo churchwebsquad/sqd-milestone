@@ -22,6 +22,7 @@ import {
 } from '../../../lib/pipelinePromptsCore'
 import { StageCard, type StageState } from '../pipeline/StageCard'
 import { PromptDrawer } from '../pipeline/PromptDrawer'
+import { PreviewDrawer } from '../pipeline/PreviewDrawer'
 import type { StrategyWebProject } from '../../../types/database'
 
 interface Props {
@@ -45,6 +46,7 @@ const STAGE_ENDPOINTS: Record<PipelineStage, string> = {
 export function PipelineWorkspace({ project, onChange }: Props) {
   const [running,  setRunning]  = useState<PipelineStage | null>(null)
   const [drawer,   setDrawer]   = useState<PipelineStage | null>(null)
+  const [preview,  setPreview]  = useState<PipelineStage | null>(null)
   const [error,    setError]    = useState<string | null>(null)
   // Voice-pass apply is a separate post-manifest step. Tracks its own
   // in-flight + result so the card can show "applied X / blocked Y".
@@ -229,6 +231,7 @@ export function PipelineWorkspace({ project, onChange }: Props) {
                 onRun={(fb) => runStage(s.stage, fb)}
                 onApprove={s.state === 'draft' ? () => approveStage(s.stage) : undefined}
                 onEditPrompt={() => setDrawer(s.stage)}
+                onViewOutput={s.output ? () => setPreview(s.stage) : undefined}
                 extraAction={extraAction}
               />
             )
@@ -249,6 +252,14 @@ export function PipelineWorkspace({ project, onChange }: Props) {
           projectId={project.id}
           onClose={() => setDrawer(null)}
           onSaved={() => { void onChange() }}
+        />
+      )}
+
+      {preview && getOutput(preview) && (
+        <PreviewDrawer
+          stage={preview}
+          output={getOutput(preview)!}
+          onClose={() => setPreview(null)}
         />
       )}
     </div>

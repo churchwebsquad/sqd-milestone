@@ -4,7 +4,7 @@
  * collapsible block under the controls.
  */
 import { useState } from 'react'
-import { Loader2, Play, RotateCw, Check, ChevronDown, ChevronRight, Settings2 } from 'lucide-react'
+import { Loader2, Play, RotateCw, Check, Settings2, Eye } from 'lucide-react'
 import { WMStatusPill } from '../StatusPill'
 import {
   STAGE_LABELS,
@@ -30,6 +30,9 @@ interface Props {
   onRun:        (feedback?: string) => void
   onApprove?:   () => void
   onEditPrompt: () => void
+  /** Open the wider preview drawer (Readable + JSON toggle). Wired
+   *  when the stage has an output to view. */
+  onViewOutput?: () => void
   /** Optional stage-specific secondary action — used by voice_pass to
    *  surface "Apply rewrites" alongside the standard Run/Approve.
    *  Renders only when supplied AND the stage is in 'draft' or
@@ -40,16 +43,12 @@ interface Props {
     loading?: boolean
     onClick: () => void
   }
-  /** Render a stage-specific output preview. Hidden until the user
-   *  expands the card. */
-  renderPreview?: (output: Record<string, unknown>) => React.ReactNode
 }
 
 export function StageCard({
   stage, state, output, redoCount, promptSource, hasAddendum,
-  onRun, onApprove, onEditPrompt, extraAction, renderPreview,
+  onRun, onApprove, onEditPrompt, onViewOutput, extraAction,
 }: Props) {
-  const [expanded, setExpanded] = useState(state === 'draft')
   const [redoText, setRedoText] = useState('')
   const [redoOpen, setRedoOpen] = useState(false)
 
@@ -200,28 +199,69 @@ export function StageCard({
         </div>
       )}
 
-      {/* Output preview */}
-      {output && (
+      {/* Output preview — opens the wider drawer */}
+      {output && onViewOutput && (
         <div className="border-t border-wm-border">
           <button
             type="button"
-            onClick={() => setExpanded(e => !e)}
-            className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-wm-text-muted hover:bg-wm-bg-hover"
+            onClick={onViewOutput}
+            className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text"
           >
-            {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-            {expanded ? 'Hide' : 'Show'} output
+            <Eye size={11} />
+            View output
+            <span className="ml-auto text-[10px] text-wm-text-subtle">
+              {summarizeOutput(output)}
+            </span>
           </button>
-          {expanded && (
-            <div className="px-3 py-2 border-t border-wm-border bg-wm-bg/40">
-              {renderPreview ? renderPreview(output) : (
-                <pre className="text-[10px] font-mono text-wm-text-muted whitespace-pre-wrap max-h-96 overflow-auto">
-                  {JSON.stringify(output, null, 2)}
-                </pre>
-              )}
-            </div>
-          )}
         </div>
       )}
     </div>
   )
+}
+
+// One-line summary shown next to "View output" so the strategist
+// knows whether it's worth opening. Falls back to key count when
+// nothing more specific is recognized.
+function summarizeOutput(output: Record<string, unknown>): string {
+  const o = output as Record<string, any>
+  // Stage 2 sitemap
+  if (Array.isArray(o.pages) && Array.isArray(o.header_nav)) {
+    return `${o.pages.length} pages · ${o.header_nav.length} nav items`
+  }
+  // Stage 4 outlines
+  if (Array.isArray(o.page_outlines)) {
+    const sections = o.page_outlines.reduce(
+      (s: number, p: any) => s + (p?.sections?.length ?? 0), 0
+    )
+    return `${o.page_outlines.length} pages · ${sections} sections`
+  }
+  // Stage 3 placements
+  if (Array.isArray(o.atom_placements)) {
+    const orphans = Array.isArray(o.orphans) ? o.orphans.length : 0
+    return `${o.atom_placements.length} placements · ${orphans} orphans`
+  }
+  // Stage 5 bind
+  if (Array.isArray(o.page_results)) {
+    const sections = o.page_results.reduce(
+      (s: number, p: any) => s + (p?.section_results?.length ?? 0), 0
+    )
+    return `${o.page_results.length} pages · ${sections} sections bound`
+  }
+  // Stage 6 coverage
+  if (Array.isArray(o.landed) || typeof o.total_score === 'number') {
+    return typeof o.total_score === 'number'
+      ? `${Math.round(o.total_score * 100)}% landed`
+      : `${(o.landed ?? []).length} landed`
+  }
+  // Stage 7 voice pass
+  if (Array.isArray(o.rewrites)) {
+    return `${o.rewrites.length} rewrites`
+  }
+  // Stage 8 final qa
+  if (Array.isArray(o.findings)) {
+    const blockers = (o.findings as any[]).filter(f => f?.severity === 'blocker').length
+    return `${o.findings.length} findings · ${blockers} blockers`
+  }
+  const keys = Object.keys(o).filter(k => k !== '_meta')
+  return `${keys.length} fields`
 }
