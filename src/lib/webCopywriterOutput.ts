@@ -41,6 +41,7 @@ import {
   emptyReconcileTelemetry, type BindTelemetryRecord,
 } from './webBindTelemetry'
 import { deriveProvenanceFromBind } from './webFieldProvenance'
+import { contentDocumentToMarkdown } from './webContentDocumentToMarkdown'
 import type { FieldProvenanceMap } from '../types/database'
 import {
   reconcileFieldValuesAcrossTemplates,
@@ -1327,6 +1328,18 @@ export async function importCopywriterPageOutput(
         ir_snapshot = assignNodeIds(bind.ir, previousIr)
       }
 
+      // Reconstruct source_markdown from the IR snapshot so Text view
+      // has content immediately on import. Previously this was null,
+      // which meant `PageTextView.tsx:247` (`section.source_markdown ?? ''`)
+      // rendered an empty textarea even though field_values was
+      // fully populated — the bug behind "the latest copywriting
+      // import didn't load in the copy into the text view."
+      // First save of the Text view triggers rebindSectionFromMarkdown
+      // which regenerates a tighter markdown anyway.
+      const source_markdown = ir_snapshot
+        ? contentDocumentToMarkdown(ir_snapshot)
+        : ''
+
       return {
         web_page_id:         pageId,
         content_template_id: s.template_id || null,
@@ -1336,6 +1349,7 @@ export async function importCopywriterPageOutput(
         // the source instead of compounding remaps off the current
         // (already-transformed) field_values.
         source_field_values: rawValues,
+        source_markdown,
         ir_snapshot,
         // Per-field provenance from this import: populated slots → 'auto',
         // required-unfilled slots → 'unbound'. The Text view gutter

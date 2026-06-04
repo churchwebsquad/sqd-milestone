@@ -23,6 +23,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
+import { resolvePromptServer } from './_lib/resolvePrompt'
 
 // Vercel serverless functions default to a short timeout (10s Hobby / 60s
 // Pro). Stage 2's full intake + 20K output ceiling can exceed that on
@@ -198,7 +199,14 @@ export default async function handler(req: any, res: any) {
   await sb.from('strategy_web_projects').update({ roadmap_stage: 'drafting_sitemap' }).eq('id', projectId)
 
   // ── Build prompt + content blocks ───────────────────────────────────
-  const systemPrompt = buildSystemPrompt()
+  // resolvePromptServer reads the editable global (+ optional project
+  // addendum) from web_pipeline_prompts; falls back to the hardcoded
+  // FALLBACK_PROMPTS in pipelinePromptsCore when the DB still has the
+  // placeholder. Lets strategists tune sitemap behavior without a deploy.
+  const resolved = await resolvePromptServer(sb, 'sitemap', projectId)
+  const systemPrompt = resolved.globalSource === 'fallback'
+    ? buildSystemPrompt()             // hardcoded original — richer than the FALLBACK summary
+    : resolved.systemPrompt
   const userContent = buildUserContent({
     project, churchName, accountHandoff, brandGuide, discoveryQuestionnaire, stage1,
     filesLoaded, redoContext, previousStage2,

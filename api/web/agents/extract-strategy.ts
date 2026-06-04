@@ -34,6 +34,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
+import { resolvePromptServer } from './_lib/resolvePrompt'
 
 // Vercel AI Gateway routes by `provider/model` slug. The gateway auths
 // via AI_GATEWAY_API_KEY locally and VERCEL_OIDC_TOKEN on Vercel deploys
@@ -264,7 +265,13 @@ export default async function handler(req: any, res: any) {
   await sb.from('strategy_web_projects').update({ roadmap_stage: 'extracting_strategy' }).eq('id', projectId)
 
   // ── Build prompt + content blocks ───────────────────────────────────
-  const systemPrompt = buildSystemPrompt()
+  // resolvePromptServer pulls editable globals (+ optional project
+  // addendum) from web_pipeline_prompts. Falls back to the hardcoded
+  // buildSystemPrompt below until the team replaces the placeholder.
+  const resolved = await resolvePromptServer(sb, 'synthesize', projectId)
+  const systemPrompt = resolved.globalSource === 'fallback'
+    ? buildSystemPrompt()
+    : resolved.systemPrompt
   const userContent = buildUserContent({
     project, accountHandoff, brandGuide, discoveryQuestionnaire,
     filesLoaded: preflight.files_loaded,
@@ -394,6 +401,9 @@ Emit a single structured object via the \`submit_strategy_extraction\` tool. Cov
   - sermons_display_mode / events_display_mode / groups_display_mode (one of: archive_link, chms_embed, wordpress_managed)
   - recommended_pages (list — your initial proposal; Stage 2 refines)
   - tech_flags (Requires ACF Setup, Requires PCO Integration, etc.)
+- **Total page count** — your recommended NUMBER of pages on the new site. IMPORTANT: the new site does NOT have to 1:1 mirror the current site. Collapse low-density pages (e.g., a thin "Mission" page + thin "Vision" page can merge into one About). Split high-density pages (e.g., if Ministries crams 15 distinct programs, recommend a parent + 15 child pages OR a more focused subset). Include Phase 1 + Phase 2 + nav-only pages in the count.
+- **Existing pages to carry forward** — slugs from the current site that the new site should preserve (vs. consolidating into something else). Each entry has \`slug\`, \`rationale\`, and \`carry_forward_from\` (original URL). Empty array = greenfield rewrite.
+- **SEO/AEO/GEO targets** — per topic or page cluster, the search phrases, answer-engine intents (conversational AEO queries), and geographic anchors (local landmarks, neighborhoods, city/region references) the page should target. Stage 2 maps these to specific page slugs.
 - **Sources used** — short attribution per source (1 sentence) + a list of any conflicts you encountered and how you resolved them.
 
 # Voice rules to internalize
@@ -633,6 +643,42 @@ const EXTRACTION_TOOL = {
           brand_handoff: { type: 'string' },
           content_collection: { type: 'string' },
           conflicts_resolved: { type: 'array', items: { type: 'string' }, description: 'List of specific contradictions encountered + which source you deferred to.' },
+        },
+      },
+      // ── New for the in-app pipeline (Stage 1 of 8) ──────────────────
+      // The strategist wants explicit numbers + carry-forward decisions
+      // surfaced here so Stage 2 (sitemap) and Stage 3 (page inventory)
+      // have ground truth to work from instead of inferring from
+      // recommended_pages.
+      total_page_count: {
+        type: 'number',
+        description: 'Your recommended total page count for the new site. NOT a 1:1 mirror of the current site — collapse low-density pages, split high-density ones. Includes Phase 1 + Phase 2 + nav-only pages.',
+      },
+      existing_pages_to_carry_forward: {
+        type: 'array',
+        description: 'Slugs from the current site that should survive into the new one (vs. being consolidated). Empty array is valid for greenfield rewrites.',
+        items: {
+          type: 'object',
+          required: ['slug','rationale'],
+          properties: {
+            slug:               { type: 'string' },
+            rationale:          { type: 'string' },
+            carry_forward_from: { type: ['string','null'], description: 'Original URL or current-site slug if applicable.' },
+          },
+        },
+      },
+      seo_aeo_geo_targets: {
+        type: 'array',
+        description: 'Per page (or per topic cluster), the search phrases, AEO answer-engine intents, and geo anchors the page should target. Stage 2 maps these to specific page slugs.',
+        items: {
+          type: 'object',
+          required: ['topic','search_phrases'],
+          properties: {
+            topic:          { type: 'string' },
+            search_phrases: { type: 'array', items: { type: 'string' } },
+            answer_intents: { type: 'array', items: { type: 'string' } },
+            geo_anchors:    { type: 'array', items: { type: 'string' }, description: 'Local landmarks, neighborhoods, city/region references.' },
+          },
         },
       },
     },
