@@ -350,6 +350,164 @@ async function runStage3() {
   return out
 }
 
+// ── STAGE 4 — Page outlines ────────────────────────────────────
+// One model call PER PAGE. Two reasons:
+//   1. Output budget. The batched call hit the 16k/20k output cap
+//      mid-emission for 17 pages × ~4 sections each. Per-page keeps
+//      each request small (~2-3k output) so we never truncate.
+//   2. Focus. The user's whole pipeline thesis is "separate each step
+//      into focused sections to prevent rule overload." A model
+//      writing outlines for ONE page at a time can stay tight against
+//      that page's job; the batched version has to context-switch.
+async function runStage4() {
+  console.log(`\n━━━ Stage 4 — Page outlines ━━━`)
+
+  const { data: project } = await sb.from('strategy_web_projects').select('*').eq('id', PROJECT_ID).maybeSingle()
+  if (!project) throw new Error('Project not found')
+  const roadmapState = (project.roadmap_state ?? {}) as any
+  if (!roadmapState.stage_1 || !roadmapState.stage_2 || !roadmapState.stage_3) {
+    throw new Error('Stage 4 requires stages 1, 2, 3.')
+  }
+
+  const [atomsRes, factsRes] = await Promise.all([
+    sb.from('content_atoms').select('id, topic, body').eq('web_project_id', PROJECT_ID),
+    sb.from('church_facts').select('id, topic, data').eq('web_project_id', PROJECT_ID),
+  ])
+  const atoms = (atomsRes.data ?? []) as any[]
+  const facts = (factsRes.data ?? []) as any[]
+  const pages = (roadmapState.stage_2.pages ?? []) as any[]
+  const atomById = new Map(atoms.map(a => [a.id, a]))
+  const factById = new Map(facts.map(f => [f.id, f]))
+  console.log(`Inputs: ${pages.length} pages · ${atoms.length} atoms · ${facts.length} facts · ${(roadmapState.stage_3.atom_placements ?? []).length} placements`)
+
+  const DISPLAY_OPTIONS = [
+    'card_grid','split_column','accordion','tabs','timeline',
+    'cta_hero','feature_strip','staff_grid','gallery','rich_text_long','process_steps',
+  ]
+
+  // Per-page tool: one page worth of sections, much more tractable.
+  const PAGE_TOOL_SCHEMA: any = {
+    type: 'object',
+    properties: {
+      sections: { type: 'array', items: { type: 'object',
+        properties: {
+          section_id:      { type: 'string' },
+          section_job:     { type: 'string' },
+          content_summary: { type: 'string' },
+          display_options: { type: 'array', items: { type: 'object',
+            properties: {
+              kind:       { type: 'string', enum: DISPLAY_OPTIONS },
+              rationale:  { type: 'string' },
+              fits_count: { type: 'number' },
+            },
+            required: ['kind','rationale'],
+          }},
+          atoms_used:  { type: 'array', items: { type: 'string' } },
+          voice_notes: { type: ['string','null'] },
+        },
+        required: ['section_id','section_job','content_summary','display_options','atoms_used'],
+      }},
+      voice_notes: { type: ['string','null'] },
+    },
+    required: ['sections'],
+  }
+
+  // Index atom placements by page_slug so each per-page call only
+  // sees the atoms routed there in Stage 3 (plus the strategy + the
+  // page's own row).
+  type Placement = { source_id: string; source_kind: 'atom'|'fact'; primary_page_slug: string; suggested_treatment: string; rationale: string }
+  const placementsByPage = new Map<string, Placement[]>()
+  for (const p of (roadmapState.stage_3.atom_placements ?? []) as Placement[]) {
+    const slug = p.primary_page_slug
+    if (!placementsByPage.has(slug)) placementsByPage.set(slug, [])
+    placementsByPage.get(slug)!.push(p)
+  }
+  for (const p of (roadmapState.stage_3.fact_placements ?? []) as Placement[]) {
+    const slug = p.primary_page_slug
+    if (!placementsByPage.has(slug)) placementsByPage.set(slug, [])
+    placementsByPage.get(slug)!.push(p)
+  }
+
+  const pageOutlines: any[] = []
+  let totalIn = 0, totalOut = 0
+
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i]
+    const slug = page.slug
+    const placements = placementsByPage.get(slug) ?? []
+    const pageAtoms = placements
+      .filter(p => p.source_kind === 'atom')
+      .map(p => ({ ...atomById.get(p.source_id), placement: p }))
+      .filter(a => a.id)
+    const pageFacts = placements
+      .filter(p => p.source_kind === 'fact')
+      .map(p => ({ ...factById.get(p.source_id), placement: p }))
+      .filter(f => f.id)
+
+    const userText = [
+      `# Drafting outline for ONE page: ${page.name} (/${slug})`,
+      `# Page metadata\n${JSON.stringify(page, null, 2)}`,
+      `# Stage 1 strategy (project-wide context)\n${JSON.stringify(roadmapState.stage_1, null, 2)}`,
+      `# Atoms placed on THIS page (Stage 3)\n${JSON.stringify(pageAtoms, null, 2)}`,
+      `# Facts placed on THIS page (Stage 3)\n${JSON.stringify(pageFacts, null, 2)}`,
+      `\nDraft section outlines for THIS page only. Use the placed atoms + facts as the content backbone. Each section needs a clear section_job + content_summary + 2-3 display_options.`,
+    ].join('\n\n')
+
+    process.stdout.write(`  [${i+1}/${pages.length}] /${slug} ... `)
+    const t0 = Date.now()
+    try {
+      const result = await generateText({
+        model: 'anthropic/claude-opus-4-7',
+        maxOutputTokens: 6000,
+        system: FALLBACK_PROMPTS.outlines,
+        messages: [{ role: 'user', content: userText }],
+        tools: {
+          submit_page_outline: tool({
+            description: 'Submit ONE page worth of section outlines.',
+            inputSchema: jsonSchema(PAGE_TOOL_SCHEMA),
+          }),
+        },
+        toolChoice: { type: 'tool', toolName: 'submit_page_outline' },
+        maxRetries: 3,
+      })
+      totalIn  += result.usage?.inputTokens  ?? 0
+      totalOut += result.usage?.outputTokens ?? 0
+      const out = result.toolCalls?.[0]?.input as any
+      const sections = out?.sections ?? []
+      pageOutlines.push({ page_slug: slug, sections, voice_notes: out?.voice_notes ?? null })
+      console.log(`${sections.length} sections (${((Date.now()-t0)/1000).toFixed(1)}s, out=${result.usage?.outputTokens})`)
+    } catch (e) {
+      console.log(`FAILED — ${e instanceof Error ? e.message : 'unknown'}`)
+      pageOutlines.push({ page_slug: slug, sections: [], voice_notes: null, error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  await sb.from('strategy_web_projects').update({
+    roadmap_state: {
+      ...(project.roadmap_state ?? {}),
+      stage_4: {
+        page_outlines: pageOutlines,
+        _meta: {
+          status: 'draft',
+          generated_at: new Date().toISOString(),
+          model: 'anthropic/claude-opus-4-7',
+          usage: { input_tokens: totalIn, output_tokens: totalOut },
+          source: 'test-pipeline-stages script (per-page)',
+        },
+      },
+    },
+  }).eq('id', PROJECT_ID)
+
+  const totalSections = pageOutlines.reduce((sum, o) => sum + (o.sections?.length ?? 0), 0)
+  const pagesWithErrors = pageOutlines.filter(o => o.error).length
+  console.log(`\nStage 4 summary:`)
+  console.log(`  pages outlined:    ${pageOutlines.length - pagesWithErrors}/${pages.length}`)
+  console.log(`  total sections:    ${totalSections}`)
+  console.log(`  total tokens:      in=${totalIn}, out=${totalOut}`)
+  if (pagesWithErrors > 0) console.log(`  pages with errors: ${pagesWithErrors}`)
+  return { page_outlines: pageOutlines }
+}
+
 // ── STAGE 1 ────────────────────────────────────────────────────
 async function runStage1() {
   console.log(`\n━━━ Stage 1 — Synthesize ━━━`)
@@ -521,6 +679,7 @@ async function runStage2(stage1: any) {
       await runStage2(stage1)
     }
     if (want('page_inventory', '3')) await runStage3()
+    if (want('outlines',       '4')) await runStage4()
     console.log('\n✓ Done.')
     process.exit(0)
   } catch (e) {
