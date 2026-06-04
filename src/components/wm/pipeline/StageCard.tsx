@@ -228,6 +228,12 @@ function summarizeOutput(output: Record<string, unknown>): string {
   if (Array.isArray(o.pages) && Array.isArray(o.header_nav)) {
     return `${o.pages.length} pages · ${o.header_nav.length} nav items`
   }
+  // Stage 2.5 sitemap coverage audit
+  if (Array.isArray(o.topic_audit) && (o.summary || o.gaps)) {
+    const score = o.summary?.overall_coverage_score
+    const gaps = o.summary?.gaps_count ?? (Array.isArray(o.gaps) ? o.gaps.length : 0)
+    return `${o.topic_audit.length} topics · ${gaps} gaps${typeof score === 'number' ? ` · ${Math.round(score * 100)}% coverage` : ''}`
+  }
   // Stage 4 outlines
   if (Array.isArray(o.page_outlines)) {
     const sections = o.page_outlines.reduce(

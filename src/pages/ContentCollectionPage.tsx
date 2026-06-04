@@ -763,8 +763,6 @@ function DiscoveryRecapSection({ recap }: { recap: DiscoveryRecap | null }) {
     { label: 'Top goals',                value: recap.top_3_website_goals },
     { label: 'Approach to copywriting',  value: recap.copy_approach },
     { label: 'Ideal website experience', value: recap.ideal_website_experience },
-    { label: 'Community connection',     value: recap.best_outreach_methods },
-    { label: 'How you speak to your audience', value: recap.audience_voice_style },
     { label: 'Words / tones to avoid',   value: recap.words_tones_to_avoid },
   ]
   const present = items.filter(i => i.value && i.value.trim())

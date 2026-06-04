@@ -9,6 +9,7 @@ import { X } from 'lucide-react'
 import { STAGE_LABELS, type PipelineStage } from '../../../lib/pipelinePromptsCore'
 import { SitemapPreview } from './previews/SitemapPreview'
 import { OutlinesPreview } from './previews/OutlinesPreview'
+import { SitemapCoveragePreview } from './previews/SitemapCoveragePreview'
 
 interface Props {
   stage:   PipelineStage
@@ -20,8 +21,9 @@ interface Props {
 // stages get their own renderers. Stages not listed fall through to
 // JSON-only mode (the toggle is hidden).
 const PREVIEWS: Partial<Record<PipelineStage, React.FC<{ output: Record<string, unknown> }>>> = {
-  sitemap:  SitemapPreview,
-  outlines: OutlinesPreview,
+  sitemap:          SitemapPreview,
+  sitemap_coverage: SitemapCoveragePreview,
+  outlines:         OutlinesPreview,
 }
 
 type View = 'readable' | 'json'

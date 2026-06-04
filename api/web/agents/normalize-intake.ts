@@ -18,7 +18,7 @@ import { resolvePromptServer } from './_lib/resolvePrompt'
 
 export const maxDuration = 300
 const MODEL = 'anthropic/claude-opus-4-7'
-const MAX_OUTPUT_TOKENS = 24000  // ~90 atoms + ~30 facts fits comfortably
+const MAX_OUTPUT_TOKENS = 32000  // bumped from 24k after Stage 0 truncated facts when ingesting full crawl topics
 
 const TEXT_FORMATS = new Set(['text/plain','text/markdown','text/x-markdown','text/csv'])
 const PDF_FORMAT = 'application/pdf'
@@ -45,7 +45,8 @@ const TOOL = {
             body:        { type: 'string' },
             metadata:    { type: 'object', additionalProperties: true },
             source_kind: { type: 'string', enum:
-              ['strategy_brief','brand_handoff','discovery_questionnaire','am_handoff','content_collection'] },
+              ['strategy_brief','brand_handoff','discovery_questionnaire','am_handoff',
+               'content_collection','site_crawl','existing_snippet'] },
             source_ref:  { type: 'string' },
             verbatim:    { type: 'boolean' },
             confidence:  { type: 'number', minimum: 0, maximum: 1 },
@@ -136,16 +137,34 @@ export default async function handler(req: any, res: any) {
   if (!project) return res.status(404).json({ error: 'Project not found' })
 
   const member = project.member as number
-  const [accountRes, brandRes, discoveryRes, intakeDocsRes] = await Promise.all([
+  const [accountRes, brandRes, discoveryRes, intakeDocsRes, topicsRes, contentSessionRes, snippetsRes] = await Promise.all([
     sb.from('strategy_account_progress').select('member, handoff_web_form, handoff_brand_form').eq('member', member).maybeSingle(),
     sb.from('strategy_brand_guides').select('*').eq('member', member).eq('is_published', true).order('last_updated_at', { ascending: false }).limit(1).maybeSingle(),
     sb.from('strategy_discovery_questionnaire').select('*').eq('member', member).order('submitted_at', { ascending: false }).limit(1).maybeSingle(),
     sb.from('web_intake_documents').select('*').eq('web_project_id', projectId).eq('archived', false),
+    // The crawler's per-topic inventory of the partner's current site —
+    // each row has passages (verbatim quotes from the live pages),
+    // source URLs, coverage status, and topic group. This is the
+    // primary source of "what does this church actually do today"
+    // information and was missing from Stage 0 before now.
+    sb.from('web_project_topics').select('*').eq('web_project_id', projectId),
+    // Partner-supplied content collection session — includes per-page
+    // preferences, sermon/event/group source-of-truth URLs, and the
+    // inventory_snapshot (frozen crawl). Mostly metadata around the
+    // crawl but adds partner intent on top of factual inventory.
+    sb.from('strategy_content_collection_sessions').select('*').eq('member', member).order('submitted_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle(),
+    // Project snippets already in the system (typically pre-resolved
+    // tokens like address/service-time). Each one is a piece of
+    // partner-confirmed content the binder can later use verbatim.
+    sb.from('web_project_snippets').select('token, label, expansion, description, tags, source').eq('web_project_id', projectId).eq('archived', false),
   ])
 
   const brandHandoffForm = accountRes.data?.handoff_brand_form ?? null
   const brandGuide       = brandRes.data ?? null
   const intakeDocs       = intakeDocsRes.data ?? []
+  const crawlTopics      = (topicsRes.data ?? []) as any[]
+  const contentSession   = contentSessionRes.data ?? null
+  const projectSnippets  = (snippetsRes.data ?? []) as any[]
 
   // Same minimum-intake pre-flight as Stage 1 (loosened to accept handoff_brand_form).
   const missing: string[] = []
@@ -179,6 +198,55 @@ export default async function handler(req: any, res: any) {
   }
   if (discoveryRes.data) {
     userBlocks.push({ type: 'text', text: `# Discovery questionnaire\n\`\`\`json\n${JSON.stringify(discoveryRes.data, null, 2)}\n\`\`\`` })
+  }
+  // Site crawl topics — the partner's live website, broken down by
+  // topic with verbatim passages and source URLs. This is intentionally
+  // surfaced BEFORE the intake files so the model treats it as ground
+  // truth for "what this church actually does today" and uses the
+  // intake files as the strategic + voice overlay.
+  if (crawlTopics.length > 0) {
+    // Strip very large/unhelpful nested storage blobs to keep token
+    // counts in check. Keep passages + items + source URLs which is
+    // where the real content lives.
+    const slim = crawlTopics
+      .filter(t => (t.passages && Array.isArray(t.passages) && t.passages.length > 0)
+                || (t.items && Array.isArray(t.items) && t.items.length > 0)
+                || (t.source_page_urls && t.source_page_urls.length > 0))
+      .map(t => ({
+        topic_key:        t.topic_key,
+        topic_label:      t.topic_label,
+        topic_group:      t.topic_group,
+        coverage_status:  t.coverage_status,
+        inventory_kind:   t.inventory_kind,
+        passages:         t.passages,
+        items:            t.items,
+        source_page_urls: t.source_page_urls,
+      }))
+    userBlocks.push({ type: 'text', text:
+      `# Site crawl topics (the partner's CURRENT website)\n` +
+      `Each entry is a topic surfaced by the crawler with verbatim passages from live pages. ` +
+      `Treat these as the canonical inventory of what the church does today — atomize every distinct ` +
+      `program, ministry, event, value, and offering you find here. The intake forms describe what ` +
+      `the redesign should accomplish; this is what the redesign has to actually represent.\n\n` +
+      `\`\`\`json\n${JSON.stringify(slim, null, 2)}\n\`\`\``
+    })
+  }
+  if (contentSession) {
+    // Drop the inventory_snapshot (already covered by crawlTopics) but
+    // keep partner-supplied preferences + per-section context.
+    const { inventory_snapshot: _ignored, ...sessionMeta } = contentSession as any
+    userBlocks.push({ type: 'text', text:
+      `# Content collection session (partner-supplied per-topic preferences)\n` +
+      `\`\`\`json\n${JSON.stringify(sessionMeta, null, 2)}\n\`\`\``
+    })
+  }
+  if (projectSnippets.length > 0) {
+    userBlocks.push({ type: 'text', text:
+      `# Existing project snippets (already-resolved partner content)\n` +
+      `Each snippet is partner-confirmed content. Atomize each one — it's a piece of the partner's ` +
+      `voice or factual story already locked in. Do not invent new content that contradicts these.\n\n` +
+      `\`\`\`json\n${JSON.stringify(projectSnippets, null, 2)}\n\`\`\``
+    })
   }
   for (const f of filesLoaded) {
     if (f.text) {

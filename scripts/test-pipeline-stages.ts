@@ -94,16 +94,22 @@ async function runStage0() {
   if (!project) throw new Error('Project not found')
 
   const member = project.member as number
-  const [accountRes, brandRes, discoveryRes, intakeDocsRes] = await Promise.all([
+  const [accountRes, brandRes, discoveryRes, intakeDocsRes, topicsRes, contentSessionRes, snippetsRes] = await Promise.all([
     sb.from('strategy_account_progress').select('member, handoff_web_form, handoff_brand_form').eq('member', member).maybeSingle(),
     sb.from('strategy_brand_guides').select('*').eq('member', member).eq('is_published', true).order('last_updated_at', { ascending: false }).limit(1).maybeSingle(),
     sb.from('strategy_discovery_questionnaire').select('*').eq('member', member).order('submitted_at', { ascending: false }).limit(1).maybeSingle(),
     sb.from('web_intake_documents').select('*').eq('web_project_id', PROJECT_ID).eq('archived', false),
+    sb.from('web_project_topics').select('*').eq('web_project_id', PROJECT_ID),
+    sb.from('strategy_content_collection_sessions').select('*').eq('member', member).order('submitted_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle(),
+    sb.from('web_project_snippets').select('token, label, expansion, description, tags, source').eq('web_project_id', PROJECT_ID).eq('archived', false),
   ])
 
   const filesLoaded = await loadIntakeFiles(intakeDocsRes.data ?? [])
   const brandHandoffForm = accountRes.data?.handoff_brand_form ?? null
   const brandGuide       = brandRes.data ?? null
+  const crawlTopics      = (topicsRes.data ?? []) as any[]
+  const contentSession   = contentSessionRes.data ?? null
+  const projectSnippets  = (snippetsRes.data ?? []) as any[]
 
   const userBlocks: any[] = []
   userBlocks.push({ type: 'text', text: `# Project\n${JSON.stringify({
@@ -120,6 +126,38 @@ async function runStage0() {
   if (discoveryRes.data) {
     userBlocks.push({ type: 'text', text: `# Discovery questionnaire\n\`\`\`json\n${JSON.stringify(discoveryRes.data, null, 2)}\n\`\`\`` })
   }
+  // Crawl topics — the partner's actual current website inventory.
+  if (crawlTopics.length > 0) {
+    const slim = crawlTopics
+      .filter(t => (Array.isArray(t.passages) && t.passages.length > 0)
+                || (Array.isArray(t.items) && t.items.length > 0)
+                || (Array.isArray(t.source_page_urls) && t.source_page_urls.length > 0))
+      .map(t => ({
+        topic_key: t.topic_key, topic_label: t.topic_label, topic_group: t.topic_group,
+        coverage_status: t.coverage_status, inventory_kind: t.inventory_kind,
+        passages: t.passages, items: t.items, source_page_urls: t.source_page_urls,
+      }))
+    userBlocks.push({ type: 'text', text:
+      `# Site crawl topics (the partner's CURRENT website)\n` +
+      `Each entry is a topic surfaced by the crawler with verbatim passages from live pages. ` +
+      `Treat these as the canonical inventory of what the church does today — atomize every distinct ` +
+      `program, ministry, event, value, and offering you find here.\n\n` +
+      `\`\`\`json\n${JSON.stringify(slim, null, 2)}\n\`\`\``
+    })
+  }
+  if (contentSession) {
+    const { inventory_snapshot: _ignored, ...sessionMeta } = contentSession as any
+    userBlocks.push({ type: 'text', text:
+      `# Content collection session (partner-supplied per-topic preferences)\n` +
+      `\`\`\`json\n${JSON.stringify(sessionMeta, null, 2)}\n\`\`\``
+    })
+  }
+  if (projectSnippets.length > 0) {
+    userBlocks.push({ type: 'text', text:
+      `# Existing project snippets (already-resolved partner content)\n` +
+      `\`\`\`json\n${JSON.stringify(projectSnippets, null, 2)}\n\`\`\``
+    })
+  }
   for (const f of filesLoaded) {
     if (f.text) userBlocks.push({ type: 'text', text: `# Intake file (${f.category}): ${f.filename}\n\n${f.text}` })
     else if (f.base64) userBlocks.push({ type: 'file', data: f.base64, mediaType: f.mime_type ?? 'application/pdf' })
@@ -134,7 +172,8 @@ async function runStage0() {
             ['persona','voice_rule','mission_statement','vision_statement','x_factor','denominational_signal','recommended_page','tone_descriptor','prose_snippet','voice_sample','ethos','story','value_statement'] },
           body: { type: 'string' }, metadata: { type: 'object', additionalProperties: true },
           source_kind: { type: 'string', enum:
-            ['strategy_brief','brand_handoff','discovery_questionnaire','am_handoff','content_collection'] },
+            ['strategy_brief','brand_handoff','discovery_questionnaire','am_handoff',
+             'content_collection','site_crawl','existing_snippet'] },
           source_ref: { type: 'string' }, verbatim: { type: 'boolean' },
           confidence: { type: 'number', minimum: 0, maximum: 1 },
         },
@@ -162,7 +201,7 @@ async function runStage0() {
   const t0 = Date.now()
   const result = await generateText({
     model: 'anthropic/claude-opus-4-7',
-    maxOutputTokens: 24000,
+    maxOutputTokens: 32000,
     system: FALLBACK_PROMPTS.normalize,
     messages: [{ role: 'user', content: userBlocks as any }],
     tools: {
@@ -227,6 +266,138 @@ async function runStage0() {
   console.log(`  facts inserted: ${factRows.length}`)
   if (out.summary?.gaps_noted?.length) {
     console.log(`  gaps noted:     ${out.summary.gaps_noted.length}`)
+  }
+}
+
+// ── STAGE 2.5 — Sitemap coverage audit ─────────────────────────
+// Reads Stage 0 atoms/facts + web_project_topics + Stage 2 sitemap.
+// Emits a per-topic audit at roadmap_state.stage_2_5 telling the
+// strategist which topics landed where and which audiences would
+// struggle to find their content with the current nav.
+async function runStage2_5() {
+  console.log(`\n━━━ Stage 2.5 — Sitemap coverage audit ━━━`)
+
+  const { data: project } = await sb.from('strategy_web_projects').select('*').eq('id', PROJECT_ID).maybeSingle()
+  if (!project) throw new Error('Project not found')
+  const roadmapState = (project.roadmap_state ?? {}) as any
+  if (!roadmapState.stage_2) throw new Error('Stage 2 sitemap must complete before the coverage audit can run.')
+
+  const [atomsRes, factsRes, topicsRes] = await Promise.all([
+    sb.from('content_atoms').select('id, topic, body, metadata').eq('web_project_id', PROJECT_ID),
+    sb.from('church_facts').select('id, topic, data').eq('web_project_id', PROJECT_ID),
+    sb.from('web_project_topics').select('topic_key, topic_label, topic_group, coverage_status, inventory_kind, passages, items, source_page_urls').eq('web_project_id', PROJECT_ID),
+  ])
+
+  const topicsSlim = (topicsRes.data ?? []).map((t: any) => ({
+    topic_key: t.topic_key, topic_label: t.topic_label, topic_group: t.topic_group,
+    coverage_status: t.coverage_status, inventory_kind: t.inventory_kind,
+    passage_count: Array.isArray(t.passages) ? t.passages.length : 0,
+    passage_sample: Array.isArray(t.passages) ? t.passages.slice(0, 2) : null,
+    items_count: Array.isArray(t.items) ? t.items.length : 0,
+    source_url_count: Array.isArray(t.source_page_urls) ? t.source_page_urls.length : 0,
+  }))
+
+  const stage2 = roadmapState.stage_2
+  const stage2Slim = {
+    pages:                stage2.pages,
+    header_nav:           stage2.header_nav,
+    footer_nav:           stage2.footer_nav,
+    absorbed_content:     stage2.absorbed_content,
+    vocabulary_decisions: stage2.vocabulary_decisions,
+    phase_summary:        stage2.phase_summary,
+  }
+
+  const TOOL_INPUT_SCHEMA: any = {
+    type: 'object',
+    properties: {
+      topic_audit: { type: 'array', items: { type: 'object',
+        properties: {
+          topic_key:        { type: 'string' }, topic_label: { type: 'string' }, topic_group: { type: 'string' },
+          atom_count:       { type: 'number' }, fact_count:  { type: 'number' },
+          crawl_passages:   { type: 'number' }, crawl_coverage: { type: ['string','null'] },
+          importance:       { type: 'string', enum: ['high','medium','low'] },
+          destination_kind: { type: 'string', enum: ['dedicated_page','anchored_section','nav_only','orphan','intentional_omission'] },
+          destination_slug:   { type: ['string','null'] },
+          destination_anchor: { type: ['string','null'] },
+          nav_reference:    { type: 'string', enum: ['header','footer','in_page_grid','breadcrumb_from_related','none'] },
+          findable_score:   { type: 'number', minimum: 0, maximum: 1 },
+          rationale:        { type: 'string' },
+        },
+        required: ['topic_key','topic_label','importance','destination_kind','nav_reference','findable_score','rationale'],
+      }},
+      summary: { type: 'object', properties: {
+        total_topics: { type: 'number' }, dedicated_pages: { type: 'number' },
+        anchored_sections: { type: 'number' }, nav_only: { type: 'number' },
+        orphans: { type: 'number' }, intentional_omissions: { type: 'number' },
+        gaps_count: { type: 'number' }, average_findable_score: { type: 'number' },
+        overall_coverage_score: { type: 'number' },
+      }, required: ['total_topics','gaps_count','overall_coverage_score'] },
+      gaps: { type: 'array', items: { type: 'object',
+        properties: {
+          topic_key: { type: 'string' }, topic_label: { type: 'string' },
+          importance: { type: 'string', enum: ['high','medium','low'] },
+          why_a_gap: { type: 'string' }, suggested_fix: { type: 'string' },
+        },
+        required: ['topic_key','topic_label','importance','why_a_gap','suggested_fix'],
+      }},
+      recommended_action: { type: 'string', enum: ['proceed_to_stage_3','redo_stage_2_with_gaps'] },
+    },
+    required: ['topic_audit','summary','gaps','recommended_action'],
+  }
+
+  const userText = [
+    `# Stage 0 — content atoms (${atomsRes.data?.length ?? 0})\n\`\`\`json\n${JSON.stringify(atomsRes.data ?? [], null, 2)}\n\`\`\``,
+    `# Stage 0 — church facts (${factsRes.data?.length ?? 0})\n\`\`\`json\n${JSON.stringify(factsRes.data ?? [], null, 2)}\n\`\`\``,
+    `# Stage 0 — crawl topics (${topicsSlim.length})\n\`\`\`json\n${JSON.stringify(topicsSlim, null, 2)}\n\`\`\``,
+    `# Stage 2 — sitemap\n\`\`\`json\n${JSON.stringify(stage2Slim, null, 2)}\n\`\`\``,
+  ].join('\n\n')
+
+  console.log('Calling anthropic/claude-opus-4-7…')
+  const t0 = Date.now()
+  const result = await generateText({
+    model: 'anthropic/claude-opus-4-7',
+    maxOutputTokens: 12000,
+    system: FALLBACK_PROMPTS.sitemap_coverage,
+    messages: [{ role: 'user', content: userText }],
+    tools: {
+      submit_sitemap_coverage: tool({
+        description: 'Submit the per-topic sitemap coverage audit.',
+        inputSchema: jsonSchema(TOOL_INPUT_SCHEMA),
+      }),
+    },
+    toolChoice: { type: 'tool', toolName: 'submit_sitemap_coverage' },
+  })
+  console.log(`Returned in ${((Date.now()-t0)/1000).toFixed(1)}s  · in=${result.usage?.inputTokens}  out=${result.usage?.outputTokens}`)
+
+  const out = result.toolCalls?.[0]?.input as any
+  if (!out) throw new Error('No tool call returned')
+
+  await sb.from('strategy_web_projects').update({
+    roadmap_state: {
+      ...(project.roadmap_state ?? {}),
+      stage_2_5: { ...out, _meta: {
+        status: 'draft',
+        generated_at: new Date().toISOString(),
+        model: 'anthropic/claude-opus-4-7',
+        usage: { input_tokens: result.usage?.inputTokens, output_tokens: result.usage?.outputTokens },
+        source: 'test-pipeline-stages script',
+      }},
+    },
+  }).eq('id', PROJECT_ID)
+
+  console.log(`\nStage 2.5 summary:`)
+  console.log(`  total topics:           ${out.summary?.total_topics ?? 0}`)
+  console.log(`  dedicated pages:        ${out.summary?.dedicated_pages ?? 0}`)
+  console.log(`  anchored sections:      ${out.summary?.anchored_sections ?? 0}`)
+  console.log(`  orphans:                ${out.summary?.orphans ?? 0}`)
+  console.log(`  gaps:                   ${out.summary?.gaps_count ?? out.gaps?.length ?? 0}`)
+  console.log(`  overall coverage score: ${(out.summary?.overall_coverage_score ?? 0).toFixed(2)}`)
+  console.log(`  recommendation:         ${out.recommended_action}`)
+  if (Array.isArray(out.gaps) && out.gaps.length > 0) {
+    console.log(`\nGaps:`)
+    for (const g of out.gaps) {
+      console.log(`  - [${g.importance}] ${g.topic_label}: ${g.why_a_gap}`)
+    }
   }
 }
 
@@ -1448,6 +1619,7 @@ async function runStage2(stage1: any) {
       if (!stage1) throw new Error('Stage 2 needs stage_1')
       await runStage2(stage1)
     }
+    if (want('sitemap_coverage','2.5')) await runStage2_5()
     if (want('page_inventory', '3')) await runStage3()
     if (want('outlines',       '4')) await runStage4()
     if (want('bind',           '5')) {

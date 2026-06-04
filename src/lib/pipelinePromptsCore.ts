@@ -14,6 +14,7 @@ export type PipelineStage =
   | 'normalize'
   | 'synthesize'
   | 'sitemap'
+  | 'sitemap_coverage'
   | 'page_inventory'
   | 'outlines'
   | 'bind'
@@ -25,6 +26,7 @@ export const PIPELINE_STAGES: PipelineStage[] = [
   'normalize',
   'synthesize',
   'sitemap',
+  'sitemap_coverage',
   'page_inventory',
   'outlines',
   'bind',
@@ -34,39 +36,46 @@ export const PIPELINE_STAGES: PipelineStage[] = [
 ]
 
 export const STAGE_LABELS: Record<PipelineStage, string> = {
-  normalize:      'Normalize intake',
-  synthesize:     'Synthesize',
-  sitemap:        'Sitemap + nav',
-  page_inventory: 'Page inventory',
-  outlines:       'Baseline outlines',
-  bind:           'Bind to Brixies',
-  coverage_qa:    'Coverage QA',
-  voice_pass:     'Voice pass',
-  final_qa:       'Final QA',
+  normalize:        'Normalize intake',
+  synthesize:       'Synthesize',
+  sitemap:          'Sitemap + nav',
+  sitemap_coverage: 'Sitemap coverage audit',
+  page_inventory:   'Page inventory',
+  outlines:         'Baseline outlines',
+  bind:             'Bind to Brixies',
+  coverage_qa:      'Coverage QA',
+  voice_pass:       'Voice pass',
+  final_qa:         'Final QA',
 }
 
+// Stage NUMBER keeps the existing numbering. The new sitemap_coverage
+// stage sits between Stage 2 and Stage 3 conceptually but is numbered
+// 2.5 so existing roadmap_state.stage_N keys remain stable.
+// We store it under roadmap_state.stage_2_5 (snake-case-friendly).
 export const STAGE_NUMBER: Record<PipelineStage, number> = {
-  normalize:      0,
-  synthesize:     1,
-  sitemap:        2,
-  page_inventory: 3,
-  outlines:       4,
-  bind:           5,
-  coverage_qa:    6,
-  voice_pass:     7,
-  final_qa:       8,
+  normalize:        0,
+  synthesize:       1,
+  sitemap:          2,
+  sitemap_coverage: 2.5,
+  page_inventory:   3,
+  outlines:         4,
+  bind:             5,
+  coverage_qa:      6,
+  voice_pass:       7,
+  final_qa:         8,
 }
 
 export const STAGE_DESCRIPTIONS: Record<PipelineStage, string> = {
-  normalize:      'Atomize raw intake — strategy brief, brand handoff, discovery, content collection — into content_atoms + church_facts that later stages route to specific pages.',
-  synthesize:     'Read discovery, brief, content inventory + collection. Solidify goals, page count, SEO/AEO/GEO targets.',
-  sitemap:        'Draft a unique navigation + sitemap structure from the page list.',
-  page_inventory: 'Map every content atom to a primary page (with optional reference pages and CTA placement).',
-  outlines:       'Per page, draft plain-prose section outlines + suggest display options (cards, columns, accordion, …).',
-  bind:           'Pick a Brixies template per section, rephrase the outline content to fit slot character budgets.',
-  coverage_qa:    'Audit: did every content atom land somewhere? Surface orphans for strategist review.',
-  voice_pass:     'Element-by-element brand-voice rewrite of every text + richtext slot.',
-  final_qa:       'Cross-page voice + consistency + merge-field + nav-vs-pages audit.',
+  normalize:        'Atomize raw intake — site crawl, strategy brief, brand handoff, discovery, content collection, snippets — into content_atoms + church_facts that later stages route to specific pages.',
+  synthesize:       'Read discovery, brief, content inventory + collection. Solidify goals, page count, SEO/AEO/GEO targets.',
+  sitemap:          'Draft a unique navigation + sitemap structure from the page list.',
+  sitemap_coverage: 'Cross-check every Stage 0 topic against the Stage 2 sitemap. Surface absorbed-but-invisible audiences, orphaned topics, and weak anchor-nav before bind work begins.',
+  page_inventory:   'Map every content atom to a primary page (with optional reference pages and CTA placement).',
+  outlines:         'Per page, draft plain-prose section outlines + suggest display options (cards, columns, accordion, …).',
+  bind:             'Pick a Brixies template per section, rephrase the outline content to fit slot character budgets.',
+  coverage_qa:      'Audit: did every content atom land somewhere? Surface orphans for strategist review.',
+  voice_pass:       'Element-by-element brand-voice rewrite of every text + richtext slot.',
+  final_qa:         'Cross-page voice + consistency + merge-field + nav-vs-pages audit.',
 }
 
 /** Marker the migration writes; resolver treats this as "not yet
@@ -75,9 +84,33 @@ export const PLACEHOLDER_MARKER = 'placeholder'
 
 export const FALLBACK_PROMPTS: Record<PipelineStage, string> = {
   normalize: `You are the Intake Normalizer. You read every available intake source
-for a church website project — strategy brief, brand handoff form, discovery
-questionnaire, content collection, AM handoff notes — and atomize them into
-two outputs that downstream stages route to specific pages and sections:
+for a church website project and atomize them into two outputs that downstream
+stages route to specific pages and sections.
+
+Sources you will receive (in priority order):
+1. Site crawl topics — the partner's CURRENT live website, broken down by
+   topic with verbatim passages and source URLs. This is the canonical
+   inventory of what this church actually does today. Atomize EVERY
+   distinct program, ministry, event, value, offering, contact method,
+   and named experience you find here. If the crawl shows the partner
+   has a Christmas Shoe Drive, a Hunger Walk, a young adults program, a
+   volunteer onboarding flow, a discipleship pathway, or an active blog
+   — each of those is one or more atoms.
+2. Existing project snippets — partner-confirmed, already-resolved
+   content tokens (address, service time, named programs). One atom per
+   snippet; treat as verbatim ground truth.
+3. Content collection session — partner-supplied preferences about how
+   sermons/events/groups should be presented, source-of-truth URLs.
+4. Strategy brief, brand handoff form, discovery questionnaire, AM
+   handoff notes — the strategic + voice overlay describing what the
+   redesign should ACCOMPLISH (vs. what already exists).
+5. Brand guide / brand handoff — voice characteristics, banned phrases,
+   tone samples.
+
+When the strategic intake (4-5) and the live crawl (1) describe the same
+thing differently, capture both atoms. The crawl tells you what the
+partner has built; the intake tells you what they want to be known for.
+Downstream stages decide what to keep.
 
 1. content_atoms — prose snippets. Each atom is ONE COMPLETE UNIT OF MEANING
    that could land on its own in a section. Examples: a mission statement, a
@@ -137,8 +170,9 @@ Required outputs:
   geographic anchors)
 - sources_used (which intake files informed each decision)`,
 
-  sitemap: `You are the Sitemap Drafter. Given the strategy extraction from Stage 1,
-produce a lean nav structure and full page list via the submit_sitemap tool.
+  sitemap: `You are the Sitemap Drafter. Given the strategy extraction from Stage 1
+and the content_atoms / church_facts surfaced by Stage 0, produce a lean
+nav structure and full page list via the submit_sitemap tool.
 
 Rules:
 - Every page in stage_1.total_page_count must appear in your output
@@ -154,8 +188,147 @@ Rules:
 - CS (content service) flags — note any pages needing follow-up content
   collection from the partner
 
-On a redo request, preserve every page/slug/nav item that the strategist
-didn't explicitly call out for change.`,
+# Coverage rules — every audience must be findable
+
+Every topic surfaced in Stage 0 (especially crawl topics with rich
+passages) must have a destination — either its own page OR a clearly
+named, anchor-linked section on a hub page that the audience for that
+content can navigate to.
+
+- A topic with "rich" or "covered" coverage_status MUST be either its
+  own page OR an anchored section on a hub. Topics with multiple
+  source URLs (3+) and meaningful passages almost always deserve their
+  own page; consolidate only when the topic is genuinely thin.
+- Do NOT consolidate high-importance topics. The following ALWAYS get
+  their own page when the crawl shows any meaningful coverage:
+    serve / volunteer    — people looking to plug in need a clear door
+    missions / outreach  — community-facing programs are partner brand
+    next_steps / connect — the partner's discipleship path can be
+                           RENAMED but its content can never be dropped
+    events / calendar    — distinct from blog/sermons and has its own
+                           recurring audience
+    plan_visit           — first-impression critical
+  If the crawl is genuinely sparse on one of these (no passages, 0-1
+  URL), you may absorb it — but document the rationale and STILL
+  ensure the absorbing page has a named anchor section so people
+  searching for that topic can reach it.
+
+# Absorption rules — when consolidating
+
+When you do absorb a smaller topic into a hub page (e.g. Paradox Young
+Adults into /ministries), three things must be true:
+
+1. The absorbed topic's name appears in the hub page's section list,
+   with the same vocabulary the audience uses to find it.
+2. The hub page's slug + an anchor (e.g. /ministries#young-adults) is
+   added to the relevant nav surface — header, footer, or a related
+   page's grid — so the absorbed audience has a discoverable path. A
+   topic that is "absorbed but invisible in nav" is effectively lost.
+3. The absorbed_content entry includes:
+     content_item     — the topic being absorbed
+     absorbed_into    — the hub page's slug
+     anchor_id        — the section anchor on that hub (required)
+     nav_reference    — where in nav this anchor is exposed (required)
+     rationale        — why a dedicated page wasn't warranted
+
+# Vocabulary, not omission
+
+"Next Steps" as a phrase may not fit the partner's voice register —
+that's a vocabulary_decision, not a content decision. NEVER drop the
+underlying content (discipleship pathway, ways to plug in, how to join
+a group). Pick a more on-voice term ("Get connected," "Belong,"
+"Find your way in," etc.) and apply it consistently — but the page
+or anchor section MUST exist if the crawl shows any of that content.
+
+The same rule applies to any topic where the partner's vocabulary
+clashes with the brand voice: rename, don't omit.
+
+On a redo request, preserve every page/slug/nav item that the
+strategist didn't explicitly call out for change.`,
+
+  sitemap_coverage: `You are the Sitemap Coverage Auditor. You receive:
+
+- The Stage 0 normalized intake (content_atoms + church_facts)
+- The Stage 0 crawl topics (web_project_topics) with their passage counts
+  and coverage_status
+- The Stage 2 sitemap (pages, header_nav, footer_nav, absorbed_content,
+  vocabulary_decisions)
+
+Your job is to answer ONE question per topic: where will the audience for
+this topic land on the new site, and is that destination reachable?
+
+For every distinct topic surfaced by Stage 0 (group atoms/facts by
+topic_group + topic_key when the crawl supplied that; otherwise infer
+the topic from atom metadata), emit one row in topic_audit:
+
+  {
+    topic_key, topic_label, topic_group,
+    atom_count, fact_count,
+    crawl_passages,           // from web_project_topics if available
+    crawl_coverage,           // 'rich' | 'covered' | 'partial' | 'sparse' | 'gap' | null
+    importance,               // 'high' | 'medium' | 'low' — see rules below
+    destination_kind,         // 'dedicated_page' | 'anchored_section' | 'nav_only' | 'orphan' | 'intentional_omission'
+    destination_slug,         // e.g. 'ministries' or null
+    destination_anchor,       // e.g. 'young-adults' or null
+    nav_reference,            // 'header' | 'footer' | 'in_page_grid' | 'breadcrumb_from_related' | 'none'
+    findable_score,           // 0-1: how easily a person searching for this topic could find it
+    rationale
+  }
+
+# Importance rules
+
+A topic is HIGH importance if any of:
+- crawl_coverage is 'rich' or 'covered' (the partner invested in it)
+- topic_key in {'serve','missions','plan_visit','next_steps','events',
+  'connect_groups','giving','sermons','sundays','kids','students',
+  'college','beliefs','location_contact'} regardless of crawl coverage
+- Stage 0 atoms include any persona whose voice_resonance maps to this
+  topic
+- The topic is named in Stage 1's project_goals or x_factor
+
+A topic is MEDIUM importance if:
+- crawl_coverage is 'partial'
+- It's a supporting program (worship_music, care, testimonies, blog,
+  newsletter) without being central to the partner's brand
+
+A topic is LOW importance if:
+- crawl_coverage is 'sparse' or null AND the topic isn't called out in
+  Stage 1's priorities
+
+# Findability + destination rules
+
+- A HIGH-importance topic MUST land on a dedicated_page OR an
+  anchored_section with nav_reference != 'none'. Otherwise findable_score
+  ≤ 0.5 and the topic shows up in the gaps list below.
+- An anchored_section requires BOTH a destination_anchor and a
+  nav_reference (header dropdown, footer column, or a strong in-page
+  grid link from a related page). Anchored sections with 'none' for
+  nav_reference get findable_score ≤ 0.4 and surface as a gap.
+- 'intentional_omission' is for topics the strategist or Stage 2
+  explicitly rejected — vocabulary_decisions banning "Next Steps" is
+  NOT an omission of the underlying content, so do not mark it that
+  way. A real omission would be e.g. a defunct ministry the partner
+  asked to retire.
+
+# Outputs
+
+Submit via submit_sitemap_coverage:
+
+- topic_audit[]: one row per topic, as above
+- summary: {
+    total_topics, dedicated_pages, anchored_sections, nav_only,
+    orphans, intentional_omissions, gaps_count,
+    average_findable_score,
+    overall_coverage_score  // 0-1, weighted by importance
+  }
+- gaps[]: every HIGH or MEDIUM importance topic with findable_score <
+  0.6, with: topic_key, why_a_gap, suggested_fix (either "promote to
+  dedicated page X" or "add anchor X on page Y, expose via nav surface
+  Z"). The strategist will use this list to redo Stage 2 if needed.
+
+If overall_coverage_score < 0.8 OR gaps[] is non-empty, recommend a
+redo of Stage 2 with the gap list as redo_context. Otherwise the
+sitemap is clear to proceed to Stage 3.`,
 
   page_inventory: `You are the Page Inventory Mapper. For every content atom (prose snippet,
 fact, persona note) and every church fact (service time, ministry, staff

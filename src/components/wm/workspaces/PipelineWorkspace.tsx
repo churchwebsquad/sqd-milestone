@@ -32,15 +32,16 @@ interface Props {
 
 // Map each stage to its API endpoint slug.
 const STAGE_ENDPOINTS: Record<PipelineStage, string> = {
-  normalize:      '/api/web/agents/normalize-intake',
-  synthesize:     '/api/web/agents/extract-strategy',
-  sitemap:        '/api/web/agents/draft-sitemap',
-  page_inventory: '/api/web/agents/page-inventory',
-  outlines:       '/api/web/agents/page-outlines',
-  bind:           '/api/web/agents/auto-bind-page',
-  coverage_qa:    '/api/web/agents/coverage-audit',
-  voice_pass:     '/api/web/agents/voice-pass',
-  final_qa:       '/api/web/agents/final-qa',
+  normalize:        '/api/web/agents/normalize-intake',
+  synthesize:       '/api/web/agents/extract-strategy',
+  sitemap:          '/api/web/agents/draft-sitemap',
+  sitemap_coverage: '/api/web/agents/sitemap-coverage',
+  page_inventory:   '/api/web/agents/page-inventory',
+  outlines:         '/api/web/agents/page-outlines',
+  bind:             '/api/web/agents/auto-bind-page',
+  coverage_qa:      '/api/web/agents/coverage-audit',
+  voice_pass:       '/api/web/agents/voice-pass',
+  final_qa:         '/api/web/agents/final-qa',
 }
 
 export function PipelineWorkspace({ project, onChange }: Props) {
@@ -58,8 +59,10 @@ export function PipelineWorkspace({ project, onChange }: Props) {
   const roadmapState = (project.roadmap_state ?? {}) as Record<string, any>
 
   // Helpers to read output + status from roadmap_state.stage_N.
+  // Stage numbers can be fractional (e.g. sitemap_coverage = 2.5);
+  // we store those as stage_2_5 (underscore, JSONB-key-safe).
   const getOutput = useCallback((s: PipelineStage): Record<string, any> | null => {
-    const key = `stage_${STAGE_NUMBER[s]}`
+    const key = `stage_${String(STAGE_NUMBER[s]).replace('.', '_')}`
     const v = roadmapState[key]
     return v && typeof v === 'object' ? v : null
   }, [roadmapState])
@@ -111,6 +114,50 @@ export function PipelineWorkspace({ project, onChange }: Props) {
     }
   }, [project.id, onChange])
 
+  // Cycle back to Stage 2 with a coverage-driven redo prompt. Called
+  // from Stage 2.5 (gaps) and Stage 6 (orphans) when the strategist
+  // wants to bounce findings to the sitemap drafter. Reflows the
+  // downstream stages once Stage 2 re-runs.
+  const cycleBackToSitemap = useCallback(async (kind: 'gaps' | 'orphans') => {
+    const sourceKey = kind === 'gaps' ? 'stage_2_5' : 'stage_6'
+    const source   = (roadmapState[sourceKey] ?? {}) as any
+    const items: any[] = kind === 'gaps'
+      ? (Array.isArray(source.gaps) ? source.gaps : [])
+      : (Array.isArray(source.orphaned) ? source.orphaned : [])
+    if (items.length === 0) {
+      setError(`No ${kind} to cycle back. Run the audit first.`)
+      return
+    }
+    const lines: string[] = []
+    if (kind === 'gaps') {
+      lines.push(
+        `The Sitemap Coverage Audit (Stage 2.5) surfaced the following gaps. Each one is a topic with content but no clear home or no findable nav path. Update the sitemap so each gap is addressed — either by promoting it to a dedicated page, adding a clearly-anchored section on a hub page with a real nav surface, or documenting why it was intentionally rejected. Do NOT drop the underlying content.`,
+        ``,
+      )
+      for (const g of items) {
+        lines.push(
+          `- ${g.topic_label ?? g.topic_key ?? '(unknown topic)'} [${g.importance ?? 'unknown'}]`,
+          `  Why a gap: ${g.why_a_gap ?? '—'}`,
+          `  Suggested fix: ${g.suggested_fix ?? '—'}`,
+        )
+      }
+    } else {
+      lines.push(
+        `The Coverage QA (Stage 6) surfaced the following orphaned atoms — content that never landed in any bound section. Update the sitemap so each orphan has a home: promote to a new page, add an anchored section on an existing page, or document why the orphan is intentionally archived.`,
+        ``,
+      )
+      for (const o of items) {
+        lines.push(
+          `- ${o.source_kind ?? 'atom'} ${o.source_id ?? ''}`,
+          `  Why orphan: ${o.rationale ?? '—'}`,
+          `  Suggested remedy: ${o.suggested_remedy ?? '—'}`,
+        )
+      }
+    }
+    const redoContext = lines.join('\n')
+    await runStage('sitemap', redoContext)
+  }, [roadmapState, runStage])
+
   // Voice-pass two-step: the agent's first call writes the rewrite
   // manifest; this second call (apply=true) walks the manifest and
   // writes new_value back into web_sections.field_values, skipping
@@ -142,7 +189,7 @@ export function PipelineWorkspace({ project, onChange }: Props) {
   }, [project.id, onChange])
 
   const approveStage = useCallback(async (stage: PipelineStage) => {
-    const key = `stage_${STAGE_NUMBER[stage]}`
+    const key = `stage_${String(STAGE_NUMBER[stage]).replace('.', '_')}`
     const current = roadmapState[key] ?? {}
     const next = { ...current, _meta: { ...(current._meta ?? {}), status: 'approved' } }
     const { error: err } = await supabase
@@ -209,6 +256,14 @@ export function PipelineWorkspace({ project, onChange }: Props) {
             const hasManifest = isVoice && s.output
               && Array.isArray((s.output as any).rewrites)
               && (s.output as any).rewrites.length > 0
+
+            // Cycle-back: bounce gaps/orphans to Stage 2 as redo_context.
+            const isCoverageAudit = s.stage === 'sitemap_coverage'
+            const isCoverageQa    = s.stage === 'coverage_qa'
+            const auditOut = s.output as any
+            const gapCount    = isCoverageAudit && Array.isArray(auditOut?.gaps)     ? auditOut.gaps.length     : 0
+            const orphanCount = isCoverageQa    && Array.isArray(auditOut?.orphaned) ? auditOut.orphaned.length : 0
+
             const extraAction = isVoice && hasManifest
               ? {
                   label: applyingVoice
@@ -217,6 +272,20 @@ export function PipelineWorkspace({ project, onChange }: Props) {
                   title: 'Write the manifest into web_sections.field_values. Fields marked override are skipped.',
                   loading: applyingVoice,
                   onClick: applyVoicePass,
+                }
+              : (isCoverageAudit && gapCount > 0)
+              ? {
+                  label: `Cycle back to Stage 2 with ${gapCount} gap${gapCount === 1 ? '' : 's'}`,
+                  title: 'Sends every gap as redo_context to the Sitemap Drafter. Downstream stages will need re-run.',
+                  loading: running === 'sitemap',
+                  onClick: () => cycleBackToSitemap('gaps'),
+                }
+              : (isCoverageQa && orphanCount > 0)
+              ? {
+                  label: `Cycle back to Stage 2 with ${orphanCount} orphan${orphanCount === 1 ? '' : 's'}`,
+                  title: 'Sends every orphaned atom as redo_context to the Sitemap Drafter. Downstream stages will need re-run.',
+                  loading: running === 'sitemap',
+                  onClick: () => cycleBackToSitemap('orphans'),
                 }
               : undefined
             return (
