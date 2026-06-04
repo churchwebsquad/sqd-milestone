@@ -230,6 +230,41 @@ For each section:
   External URLs (http/https, mailto:, tel:) are fine and don't need to
   match the slug list.
 
+- NEVER invent contact details — emails, phone numbers, physical
+  addresses, mailing addresses. Use ONLY values that appear verbatim in
+  the intake (discovery questionnaire, brand handoff, content
+  collection, strategy brief). If the intake doesn't have a contact
+  method for the slot, leave the slot empty. Inventing a plausible-
+  looking email like "info@example.com" is worse than leaving the
+  slot blank — the wrong domain looks legitimate and gets shipped.
+
+- When a button slot has no real destination URL, OMIT the button
+  from the array entirely rather than emitting a button with an
+  empty url string. A button with no destination doesn't help the
+  visitor and clutters the layout. If the template requires the
+  slot, leave just one button with a real URL and skip the others.
+
+- NEVER emit a button or card link that points to the same page the
+  section lives on. Self-linking CTAs ("Kids & Youth Overview" on the
+  /paradox-kids page, "Visit" button on /plan-a-visit, etc.) read as
+  a layout bug. Either route the CTA to a related page, or drop it.
+
+- Use the vocabulary the Stage 2 sitemap settled on. The user content
+  includes a vocabulary_decisions object — when Stage 2 picked "Visit"
+  as the nav label for /plan-a-visit, button labels and card titles
+  referencing that destination should also say "Visit" (not "Plan a
+  Visit"). Same for "Sermon Library" vs "Listen to a Sermon", etc.
+  Body prose can still vary, but anything that functions as a label
+  or nav-equivalent should match.
+
+- Avoid time-bound copy that goes stale within a few months. Do not
+  date-stamp content ("As of May 2026..."), do not use elapsed-time
+  phrasing ("Eleven weeks into the series", "Three months in"), and
+  prefer durable framing ("Walking through the Gospel of Matthew")
+  over present-tense temporal qualifiers ("Right now, we're in...").
+  If the partner gave a current sermon series, name the series — not
+  the week number.
+
 - Per page, emit a page_seo object alongside section_picks:
     seo: { title, meta_description, focus_keywords[] }
     aeo: { answer_intent, structured_qa[] }   // optional
