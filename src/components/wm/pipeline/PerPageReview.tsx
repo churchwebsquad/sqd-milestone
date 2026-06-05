@@ -333,6 +333,29 @@ function PageMeta({ stage4Page }: { stage4Page?: Stage4Page }) {
   )
 }
 
+/** Compose the effective field_values for a section by overlaying
+ *  active voice-pass rewrites on top of the current web_sections
+ *  field_values. Omitted rewrites pass through; user_value beats
+ *  new_value beats the bound original. The result is what the page
+ *  WILL look like after Apply runs — i.e. the strategist sees the
+ *  final state without having to click Apply first. */
+function effectiveValues(
+  bound: WebSectionRow | undefined,
+  rewrites: Stage7Rewrite[],
+): { values: Record<string, unknown>; pending: Set<string> } {
+  const out = { ...(bound?.field_values ?? {}) }
+  const pending = new Set<string>()
+  for (const r of rewrites) {
+    if (r.omitted === true) continue
+    if (!r.field_key) continue
+    const v = typeof r.user_value === 'string' && r.user_value.length > 0 ? r.user_value : r.new_value
+    if (v == null) continue
+    out[r.field_key] = v
+    pending.add(r.field_key)
+  }
+  return { values: out, pending }
+}
+
 function SectionRow({
   index, outline, bound, rewrites, findings,
 }: {
@@ -342,13 +365,20 @@ function SectionRow({
   rewrites: Stage7Rewrite[]
   findings: Stage8Finding[]
 }) {
-  const [expanded, setExpanded] = useState(false)
+  // Lead with rendered copy. Sections are expanded by default so the
+  // strategist can scan writing quality without clicking every section
+  // open. Strategy backbone + raw values collapse below.
+  const [expanded, setExpanded] = useState(true)
+  const [showBackbone, setShowBackbone] = useState(false)
+  const [showRewrites, setShowRewrites] = useState(false)
+  const [showRaw,      setShowRaw]      = useState(false)
   const sectionLabel = outline?.section_id
     ?? (bound ? `section-${index + 1}` : `section-${index + 1}`)
   const sectionJob = outline?.section_job
   const requiredCount = outline?.required_messages?.length ?? 0
   const activeRewriteCount = rewrites.filter(r => r.omitted !== true).length
   const findingsCount = findings.length
+  const { values: effective, pending } = effectiveValues(bound, rewrites)
 
   return (
     <div className="rounded border border-wm-border bg-wm-bg-elevated">
@@ -392,21 +422,66 @@ function SectionRow({
       </button>
 
       {expanded && (
-        <div className="border-t border-wm-border px-3 py-2 space-y-3 bg-wm-bg/30">
-          {/* Contract block (Stage 4) */}
-          {outline && <OutlineBlock outline={outline} />}
+        <div className="border-t border-wm-border bg-wm-bg/30">
+          {/* LEAD: Rendered final copy (effective values).
+              This is what the strategist actually wants to see — the
+              section as it WILL appear after Apply, with active manifest
+              rewrites overlaid on bound field_values. */}
+          {bound && (
+            <div className="px-4 py-4 border-b border-wm-border bg-white/40">
+              <RenderedCopy values={effective} pending={pending} />
+            </div>
+          )}
 
-          {/* Bound copy block (web_sections.field_values) */}
-          {bound && <BoundCopyBlock bound={bound} />}
+          {/* QA findings stay visible at the top below copy — these
+              are the things the strategist NEEDS to see, not collapse. */}
+          {findings.length > 0 && (
+            <div className="px-3 py-2 border-b border-wm-border">
+              <FindingsBlock title="QA findings on this section" findings={findings} />
+            </div>
+          )}
 
-          {/* Voice rewrites block (Stage 7) */}
-          {rewrites.length > 0 && <RewritesBlock rewrites={rewrites} />}
-
-          {/* QA findings for this section (Stage 8) */}
-          {findings.length > 0 && <FindingsBlock title="Section QA findings" findings={findings} />}
+          {/* Everything below collapses by default — strategy backbone
+              + raw voice rewrites + raw field_values. Toggles, not
+              auto-expand, so the page reads as copy first. */}
+          <div className="px-3 py-2 space-y-1.5">
+            {outline && (
+              <CollapseToggle
+                open={showBackbone}
+                onToggle={() => setShowBackbone(o => !o)}
+                label="Strategy backbone"
+                count={requiredCount + (outline.cta ? 1 : 0)}
+                countLabel="contract items"
+              >
+                <OutlineBlock outline={outline} />
+              </CollapseToggle>
+            )}
+            {rewrites.length > 0 && (
+              <CollapseToggle
+                open={showRewrites}
+                onToggle={() => setShowRewrites(o => !o)}
+                label="Voice-pass diff (before → after)"
+                count={activeRewriteCount}
+                countLabel="active rewrites"
+              >
+                <RewritesBlock rewrites={rewrites} />
+              </CollapseToggle>
+            )}
+            {bound && (
+              <CollapseToggle
+                open={showRaw}
+                onToggle={() => setShowRaw(o => !o)}
+                label="Raw field_values (debug)"
+                count={Object.keys(bound.field_values ?? {}).length}
+                countLabel="slots"
+              >
+                <BoundCopyBlock bound={bound} />
+              </CollapseToggle>
+            )}
+          </div>
 
           {!outline && !bound && (
-            <p className="text-[11px] text-wm-text-muted italic">
+            <p className="px-3 py-3 text-[11px] text-wm-text-muted italic">
               No outline, no bound copy, no rewrites yet for this section position.
             </p>
           )}
@@ -652,6 +727,233 @@ function ChipRow({ label, items, tone }: { label: string; items: string[]; tone:
           </span>
         ))}
       </div>
+    </div>
+  )
+}
+
+/** Renders a section's effective field_values as styled text — heading
+ *  as a display title, tagline/eyebrow as caption, description/body as
+ *  paragraph, buttons as buttons. Slots with pending voice-pass rewrites
+ *  get a small "pending" dot so the strategist sees what's not yet
+ *  applied. Structured slots (cards, grid_row, accordion, etc.) render
+ *  as a flexible mini-grid so the user can scan repeated items, not as
+ *  raw JSON. */
+function RenderedCopy({
+  values, pending,
+}: {
+  values: Record<string, unknown>
+  pending: Set<string>
+}) {
+  // Pluck known slots (best-effort — Brixies field naming is consistent
+  // enough that this covers ~95% of sections). Unrecognized string
+  // slots fall into "other" and render as a small caption row.
+  const get = (k: string): string | null => {
+    const v = values[k]
+    return typeof v === 'string' && v.trim().length > 0 ? v : null
+  }
+  const eyebrow     = get('eyebrow') ?? get('tagline')
+  const heading     = get('heading') ?? get('title') ?? get('h1') ?? get('h2')
+  const subhead     = get('subhead') ?? get('subheading') ?? (heading && get('tagline') !== eyebrow ? get('tagline') : null)
+  const description = get('description') ?? get('accent_description') ?? get('intro')
+  const body        = get('body') ?? get('rich_text') ?? get('long_text') ?? get('content')
+  // Lift structured-slot items so cards/rows preview visually.
+  const buttons  = pickArrayOfObjects(values, ['buttons'])
+  const cards    = pickArrayOfObjects(values, ['cards', 'card_group', 'grid_row.items'])
+  const rows     = pickArrayOfObjects(values, ['row_list', 'list'])
+  const accordion = pickArrayOfObjects(values, ['accordion_items', 'accordion_left', 'accordion_right', 'faqs', 'faq_items'])
+  const stepGroup = pickArrayOfObjects(values, ['steps', 'step_group'])
+  // Catch-all: any string slot not in the explicit list. Shown small
+  // and last so the strategist can spot a stray field, but rendered
+  // copy stays clean.
+  const known = new Set([
+    'eyebrow','tagline','heading','title','h1','h2',
+    'subhead','subheading',
+    'description','accent_description','intro',
+    'body','rich_text','long_text','content',
+    'buttons','cards','card_group','grid_row',
+    'row_list','list',
+    'accordion_items','accordion_left','accordion_right','faqs','faq_items',
+    'steps','step_group',
+  ])
+  const otherStrings = Object.entries(values)
+    .filter(([k, v]) => !known.has(k) && typeof v === 'string' && v.trim().length > 0) as Array<[string, string]>
+
+  const dot = (key: string) => pending.has(key)
+    ? <span title="Pending voice-pass rewrite (not yet applied to web_sections)"
+            className="inline-block w-1.5 h-1.5 rounded-full bg-wm-accent mr-1 align-middle" />
+    : null
+
+  return (
+    <div className="space-y-3">
+      {(eyebrow || pending.has('eyebrow') || pending.has('tagline')) && (
+        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">
+          {dot('eyebrow')}{dot('tagline')}
+          {eyebrow ?? <span className="italic text-wm-text-subtle">(no eyebrow)</span>}
+        </p>
+      )}
+      {(heading || pending.has('heading') || pending.has('title')) && (
+        <h2 className="text-[20px] md:text-[22px] font-semibold text-wm-text leading-tight">
+          {dot('heading')}{dot('title')}{dot('h1')}{dot('h2')}
+          {heading ?? <span className="italic text-wm-text-subtle text-[14px]">(no heading)</span>}
+        </h2>
+      )}
+      {subhead && (
+        <p className="text-[14px] text-wm-text-muted leading-snug">
+          {dot('subhead')}{dot('subheading')}
+          {subhead}
+        </p>
+      )}
+      {description && (
+        <p className="text-[13px] text-wm-text leading-relaxed whitespace-pre-wrap">
+          {dot('description')}{dot('accent_description')}{dot('intro')}
+          {description}
+        </p>
+      )}
+      {body && (
+        <div className="text-[13px] text-wm-text leading-relaxed whitespace-pre-wrap">
+          {dot('body')}{dot('rich_text')}{dot('long_text')}{dot('content')}
+          {body}
+        </div>
+      )}
+      {buttons.length > 0 && (
+        <div className="flex flex-wrap gap-2 pt-1">
+          {dot('buttons')}
+          {buttons.map((b, i) => {
+            const label = typeof b.label === 'string' ? b.label : '(button)'
+            const url   = typeof b.url   === 'string' ? b.url   : null
+            return (
+              <span key={i} className="inline-flex items-baseline gap-1.5 px-3 py-1.5 rounded-full bg-wm-text text-white text-[11px] font-semibold">
+                {label}
+                {url && <code className="text-[9px] font-mono opacity-70">{url}</code>}
+              </span>
+            )
+          })}
+        </div>
+      )}
+      {cards.length > 0 && (
+        <MiniList label="Cards" items={cards} fieldOrder={['title','heading','description','body']} />
+      )}
+      {rows.length > 0 && (
+        <MiniList label="Rows" items={rows} fieldOrder={['title','heading','description','body']} />
+      )}
+      {accordion.length > 0 && (
+        <MiniList label="Accordion items" items={accordion} fieldOrder={['title','question','description','answer','body']} />
+      )}
+      {stepGroup.length > 0 && (
+        <MiniList label="Steps" items={stepGroup} fieldOrder={['title','heading','description','body']} numbered />
+      )}
+      {otherStrings.length > 0 && (
+        <details className="text-[11px]">
+          <summary className="text-[9px] uppercase tracking-widest font-bold text-wm-text-subtle cursor-pointer">
+            Other slots ({otherStrings.length})
+          </summary>
+          <dl className="space-y-1 mt-1">
+            {otherStrings.map(([k, v]) => (
+              <div key={k} className="grid grid-cols-[100px_1fr] gap-2 text-[11px]">
+                <dt className="font-mono text-wm-text-subtle truncate">{dot(k)}{k}</dt>
+                <dd className="text-wm-text-muted leading-snug whitespace-pre-wrap">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      )}
+      {/* Empty-state — section bound but every known slot is empty */}
+      {!eyebrow && !heading && !subhead && !description && !body
+        && buttons.length === 0 && cards.length === 0 && rows.length === 0
+        && accordion.length === 0 && stepGroup.length === 0
+        && otherStrings.length === 0 && (
+        <p className="text-[12px] text-wm-text-muted italic">
+          Section is bound but every slot is empty. The strategist needs to fill content here.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function pickArrayOfObjects(
+  values: Record<string, unknown>,
+  keys: string[],
+): Array<Record<string, unknown>> {
+  for (const k of keys) {
+    // Support "a.b" notation for nested picks (e.g. grid_row.items).
+    let v: unknown = values
+    for (const segment of k.split('.')) {
+      v = v && typeof v === 'object' ? (v as Record<string, unknown>)[segment] : undefined
+    }
+    if (Array.isArray(v) && v.every(item => item && typeof item === 'object')) {
+      return v as Array<Record<string, unknown>>
+    }
+  }
+  return []
+}
+
+function MiniList({
+  label, items, fieldOrder, numbered,
+}: {
+  label:      string
+  items:      Array<Record<string, unknown>>
+  fieldOrder: string[]
+  numbered?:  boolean
+}) {
+  return (
+    <div>
+      <p className="text-[9px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">
+        {label} ({items.length})
+      </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        {items.map((item, i) => {
+          const title = fieldOrder.map(f => item[f]).find(v => typeof v === 'string' && v.length > 0) as string | undefined
+          const body  = fieldOrder.slice(fieldOrder.indexOf('description')).map(f => item[f])
+            .find(v => typeof v === 'string' && v.length > 0) as string | undefined
+          return (
+            <div key={i} className="rounded border border-wm-border bg-wm-bg-elevated/60 px-2.5 py-1.5">
+              <p className="text-[12px] font-semibold text-wm-text leading-snug">
+                {numbered && <span className="text-wm-text-subtle font-mono text-[10px] mr-1">{i + 1}.</span>}
+                {title ?? <span className="italic text-wm-text-subtle">(no title)</span>}
+              </p>
+              {body && body !== title && (
+                <p className="text-[11px] text-wm-text-muted leading-snug mt-0.5">{body}</p>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function CollapseToggle({
+  open, onToggle, label, count, countLabel, children,
+}: {
+  open:        boolean
+  onToggle:    () => void
+  label:       string
+  count?:      number
+  countLabel?: string
+  children:    React.ReactNode
+}) {
+  return (
+    <div className="rounded border border-wm-border bg-wm-bg-elevated/40">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full px-2.5 py-1.5 flex items-baseline gap-2 text-left hover:bg-wm-bg-hover"
+      >
+        {open
+          ? <ChevronDown size={10} className="shrink-0 text-wm-text-muted self-center" />
+          : <ChevronRight size={10} className="shrink-0 text-wm-text-muted self-center" />}
+        <span className="text-[11px] font-semibold text-wm-text">{label}</span>
+        {typeof count === 'number' && count > 0 && (
+          <span className="text-[10px] text-wm-text-muted">
+            {count}{countLabel ? ` ${countLabel}` : ''}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="px-3 pb-2.5 pt-1.5 border-t border-wm-border bg-wm-bg/30">
+          {children}
+        </div>
+      )}
     </div>
   )
 }

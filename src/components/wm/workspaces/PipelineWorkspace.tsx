@@ -67,11 +67,15 @@ export function PipelineWorkspace({ project, onChange }: Props) {
     .map(s => s.trim())
     .filter(Boolean)
   const SCOPE_AWARE: PipelineStage[] = ['outlines', 'voice_pass']
-  /** Stage-major (default) shows every stage as a card with all pages
-   *  rolled up; page-major shows every page as a card with its
-   *  contract → bound copy → voice → QA collapsed under it. The
-   *  toggle lives in the page header. */
-  const [view, setView] = useState<'stages' | 'pages'>('stages')
+  /** Page-major (default) shows every page as a card leading with the
+   *  RENDERED FINAL COPY (effective values = current bound copy + active
+   *  manifest rewrites overlaid). Strategy backbone + voice-pass diff
+   *  + raw values collapse below.
+   *
+   *  Stage-major ("Engine") is the original pipeline view — every stage
+   *  as a card. Kept for power-user access; the strategist's primary
+   *  surface is the page view. */
+  const [view, setView] = useState<'stages' | 'pages'>('pages')
 
   const roadmapState = (project.roadmap_state ?? {}) as Record<string, any>
 
@@ -341,29 +345,22 @@ export function PipelineWorkspace({ project, onChange }: Props) {
         <header className="mb-2 flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0 flex-1">
             <p className="text-[11px] uppercase tracking-widest font-bold text-wm-accent-strong">Copywriting pipeline</p>
-            <h1 className="text-2xl font-semibold text-wm-text mt-1">Eight focused stages, end to end</h1>
+            <h1 className="text-2xl font-semibold text-wm-text mt-1">
+              {view === 'pages' ? 'Pages, ready to review' : 'Pipeline engine'}
+            </h1>
             <p className="text-sm text-wm-text-muted mt-1">
-              {view === 'stages'
-                ? <>Each stage runs as its own model call with an editable system prompt.
-                    Approve a stage to unlock the next one. Edit a project addendum to tune a
-                    stage for this project without changing the global default.</>
-                : <>One card per page — contract, bound copy, voice rewrites, and QA findings
-                    collapsed together for review. Switch back to <strong>By stage</strong> to
-                    run pipeline stages.</>}
+              {view === 'pages'
+                ? <>Each card is one page of the site. Open a page to read the
+                    final copy as it will appear — including any pending voice-pass
+                    rewrites not yet applied. Switch to <strong>Engine</strong> to
+                    run pipeline stages.</>
+                : <>Pipeline internals — every stage as a card with its model call,
+                    prompt, and output. Run stages, refine, and approve here. Switch
+                    to <strong>Pages</strong> to review the rendered copy.</>}
             </p>
           </div>
-          {/* View toggle — stage-major vs page-major. */}
+          {/* View toggle — Pages (user-centric, default) vs Engine (pipeline internals). */}
           <div className="shrink-0 inline-flex rounded-md border border-wm-border bg-wm-bg p-0.5 text-[11px] font-semibold">
-            <button
-              type="button"
-              onClick={() => setView('stages')}
-              className={[
-                'inline-flex items-center gap-1 px-2.5 py-1 rounded',
-                view === 'stages' ? 'bg-wm-accent text-white' : 'text-wm-text-muted hover:text-wm-text',
-              ].join(' ')}
-            >
-              <Layers size={11} /> By stage
-            </button>
             <button
               type="button"
               onClick={() => setView('pages')}
@@ -372,7 +369,17 @@ export function PipelineWorkspace({ project, onChange }: Props) {
                 view === 'pages' ? 'bg-wm-accent text-white' : 'text-wm-text-muted hover:text-wm-text',
               ].join(' ')}
             >
-              <FileText size={11} /> By page
+              <FileText size={11} /> Pages
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('stages')}
+              className={[
+                'inline-flex items-center gap-1 px-2.5 py-1 rounded',
+                view === 'stages' ? 'bg-wm-accent text-white' : 'text-wm-text-muted hover:text-wm-text',
+              ].join(' ')}
+            >
+              <Layers size={11} /> Engine
             </button>
           </div>
         </header>
