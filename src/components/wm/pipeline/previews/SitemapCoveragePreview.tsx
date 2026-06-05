@@ -69,8 +69,20 @@ interface VoiceAuditRow {
   current_label?:   string
   suggested_label?: string
   issue?:           'banned_term' | 'vocabulary_mismatch' | 'generic_when_owned'
+                  | 'insider_term' | 'inward_pointing'
   source_quote?:    string
   severity?:        'high' | 'medium' | 'low'
+}
+
+interface GroupingAuditRow {
+  nav_path?:               string
+  parent_label?:           string
+  inferred_parent_intent?: string
+  children_intents?:       string[]
+  issue?:                  'mixed_intent' | 'parent_label_mismatch' | 'thin_group' | 'clean'
+  severity?:               'high' | 'medium' | 'low'
+  rationale?:              string
+  suggested_fix?:          string
 }
 
 interface CoverageData {
@@ -79,19 +91,23 @@ interface CoverageData {
   gaps?:               Gap[]
   identity_audit?:     IdentityAuditRow[]
   identity_gaps?:      IdentityGap[]
+  grouping_audit?:     GroupingAuditRow[]
   voice_audit?:        VoiceAuditRow[]
   recommended_action?: 'proceed_to_stage_3' | 'redo_stage_2_with_gaps'
 }
 
 export function SitemapCoveragePreview({ output }: { output: Record<string, unknown> }) {
-  const data          = output as CoverageData
-  const audit         = data.topic_audit ?? []
-  const gaps          = data.gaps ?? []
-  const identityAudit = data.identity_audit ?? []
-  const identityGaps  = data.identity_gaps ?? []
-  const voiceAudit    = data.voice_audit ?? []
-  const summary       = data.summary ?? {}
-  const action        = data.recommended_action
+  const data           = output as CoverageData
+  const audit          = data.topic_audit ?? []
+  const gaps           = data.gaps ?? []
+  const identityAudit  = data.identity_audit ?? []
+  const identityGaps   = data.identity_gaps ?? []
+  const groupingAudit  = data.grouping_audit ?? []
+  const voiceAudit     = data.voice_audit ?? []
+  const summary        = data.summary ?? {}
+  const action         = data.recommended_action
+
+  const groupingFlagged = groupingAudit.filter(g => g.severity === 'high' || g.severity === 'medium')
 
   return (
     <div className="space-y-6">
@@ -99,8 +115,9 @@ export function SitemapCoveragePreview({ output }: { output: Record<string, unkn
 
       <Summary summary={summary} />
 
-      {gaps.length > 0          && <GapsPanel gaps={gaps} />}
-      {identityGaps.length > 0  && <IdentityGapsPanel gaps={identityGaps} />}
+      {gaps.length > 0           && <GapsPanel gaps={gaps} />}
+      {identityGaps.length > 0   && <IdentityGapsPanel gaps={identityGaps} />}
+      {groupingFlagged.length > 0 && <GroupingAuditPanel rows={groupingFlagged} />}
       {voiceAudit.some(v => v.severity === 'high' || v.severity === 'medium') &&
         <VoiceAuditPanel rows={voiceAudit} />}
 
@@ -227,6 +244,66 @@ function IdentityGapsPanel({ gaps }: { gaps: IdentityGap[] }) {
         ))}
       </ul>
     </Section>
+  )
+}
+
+function GroupingAuditPanel({ rows }: { rows: GroupingAuditRow[] }) {
+  const high   = rows.filter(r => r.severity === 'high')
+  const medium = rows.filter(r => r.severity === 'medium')
+  return (
+    <Section label={`Grouping audit — dropdown intent matches (${rows.length})`}>
+      {high.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-danger mb-1.5">
+            High severity ({high.length})
+          </p>
+          <ul className="space-y-2">{high.map((r, i) => <GroupingRow key={`h-${i}`} row={r} tone="danger" />)}</ul>
+        </div>
+      )}
+      {medium.length > 0 && (
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-warning mb-1.5">
+            Medium severity ({medium.length})
+          </p>
+          <ul className="space-y-2">{medium.map((r, i) => <GroupingRow key={`m-${i}`} row={r} tone="warning" />)}</ul>
+        </div>
+      )}
+    </Section>
+  )
+}
+
+function GroupingRow({ row, tone }: { row: GroupingAuditRow; tone: 'danger' | 'warning' }) {
+  return (
+    <li className={[
+      'rounded-md border px-3 py-2',
+      tone === 'danger'  ? 'border-wm-danger/30 bg-wm-danger-bg/40' :
+                           'border-wm-warning/30 bg-wm-warning-bg/40',
+    ].join(' ')}>
+      <div className="flex items-baseline gap-2 mb-1 flex-wrap">
+        <span className="text-[10px] font-mono text-wm-text-subtle">{row.nav_path}</span>
+        <span className="text-[12px] font-semibold text-wm-text">&ldquo;{row.parent_label}&rdquo;</span>
+        {row.issue && <Tag tone={tone === 'danger' ? 'warning' : 'muted'}>{row.issue.replace(/_/g,' ')}</Tag>}
+        {row.inferred_parent_intent && (
+          <Tag tone="muted">parent: {row.inferred_parent_intent.replace(/_/g,' ')}</Tag>
+        )}
+      </div>
+      {row.children_intents && row.children_intents.length > 0 && (
+        <p className="text-[11px] text-wm-text-muted leading-snug">
+          <span className="text-wm-text-subtle">Children:</span>{' '}
+          {row.children_intents.map(c => c.replace(/_/g,' ')).join(' · ')}
+        </p>
+      )}
+      {row.rationale && (
+        <p className="text-[12px] text-wm-text leading-relaxed mt-1">
+          <span className="text-wm-text-subtle">Why:</span> {row.rationale}
+        </p>
+      )}
+      {row.suggested_fix && (
+        <p className="text-[12px] text-wm-text leading-relaxed mt-1">
+          <span className="text-wm-text-subtle">Suggested fix:</span> {row.suggested_fix}
+        </p>
+      )}
+    </li>
   )
 }
 

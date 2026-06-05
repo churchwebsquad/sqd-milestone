@@ -337,9 +337,103 @@ missional
 - Blended → pick the dominant for the site spine; borrow another
   model's structure on a single page where its job differs.
 
+# GROUPING CORRECTNESS — every dropdown serves one intent
+
+Every dropdown group has an INTENT TYPE. Children inside a group must
+share that intent. Parent labels must signal it.
+
+Intent types:
+
+  commitment_pathway — what a visitor DOES next to grow/belong/serve:
+    Discussion Groups · Volunteer · Serve Redlands · Baptism ·
+    Classes · Care · Next Steps · Membership
+  current_state — what's happening now / the present-tense life of the
+    church: Events · Stories/Testimonies · Blog/News · Newsletter
+  audience_pages — age-band / life-stage ministries, each its own page:
+    Kids · Youth · Young Adults · ParaTots · adult ministries
+  identity_trust — who-we-are / why-trust-us:
+    Our Story · Beliefs · Leadership/Staff · Open & Affirming · Locations
+  media_archive — content artifacts:
+    Sermons · Discussion Guides · Sermon Blog
+  giving_conversion — money:
+    Give/Donate
+  mandatory_visitor — first-impression-critical (always top-level):
+    Plan a Visit · Sermons
+
+Mixing intents inside a single dropdown is a defect. Examples of what
+NOT to do:
+  - Putting Volunteer or Serve Redlands under a "Ministries" parent
+    that also holds Kids/Youth/Young Adults. Volunteer is
+    commitment_pathway; Kids is audience_pages. Different audiences,
+    different intents.
+  - Putting Events under a "Sermons" or media archive parent. Events
+    is current_state; sermons are media_archive.
+  - Putting Discussion Groups under "Sermons". Discussion Groups is
+    commitment_pathway; sermons are media_archive.
+  - Putting Next Steps under "About" or "Who We Are". About is
+    identity_trust about the CHURCH; Next Steps is commitment_pathway
+    for the VISITOR.
+
+Before submitting:
+1. For every group in header_nav and footer_nav, name its intent_type
+   (single value).
+2. Walk its children. Every child must belong to that intent_type.
+   If a child doesn't fit, MOVE IT to the right group, don't compromise
+   the parent's intent.
+3. If a parent has fewer than 3 children of the same intent, flatten
+   it to a standalone page or merge with another group of the same
+   intent.
+4. Emit "intent_type" and a "grouping_rationale" per group (which
+   intent_type it serves + why these children cluster).
+
+# Voice-aware default rejection — when NOT to use this prompt's labels
+
+The doc's default labels (Ministries, Get Involved, About, Connect,
+Watch, etc.) are FALLBACKS — they exist so you have something to put
+when the church hasn't supplied an own phrase. Default labels must be
+REJECTED when the partner's voice signals against them.
+
+Reject the default label and pick an alternative when ANY of these
+hold:
+
+- The partner's voice profile (Stage 1 voice_characteristics,
+  signature_phrases, or tone_examples_avoid) explicitly rules out
+  insider/churchy vocabulary. "Ministries" is the classic insider
+  term — for skeptic-facing churches (any persona named "skeptic,"
+  "exile," "burned by church," or similar), prefer "Community,"
+  "Get Connected," or skip the parent label entirely.
+- The partner's signature_phrases include an owned alternative for a
+  category. If the partner has a phrase for "what comes after
+  Saturday," use IT, not "Next Steps."
+- Default label is inward-pointing for a church that's actively
+  fighting inward-pointing language. "Who We Are" is technically a
+  doc fallback for the About dropdown, but a church preaching
+  against "we" language should use "About," "Our Story," or skip
+  the dropdown parent and make the About page standalone.
+
+Common owned-alternative pairings to consider when picking parent
+labels (still subject to RULE-0):
+
+  Default              Voice-aware alternatives
+  -------              ------------------------
+  Ministries           Community · Family Life · Find Your People
+  Get Involved         Belong · Find Your Way In · Get Connected
+  Next Steps           Belong · Get Connected · Find Your Place ·
+                       Start the Conversation
+  About                Our Story · Behind Paradox · Why We're Here
+  Who We Are           Avoid for "anti-we" voices. Use About as a
+                       standalone page or pick a non-self-referential
+                       group label.
+  Watch                Sermons · Messages · The Conversation
+  Outreach             Serve Redlands · For the City · In the Community
+
+Document the swap in vocabulary_decisions with the source quote
+from voice_characteristics or signature_phrases that justified it.
+
 # GROUPING CONVENTIONS — how pages cluster
 
-Defaults below; RULE-0 (church's own labels) and GLOBAL NAV RULES
+Defaults below; RULE-0 (church's own labels), GLOBAL NAV RULES, and
+the GROUPING CORRECTNESS + voice-aware rejection rules above all
 override.
 
 ## main_level — NEVER buried in a dropdown
@@ -454,7 +548,105 @@ Shell-selection rules:
 - Same groupings regardless of shell — only rendering changes.
 - Visible top-level stays ≤ 6, except offcanvas (intentionally
   shows fewer; everything lives in the overlay).
-- [Visit] and [Give] stay visible in the header in ALL shells.
+- [Visit] and [Give]/[Donate] stay visible in the header in ALL shells.
+
+# nav_presentation — populate the shell you picked
+
+Picking the shell is step 1. Step 2 is laying out the shell —
+otherwise downstream stages can't actually build the nav UI. After
+you settle on the groupings, emit a "nav_presentation" block
+describing how the visible nav maps to the chosen shell.
+
+## When shell = standard_dropdowns
+
+  nav_presentation: {
+    shell: 'standard_dropdowns',
+    visible_top_level: [   // 5-6 items, in display order
+      { kind, label, slug?, group_label? }
+    ],
+    standard_dropdowns: {
+      groups: [
+        {
+          group_label,
+          children: [{ label, slug, one_line_description? }]
+        }
+      ]
+    }
+  }
+
+## When shell = mega_menu
+
+  nav_presentation: {
+    shell: 'megamenu',
+    visible_top_level: [...same shape as above],
+    megamenu_panels: [
+      {
+        triggered_by: '<top-level label>',
+        columns: [
+          {
+            heading,                // e.g. 'Find Your People'
+            description,            // one line, optional
+            links: [
+              { label, slug, one_line_description }
+            ]
+          }
+        ],
+        featured_tile: {            // optional but recommended
+          kind: 'image_cta' | 'sermon_card' | 'event_card' | 'persona_callout',
+          heading,
+          body,
+          link_label,
+          link_slug
+        }
+      }
+    ]
+  }
+
+Megamenu rules:
+- Each column carries 3-5 links MAX. If a column hits 6, split it.
+- Every link gets a one-line description (better UX + SEO).
+- Each panel should have a featured_tile when the partner has a
+  strong x_factor concept that earns spotlight (e.g. Open &
+  Affirming card in the Who We Are panel).
+
+## When shell = offcanvas_flyout
+
+  nav_presentation: {
+    shell: 'offcanvas',
+    visible_top_level: [
+      // intentionally lean — usually just persistent buttons +
+      // hamburger trigger
+      { kind: 'button', label: 'Visit', slug: 'plan-a-visit' },
+      { kind: 'button', label: 'Donate', slug: 'donate' }
+    ],
+    offcanvas_overlay: {
+      hero_message?,              // optional one-line greeter
+      sections: [
+        {
+          section_label,          // e.g. 'Visit Paradox', 'Community'
+          links: [{ label, slug }]
+        }
+      ],
+      surfaced_facts: {           // appears in the overlay alongside nav
+        service_times?: string,
+        address?: string,
+        socials?: [{ platform, url }],
+        search?: boolean
+      }
+    }
+  }
+
+Offcanvas rules:
+- visible_top_level is INTENTIONALLY 1-3 items (usually [Visit] +
+  [Donate] + hamburger).
+- The overlay holds the FULL nav, grouped into sections matching the
+  groupings you already settled on.
+- Surface service times, address, socials, search in the overlay —
+  these are why offcanvas works for visitor-heavy sites.
+
+Document your shell pick in "presentation_rationale" (1-2 sentences:
+why this shell fits the partner's page count, voice, and primary
+audience).
 
 # Absorption rules — keep absorbed audiences findable
 
@@ -667,12 +859,67 @@ Any identity item with destination_kind='unsupported' (or with
 findable_score < 0.6) goes into identity_gaps[] with importance
 defaulted to HIGH and a suggested_fix.
 
-# Voice audit — nav labels vs the church's actual vocabulary
+# Grouping audit — every dropdown must serve one intent
+
+Walk every group in stage_2.header_nav and stage_2.footer_nav. For
+each group:
+
+1. Identify the parent label's IMPLIED intent_type from its name:
+     commitment_pathway · current_state · audience_pages ·
+     identity_trust · media_archive · giving_conversion ·
+     mandatory_visitor · misc
+2. Inspect each child's intent_type:
+     - Volunteer / Serve / Discussion Groups / Baptism / Classes /
+       Care / Next Steps / Membership → commitment_pathway
+     - Events / Stories / Blog / Newsletter → current_state
+     - Kids / Youth / Young Adults / ParaTots / age-band ministries
+       → audience_pages
+     - Our Story / About / Beliefs / Leadership / Staff / Locations
+       / Open & Affirming → identity_trust
+     - Sermons / Discussion Guides / Sermon Blog → media_archive
+     - Give / Donate → giving_conversion
+3. Flag any group where children mix multiple intent_types.
+4. Flag any group where the parent's implied intent doesn't match
+   the children's actual intent (e.g., parent label "Ministries"
+   (audience_pages) holding Volunteer (commitment_pathway) and
+   Serve Redlands (commitment_pathway)).
+5. Flag groups with fewer than 3 same-intent children (should be
+   flattened or merged per the doc).
+
+Emit grouping_audit[] with one row per group analyzed:
+
+  {
+    nav_path,                 // e.g. 'header_nav.Ministries'
+    parent_label,
+    inferred_parent_intent,   // single intent_type the parent name implies
+    children_intents,         // array of intent_types observed in children
+    issue: 'mixed_intent' | 'parent_label_mismatch' | 'thin_group'
+         | 'clean',
+    severity: 'high' | 'medium' | 'low',
+    rationale,
+    suggested_fix             // e.g. 'Move Volunteer + Serve Redlands
+                              //  to a Connect/Get Involved group;
+                              //  keep Ministries for audience pages only'
+  }
+
+Severity rubric:
+- HIGH for mixed_intent or parent_label_mismatch when the offending
+  group is in header_nav (visitor-facing primary surface). Bad
+  grouping at the top level is a structural defect.
+- MEDIUM for the same issues in footer_nav (visitor-facing but lower
+  priority).
+- LOW for thin_group (cosmetic — easy fix).
+
+grouping_gaps[] is the HIGH+MEDIUM subset of grouping_audit.
+
+# Voice audit — labels vs the church's actual vocabulary
 
 The sitemap is one of the partner's most visible voice surfaces. A
 default "Give" label on a church that says "Donate" is a voice
 violation, not a styling choice. Walk every label in header_nav (top
-level + children) and footer_nav.
+level AND children) and footer_nav. Walk PARENT labels as well as
+children — "Ministries" as a parent label is itself a voice
+decision.
 
 For each label, check:
 
@@ -691,30 +938,52 @@ For each label, check:
 3. Generic-when-owned — when the label is generic ("Get Involved")
    and the partner has an owned phrase ("Find Your Way In", "Join
    the Mission") in Stage 1's signature_moves or voice samples.
+4. Insider/churchy term against an outsider-leaning voice — extends
+   beyond verb-level mismatches to CATEGORY labels. "Ministries,"
+   "Outreach," "Fellowship," "Stewardship," "Discipleship," "Body
+   life" are insider terms. If the partner's persona profile
+   includes a "skeptic," "burned by church," "exile," or "new to
+   faith" archetype, OR the voice_characteristics explicitly
+   include tone_examples_avoid that flag insider language, those
+   labels need a voice-aware alternative even if they're
+   technically grammatical. "Ministries" → "Community" or
+   "Family Life" or skip the parent label and flatten. "Outreach" →
+   "Serve Redlands" / "For the City" / "In the Community."
+5. Inward-pointing label on outsider-facing voice — "Who We Are" /
+   "About Us" / "Our Heart" point inward. For a partner whose voice
+   actively de-centers "we" and addresses "you" (the visitor),
+   prefer "About," "Our Story" as a standalone page, or a non-
+   self-referential group label. The doc lists "Who We Are" as a
+   valid fallback but it's MEDIUM-severity for visitor-centered
+   voices.
 
 Emit voice_audit[] with one row per label that fails any check:
 
   {
-    nav_path,                 // e.g. "header_nav.give" or
-                              //      "footer_nav.Connect.contact"
+    nav_path,                 // e.g. "header_nav.Ministries" or
+                              //      "header_nav.Ministries.kids"
     current_label,
-    suggested_label,          // the partner's actual term
-    issue: 'banned_term' | 'vocabulary_mismatch' | 'generic_when_owned',
+    suggested_label,          // the partner's actual term, or a
+                              // voice-aware alternative when the
+                              // doc default fails
+    issue: 'banned_term' | 'vocabulary_mismatch' | 'generic_when_owned'
+         | 'insider_term' | 'inward_pointing',
     source_quote,             // the Stage 0/1 evidence
     severity: 'high' | 'medium' | 'low'
   }
 
 Severity rubric:
-- HIGH if the issue is banned_term (the church's voice rules out the
-  verb), OR if vocabulary_mismatch is backed by LIVE-SITE EVIDENCE —
-  i.e. the crawl shows the partner using the alternative term as a
-  page title, button label, or recurring noun in their site copy
-  ("Donate" appears as the existing /donate page title and in atom
-  passages). Live-site terminology is the partner's lived
-  vocabulary; using a different word in their new nav is a brand
-  violation, not a stylistic option.
-- MEDIUM for vocabulary_mismatch where the alternative term appears
-  in brand intake/voice samples but not yet on the live site.
+- HIGH if banned_term (the church's voice rules out the verb), OR
+  vocabulary_mismatch backed by LIVE-SITE EVIDENCE (crawl shows the
+  partner using the alternative term as a page title, button, or
+  recurring noun in their site copy — "Donate" at /donate, etc.),
+  OR insider_term when the partner has a NAMED skeptic/exile/burned-
+  by-church persona that the term would alienate.
+- MEDIUM for vocabulary_mismatch where the alternative appears in
+  brand intake/voice samples but not yet on the live site, OR for
+  inward_pointing labels on visitor-centered voices, OR for
+  insider_term when no persona profile flags it but the voice
+  profile leans outsider-friendly.
 - LOW for generic_when_owned (an owned phrase exists but the generic
   label is still acceptable for outsider clarity per RULE-0).
 
@@ -723,13 +992,15 @@ Severity rubric:
 recommended_action = 'redo_stage_2_with_gaps' if ANY of:
 - gaps[] (HIGH topic_audit) non-empty
 - identity_gaps[] non-empty
+- grouping_audit[] contains any 'high' severity entries
 - voice_audit[] contains any 'high' severity entries
 
 Otherwise 'proceed_to_stage_3'.
 
-A clean Stage 2 has: zero HIGH topic gaps, zero identity gaps, and
-zero HIGH voice violations. MEDIUM voice notes and LOW topic nits are
-surfaced for review but don't trigger redo.`,
+A clean Stage 2 has: zero HIGH topic gaps, zero identity gaps, zero
+HIGH grouping defects, and zero HIGH voice violations. MEDIUM and
+LOW findings across any dimension surface for strategist review but
+don't trigger redo.`,
 
   page_inventory: `You are the Page Inventory Mapper. For every content atom (prose snippet,
 fact, persona note) and every church fact (service time, ministry, staff

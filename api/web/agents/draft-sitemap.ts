@@ -466,7 +466,7 @@ export const SITEMAP_TOOL = {
   description: 'Submit the proposed strategic sitemap for this church website project.',
   input_schema: {
     type: 'object' as const,
-    required: ['nav_strategy', 'nav_voice_register', 'nav_pattern', 'voice_audit', 'phase_summary', 'pages', 'header_nav', 'footer_nav', 'content_coverage_audit', 'sources_used'],
+    required: ['nav_strategy', 'nav_voice_register', 'nav_pattern', 'voice_audit', 'phase_summary', 'pages', 'header_nav', 'footer_nav', 'content_coverage_audit', 'sources_used', 'nav_presentation'],
     properties: {
       nav_strategy: {
         type: 'string',
@@ -544,7 +544,7 @@ export const SITEMAP_TOOL = {
       },
       header_nav: {
         type: 'array',
-        description: 'The primary header navigation tree. Items can be pages (kind="page") or groupings (kind="group") with children. Max 6 top-level items.',
+        description: 'The primary header navigation tree. Items can be pages (kind="page") or groupings (kind="group") with children. Max 6 top-level items. Every kind="group" entry MUST carry intent_type + grouping_rationale so Stage 2.5 can audit grouping correctness.',
         items: {
           type: 'object',
           required: ['label', 'kind'],
@@ -553,6 +553,17 @@ export const SITEMAP_TOOL = {
             kind: { type: 'string', enum: ['page', 'group'] },
             slug: { type: 'string', description: 'Required when kind=page.' },
             rationale: { type: 'string' },
+            intent_type: {
+              type: 'string',
+              enum: ['commitment_pathway','current_state','audience_pages',
+                     'identity_trust','media_archive','giving_conversion',
+                     'mandatory_visitor','misc'],
+              description: 'Required when kind=group. Names the single intent the group serves. Children must share this intent.',
+            },
+            grouping_rationale: {
+              type: 'string',
+              description: 'Required when kind=group. Why these specific children cluster under this intent.',
+            },
             children: {
               type: 'array',
               items: {
@@ -663,6 +674,141 @@ export const SITEMAP_TOOL = {
           brand_handoff: { type: 'string' },
           strategy_brief: { type: 'string' },
           conflicts_resolved: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      nav_presentation: {
+        type: 'object',
+        description: 'How the chosen nav_pattern is actually laid out — visible items + per-shell config. See the prompt for shell-specific schema.',
+        required: ['shell','visible_top_level','presentation_rationale'],
+        properties: {
+          shell: { type: 'string',
+            enum: ['standard_dropdowns','megamenu','offcanvas'] },
+          presentation_rationale: { type: 'string',
+            description: '1-2 sentences: why this shell fits the partner.' },
+          visible_top_level: {
+            type: 'array',
+            description: 'Items visible in the header in their display order. For offcanvas this is intentionally lean (1-3 items + hamburger).',
+            items: {
+              type: 'object',
+              required: ['kind','label'],
+              properties: {
+                kind:        { type: 'string', enum: ['page','group','button','hamburger'] },
+                label:       { type: 'string' },
+                slug:        { type: 'string' },
+                group_label: { type: 'string', description: 'Refers to the header_nav group this represents.' },
+              },
+            },
+          },
+          standard_dropdowns: {
+            type: 'object',
+            description: 'Required when shell=standard_dropdowns.',
+            properties: {
+              groups: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['group_label','children'],
+                  properties: {
+                    group_label: { type: 'string' },
+                    children: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['label','slug'],
+                        properties: {
+                          label:                { type: 'string' },
+                          slug:                 { type: 'string' },
+                          one_line_description: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          megamenu_panels: {
+            type: 'array',
+            description: 'Required when shell=megamenu. One panel per top-level dropdown.',
+            items: {
+              type: 'object',
+              required: ['triggered_by','columns'],
+              properties: {
+                triggered_by: { type: 'string', description: 'Top-level label that opens this panel.' },
+                columns: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    required: ['heading','links'],
+                    properties: {
+                      heading:     { type: 'string' },
+                      description: { type: 'string' },
+                      links: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          required: ['label','slug'],
+                          properties: {
+                            label:                { type: 'string' },
+                            slug:                 { type: 'string' },
+                            one_line_description: { type: 'string' },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+                featured_tile: {
+                  type: 'object',
+                  properties: {
+                    kind:       { type: 'string', enum: ['image_cta','sermon_card','event_card','persona_callout'] },
+                    heading:    { type: 'string' },
+                    body:       { type: 'string' },
+                    link_label: { type: 'string' },
+                    link_slug:  { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          offcanvas_overlay: {
+            type: 'object',
+            description: 'Required when shell=offcanvas. The full nav lives inside this overlay.',
+            properties: {
+              hero_message: { type: 'string' },
+              sections: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['section_label','links'],
+                  properties: {
+                    section_label: { type: 'string' },
+                    links: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['label','slug'],
+                        properties: {
+                          label: { type: 'string' },
+                          slug:  { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+              surfaced_facts: {
+                type: 'object',
+                properties: {
+                  service_times: { type: 'string' },
+                  address:       { type: 'string' },
+                  socials:       { type: 'array', items: { type: 'object',
+                    properties: { platform: { type: 'string' }, url: { type: 'string' } } } },
+                  search:        { type: 'boolean' },
+                },
+              },
+            },
+          },
         },
       },
     },
