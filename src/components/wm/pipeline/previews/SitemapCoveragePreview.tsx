@@ -85,15 +85,27 @@ interface GroupingAuditRow {
   suggested_fix?:          string
 }
 
+interface HeaderCompletenessRow {
+  category?:          'mandatory_visitor' | 'media_archive' | 'commitment_pathway'
+                    | 'audience_or_community' | 'identity_trust' | 'giving_conversion'
+                    | 'media_archive_blog'
+  has_visible_entry?: boolean
+  visible_entries?:   string[]
+  severity?:          'high' | 'medium' | 'low'
+  rationale?:         string
+  suggested_fix?:     string
+}
+
 interface CoverageData {
-  topic_audit?:        Audit[]
-  summary?:            Summary
-  gaps?:               Gap[]
-  identity_audit?:     IdentityAuditRow[]
-  identity_gaps?:      IdentityGap[]
-  grouping_audit?:     GroupingAuditRow[]
-  voice_audit?:        VoiceAuditRow[]
-  recommended_action?: 'proceed_to_stage_3' | 'redo_stage_2_with_gaps'
+  topic_audit?:               Audit[]
+  summary?:                   Summary
+  gaps?:                      Gap[]
+  identity_audit?:            IdentityAuditRow[]
+  identity_gaps?:             IdentityGap[]
+  grouping_audit?:            GroupingAuditRow[]
+  voice_audit?:               VoiceAuditRow[]
+  header_completeness_audit?: HeaderCompletenessRow[]
+  recommended_action?:        'proceed_to_stage_3' | 'redo_stage_2_with_gaps'
 }
 
 export function SitemapCoveragePreview({ output }: { output: Record<string, unknown> }) {
@@ -104,10 +116,12 @@ export function SitemapCoveragePreview({ output }: { output: Record<string, unkn
   const identityGaps   = data.identity_gaps ?? []
   const groupingAudit  = data.grouping_audit ?? []
   const voiceAudit     = data.voice_audit ?? []
+  const headerAudit    = data.header_completeness_audit ?? []
   const summary        = data.summary ?? {}
   const action         = data.recommended_action
 
   const groupingFlagged = groupingAudit.filter(g => g.severity === 'high' || g.severity === 'medium')
+  const headerFlagged   = headerAudit.filter(h => h.severity === 'high' || h.severity === 'medium')
 
   return (
     <div className="space-y-6">
@@ -115,8 +129,9 @@ export function SitemapCoveragePreview({ output }: { output: Record<string, unkn
 
       <Summary summary={summary} />
 
-      {gaps.length > 0           && <GapsPanel gaps={gaps} />}
-      {identityGaps.length > 0   && <IdentityGapsPanel gaps={identityGaps} />}
+      {gaps.length > 0            && <GapsPanel gaps={gaps} />}
+      {identityGaps.length > 0    && <IdentityGapsPanel gaps={identityGaps} />}
+      {headerFlagged.length > 0   && <HeaderCompletenessPanel rows={headerFlagged} />}
       {groupingFlagged.length > 0 && <GroupingAuditPanel rows={groupingFlagged} />}
       {voiceAudit.some(v => v.severity === 'high' || v.severity === 'medium') &&
         <VoiceAuditPanel rows={voiceAudit} />}
@@ -244,6 +259,71 @@ function IdentityGapsPanel({ gaps }: { gaps: IdentityGap[] }) {
         ))}
       </ul>
     </Section>
+  )
+}
+
+function HeaderCompletenessPanel({ rows }: { rows: HeaderCompletenessRow[] }) {
+  const high   = rows.filter(r => r.severity === 'high')
+  const medium = rows.filter(r => r.severity === 'medium')
+  const CAT_LABELS: Record<string, string> = {
+    mandatory_visitor:     'Mandatory visitor',
+    media_archive:         'Media archive (Sermons)',
+    media_archive_blog:    'Blog',
+    commitment_pathway:    'Commitment pathway',
+    audience_or_community: 'Audience / Community',
+    identity_trust:        'Identity / trust',
+    giving_conversion:     'Giving',
+  }
+  return (
+    <Section label={`Header completeness — essential categories with a visible home (${rows.length} flagged)`}>
+      {high.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-danger mb-1.5">
+            Missing categories ({high.length})
+          </p>
+          <ul className="space-y-2">{high.map((r, i) => <HeaderRow key={`h-${i}`} row={r} tone="danger" labels={CAT_LABELS} />)}</ul>
+        </div>
+      )}
+      {medium.length > 0 && (
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-warning mb-1.5">
+            Weakly placed ({medium.length})
+          </p>
+          <ul className="space-y-2">{medium.map((r, i) => <HeaderRow key={`m-${i}`} row={r} tone="warning" labels={CAT_LABELS} />)}</ul>
+        </div>
+      )}
+    </Section>
+  )
+}
+
+function HeaderRow({ row, tone, labels }: { row: HeaderCompletenessRow; tone: 'danger' | 'warning'; labels: Record<string,string> }) {
+  return (
+    <li className={[
+      'rounded-md border px-3 py-2',
+      tone === 'danger' ? 'border-wm-danger/30 bg-wm-danger-bg/40' : 'border-wm-warning/30 bg-wm-warning-bg/40',
+    ].join(' ')}>
+      <div className="flex items-baseline gap-2 mb-1 flex-wrap">
+        <span className="text-[12px] font-semibold text-wm-text">
+          {labels[row.category ?? ''] ?? row.category}
+        </span>
+        {row.has_visible_entry === false && <Tag tone="warning">no visible entry</Tag>}
+        {Array.isArray(row.visible_entries) && row.visible_entries.length > 0 && (
+          <span className="text-[10px] font-mono text-wm-text-subtle">
+            in nav: {row.visible_entries.join(', ')}
+          </span>
+        )}
+      </div>
+      {row.rationale && (
+        <p className="text-[12px] text-wm-text leading-relaxed">
+          <span className="text-wm-text-subtle">Why:</span> {row.rationale}
+        </p>
+      )}
+      {row.suggested_fix && (
+        <p className="text-[12px] text-wm-text leading-relaxed mt-1">
+          <span className="text-wm-text-subtle">Suggested fix:</span> {row.suggested_fix}
+        </p>
+      )}
+    </li>
   )
 }
 

@@ -380,9 +380,19 @@ async function runStage2_5() {
         },
         required: ['nav_path','parent_label','issue','severity','rationale'],
       }},
+      header_completeness_audit: { type: 'array', items: { type: 'object',
+        properties: {
+          category: { type: 'string', enum: ['mandatory_visitor','media_archive','commitment_pathway','audience_or_community','identity_trust','giving_conversion','media_archive_blog'] },
+          has_visible_entry: { type: 'boolean' },
+          visible_entries: { type: 'array', items: { type: 'string' } },
+          severity: { type: 'string', enum: ['high','medium','low'] },
+          rationale: { type: 'string' }, suggested_fix: { type: 'string' },
+        },
+        required: ['category','has_visible_entry','severity','rationale'],
+      }},
       recommended_action: { type: 'string', enum: ['proceed_to_stage_3','redo_stage_2_with_gaps'] },
     },
-    required: ['topic_audit','summary','gaps','identity_audit','identity_gaps','voice_audit','grouping_audit','recommended_action'],
+    required: ['topic_audit','summary','gaps','identity_audit','identity_gaps','voice_audit','grouping_audit','header_completeness_audit','recommended_action'],
   }
 
   // Surface Stage 1's topic_coverage_plan + project_goals + x_factor
@@ -451,9 +461,12 @@ async function runStage2_5() {
     ? out.voice_audit.filter((v: any) => v.severity === 'high') : []
   const voiceMedium    = Array.isArray(out.voice_audit)
     ? out.voice_audit.filter((v: any) => v.severity === 'medium') : []
-  const groupingAudit  = Array.isArray(out.grouping_audit) ? out.grouping_audit : []
-  const groupingHigh   = groupingAudit.filter((g: any) => g.severity === 'high')
-  const groupingMedium = groupingAudit.filter((g: any) => g.severity === 'medium')
+  const groupingAudit   = Array.isArray(out.grouping_audit) ? out.grouping_audit : []
+  const groupingHigh    = groupingAudit.filter((g: any) => g.severity === 'high')
+  const groupingMedium  = groupingAudit.filter((g: any) => g.severity === 'medium')
+  const headerAudit     = Array.isArray(out.header_completeness_audit) ? out.header_completeness_audit : []
+  const headerHigh      = headerAudit.filter((g: any) => g.severity === 'high')
+  const headerMedium    = headerAudit.filter((g: any) => g.severity === 'medium')
 
   console.log(`\nStage 2.5 summary:`)
   console.log(`  total topics:           ${out.summary?.total_topics ?? 0}`)
@@ -462,6 +475,7 @@ async function runStage2_5() {
   console.log(`  orphans:                ${out.summary?.orphans ?? 0}`)
   console.log(`  topic gaps (HIGH):      ${out.gaps?.length ?? 0}`)
   console.log(`  identity gaps:          ${identityGaps.length}`)
+  console.log(`  header completeness:    ${headerHigh.length} high · ${headerMedium.length} medium`)
   console.log(`  grouping defects:       ${groupingHigh.length} high · ${groupingMedium.length} medium`)
   console.log(`  voice violations:       ${voiceHigh.length} high · ${voiceMedium.length} medium`)
   console.log(`  overall coverage score: ${(out.summary?.overall_coverage_score ?? 0).toFixed(2)}`)
@@ -476,6 +490,13 @@ async function runStage2_5() {
     console.log(`\nIdentity gaps:`)
     for (const g of identityGaps) {
       console.log(`  - [${g.kind}] ${g.label}: ${g.why_a_gap}`)
+    }
+  }
+  if (headerHigh.length > 0) {
+    console.log(`\nHeader completeness defects (high):`)
+    for (const h of headerHigh) {
+      console.log(`  - [${h.category}] ${h.rationale}`)
+      if (h.suggested_fix) console.log(`     fix: ${h.suggested_fix}`)
     }
   }
   if (groupingHigh.length > 0) {
@@ -1673,14 +1694,16 @@ async function runStage2(stage1: any, opts: { redoContext?: string; cycleBack?: 
       const audit = roadmap.stage_2_5 ?? {}
       const gaps         = Array.isArray(audit.gaps)           ? audit.gaps           : []
       const identityGaps = Array.isArray(audit.identity_gaps)  ? audit.identity_gaps  : []
+      const headerHigh   = Array.isArray(audit.header_completeness_audit)
+        ? audit.header_completeness_audit.filter((g: any) => g.severity === 'high') : []
       const groupingHigh = Array.isArray(audit.grouping_audit)
         ? audit.grouping_audit.filter((g: any) => g.severity === 'high') : []
       const voiceHigh    = Array.isArray(audit.voice_audit)
         ? audit.voice_audit.filter((v: any) => v.severity === 'high') : []
-      if (gaps.length === 0 && identityGaps.length === 0 && groupingHigh.length === 0 && voiceHigh.length === 0) {
+      if (gaps.length === 0 && identityGaps.length === 0 && headerHigh.length === 0 && groupingHigh.length === 0 && voiceHigh.length === 0) {
         throw new Error('Cycle-back: stage_2_5 has no HIGH-severity findings to redo against.')
       }
-      lines.push(`The Sitemap Coverage Audit (Stage 2.5) surfaced findings across four dimensions. Update the sitemap to address each one — do NOT drop underlying content; route, regroup, or rename instead.`, ``)
+      lines.push(`The Sitemap Coverage Audit (Stage 2.5) surfaced findings across five dimensions. Update the sitemap to address each one — do NOT drop underlying content; route, regroup, or rename instead.`, ``)
       if (gaps.length > 0) {
         lines.push(`## Coverage gaps — topics with no findable destination`, ``)
         for (const g of gaps) {
@@ -1700,6 +1723,16 @@ async function runStage2(stage1: any, opts: { redoContext?: string; cycleBack?: 
             `  Source: ${g.source_quote ?? '—'}`,
             `  Why a gap: ${g.why_a_gap ?? '—'}`,
             `  Suggested fix: ${g.suggested_fix ?? '—'}`,
+          )
+        }
+        lines.push(``)
+      }
+      if (headerHigh.length > 0) {
+        lines.push(`## Header completeness — essential intent categories missing from the visible nav`, ``)
+        for (const h of headerHigh) {
+          lines.push(
+            `- [${h.category}] ${h.rationale}`,
+            `  Suggested fix: ${h.suggested_fix ?? '—'}`,
           )
         }
         lines.push(``)
@@ -1725,7 +1758,7 @@ async function runStage2(stage1: any, opts: { redoContext?: string; cycleBack?: 
         }
         lines.push(``)
       }
-      console.log(`Cycle-back: ${gaps.length} coverage · ${identityGaps.length} identity · ${groupingHigh.length} grouping · ${voiceHigh.length} voice (high)`)
+      console.log(`Cycle-back: ${gaps.length} coverage · ${identityGaps.length} identity · ${headerHigh.length} header · ${groupingHigh.length} grouping · ${voiceHigh.length} voice (high)`)
     } else {
       const orphans = roadmap.stage_6?.orphaned ?? []
       if (orphans.length === 0) throw new Error('Cycle-back: stage_6.orphaned is empty.')
@@ -1830,17 +1863,20 @@ async function runSitemapAutoLoop(stage1: any, maxIterations = 3) {
     const action = audit.recommended_action as string | undefined
     const gapCount          = Array.isArray(audit.gaps)           ? audit.gaps.length           : 0
     const identityGapCount  = Array.isArray(audit.identity_gaps)  ? audit.identity_gaps.length  : 0
+    const headerHighCount   = Array.isArray(audit.header_completeness_audit)
+      ? audit.header_completeness_audit.filter((g: any) => g.severity === 'high').length : 0
     const groupingHighCount = Array.isArray(audit.grouping_audit)
       ? audit.grouping_audit.filter((g: any) => g.severity === 'high').length : 0
     const voiceHighCount    = Array.isArray(audit.voice_audit)
       ? audit.voice_audit.filter((v: any) => v.severity === 'high').length : 0
-    const totalBlocking     = gapCount + identityGapCount + groupingHighCount + voiceHighCount
+    const totalBlocking     = gapCount + identityGapCount + headerHighCount + groupingHighCount + voiceHighCount
     const score             = audit.summary?.overall_coverage_score
 
     history.push({
       iteration:       round,
       coverage_gaps:   gapCount,
       identity_gaps:   identityGapCount,
+      header_high:     headerHighCount,
       grouping_high:   groupingHighCount,
       voice_high:      voiceHighCount,
       coverage_score:  score,
@@ -1848,12 +1884,13 @@ async function runSitemapAutoLoop(stage1: any, maxIterations = 3) {
       issues_summary:  [
         ...((audit.gaps ?? []) as any[]).map(g => `topic:${g.topic_label ?? g.topic_key}`),
         ...((audit.identity_gaps ?? []) as any[]).map(g => `identity:${g.label}`),
+        ...((audit.header_completeness_audit ?? []) as any[]).filter(g => g.severity === 'high').map(g => `header:${g.category}`),
         ...((audit.grouping_audit ?? []) as any[]).filter(g => g.severity === 'high').map(g => `grouping:${g.parent_label}/${g.issue}`),
         ...((audit.voice_audit ?? []) as any[]).filter(v => v.severity === 'high').map(v => `voice:${v.current_label}→${v.suggested_label}`),
       ],
     })
 
-    console.log(`\nIteration ${round} result: ${gapCount} topic + ${identityGapCount} identity + ${groupingHighCount} grouping + ${voiceHighCount} voice (high) · score ${score?.toFixed(2) ?? 'n/a'} · ${action ?? 'unknown'}`)
+    console.log(`\nIteration ${round} result: ${gapCount} topic + ${identityGapCount} identity + ${headerHighCount} header + ${groupingHighCount} grouping + ${voiceHighCount} voice (high) · score ${score?.toFixed(2) ?? 'n/a'} · ${action ?? 'unknown'}`)
 
     if (action === 'proceed_to_stage_3' && totalBlocking === 0) {
       console.log(`\n✓ Converged at iteration ${round}.`)
@@ -1876,7 +1913,7 @@ async function runSitemapAutoLoop(stage1: any, maxIterations = 3) {
 
   console.log(`\nAuto-loop history (${history.length} iterations):`)
   for (const h of history) {
-    console.log(`  ${h.iteration}. coverage=${h.coverage_gaps} identity=${h.identity_gaps} grouping=${h.grouping_high} voice=${h.voice_high} score=${(h.coverage_score ?? 0).toFixed(2)} → ${h.recommendation}`)
+    console.log(`  ${h.iteration}. coverage=${h.coverage_gaps} identity=${h.identity_gaps} header=${h.header_high} grouping=${h.grouping_high} voice=${h.voice_high} score=${(h.coverage_score ?? 0).toFixed(2)} → ${h.recommendation}`)
     if (h.issues_summary.length > 0) {
       console.log(`     issues: ${h.issues_summary.join(' | ')}`)
     }

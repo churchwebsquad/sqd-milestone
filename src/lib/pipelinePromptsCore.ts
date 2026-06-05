@@ -177,6 +177,32 @@ it as the contract for the sitemap. A topic that you assign to
 own_page or section_of must be reachable in the eventual sitemap; if
 Stage 2 drops it, that's a Stage 2 failure, not yours.
 
+# Destination defaults for low-importance utility topics
+
+Some topics ALMOST NEVER deserve their own page; they live as footer
+links or as content blocks on strategic pages. Default these to
+section_of (NOT own_page) unless the partner has explicit evidence of
+investment beyond signup widgets:
+
+- Newsletter / Bulletin → section_of: 'footer' (with a content block
+  on Plan a Visit + Home for signup). The form is a snippet, not a
+  page.
+- Sign up for updates / Stay in touch — same as newsletter.
+- Privacy Policy / Terms of Service → section_of: 'footer'.
+- Search → not a topic; lives as a header utility.
+
+# Seasonal experiences are out of scope at this stage
+
+Do NOT emit Christmas, Easter, Advent, Lent, Holy Week, or any
+season-specific experience as a project_goal or a coverage_plan
+entry. Seasonal site experiences are handled downstream as Home
+hero takeovers or temporary landing pages, NOT as permanent sitemap
+items. Even when the partner mentions Christmas or Easter as part
+of their growth strategy, treat that as a Stage 3+ concern (page
+brief / hero rotation), not a Stage 1 page-count input. Excluding
+them keeps Stage 2.5 from generating false-positive seasonal gap
+findings.
+
 Required outputs:
 - audience (primary + secondary)
 - voice_characteristics (signature moves + sample sentences)
@@ -298,6 +324,48 @@ prompt are fallbacks ONLY.
   when nav_pattern = "megamenu".
 - Label for the outsider, not the org chart. Visitor language wins
   when accessibility is the stated goal.
+
+# HEADER COMPLETENESS — every essential category needs a visible home
+
+The visible top-level nav (header_nav) must give every primary
+visitor intent a discoverable entry. Walk these categories and verify
+each has AT LEAST ONE entry visible in header_nav:
+
+  mandatory_visitor    → Plan a Visit (always; usually a button)
+  media_archive        → Sermons / Messages (mandatory; never buried)
+  commitment_pathway   → at least one entry. Either a dedicated page
+                         (Next Steps / Belong / Volunteer) OR a
+                         grouping parent ("Get Connected", "Belong",
+                         "Take a Step") that holds the pathway items.
+                         If you have 3+ pathway items (Volunteer,
+                         Discussion Groups, Baptism, Classes, Care),
+                         CLUSTER THEM AS ONE GROUP rather than
+                         promoting one to top-level and burying the
+                         rest in footer. Burying Volunteer because
+                         Serve Redlands got promoted = defect.
+  audience_or_community → at least one entry. Either Community as a
+                         parent group, or a Family/Generations
+                         dropdown, or audience pages directly.
+  identity_trust       → at least one entry (Who We Are / About /
+                         Our Story).
+  giving_conversion    → Donate / Give (always; usually a button).
+
+If a category has no visible entry, that's a structural defect —
+visitors with that intent have nowhere to start. Stage 2.5 will
+audit this independently as header_completeness_audit.
+
+ALSO check certain items have at least a discoverable home (not
+necessarily visible top-level but visible somewhere — header child,
+footer column, related-page grid):
+
+  - Blog: must appear in either a Community/Stories dropdown OR a
+    Sermon-cluster dropdown OR a footer "Resources" column. The blog
+    is the SEO engine for sermon-based content; dropping it entirely
+    from nav is a structural failure even when newsletter and
+    testimonies don't need to be visible.
+  - Newsletter: footer-only is correct. Do NOT give it a top-level
+    or dropdown placement. The signup form lives as a content block
+    on Plan a Visit + Home + footer.
 
 # MODELS — detect ONE and apply its nav shape
 
@@ -540,7 +608,7 @@ offcanvas_flyout    (nav_pattern: offcanvas)
 
 Shell-selection rules:
 - by_page_count: ≤ 12 → standard_dropdowns;
-                 12-25 → mega_menu;
+                 12-25 → mega_menu (DEFAULT in this range);
                  15+ or brand-forward → offcanvas_flyout
 - by_model:      attractional → offcanvas_flyout or mega_menu;
                  discipleship → standard_dropdowns or mega_menu;
@@ -549,6 +617,48 @@ Shell-selection rules:
 - Visible top-level stays ≤ 6, except offcanvas (intentionally
   shows fewer; everything lives in the overlay).
 - [Visit] and [Give]/[Donate] stay visible in the header in ALL shells.
+
+# Strong default — pick the shell that AMPLIFIES brand differentiation
+
+Standard_dropdowns is the SAFEST shell, not the best one. It works
+for any partner but elevates nothing about them. For partners with
+strong brand differentiation, prefer the richer shells:
+
+A partner is "brand-forward" when ANY of:
+  - Stage 1 x_factor names ≥ 2 distinct differentiating concepts
+    (e.g. "refuses to choose", "open and affirming", "intellectual
+    honesty" — Paradox qualifies easily)
+  - Voice profile is conversational + bold + intellectually serious
+    (not formal/transactional)
+  - Personas include skeptic/exile/burned-by-church archetypes who
+    need brand signal to give the church a chance
+  - Stage 1 project_goals include outward growth ("grow online
+    community", "answer questions before they ask", etc.)
+
+For brand-forward partners in the 12-25 page range, MEGA_MENU IS THE
+DEFAULT. Pick standard_dropdowns ONLY if you can name a specific
+reason why mega-menu density would hurt this partner (e.g. an audience
+that explicitly skews older / less browser-savvy in Stage 1's audience
+profile). Document the deviation in presentation_rationale.
+
+Mega-menu wins for brand-forward partners because:
+  - Each panel column carries a section heading + one-line
+    descriptions per link, which is itself voice surface — every
+    column lets the brand voice show through ("Curiosity-first kids
+    ministry" beats just "Paradox Kids")
+  - Featured tiles in each panel can spotlight x_factor concepts
+    (e.g. an "Open & Affirming" card with body copy and a CTA)
+  - Visitors get a richer signal of what the church is about in the
+    first hover, not after they commit to navigating
+
+Offcanvas is appropriate when EITHER:
+  - Audience skews mobile-heavy (Stage 1 audience or partner
+    operates primarily through social → people find them on mobile
+    first)
+  - Visual brand wants the minimalism (a clean header + immersive
+    overlay matches the brand's restraint)
+  - Page count exceeds 25 and standard navigation density would
+    overwhelm
 
 # nav_presentation — populate the shell you picked
 
@@ -859,6 +969,68 @@ Any identity item with destination_kind='unsupported' (or with
 findable_score < 0.6) goes into identity_gaps[] with importance
 defaulted to HIGH and a suggested_fix.
 
+# Header completeness audit — every essential category has a visible home
+
+The visible top-level nav is the first thing a visitor sees. It must
+cover every primary intent category. Walk stage_2.header_nav (or
+nav_presentation.visible_top_level when populated) and verify these
+categories EACH have at least one visible entry:
+
+  mandatory_visitor    → Plan a Visit
+  media_archive        → Sermons / Messages
+  commitment_pathway   → any of Volunteer, Discussion Groups, Next
+                         Steps, Baptism, Classes, Care — OR a
+                         grouping parent that holds them (e.g.
+                         "Get Connected", "Belong", "Take a Step")
+  audience_or_community → at least one entry (Community parent,
+                         Family/Generations dropdown, or direct
+                         audience pages)
+  identity_trust       → Who We Are / About / Our Story
+  giving_conversion    → Donate / Give
+
+For each category, emit one row in header_completeness_audit:
+
+  {
+    category,               // one of the six above
+    has_visible_entry,      // boolean
+    visible_entries,        // labels found, empty if has_visible_entry=false
+    severity,               // 'high' if !has_visible_entry; 'low' otherwise
+    rationale
+  }
+
+Also audit specific items that have a required home (not necessarily
+top-level but visible SOMEWHERE):
+
+  - Blog: must appear in header (under a Community or Sermon
+    cluster), OR footer prominently. If Blog is in pages[] but has
+    no nav surface at all, that's HIGH severity in
+    header_completeness_audit with category='media_archive_blog'
+    and rationale 'Blog has SEO value but no nav home'.
+  - Newsletter: footer-only is correct; if Newsletter is in
+    header_nav at all, flag MEDIUM severity vocabulary/structure
+    error (newsletter is a snippet, not a destination).
+
+Severity rubric:
+- HIGH if a category has no visible top-level home (a real defect —
+  visitors with that intent have no door).
+- MEDIUM if a category has a home but the entry is buried (e.g.
+  commitment_pathway only visible inside a misnamed group, or Blog
+  in pages but not in nav).
+- LOW informational rows showing the category is covered.
+
+header_completeness_audit goes into the redo trigger — any HIGH
+severity entry triggers recommended_action='redo_stage_2_with_gaps'.
+
+# Seasonal/Christmas/Easter explicit non-finding
+
+Stage 1 should not emit seasonal experiences as project_goals (per
+its updated prompt). If a Christmas / Easter / Advent / Lent /
+seasonal mention appears in any audit dimension as a "gap," it is
+NOT a real finding — those are handled downstream as Home hero
+rotations or temporary landing pages. Suppress all seasonal items
+from gaps[] / identity_gaps[] / grouping_audit[] / voice_audit[] /
+header_completeness_audit[]. They are out of scope at this stage.
+
 # Grouping audit — every dropdown must serve one intent
 
 Walk every group in stage_2.header_nav and stage_2.footer_nav. For
@@ -994,11 +1166,13 @@ recommended_action = 'redo_stage_2_with_gaps' if ANY of:
 - identity_gaps[] non-empty
 - grouping_audit[] contains any 'high' severity entries
 - voice_audit[] contains any 'high' severity entries
+- header_completeness_audit[] contains any 'high' severity entries
 
 Otherwise 'proceed_to_stage_3'.
 
 A clean Stage 2 has: zero HIGH topic gaps, zero identity gaps, zero
-HIGH grouping defects, and zero HIGH voice violations. MEDIUM and
+HIGH grouping defects, zero HIGH voice violations, and every
+essential intent category covered in the visible header. MEDIUM and
 LOW findings across any dimension surface for strategist review but
 don't trigger redo.`,
 

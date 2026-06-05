@@ -147,10 +147,28 @@ const TOOL = {
           required: ['nav_path','parent_label','issue','severity','rationale'],
         },
       },
+      header_completeness_audit: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            category:          { type: 'string',
+              enum: ['mandatory_visitor','media_archive','commitment_pathway',
+                     'audience_or_community','identity_trust','giving_conversion',
+                     'media_archive_blog'] },
+            has_visible_entry: { type: 'boolean' },
+            visible_entries:   { type: 'array', items: { type: 'string' } },
+            severity:          { type: 'string', enum: ['high','medium','low'] },
+            rationale:         { type: 'string' },
+            suggested_fix:     { type: 'string' },
+          },
+          required: ['category','has_visible_entry','severity','rationale'],
+        },
+      },
       recommended_action: { type: 'string',
         enum: ['proceed_to_stage_3','redo_stage_2_with_gaps'] },
     },
-    required: ['topic_audit','summary','gaps','identity_audit','identity_gaps','voice_audit','grouping_audit','recommended_action'],
+    required: ['topic_audit','summary','gaps','identity_audit','identity_gaps','voice_audit','grouping_audit','header_completeness_audit','recommended_action'],
   },
 }
 
