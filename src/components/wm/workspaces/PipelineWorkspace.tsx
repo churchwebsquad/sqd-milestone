@@ -403,6 +403,19 @@ export function PipelineWorkspace({ project, onChange }: Props) {
             // manifest's rewrites back into web_sections. Available
             // only when a draft manifest exists.
             const extraAction = extraActionFor(s.stage, s.output)
+            // Surface a "Re-run" shortcut on stages with existing
+            // output so the strategist isn't forced through Refine
+            // when they just want to regenerate from scratch. For
+            // scope-aware stages (Stage 4 + 7), show the scope hint
+            // so they can see whether the re-run will be narrow or
+            // full-pipeline before they click.
+            const isScopeAware = SCOPE_AWARE.includes(s.stage)
+            const showRerun = (s.state === 'draft' || s.state === 'approved')
+            const rerunHint = isScopeAware && scopedSlugs.length > 0
+              ? ` (${scopedSlugs.length === 1 ? scopedSlugs[0] : `${scopedSlugs.length} pages`})`
+              : isScopeAware
+                ? ' (all pages)'
+                : undefined
             return (
               <StageCard
                 key={s.stage}
@@ -417,6 +430,8 @@ export function PipelineWorkspace({ project, onChange }: Props) {
                 onEditPrompt={() => setDrawer(s.stage)}
                 onViewOutput={s.output ? () => setPreview(s.stage) : undefined}
                 extraAction={extraAction}
+                showRerun={showRerun}
+                rerunHint={rerunHint}
               />
             )
           })}

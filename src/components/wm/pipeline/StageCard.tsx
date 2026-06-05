@@ -43,11 +43,23 @@ interface Props {
     loading?: boolean
     onClick: () => void
   }
+  /** When true, show the Run button even in draft/approved states.
+   *  Wired for SCOPE_AWARE stages when the user has a scope set —
+   *  the run is non-destructive (merges into existing output) so
+   *  surfacing the Run shortcut is safe + much more discoverable
+   *  than "type something into Refine to retrigger." Renders as
+   *  "Re-run" so the strategist knows the stage already has data. */
+  showRerun?: boolean
+  /** Optional helper label appended to the Re-run button — e.g.
+   *  "(home only)" when scoped, so the strategist sees what will
+   *  actually fire. */
+  rerunHint?: string
 }
 
 export function StageCard({
   stage, state, output, redoCount, promptSource, hasAddendum,
   onRun, onApprove, onEditPrompt, onViewOutput, extraAction,
+  showRerun, rerunHint,
 }: Props) {
   const [redoText, setRedoText] = useState('')
   const [redoOpen, setRedoOpen] = useState(false)
@@ -117,6 +129,16 @@ export function StageCard({
           )}
           {(state === 'draft' || state === 'approved') && (
             <>
+              {showRerun && (
+                <button
+                  type="button"
+                  onClick={() => onRun()}
+                  title={`Regenerate this stage from scratch.${rerunHint ? ' ' + rerunHint : ''}`}
+                  className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-semibold bg-wm-accent text-white hover:bg-wm-accent-hover"
+                >
+                  <Play size={11} /> Re-run{rerunHint ? <span className="text-[10px] opacity-90 font-mono">{rerunHint}</span> : null}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setRedoOpen(o => !o)}
