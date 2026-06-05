@@ -181,6 +181,14 @@ export default async function handler(req: any, res: any) {
 
   const projectId   = typeof req.body?.projectId === 'string' ? req.body.projectId : null
   const redoContext = typeof req.body?.redoContext === 'string' ? req.body.redoContext.trim() : ''
+  /** Optional scope: when present, the agent processes ONLY these
+   *  page slugs and merges results into roadmap_state.stage_4.page_outlines —
+   *  the other pages' outlines are preserved verbatim. Use for
+   *  iterative testing on a single page without re-burning the whole
+   *  17-page sitemap each pass. */
+  const pageSlugs: string[] | null = Array.isArray(req.body?.pageSlugs) && req.body.pageSlugs.every((s: unknown) => typeof s === 'string')
+    ? req.body.pageSlugs as string[]
+    : null
   if (!projectId) return res.status(400).json({ error: 'projectId required' })
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
@@ -205,15 +213,39 @@ export default async function handler(req: any, res: any) {
     sb.from('church_facts').select('id, topic, data').eq('web_project_id', projectId),
   ])
 
-  const previous = redoContext ? roadmapState.stage_4 : undefined
+  const previous = redoContext || pageSlugs ? roadmapState.stage_4 : undefined
   const resolved = await resolvePromptServer(sb, 'outlines', projectId)
+
+  // Scope filter — when present, narrow Stage 2's page list + Stage 3
+  // placements to just the targeted pages. The model then emits
+  // outlines only for those pages, and we merge with the existing
+  // roadmap_state.stage_4.page_outlines preserving the rest.
+  let scopedStage2 = stage2
+  let scopedStage3 = stage3
+  if (pageSlugs && pageSlugs.length > 0) {
+    const stage2Pages = ((stage2 as any)?.pages ?? []) as Array<{ slug?: string }>
+    const filteredPages = stage2Pages.filter(p => pageSlugs.includes(p.slug ?? ''))
+    scopedStage2 = { ...(stage2 as any), pages: filteredPages }
+    const stage3Placements = ((stage3 as any)?.atom_placements ?? []) as Array<{ primary_page_slug?: string }>
+    const stage3Facts = ((stage3 as any)?.fact_placements ?? []) as Array<{ primary_page_slug?: string }>
+    scopedStage3 = {
+      ...(stage3 as any),
+      atom_placements: stage3Placements.filter(a => pageSlugs.includes(a.primary_page_slug ?? '')),
+      fact_placements: stage3Facts.filter(f => pageSlugs.includes(f.primary_page_slug ?? '')),
+    }
+  }
+
+  const scopeInstruction = pageSlugs && pageSlugs.length > 0
+    ? `# Scope — IMPORTANT\nEmit page_outlines ONLY for these page slugs: ${pageSlugs.join(', ')}. Do not emit outlines for any other page. The other pages' outlines already exist and will be preserved untouched.`
+    : ''
 
   const userText = [
     `# Stage 1 strategy\n${JSON.stringify(stage1, null, 2)}`,
-    `# Stage 2 sitemap\n${JSON.stringify(stage2, null, 2)}`,
-    `# Stage 3 page inventory (atom placements)\n${JSON.stringify(stage3, null, 2)}`,
+    `# Stage 2 sitemap${pageSlugs ? ' (filtered to scope)' : ''}\n${JSON.stringify(scopedStage2, null, 2)}`,
+    `# Stage 3 page inventory (atom placements)\n${JSON.stringify(scopedStage3, null, 2)}`,
     `# Atoms\n${JSON.stringify(atomsRes.data ?? [], null, 2)}`,
     `# Facts\n${JSON.stringify(factsRes.data ?? [], null, 2)}`,
+    scopeInstruction,
     previous && `# Previous draft\n${JSON.stringify(previous, null, 2)}`,
     redoContext && `# Strategist redo feedback\n${redoContext}`,
   ].filter(Boolean).join('\n\n')
@@ -251,18 +283,42 @@ export default async function handler(req: any, res: any) {
     model: MODEL,
     prompt_source: resolved.globalSource,
     has_project_addendum: resolved.hasProjectAddendum,
+    scoped_to_page_slugs: pageSlugs ?? null,
     redo_count: typeof (previous as any)?._meta?.redo_count === 'number'
       ? (previous as any)._meta.redo_count + (redoContext ? 1 : 0)
       : 0,
     usage,
   }
 
+  // Merge mode when scoped: keep existing outlines for pages NOT in
+  // pageSlugs, and replace the targeted pages with the new output.
+  // Stops the strategist from losing 16 other page outlines when
+  // testing one.
+  let mergedOutlines: any[] = []
+  if (pageSlugs && pageSlugs.length > 0) {
+    const existingOutlines = ((previous as any)?.page_outlines ?? []) as Array<{ page_slug?: string }>
+    const newOutlines = ((toolResult as any)?.page_outlines ?? []) as Array<{ page_slug?: string }>
+    const newSlugs = new Set(newOutlines.map(o => o.page_slug))
+    mergedOutlines = [
+      ...existingOutlines.filter(o => !newSlugs.has(o.page_slug)),
+      ...newOutlines,
+    ]
+  } else {
+    mergedOutlines = ((toolResult as any)?.page_outlines ?? [])
+  }
+
+  const stage4Write = {
+    ...toolResult,
+    page_outlines: mergedOutlines,
+    _meta: meta,
+  }
+
   const { error: writeErr } = await sb.from('strategy_web_projects')
     .update({
-      roadmap_state: { ...(project.roadmap_state ?? {}), stage_4: { ...toolResult, _meta: meta } },
+      roadmap_state: { ...(project.roadmap_state ?? {}), stage_4: stage4Write },
     })
     .eq('id', projectId)
   if (writeErr) return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
 
-  return res.status(200).json({ ok: true, output: toolResult, usage })
+  return res.status(200).json({ ok: true, output: stage4Write, usage })
 }

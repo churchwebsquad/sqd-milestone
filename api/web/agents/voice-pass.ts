@@ -83,6 +83,14 @@ export default async function handler(req: any, res: any) {
    *  to writing the manifest. Strategist sets this on a second click
    *  after reviewing the manifest. */
   const apply = req.body?.apply === true
+  /** Optional scope: when present, the agent only generates (or
+   *  applies) rewrites for sections that belong to these page slugs.
+   *  Iterative testing surface — pair with page-outlines' pageSlugs to
+   *  rerun a single page through the contract → voice flow without
+   *  touching the rest of the project. */
+  const pageSlugs: string[] | null = Array.isArray(req.body?.pageSlugs) && req.body.pageSlugs.every((s: unknown) => typeof s === 'string')
+    ? req.body.pageSlugs as string[]
+    : null
   if (!projectId) return res.status(400).json({ error: 'projectId required' })
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
@@ -101,7 +109,12 @@ export default async function handler(req: any, res: any) {
 
   const { data: pages } = await sb.from('web_pages')
     .select('id, slug, name').eq('web_project_id', projectId).eq('archived', false)
-  const pageIds = (pages ?? []).map(p => p.id as string)
+  // Apply page-slug scope here so every downstream lookup is naturally
+  // narrowed to the targeted pages.
+  const scopedPages = pageSlugs && pageSlugs.length > 0
+    ? (pages ?? []).filter(p => pageSlugs.includes(p.slug as string))
+    : (pages ?? [])
+  const pageIds = scopedPages.map(p => p.id as string)
   const { data: sections } = await sb.from('web_sections')
     .select('id, web_page_id, content_template_id, field_values, field_provenance, sort_order')
     .eq('archived', false)
@@ -169,6 +182,9 @@ export default async function handler(req: any, res: any) {
   }> = []
   if (stage4?.page_outlines) {
     for (const page of stage4.page_outlines) {
+      // Honor the scope filter — drop contracts for pages we're not
+      // touching so the model isn't distracted by them.
+      if (pageSlugs && pageSlugs.length > 0 && !pageSlugs.includes(page.page_slug)) continue
       for (const sec of (page.sections ?? [])) {
         sectionContracts.push({
           page_slug:           page.page_slug,
@@ -227,18 +243,52 @@ export default async function handler(req: any, res: any) {
     model: MODEL,
     prompt_source: resolved.globalSource,
     has_project_addendum: resolved.hasProjectAddendum,
+    scoped_to_page_slugs: pageSlugs ?? null,
     redo_count: typeof (previous as any)?._meta?.redo_count === 'number'
       ? (previous as any)._meta.redo_count + (redoContext ? 1 : 0)
       : 0,
     usage,
   }
 
+  // Merge mode when scoped: keep rewrites + skips from other pages,
+  // replace only those targeting sections on the scoped pages. The
+  // scoped sectionId set determines what's "in scope" — anything
+  // matching gets replaced; anything else survives untouched.
+  const sectionIdsInScope = new Set(ourSections.map(s => s.id as string))
+  let mergedRewrites: any[]
+  let mergedSkipped:  any[]
+  if (pageSlugs && pageSlugs.length > 0) {
+    const previousAny  = (previous as any) ?? {}
+    const prevRewrites = Array.isArray(previousAny.rewrites) ? previousAny.rewrites : []
+    const prevSkipped  = Array.isArray(previousAny.skipped)  ? previousAny.skipped  : []
+    const newRewrites  = Array.isArray((toolResult as any)?.rewrites) ? (toolResult as any).rewrites : []
+    const newSkipped   = Array.isArray((toolResult as any)?.skipped)  ? (toolResult as any).skipped  : []
+    mergedRewrites = [
+      ...prevRewrites.filter((r: any) => !sectionIdsInScope.has(r?.web_section_id)),
+      ...newRewrites,
+    ]
+    mergedSkipped = [
+      ...prevSkipped.filter((s: any) => !sectionIdsInScope.has(s?.web_section_id)),
+      ...newSkipped,
+    ]
+  } else {
+    mergedRewrites = Array.isArray((toolResult as any)?.rewrites) ? (toolResult as any).rewrites : []
+    mergedSkipped  = Array.isArray((toolResult as any)?.skipped)  ? (toolResult as any).skipped  : []
+  }
+
+  const stage7Write = {
+    ...toolResult,
+    rewrites: mergedRewrites,
+    skipped:  mergedSkipped,
+    _meta:    meta,
+  }
+
   const { error: writeErr } = await sb.from('strategy_web_projects')
     .update({
-      roadmap_state: { ...(project.roadmap_state ?? {}), stage_7: { ...toolResult, _meta: meta } },
+      roadmap_state: { ...(project.roadmap_state ?? {}), stage_7: stage7Write },
     })
     .eq('id', projectId)
   if (writeErr) return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
 
-  return res.status(200).json({ ok: true, output: toolResult, usage })
+  return res.status(200).json({ ok: true, output: stage7Write, usage })
 }

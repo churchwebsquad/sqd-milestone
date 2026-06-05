@@ -55,6 +55,17 @@ export function PipelineWorkspace({ project, onChange }: Props) {
   const [voiceApplyResult, setVoiceApplyResult] = useState<
     { applied: number; blocked_by_override: number; omitted_by_user: number } | null
   >(null)
+  /** Iterative-testing scope. When non-empty, Stage 4 + Stage 7 runs
+   *  only touch the listed page slugs (merging results with existing
+   *  outputs). Other stages ignore this — they're either single-shot
+   *  (Stage 1, 2, 8) or already-narrow (Stage 5 picks per page). The
+   *  value is a comma-separated string; we split + trim on send. */
+  const [scopeText, setScopeText] = useState('')
+  const scopedSlugs = scopeText
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+  const SCOPE_AWARE: PipelineStage[] = ['outlines', 'voice_pass']
 
   const roadmapState = (project.roadmap_state ?? {}) as Record<string, any>
 
@@ -91,6 +102,10 @@ export function PipelineWorkspace({ project, onChange }: Props) {
       const { data: { session } } = await supabase.auth.getSession()
       const jwt = session?.access_token
       if (!jwt) throw new Error('Not authenticated')
+      // Scope only applies to stages that support per-page narrowing
+      // (Stage 4 outlines + Stage 7 voice_pass). For all other stages
+      // we send the full sitemap — the agent ignores pageSlugs anyway.
+      const useScope = SCOPE_AWARE.includes(stage) && scopedSlugs.length > 0
       const res = await fetch(STAGE_ENDPOINTS[stage], {
         method: 'POST',
         headers: {
@@ -100,6 +115,7 @@ export function PipelineWorkspace({ project, onChange }: Props) {
         body: JSON.stringify({
           projectId:   project.id,
           redoContext: feedback ?? undefined,
+          pageSlugs:   useScope ? scopedSlugs : undefined,
         }),
       })
       const json = await res.json().catch(() => ({}))
@@ -118,7 +134,9 @@ export function PipelineWorkspace({ project, onChange }: Props) {
     } finally {
       setRunning(null)
     }
-  }, [project.id, onChange])
+  // scopedSlugs and SCOPE_AWARE are captured from outer scope; including
+  // scopedSlugs in deps so runStage re-binds when the scope changes.
+  }, [project.id, onChange, scopedSlugs])
 
   /** Per-rewrite mutation for Stage 7. Patches a single entry in
    *  roadmap_state.stage_7.rewrites[index] with the user's omit/edit
@@ -344,6 +362,40 @@ export function PipelineWorkspace({ project, onChange }: Props) {
             )}.
           </div>
         )}
+
+        {/* Test scope — applies to Stage 4 outlines + Stage 7 voice
+            pass only. When set, those agents process only the listed
+            pages and merge results with existing output (preserving
+            the other pages). Other stages ignore this. */}
+        <div className="rounded-md border border-wm-border bg-wm-bg/40 px-3 py-2 flex items-center gap-2 flex-wrap text-[12px]">
+          <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
+            Scope (optional)
+          </span>
+          <input
+            type="text"
+            value={scopeText}
+            onChange={e => setScopeText(e.target.value)}
+            placeholder="page slugs, comma-separated — e.g. home, beliefs"
+            className="flex-1 min-w-[200px] text-[12px] px-2 py-1 rounded border border-wm-border bg-wm-bg-elevated focus:border-wm-accent focus:outline-none"
+          />
+          {scopedSlugs.length > 0 && (
+            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-wm-accent-strong">
+              {scopedSlugs.length} page{scopedSlugs.length === 1 ? '' : 's'}
+              <button
+                type="button"
+                onClick={() => setScopeText('')}
+                className="text-wm-text-muted hover:text-wm-text"
+                title="Clear scope"
+              >
+                ×
+              </button>
+            </span>
+          )}
+          <span className="text-[10px] text-wm-text-muted basis-full">
+            Applies to <strong>Outlines</strong> (Stage 4) + <strong>Voice pass</strong> (Stage 7).
+            Other stages ignore this. Results merge into existing output — other pages stay untouched.
+          </span>
+        </div>
 
         <div className="space-y-2">
           {stages.map(s => {
