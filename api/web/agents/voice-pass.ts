@@ -152,10 +152,43 @@ export default async function handler(req: any, res: any) {
   const previous = redoContext ? roadmapState.stage_7 : undefined
   const resolved = await resolvePromptServer(sb, 'voice_pass', projectId)
 
+  // Pull Stage 4 section contracts so the model can honor required_messages,
+  // keyword_assignments, and cta.label per section. Without these, the
+  // voice pass has no way to know which words it must preserve, and
+  // ends up paraphrasing away load-bearing content + keywords. We thin
+  // the payload to the load-bearing fields — the full content_summary
+  // lives in Stage 4 but the binder already used it; voice pass only
+  // needs the contract guards.
+  const stage4 = roadmapState.stage_4 as { page_outlines?: any[] } | undefined
+  const sectionContracts: Array<{
+    page_slug:           string
+    section_id:          string
+    required_messages:   string[]
+    keyword_assignments: { primary?: string[]; supporting?: string[] } | null
+    cta:                 { label: string; destination_page: string } | null
+  }> = []
+  if (stage4?.page_outlines) {
+    for (const page of stage4.page_outlines) {
+      for (const sec of (page.sections ?? [])) {
+        sectionContracts.push({
+          page_slug:           page.page_slug,
+          section_id:          sec.section_id,
+          required_messages:   Array.isArray(sec.required_messages) ? sec.required_messages : [],
+          keyword_assignments: sec.keyword_assignments ?? null,
+          cta:                 sec.cta ? { label: sec.cta.label, destination_page: sec.cta.destination_page } : null,
+        })
+      }
+    }
+  }
+
   const userText = [
     `# Voice card (Stage 1)\n${JSON.stringify((stage1 as any).voice_characteristics, null, 2)}`,
     `# Personas (Stage 1)\n${JSON.stringify((stage1 as any).personas, null, 2)}`,
     brandGuide && `# Brand guide\n${JSON.stringify(brandGuide, null, 2)}`,
+    sectionContracts.length > 0 &&
+      `# Stage 4 section contracts — load-bearing constraints\n` +
+      `For each section_id, required_messages must survive any rewrite, keyword_assignments.primary phrases must stay in heading or lead sentence, and cta.label must not change. The section_id here matches web_section_id in the Sections payload below.\n` +
+      JSON.stringify(sectionContracts, null, 2),
     `# Sections (current field_values + provenance)\n${JSON.stringify(ourSections, null, 2)}`,
     previous && `# Previous run\n${JSON.stringify(previous, null, 2)}`,
     redoContext && `# Strategist redo feedback\n${redoContext}`,

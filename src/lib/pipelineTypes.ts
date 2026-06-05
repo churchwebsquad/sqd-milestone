@@ -187,6 +187,32 @@ export interface Stage4DisplayOption {
   fits_count?: number                    // optional — # of items it can hold
 }
 
+/** CTA intent — what the visitor is being asked to do. Stage 5 binds
+ *  the label + destination_page into a button slot. */
+export type Stage4CtaIntent =
+  | 'visit' | 'attend' | 'contact' | 'give'
+  | 'subscribe' | 'signup' | 'watch' | 'read'
+  | 'navigate' | 'other'
+
+export interface Stage4Cta {
+  intent:           Stage4CtaIntent
+  label:            string
+  destination_page: string                 // "/<slug>" or "/<slug>#anchor"
+}
+
+export interface Stage4KeywordAssignments {
+  primary:    string[]                     // must land in heading or lead sentence
+  supporting: string[]                     // appears naturally in body
+}
+
+export interface Stage4PageSeoTargets {
+  search_phrases:          string[]
+  answer_intents:          string[]
+  geo_anchors:             string[]
+  title_target:            string | null
+  meta_description_target: string | null
+}
+
 export interface Stage4Section {
   section_id:       string               // synthesized per outline
   section_job:      string
@@ -194,12 +220,25 @@ export interface Stage4Section {
   display_options:  Stage4DisplayOption[]
   atoms_used:       string[]
   voice_notes:      string | null
+
+  // Section contract — the "what must be said" half of the outline.
+  // Stage 5 binds these mechanically; Stage 7 voice pass cannot
+  // violate them.
+  serves_personas:     string[]            // Stage 1 persona labels
+  addresses_goal:      string | null
+  required_messages:   string[]            // 1-3 must-include claims
+  cta:                 Stage4Cta | null    // null when no action belongs here
+  keyword_assignments: Stage4KeywordAssignments | null
 }
 
 export interface Stage4PageOutline {
   page_slug:    string
   sections:     Stage4Section[]
   voice_notes:  string | null
+
+  // Page-level contract additions.
+  primary_persona:    string | null        // Stage 1 persona this page primarily serves
+  page_seo_targets:   Stage4PageSeoTargets | null
 }
 
 export interface Stage4Output {

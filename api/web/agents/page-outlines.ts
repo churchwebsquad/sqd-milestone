@@ -21,8 +21,25 @@ const DISPLAY_OPTIONS = [
   'cta_hero','feature_strip','staff_grid','gallery','rich_text_long','process_steps',
 ]
 
+// CTA intent — what the visitor is being asked to do. The button-or-
+// not decision belongs to Stage 5 (some templates have button slots,
+// some don't); Stage 4 commits to whether the section needs a CTA at
+// all + what the action should be.
+const CTA_INTENTS = [
+  'visit',           // plan an in-person visit
+  'attend',          // join a specific event/service
+  'contact',         // talk to a person
+  'give',            // donation
+  'subscribe',       // newsletter / email
+  'signup',          // small group / volunteer signup
+  'watch',           // watch sermon / video
+  'read',            // read further content / blog
+  'navigate',        // go to a related hub page
+  'other',
+]
+
 const TOOL = {
-  description: 'Submit page outlines with display option suggestions for every page.',
+  description: 'Submit page outlines with display options and section contracts for every page.',
   input_schema: {
     type: 'object',
     properties: {
@@ -32,14 +49,88 @@ const TOOL = {
           type: 'object',
           properties: {
             page_slug: { type: 'string' },
+            /** Stage 1 persona label this page is primarily designed to
+             *  serve. Pages may serve secondary personas in individual
+             *  sections — those go in section.serves_personas. */
+            primary_persona: { type: ['string','null'] },
+            /** Per-page SEO/AEO/GEO bundle pulled from Stage 1's
+             *  seo_aeo_geo_targets and refined for this page. Stage 5's
+             *  page_seo writes title/meta_description directly from
+             *  this; the rest distributes down to section.keyword_assignments. */
+            page_seo_targets: {
+              type: ['object','null'],
+              properties: {
+                search_phrases: { type: 'array', items: { type: 'string' },
+                  description: 'SEO — phrases users would type into Google for this page.' },
+                answer_intents: { type: 'array', items: { type: 'string' },
+                  description: 'AEO — conversational queries this page should answer (e.g. "what time is church", "is X church welcoming").' },
+                geo_anchors:    { type: 'array', items: { type: 'string' },
+                  description: 'GEO — local landmarks, neighborhoods, city/region references this page should mention.' },
+                title_target:   { type: ['string','null'],
+                  description: 'Suggested <title> tag — keyword-led, under 60 chars. Stage 5 writes this verbatim into page_seo.title.' },
+                meta_description_target: { type: ['string','null'],
+                  description: 'Suggested meta description — under 160 chars. Stage 5 writes verbatim into page_seo.meta_description.' },
+              },
+            },
             sections: {
               type: 'array',
               items: {
                 type: 'object',
                 properties: {
                   section_id:      { type: 'string' },
-                  section_job:     { type: 'string' },
-                  content_summary: { type: 'string' },
+                  section_job:     { type: 'string',
+                    description: 'One sentence: what this section accomplishes for the visitor.' },
+                  content_summary: { type: 'string',
+                    description: 'Plain prose. Lead with "Heading: <3-7 word phrase>. Body: <prose>." so Stage 5 knows what goes where.' },
+
+                  // ── Section contract — the "what must be said" half ──
+                  /** Persona labels (from Stage 1) this section addresses.
+                   *  An array because some sections serve multiple personas
+                   *  at once (e.g. a Beliefs section serving both newcomers
+                   *  and skeptics). Empty = serves whoever the page serves. */
+                  serves_personas: { type: 'array', items: { type: 'string' } },
+                  /** Stage 1 strategy goal this section advances. Freeform
+                   *  text referencing one of stage_1.goals (or the broader
+                   *  brand objective when no single goal applies). */
+                  addresses_goal: { type: ['string','null'] },
+                  /** 1-3 concrete claims that MUST appear in the copy.
+                   *  Stage 5 may paraphrase but cannot drop. Stage 7
+                   *  voice pass also cannot rewrite these away. Example:
+                   *  ["Service times are Sundays 9am + 11am",
+                   *   "Childcare is provided through 5th grade",
+                   *   "Coffee is served before each service"]. */
+                  required_messages: { type: 'array', items: { type: 'string' } },
+                  /** When the section's job is to drive a visitor action,
+                   *  declare the CTA here. Stage 5 will look for a button
+                   *  slot in the chosen template and wire this label +
+                   *  destination. Null when no CTA belongs here (e.g.
+                   *  staff bios, photo galleries, content-only sections). */
+                  cta: {
+                    type: ['object','null'],
+                    properties: {
+                      intent:           { type: 'string', enum: CTA_INTENTS },
+                      label:            { type: 'string',
+                        description: 'Button label — short and scannable. Must use any vocabulary_decisions.we_chose values from Stage 2.' },
+                      destination_page: { type: 'string',
+                        description: 'Slug from Stage 2 sitemap (e.g. "/visit" or "/visit#service-times"). Must resolve to a real page.' },
+                    },
+                    required: ['intent','label','destination_page'],
+                  },
+                  /** Which Stage 1 SEO/AEO/GEO phrases this section owns.
+                   *  primary[] must appear in the section's heading slot
+                   *  OR the first sentence of body/description. supporting[]
+                   *  appears naturally in body copy. Distribute Stage 1's
+                   *  phrases across the page — don't repeat the same phrase
+                   *  in multiple sections of the same page. */
+                  keyword_assignments: {
+                    type: ['object','null'],
+                    properties: {
+                      primary:    { type: 'array', items: { type: 'string' } },
+                      supporting: { type: 'array', items: { type: 'string' } },
+                    },
+                  },
+                  // ── End contract ──
+
                   display_options: {
                     type: 'array',
                     items: {
@@ -55,7 +146,10 @@ const TOOL = {
                   atoms_used:  { type: 'array', items: { type: 'string' } },
                   voice_notes: { type: ['string','null'] },
                 },
-                required: ['section_id','section_job','content_summary','display_options','atoms_used'],
+                required: [
+                  'section_id','section_job','content_summary','display_options','atoms_used',
+                  'serves_personas','required_messages',
+                ],
               },
             },
             voice_notes: { type: ['string','null'] },
