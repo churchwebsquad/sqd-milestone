@@ -14,7 +14,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
-import { resolvePromptServer } from './_lib/resolvePrompt'
+import { resolvePromptServer } from './_lib/resolvePrompt.js'
 
 export const maxDuration = 300
 const MODEL = 'anthropic/claude-opus-4-7'

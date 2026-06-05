@@ -29,7 +29,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
-import { resolvePromptServer } from './_lib/resolvePrompt'
+import { resolvePromptServer } from './_lib/resolvePrompt.js'
 
 export const maxDuration = 600  // 17 pages × ~10 sec parallel + overhead
 // Sonnet 4.6 is the target model for voice work. If the AI Gateway

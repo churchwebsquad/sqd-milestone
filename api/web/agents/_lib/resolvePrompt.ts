@@ -10,7 +10,7 @@ import {
   FALLBACK_PROMPTS,
   PLACEHOLDER_MARKER,
   type PipelineStage,
-} from '../../../../src/lib/pipelinePromptsCore'
+} from '../../../../src/lib/pipelinePromptsCore.js'
 
 export interface ResolvedPromptServer {
   systemPrompt:       string

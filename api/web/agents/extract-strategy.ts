@@ -34,7 +34,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
-import { resolvePromptServer } from './_lib/resolvePrompt'
+import { resolvePromptServer } from './_lib/resolvePrompt.js'
 
 // Vercel AI Gateway routes by `provider/model` slug. The gateway auths
 // via AI_GATEWAY_API_KEY locally and VERCEL_OIDC_TOKEN on Vercel deploys

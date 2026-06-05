@@ -23,8 +23,8 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
-import { resolvePromptServer } from './_lib/resolvePrompt'
-import { FALLBACK_PROMPTS } from '../../../src/lib/pipelinePromptsCore'
+import { resolvePromptServer } from './_lib/resolvePrompt.js'
+import { FALLBACK_PROMPTS } from '../../../src/lib/pipelinePromptsCore.js'
 
 // Vercel serverless functions default to a short timeout (10s Hobby / 60s
 // Pro). Stage 2's full intake + 20K output ceiling can exceed that on
