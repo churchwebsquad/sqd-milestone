@@ -114,9 +114,10 @@ export default async function handler(req: any, res: any) {
     sb.from('content_atoms').select('id, topic, body').eq('web_project_id', projectId),
     sb.from('church_facts').select('id, topic, data').eq('web_project_id', projectId),
     sb.from('web_pages').select('id, slug, name').eq('web_project_id', projectId).eq('archived', false),
+    // web_sections has no `archived` column — visibility comes from
+    // joining through web_pages, which IS archive-filtered above.
     sb.from('web_sections')
-      .select('id, web_page_id, content_template_id, field_values, sort_order')
-      .eq('archived', false),
+      .select('id, web_page_id, content_template_id, field_values, sort_order'),
   ])
   const pages    = (pagesRes.data ?? []) as Array<{ id: string }>
   const pageIds  = pages.map(p => p.id)

@@ -321,9 +321,14 @@ async function voicePassHandler(req: any, res: any) {
     else unlockedPages.push(p)
   }
   const pageIds = unlockedPages.map(p => p.id)
+  // NOTE: web_sections has no `archived` column (only web_pages does).
+  // The previous `.eq('archived', false)` here was a silent bug —
+  // PostgREST returned an error, sections came back null, ourSections
+  // was always empty, and voice-pass returned "no sections in scope"
+  // for every project. Filter scope by joining through web_pages
+  // (already filtered for archived above).
   const { data: sections } = await sb.from('web_sections')
     .select('id, web_page_id, content_template_id, field_values, field_provenance, sort_order')
-    .eq('archived', false)
   const ourSections = ((sections ?? []) as WebSection[]).filter(s => pageIds.includes(s.web_page_id))
 
   // ── Apply mode — write the rewrite manifest to web_sections ──

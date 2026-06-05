@@ -84,9 +84,11 @@ export default async function handler(req: any, res: any) {
   const { data: pages } = await sb.from('web_pages')
     .select('id, slug, name, seo').eq('web_project_id', projectId).eq('archived', false)
   const pageIds = (pages ?? []).map(p => p.id as string)
+  // web_sections has no `archived` column — that filter was a silent
+  // bug that made this agent see zero sections. Visibility comes from
+  // joining through web_pages, which IS archive-filtered above.
   const { data: sections } = await sb.from('web_sections')
     .select('id, web_page_id, content_template_id, field_values, sort_order')
-    .eq('archived', false)
   const ourSections = (sections ?? []).filter(s => pageIds.includes(s.web_page_id as string))
 
   const { data: snippets } = await sb.from('web_project_snippets')

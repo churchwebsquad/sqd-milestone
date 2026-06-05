@@ -117,8 +117,10 @@ export function PerPageReview({
           .select('id, slug, name, sort_order')
           .eq('web_project_id', project.id).eq('archived', false),
         supabase.from('web_sections')
-          .select('id, web_page_id, sort_order, content_template_id, field_values')
-          .eq('archived', false),
+          .select('id, web_page_id, sort_order, content_template_id, field_values'),
+          // web_sections has no `archived` column (only web_pages does)
+          // — filtering on it returns zero rows. Visibility is gated
+          // by joining through web_pages below.
       ])
       if (cancelled) return
       const pages = (pagesRes.data ?? []) as WebPageRow[]
@@ -172,7 +174,6 @@ export function PerPageReview({
     const { data: sectionsRes } = await supabase
       .from('web_sections')
       .select('id, web_page_id, sort_order, content_template_id, field_values')
-      .eq('archived', false)
     const pageIds = new Set(webPages.map(p => p.id))
     setWebSections(((sectionsRes ?? []) as WebSectionRow[]).filter(s => pageIds.has(s.web_page_id)))
   }
