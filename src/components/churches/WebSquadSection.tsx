@@ -115,7 +115,7 @@ function SubmissionCard({ entry, defaultOpen, portalToken, memberId }: { entry: 
   )
 }
 
-export default function WebSquadSection({ church, submissions, websiteAudits, onSave, editing, portalToken, memberId }: Props) {
+export default function WebSquadSection({ church, submissions, onSave, editing, portalToken, memberId }: Props) {
   const webPathway = extractWebPathway(church.handoff_web_form as Record<string, unknown> | null)
   const raw = church as Record<string, unknown>
   const currentPlatform = normalizeWebsitePlatform(raw.current_website_platform as string | null | undefined)
@@ -213,24 +213,6 @@ export default function WebSquadSection({ church, submissions, websiteAudits, on
         </div>
       )}
 
-      {/* Web Support Evaluation Results — rendered as pill labels */}
-      {websiteAudits.length > 0 && (
-        <div className="mb-4 rounded-xl border border-lavender bg-lavender-tint/20 p-4">
-          <p className="text-sm font-bold text-deep-plum mb-3">Web Support Evaluation Results</p>
-          <div className="rounded-xl bg-lavender-tint/60 p-4">
-            <div className="flex flex-wrap gap-2">
-              {websiteAudits.map((audit, i) => (
-                <span
-                  key={i}
-                  className="inline-flex items-center rounded-full bg-primary-purple/10 border border-primary-purple/20 text-primary-purple text-xs font-semibold px-3 py-1"
-                >
-                  {audit.name}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Launch Details */}
       <div className="border-t border-lavender/50 pt-4 mt-4">

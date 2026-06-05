@@ -120,9 +120,9 @@ Deno.serve(async (req) => {
   const editCount = marks.filter((m) => (m.target_path ?? "").startsWith("answer:")).length;
   const addCount = marks.filter((m) => (m.target_path ?? "").startsWith("missing:")).length;
 
-  // The app origin is supplied via env (set on deploy) so the staff link
-  // points to the right host. Defaults to the production-style URL.
-  const appOrigin = Deno.env.get("APP_ORIGIN") ?? "https://app.churchmediasquad.com";
+  // The app origin defaults to the production host; can be overridden
+  // via the APP_ORIGIN secret if the staff app moves.
+  const appOrigin = Deno.env.get("APP_ORIGIN") ?? "https://strategy.thesqd.com";
   const intakeUrl = session.web_project_id
     ? `${appOrigin}/web/${session.web_project_id}?tab=intake`
     : appOrigin;
