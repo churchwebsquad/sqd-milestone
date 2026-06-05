@@ -108,29 +108,45 @@ export default async function handler(req: any, res: any) {
   const ourSections = (sections ?? []).filter(s => pageIds.includes(s.web_page_id as string))
 
   // Apply mode: write the previous run's rewrites back to web_sections.
+  // Honors strategist annotations from the preview drawer:
+  //   • r.omitted === true  → skip; the original copy survives.
+  //   • r.user_value (non-empty string) → write that string instead
+  //     of r.new_value (the strategist hand-edited this row).
   // Skips fields where field_provenance='override' to respect human edits.
   if (apply) {
     const stage7 = roadmapState.stage_7 as { rewrites?: Array<Record<string, unknown>> } | undefined
     if (!stage7?.rewrites) {
       return res.status(400).json({ error: 'No Stage 7 manifest to apply. Run the pass first.' })
     }
-    let applied = 0, blockedByOverride = 0
+    let applied = 0, blockedByOverride = 0, omittedByUser = 0
     for (const r of stage7.rewrites) {
+      if (r.omitted === true) { omittedByUser++; continue }
       const sectionId = String(r.web_section_id)
       const fieldKey  = String(r.field_key)
-      const newValue  = r.new_value
+      const override  = typeof r.user_value === 'string' && r.user_value.length > 0
+        ? r.user_value
+        : null
+      const newValue  = override ?? r.new_value
       const sec = ourSections.find(s => s.id === sectionId)
       if (!sec) continue
       const prov = (sec.field_provenance ?? {}) as Record<string, { source?: string }>
       if (prov[fieldKey]?.source === 'override') { blockedByOverride++; continue }
       const updated = { ...(sec.field_values as Record<string, unknown>), [fieldKey]: newValue }
-      const updatedProv = { ...prov, [fieldKey]: { ...(prov[fieldKey] ?? {}), source: 'voice_pass' } }
+      // Strategist-edited rows carry source='strategist_voice_pass' so
+      // the round-trip is auditable. Pure model rewrites stay 'voice_pass'.
+      const sourceTag = override ? 'strategist_voice_pass' : 'voice_pass'
+      const updatedProv = { ...prov, [fieldKey]: { ...(prov[fieldKey] ?? {}), source: sourceTag } }
       const { error } = await sb.from('web_sections')
         .update({ field_values: updated, field_provenance: updatedProv })
         .eq('id', sectionId)
       if (!error) applied++
     }
-    return res.status(200).json({ ok: true, applied, blocked_by_override: blockedByOverride })
+    return res.status(200).json({
+      ok: true,
+      applied,
+      blocked_by_override: blockedByOverride,
+      omitted_by_user:     omittedByUser,
+    })
   }
 
   const previous = redoContext ? roadmapState.stage_7 : undefined

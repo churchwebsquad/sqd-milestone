@@ -35,23 +35,30 @@ interface Props {
   extraAction?: ExtraAction
   /** True while the parent is running this stage. Disables Refine. */
   running?:     boolean
+  /** Voice-pass per-rewrite mutation. Threads through to
+   *  VoicePassPreview so each row can show Omit/Edit/Reset controls. */
+  onUpdateRewrite?: (index: number, patch: Partial<{ omitted: boolean | undefined; user_value: string | undefined }>) => Promise<void>
 }
 
-// Stage → readable preview component. Add entries here as the other
-// stages get their own renderers. Stages not listed fall through to
-// JSON-only mode (the toggle is hidden).
+// Stage → readable preview component. Most previews are read-only, so
+// the (output) → JSX shape is sufficient. VoicePassPreview is the
+// exception — it needs an onUpdateRewrite callback for the per-rewrite
+// omit/edit/reset controls — and we pass that through manually below.
 const PREVIEWS: Partial<Record<PipelineStage, React.FC<{ output: Record<string, unknown> }>>> = {
   sitemap:          SitemapPreview,
   sitemap_coverage: SitemapCoveragePreview,
   outlines:         OutlinesPreview,
-  voice_pass:       VoicePassPreview,
+  // voice_pass intentionally omitted — see render below where we
+  // invoke VoicePassPreview directly with its extra prop.
 }
 
 type View = 'readable' | 'json'
 
-export function PreviewDrawer({ stage, output, onClose, onRefine, onApprove, extraAction, running }: Props) {
+export function PreviewDrawer({ stage, output, onClose, onRefine, onApprove, extraAction, running, onUpdateRewrite }: Props) {
   const Preview = PREVIEWS[stage]
-  const [view, setView] = useState<View>(Preview ? 'readable' : 'json')
+  const isVoicePass = stage === 'voice_pass'
+  const hasReadable = Preview || isVoicePass
+  const [view, setView] = useState<View>(hasReadable ? 'readable' : 'json')
   const [refineOpen, setRefineOpen] = useState(false)
   const [refineText, setRefineText] = useState('')
   const [refineSubmitting, setRefineSubmitting] = useState(false)
@@ -89,7 +96,7 @@ export function PreviewDrawer({ stage, output, onClose, onRefine, onApprove, ext
               <p className="text-[14px] font-semibold text-wm-text truncate">{STAGE_LABELS[stage]}</p>
             </div>
             <div className="shrink-0 flex items-center gap-1.5 flex-wrap">
-              {Preview && (
+              {hasReadable && (
                 <div className="inline-flex rounded-md border border-wm-border bg-wm-bg p-0.5 text-[11px] font-semibold">
                   <button
                     type="button"
@@ -218,13 +225,15 @@ export function PreviewDrawer({ stage, output, onClose, onRefine, onApprove, ext
         </div>
 
         <div className="p-4">
-          {view === 'readable' && Preview
-            ? <Preview output={output} />
-            : (
-              <pre className="text-[10px] font-mono text-wm-text-muted whitespace-pre-wrap bg-wm-bg p-3 rounded border border-wm-border overflow-auto">
-                {JSON.stringify(output, null, 2)}
-              </pre>
-            )}
+          {view === 'readable' && isVoicePass
+            ? <VoicePassPreview output={output} onUpdateRewrite={onUpdateRewrite} />
+            : view === 'readable' && Preview
+              ? <Preview output={output} />
+              : (
+                <pre className="text-[10px] font-mono text-wm-text-muted whitespace-pre-wrap bg-wm-bg p-3 rounded border border-wm-border overflow-auto">
+                  {JSON.stringify(output, null, 2)}
+                </pre>
+              )}
         </div>
       </div>
     </div>

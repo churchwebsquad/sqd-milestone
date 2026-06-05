@@ -53,7 +53,7 @@ export function PipelineWorkspace({ project, onChange }: Props) {
   // in-flight + result so the card can show "applied X / blocked Y".
   const [applyingVoice, setApplyingVoice] = useState(false)
   const [voiceApplyResult, setVoiceApplyResult] = useState<
-    { applied: number; blocked_by_override: number } | null
+    { applied: number; blocked_by_override: number; omitted_by_user: number } | null
   >(null)
 
   const roadmapState = (project.roadmap_state ?? {}) as Record<string, any>
@@ -108,11 +108,57 @@ export function PipelineWorkspace({ project, onChange }: Props) {
       }
       await onChange()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Run failed')
+      // Set the page-level banner AND re-throw so callers can react.
+      // The PreviewDrawer's Refine flow depends on the rejection
+      // surfacing inside the drawer — otherwise it silently closes
+      // the refine panel and looks like nothing happened.
+      const message = e instanceof Error ? e.message : 'Run failed'
+      setError(message)
+      throw e instanceof Error ? e : new Error(message)
     } finally {
       setRunning(null)
     }
   }, [project.id, onChange])
+
+  /** Per-rewrite mutation for Stage 7. Patches a single entry in
+   *  roadmap_state.stage_7.rewrites[index] with the user's omit/edit
+   *  choice. The apply step reads these annotations and skips omitted
+   *  rewrites + uses user_value where set.
+   *
+   *  Removing a key (passing undefined) is treated as "reset to model
+   *  default" — the agent-emitted new_value applies again. Strategist
+   *  workflow: omit → undo → use my variation → undo, all reversible. */
+  const updateRewrite = useCallback(async (
+    index: number,
+    patch: Partial<{ omitted: boolean | undefined; user_value: string | undefined }>,
+  ) => {
+    const stage7 = (roadmapState.stage_7 ?? {}) as Record<string, unknown>
+    const rewrites = Array.isArray(stage7.rewrites)
+      ? (stage7.rewrites as Array<Record<string, unknown>>)
+      : []
+    if (!rewrites[index]) throw new Error(`No rewrite at index ${index}`)
+    const next = rewrites.slice()
+    const current = { ...rewrites[index] }
+    if ('omitted' in patch) {
+      if (patch.omitted) current.omitted = true
+      else delete current.omitted
+    }
+    if ('user_value' in patch) {
+      if (typeof patch.user_value === 'string' && patch.user_value.length > 0) {
+        current.user_value = patch.user_value
+      } else {
+        delete current.user_value
+      }
+    }
+    next[index] = current
+    const nextStage7 = { ...stage7, rewrites: next }
+    const { error } = await supabase
+      .from('strategy_web_projects')
+      .update({ roadmap_state: { ...roadmapState, stage_7: nextStage7 } } as never)
+      .eq('id', project.id)
+    if (error) throw new Error(error.message)
+    await onChange()
+  }, [project.id, roadmapState, onChange])
 
   // Cycle back to Stage 2 with a coverage-driven redo prompt. Called
   // from Stage 2.5 (gaps) and Stage 6 (orphans) when the strategist
@@ -179,6 +225,7 @@ export function PipelineWorkspace({ project, onChange }: Props) {
       setVoiceApplyResult({
         applied:             Number(json.applied ?? 0),
         blocked_by_override: Number(json.blocked_by_override ?? 0),
+        omitted_by_user:     Number(json.omitted_by_user ?? 0),
       })
       await onChange()
     } catch (e) {
@@ -209,11 +256,18 @@ export function PipelineWorkspace({ project, onChange }: Props) {
   // CTAs. Everything else returns undefined.
   const extraActionFor = useCallback((stage: PipelineStage, output: Record<string, any> | null) => {
     if (stage === 'voice_pass') {
-      const rewriteCount = Array.isArray(output?.rewrites) ? output!.rewrites.length : 0
-      if (rewriteCount > 0) {
+      const all = Array.isArray(output?.rewrites) ? output!.rewrites as Array<Record<string, unknown>> : []
+      // Strategist may have flagged some rewrites as omitted from
+      // inside the preview drawer; the apply step skips those. Show
+      // the active count so the button label matches reality.
+      const activeCount  = all.filter(r => r.omitted !== true).length
+      const omittedCount = all.length - activeCount
+      if (all.length > 0) {
         return {
-          label: applyingVoice ? 'Applying…' : `Apply ${rewriteCount} rewrites`,
-          title: 'Write the manifest into web_sections.field_values. Fields marked override are skipped.',
+          label: applyingVoice
+            ? 'Applying…'
+            : `Apply ${activeCount} rewrites${omittedCount > 0 ? ` (${omittedCount} omitted)` : ''}`,
+          title: 'Write the active manifest into web_sections.field_values. Omitted rewrites and override-protected fields are skipped.',
           loading: applyingVoice,
           onClick: applyVoicePass,
         }
@@ -281,6 +335,9 @@ export function PipelineWorkspace({ project, onChange }: Props) {
           <div className="rounded-md border border-wm-success/30 bg-wm-success-bg px-3 py-2 text-[12px] text-wm-success">
             Voice rewrites applied: <strong>{voiceApplyResult.applied}</strong> field
             {voiceApplyResult.applied === 1 ? '' : 's'} updated
+            {voiceApplyResult.omitted_by_user > 0 && (
+              <> · <strong>{voiceApplyResult.omitted_by_user}</strong> omitted by you</>
+            )}
             {voiceApplyResult.blocked_by_override > 0 && (
               <> · <strong>{voiceApplyResult.blocked_by_override}</strong> skipped
                 (field_provenance='override' protected)</>
@@ -342,6 +399,7 @@ export function PipelineWorkspace({ project, onChange }: Props) {
           onApprove={getStatus(preview) === 'draft' ? () => approveStage(preview) : undefined}
           extraAction={extraActionFor(preview, getOutput(preview))}
           running={running === preview}
+          onUpdateRewrite={preview === 'voice_pass' ? updateRewrite : undefined}
         />
       )}
     </div>
