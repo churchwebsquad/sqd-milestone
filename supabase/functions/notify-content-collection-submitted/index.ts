@@ -1,16 +1,16 @@
-// notify-content-collection-submitted — posts a Slack notification to
-// the am-pm-web channel when a partner submits their Content Collection
-// portal. Fire-and-forget from ContentCollectionPage.submitFinal.
+// notify-content-collection-submitted — posts to the #am-pm-web Slack
+// channel when a partner submits their Content Collection portal.
+// Fire-and-forget from ContentCollectionPage.submitFinal.
 //
-// Reads SLACK_WEBHOOK_AM_PM_WEB env var (Slack incoming webhook URL).
-// If unset, logs a warning and returns 200 success without posting —
-// so the submit flow never hard-fails on missing config.
+// Reuses the existing Slack bot setup (SLACK_BOT_TOKEN) — the same bot
+// that delivers staff login codes. No webhook URL needed. The bot must
+// be added to #am-pm-web (one-time channel membership) before posts
+// land — otherwise chat.postMessage returns "not_in_channel" and the
+// function logs the failure but does not block the submit.
 //
-// Message contents:
-//   - Church name + member number
-//   - Submitted-at timestamp
-//   - Count of partner marks (revisions + additions)
-//   - Direct link to the staff Intake workspace where responses render
+// Channel override: set SLACK_AM_PM_WEB_CHANNEL (channel ID like
+// "C0XXXXXX" preferred; "#am-pm-web" works for public channels too).
+// Defaults to "#am-pm-web".
 //
 // Body params (POST JSON):
 //   { session_id: string }   required
@@ -67,14 +67,15 @@ Deno.serve(async (req) => {
     });
   }
 
-  const webhookUrl = Deno.env.get("SLACK_WEBHOOK_AM_PM_WEB");
-  if (!webhookUrl) {
-    console.warn("[notify-content-collection-submitted] SLACK_WEBHOOK_AM_PM_WEB unset — skipping post");
+  const slackToken = Deno.env.get("SLACK_BOT_TOKEN");
+  if (!slackToken) {
+    console.warn("[notify-content-collection-submitted] SLACK_BOT_TOKEN unset — skipping post");
     return new Response(
-      JSON.stringify({ ok: true, posted: false, reason: "webhook_url_unset" }),
+      JSON.stringify({ ok: true, posted: false, reason: "slack_bot_token_unset" }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
+  const channel = Deno.env.get("SLACK_AM_PM_WEB_CHANNEL") ?? "#am-pm-web";
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -109,7 +110,7 @@ Deno.serve(async (req) => {
       : Promise.resolve({ data: null as ProjectRow | null }),
     supabase
       .from("strategy_content_collection_marks")
-      .select("id, target_path", { count: "exact" })
+      .select("id, target_path")
       .eq("session_id", session_id),
   ]);
 
@@ -119,8 +120,8 @@ Deno.serve(async (req) => {
   const editCount = marks.filter((m) => (m.target_path ?? "").startsWith("answer:")).length;
   const addCount = marks.filter((m) => (m.target_path ?? "").startsWith("missing:")).length;
 
-  // Compose a Slack Block Kit message. The app origin is supplied via
-  // env (set on deploy) so the staff link points to the right host.
+  // The app origin is supplied via env (set on deploy) so the staff link
+  // points to the right host. Defaults to the production-style URL.
   const appOrigin = Deno.env.get("APP_ORIGIN") ?? "https://app.churchmediasquad.com";
   const intakeUrl = session.web_project_id
     ? `${appOrigin}/web/${session.web_project_id}?tab=intake`
@@ -130,63 +131,64 @@ Deno.serve(async (req) => {
     : "just now";
 
   const text = `${churchName} (#${session.member}) submitted their Content Collection — ${editCount} edits, ${addCount} additions`;
-  const slackPayload = {
-    text,
-    blocks: [
-      {
-        type: "header",
-        text: { type: "plain_text", text: "Content Collection submitted", emoji: true },
-      },
-      {
-        type: "section",
-        fields: [
-          { type: "mrkdwn", text: `*Church:*\n${churchName}` },
-          { type: "mrkdwn", text: `*Member:*\n#${session.member}` },
-          { type: "mrkdwn", text: `*Project:*\n${projectName}` },
-          { type: "mrkdwn", text: `*Submitted:*\n${submittedAt}` },
-          { type: "mrkdwn", text: `*Edits:*\n${editCount}` },
-          { type: "mrkdwn", text: `*Additions:*\n${addCount}` },
-        ],
-      },
-      {
-        type: "actions",
-        elements: [
-          {
-            type: "button",
-            text: { type: "plain_text", text: "View partner responses", emoji: true },
-            url: intakeUrl,
-            style: "primary",
-          },
-        ],
-      },
-    ],
-  };
 
-  try {
-    const slackRes = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(slackPayload),
-    });
-    if (!slackRes.ok) {
-      const body = await slackRes.text().catch(() => "");
-      console.error("[notify-content-collection-submitted] slack error", slackRes.status, body.slice(0, 200));
-      return new Response(
-        JSON.stringify({ ok: false, posted: false, slack_status: slackRes.status }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "unknown";
-    console.error("[notify-content-collection-submitted] fetch threw", message);
+  // Post via Slack Web API chat.postMessage — same path the staff
+  // login flow uses for codes. Bot must be a member of `channel`.
+  const slackResponse = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${slackToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      channel,
+      text,                       // fallback text for notifications
+      blocks: [
+        {
+          type: "header",
+          text: { type: "plain_text", text: "Content Collection submitted", emoji: true },
+        },
+        {
+          type: "section",
+          fields: [
+            { type: "mrkdwn", text: `*Church:*\n${churchName}` },
+            { type: "mrkdwn", text: `*Member:*\n#${session.member}` },
+            { type: "mrkdwn", text: `*Project:*\n${projectName}` },
+            { type: "mrkdwn", text: `*Submitted:*\n${submittedAt}` },
+            { type: "mrkdwn", text: `*Edits:*\n${editCount}` },
+            { type: "mrkdwn", text: `*Additions:*\n${addCount}` },
+          ],
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "View partner responses", emoji: true },
+              url: intakeUrl,
+              style: "primary",
+            },
+          ],
+        },
+      ],
+    }),
+  });
+
+  const slackData = await slackResponse.json().catch(() => ({ ok: false, error: "non_json_response" }));
+  if (!slackData.ok) {
+    console.error("[notify-content-collection-submitted] slack api error:", slackData.error);
+    // Common values to look out for:
+    //   - "not_in_channel" → invite the bot to #am-pm-web
+    //   - "channel_not_found" → channel doesn't exist or bot can't see it
+    //   - "invalid_auth" / "token_revoked" → SLACK_BOT_TOKEN needs refresh
     return new Response(
-      JSON.stringify({ ok: false, posted: false, error: message }),
+      JSON.stringify({ ok: false, posted: false, slack_error: slackData.error ?? "unknown" }),
       { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 
   return new Response(
-    JSON.stringify({ ok: true, posted: true, edits: editCount, additions: addCount }),
+    JSON.stringify({ ok: true, posted: true, channel, edits: editCount, additions: addCount }),
     { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
 });
