@@ -6,6 +6,7 @@ import { extractWebPathway, normalizeWebsitePlatform } from '../../types/churche
 import { PATHWAY_LABELS, ASSET_TYPE_LABELS } from '../submit/types'
 import EditableField from './EditableField'
 import { SectionHeader, SubSectionLabel, ToolLink } from './ChurchUI'
+import { WebSupportEvaluationChecklist } from './WebSupportEvaluationChecklist'
 
 const STATUS_CLASSES: Record<MilestoneStatus, string> = {
   sent: 'bg-primary-purple/10 text-primary-purple',
@@ -163,14 +164,16 @@ export default function WebSquadSection({ church, submissions, websiteAudits, on
         )}
       </div>
 
+      {/* Web Support Evaluation — inline checklist driven by
+          website_support_audit. Replaces the prior external dashboard
+          link and the audit-fix link; clicking an item appends this
+          member to the audit row's CSV cells (append-only). */}
+      <WebSupportEvaluationChecklist memberId={memberId} />
+
       {/* Tools */}
       <div className="mb-4">
         <SubSectionLabel label="Tools" icon={Wrench} variant="tools" />
         <div className="flex flex-wrap gap-2">
-          <ToolLink label="Web Support Evaluation" url="https://website-support-audit-dashboard.lovable.app/" />
-          {typeof raw.audit_fix_website === 'string' && raw.audit_fix_website.startsWith('http') && (
-            <ToolLink label="Fix Website on Evaluation Tool" url={raw.audit_fix_website} />
-          )}
           <ToolLink label="ContentSnare" url="https://churchmediasquad.contentsnare.com/requests" />
         </div>
       </div>
