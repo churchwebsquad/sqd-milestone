@@ -726,6 +726,21 @@ async function runStage5(limit?: number) {
     await sb.from('web_pages').delete().in('id', ids)
   }
 
+  // Cross-page library tracker. Once a section binds template
+  // "feature-section-65", we want subsequent pages to keep landing
+  // on the "-65" lineage where possible. Suffix extraction: the
+  // template id is typically something like "feature-section-65"
+  // or "hero-section-55" — grab the trailing integer.
+  // This array updates AFTER each page's bind completes and is
+  // surfaced as `library_picks_so_far` in subsequent pages' user
+  // content so the model can enforce visual continuity.
+  const librarySuffixCounts = new Map<string, number>()
+  const extractSuffix = (templateId: string | null | undefined): string | null => {
+    if (!templateId) return null
+    const m = templateId.match(/-(\d+)(?:[^0-9].*)?$/)
+    return m ? m[1] : null
+  }
+
   // Fetch full template catalog (content kind only) so we can filter
   // per section. Includes the `fields` schema so the model can emit
   // slot-valid field_values.
@@ -887,10 +902,17 @@ async function runStage5(limit?: number) {
     // card titles, and other label-shaped slots.
     const vocabularyDecisions = roadmapState.stage_2?.vocabulary_decisions ?? []
 
+    // Sort by usage so the most-used suffixes appear first — signals
+    // to the model which library has the strongest project-wide claim.
+    const librarySoFar = Array.from(librarySuffixCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([suffix, count]) => ({ suffix, sections_used: count }))
+
     const userText = [
       `# Page: ${stage2Page.name} (/${slug})`,
       `# valid_slugs — every internal href MUST point to one of these (anchor "#section" optional)\n${JSON.stringify(validSlugs, null, 2)}`,
       `# vocabulary_decisions — button labels, card titles, and nav-shaped slots MUST use the "we_chose" term, not "instead_of"\n${JSON.stringify(vocabularyDecisions, null, 2)}`,
+      `# library_picks_so_far — visual lineage already established on prior bound pages this project. Prefer these suffixes when an option exists.\n${JSON.stringify(librarySoFar, null, 2)}`,
       `# Stage 1 SEO/AEO/GEO targets (compose page_seo from the most relevant entries)\n${JSON.stringify(stage1SeoTargets, null, 2)}`,
       `# Page-level AEO keywords (from Stage 2 sitemap)\n${JSON.stringify(pageAeoKeywords, null, 2)}`,
       `# Sections to bind (${sectionInputs.length})`,
@@ -985,6 +1007,16 @@ async function runStage5(limit?: number) {
       }
       console.log(`${rows.length}/${sectionInputs.length} sections bound (${((Date.now()-t0)/1000).toFixed(1)}s, out=${result.usage?.outputTokens})`)
       pageResults.push({ page_slug: slug, web_page_id: pageId, sections: picks })
+
+      // Update the project-wide library tracker — every picked
+      // template's numeric suffix accumulates so the next page sees
+      // which lineages have already been chosen.
+      for (const pick of picks) {
+        const suffix = extractSuffix(pick.template_id)
+        if (suffix) {
+          librarySuffixCounts.set(suffix, (librarySuffixCounts.get(suffix) ?? 0) + 1)
+        }
+      }
     } catch (e) {
       console.log(`FAILED — ${e instanceof Error ? e.message : 'unknown'}`)
       pageResults.push({ page_slug: slug, web_page_id: pageId, sections: [], error: e instanceof Error ? e.message : String(e) })
