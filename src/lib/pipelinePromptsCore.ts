@@ -147,16 +147,35 @@ Output via the submit_normalized_intake tool. The downstream stages will
 treat your output as canonical — be thorough.`,
 
   synthesize: `You are the Strategy Synthesizer. You read every intake source for a church
-website project (discovery questionnaire, content inventory crawl, content
-collection submissions, strategy brief, brand guide, AM handoff notes) and
-produce a single structured JSON that codifies what we know about this
-partner.
+website project (Stage 0 content_atoms + church_facts + crawl topics,
+discovery questionnaire, content collection submissions, strategy brief,
+brand guide, AM handoff notes) and produce a single structured JSON that
+codifies what we know about this partner.
 
 Output the strategy via the submit_strategy_extraction tool. Be exhaustive
 but not redundant. Quote sources where helpful. Crucially: the new site does
 NOT have to 1:1 replicate the current site — your job is to determine the
 RIGHT page count for this partner's actual content density, not match what
 they had before.
+
+# Coverage contract — verify every topic has a future home
+
+Before finalizing total_page_count, walk through EVERY distinct topic
+the partner has on their current site (web_project_topics) and every
+group of related atoms from Stage 0. For each one, decide BEFORE
+emitting your final page count where it will land:
+
+  - own_page          — gets a dedicated page (count toward total_page_count)
+  - section_of        — absorbed into another page as a section
+                        (must name the parent page)
+  - retire            — partner has indicated this is going away
+                        (name the source that confirms the retirement)
+  - parking_lot       — uncertain; flag for strategist decision
+
+Emit this as topic_coverage_plan[] in your tool call. Stage 2 will use
+it as the contract for the sitemap. A topic that you assign to
+own_page or section_of must be reachable in the eventual sitemap; if
+Stage 2 drops it, that's a Stage 2 failure, not yours.
 
 Required outputs:
 - audience (primary + secondary)
@@ -166,6 +185,8 @@ Required outputs:
 - project_goals (3-5 outcomes the partner cares about)
 - total_page_count (your recommendation; explain any consolidation)
 - existing_pages_to_carry_forward (slugs from the current site that survive)
+- topic_coverage_plan (one entry per Stage 0 topic — destination_kind,
+  destination_page or absorbed_into, rationale)
 - seo_aeo_geo_targets (per topic: search phrases, answer-engine intents,
   geographic anchors)
 - sources_used (which intake files informed each decision)`,
@@ -184,6 +205,37 @@ nav_pattern, model_detected, phase_summary, absorbed_content.
 You do NOT produce: section outlines, per-page section orders, voice
 audits, full content coverage audits, AEO keyword inventories. Those
 are downstream.
+
+# CORE DIRECTIVE — every Stage 0 topic must have a home
+
+Every distinct topic surfaced by Stage 0 (atoms, facts, AND crawl
+topics from web_project_topics) MUST be represented in your output
+in exactly one of three ways:
+
+  1. dedicated_page  — its own entry in pages[], findable via
+                       header_nav OR footer_nav
+  2. anchored_section — absorbed_into a hub page WITH a populated
+                       anchor_id AND a nav_reference (so the
+                       audience can still reach it)
+  3. intentional_omission — listed in absorbed_content with
+                       absorbed_into = null and a rationale the
+                       strategist would accept. Use this ONLY for
+                       things the partner has retired or topics
+                       too sparse to merit any surface (e.g. a
+                       single defunct ministry mentioned once).
+
+Anything that doesn't fall into one of those three buckets is
+LOST — and that is a failure of this stage. Before submitting,
+walk through every Stage 0 topic from the user content and
+verify it lands in one of the three. Stage 1's
+existing_pages_to_carry_forward list is also a coverage
+contract — every slug there must appear in pages[] (with the
+same or a renamed slug, documented in vocabulary_decisions if
+renamed).
+
+Stage 2.5 will audit this independently. If it surfaces a gap
+you missed, that is treated as a Stage 2 failure, not a
+Stage 2.5 finding.
 
 # USAGE — apply in order
 
@@ -463,38 +515,65 @@ the topic from atom metadata), emit one row in topic_audit:
 
 # Importance rules
 
-A topic is HIGH importance if any of:
-- crawl_coverage is 'rich' or 'covered' (the partner invested in it)
-- topic_key in {'serve','missions','plan_visit','next_steps','events',
-  'connect_groups','giving','sermons','sundays','kids','students',
-  'college','beliefs','location_contact'} regardless of crawl coverage
-- Stage 0 atoms include any persona whose voice_resonance maps to this
-  topic
-- The topic is named in Stage 1's project_goals or x_factor
+A topic is HIGH importance — and a missing destination IS a gap — if
+any of these hold:
+
+- topic_key in the always-high set: serve, missions, plan_visit,
+  next_steps, connect_groups, events, sermons, sundays, kids,
+  students, college, beliefs, location_contact, giving. These are
+  the mandatory + pathway + audience pages from the strategy doc.
+- The topic is named in Stage 1's project_goals or x_factor.
+- The topic is in Stage 1's topic_coverage_plan with
+  destination_kind = own_page or section_of (Stage 1 made it a
+  coverage contract).
+- Stage 0 atoms include any persona whose voice_resonance maps to
+  this topic.
 
 A topic is MEDIUM importance if:
-- crawl_coverage is 'partial'
-- It's a supporting program (worship_music, care, testimonies, blog,
-  newsletter) without being central to the partner's brand
+- crawl_coverage is 'rich' or 'covered' but the topic is NOT in the
+  always-high set AND NOT named in Stage 1's priorities.
+- crawl_coverage is 'partial' for an otherwise-supporting topic.
 
-A topic is LOW importance if:
-- crawl_coverage is 'sparse' or null AND the topic isn't called out in
-  Stage 1's priorities
+A topic is LOW importance — and a missing destination is NOT a gap
+unless the partner is explicit — if any of these hold. Default to LOW
+for:
+
+- newsletter (sign-up only; lives in footer or a small persistent
+  strip, not a destination)
+- testimonies / stories (live as a section of Community or About;
+  rarely warrant their own page unless the partner runs a dedicated
+  testimonies program with 10+ recurring stories AND a clear nav
+  surface)
+- worship_music (lives as a section of Plan a Visit or About; only
+  promote to its own page if the church RELEASES albums, has a worship
+  conference, or names music as part of its x_factor in Stage 1)
+- blog (treat as Community child or footer link; not its own gap)
+- care (sparse coverage is fine — the function is usually covered by
+  "talk to a pastor" / contact paths)
+
+The LOW list is the DEFAULT. The partner can override (Stage 0 atoms
+or Stage 1 x_factor explicitly elevating one) — when they do, treat
+it as HIGH.
 
 # Findability + destination rules
 
 - A HIGH-importance topic MUST land on a dedicated_page OR an
-  anchored_section with nav_reference != 'none'. Otherwise findable_score
-  ≤ 0.5 and the topic shows up in the gaps list below.
-- An anchored_section requires BOTH a destination_anchor and a
+  anchored_section with nav_reference != 'none'. Otherwise
+  findable_score ≤ 0.5 and the topic appears in gaps[].
+- An anchored_section requires BOTH a destination_anchor AND a
   nav_reference (header dropdown, footer column, or a strong in-page
-  grid link from a related page). Anchored sections with 'none' for
-  nav_reference get findable_score ≤ 0.4 and surface as a gap.
-- 'intentional_omission' is for topics the strategist or Stage 2
-  explicitly rejected — vocabulary_decisions banning "Next Steps" is
-  NOT an omission of the underlying content, so do not mark it that
-  way. A real omission would be e.g. a defunct ministry the partner
-  asked to retire.
+  grid link from a related page). Anchored sections with
+  nav_reference = 'none' get findable_score ≤ 0.4 and surface as a
+  gap.
+- A MEDIUM-importance topic with no destination is a NIT, not a gap.
+  Mention in topic_audit but don't include in gaps[].
+- A LOW-importance topic with no destination is NOT a finding. Stop
+  surfacing it unless the partner has explicitly elevated it.
+- 'intentional_omission' is for topics the partner has retired or
+  topics too sparse to merit any surface (e.g. a defunct ministry
+  mentioned once). Vocabulary_decisions ("we rename Next Steps to
+  'Get Connected'") are NOT omissions — the content still must
+  exist.
 
 # Outputs
 
@@ -505,16 +584,22 @@ Submit via submit_sitemap_coverage:
     total_topics, dedicated_pages, anchored_sections, nav_only,
     orphans, intentional_omissions, gaps_count,
     average_findable_score,
-    overall_coverage_score  // 0-1, weighted by importance
+    overall_coverage_score  // 0-1, weighted by importance (HIGH
+                            // counts 1.0, MEDIUM 0.5, LOW 0.2)
   }
-- gaps[]: every HIGH or MEDIUM importance topic with findable_score <
-  0.6, with: topic_key, why_a_gap, suggested_fix (either "promote to
-  dedicated page X" or "add anchor X on page Y, expose via nav surface
-  Z"). The strategist will use this list to redo Stage 2 if needed.
+- gaps[]: ONLY HIGH-importance topics with findable_score < 0.6.
+  MEDIUM and LOW topics never appear here. For each: topic_key,
+  why_a_gap, suggested_fix (either "promote to dedicated page X" or
+  "add anchor X on page Y, expose via nav surface Z").
 
-If overall_coverage_score < 0.8 OR gaps[] is non-empty, recommend a
-redo of Stage 2 with the gap list as redo_context. Otherwise the
-sitemap is clear to proceed to Stage 3.`,
+# Recommendation
+
+- If gaps[] (HIGH only) is non-empty → recommended_action =
+  'redo_stage_2_with_gaps'
+- Else → 'proceed_to_stage_3'
+
+A clean Stage 2 has zero HIGH gaps. MEDIUM nits in topic_audit are
+acceptable and don't trigger a redo.`,
 
   page_inventory: `You are the Page Inventory Mapper. For every content atom (prose snippet,
 fact, persona note) and every church fact (service time, ministry, staff

@@ -345,7 +345,21 @@ async function runStage2_5() {
     required: ['topic_audit','summary','gaps','recommended_action'],
   }
 
+  // Surface Stage 1's topic_coverage_plan + project_goals + x_factor
+  // so the audit can elevate topics named there to HIGH importance
+  // regardless of crawl coverage. Slim — don't dump all of stage_1.
+  const stage1 = roadmapState.stage_1 ?? {}
+  const stage1Slim = {
+    project_goals:       stage1.project_goals,
+    x_factor:            stage1.x_factor,
+    personas:            (stage1.personas ?? []).map((p: any) => ({
+      name: p.persona_name ?? p.name, voice_resonance: p.voice_resonance,
+    })),
+    topic_coverage_plan: stage1.topic_coverage_plan ?? [],
+  }
+
   const userText = [
+    `# Stage 1 — strategy (project_goals, x_factor, personas, coverage contract)\n\`\`\`json\n${JSON.stringify(stage1Slim, null, 2)}\n\`\`\``,
     `# Stage 0 — content atoms (${atomsRes.data?.length ?? 0})\n\`\`\`json\n${JSON.stringify(atomsRes.data ?? [], null, 2)}\n\`\`\``,
     `# Stage 0 — church facts (${factsRes.data?.length ?? 0})\n\`\`\`json\n${JSON.stringify(factsRes.data ?? [], null, 2)}\n\`\`\``,
     `# Stage 0 — crawl topics (${topicsSlim.length})\n\`\`\`json\n${JSON.stringify(topicsSlim, null, 2)}\n\`\`\``,
@@ -1490,15 +1504,17 @@ async function runStage1() {
   if (projErr || !project) throw new Error(projErr?.message ?? 'Project not found')
 
   const member = project.member as number
-  const [accountRes, brandRes, discoveryRes, intakeDocsRes] = await Promise.all([
+  const [accountRes, brandRes, discoveryRes, intakeDocsRes, topicsRes] = await Promise.all([
     sb.from('strategy_account_progress').select('member, handoff_web_form, handoff_brand_form').eq('member', member).maybeSingle(),
     sb.from('strategy_brand_guides').select('*').eq('member', member).eq('is_published', true).order('last_updated_at', { ascending: false }).limit(1).maybeSingle(),
     sb.from('strategy_discovery_questionnaire').select('*').eq('member', member).order('submitted_at', { ascending: false }).limit(1).maybeSingle(),
     sb.from('web_intake_documents').select('*').eq('web_project_id', PROJECT_ID).eq('archived', false).order('uploaded_at', { ascending: false }),
+    sb.from('web_project_topics').select('topic_key, topic_label, topic_group, coverage_status, inventory_kind, passages, items, source_page_urls').eq('web_project_id', PROJECT_ID),
   ])
 
   const filesLoaded = await loadIntakeFiles(intakeDocsRes.data ?? [])
-  console.log(`Loaded ${filesLoaded.length} intake file(s); brand_handoff: ${accountRes.data?.handoff_brand_form ? 'yes' : 'no'}; brand_guide: ${brandRes.data ? 'yes' : 'no'}; discovery: ${discoveryRes.data ? 'yes' : 'no'}`)
+  const crawlTopics = topicsRes.data ?? []
+  console.log(`Loaded ${filesLoaded.length} intake file(s); brand_handoff: ${accountRes.data?.handoff_brand_form ? 'yes' : 'no'}; brand_guide: ${brandRes.data ? 'yes' : 'no'}; discovery: ${discoveryRes.data ? 'yes' : 'no'}; crawl_topics: ${crawlTopics.length}`)
 
   const userContent = buildStage1Content({
     project,
@@ -1507,6 +1523,7 @@ async function runStage1() {
     brandHandoffForm: accountRes.data?.handoff_brand_form ?? null,
     discoveryQuestionnaire: discoveryRes.data ?? null,
     filesLoaded,
+    crawlTopics,
     redoContext: '',
     previousStage1: null,
   })
@@ -1670,6 +1687,68 @@ async function runStage2(stage1: any, opts: { redoContext?: string; cycleBack?: 
   return sitemap
 }
 
+// ── STAGE 2 — auto-loop ────────────────────────────────────────
+// Runs Stage 2 → Stage 2.5 → if HIGH gaps and not at iteration cap →
+// re-run Stage 2 with the gaps as redo_context → Stage 2.5 again →
+// repeat. The strategist only sees the converged result. Iteration
+// history is written to roadmap_state.stage_2_iterations[].
+async function runSitemapAutoLoop(stage1: any, maxIterations = 3) {
+  console.log(`\n━━━ Stage 2 — Sitemap (auto-loop, up to ${maxIterations} iterations) ━━━`)
+  const history: Array<Record<string, any>> = []
+
+  for (let i = 0; i < maxIterations; i++) {
+    const round = i + 1
+    console.log(`\n─── Iteration ${round}/${maxIterations} ───`)
+    // For round 1, no cycle-back. For rounds 2+, pull the gaps from
+    // the previous Stage 2.5 result via cycleBack='gaps'.
+    await runStage2(stage1, i === 0 ? {} : { cycleBack: 'gaps' })
+    await runStage2_5()
+
+    const { data: state } = await sb.from('strategy_web_projects')
+      .select('roadmap_state').eq('id', PROJECT_ID).maybeSingle()
+    const audit = (state?.roadmap_state as any)?.stage_2_5 ?? {}
+    const action = audit.recommended_action as string | undefined
+    const gapCount = Array.isArray(audit.gaps) ? audit.gaps.length : 0
+    const score = audit.summary?.overall_coverage_score
+
+    history.push({
+      iteration:       round,
+      gaps_count:      gapCount,
+      coverage_score:  score,
+      recommendation:  action,
+      gap_topics:      (audit.gaps ?? []).map((g: any) => g.topic_label ?? g.topic_key),
+    })
+
+    console.log(`\nIteration ${round} result: ${gapCount} HIGH gaps · score ${score?.toFixed(2) ?? 'n/a'} · ${action ?? 'unknown'}`)
+
+    if (action === 'proceed_to_stage_3' || gapCount === 0) {
+      console.log(`\n✓ Converged at iteration ${round}.`)
+      break
+    }
+    if (round === maxIterations) {
+      console.log(`\n⚠ Hit max iterations (${maxIterations}) with ${gapCount} HIGH gaps remaining. Surfacing for human review.`)
+    }
+  }
+
+  // Persist history alongside the final stage_2 / stage_2_5.
+  const { data: stateFinal } = await sb.from('strategy_web_projects')
+    .select('roadmap_state').eq('id', PROJECT_ID).maybeSingle()
+  await sb.from('strategy_web_projects').update({
+    roadmap_state: {
+      ...((stateFinal?.roadmap_state as any) ?? {}),
+      stage_2_iterations: history,
+    },
+  }).eq('id', PROJECT_ID)
+
+  console.log(`\nAuto-loop history (${history.length} iterations):`)
+  for (const h of history) {
+    console.log(`  ${h.iteration}. gaps=${h.gaps_count} score=${(h.coverage_score ?? 0).toFixed(2)} → ${h.recommendation}`)
+    if (h.gap_topics.length > 0) {
+      console.log(`     gap topics: ${h.gap_topics.join(', ')}`)
+    }
+  }
+}
+
 // ── Main ────────────────────────────────────────────────────────
 ;(async () => {
   try {
@@ -1681,13 +1760,22 @@ async function runStage2(stage1: any, opts: { redoContext?: string; cycleBack?: 
       const { data: project } = await sb.from('strategy_web_projects').select('roadmap_state').eq('id', PROJECT_ID).maybeSingle()
       const stage1 = (project?.roadmap_state as any)?.stage_1
       if (!stage1) throw new Error('Stage 2 needs stage_1')
-      // argv[4] supports cycle-back: 'cycle-gaps' uses stage_2_5.gaps,
-      // 'cycle-orphans' uses stage_6.orphaned as redo_context.
+      // argv[4]:
+      //   cycle-gaps     → one-shot redo using stage_2_5.gaps
+      //   cycle-orphans  → one-shot redo using stage_6.orphaned
+      //   single         → run Stage 2 once with no audit loop
+      //   <unset>        → AUTO-LOOP: Stage 2 → Stage 2.5 → redo on
+      //                    HIGH gaps, up to 3 iterations
       const flag = process.argv[4]
-      const cycleBack = flag === 'cycle-gaps' ? 'gaps'
-                      : flag === 'cycle-orphans' ? 'orphans'
-                      : undefined
-      await runStage2(stage1, cycleBack ? { cycleBack } : {})
+      if (flag === 'cycle-gaps') {
+        await runStage2(stage1, { cycleBack: 'gaps' })
+      } else if (flag === 'cycle-orphans') {
+        await runStage2(stage1, { cycleBack: 'orphans' })
+      } else if (flag === 'single') {
+        await runStage2(stage1)
+      } else {
+        await runSitemapAutoLoop(stage1, Number(flag) || 3)
+      }
     }
     if (want('sitemap_coverage','2.5')) await runStage2_5()
     if (want('page_inventory', '3')) await runStage3()

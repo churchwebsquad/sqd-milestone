@@ -176,13 +176,17 @@ export default async function handler(req: any, res: any) {
 
   // ── Load intake from DB ─────────────────────────────────────────────
   const member = project.member as number
-  const [accountRes, brandRes, discoveryRes, intakeDocsRes] = await Promise.all([
+  const [accountRes, brandRes, discoveryRes, intakeDocsRes, topicsRes] = await Promise.all([
     // handoff_brand_form is the AM's rich brand intake — used as the
     // brand source when no published strategy_brand_guides row exists.
     sb.from('strategy_account_progress').select('member, handoff_web_form, handoff_brand_form').eq('member', member).maybeSingle(),
     sb.from('strategy_brand_guides').select('*').eq('member', member).eq('is_published', true).order('last_updated_at', { ascending: false }).limit(1).maybeSingle(),
     sb.from('strategy_discovery_questionnaire').select('*').eq('member', member).order('submitted_at', { ascending: false }).limit(1).maybeSingle(),
     sb.from('web_intake_documents').select('*').eq('web_project_id', projectId).eq('archived', false).order('uploaded_at', { ascending: false }),
+    // Crawl topics — the partner's live website inventory. Stage 1
+    // needs to see this so topic_coverage_plan accounts for every
+    // distinct topic the new site has to represent.
+    sb.from('web_project_topics').select('topic_key, topic_label, topic_group, coverage_status, inventory_kind, passages, items, source_page_urls').eq('web_project_id', projectId),
   ])
 
   const accountHandoff = accountRes.data?.handoff_web_form ?? null
@@ -190,6 +194,7 @@ export default async function handler(req: any, res: any) {
   const brandGuide = brandRes.data ?? null
   const discoveryQuestionnaire = discoveryRes.data ?? null
   const intakeDocs = intakeDocsRes.data ?? []
+  const crawlTopics = topicsRes.data ?? []
 
   // ── Pre-flight: check required sources + load all uploaded files ────
   const missing_sources: string[] = []
@@ -285,6 +290,7 @@ export default async function handler(req: any, res: any) {
     project, accountHandoff, brandGuide, brandHandoffForm,
     discoveryQuestionnaire,
     filesLoaded: preflight.files_loaded,
+    crawlTopics,
     redoContext, previousStage1,
   })
 
@@ -440,6 +446,9 @@ interface UserContentInputs {
   brandHandoffForm: unknown            // jsonb from strategy_account_progress.handoff_brand_form
   discoveryQuestionnaire: any
   filesLoaded: PreflightFile[]
+  /** Optional crawl topics (web_project_topics rows). When present,
+   *  Stage 1 must emit topic_coverage_plan for every entry. */
+  crawlTopics?: any[]
   redoContext: string
   /** Previous Stage 1 extraction — only set on redo. */
   previousStage1?: Record<string, unknown> | null
@@ -517,6 +526,32 @@ ${guide.handoff_notes ?? '(none)'}`,
   // Content collection (highest detail volume)
   blocks.push({ type: 'text', text: '# Source: Content Collection (every concrete fact must find a home on the new site)' })
   appendCategoryFiles(blocks, inputs.filesLoaded, 'content_collection', 'Content Collection file')
+
+  // Crawl topics — the partner's current website inventory. Stage 1
+  // uses this list to build topic_coverage_plan, the contract Stage 2
+  // must honor.
+  if (inputs.crawlTopics && inputs.crawlTopics.length > 0) {
+    const slim = inputs.crawlTopics
+      .filter((t: any) => (Array.isArray(t.passages) && t.passages.length > 0)
+                       || (Array.isArray(t.items) && t.items.length > 0)
+                       || (Array.isArray(t.source_page_urls) && t.source_page_urls.length > 0))
+      .map((t: any) => ({
+        topic_key: t.topic_key, topic_label: t.topic_label, topic_group: t.topic_group,
+        coverage_status: t.coverage_status, inventory_kind: t.inventory_kind,
+        passage_count: Array.isArray(t.passages) ? t.passages.length : 0,
+        passage_sample: Array.isArray(t.passages) ? t.passages.slice(0, 1) : null,
+        items_count: Array.isArray(t.items) ? t.items.length : 0,
+        source_url_count: Array.isArray(t.source_page_urls) ? t.source_page_urls.length : 0,
+      }))
+    blocks.push({
+      type: 'text',
+      text: `# Source: Crawl topics (the partner's CURRENT live site, by topic)\n` +
+            `Every entry below must appear in your topic_coverage_plan output. ` +
+            `Decide own_page / section_of / retire / parking_lot for each, with ` +
+            `rationale. This is the coverage contract Stage 2 will honor.\n\n` +
+            `\`\`\`json\n${JSON.stringify(slim, null, 2)}\n\`\`\``,
+    })
+  }
 
   // Optional redo context
   if (inputs.previousStage1) {
@@ -698,6 +733,22 @@ export const EXTRACTION_TOOL = {
             search_phrases: { type: 'array', items: { type: 'string' } },
             answer_intents: { type: 'array', items: { type: 'string' } },
             geo_anchors:    { type: 'array', items: { type: 'string' }, description: 'Local landmarks, neighborhoods, city/region references.' },
+          },
+        },
+      },
+      topic_coverage_plan: {
+        type: 'array',
+        description: 'Coverage contract. One entry per distinct Stage 0 topic (atom cluster, fact group, or web_project_topics row). Every topic MUST be accounted for before Stage 2 drafts. Stage 2 treats this list as authoritative — any topic you assign to own_page or section_of must end up reachable in the sitemap.',
+        items: {
+          type: 'object',
+          required: ['topic_key','destination_kind','rationale'],
+          properties: {
+            topic_key:        { type: 'string', description: 'Stable identifier — crawl topic_key when one exists, else a hyphenated label.' },
+            topic_label:      { type: 'string', description: 'Human-readable label.' },
+            destination_kind: { type: 'string', enum: ['own_page','section_of','retire','parking_lot'] },
+            destination_page: { type: ['string','null'], description: 'When destination_kind=own_page: the page slug Stage 2 should create. Null otherwise.' },
+            absorbed_into:    { type: ['string','null'], description: 'When destination_kind=section_of: the parent page slug this topic becomes a section on. Null otherwise.' },
+            rationale:        { type: 'string' },
           },
         },
       },
