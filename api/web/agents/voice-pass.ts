@@ -160,23 +160,30 @@ function validateRewrite(r: Rewrite, contract?: SectionContract): { ok: true } |
 }
 
 /** Run one Sonnet 4.6 call for a single page. Returns rewrites + skips
- *  (server-validated) plus token usage. */
+ *  (server-validated) plus token usage.
+ *
+ *  Architecture: the project-wide context (voice card + brand guide +
+ *  personas + voice exemplars) is sent as the FIRST user content
+ *  block with Anthropic prompt caching (`cache_control: ephemeral`).
+ *  All per-page calls in this run reuse the same cached block, which
+ *  - keeps the model's attention on per-page craft instead of
+ *    re-absorbing the brand voice on every call,
+ *  - makes voice consistent across pages (same cached anchor),
+ *  - drops cost on the cached portion to ~10% of fresh-token cost.
+ *
+ *  The second content block is the per-page payload (contracts +
+ *  current field_values). That's what varies per call. */
 async function runPage(
   page: WebPage,
   pageSections: WebSection[],
   pageContracts: SectionContract[],
-  voiceCard: unknown,
-  personas: unknown,
-  brandGuide: unknown,
+  cachedProjectContext: string,
   previousForPage: unknown,
   redoContext: string,
   systemPrompt: string,
 ): Promise<{ rewrites: Rewrite[]; skipped: Skip[]; usage: { input_tokens?: number; output_tokens?: number } }> {
-  const userText = [
-    `# Page\n${page.name} (/${page.slug})`,
-    `# Voice card (Stage 1)\n${JSON.stringify(voiceCard, null, 2)}`,
-    `# Personas (Stage 1)\n${JSON.stringify(personas, null, 2)}`,
-    brandGuide && `# Brand guide\n${JSON.stringify(brandGuide, null, 2)}`,
+  const pagePayload = [
+    `# This page\n${page.name} (/${page.slug})`,
     pageContracts.length > 0 &&
       `# Stage 4 section contracts — load-bearing constraints for THIS page\n` +
       `For each section_id, required_messages must survive any rewrite verbatim or paraphrased (signal tokens stay), keyword_assignments.primary phrases must remain in heading or lead sentence, and cta.label MUST NOT change.\n` +
@@ -190,7 +197,29 @@ async function runPage(
     model: MODEL,
     maxOutputTokens: MAX_OUTPUT_TOKENS_PER_PAGE,
     system: systemPrompt,
-    messages: [{ role: 'user', content: userText }],
+    messages: [
+      {
+        role: 'user',
+        content: [
+          // Cached: project-wide voice context. Same string across every
+          // per-page call in this run. Anthropic caches at ~10% billing
+          // for 5 minutes; if all pages finish in that window the
+          // savings + attention focus are substantial.
+          {
+            type: 'text',
+            text: cachedProjectContext,
+            providerOptions: {
+              anthropic: { cacheControl: { type: 'ephemeral' } },
+            },
+          },
+          // Variable: per-page payload. Not cached.
+          {
+            type: 'text',
+            text: pagePayload,
+          },
+        ] as any,
+      },
+    ],
     tools: {
       submit_voice_rewrites: tool({
         description: TOOL.description,
@@ -437,6 +466,25 @@ async function voicePassHandler(req: any, res: any) {
     }
   }
 
+  // Build the cached project context ONCE. Every per-page call sends
+  // this same string as a cache_control='ephemeral' content block, so
+  // Anthropic caches it across the parallel calls. Concentrates the
+  // model's attention on per-page craft instead of re-reading brand
+  // voice 17 times.
+  const voiceExemplars = (stage1 as any).voice_exemplars as string[] | undefined
+  const cachedProjectContext = [
+    `# Brand voice card (Stage 1)`,
+    JSON.stringify((stage1 as any).voice_characteristics, null, 2),
+    brandGuide && `# Brand guide\n${JSON.stringify(brandGuide, null, 2)}`,
+    `# Personas (Stage 1) — reference set`,
+    JSON.stringify((stage1 as any).personas, null, 2),
+    Array.isArray(voiceExemplars) && voiceExemplars.length > 0 && [
+      `# Voice exemplars — known-great phrases from this brand`,
+      `These are strategist-vetted samples of how this voice actually sounds at its best. Pattern-match the energy, cadence, and word choice. Aim for this level of craft on every rewrite. Do not literally copy.`,
+      ...voiceExemplars.map((e, i) => `  ${i + 1}. "${e}"`),
+    ].join('\n'),
+  ].filter(Boolean).join('\n\n')
+
   // Fire all pages in parallel. Sonnet 4.6 is fast enough that even
   // 17 pages finish under the 600s maxDuration. If a single page
   // errors, we keep the rest — the strategist can refine just that
@@ -446,9 +494,7 @@ async function voicePassHandler(req: any, res: any) {
       w.page,
       w.pageSections,
       w.pageContracts,
-      (stage1 as any).voice_characteristics,
-      (stage1 as any).personas,
-      brandGuide ?? null,
+      cachedProjectContext,
       previousByPageSlug.get(w.page.slug) ?? null,
       redoContext,
       resolved.systemPrompt,
