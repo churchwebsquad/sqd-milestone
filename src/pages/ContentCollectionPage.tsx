@@ -373,13 +373,21 @@ export default function ContentCollectionPage() {
       .from('strategy_content_collection_sessions')
       .update({ status: 'submitted', submitted_at: new Date().toISOString() })
       .eq('id', sessionId)
-    // Reconcile snippets with the partner's submitted answers. Fire-
-    // and-forget so a slow / failing edge function doesn't block the
-    // "you've submitted" screen — staff can also trigger this manually
-    // from the Intake & Crawl page if it fails silently.
+    // Two fire-and-forget side effects after submit. Neither blocks the
+    // "you've submitted" screen — staff can also trigger snippet refresh
+    // manually from the Intake & Crawl page if it fails silently.
+    //
+    // 1. Reconcile snippets with the partner's submitted answers.
     void supabase.functions.invoke('refresh-snippets-from-content-collection', {
       body: { session_id: sessionId },
     }).catch(err => { console.error('[snippet refresh] failed', err) })
+    // 2. Post a Slack notification to the am-pm-web channel so the
+    //    AM / PM / Web team knows the partner finished and the intake
+    //    checklist can be marked complete. Silently skips if the
+    //    webhook env var is unset (no-op for local dev).
+    void supabase.functions.invoke('notify-content-collection-submitted', {
+      body: { session_id: sessionId },
+    }).catch(err => { console.error('[slack notify] failed', err) })
     setSession(session ? { ...session, status: 'submitted' } : null)
   }
 

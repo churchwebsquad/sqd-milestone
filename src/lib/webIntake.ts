@@ -51,7 +51,7 @@ export async function fetchIntakeStatus(
   webProjectId: string,
   member: number,
 ): Promise<IntakeStatus> {
-  const [docsRes, accountRes, brandRes, discoveryRes, crawlRes, reviewsRes] = await Promise.all([
+  const [docsRes, accountRes, brandRes, discoveryRes, crawlRes, reviewsRes, ccSessionRes] = await Promise.all([
     supabase
       .from('web_intake_documents')
       .select('*')
@@ -94,6 +94,16 @@ export async function fetchIntakeStatus(
       .select('id, kind, status, completed_at, started_at')
       .eq('web_project_id', webProjectId)
       .eq('kind', 'partner'),
+    // Content collection portal session. If the partner submitted the
+    // portal, that counts as content_collection complete without needing
+    // an uploaded file or the auto-complete derivation.
+    supabase
+      .from('strategy_content_collection_sessions')
+      .select('id, status, submitted_at')
+      .eq('web_project_id', webProjectId)
+      .order('submitted_at', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle(),
   ])
 
   const docs = (docsRes.data ?? []) as WebIntakeDocument[]
@@ -186,17 +196,27 @@ export async function fetchIntakeStatus(
          ? lastPartnerCompletedAt
          : latestCrawl?.completed_at ?? lastPartnerCompletedAt ?? latestCrawl?.created_at ?? null)
     : null
+  // Content collection portal — third trigger. If the partner submitted
+  // the portal, that's a complete content collection regardless of
+  // uploaded files or crawl/review state. Takes priority since it's the
+  // most concrete signal that the partner provided their content.
+  const ccSession = ccSessionRes.data as { id: string; status: string | null; submitted_at: string | null } | null
+  const portalSubmitted = !!(ccSession && ccSession.status === 'submitted' && ccSession.submitted_at)
   const content_collection: IntakeRowStatus = {
     key: 'content_collection',
     is_hard_stop: true,
-    received: content.length > 0 || autoCompleteContentCollection,
-    received_at: content[0]?.uploaded_at ?? autoCompleteReceivedAt,
+    received: portalSubmitted || content.length > 0 || autoCompleteContentCollection,
+    received_at:
+      portalSubmitted ? ccSession!.submitted_at :
+      (content[0]?.uploaded_at ?? autoCompleteReceivedAt),
     source_url: null,
-    source_label: content.length > 0
-      ? `${content.length} file${content.length === 1 ? '' : 's'} uploaded`
-      : (autoCompleteContentCollection
-         ? 'Auto-completed via site crawl + partner feedback'
-         : null),
+    source_label: portalSubmitted
+      ? 'Content Collection portal submitted'
+      : (content.length > 0
+         ? `${content.length} file${content.length === 1 ? '' : 's'} uploaded`
+         : (autoCompleteContentCollection
+            ? 'Auto-completed via site crawl + partner feedback'
+            : null)),
     uploaded_files: content,
   }
 

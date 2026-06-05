@@ -71,7 +71,7 @@ interface MarkRow {
   client_note:                   string | null
   proposed_program_name:         string | null
   proposed_program_description:  string | null
-  updated_at:                    string
+  marked_at:                     string
 }
 
 export function ContentCollectionResponsesPanel({ projectId }: Props) {
@@ -100,9 +100,9 @@ export function ContentCollectionResponsesPanel({ projectId }: Props) {
     const [marksRes, attRes] = await Promise.all([
       supabase
         .from('strategy_content_collection_marks')
-        .select('id, target_path, target_kind, status, client_note, proposed_program_name, proposed_program_description, updated_at')
+        .select('id, target_path, target_kind, status, client_note, proposed_program_name, proposed_program_description, marked_at')
         .eq('session_id', s.id)
-        .order('updated_at', { ascending: false }),
+        .order('marked_at', { ascending: false }),
       supabase
         .from('strategy_content_collection_attachments')
         .select('*')
@@ -289,7 +289,7 @@ function Step1AnswerEditsSection({ marks }: { marks: MarkRow[] }) {
             <li key={m.id} className="rounded-md border border-wm-border bg-wm-bg px-3 py-2">
               <div className="flex items-baseline justify-between gap-2 flex-wrap">
                 <code className="text-[10px] font-mono text-wm-text-muted">{bucket} · {field}</code>
-                <span className="text-[10px] text-wm-text-subtle">{new Date(m.updated_at).toLocaleString()}</span>
+                <span className="text-[10px] text-wm-text-subtle">{new Date(m.marked_at).toLocaleString()}</span>
               </div>
               <p className="text-[13px] text-wm-text mt-1 whitespace-pre-line leading-snug">
                 {m.client_note || <span className="italic text-wm-text-subtle">empty</span>}
