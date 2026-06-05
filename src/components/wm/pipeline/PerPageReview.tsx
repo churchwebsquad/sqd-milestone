@@ -22,8 +22,13 @@
  * without bound copy or rewrites.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, FileText, Target, Megaphone, AlertTriangle, Sparkles } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText, Target, Megaphone, AlertTriangle, Sparkles, Check, Unlock, RotateCcw, Loader2, Pencil, X } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
+import {
+  approveCopy, unlockCopy, restoreApproval, getApproval, isApproved,
+  type PageApprovalRecord,
+} from '../../../lib/pageApprovals'
+import { SitemapStrip } from './SitemapStrip'
 import type { StrategyWebProject } from '../../../types/database'
 
 interface Stage2Page  { slug: string; name?: string; nav_label?: string; page_type?: string }
@@ -87,7 +92,13 @@ interface Stage8Finding {
   suggested_fix?:  string
 }
 
-export function PerPageReview({ project }: { project: StrategyWebProject }) {
+export function PerPageReview({
+  project,
+  onChange,
+}: {
+  project:  StrategyWebProject
+  onChange?: () => void | Promise<void>
+}) {
   const roadmap = (project.roadmap_state ?? {}) as Record<string, any>
   const stage2Pages: Stage2Page[]   = roadmap.stage_2?.pages ?? []
   const stage4Pages: Stage4Page[]   = roadmap.stage_4?.page_outlines ?? []
@@ -152,11 +163,31 @@ export function PerPageReview({ project }: { project: StrategyWebProject }) {
     )
   }
 
+  // Refresh the project + DB-backed sections after any mutation
+  // (approve/unlock/restore/inline edit). The parent supplies
+  // onChange to re-fetch strategy_web_projects; we also re-pull
+  // web_sections locally so RenderedCopy renders the fresh state.
+  const refresh = async () => {
+    if (onChange) await onChange()
+    const { data: sectionsRes } = await supabase
+      .from('web_sections')
+      .select('id, web_page_id, sort_order, content_template_id, field_values')
+      .eq('archived', false)
+    const pageIds = new Set(webPages.map(p => p.id))
+    setWebSections(((sectionsRes ?? []) as WebSectionRow[]).filter(s => pageIds.has(s.web_page_id)))
+  }
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
+      <SitemapStrip
+        roadmapState={roadmap}
+        activeSlug={openSlug}
+        onSelect={(slug) => setOpenSlug(slug)}
+      />
       {orderedPages.map(p => (
         <PageCard
           key={p.slug}
+          projectId={project.id}
           slug={p.slug}
           name={p.name}
           open={openSlug === p.slug}
@@ -166,6 +197,9 @@ export function PerPageReview({ project }: { project: StrategyWebProject }) {
           webSections={webSections}
           rewrites={rewrites}
           findings={findings}
+          approval={getApproval(roadmap, p.slug)}
+          locked={isApproved(roadmap, p.slug)}
+          onChange={refresh}
         />
       ))}
     </div>
@@ -173,8 +207,10 @@ export function PerPageReview({ project }: { project: StrategyWebProject }) {
 }
 
 function PageCard({
-  slug, name, open, onToggle, stage4Page, webPage, webSections, rewrites, findings,
+  projectId, slug, name, open, onToggle, stage4Page, webPage, webSections, rewrites, findings,
+  approval, locked, onChange,
 }: {
+  projectId: string
   slug: string
   name: string
   open: boolean
@@ -184,6 +220,9 @@ function PageCard({
   webSections: WebSectionRow[]
   rewrites: Stage7Rewrite[]
   findings: Stage8Finding[]
+  approval: PageApprovalRecord | null
+  locked:   boolean
+  onChange: () => void | Promise<void>
 }) {
   const pageSections = webPage
     ? webSections
@@ -240,6 +279,15 @@ function PageCard({
 
       {open && (
         <div className="border-t border-wm-border px-3 py-3 space-y-3 bg-wm-bg/30">
+          {/* Approval banner — the load-bearing state UI. Shows current
+              approval state + Approve/Unlock/Restore controls. */}
+          <ApprovalBanner
+            projectId={projectId}
+            slug={slug}
+            approval={approval}
+            onChange={onChange}
+          />
+
           {/* Page-level meta */}
           <PageMeta stage4Page={stage4Page} />
 
@@ -264,6 +312,8 @@ function PageCard({
                 bound={pair.bound}
                 rewrites={pair.bound ? pageRewrites.filter(r => r.web_section_id === pair.bound!.id) : []}
                 findings={pair.bound ? pageFindings.filter(f => f.web_section_id === pair.bound!.id) : []}
+                locked={locked}
+                onChange={onChange}
               />
             ))}
           </div>
@@ -357,13 +407,15 @@ function effectiveValues(
 }
 
 function SectionRow({
-  index, outline, bound, rewrites, findings,
+  index, outline, bound, rewrites, findings, locked, onChange,
 }: {
   index:    number
   outline?: Stage4Section
   bound?:   WebSectionRow
   rewrites: Stage7Rewrite[]
   findings: Stage8Finding[]
+  locked:   boolean
+  onChange: () => void | Promise<void>
 }) {
   // Lead with rendered copy. Sections are expanded by default so the
   // strategist can scan writing quality without clicking every section
@@ -429,7 +481,13 @@ function SectionRow({
               rewrites overlaid on bound field_values. */}
           {bound && (
             <div className="px-4 py-4 border-b border-wm-border bg-white/40">
-              <RenderedCopy values={effective} pending={pending} />
+              <RenderedCopy
+                values={effective}
+                pending={pending}
+                sectionId={bound.id}
+                locked={locked}
+                onChange={onChange}
+              />
             </div>
           )}
 
@@ -739,23 +797,36 @@ function ChipRow({ label, items, tone }: { label: string; items: string[]; tone:
  *  as a flexible mini-grid so the user can scan repeated items, not as
  *  raw JSON. */
 function RenderedCopy({
-  values, pending,
+  values, pending, sectionId, locked, onChange,
 }: {
-  values: Record<string, unknown>
-  pending: Set<string>
+  values:    Record<string, unknown>
+  pending:   Set<string>
+  sectionId: string
+  locked:    boolean
+  onChange:  () => void | Promise<void>
 }) {
   // Pluck known slots (best-effort — Brixies field naming is consistent
   // enough that this covers ~95% of sections). Unrecognized string
   // slots fall into "other" and render as a small caption row.
+  // For each text slot, we resolve the canonical field key so inline
+  // edits write to the right field. The render functions below use
+  // the resolved key (e.g. 'heading' or 'title' depending on what
+  // actually exists in field_values).
   const get = (k: string): string | null => {
     const v = values[k]
     return typeof v === 'string' && v.trim().length > 0 ? v : null
   }
-  const eyebrow     = get('eyebrow') ?? get('tagline')
-  const heading     = get('heading') ?? get('title') ?? get('h1') ?? get('h2')
-  const subhead     = get('subhead') ?? get('subheading') ?? (heading && get('tagline') !== eyebrow ? get('tagline') : null)
-  const description = get('description') ?? get('accent_description') ?? get('intro')
-  const body        = get('body') ?? get('rich_text') ?? get('long_text') ?? get('content')
+  const firstKey = (keys: string[]): string => keys.find(k => typeof values[k] === 'string') ?? keys[0]
+  const eyebrowKey     = firstKey(['eyebrow','tagline'])
+  const eyebrow        = get(eyebrowKey)
+  const headingKey     = firstKey(['heading','title','h1','h2'])
+  const heading        = get(headingKey)
+  const subheadKey     = firstKey(['subhead','subheading'])
+  const subhead        = get(subheadKey) ?? (heading && get('tagline') !== eyebrow ? get('tagline') : null)
+  const descriptionKey = firstKey(['description','accent_description','intro'])
+  const description    = get(descriptionKey)
+  const bodyKey        = firstKey(['body','rich_text','long_text','content'])
+  const body           = get(bodyKey)
   // Lift structured-slot items so cards/rows preview visually.
   const buttons  = pickArrayOfObjects(values, ['buttons'])
   const cards    = pickArrayOfObjects(values, ['cards', 'card_group', 'grid_row.items'])
@@ -785,35 +856,42 @@ function RenderedCopy({
 
   return (
     <div className="space-y-3">
-      {(eyebrow || pending.has('eyebrow') || pending.has('tagline')) && (
-        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">
-          {dot('eyebrow')}{dot('tagline')}
-          {eyebrow ?? <span className="italic text-wm-text-subtle">(no eyebrow)</span>}
-        </p>
+      {(eyebrow || pending.has(eyebrowKey)) && (
+        <EditableText
+          value={eyebrow} fieldKey={eyebrowKey} sectionId={sectionId}
+          locked={locked} pending={pending.has(eyebrowKey)} onChange={onChange}
+          className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong"
+        />
       )}
-      {(heading || pending.has('heading') || pending.has('title')) && (
-        <h2 className="text-[20px] md:text-[22px] font-semibold text-wm-text leading-tight">
-          {dot('heading')}{dot('title')}{dot('h1')}{dot('h2')}
-          {heading ?? <span className="italic text-wm-text-subtle text-[14px]">(no heading)</span>}
-        </h2>
+      {(heading || pending.has(headingKey)) && (
+        <EditableText
+          value={heading} fieldKey={headingKey} sectionId={sectionId}
+          locked={locked} pending={pending.has(headingKey)} onChange={onChange}
+          className="text-[20px] md:text-[22px] font-semibold text-wm-text leading-tight"
+        />
       )}
       {subhead && (
-        <p className="text-[14px] text-wm-text-muted leading-snug">
-          {dot('subhead')}{dot('subheading')}
-          {subhead}
-        </p>
+        <EditableText
+          value={subhead} fieldKey={subheadKey} sectionId={sectionId}
+          locked={locked} pending={pending.has(subheadKey)} onChange={onChange}
+          className="text-[14px] text-wm-text-muted leading-snug"
+        />
       )}
       {description && (
-        <p className="text-[13px] text-wm-text leading-relaxed whitespace-pre-wrap">
-          {dot('description')}{dot('accent_description')}{dot('intro')}
-          {description}
-        </p>
+        <EditableText
+          value={description} fieldKey={descriptionKey} sectionId={sectionId}
+          locked={locked} pending={pending.has(descriptionKey)} onChange={onChange}
+          className="text-[13px] text-wm-text leading-relaxed whitespace-pre-wrap"
+          multiline
+        />
       )}
       {body && (
-        <div className="text-[13px] text-wm-text leading-relaxed whitespace-pre-wrap">
-          {dot('body')}{dot('rich_text')}{dot('long_text')}{dot('content')}
-          {body}
-        </div>
+        <EditableText
+          value={body} fieldKey={bodyKey} sectionId={sectionId}
+          locked={locked} pending={pending.has(bodyKey)} onChange={onChange}
+          className="text-[13px] text-wm-text leading-relaxed whitespace-pre-wrap"
+          multiline
+        />
       )}
       {buttons.length > 0 && (
         <div className="flex flex-wrap gap-2 pt-1">
@@ -954,6 +1032,369 @@ function CollapseToggle({
           {children}
         </div>
       )}
+    </div>
+  )
+}
+
+/** Page approval state banner with controls. The load-bearing UI for
+ *  the new approval workflow — Draft → Approved → Unlocked → Re-approve.
+ *  Reflects state of roadmap_state.approved_pages[slug] and exposes
+ *  buttons that call the pageApprovals helpers.
+ */
+function ApprovalBanner({
+  projectId, slug, approval, onChange,
+}: {
+  projectId: string
+  slug:      string
+  approval:  PageApprovalRecord | null
+  onChange:  () => void | Promise<void>
+}) {
+  const [busy, setBusy] = useState<null | 'approve' | 'unlock' | 'restore'>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [unlockOpen, setUnlockOpen] = useState(false)
+  const [unlockReason, setUnlockReason] = useState('')
+
+  const wrap = async (kind: 'approve' | 'unlock' | 'restore', fn: () => Promise<{ ok: true } | { ok: true; version: number } | { ok: false; error: string }>) => {
+    setBusy(kind); setError(null)
+    try {
+      const result = await fn()
+      if (!result.ok) setError(result.error)
+      else await onChange()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Action failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleApprove = () => wrap('approve', () => approveCopy({
+    projectId, pageSlug: slug, userId: null,
+  }))
+  const handleRestore = () => wrap('restore', () => restoreApproval({
+    projectId, pageSlug: slug,
+  }))
+  const submitUnlock = () => wrap('unlock', async () => {
+    const r = await unlockCopy({
+      projectId, pageSlug: slug, userId: null,
+      reason: unlockReason.trim() || 'No reason given',
+    })
+    if (r.ok) { setUnlockOpen(false); setUnlockReason('') }
+    return r
+  })
+
+  // ── States ──
+  const status = approval?.status
+  const version = approval?.version
+  const stale = approval?.stale === true
+  const approvedAt = approval?.approved_at ? new Date(approval.approved_at).toLocaleDateString() : null
+  const unlockedAt = approval?.unlocked_at ? new Date(approval.unlocked_at).toLocaleDateString() : null
+
+  // Approved state — green banner, primary action is Unlock
+  if (status === 'approved' && !stale) {
+    return (
+      <div className="rounded border border-wm-success/40 bg-wm-success-bg/40 px-3 py-2 flex items-center gap-2 flex-wrap">
+        <Check size={13} className="text-wm-success shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-[12px] text-wm-text">
+            <strong className="text-wm-success">Approved</strong>
+            {version && <span className="text-wm-text-muted"> · v{version}</span>}
+            {approvedAt && <span className="text-wm-text-muted"> · {approvedAt}</span>}
+          </p>
+          <p className="text-[10px] text-wm-text-muted leading-snug">
+            Voice-pass + bind are locked. Re-runs will skip this page until you unlock it.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setUnlockOpen(o => !o)}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-semibold border border-wm-border text-wm-text bg-wm-bg-elevated hover:bg-wm-bg-hover disabled:opacity-40"
+        >
+          <Unlock size={11} /> Unlock for re-run
+        </button>
+        {unlockOpen && (
+          <div className="basis-full mt-2 p-2 rounded border border-wm-border bg-wm-bg-elevated">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">
+              Unlock reason
+            </p>
+            <p className="text-[11px] text-wm-text-muted mb-1.5 leading-snug">
+              Unlocking removes the approval and lets the pipeline write here again. The
+              approved version (v{version}) is preserved — you can restore at any time.
+            </p>
+            <input
+              type="text"
+              value={unlockReason}
+              onChange={e => setUnlockReason(e.target.value)}
+              disabled={busy === 'unlock'}
+              placeholder="Why unlock? e.g., 'Headings need rework after SEO audit'"
+              className="w-full text-[12px] px-2 py-1.5 rounded border border-wm-border bg-wm-bg-elevated focus:border-wm-accent focus:outline-none"
+            />
+            <div className="flex justify-end gap-2 mt-2">
+              <button
+                type="button"
+                onClick={() => { setUnlockOpen(false); setUnlockReason('') }}
+                disabled={busy === 'unlock'}
+                className="text-[11px] text-wm-text-muted hover:text-wm-text px-2 py-1 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitUnlock()}
+                disabled={busy === 'unlock' || !unlockReason.trim()}
+                className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-semibold bg-wm-warning text-white hover:opacity-90 disabled:opacity-40"
+              >
+                {busy === 'unlock' ? <Loader2 size={11} className="animate-spin" /> : <Unlock size={11} />}
+                Confirm unlock
+              </button>
+            </div>
+          </div>
+        )}
+        {error && <p className="basis-full text-[11px] text-wm-danger mt-1">Action failed: {error}</p>}
+      </div>
+    )
+  }
+
+  // Approved + stale state — yellow banner
+  if (status === 'approved' && stale) {
+    return (
+      <div className="rounded border border-wm-warning/40 bg-wm-warning/10 px-3 py-2 flex items-center gap-2 flex-wrap">
+        <AlertTriangle size={13} className="text-wm-warning shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-[12px] text-wm-text">
+            <strong className="text-wm-warning">Approved v{version} — but stale</strong>
+            {approvedAt && <span className="text-wm-text-muted"> · approved {approvedAt}</span>}
+          </p>
+          <p className="text-[10px] text-wm-text-muted leading-snug">
+            {approval?.stale_reasons?.length
+              ? `Stage 8 / upstream context changes: ${approval.stale_reasons.join('; ')}`
+              : 'Upstream context changed since approval — review and re-approve, or unlock to re-run.'}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void handleApprove()}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-semibold bg-wm-success text-white hover:opacity-90 disabled:opacity-40"
+        >
+          {busy === 'approve' ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+          Re-approve as-is
+        </button>
+        <button
+          type="button"
+          onClick={() => setUnlockOpen(o => !o)}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-semibold border border-wm-border text-wm-text bg-wm-bg-elevated hover:bg-wm-bg-hover disabled:opacity-40"
+        >
+          <Unlock size={11} /> Unlock for re-run
+        </button>
+        {error && <p className="basis-full text-[11px] text-wm-danger mt-1">{error}</p>}
+      </div>
+    )
+  }
+
+  // Unlocked state — orange banner with Restore option
+  if (status === 'unlocked') {
+    return (
+      <div className="rounded border border-wm-accent/40 bg-wm-accent-tint/40 px-3 py-2 flex items-center gap-2 flex-wrap">
+        <Unlock size={13} className="text-wm-accent-strong shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-[12px] text-wm-text">
+            <strong className="text-wm-accent-strong">Unlocked</strong>
+            {version && <span className="text-wm-text-muted"> · was v{version}</span>}
+            {unlockedAt && <span className="text-wm-text-muted"> · {unlockedAt}</span>}
+          </p>
+          <p className="text-[10px] text-wm-text-muted leading-snug">
+            {approval?.unlock_reason && <em>"{approval.unlock_reason}"</em>}
+            {' '}Pipeline can write here again. Approve when ready (creates v{(version ?? 0) + 1}) or restore the previous approval.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void handleApprove()}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-semibold bg-wm-success text-white hover:opacity-90 disabled:opacity-40"
+        >
+          {busy === 'approve' ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+          Approve as v{(version ?? 0) + 1}
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleRestore()}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-semibold border border-wm-border text-wm-text bg-wm-bg-elevated hover:bg-wm-bg-hover disabled:opacity-40"
+        >
+          {busy === 'restore' ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />}
+          Restore v{version}
+        </button>
+        {error && <p className="basis-full text-[11px] text-wm-danger mt-1">{error}</p>}
+      </div>
+    )
+  }
+
+  // Draft state — neutral banner with Approve as primary
+  return (
+    <div className="rounded border border-wm-border bg-wm-bg/40 px-3 py-2 flex items-center gap-2 flex-wrap">
+      <div className="flex-1 min-w-0">
+        <p className="text-[12px] text-wm-text font-semibold">Draft</p>
+        <p className="text-[10px] text-wm-text-muted leading-snug">
+          This page hasn't been approved. Pipeline can write here freely. Read the copy
+          below, edit anything that's off, then approve when it's ready to ship.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={() => void handleApprove()}
+        disabled={busy !== null}
+        className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-semibold bg-wm-success text-white hover:opacity-90 disabled:opacity-40"
+      >
+        {busy === 'approve' ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+        Approve copy
+      </button>
+      {error && <p className="basis-full text-[11px] text-wm-danger mt-1">{error}</p>}
+    </div>
+  )
+}
+
+/** Hover-to-edit text slot. Click on the rendered text → opens an
+ *  inline input/textarea → save writes to web_sections.field_values
+ *  with field_provenance flipped to 'override' so voice pass leaves
+ *  the strategist's edit alone on future runs.
+ *
+ *  When locked, the slot renders read-only (cursor: default, no hover
+ *  affordance, click does nothing). The lock comes from the page's
+ *  approval state.
+ */
+function EditableText({
+  value, fieldKey, sectionId, locked, pending, onChange,
+  className, multiline,
+}: {
+  value:     string | null
+  fieldKey:  string
+  sectionId: string
+  locked:    boolean
+  pending:   boolean
+  onChange:  () => void | Promise<void>
+  className?: string
+  multiline?: boolean
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value ?? '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const startEdit = () => {
+    if (locked) return
+    setDraft(value ?? '')
+    setError(null)
+    setEditing(true)
+  }
+
+  const save = async () => {
+    if (saving) return
+    setSaving(true); setError(null)
+    try {
+      const { data: sec, error: readErr } = await supabase
+        .from('web_sections')
+        .select('field_values, field_provenance')
+        .eq('id', sectionId)
+        .single()
+      if (readErr || !sec) throw new Error(readErr?.message ?? 'Section not found')
+      const fv   = ((sec as { field_values: Record<string, unknown> | null }).field_values   ?? {}) as Record<string, unknown>
+      const prov = ((sec as { field_provenance: Record<string, { source?: string }> | null }).field_provenance ?? {}) as Record<string, { source?: string }>
+      const nextFv   = { ...fv,   [fieldKey]: draft }
+      const nextProv = { ...prov, [fieldKey]: { ...(prov[fieldKey] ?? {}), source: 'override' } }
+      const { error: writeErr } = await supabase
+        .from('web_sections')
+        .update({ field_values: nextFv, field_provenance: nextProv } as never)
+        .eq('id', sectionId)
+      if (writeErr) throw new Error(writeErr.message)
+      setEditing(false)
+      await onChange()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const cancel = () => {
+    setEditing(false)
+    setDraft(value ?? '')
+    setError(null)
+  }
+
+  if (editing) {
+    return (
+      <div className="space-y-1.5">
+        {multiline ? (
+          <textarea
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            disabled={saving}
+            rows={4}
+            autoFocus
+            className="w-full text-[13px] px-2 py-1.5 rounded border-2 border-wm-accent bg-white focus:outline-none disabled:opacity-60"
+          />
+        ) : (
+          <input
+            type="text"
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            disabled={saving}
+            autoFocus
+            className="w-full text-[13px] px-2 py-1.5 rounded border-2 border-wm-accent bg-white focus:outline-none disabled:opacity-60"
+          />
+        )}
+        {error && <p className="text-[11px] text-wm-danger">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={cancel}
+            disabled={saving}
+            className="text-[11px] text-wm-text-muted hover:text-wm-text px-2 py-1 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={saving || draft === (value ?? '')}
+            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-semibold bg-wm-accent text-white hover:bg-wm-accent-hover disabled:opacity-40"
+          >
+            {saving ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+            Save edit
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  const dot = pending
+    ? <span title="Pending voice-pass rewrite (not yet applied)"
+            className="inline-block w-1.5 h-1.5 rounded-full bg-wm-accent mr-1.5 align-middle" />
+    : null
+
+  return (
+    <div
+      className={[
+        className,
+        'group relative',
+        locked
+          ? 'cursor-default'
+          : 'cursor-text hover:bg-wm-accent-tint/15 -mx-1 px-1 rounded transition-colors',
+      ].join(' ')}
+      onClick={startEdit}
+      title={locked ? 'Page is approved — unlock to edit' : 'Click to edit'}
+    >
+      {!locked && (
+        <Pencil
+          size={10}
+          className="opacity-0 group-hover:opacity-50 absolute top-1 right-1 text-wm-accent-strong"
+        />
+      )}
+      {dot}
+      {value || <span className="italic text-wm-text-subtle">(empty)</span>}
     </div>
   )
 }

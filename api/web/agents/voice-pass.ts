@@ -306,23 +306,47 @@ async function voicePassHandler(req: any, res: any) {
   const scopedPages: WebPage[] = (pageSlugs && pageSlugs.length > 0
     ? (pages ?? []).filter(p => pageSlugs.includes(p.slug as string))
     : (pages ?? [])) as WebPage[]
-  const pageIds = scopedPages.map(p => p.id)
+
+  // ── DRIFT-PREVENTION LOCK ───────────────────────────────────────
+  // Skip pages currently approved. The roadmap_state.approved_pages
+  // map carries { status: 'approved' | 'unlocked', ... } per slug;
+  // approved = locked from regeneration. Strategist must explicitly
+  // unlock before this page can be re-written.
+  const approvedPages = (roadmapState.approved_pages ?? {}) as Record<string, { status?: string }>
+  const isApproved = (slug: string) => approvedPages[slug]?.status === 'approved'
+  const skippedApprovedPages: string[] = []
+  const unlockedPages: WebPage[] = []
+  for (const p of scopedPages) {
+    if (isApproved(p.slug)) skippedApprovedPages.push(p.slug)
+    else unlockedPages.push(p)
+  }
+  const pageIds = unlockedPages.map(p => p.id)
   const { data: sections } = await sb.from('web_sections')
     .select('id, web_page_id, content_template_id, field_values, field_provenance, sort_order')
     .eq('archived', false)
   const ourSections = ((sections ?? []) as WebSection[]).filter(s => pageIds.includes(s.web_page_id))
 
-  // ── Apply mode (unchanged from prior version) ──
+  // ── Apply mode — write the rewrite manifest to web_sections ──
+  // Lock check: rewrites targeting sections on approved pages are
+  // skipped entirely. Strategist must unlock the page before its
+  // copy can be replaced.
   if (apply) {
     const stage7 = roadmapState.stage_7 as { rewrites?: Array<Record<string, unknown>> } | undefined
     if (!stage7?.rewrites) {
       return res.status(400).json({ error: 'No Stage 7 manifest to apply. Run the pass first.' })
     }
-    let applied = 0, blockedByOverride = 0, omittedByUser = 0
+    // Map every section id to its page slug so we can check the lock
+    // on a per-rewrite basis. unlockedPages already excludes approved
+    // pages, so a section whose page isn't in unlockedPages.id is
+    // either archived OR approved — either way we skip.
+    const unlockedSectionIds = new Set(ourSections.map(s => s.id))
+    let applied = 0, blockedByOverride = 0, omittedByUser = 0, blockedByApproval = 0
     for (const r of stage7.rewrites) {
       if (r.omitted === true) { omittedByUser++; continue }
       const sectionId = String(r.web_section_id)
       const fieldKey  = String(r.field_key)
+      // Drift-prevention lock: section must belong to an unlocked page.
+      if (!unlockedSectionIds.has(sectionId)) { blockedByApproval++; continue }
       const override  = typeof r.user_value === 'string' && r.user_value.length > 0
         ? r.user_value
         : null
@@ -342,6 +366,8 @@ async function voicePassHandler(req: any, res: any) {
     return res.status(200).json({
       ok: true,
       applied,
+      blocked_by_approval: blockedByApproval,
+      skipped_approved_pages: skippedApprovedPages,
       blocked_by_override: blockedByOverride,
       omitted_by_user:     omittedByUser,
     })
@@ -382,7 +408,7 @@ async function voicePassHandler(req: any, res: any) {
   }
 
   // Build the list of work items we'll process.
-  const workItems = scopedPages
+  const workItems = unlockedPages
     .map(page => {
       const pageSections = (sectionsByPage.get(page.id) ?? []).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
       const pageContracts = contractsBySlug.get(page.slug) ?? []
@@ -395,7 +421,7 @@ async function voicePassHandler(req: any, res: any) {
   if (previous && Array.isArray((previous as any)?.rewrites)) {
     const prevRewrites = (previous as any).rewrites as any[]
     const sectionIdToPageId = new Map(ourSections.map(s => [s.id, s.web_page_id]))
-    const pageIdToSlug = new Map(scopedPages.map(p => [p.id, p.slug]))
+    const pageIdToSlug = new Map(unlockedPages.map(p => [p.id, p.slug]))
     for (const r of prevRewrites) {
       const pageId = sectionIdToPageId.get(r.web_section_id)
       if (!pageId) continue
@@ -445,11 +471,20 @@ async function voicePassHandler(req: any, res: any) {
   // filter); that should fail loud with a clear message, not pretend
   // 0/0 pages succeeded.
   if (workItems.length === 0) {
-    return res.status(400).json({
-      error: 'No sections found in scope. Check that pageSlugs match real sitemap pages with bound web_sections.',
-      scoped_to_page_slugs: pageSlugs,
-      scoped_page_count:    scopedPages.length,
-      total_section_count:  ourSections.length,
+    // Distinguish "scope didn't match anything" from "everything in scope is approved"
+    const allSkippedAreApproved = skippedApprovedPages.length === scopedPages.length && skippedApprovedPages.length > 0
+    return res.status(allSkippedAreApproved ? 200 : 400).json({
+      ok: allSkippedAreApproved,
+      error: allSkippedAreApproved
+        ? undefined
+        : 'No sections found in scope. Check that pageSlugs match real sitemap pages with bound web_sections.',
+      message: allSkippedAreApproved
+        ? `All ${skippedApprovedPages.length} page(s) in scope are approved. Unlock them to re-run voice pass.`
+        : undefined,
+      scoped_to_page_slugs:   pageSlugs,
+      scoped_page_count:      scopedPages.length,
+      skipped_approved_pages: skippedApprovedPages,
+      total_section_count:    ourSections.length,
     })
   }
   if (pageErrors.length === workItems.length) {
@@ -472,6 +507,7 @@ async function voicePassHandler(req: any, res: any) {
     pages_succeeded: workItems.length - pageErrors.length,
     pages_failed:    pageErrors.length,
     page_errors:     pageErrors.length > 0 ? pageErrors : undefined,
+    skipped_approved_pages: skippedApprovedPages.length > 0 ? skippedApprovedPages : undefined,
     redo_count: typeof (previous as any)?._meta?.redo_count === 'number'
       ? (previous as any)._meta.redo_count + (redoContext ? 1 : 0)
       : 0,

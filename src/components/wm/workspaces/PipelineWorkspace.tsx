@@ -438,7 +438,7 @@ export function PipelineWorkspace({ project, onChange }: Props) {
           </span>
         </div>
 
-        {view === 'pages' && <PerPageReview project={project} />}
+        {view === 'pages' && <PerPageReview project={project} onChange={onChange} />}
 
         <div className={[
           'space-y-2',
