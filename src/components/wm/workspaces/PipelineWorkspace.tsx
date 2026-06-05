@@ -203,6 +203,47 @@ export function PipelineWorkspace({ project, onChange }: Props) {
     await onChange()
   }, [project.id, roadmapState, onChange])
 
+  // Derives the stage-specific extra action surfaced both on the
+  // StageCard AND inside the PreviewDrawer header. Voice pass gets
+  // "Apply rewrites"; sitemap_coverage/coverage_qa get the cycle-back
+  // CTAs. Everything else returns undefined.
+  const extraActionFor = useCallback((stage: PipelineStage, output: Record<string, any> | null) => {
+    if (stage === 'voice_pass') {
+      const rewriteCount = Array.isArray(output?.rewrites) ? output!.rewrites.length : 0
+      if (rewriteCount > 0) {
+        return {
+          label: applyingVoice ? 'Applying…' : `Apply ${rewriteCount} rewrites`,
+          title: 'Write the manifest into web_sections.field_values. Fields marked override are skipped.',
+          loading: applyingVoice,
+          onClick: applyVoicePass,
+        }
+      }
+    }
+    if (stage === 'sitemap_coverage') {
+      const gapCount = Array.isArray(output?.gaps) ? output!.gaps.length : 0
+      if (gapCount > 0) {
+        return {
+          label: `Cycle back to Stage 2 with ${gapCount} gap${gapCount === 1 ? '' : 's'}`,
+          title: 'Sends every gap as redo_context to the Sitemap Drafter. Downstream stages will need re-run.',
+          loading: running === 'sitemap',
+          onClick: () => cycleBackToSitemap('gaps'),
+        }
+      }
+    }
+    if (stage === 'coverage_qa') {
+      const orphanCount = Array.isArray(output?.orphaned) ? output!.orphaned.length : 0
+      if (orphanCount > 0) {
+        return {
+          label: `Cycle back to Stage 2 with ${orphanCount} orphan${orphanCount === 1 ? '' : 's'}`,
+          title: 'Sends every orphaned atom as redo_context to the Sitemap Drafter. Downstream stages will need re-run.',
+          loading: running === 'sitemap',
+          onClick: () => cycleBackToSitemap('orphans'),
+        }
+      }
+    }
+    return undefined
+  }, [applyingVoice, applyVoicePass, running, cycleBackToSitemap])
+
   const stages = useMemo(() => PIPELINE_STAGES.map(s => {
     const out = getOutput(s)
     const meta = out?._meta ?? {}
@@ -252,42 +293,7 @@ export function PipelineWorkspace({ project, onChange }: Props) {
             // Voice-pass gets a secondary CTA that writes the
             // manifest's rewrites back into web_sections. Available
             // only when a draft manifest exists.
-            const isVoice = s.stage === 'voice_pass'
-            const hasManifest = isVoice && s.output
-              && Array.isArray((s.output as any).rewrites)
-              && (s.output as any).rewrites.length > 0
-
-            // Cycle-back: bounce gaps/orphans to Stage 2 as redo_context.
-            const isCoverageAudit = s.stage === 'sitemap_coverage'
-            const isCoverageQa    = s.stage === 'coverage_qa'
-            const auditOut = s.output as any
-            const gapCount    = isCoverageAudit && Array.isArray(auditOut?.gaps)     ? auditOut.gaps.length     : 0
-            const orphanCount = isCoverageQa    && Array.isArray(auditOut?.orphaned) ? auditOut.orphaned.length : 0
-
-            const extraAction = isVoice && hasManifest
-              ? {
-                  label: applyingVoice
-                    ? 'Applying…'
-                    : `Apply ${(s.output as any).rewrites.length} rewrites`,
-                  title: 'Write the manifest into web_sections.field_values. Fields marked override are skipped.',
-                  loading: applyingVoice,
-                  onClick: applyVoicePass,
-                }
-              : (isCoverageAudit && gapCount > 0)
-              ? {
-                  label: `Cycle back to Stage 2 with ${gapCount} gap${gapCount === 1 ? '' : 's'}`,
-                  title: 'Sends every gap as redo_context to the Sitemap Drafter. Downstream stages will need re-run.',
-                  loading: running === 'sitemap',
-                  onClick: () => cycleBackToSitemap('gaps'),
-                }
-              : (isCoverageQa && orphanCount > 0)
-              ? {
-                  label: `Cycle back to Stage 2 with ${orphanCount} orphan${orphanCount === 1 ? '' : 's'}`,
-                  title: 'Sends every orphaned atom as redo_context to the Sitemap Drafter. Downstream stages will need re-run.',
-                  loading: running === 'sitemap',
-                  onClick: () => cycleBackToSitemap('orphans'),
-                }
-              : undefined
+            const extraAction = extraActionFor(s.stage, s.output)
             return (
               <StageCard
                 key={s.stage}
@@ -308,9 +314,12 @@ export function PipelineWorkspace({ project, onChange }: Props) {
         </div>
 
         {running && (
-          <div className="rounded-md border border-wm-accent/30 bg-wm-accent-tint px-3 py-2 text-[12px] text-wm-text flex items-center gap-2">
-            <Loader2 size={12} className="animate-spin text-wm-accent" />
-            Stage {STAGE_NUMBER[running]} is running — keep this tab open.
+          <div className="sticky bottom-3 mt-3 rounded-md border border-wm-accent/40 bg-wm-accent-tint shadow-md px-3 py-2 text-[12px] text-wm-text flex items-center gap-2 z-10">
+            <Loader2 size={14} className="animate-spin text-wm-accent shrink-0" />
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold">Stage {STAGE_NUMBER[running]} is running.</span>
+              <span className="text-wm-text-muted"> {running === 'sitemap' ? 'Sitemap drafts take 2-3 minutes.' : 'Keep this tab open.'}</span>
+            </div>
           </div>
         )}
       </div>
@@ -329,6 +338,10 @@ export function PipelineWorkspace({ project, onChange }: Props) {
           stage={preview}
           output={getOutput(preview)!}
           onClose={() => setPreview(null)}
+          onRefine={async (feedback) => { await runStage(preview, feedback) }}
+          onApprove={getStatus(preview) === 'draft' ? () => approveStage(preview) : undefined}
+          extraAction={extraActionFor(preview, getOutput(preview))}
+          running={running === preview}
         />
       )}
     </div>
