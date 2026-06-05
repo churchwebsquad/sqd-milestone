@@ -1650,6 +1650,42 @@ async function runStage1() {
     extraction = extraction.strategy
   }
 
+  // Hard-enforce destination defaults for utility topics. The prompt
+  // says Newsletter MUST be section_of:footer but Opus has been known
+  // to rationalize around it ("Lightweight signup page. Keep as
+  // conversion endpoint."). Coerce here so downstream stages see the
+  // correct contract regardless of what the model decided.
+  if (Array.isArray(extraction?.topic_coverage_plan)) {
+    const FOOTER_ONLY_KEYS = /^(newsletter|bulletin|sign[\-_ ]?up|stay[\-_ ]?in[\-_ ]?touch|email[\-_ ]?list)/i
+    let coercedCount = 0
+    extraction.topic_coverage_plan = extraction.topic_coverage_plan.map((entry: any) => {
+      const label = String(entry?.topic_label ?? entry?.topic_key ?? '')
+      if (FOOTER_ONLY_KEYS.test(label) && entry.destination_kind === 'own_page') {
+        coercedCount++
+        return {
+          ...entry,
+          destination_kind: 'section_of',
+          destination_page: null,
+          absorbed_into:    'footer',
+          rationale: (entry.rationale ?? '') + ' [Auto-coerced from own_page → section_of footer per Stage 1 utility-topic default.]',
+        }
+      }
+      return entry
+    })
+    // Also enforce existing_pages_to_carry_forward — strip newsletter
+    // slugs so Stage 2 doesn't see them as pages worth preserving.
+    if (Array.isArray(extraction.existing_pages_to_carry_forward)) {
+      const before = extraction.existing_pages_to_carry_forward.length
+      extraction.existing_pages_to_carry_forward = extraction.existing_pages_to_carry_forward
+        .filter((e: any) => !FOOTER_ONLY_KEYS.test(String(e?.slug ?? '')))
+      const stripped = before - extraction.existing_pages_to_carry_forward.length
+      if (stripped > 0) coercedCount += stripped
+    }
+    if (coercedCount > 0) {
+      console.log(`  enforcement: coerced ${coercedCount} utility-topic entries to footer-only`)
+    }
+  }
+
   // Persist
   const { error: writeErr } = await sb.from('strategy_web_projects').update({
     roadmap_state: {
@@ -1675,6 +1711,96 @@ async function runStage1() {
   console.log(`  carry-forward:     ${(extraction?.existing_pages_to_carry_forward ?? []).length}`)
   console.log(`  seo targets:       ${(extraction?.seo_aeo_geo_targets ?? []).length}`)
   return extraction
+}
+
+// ── Footer-only utility enforcement ────────────────────────────
+// Belt-and-suspenders. The prompt says newsletter/bulletin/etc are
+// footer-only, but the model occasionally rationalizes around it.
+// This post-processor coerces the structure regardless.
+const FOOTER_ONLY_LABEL = /^(newsletter|bulletin|sign[\-_ ]?up|stay[\-_ ]?in[\-_ ]?touch|email[\-_ ]?list)/i
+const FOOTER_ONLY_SLUG  = /(^|[\/_-])(newsletter|bulletin|signup|sign-up|emaillist)([\/_-]|$)/i
+function isFooterOnly(s: { label?: string; slug?: string } | null | undefined): boolean {
+  if (!s) return false
+  if (s.label && FOOTER_ONLY_LABEL.test(s.label)) return true
+  if (s.slug && FOOTER_ONLY_SLUG.test(s.slug)) return true
+  return false
+}
+function enforceFooterOnlyTopics(sitemap: any): any {
+  if (!sitemap || typeof sitemap !== 'object') return sitemap
+  const stripped: Array<{ slug?: string; label?: string }> = []
+
+  // 1. Remove from pages[] entirely (footer-only items aren't pages).
+  if (Array.isArray(sitemap.pages)) {
+    sitemap.pages = sitemap.pages.filter((p: any) => {
+      if (isFooterOnly(p)) { stripped.push({ slug: p.slug, label: p.name }); return false }
+      return true
+    })
+  }
+
+  // 2. Strip from header_nav (visible top-level AND dropdown children).
+  if (Array.isArray(sitemap.header_nav)) {
+    sitemap.header_nav = sitemap.header_nav
+      .filter((it: any) => !isFooterOnly(it))
+      .map((it: any) => {
+        if (Array.isArray(it.children)) {
+          it.children = it.children.filter((c: any) => !isFooterOnly(c))
+        }
+        return it
+      })
+  }
+
+  // 3. Strip from nav_presentation (visible_top_level + dropdowns +
+  //    megamenu panels + offcanvas sections).
+  const np = sitemap.nav_presentation
+  if (np && typeof np === 'object') {
+    if (Array.isArray(np.visible_top_level)) {
+      np.visible_top_level = np.visible_top_level.filter((it: any) => !isFooterOnly(it))
+    }
+    if (np.standard_dropdowns?.groups) {
+      for (const g of np.standard_dropdowns.groups) {
+        if (Array.isArray(g.children)) g.children = g.children.filter((c: any) => !isFooterOnly(c))
+      }
+    }
+    if (Array.isArray(np.megamenu_panels)) {
+      for (const p of np.megamenu_panels) {
+        if (Array.isArray(p.columns)) {
+          for (const col of p.columns) {
+            if (Array.isArray(col.links)) col.links = col.links.filter((l: any) => !isFooterOnly(l))
+          }
+        }
+        // featured_tile: if it points to a footer-only slug, clear it
+        if (p.featured_tile && isFooterOnly({ slug: p.featured_tile.link_slug })) {
+          delete p.featured_tile
+        }
+      }
+    }
+    if (np.offcanvas_overlay?.sections) {
+      for (const s of np.offcanvas_overlay.sections) {
+        if (Array.isArray(s.links)) s.links = s.links.filter((l: any) => !isFooterOnly(l))
+      }
+    }
+  }
+
+  // 4. Ensure each stripped item has a footer presence — add to a
+  //    "Stay in Touch" footer column if not already there.
+  if (stripped.length > 0 && Array.isArray(sitemap.footer_nav)) {
+    let stayCol = sitemap.footer_nav.find((c: any) =>
+      /stay|touch|connect|follow|utility/i.test(String(c?.section_label ?? '')))
+    if (!stayCol) {
+      stayCol = { section_label: 'Stay in Touch', items: [] }
+      sitemap.footer_nav.push(stayCol)
+    }
+    stayCol.items = stayCol.items ?? []
+    for (const s of stripped) {
+      const label = s.label ?? 'Newsletter'
+      if (!stayCol.items.some((it: any) => (it.label ?? '').toLowerCase() === label.toLowerCase())) {
+        stayCol.items.push({ label, slug: null, url: null, kind: 'footer_signup' })
+      }
+    }
+    console.log(`  enforcement: stripped ${stripped.length} footer-only item(s) from above-the-fold nav (${stripped.map(s => s.label ?? s.slug).join(', ')})`)
+  }
+
+  return sitemap
 }
 
 // ── STAGE 2 ────────────────────────────────────────────────────
@@ -1815,6 +1941,12 @@ async function runStage2(stage1: any, opts: { redoContext?: string; cycleBack?: 
   if (sitemap && Object.keys(sitemap).length === 1 && sitemap.sitemap) {
     sitemap = sitemap.sitemap
   }
+
+  // Hard-enforce footer-only utility topics across Stage 2 output.
+  // Strips newsletter etc. from pages[], header_nav (including
+  // dropdowns and megamenu panels), and nav_presentation. Ensures
+  // they land in footer_nav under a "Stay in Touch" / utility column.
+  sitemap = enforceFooterOnlyTopics(sitemap)
 
   const { error: writeErr } = await sb.from('strategy_web_projects').update({
     roadmap_state: {

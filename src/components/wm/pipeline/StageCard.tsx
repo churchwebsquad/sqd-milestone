@@ -120,10 +120,10 @@ export function StageCard({
               <button
                 type="button"
                 onClick={() => setRedoOpen(o => !o)}
-                title="Redo with feedback"
+                title="Refine with targeted feedback — keep everything except what you call out"
                 className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-semibold border border-wm-border bg-wm-bg-elevated hover:bg-wm-bg-hover"
               >
-                <RotateCw size={11} /> Redo
+                <RotateCw size={11} /> Refine
               </button>
               {extraAction && (
                 <button
@@ -161,17 +161,27 @@ export function StageCard({
         </div>
       </div>
 
-      {/* Redo feedback drawer */}
+      {/* Refine feedback drawer */}
       {redoOpen && (
         <div className="border-t border-wm-border bg-wm-bg-hover/40 px-3 py-2">
           <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">
-            What should change?
+            Targeted change — keep everything else identical
+          </p>
+          <p className="text-[11px] text-wm-text-muted mb-1.5 leading-snug">
+            Be specific about what to change. Everything else stays. Examples:
+            <span className="block mt-1 ml-3 text-[10px] font-mono text-wm-text-subtle">
+              · &ldquo;Rename Discussion Groups to Conversations everywhere&rdquo;<br/>
+              · &ldquo;Move Blog out of Start the Conversation and into a new Sermons dropdown&rdquo;<br/>
+              · &ldquo;Change Contact link to a popup Church Center form, not a standalone page&rdquo;<br/>
+              · &ldquo;Polish the megamenu descriptions — drop em dashes, vary openings&rdquo;<br/>
+              · &ldquo;Switch shell from megamenu to offcanvas&rdquo;
+            </span>
           </p>
           <textarea
             value={redoText}
             onChange={e => setRedoText(e.target.value)}
-            placeholder="Be specific. E.g. 'Combine About + History into one page. Bump Sermons to nav-only.'"
-            rows={3}
+            placeholder="What should change about this stage's output? The model will preserve everything you don't mention."
+            rows={4}
             className="w-full text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated focus:border-wm-accent focus:outline-none"
           />
           <div className="flex justify-end gap-2 mt-2">
@@ -193,7 +203,7 @@ export function StageCard({
               disabled={!redoText.trim()}
               className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-semibold bg-wm-accent text-white hover:bg-wm-accent-hover disabled:opacity-40"
             >
-              <RotateCw size={11} /> Redo with feedback
+              <RotateCw size={11} /> Refine with feedback
             </button>
           </div>
         </div>

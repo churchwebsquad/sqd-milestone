@@ -184,10 +184,16 @@ links or as content blocks on strategic pages. Default these to
 section_of (NOT own_page) unless the partner has explicit evidence of
 investment beyond signup widgets:
 
-- Newsletter / Bulletin → section_of: 'footer' (with a content block
-  on Plan a Visit + Home for signup). The form is a snippet, not a
-  page.
-- Sign up for updates / Stay in touch — same as newsletter.
+- Newsletter / Bulletin → section_of: 'footer'. This is NOT
+  negotiable. The form is a snippet, not a page; assign destination_
+  kind='section_of' with absorbed_into='footer' AND include a note
+  in the rationale that Stage 2 must place the signup as a content
+  block on Plan a Visit + Home + footer column, NEVER as a
+  dedicated page in pages[]. Even if the crawl shows a /newsletter
+  URL on the live site, the destination is still footer — that URL
+  becomes a slug-less footer link. Do NOT emit Newsletter as
+  own_page under any circumstance.
+- Sign up for updates / Stay in touch — same rule as newsletter.
 - Privacy Policy / Terms of Service → section_of: 'footer'.
 - Search → not a topic; lives as a header utility.
 
@@ -363,9 +369,16 @@ footer column, related-page grid):
     is the SEO engine for sermon-based content; dropping it entirely
     from nav is a structural failure even when newsletter and
     testimonies don't need to be visible.
-  - Newsletter: footer-only is correct. Do NOT give it a top-level
-    or dropdown placement. The signup form lives as a content block
-    on Plan a Visit + Home + footer.
+  - Newsletter: footer-only. ABSOLUTE — no exceptions. Newsletter
+    must NEVER appear in header_nav (visible top-level or as a
+    dropdown child), in megamenu_panels (any column or featured
+    tile), or in offcanvas_overlay's sections array. It is a
+    snippet, not a destination. The signup lives in one footer
+    column + as a content block on Plan a Visit + Home. Newsletter
+    in any nav surface above the footer is a structural defect
+    Stage 2.5 will flag HIGH. Same rule applies to "Sign up for
+    updates" / "Stay in touch" / "Get the bulletin" — any newsletter-
+    equivalent goes footer-only.
 
 # MODELS — detect ONE and apply its nav shape
 
@@ -758,6 +771,56 @@ Document your shell pick in "presentation_rationale" (1-2 sentences:
 why this shell fits the partner's page count, voice, and primary
 audience).
 
+# Nav copy voice rules — apply to every description you write
+
+The descriptions you write inside nav_presentation (column headings,
+one_line_descriptions, featured_tile bodies, offcanvas hero_message,
+offcanvas section_labels) are voice surface. Stage 7's voice pass
+ONLY rewrites web_sections.field_values — it does NOT touch the nav
+block. So whatever you write here SHIPS as-is. Apply the brand voice
+the same way the page-level copywriter would.
+
+Constraints for every nav copy line you produce:
+
+- Em dashes: limit to AT MOST ONE em dash across all
+  one_line_descriptions in a single panel/dropdown. Zero is better.
+  If a sentence reads fine as two sentences, break it. "Curiosity-
+  first kids ministry — ages 5 to 9" is worse than "Curiosity-first
+  kids ministry for ages 5-9." Hyphens are fine; em dashes are a
+  voice tic.
+
+- Vary rhetorical patterns. Do NOT repeat the "X, not Y" / "not just
+  X, Y" construction across multiple descriptions ("not a brand
+  strategy", "not just a service", "not your average sermon"). Once
+  per dropdown panel maximum. Same for parallel-clause framings.
+
+- Match the partner's voice register from Stage 1. If the voice is
+  conversational + intellectually honest, write that — full
+  sentences, plain words, contractions OK. If formal, write that.
+  Don't drop into marketing-copy mode (no "Discover what...",
+  "Experience the...", "Unleash your...").
+
+- Vary openings. If three descriptions in a row start with "A " or
+  "For " or "Where ", rephrase one. Repetition signals AI authorship.
+
+- Plain over poetic for nav-adjacent copy. "Ages 5-9, Saturdays
+  9:15am" reads better than "Where wonder meets the wisdom of
+  childhood." Save poetic voice for body copy on the page itself.
+
+- Reader-centered over church-centered. "What to expect at your
+  first Paradox Kids check-in" beats "We provide a warm
+  environment for our youngest learners." If the description
+  describes what the CHURCH does for the visitor, flip it to what
+  the VISITOR will experience.
+
+- Word count: one_line_descriptions are 8-15 words. Panel column
+  descriptions are 5-10 words. Featured tile bodies are 15-30 words.
+  Heading text (column headings, group labels) stays under 5 words.
+
+When you draft the descriptions, scan them as a group before
+submitting. If any constraint above is violated, rewrite. The nav
+block is a brand surface; treat it like one.
+
 # Absorption rules — keep absorbed audiences findable
 
 When you absorb a topic into a hub page, each absorbed_content
@@ -1006,9 +1069,15 @@ top-level but visible SOMEWHERE):
     no nav surface at all, that's HIGH severity in
     header_completeness_audit with category='media_archive_blog'
     and rationale 'Blog has SEO value but no nav home'.
-  - Newsletter: footer-only is correct; if Newsletter is in
-    header_nav at all, flag MEDIUM severity vocabulary/structure
-    error (newsletter is a snippet, not a destination).
+  - Newsletter: footer-only. If Newsletter appears ANYWHERE above
+    the footer — in header_nav, in any dropdown child, in any
+    megamenu panel column, in any megamenu featured_tile, or in
+    offcanvas_overlay.sections — flag as HIGH severity
+    header_completeness_audit with category='media_archive_blog'
+    (re-using the misc category) and rationale 'Newsletter is a
+    signup snippet, not a destination. Move to footer column with
+    content blocks on Plan a Visit + Home.' Newsletter own_page in
+    pages[] is also HIGH — newsletter never deserves its own page.
 
 Severity rubric:
 - HIGH if a category has no visible top-level home (a real defect —
@@ -1151,6 +1220,11 @@ Severity rubric:
   recurring noun in their site copy — "Donate" at /donate, etc.),
   OR insider_term when the partner has a NAMED skeptic/exile/burned-
   by-church persona that the term would alienate.
+  Live-site evidence is a HARD trigger — no softening to MEDIUM
+  based on "the partner may want to standardize" or "the partner
+  is migrating from Squarespace." If the live site URL + page
+  title show the partner using a specific term, the new sitemap
+  must use it. Period.
 - MEDIUM for vocabulary_mismatch where the alternative appears in
   brand intake/voice samples but not yet on the live site, OR for
   inward_pointing labels on visitor-centered voices, OR for

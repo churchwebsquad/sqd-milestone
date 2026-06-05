@@ -259,6 +259,12 @@ export default async function handler(req: any, res: any) {
     // losing the draft.
     raw = applyIntegrityAudit(raw, previousStage2, !!redoContext, stage1)
 
+    // Hard-enforce footer-only utility topics (newsletter/bulletin/etc).
+    // The prompt says these can't appear in pages[], header_nav, or
+    // nav_presentation above-the-fold surfaces — coerce regardless of
+    // what the model emitted.
+    raw = enforceFooterOnlyTopicsServer(raw)
+
     toolResult = raw
   } catch (err: any) {
     // Roll back so user can retry
@@ -829,6 +835,90 @@ export const SITEMAP_TOOL = {
  *  - Duplicate slugs
  *  - Mandatory Phase 1 pages missing
  */
+/**
+ *  Footer-only utility enforcement. Belt-and-suspenders for newsletter
+ *  and similar signup-only topics. Strips them from pages[], header_nav
+ *  (top-level + dropdown children), nav_presentation (visible_top_level,
+ *  standard_dropdowns groups, megamenu panels, offcanvas overlay), and
+ *  ensures they land in footer_nav under a "Stay in Touch" column.
+ */
+const FOOTER_ONLY_LABEL_RX = /^(newsletter|bulletin|sign[\-_ ]?up|stay[\-_ ]?in[\-_ ]?touch|email[\-_ ]?list)/i
+const FOOTER_ONLY_SLUG_RX  = /(^|[\/_-])(newsletter|bulletin|signup|sign-up|emaillist)([\/_-]|$)/i
+function isFooterOnlyItem(it: { label?: string; slug?: string; name?: string } | null | undefined): boolean {
+  if (!it) return false
+  const label = it.label ?? it.name ?? ''
+  if (label && FOOTER_ONLY_LABEL_RX.test(label)) return true
+  if (it.slug && FOOTER_ONLY_SLUG_RX.test(it.slug)) return true
+  return false
+}
+function enforceFooterOnlyTopicsServer(raw: Record<string, unknown>): Record<string, unknown> {
+  if (!raw || typeof raw !== 'object') return raw
+  const sitemap = raw as any
+  const stripped: Array<{ slug?: string; label?: string }> = []
+
+  if (Array.isArray(sitemap.pages)) {
+    sitemap.pages = sitemap.pages.filter((p: any) => {
+      if (isFooterOnlyItem(p)) { stripped.push({ slug: p.slug, label: p.name }); return false }
+      return true
+    })
+  }
+  if (Array.isArray(sitemap.header_nav)) {
+    sitemap.header_nav = sitemap.header_nav
+      .filter((it: any) => !isFooterOnlyItem(it))
+      .map((it: any) => {
+        if (Array.isArray(it.children)) {
+          it.children = it.children.filter((c: any) => !isFooterOnlyItem(c))
+        }
+        return it
+      })
+  }
+  const np = sitemap.nav_presentation
+  if (np && typeof np === 'object') {
+    if (Array.isArray(np.visible_top_level)) {
+      np.visible_top_level = np.visible_top_level.filter((it: any) => !isFooterOnlyItem(it))
+    }
+    if (np.standard_dropdowns?.groups) {
+      for (const g of np.standard_dropdowns.groups) {
+        if (Array.isArray(g.children)) g.children = g.children.filter((c: any) => !isFooterOnlyItem(c))
+      }
+    }
+    if (Array.isArray(np.megamenu_panels)) {
+      for (const p of np.megamenu_panels) {
+        if (Array.isArray(p.columns)) {
+          for (const col of p.columns) {
+            if (Array.isArray(col.links)) col.links = col.links.filter((l: any) => !isFooterOnlyItem(l))
+          }
+        }
+        if (p.featured_tile && isFooterOnlyItem({ slug: p.featured_tile.link_slug })) {
+          delete p.featured_tile
+        }
+      }
+    }
+    if (np.offcanvas_overlay?.sections) {
+      for (const s of np.offcanvas_overlay.sections) {
+        if (Array.isArray(s.links)) s.links = s.links.filter((l: any) => !isFooterOnlyItem(l))
+      }
+    }
+  }
+  if (stripped.length > 0 && Array.isArray(sitemap.footer_nav)) {
+    let stayCol = sitemap.footer_nav.find((c: any) =>
+      /stay|touch|connect|follow|utility/i.test(String(c?.section_label ?? '')))
+    if (!stayCol) {
+      stayCol = { section_label: 'Stay in Touch', items: [] }
+      sitemap.footer_nav.push(stayCol)
+    }
+    stayCol.items = stayCol.items ?? []
+    for (const s of stripped) {
+      const label = s.label ?? 'Newsletter'
+      if (!stayCol.items.some((it: any) => (it.label ?? '').toLowerCase() === label.toLowerCase())) {
+        stayCol.items.push({ label, slug: null, url: null, kind: 'footer_signup' })
+      }
+    }
+    console.log(`[draft-sitemap] footer-only enforcement: stripped ${stripped.length} item(s) from above-the-fold nav: ${stripped.map(s => s.label ?? s.slug).join(', ')}`)
+  }
+  return sitemap
+}
+
 function applyIntegrityAudit(
   raw: Record<string, unknown>,
   previousStage2: Record<string, unknown> | null | undefined,

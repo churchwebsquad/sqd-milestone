@@ -331,6 +331,32 @@ export default async function handler(req: any, res: any) {
     ) {
       raw = raw.strategy as Record<string, unknown>
     }
+
+    // Hard-enforce destination defaults for utility topics. The prompt
+    // says Newsletter MUST be section_of:footer but the model has been
+    // known to rationalize around it. Coerce here so Stage 2 sees the
+    // correct contract regardless of what was emitted.
+    const FOOTER_ONLY_PATTERN = /^(newsletter|bulletin|sign[\-_ ]?up|stay[\-_ ]?in[\-_ ]?touch|email[\-_ ]?list)/i
+    if (Array.isArray((raw as any).topic_coverage_plan)) {
+      (raw as any).topic_coverage_plan = (raw as any).topic_coverage_plan.map((entry: any) => {
+        const label = String(entry?.topic_label ?? entry?.topic_key ?? '')
+        if (FOOTER_ONLY_PATTERN.test(label) && entry?.destination_kind === 'own_page') {
+          return {
+            ...entry,
+            destination_kind: 'section_of',
+            destination_page: null,
+            absorbed_into:    'footer',
+            rationale: (entry.rationale ?? '') + ' [Auto-coerced from own_page → section_of footer per Stage 1 utility-topic default.]',
+          }
+        }
+        return entry
+      })
+    }
+    if (Array.isArray((raw as any).existing_pages_to_carry_forward)) {
+      (raw as any).existing_pages_to_carry_forward = (raw as any).existing_pages_to_carry_forward
+        .filter((e: any) => !FOOTER_ONLY_PATTERN.test(String(e?.slug ?? '')))
+    }
+
     toolResult = raw
   } catch (err: any) {
     // Restore stage so user can retry
