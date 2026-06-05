@@ -32,7 +32,12 @@ import { generateText, jsonSchema, tool } from 'ai'
 import { resolvePromptServer } from './_lib/resolvePrompt'
 
 export const maxDuration = 600  // 17 pages × ~10 sec parallel + overhead
-const MODEL = 'anthropic/claude-sonnet-4-6'
+// Sonnet 4.6 is the target model for voice work. If the AI Gateway
+// hasn't enabled 4.6 yet (the codebase otherwise uses claude-opus-4-7
+// and claude-haiku-4-5), set VOICE_PASS_MODEL_OVERRIDE on the
+// environment to fall back to claude-sonnet-4-5 or another model
+// without a redeploy.
+const MODEL = process.env.VOICE_PASS_MODEL_OVERRIDE || 'anthropic/claude-sonnet-4-6'
 const MAX_OUTPUT_TOKENS_PER_PAGE = 8000
 
 // Field keys that get treated as headings for structural validation.
@@ -239,6 +244,26 @@ async function runPage(
 }
 
 export default async function handler(req: any, res: any) {
+  try {
+    return await voicePassHandler(req, res)
+  } catch (err: any) {
+    // Catch ANY uncaught exception (validation regex bugs, model
+    // gateway failures bubbling up outside the per-page try, JSON
+    // parse failures, etc.) and surface a real message in the
+    // response. Without this wrap, Vercel returns a generic 500
+    // with no body, which gives the strategist nothing to act on.
+    const message = err instanceof Error ? err.message : String(err)
+    const stack   = err instanceof Error ? err.stack    : undefined
+    console.error('[voice-pass] uncaught error:', message, stack)
+    return res.status(500).json({
+      error: `voice-pass uncaught: ${message}`,
+      model: MODEL,
+      stack: stack?.split('\n').slice(0, 8).join('\n'),
+    })
+  }
+}
+
+async function voicePassHandler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   const supabaseUrl     = process.env.VITE_SUPABASE_URL
@@ -415,9 +440,22 @@ export default async function handler(req: any, res: any) {
     }
   })
 
+  // Differentiate empty-workload from total-failure. An empty workItems
+  // list means we found no sections in scope (probably a bad pageSlugs
+  // filter); that should fail loud with a clear message, not pretend
+  // 0/0 pages succeeded.
+  if (workItems.length === 0) {
+    return res.status(400).json({
+      error: 'No sections found in scope. Check that pageSlugs match real sitemap pages with bound web_sections.',
+      scoped_to_page_slugs: pageSlugs,
+      scoped_page_count:    scopedPages.length,
+      total_section_count:  ourSections.length,
+    })
+  }
   if (pageErrors.length === workItems.length) {
     return res.status(502).json({
       error: 'All per-page voice-pass calls failed',
+      model: MODEL,
       pageErrors,
     })
   }
