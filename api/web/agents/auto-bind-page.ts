@@ -112,6 +112,18 @@ export default async function handler(req: any, res: any) {
     `You're given a page brief with multiple sections and a list of candidate Brixies template variants for each section. ` +
     `Your job: pick the single best-fit template id for every section.\n\n` +
 
+    `=== HARD RULE — ONE HERO PER PAGE ===\n` +
+    `A page can have AT MOST ONE template from the Hero Section family. The hero is ` +
+    `section[0] (the first section, sort_order 0). EVERY OTHER section on the page MUST ` +
+    `pick a non-Hero template — Feature Section, Content Section, CTA Section, Intro ` +
+    `Section, etc. Stacking two heroes on a page reads as a layout bug; stacking three ` +
+    `is a structural failure. If section[0]'s candidates include a Hero, prefer it. For ` +
+    `every other section, if you find yourself reaching for a Hero, you are wrong — pick ` +
+    `a CTA/Feature/Content variant instead. A closing-CTA section is NOT a hero; it's a ` +
+    `CTA Section. A mid-page positioning band is NOT a hero; it's a Feature Section. ` +
+    `Post-pick validation will strip extra Hero picks and force re-pick from non-Hero ` +
+    `candidates, so save the round trip.\n\n` +
+
     `EACH CANDIDATE HAS METADATA YOU MUST CONSIDER:\n` +
     `  - family_usage: what this Brixies family is actually used for. This is authoritative — ` +
     `the brief's suggested_template_family is just a hint and is sometimes wrong.\n` +
@@ -228,9 +240,58 @@ export default async function handler(req: any, res: any) {
       cleaned.push(pick)
     }
 
+    // Structural validation: at most one Hero family pick per page.
+    // section[0] keeps its Hero pick if it has one; every other
+    // section with a Hero pick gets re-routed to a non-Hero candidate.
+    // Tracks any forced overrides so the strategist can see what was
+    // changed (and re-bind manually if no non-Hero candidate was
+    // available).
+    const isHero = (familyName: string) =>
+      typeof familyName === 'string' && familyName.toLowerCase().startsWith('hero')
+    const overrides: Array<{ section_id: string; original_template_id: string; new_template_id: string | null; reason: string }> = []
+    let firstHeroSeen = false
+    for (let i = 0; i < cleaned.length; i++) {
+      const pick = cleaned[i]
+      const sec = sections.find(s => s.section_id === pick.section_id)!
+      const candidate = sec.candidates.find(c => c.id === pick.template_id)!
+      if (!isHero(candidate.family)) continue
+      // First Hero pick (regardless of section position) is allowed.
+      // We don't enforce "must be section[0]" because some pages
+      // legitimately put their hero elsewhere — but at most one.
+      if (!firstHeroSeen) { firstHeroSeen = true; continue }
+      // Extra hero — re-route to best non-Hero candidate in this
+      // section's pool. Preference order: site library > brief family > anything.
+      const nonHero = sec.candidates.filter(c => !isHero(c.family))
+      const replacement =
+        nonHero.find(c => c.is_site_pick)    ??
+        nonHero.find(c => c.is_brief_family) ??
+        nonHero[0]
+      if (!replacement) {
+        overrides.push({
+          section_id:           pick.section_id,
+          original_template_id: pick.template_id,
+          new_template_id:      null,
+          reason:               'no_non_hero_candidate_available',
+        })
+        continue
+      }
+      overrides.push({
+        section_id:           pick.section_id,
+        original_template_id: pick.template_id,
+        new_template_id:      replacement.id,
+        reason:               'enforced_one_hero_per_page',
+      })
+      cleaned[i] = {
+        section_id:  pick.section_id,
+        template_id: replacement.id,
+        rationale:   `[auto] Reassigned from ${candidate.family} to ${replacement.family} — enforcing one-hero-per-page rule. Original model pick was ${pick.template_id} (${candidate.family}); ${replacement.family} chosen from same section's candidate pool.`,
+      }
+    }
+
     return res.status(200).json({
       ok: true,
       picks: cleaned,
+      overrides,
       usage: {
         input_tokens: result.usage?.inputTokens,
         output_tokens: result.usage?.outputTokens,

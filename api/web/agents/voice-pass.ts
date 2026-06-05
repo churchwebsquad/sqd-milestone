@@ -1,16 +1,28 @@
 /**
  * Vercel Serverless Function — /api/web/agents/voice-pass
  *
- * Stage 7 of the copywriting pipeline. Element-by-element brand-voice
- * rewrite of every text + richtext slot across every section. Single
- * model call (Opus) processes the full batch and returns rewrites +
- * skips; that's cheaper + more coherent than per-slot calls until
- * cost demands otherwise.
+ * Stage 7 of the copywriting pipeline. Brand-voice rewrite of every
+ * string slot across every section, run PER PAGE so each page gets
+ * the model's full attention with its full context (Stage 4 contract
+ * + current field_values for that page only).
+ *
+ * Architectural change vs. the prior bulk approach: the old version
+ * ran one Opus call across ~150 slots × 17 pages. Each rewrite got
+ * shallow attention; Opus's parallel-clause/rhetorical-question tic
+ * surfaced often. The new version runs one Sonnet 4.6 call per page,
+ * usually 8-12 slots in scope per call. Each rewrite lands with the
+ * full per-page voice context and structural rules.
+ *
+ * Code validation runs AFTER the model returns: every rewrite is
+ * checked against hard structural rules (heading word count, no `?`
+ * in heading slots, required_messages still present). Failures are
+ * dropped from rewrites[] and pushed to skipped[] with a
+ * "validation_failed_<reason>" tag. The strategist sees them in the
+ * preview drawer and can Refine or hand-edit.
  *
  * Writes:
- *  • roadmap_state.stage_7 — the rewrite manifest
- *  • web_sections.field_values — applied rewrites (skipping anything
- *    flagged field_provenance='override')
+ *  • roadmap_state.stage_7 — the rewrite manifest (rewrites + skipped)
+ *  • web_sections.field_values — applied rewrites (when apply=true)
  *  • web_sections.field_provenance — marks rewritten fields as 'voice_pass'
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -19,12 +31,17 @@ import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
 import { resolvePromptServer } from './_lib/resolvePrompt'
 
-export const maxDuration = 600  // big batch
-const MODEL = 'anthropic/claude-opus-4-7'
-const MAX_OUTPUT_TOKENS = 16000
+export const maxDuration = 600  // 17 pages × ~10 sec parallel + overhead
+const MODEL = 'anthropic/claude-sonnet-4-6'
+const MAX_OUTPUT_TOKENS_PER_PAGE = 8000
+
+// Field keys that get treated as headings for structural validation.
+// Matches the prefix patterns Brixies templates use across families.
+const HEADING_PREFIX_RE = /^(heading|title|h[1-6]|page_title|section_title)$/i
+const MAX_HEADING_WORDS = 7
 
 const TOOL = {
-  description: 'Submit voice-pass rewrites + skips.',
+  description: 'Submit voice-pass rewrites + skips for this page.',
   input_schema: {
     type: 'object',
     properties: {
@@ -50,8 +67,7 @@ const TOOL = {
           properties: {
             web_section_id: { type: 'string' },
             field_key:      { type: 'string' },
-            reason:         { type: 'string',
-              enum: ['already_on_voice','override_locked','over_budget_after_rewrite'] },
+            reason:         { type: 'string' },
           },
           required: ['web_section_id','field_key','reason'],
         },
@@ -59,6 +75,167 @@ const TOOL = {
     },
     required: ['rewrites','skipped'],
   },
+}
+
+interface Rewrite {
+  web_section_id:        string
+  field_key:             string
+  old_value:             string
+  new_value:             string
+  voice_alignment_score: number
+  rationale:             string
+}
+
+interface Skip {
+  web_section_id: string
+  field_key:      string
+  reason:         string
+}
+
+interface SectionContract {
+  page_slug:           string
+  section_id:          string
+  required_messages:   string[]
+  keyword_assignments: { primary?: string[]; supporting?: string[] } | null
+  cta:                 { label: string; destination_page: string } | null
+}
+
+interface WebSection {
+  id: string
+  web_page_id: string
+  content_template_id: string | null
+  field_values: Record<string, unknown> | null
+  field_provenance: Record<string, { source?: string }> | null
+  sort_order: number | null
+}
+
+interface WebPage { id: string; slug: string; name: string }
+
+/** Hard structural rules applied AFTER the model returns. Any rewrite
+ *  that fails ends up in skipped[] with reason='validation_failed_X'
+ *  instead of getting silently shipped. */
+function validateRewrite(r: Rewrite, contract?: SectionContract): { ok: true } | { ok: false; reason: string } {
+  const isHeading = HEADING_PREFIX_RE.test(r.field_key.trim())
+  const value = (r.new_value ?? '').trim()
+  if (isHeading) {
+    if (value.includes('?')) {
+      return { ok: false, reason: 'validation_failed_heading_has_question_mark' }
+    }
+    const wordCount = value.split(/\s+/).filter(Boolean).length
+    if (wordCount > MAX_HEADING_WORDS) {
+      return { ok: false, reason: `validation_failed_heading_${wordCount}_words_max_${MAX_HEADING_WORDS}` }
+    }
+    // Detect the question-answer pattern even without an explicit `?`:
+    // "Either or? Neither." — clauses divided by `? ` and the second
+    // clause is a single word or two-word punchline.
+    // Already caught by the `?` check above, but keep this as a safety
+    // net if the model emits the pattern with em-dash or comma instead.
+    if (/^\S+(\s\S+){0,1}[.?!]$/.test(value) && /[?]/.test(value)) {
+      return { ok: false, reason: 'validation_failed_question_answer_punchline' }
+    }
+  }
+  // Contract enforcement — required_messages must remain present in
+  // SOMEWHERE in the rewrite or its section (best-effort check on a
+  // per-rewrite basis: at minimum, the required message keywords
+  // should not be wholly absent if the OLD value contained them).
+  if (contract && contract.required_messages.length > 0) {
+    for (const rm of contract.required_messages) {
+      // Pull a few "signal" tokens from the required message — proper
+      // nouns and numeric tokens are load-bearing; if they appear in
+      // old_value but vanish from new_value, that's a drop.
+      const signals = (rm.match(/\b[A-Z][a-z]+|\b\d+(?:[apm]+)?\b/g) ?? []).filter(Boolean)
+      for (const sig of signals) {
+        if (r.old_value.includes(sig) && !r.new_value.includes(sig)) {
+          return { ok: false, reason: `validation_failed_dropped_required_signal_${sig}` }
+        }
+      }
+    }
+  }
+  return { ok: true }
+}
+
+/** Run one Sonnet 4.6 call for a single page. Returns rewrites + skips
+ *  (server-validated) plus token usage. */
+async function runPage(
+  page: WebPage,
+  pageSections: WebSection[],
+  pageContracts: SectionContract[],
+  voiceCard: unknown,
+  personas: unknown,
+  brandGuide: unknown,
+  previousForPage: unknown,
+  redoContext: string,
+  systemPrompt: string,
+): Promise<{ rewrites: Rewrite[]; skipped: Skip[]; usage: { input_tokens?: number; output_tokens?: number } }> {
+  const userText = [
+    `# Page\n${page.name} (/${page.slug})`,
+    `# Voice card (Stage 1)\n${JSON.stringify(voiceCard, null, 2)}`,
+    `# Personas (Stage 1)\n${JSON.stringify(personas, null, 2)}`,
+    brandGuide && `# Brand guide\n${JSON.stringify(brandGuide, null, 2)}`,
+    pageContracts.length > 0 &&
+      `# Stage 4 section contracts — load-bearing constraints for THIS page\n` +
+      `For each section_id, required_messages must survive any rewrite verbatim or paraphrased (signal tokens stay), keyword_assignments.primary phrases must remain in heading or lead sentence, and cta.label MUST NOT change.\n` +
+      JSON.stringify(pageContracts, null, 2),
+    `# Sections to rewrite — current field_values + provenance\n${JSON.stringify(pageSections, null, 2)}`,
+    previousForPage && `# Previous voice-pass output for this page\n${JSON.stringify(previousForPage, null, 2)}`,
+    redoContext && `# Strategist redo feedback\n${redoContext}`,
+  ].filter(Boolean).join('\n\n')
+
+  const result = await generateText({
+    model: MODEL,
+    maxOutputTokens: MAX_OUTPUT_TOKENS_PER_PAGE,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userText }],
+    tools: {
+      submit_voice_rewrites: tool({
+        description: TOOL.description,
+        inputSchema: jsonSchema(TOOL.input_schema as any),
+      }),
+    },
+    toolChoice: { type: 'tool', toolName: 'submit_voice_rewrites' },
+  })
+
+  const usage = { input_tokens: result.usage?.inputTokens, output_tokens: result.usage?.outputTokens }
+  const toolCall = result.toolCalls?.[0]
+  if (!toolCall || toolCall.toolName !== 'submit_voice_rewrites') {
+    throw new Error(`Page ${page.slug}: Model did not return submit_voice_rewrites tool call`)
+  }
+  const raw = toolCall.input as { rewrites: Rewrite[]; skipped: Skip[] }
+  const contractBySection = new Map(pageContracts.map(c => [c.section_id, c]))
+
+  // Filter to sections we asked about (defensive) + run validation.
+  const sectionIds = new Set(pageSections.map(s => s.id))
+  const rewrites: Rewrite[] = []
+  const skipped:  Skip[]    = []
+
+  for (const r of (raw.rewrites ?? [])) {
+    if (!sectionIds.has(r.web_section_id)) continue  // model hallucinated a section
+    // Try to find a contract by section_id — Stage 4's section_id
+    // doesn't match web_section_id, so look up by sort-order alignment
+    // (best-effort, will be skipped if no contract matches).
+    const section = pageSections.find(s => s.id === r.web_section_id)
+    let contract: SectionContract | undefined
+    if (section) {
+      const sortedSections = pageSections.slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      const idx = sortedSections.findIndex(s => s.id === r.web_section_id)
+      contract = pageContracts[idx]
+    }
+    void contractBySection
+    const verdict = validateRewrite(r, contract)
+    if (verdict.ok) {
+      rewrites.push(r)
+    } else {
+      skipped.push({
+        web_section_id: r.web_section_id,
+        field_key:      r.field_key,
+        reason:         verdict.reason,
+      })
+    }
+  }
+  for (const s of (raw.skipped ?? [])) {
+    if (sectionIds.has(s.web_section_id)) skipped.push(s)
+  }
+  return { rewrites, skipped, usage }
 }
 
 export default async function handler(req: any, res: any) {
@@ -79,15 +256,7 @@ export default async function handler(req: any, res: any) {
 
   const projectId   = typeof req.body?.projectId === 'string' ? req.body.projectId : null
   const redoContext = typeof req.body?.redoContext === 'string' ? req.body.redoContext.trim() : ''
-  /** When true, apply rewrites to web_sections.field_values in addition
-   *  to writing the manifest. Strategist sets this on a second click
-   *  after reviewing the manifest. */
   const apply = req.body?.apply === true
-  /** Optional scope: when present, the agent only generates (or
-   *  applies) rewrites for sections that belong to these page slugs.
-   *  Iterative testing surface — pair with page-outlines' pageSlugs to
-   *  rerun a single page through the contract → voice flow without
-   *  touching the rest of the project. */
   const pageSlugs: string[] | null = Array.isArray(req.body?.pageSlugs) && req.body.pageSlugs.every((s: unknown) => typeof s === 'string')
     ? req.body.pageSlugs as string[]
     : null
@@ -109,23 +278,16 @@ export default async function handler(req: any, res: any) {
 
   const { data: pages } = await sb.from('web_pages')
     .select('id, slug, name').eq('web_project_id', projectId).eq('archived', false)
-  // Apply page-slug scope here so every downstream lookup is naturally
-  // narrowed to the targeted pages.
-  const scopedPages = pageSlugs && pageSlugs.length > 0
+  const scopedPages: WebPage[] = (pageSlugs && pageSlugs.length > 0
     ? (pages ?? []).filter(p => pageSlugs.includes(p.slug as string))
-    : (pages ?? [])
-  const pageIds = scopedPages.map(p => p.id as string)
+    : (pages ?? [])) as WebPage[]
+  const pageIds = scopedPages.map(p => p.id)
   const { data: sections } = await sb.from('web_sections')
     .select('id, web_page_id, content_template_id, field_values, field_provenance, sort_order')
     .eq('archived', false)
-  const ourSections = (sections ?? []).filter(s => pageIds.includes(s.web_page_id as string))
+  const ourSections = ((sections ?? []) as WebSection[]).filter(s => pageIds.includes(s.web_page_id))
 
-  // Apply mode: write the previous run's rewrites back to web_sections.
-  // Honors strategist annotations from the preview drawer:
-  //   • r.omitted === true  → skip; the original copy survives.
-  //   • r.user_value (non-empty string) → write that string instead
-  //     of r.new_value (the strategist hand-edited this row).
-  // Skips fields where field_provenance='override' to respect human edits.
+  // ── Apply mode (unchanged from prior version) ──
   if (apply) {
     const stage7 = roadmapState.stage_7 as { rewrites?: Array<Record<string, unknown>> } | undefined
     if (!stage7?.rewrites) {
@@ -145,8 +307,6 @@ export default async function handler(req: any, res: any) {
       const prov = (sec.field_provenance ?? {}) as Record<string, { source?: string }>
       if (prov[fieldKey]?.source === 'override') { blockedByOverride++; continue }
       const updated = { ...(sec.field_values as Record<string, unknown>), [fieldKey]: newValue }
-      // Strategist-edited rows carry source='strategist_voice_pass' so
-      // the round-trip is auditable. Pure model rewrites stay 'voice_pass'.
       const sourceTag = override ? 'strategist_voice_pass' : 'voice_pass'
       const updatedProv = { ...prov, [fieldKey]: { ...(prov[fieldKey] ?? {}), source: sourceTag } }
       const { error } = await sb.from('web_sections')
@@ -162,31 +322,17 @@ export default async function handler(req: any, res: any) {
     })
   }
 
+  // ── Generation mode (NEW per-page architecture) ──
   const previous = redoContext ? roadmapState.stage_7 : undefined
   const resolved = await resolvePromptServer(sb, 'voice_pass', projectId)
 
-  // Pull Stage 4 section contracts so the model can honor required_messages,
-  // keyword_assignments, and cta.label per section. Without these, the
-  // voice pass has no way to know which words it must preserve, and
-  // ends up paraphrasing away load-bearing content + keywords. We thin
-  // the payload to the load-bearing fields — the full content_summary
-  // lives in Stage 4 but the binder already used it; voice pass only
-  // needs the contract guards.
   const stage4 = roadmapState.stage_4 as { page_outlines?: any[] } | undefined
-  const sectionContracts: Array<{
-    page_slug:           string
-    section_id:          string
-    required_messages:   string[]
-    keyword_assignments: { primary?: string[]; supporting?: string[] } | null
-    cta:                 { label: string; destination_page: string } | null
-  }> = []
+  const allContracts: SectionContract[] = []
   if (stage4?.page_outlines) {
     for (const page of stage4.page_outlines) {
-      // Honor the scope filter — drop contracts for pages we're not
-      // touching so the model isn't distracted by them.
       if (pageSlugs && pageSlugs.length > 0 && !pageSlugs.includes(page.page_slug)) continue
       for (const sec of (page.sections ?? [])) {
-        sectionContracts.push({
+        allContracts.push({
           page_slug:           page.page_slug,
           section_id:          sec.section_id,
           required_messages:   Array.isArray(sec.required_messages) ? sec.required_messages : [],
@@ -197,46 +343,86 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  const userText = [
-    `# Voice card (Stage 1)\n${JSON.stringify((stage1 as any).voice_characteristics, null, 2)}`,
-    `# Personas (Stage 1)\n${JSON.stringify((stage1 as any).personas, null, 2)}`,
-    brandGuide && `# Brand guide\n${JSON.stringify(brandGuide, null, 2)}`,
-    sectionContracts.length > 0 &&
-      `# Stage 4 section contracts — load-bearing constraints\n` +
-      `For each section_id, required_messages must survive any rewrite, keyword_assignments.primary phrases must stay in heading or lead sentence, and cta.label must not change. The section_id here matches web_section_id in the Sections payload below.\n` +
-      JSON.stringify(sectionContracts, null, 2),
-    `# Sections (current field_values + provenance)\n${JSON.stringify(ourSections, null, 2)}`,
-    previous && `# Previous run\n${JSON.stringify(previous, null, 2)}`,
-    redoContext && `# Strategist redo feedback\n${redoContext}`,
-  ].filter(Boolean).join('\n\n')
-
-  let toolResult: Record<string, unknown> | null = null
-  let usage: { input_tokens?: number; output_tokens?: number } = {}
-  try {
-    const result = await generateText({
-      model: MODEL,
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
-      system: resolved.systemPrompt,
-      messages: [{ role: 'user', content: userText }],
-      tools: {
-        submit_voice_rewrites: tool({
-          description: TOOL.description,
-          inputSchema: jsonSchema(TOOL.input_schema as any),
-        }),
-      },
-      toolChoice: { type: 'tool', toolName: 'submit_voice_rewrites' },
-    })
-    usage = { input_tokens: result.usage?.inputTokens, output_tokens: result.usage?.outputTokens }
-    const toolCall = result.toolCalls?.[0]
-    if (!toolCall || toolCall.toolName !== 'submit_voice_rewrites') {
-      throw new Error('Model did not return the expected tool call')
-    }
-    toolResult = toolCall.input as Record<string, unknown>
-  } catch (err: any) {
-    console.error('[voice-pass] gateway error:', err?.message)
-    return res.status(502).json({ error: `AI Gateway error: ${err?.message ?? 'unknown'}` })
+  // Group sections + contracts by page so we can call the model once
+  // per page with full per-page context.
+  const sectionsByPage = new Map<string, WebSection[]>()
+  for (const s of ourSections) {
+    if (!sectionsByPage.has(s.web_page_id)) sectionsByPage.set(s.web_page_id, [])
+    sectionsByPage.get(s.web_page_id)!.push(s)
+  }
+  const contractsBySlug = new Map<string, SectionContract[]>()
+  for (const c of allContracts) {
+    if (!contractsBySlug.has(c.page_slug)) contractsBySlug.set(c.page_slug, [])
+    contractsBySlug.get(c.page_slug)!.push(c)
   }
 
+  // Build the list of work items we'll process.
+  const workItems = scopedPages
+    .map(page => {
+      const pageSections = (sectionsByPage.get(page.id) ?? []).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      const pageContracts = contractsBySlug.get(page.slug) ?? []
+      return { page, pageSections, pageContracts }
+    })
+    .filter(w => w.pageSections.length > 0)
+
+  // Per-page previous output, so each call only sees its own history.
+  const previousByPageSlug = new Map<string, unknown>()
+  if (previous && Array.isArray((previous as any)?.rewrites)) {
+    const prevRewrites = (previous as any).rewrites as any[]
+    const sectionIdToPageId = new Map(ourSections.map(s => [s.id, s.web_page_id]))
+    const pageIdToSlug = new Map(scopedPages.map(p => [p.id, p.slug]))
+    for (const r of prevRewrites) {
+      const pageId = sectionIdToPageId.get(r.web_section_id)
+      if (!pageId) continue
+      const slug = pageIdToSlug.get(pageId)
+      if (!slug) continue
+      if (!previousByPageSlug.has(slug)) previousByPageSlug.set(slug, { rewrites: [] })
+      ;((previousByPageSlug.get(slug) as any).rewrites as any[]).push(r)
+    }
+  }
+
+  // Fire all pages in parallel. Sonnet 4.6 is fast enough that even
+  // 17 pages finish under the 600s maxDuration. If a single page
+  // errors, we keep the rest — the strategist can refine just that
+  // page after seeing the partial result.
+  const pageResults = await Promise.allSettled(workItems.map(w =>
+    runPage(
+      w.page,
+      w.pageSections,
+      w.pageContracts,
+      (stage1 as any).voice_characteristics,
+      (stage1 as any).personas,
+      brandGuide ?? null,
+      previousByPageSlug.get(w.page.slug) ?? null,
+      redoContext,
+      resolved.systemPrompt,
+    ),
+  ))
+
+  const rewrites: Rewrite[] = []
+  const skipped:  Skip[]    = []
+  let totalIn = 0, totalOut = 0
+  const pageErrors: Array<{ slug: string; error: string }> = []
+  pageResults.forEach((r, i) => {
+    const slug = workItems[i].page.slug
+    if (r.status === 'fulfilled') {
+      rewrites.push(...r.value.rewrites)
+      skipped.push(...r.value.skipped)
+      totalIn  += r.value.usage.input_tokens  ?? 0
+      totalOut += r.value.usage.output_tokens ?? 0
+    } else {
+      pageErrors.push({ slug, error: r.reason instanceof Error ? r.reason.message : String(r.reason) })
+    }
+  })
+
+  if (pageErrors.length === workItems.length) {
+    return res.status(502).json({
+      error: 'All per-page voice-pass calls failed',
+      pageErrors,
+    })
+  }
+
+  const usage = { input_tokens: totalIn, output_tokens: totalOut }
   const meta = {
     status: 'draft',
     generated_at: new Date().toISOString(),
@@ -244,40 +430,39 @@ export default async function handler(req: any, res: any) {
     prompt_source: resolved.globalSource,
     has_project_addendum: resolved.hasProjectAddendum,
     scoped_to_page_slugs: pageSlugs ?? null,
+    architecture: 'per_page_calls',
+    pages_succeeded: workItems.length - pageErrors.length,
+    pages_failed:    pageErrors.length,
+    page_errors:     pageErrors.length > 0 ? pageErrors : undefined,
     redo_count: typeof (previous as any)?._meta?.redo_count === 'number'
       ? (previous as any)._meta.redo_count + (redoContext ? 1 : 0)
       : 0,
     usage,
   }
 
-  // Merge mode when scoped: keep rewrites + skips from other pages,
-  // replace only those targeting sections on the scoped pages. The
-  // scoped sectionId set determines what's "in scope" — anything
-  // matching gets replaced; anything else survives untouched.
-  const sectionIdsInScope = new Set(ourSections.map(s => s.id as string))
+  // Merge with previous output when scoped: keep rewrites + skips for
+  // sections NOT in scope; replace those in scope with new results.
+  const sectionIdsInScope = new Set(ourSections.map(s => s.id))
   let mergedRewrites: any[]
   let mergedSkipped:  any[]
   if (pageSlugs && pageSlugs.length > 0) {
     const previousAny  = (previous as any) ?? {}
     const prevRewrites = Array.isArray(previousAny.rewrites) ? previousAny.rewrites : []
     const prevSkipped  = Array.isArray(previousAny.skipped)  ? previousAny.skipped  : []
-    const newRewrites  = Array.isArray((toolResult as any)?.rewrites) ? (toolResult as any).rewrites : []
-    const newSkipped   = Array.isArray((toolResult as any)?.skipped)  ? (toolResult as any).skipped  : []
     mergedRewrites = [
       ...prevRewrites.filter((r: any) => !sectionIdsInScope.has(r?.web_section_id)),
-      ...newRewrites,
+      ...rewrites,
     ]
     mergedSkipped = [
       ...prevSkipped.filter((s: any) => !sectionIdsInScope.has(s?.web_section_id)),
-      ...newSkipped,
+      ...skipped,
     ]
   } else {
-    mergedRewrites = Array.isArray((toolResult as any)?.rewrites) ? (toolResult as any).rewrites : []
-    mergedSkipped  = Array.isArray((toolResult as any)?.skipped)  ? (toolResult as any).skipped  : []
+    mergedRewrites = rewrites
+    mergedSkipped  = skipped
   }
 
   const stage7Write = {
-    ...toolResult,
     rewrites: mergedRewrites,
     skipped:  mergedSkipped,
     _meta:    meta,

@@ -1408,6 +1408,18 @@ For each section:
 - Preserve atoms_used from Stage 4 — every atom should appear in
   field_values somewhere.
 
+# HARD RULE — ONE HERO PER PAGE
+
+A page may have AT MOST ONE template from the Hero Section family.
+The hero is typically section[0]. Every other section MUST be
+non-Hero — Feature, Content, CTA, Intro, etc. Closing-CTA bands are
+CTA Section, not Hero. Mid-page positioning blocks are Feature
+Section. If two heroes land on one page, fix it before submitting.
+Post-pick code validation will strip extras and force re-pick from
+non-Hero candidates; if you violate this rule, the strategist sees
+auto-overrides in the result, which is a tell that the model picked
+poorly.
+
 # Honor the Stage 4 section contract
 
 - **required_messages must survive.** Every claim in
@@ -1675,16 +1687,43 @@ You MAY change every word. You may NOT:
   card titles, eyebrows, short CTAs — plain and scannable.
   "Two ways in" beats "Two ways forward — both quiet."
 
-# Skip rules — log these as skipped, do not rewrite
+# Skip rules — be strict, not generous
 
-- already_on_voice: existing value matches voice + meets all rules.
-- override_locked: field_provenance='override'.
-- over_budget_after_rewrite: cannot land voice within max_chars.
+A slot is ONLY "already_on_voice" if ALL of these are true:
+  1. The current value reads in this church's voice (no generic
+     brochure tone, no corporate stiffness, no performed enthusiasm).
+  2. The value is within max_chars.
+  3. It satisfies EVERY structural rule above — for heading slots
+     specifically, that means 3-7 words, no rhetorical questions,
+     no question-answer punchlines, no full sentences.
+  4. It honors the section's Stage 4 contract (required_messages
+     present, primary keywords in heading or lead sentence, cta.label
+     unchanged).
+
+If ANY of those fails, you MUST rewrite — even when the existing
+copy "sounds like Paradox." A 13-word heading that uses brand voice
+is still a broken heading. A heading-shaped rhetorical question is
+still a heading-shape failure. The previous voice pass on this
+project shipped headings like "A church for people who take their
+questions as seriously as their faith." (13 words) and "If you've
+been circling, you're in the right place." (9 words) because they
+"sounded right." That is the loophole this rule closes. Headings get
+scanned in 0.4 seconds — they have to read as labels, not sentences.
+
+Other skip reasons:
+- override_locked: field_provenance='override' (strategist locked).
+- over_budget_after_rewrite: cannot land voice within max_chars after
+  honest effort. Mark explicitly so the strategist knows to swap
+  templates.
 - structured_slot_not_supported: value is array/object.
 
 Output via submit_voice_rewrites: one rewrite per qualifying string slot
 {web_section_id, field_key, old_value, new_value, voice_alignment_score,
-rationale} plus a skipped[] array with the reasons above.`,
+rationale} plus a skipped[] array with the reasons above. A hard
+post-validation pass runs on your output before it lands in the manifest:
+heading slots > 7 words OR containing '?' get rejected and moved into
+skipped[] with reason='validation_failed_*'. Save yourself the round
+trip — fix headings on the first pass.`,
 
   final_qa: `You are the Final QA. Run the following checks across all bound + voiced
 sections and produce a findings list:
@@ -1698,7 +1737,48 @@ sections and produce a findings list:
    existing project snippet
 5. SEO targets: every page has seo title + meta_description; AEO keywords
    from Stage 1 are represented across pages
+6. Page structural integrity: at most ONE Hero family template per
+   page; no self-linking CTAs (button url === current page); no
+   sections with empty/missing required slots
+7. Heading shape: every heading slot is 3-7 words, no rhetorical
+   questions, no question-answer punchlines
 
-Output via submit_final_qa: findings[] with {severity, page_slug, section_id,
-issue, suggested_fix}. Severity: blocker, warning, nit.`,
+# Severity policy — be strict on structural failures
+
+\`blocker\` — must be fixed before publish. Use for ANY of:
+- Page-structural violations: two or more Hero templates on one page,
+  missing required pages from the sitemap, broken nav (page has no
+  inbound link).
+- Self-linking CTAs (button url points to the current page).
+- Required_message from Stage 4 contract is missing from bound copy.
+- CTA label changed away from contract.cta.label.
+- Heading slot is a rhetorical question, contains '?', or runs over
+  7 words.
+- Unresolved {{merge_token}} reaching the final field_values.
+- Persona with zero coverage across the project.
+
+\`warning\` — should be fixed before publish but not blocking. Use for:
+- Voice drift between pages where one page reads notably different
+  from the rest.
+- Keyword from page_seo_targets that isn't placed anywhere on the
+  page (heading or body).
+- Same rhetorical pattern (X-not-Y, parallel-clause) used 3+ times
+  on one page after voice pass.
+- Internal links pointing at archived/missing slugs.
+
+\`nit\` — strategist's discretion. Use for:
+- Stylistic preference notes ("could be tightened").
+- Minor copy infelicities (a word that could be punchier).
+- NEVER use for structural failures. If you find yourself writing
+  "this should be a blocker but it's only one section so..." — stop.
+  It's a blocker. Three heroes on one page is a blocker. The
+  argument "stacking is just repetitive" is wrong — it's a structural
+  bug, full stop.
+
+Categories: 'nav_parity', 'persona_coverage', 'voice_drift',
+'merge_field', 'seo', 'page_structure', 'heading_shape',
+'contract_violation', 'cta_integrity'.
+
+Output via submit_final_qa: findings[] with {severity, page_slug,
+web_section_id, category, issue, suggested_fix}.`,
 }
