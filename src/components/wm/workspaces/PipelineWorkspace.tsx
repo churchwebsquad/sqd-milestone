@@ -12,7 +12,7 @@
  * unlocks the next stage's Run button.
  */
 import { useCallback, useMemo, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Layers, FileText } from 'lucide-react'
 import { WMCard } from '../Card'
 import { supabase } from '../../../lib/supabase'
 import {
@@ -23,6 +23,7 @@ import {
 import { StageCard, type StageState } from '../pipeline/StageCard'
 import { PromptDrawer } from '../pipeline/PromptDrawer'
 import { PreviewDrawer } from '../pipeline/PreviewDrawer'
+import { PerPageReview } from '../pipeline/PerPageReview'
 import type { StrategyWebProject } from '../../../types/database'
 
 interface Props {
@@ -66,6 +67,11 @@ export function PipelineWorkspace({ project, onChange }: Props) {
     .map(s => s.trim())
     .filter(Boolean)
   const SCOPE_AWARE: PipelineStage[] = ['outlines', 'voice_pass']
+  /** Stage-major (default) shows every stage as a card with all pages
+   *  rolled up; page-major shows every page as a card with its
+   *  contract → bound copy → voice → QA collapsed under it. The
+   *  toggle lives in the page header. */
+  const [view, setView] = useState<'stages' | 'pages'>('stages')
 
   const roadmapState = (project.roadmap_state ?? {}) as Record<string, any>
 
@@ -332,15 +338,43 @@ export function PipelineWorkspace({ project, onChange }: Props) {
   return (
     <div className="p-6 md:p-8">
       <div className="max-w-3xl mx-auto space-y-3">
-        <header className="mb-2">
-          <p className="text-[11px] uppercase tracking-widest font-bold text-wm-accent-strong">Copywriting pipeline</p>
-          <h1 className="text-2xl font-semibold text-wm-text mt-1">Eight focused stages, end to end</h1>
-          <p className="text-sm text-wm-text-muted mt-1">
-            Each stage runs as its own model call with an editable system
-            prompt. Approve a stage to unlock the next one. Edit a project
-            addendum to tune a stage for this project without changing the
-            global default.
-          </p>
+        <header className="mb-2 flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] uppercase tracking-widest font-bold text-wm-accent-strong">Copywriting pipeline</p>
+            <h1 className="text-2xl font-semibold text-wm-text mt-1">Eight focused stages, end to end</h1>
+            <p className="text-sm text-wm-text-muted mt-1">
+              {view === 'stages'
+                ? <>Each stage runs as its own model call with an editable system prompt.
+                    Approve a stage to unlock the next one. Edit a project addendum to tune a
+                    stage for this project without changing the global default.</>
+                : <>One card per page — contract, bound copy, voice rewrites, and QA findings
+                    collapsed together for review. Switch back to <strong>By stage</strong> to
+                    run pipeline stages.</>}
+            </p>
+          </div>
+          {/* View toggle — stage-major vs page-major. */}
+          <div className="shrink-0 inline-flex rounded-md border border-wm-border bg-wm-bg p-0.5 text-[11px] font-semibold">
+            <button
+              type="button"
+              onClick={() => setView('stages')}
+              className={[
+                'inline-flex items-center gap-1 px-2.5 py-1 rounded',
+                view === 'stages' ? 'bg-wm-accent text-white' : 'text-wm-text-muted hover:text-wm-text',
+              ].join(' ')}
+            >
+              <Layers size={11} /> By stage
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('pages')}
+              className={[
+                'inline-flex items-center gap-1 px-2.5 py-1 rounded',
+                view === 'pages' ? 'bg-wm-accent text-white' : 'text-wm-text-muted hover:text-wm-text',
+              ].join(' ')}
+            >
+              <FileText size={11} /> By page
+            </button>
+          </div>
         </header>
 
         {error && (
@@ -397,7 +431,12 @@ export function PipelineWorkspace({ project, onChange }: Props) {
           </span>
         </div>
 
-        <div className="space-y-2">
+        {view === 'pages' && <PerPageReview project={project} />}
+
+        <div className={[
+          'space-y-2',
+          view === 'pages' ? 'hidden' : '',
+        ].join(' ')}>
           {stages.map(s => {
             // Voice-pass gets a secondary CTA that writes the
             // manifest's rewrites back into web_sections. Available

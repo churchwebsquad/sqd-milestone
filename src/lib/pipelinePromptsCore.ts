@@ -1656,6 +1656,21 @@ You MAY change every word. You may NOT:
   slot into a full sentence. Move any literary phrase to the
   description/body/eyebrow slot in the same section if one exists.
 
+- **Heading anti-patterns — never use these as a heading.** A heading
+  must be a noun-phrase or short statement. NOT a rhetorical question.
+  NOT a question followed by a one-word answer. NOT a punchline.
+  · BAD: "Faith or thinking? Neither."
+  · BAD: "What's a Saturday like? Honest."
+  · BAD: "Why us? Because."
+  · BAD: "Doubt welcome?"
+  · GOOD: "What a Saturday looks like"
+  · GOOD: "Doubt is welcome here"
+  · GOOD: "Built for the long haul"
+  If the model wants to write a clever question-answer phrase, that
+  belongs in body copy or as a pull-quote, never in a heading slot.
+  Headings get scanned in 0.4 seconds; they must read as a label, not
+  a riddle.
+
 - **Functional > poetic for navigation-adjacent copy.** Button labels,
   card titles, eyebrows, short CTAs — plain and scannable.
   "Two ways in" beats "Two ways forward — both quiet."
