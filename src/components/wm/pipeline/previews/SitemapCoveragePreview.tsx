@@ -45,19 +45,53 @@ interface Summary {
   overall_coverage_score?: number
 }
 
+interface IdentityAuditRow {
+  kind?:              'x_factor' | 'project_goal' | 'persona_need'
+  label?:             string
+  source_quote?:      string
+  destination_kind?:  'dedicated_page' | 'anchored_section' | 'hero_position' | 'unsupported'
+  destination_slug?:  string | null
+  destination_anchor?: string | null
+  findable_score?:    number
+  rationale?:         string
+}
+
+interface IdentityGap {
+  kind?:          'x_factor' | 'project_goal' | 'persona_need'
+  label?:         string
+  source_quote?:  string
+  why_a_gap?:     string
+  suggested_fix?: string
+}
+
+interface VoiceAuditRow {
+  nav_path?:        string
+  current_label?:   string
+  suggested_label?: string
+  issue?:           'banned_term' | 'vocabulary_mismatch' | 'generic_when_owned'
+  source_quote?:    string
+  severity?:        'high' | 'medium' | 'low'
+}
+
 interface CoverageData {
   topic_audit?:        Audit[]
   summary?:            Summary
   gaps?:               Gap[]
+  identity_audit?:     IdentityAuditRow[]
+  identity_gaps?:      IdentityGap[]
+  voice_audit?:        VoiceAuditRow[]
   recommended_action?: 'proceed_to_stage_3' | 'redo_stage_2_with_gaps'
 }
 
 export function SitemapCoveragePreview({ output }: { output: Record<string, unknown> }) {
-  const data    = output as CoverageData
-  const audit   = data.topic_audit ?? []
-  const gaps    = data.gaps ?? []
-  const summary = data.summary ?? {}
-  const action  = data.recommended_action
+  const data          = output as CoverageData
+  const audit         = data.topic_audit ?? []
+  const gaps          = data.gaps ?? []
+  const identityAudit = data.identity_audit ?? []
+  const identityGaps  = data.identity_gaps ?? []
+  const voiceAudit    = data.voice_audit ?? []
+  const summary       = data.summary ?? {}
+  const action        = data.recommended_action
 
   return (
     <div className="space-y-6">
@@ -65,8 +99,12 @@ export function SitemapCoveragePreview({ output }: { output: Record<string, unkn
 
       <Summary summary={summary} />
 
-      {gaps.length > 0 && <GapsPanel gaps={gaps} />}
+      {gaps.length > 0          && <GapsPanel gaps={gaps} />}
+      {identityGaps.length > 0  && <IdentityGapsPanel gaps={identityGaps} />}
+      {voiceAudit.some(v => v.severity === 'high' || v.severity === 'medium') &&
+        <VoiceAuditPanel rows={voiceAudit} />}
 
+      {identityAudit.length > 0 && <IdentityAuditTable rows={identityAudit} />}
       <TopicAuditTable audit={audit} />
     </div>
   )
@@ -157,6 +195,175 @@ function GapsPanel({ gaps }: { gaps: Gap[] }) {
         ))}
       </ul>
     </Section>
+  )
+}
+
+function IdentityGapsPanel({ gaps }: { gaps: IdentityGap[] }) {
+  return (
+    <Section label={`Identity gaps — Stage 1 outputs not addressed (${gaps.length})`}>
+      <ul className="space-y-2">
+        {gaps.map((g, i) => (
+          <li key={i} className="rounded-md border border-wm-accent/40 bg-wm-accent-tint/40 px-3 py-2">
+            <div className="flex items-baseline gap-2 mb-1 flex-wrap">
+              <KindTag kind={g.kind} />
+              <span className="text-[12px] font-semibold text-wm-text">{g.label ?? '—'}</span>
+            </div>
+            {g.source_quote && (
+              <p className="text-[11px] text-wm-text-muted italic mt-1 leading-relaxed">
+                <span className="text-wm-text-subtle">Source:</span> &ldquo;{g.source_quote}&rdquo;
+              </p>
+            )}
+            {g.why_a_gap && (
+              <p className="text-[12px] text-wm-text leading-relaxed mt-1">
+                <span className="text-wm-text-subtle">Why:</span> {g.why_a_gap}
+              </p>
+            )}
+            {g.suggested_fix && (
+              <p className="text-[12px] text-wm-text leading-relaxed mt-1">
+                <span className="text-wm-text-subtle">Suggested fix:</span> {g.suggested_fix}
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Section>
+  )
+}
+
+function VoiceAuditPanel({ rows }: { rows: VoiceAuditRow[] }) {
+  const high   = rows.filter(r => r.severity === 'high')
+  const medium = rows.filter(r => r.severity === 'medium')
+  const low    = rows.filter(r => r.severity === 'low')
+  return (
+    <Section label={`Voice audit — nav labels vs church vocabulary (${rows.length})`}>
+      {high.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-danger mb-1.5">
+            High severity ({high.length})
+          </p>
+          <ul className="space-y-2">{high.map((r, i) => <VoiceRow key={`h-${i}`} row={r} tone="danger" />)}</ul>
+        </div>
+      )}
+      {medium.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-warning mb-1.5">
+            Medium severity ({medium.length})
+          </p>
+          <ul className="space-y-2">{medium.map((r, i) => <VoiceRow key={`m-${i}`} row={r} tone="warning" />)}</ul>
+        </div>
+      )}
+      {low.length > 0 && (
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">
+            Low severity ({low.length})
+          </p>
+          <ul className="space-y-2">{low.map((r, i) => <VoiceRow key={`l-${i}`} row={r} tone="muted" />)}</ul>
+        </div>
+      )}
+    </Section>
+  )
+}
+
+function VoiceRow({ row, tone }: { row: VoiceAuditRow; tone: 'danger' | 'warning' | 'muted' }) {
+  return (
+    <li className={[
+      'rounded-md border px-3 py-2',
+      tone === 'danger'  ? 'border-wm-danger/30 bg-wm-danger-bg/40' :
+      tone === 'warning' ? 'border-wm-warning/30 bg-wm-warning-bg/40' :
+                           'border-wm-border bg-wm-bg/40',
+    ].join(' ')}>
+      <div className="flex items-baseline gap-2 mb-1 flex-wrap">
+        <span className="text-[10px] font-mono text-wm-text-subtle">{row.nav_path}</span>
+        <span className="text-[12px] text-wm-text">
+          <span className="line-through opacity-70">&ldquo;{row.current_label}&rdquo;</span>
+          <span className="mx-1 text-wm-text-subtle">→</span>
+          <span className="font-semibold">&ldquo;{row.suggested_label}&rdquo;</span>
+        </span>
+        {row.issue && <Tag tone={tone === 'danger' ? 'warning' : 'muted'}>{row.issue.replace(/_/g,' ')}</Tag>}
+      </div>
+      {row.source_quote && (
+        <p className="text-[11px] text-wm-text-muted italic leading-snug">
+          &ldquo;{row.source_quote}&rdquo;
+        </p>
+      )}
+    </li>
+  )
+}
+
+function IdentityAuditTable({ rows }: { rows: IdentityAuditRow[] }) {
+  const sorted = useMemo(() => {
+    return [...rows].sort((a, b) => (a.findable_score ?? 1) - (b.findable_score ?? 1))
+  }, [rows])
+  return (
+    <Section label={`Strategic identity audit (${rows.length})`}>
+      <div className="space-y-1.5">
+        {sorted.map((r, i) => <IdentityRow key={i} row={r} />)}
+      </div>
+    </Section>
+  )
+}
+
+function IdentityRow({ row }: { row: IdentityAuditRow }) {
+  const [open, setOpen] = useState(false)
+  const score = row.findable_score ?? 0
+  const scoreTone =
+    score >= 0.8 ? 'success' :
+    score >= 0.6 ? 'accent'  :
+    score >= 0.4 ? 'warning' :
+    'danger'
+  const hasDetail = !!(row.rationale || row.source_quote)
+  return (
+    <div className="rounded-md border border-wm-border bg-wm-bg/40">
+      <button
+        type="button"
+        onClick={() => hasDetail && setOpen(o => !o)}
+        className={['w-full px-2.5 py-1.5 flex items-baseline gap-2 text-left',
+                    hasDetail ? 'hover:bg-wm-bg-hover' : 'cursor-default'].join(' ')}
+      >
+        {hasDetail
+          ? (open ? <ChevronDown size={11} className="shrink-0 text-wm-text-muted self-center" />
+                  : <ChevronRight size={11} className="shrink-0 text-wm-text-muted self-center" />)
+          : <span className="shrink-0 w-3" />}
+        <KindTag kind={row.kind} />
+        <span className="text-[12px] font-semibold text-wm-text truncate">{row.label ?? '—'}</span>
+        <span className="ml-auto flex items-center gap-1.5 shrink-0">
+          <DestinationTag
+            kind={row.destination_kind === 'hero_position' ? 'anchored_section' : (row.destination_kind as any)}
+            slug={row.destination_slug}
+            anchor={row.destination_anchor}
+          />
+          <ScoreBadge score={score} tone={scoreTone} />
+        </span>
+      </button>
+      {hasDetail && open && (
+        <div className="px-2.5 pb-2 pt-1 pl-8 space-y-1 border-t border-wm-border bg-wm-bg/20">
+          {row.source_quote && (
+            <p className="text-[11px] text-wm-text-muted italic leading-relaxed">
+              <span className="text-wm-text-subtle">Source:</span> &ldquo;{row.source_quote}&rdquo;
+            </p>
+          )}
+          {row.rationale && (
+            <p className="text-[11px] text-wm-text leading-relaxed">
+              <span className="text-wm-text-subtle">Rationale:</span> {row.rationale}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function KindTag({ kind }: { kind?: 'x_factor' | 'project_goal' | 'persona_need' }) {
+  if (!kind) return null
+  const label =
+    kind === 'x_factor'     ? 'x-factor'   :
+    kind === 'project_goal' ? 'goal'       :
+    kind === 'persona_need' ? 'persona'    :
+    kind
+  return (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-wm-accent-tint text-wm-accent-strong border border-wm-accent/30">
+      {label}
+    </span>
   )
 }
 

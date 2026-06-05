@@ -340,9 +340,38 @@ async function runStage2_5() {
         },
         required: ['topic_key','topic_label','importance','why_a_gap','suggested_fix'],
       }},
+      identity_audit: { type: 'array', items: { type: 'object',
+        properties: {
+          kind: { type: 'string', enum: ['x_factor','project_goal','persona_need'] },
+          label: { type: 'string' }, source_quote: { type: 'string' },
+          destination_kind: { type: 'string', enum: ['dedicated_page','anchored_section','hero_position','unsupported'] },
+          destination_slug: { type: ['string','null'] }, destination_anchor: { type: ['string','null'] },
+          findable_score: { type: 'number', minimum: 0, maximum: 1 },
+          rationale: { type: 'string' },
+        },
+        required: ['kind','label','destination_kind','findable_score','rationale'],
+      }},
+      identity_gaps: { type: 'array', items: { type: 'object',
+        properties: {
+          kind: { type: 'string', enum: ['x_factor','project_goal','persona_need'] },
+          label: { type: 'string' }, source_quote: { type: 'string' },
+          why_a_gap: { type: 'string' }, suggested_fix: { type: 'string' },
+        },
+        required: ['kind','label','why_a_gap','suggested_fix'],
+      }},
+      voice_audit: { type: 'array', items: { type: 'object',
+        properties: {
+          nav_path: { type: 'string' }, current_label: { type: 'string' },
+          suggested_label: { type: 'string' },
+          issue: { type: 'string', enum: ['banned_term','vocabulary_mismatch','generic_when_owned'] },
+          source_quote: { type: 'string' },
+          severity: { type: 'string', enum: ['high','medium','low'] },
+        },
+        required: ['nav_path','current_label','suggested_label','issue','severity'],
+      }},
       recommended_action: { type: 'string', enum: ['proceed_to_stage_3','redo_stage_2_with_gaps'] },
     },
-    required: ['topic_audit','summary','gaps','recommended_action'],
+    required: ['topic_audit','summary','gaps','identity_audit','identity_gaps','voice_audit','recommended_action'],
   }
 
   // Surface Stage 1's topic_coverage_plan + project_goals + x_factor
@@ -350,12 +379,19 @@ async function runStage2_5() {
   // regardless of crawl coverage. Slim — don't dump all of stage_1.
   const stage1 = roadmapState.stage_1 ?? {}
   const stage1Slim = {
-    project_goals:       stage1.project_goals,
-    x_factor:            stage1.x_factor,
-    personas:            (stage1.personas ?? []).map((p: any) => ({
-      name: p.persona_name ?? p.name, voice_resonance: p.voice_resonance,
+    project_goals:                    stage1.project_goals,
+    x_factor:                         stage1.x_factor,
+    personas:                         (stage1.personas ?? []).map((p: any) => ({
+      name:            p.persona_name ?? p.name,
+      voice_resonance: p.voice_resonance,
+      need:            p.need,
+      goal:            p.goal,
     })),
-    topic_coverage_plan: stage1.topic_coverage_plan ?? [],
+    topic_coverage_plan:              stage1.topic_coverage_plan ?? [],
+    // Safety net for partner-specific pages the crawl doesn't
+    // categorize as discrete topics. Stage 2.5 must verify each
+    // carry-forward slug survived into stage_2.pages[].
+    existing_pages_to_carry_forward:  stage1.existing_pages_to_carry_forward ?? [],
   }
 
   const userText = [
@@ -399,18 +435,38 @@ async function runStage2_5() {
     },
   }).eq('id', PROJECT_ID)
 
+  const identityGaps = Array.isArray(out.identity_gaps) ? out.identity_gaps : []
+  const voiceHigh    = Array.isArray(out.voice_audit)
+    ? out.voice_audit.filter((v: any) => v.severity === 'high') : []
+  const voiceMedium  = Array.isArray(out.voice_audit)
+    ? out.voice_audit.filter((v: any) => v.severity === 'medium') : []
+
   console.log(`\nStage 2.5 summary:`)
   console.log(`  total topics:           ${out.summary?.total_topics ?? 0}`)
   console.log(`  dedicated pages:        ${out.summary?.dedicated_pages ?? 0}`)
   console.log(`  anchored sections:      ${out.summary?.anchored_sections ?? 0}`)
   console.log(`  orphans:                ${out.summary?.orphans ?? 0}`)
-  console.log(`  gaps:                   ${out.summary?.gaps_count ?? out.gaps?.length ?? 0}`)
+  console.log(`  topic gaps (HIGH):      ${out.gaps?.length ?? 0}`)
+  console.log(`  identity gaps:          ${identityGaps.length}`)
+  console.log(`  voice violations:       ${voiceHigh.length} high · ${voiceMedium.length} medium`)
   console.log(`  overall coverage score: ${(out.summary?.overall_coverage_score ?? 0).toFixed(2)}`)
   console.log(`  recommendation:         ${out.recommended_action}`)
   if (Array.isArray(out.gaps) && out.gaps.length > 0) {
-    console.log(`\nGaps:`)
+    console.log(`\nTopic gaps:`)
     for (const g of out.gaps) {
       console.log(`  - [${g.importance}] ${g.topic_label}: ${g.why_a_gap}`)
+    }
+  }
+  if (identityGaps.length > 0) {
+    console.log(`\nIdentity gaps:`)
+    for (const g of identityGaps) {
+      console.log(`  - [${g.kind}] ${g.label}: ${g.why_a_gap}`)
+    }
+  }
+  if (voiceHigh.length > 0) {
+    console.log(`\nVoice violations (high):`)
+    for (const v of voiceHigh) {
+      console.log(`  - ${v.nav_path}  "${v.current_label}" → "${v.suggested_label}"  (${v.issue})`)
     }
   }
 }
@@ -1592,20 +1648,49 @@ async function runStage2(stage1: any, opts: { redoContext?: string; cycleBack?: 
     const roadmap = (project.roadmap_state ?? {}) as any
     const lines: string[] = []
     if (opts.cycleBack === 'gaps') {
-      const gaps = roadmap.stage_2_5?.gaps ?? []
-      if (gaps.length === 0) throw new Error('Cycle-back: stage_2_5.gaps is empty.')
-      lines.push(
-        `The Sitemap Coverage Audit (Stage 2.5) surfaced the following gaps. Each one is a topic with content but no clear home or no findable nav path. Update the sitemap so each gap is addressed — either by promoting it to a dedicated page, adding a clearly-anchored section on a hub page with a real nav surface, or documenting why it was intentionally rejected. Do NOT drop the underlying content.`,
-        ``,
-      )
-      for (const g of gaps) {
-        lines.push(
-          `- ${g.topic_label ?? g.topic_key ?? '(unknown)'} [${g.importance ?? 'unknown'}]`,
-          `  Why a gap: ${g.why_a_gap ?? '—'}`,
-          `  Suggested fix: ${g.suggested_fix ?? '—'}`,
-        )
+      const audit = roadmap.stage_2_5 ?? {}
+      const gaps         = Array.isArray(audit.gaps)          ? audit.gaps          : []
+      const identityGaps = Array.isArray(audit.identity_gaps) ? audit.identity_gaps : []
+      const voiceHigh    = Array.isArray(audit.voice_audit)
+        ? audit.voice_audit.filter((v: any) => v.severity === 'high') : []
+      if (gaps.length === 0 && identityGaps.length === 0 && voiceHigh.length === 0) {
+        throw new Error('Cycle-back: stage_2_5 has no HIGH-severity findings to redo against.')
       }
-      console.log(`Cycle-back: ${gaps.length} gaps from Stage 2.5`)
+      lines.push(`The Sitemap Coverage Audit (Stage 2.5) surfaced findings across three dimensions. Update the sitemap to address each one — do NOT drop underlying content; route or rename instead.`, ``)
+      if (gaps.length > 0) {
+        lines.push(`## Coverage gaps — topics with no findable destination`, ``)
+        for (const g of gaps) {
+          lines.push(
+            `- ${g.topic_label ?? g.topic_key ?? '(unknown)'} [${g.importance ?? 'unknown'}]`,
+            `  Why a gap: ${g.why_a_gap ?? '—'}`,
+            `  Suggested fix: ${g.suggested_fix ?? '—'}`,
+          )
+        }
+        lines.push(``)
+      }
+      if (identityGaps.length > 0) {
+        lines.push(`## Identity gaps — Stage 1 strategic outputs not addressed by the sitemap`, ``)
+        for (const g of identityGaps) {
+          lines.push(
+            `- [${g.kind}] ${g.label}`,
+            `  Source: ${g.source_quote ?? '—'}`,
+            `  Why a gap: ${g.why_a_gap ?? '—'}`,
+            `  Suggested fix: ${g.suggested_fix ?? '—'}`,
+          )
+        }
+        lines.push(``)
+      }
+      if (voiceHigh.length > 0) {
+        lines.push(`## Voice violations — nav labels that contradict the church's vocabulary`, ``)
+        for (const v of voiceHigh) {
+          lines.push(
+            `- ${v.nav_path}: "${v.current_label}" → "${v.suggested_label}" (${v.issue})`,
+            `  Source: ${v.source_quote ?? '—'}`,
+          )
+        }
+        lines.push(``)
+      }
+      console.log(`Cycle-back: ${gaps.length} coverage · ${identityGaps.length} identity · ${voiceHigh.length} voice (high)`)
     } else {
       const orphans = roadmap.stage_6?.orphaned ?? []
       if (orphans.length === 0) throw new Error('Cycle-back: stage_6.orphaned is empty.')
@@ -1708,25 +1793,35 @@ async function runSitemapAutoLoop(stage1: any, maxIterations = 3) {
       .select('roadmap_state').eq('id', PROJECT_ID).maybeSingle()
     const audit = (state?.roadmap_state as any)?.stage_2_5 ?? {}
     const action = audit.recommended_action as string | undefined
-    const gapCount = Array.isArray(audit.gaps) ? audit.gaps.length : 0
-    const score = audit.summary?.overall_coverage_score
+    const gapCount         = Array.isArray(audit.gaps)          ? audit.gaps.length          : 0
+    const identityGapCount = Array.isArray(audit.identity_gaps) ? audit.identity_gaps.length : 0
+    const voiceHighCount   = Array.isArray(audit.voice_audit)
+      ? audit.voice_audit.filter((v: any) => v.severity === 'high').length : 0
+    const totalBlocking    = gapCount + identityGapCount + voiceHighCount
+    const score            = audit.summary?.overall_coverage_score
 
     history.push({
       iteration:       round,
-      gaps_count:      gapCount,
+      coverage_gaps:   gapCount,
+      identity_gaps:   identityGapCount,
+      voice_high:      voiceHighCount,
       coverage_score:  score,
       recommendation:  action,
-      gap_topics:      (audit.gaps ?? []).map((g: any) => g.topic_label ?? g.topic_key),
+      issues_summary:  [
+        ...((audit.gaps ?? []) as any[]).map(g => `topic:${g.topic_label ?? g.topic_key}`),
+        ...((audit.identity_gaps ?? []) as any[]).map(g => `identity:${g.label}`),
+        ...((audit.voice_audit ?? []) as any[]).filter(v => v.severity === 'high').map(v => `voice:${v.current_label}→${v.suggested_label}`),
+      ],
     })
 
-    console.log(`\nIteration ${round} result: ${gapCount} HIGH gaps · score ${score?.toFixed(2) ?? 'n/a'} · ${action ?? 'unknown'}`)
+    console.log(`\nIteration ${round} result: ${gapCount} topic + ${identityGapCount} identity + ${voiceHighCount} voice (high) · score ${score?.toFixed(2) ?? 'n/a'} · ${action ?? 'unknown'}`)
 
-    if (action === 'proceed_to_stage_3' || gapCount === 0) {
+    if (action === 'proceed_to_stage_3' && totalBlocking === 0) {
       console.log(`\n✓ Converged at iteration ${round}.`)
       break
     }
     if (round === maxIterations) {
-      console.log(`\n⚠ Hit max iterations (${maxIterations}) with ${gapCount} HIGH gaps remaining. Surfacing for human review.`)
+      console.log(`\n⚠ Hit max iterations (${maxIterations}) with ${totalBlocking} blocking findings remaining. Surfacing for human review.`)
     }
   }
 
@@ -1742,9 +1837,9 @@ async function runSitemapAutoLoop(stage1: any, maxIterations = 3) {
 
   console.log(`\nAuto-loop history (${history.length} iterations):`)
   for (const h of history) {
-    console.log(`  ${h.iteration}. gaps=${h.gaps_count} score=${(h.coverage_score ?? 0).toFixed(2)} → ${h.recommendation}`)
-    if (h.gap_topics.length > 0) {
-      console.log(`     gap topics: ${h.gap_topics.join(', ')}`)
+    console.log(`  ${h.iteration}. coverage=${h.coverage_gaps} identity=${h.identity_gaps} voice=${h.voice_high} score=${(h.coverage_score ?? 0).toFixed(2)} → ${h.recommendation}`)
+    if (h.issues_summary.length > 0) {
+      console.log(`     issues: ${h.issues_summary.join(' | ')}`)
     }
   }
 }

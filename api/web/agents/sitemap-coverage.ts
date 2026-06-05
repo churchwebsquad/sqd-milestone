@@ -77,10 +77,58 @@ const TOOL = {
           required: ['topic_key','topic_label','importance','why_a_gap','suggested_fix'],
         },
       },
+      identity_audit: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            kind:               { type: 'string', enum: ['x_factor','project_goal','persona_need'] },
+            label:              { type: 'string' },
+            source_quote:       { type: 'string' },
+            destination_kind:   { type: 'string',
+              enum: ['dedicated_page','anchored_section','hero_position','unsupported'] },
+            destination_slug:   { type: ['string','null'] },
+            destination_anchor: { type: ['string','null'] },
+            findable_score:     { type: 'number', minimum: 0, maximum: 1 },
+            rationale:          { type: 'string' },
+          },
+          required: ['kind','label','destination_kind','findable_score','rationale'],
+        },
+      },
+      identity_gaps: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            kind:          { type: 'string', enum: ['x_factor','project_goal','persona_need'] },
+            label:         { type: 'string' },
+            source_quote:  { type: 'string' },
+            why_a_gap:     { type: 'string' },
+            suggested_fix: { type: 'string' },
+          },
+          required: ['kind','label','why_a_gap','suggested_fix'],
+        },
+      },
+      voice_audit: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            nav_path:        { type: 'string' },
+            current_label:   { type: 'string' },
+            suggested_label: { type: 'string' },
+            issue:           { type: 'string',
+              enum: ['banned_term','vocabulary_mismatch','generic_when_owned'] },
+            source_quote:    { type: 'string' },
+            severity:        { type: 'string', enum: ['high','medium','low'] },
+          },
+          required: ['nav_path','current_label','suggested_label','issue','severity'],
+        },
+      },
       recommended_action: { type: 'string',
         enum: ['proceed_to_stage_3','redo_stage_2_with_gaps'] },
     },
-    required: ['topic_audit','summary','gaps','recommended_action'],
+    required: ['topic_audit','summary','gaps','identity_audit','identity_gaps','voice_audit','recommended_action'],
   },
 }
 
@@ -144,8 +192,23 @@ export default async function handler(req: any, res: any) {
     vocabulary_decisions: stage2.vocabulary_decisions,
     phase_summary:        stage2.phase_summary,
   }
+  const stage1 = roadmapState.stage_1 ?? {}
+  const stage1Slim = {
+    project_goals:                   stage1.project_goals,
+    x_factor:                        stage1.x_factor,
+    personas: (stage1.personas ?? []).map((p: any) => ({
+      name:            p.persona_name ?? p.name,
+      voice_resonance: p.voice_resonance,
+      need:            p.need,
+      goal:            p.goal,
+    })),
+    topic_coverage_plan:             stage1.topic_coverage_plan ?? [],
+    existing_pages_to_carry_forward: stage1.existing_pages_to_carry_forward ?? [],
+  }
 
   const userText = [
+    `# Stage 1 — strategy (project_goals, x_factor, personas, coverage contract, carry-forward pages)\n` +
+    `\`\`\`json\n${JSON.stringify(stage1Slim, null, 2)}\n\`\`\``,
     `# Stage 0 — content atoms (${atomsRes.data?.length ?? 0})\n` +
     `\`\`\`json\n${JSON.stringify(atomsRes.data ?? [], null, 2)}\n\`\`\``,
     `# Stage 0 — church facts (${factsRes.data?.length ?? 0})\n` +

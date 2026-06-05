@@ -592,14 +592,144 @@ Submit via submit_sitemap_coverage:
   why_a_gap, suggested_fix (either "promote to dedicated page X" or
   "add anchor X on page Y, expose via nav surface Z").
 
+# Strategic identity audit — verify Stage 1's strategic outputs land
+
+The crawl topic_audit catches what the partner has TODAY. The strategic
+identity audit catches what makes this partner DIFFERENT — the items
+Stage 1 declared as the project's identity. The crawler categorizes by
+generic topics ("Beliefs & Values") and won't surface partner-specific
+identity items like "Open and Affirming" or "We refuse to choose" as
+their own topic. Stage 1 names them. Stage 2 must address them.
+
+Walk every entry in:
+
+1. stage_1.x_factor — the one or two sentences identifying what makes
+   this partner distinct. Decompose into specific concepts (e.g.
+   "open and affirming," "refuses to choose between progressive and
+   traditional," "intellectual honesty"). For each concept, verify
+   the sitemap has a destination — own page, anchored section, or
+   prominent hero/positioning section on Home that surfaces it.
+2. stage_1.project_goals — 3-5 outcomes the partner cares about
+   (e.g. "answer first-time visitor questions before they ask",
+   "grow online community across platforms", "share sermon content
+   widely for SEO"). For each goal, verify the sitemap supports it
+   structurally — a goal like "share sermon content" requires
+   Sermons + Blog + Discussion Guides or equivalent surfaces; a goal
+   like "answer questions before they ask" requires a strong
+   /plan-a-visit FAQ or anchored sections.
+3. stage_1.personas[] — for each persona, walk their voice_resonance
+   and need + goal fields. Verify the sitemap creates an obvious
+   path for that persona. Examples (Paradox personas, illustrative):
+     Lena (Faithful Exile, mixed-faith household, LGBTQ+ family
+       members) — needs Open & Affirming visible from home + a
+       trust-signaling Beliefs page.
+     Marcus (Skeptic) — needs explicit "you don't have to declare a
+       belief to walk in" framing on Visit + intellectual-depth
+       signaling on Sermons.
+     Jordan (Exile, new in city, queer) — needs queer welcome made
+       structural, not decorative, and a clear community on-ramp
+       (Discussion Groups).
+   If a persona has no obvious first-page path, it's a gap.
+4. stage_1.existing_pages_to_carry_forward[] — pages from the current
+   live site Stage 1 said should survive into the new sitemap. Every
+   slug there MUST appear in stage_2.pages[] — either with the same
+   slug or a renamed slug documented in vocabulary_decisions. A
+   carry-forward page that was dropped or absorbed-into-something-
+   else without being explicitly preserved is a HIGH identity_gap.
+5. live URL preservation — scan crawl_topics[].source_page_urls. Any
+   URL with a partner-specific slug (e.g. /open-and-affirming, where
+   the slug echoes a phrase the partner uses verbatim and is NOT a
+   generic noun like /about or /events) that does NOT appear as a
+   dedicated_page in stage_2.pages[] AND was NOT flagged for
+   carry-forward by Stage 1 is a HIGH identity_gap. The crawl
+   categorizes "Beliefs & Values" as one topic, but the partner's
+   actual URL structure tells you which concepts they made
+   dedicated pages for. Honor that signal even when Stage 1 didn't
+   surface it explicitly — those URLs already have SEO equity + an
+   audience clicking through.
+
+Emit identity_audit[] with one row per identity concept, project_goal,
+or persona need:
+
+  {
+    kind: 'x_factor' | 'project_goal' | 'persona_need',
+    label,
+    source_quote,             // the Stage 1 phrasing
+    destination_kind: 'dedicated_page' | 'anchored_section'
+                    | 'hero_position' | 'unsupported',
+    destination_slug,
+    destination_anchor,       // when anchored_section
+    findable_score,           // 0-1
+    rationale
+  }
+
+Any identity item with destination_kind='unsupported' (or with
+findable_score < 0.6) goes into identity_gaps[] with importance
+defaulted to HIGH and a suggested_fix.
+
+# Voice audit — nav labels vs the church's actual vocabulary
+
+The sitemap is one of the partner's most visible voice surfaces. A
+default "Give" label on a church that says "Donate" is a voice
+violation, not a styling choice. Walk every label in header_nav (top
+level + children) and footer_nav.
+
+For each label, check:
+
+1. Banned terms — the partner's voice or atom passages explicitly
+   ruling out certain verbs. If the partner says "we're not a church
+   you watch", "Watch" is banned (use "Sermons" / "Messages").
+   Source: voice_characteristics, atoms with topic='voice_rule',
+   verbatim passages.
+2. Vocabulary mismatch — when the partner has their OWN phrase for a
+   nav slot. If the partner's site / atoms / brand handoff uses
+   "Donate" but the sitemap says "Give", that's a mismatch. If the
+   partner uses "The Conversation" for what we'd call "Sermons",
+   that's a mismatch. Source: existing_snippet atoms, site_crawl
+   passages, brand handoff form, the partner's current site
+   navigation if surfaced by the crawl.
+3. Generic-when-owned — when the label is generic ("Get Involved")
+   and the partner has an owned phrase ("Find Your Way In", "Join
+   the Mission") in Stage 1's signature_moves or voice samples.
+
+Emit voice_audit[] with one row per label that fails any check:
+
+  {
+    nav_path,                 // e.g. "header_nav.give" or
+                              //      "footer_nav.Connect.contact"
+    current_label,
+    suggested_label,          // the partner's actual term
+    issue: 'banned_term' | 'vocabulary_mismatch' | 'generic_when_owned',
+    source_quote,             // the Stage 0/1 evidence
+    severity: 'high' | 'medium' | 'low'
+  }
+
+Severity rubric:
+- HIGH if the issue is banned_term (the church's voice rules out the
+  verb), OR if vocabulary_mismatch is backed by LIVE-SITE EVIDENCE —
+  i.e. the crawl shows the partner using the alternative term as a
+  page title, button label, or recurring noun in their site copy
+  ("Donate" appears as the existing /donate page title and in atom
+  passages). Live-site terminology is the partner's lived
+  vocabulary; using a different word in their new nav is a brand
+  violation, not a stylistic option.
+- MEDIUM for vocabulary_mismatch where the alternative term appears
+  in brand intake/voice samples but not yet on the live site.
+- LOW for generic_when_owned (an owned phrase exists but the generic
+  label is still acceptable for outsider clarity per RULE-0).
+
 # Recommendation
 
-- If gaps[] (HIGH only) is non-empty → recommended_action =
-  'redo_stage_2_with_gaps'
-- Else → 'proceed_to_stage_3'
+recommended_action = 'redo_stage_2_with_gaps' if ANY of:
+- gaps[] (HIGH topic_audit) non-empty
+- identity_gaps[] non-empty
+- voice_audit[] contains any 'high' severity entries
 
-A clean Stage 2 has zero HIGH gaps. MEDIUM nits in topic_audit are
-acceptable and don't trigger a redo.`,
+Otherwise 'proceed_to_stage_3'.
+
+A clean Stage 2 has: zero HIGH topic gaps, zero identity gaps, and
+zero HIGH voice violations. MEDIUM voice notes and LOW topic nits are
+surfaced for review but don't trigger redo.`,
 
   page_inventory: `You are the Page Inventory Mapper. For every content atom (prose snippet,
 fact, persona note) and every church fact (service time, ministry, staff
