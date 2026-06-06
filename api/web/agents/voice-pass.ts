@@ -472,7 +472,20 @@ async function voicePassHandler(req: any, res: any) {
   // model's attention on per-page craft instead of re-reading brand
   // voice 17 times.
   const voiceExemplars = (stage1 as any).voice_exemplars as string[] | undefined
+  // Copy approach — the client's stated posture for how much TheSquad
+  // should write vs. preserve. Drives the writing-power dial in the
+  // prompt. Default to 'replace_most' when missing (TheSquad's
+  // standard service offering: write fresh prose, reference existing
+  // copy for facts + vocabulary).
+  const COPY_APPROACH_VALUES = new Set(['verbatim','edit_refine','replace_most','from_scratch'])
+  const rawCopyApproach = (stage1 as any).copy_approach
+  const copyApproach: string = typeof rawCopyApproach === 'string' && COPY_APPROACH_VALUES.has(rawCopyApproach)
+    ? rawCopyApproach
+    : 'replace_most'
+
   const cachedProjectContext = [
+    `# Copy approach (client's stated posture)\n` +
+      `"${copyApproach}" — translate this directly into how much you write vs. preserve, per the rules in your system prompt. This is the most important per-project setting in voice pass.`,
     `# Brand voice card (Stage 1)`,
     JSON.stringify((stage1 as any).voice_characteristics, null, 2),
     brandGuide && `# Brand guide\n${JSON.stringify(brandGuide, null, 2)}`,
@@ -555,6 +568,7 @@ async function voicePassHandler(req: any, res: any) {
     has_project_addendum: resolved.hasProjectAddendum,
     scoped_to_page_slugs: pageSlugs ?? null,
     architecture: 'per_page_calls',
+    copy_approach: copyApproach,
     pages_succeeded: workItems.length - pageErrors.length,
     pages_failed:    pageErrors.length,
     page_errors:     pageErrors.length > 0 ? pageErrors : undefined,
