@@ -12,7 +12,7 @@
  * a Phase 2 polish.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronDown, ChevronRight, Library, MessageCircle, Plus, Search, Settings, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
