@@ -193,6 +193,21 @@ export default function ContentCollectionPage() {
   // canonical version.
   const [strategyBriefPrefills, setStrategyBriefPrefills] = useState<Record<string, string>>({})
 
+  /** Crawl freshness state. The partner-facing inventory reads from
+   *  web_project_topics, which is populated by Firecrawl via the
+   *  fire-crawl-trigger edge function. If that crawl failed or got
+   *  stuck (Firecrawl rate-limit, upstream-proxy auth error, polling
+   *  timeout), the page used to display the raw error message inline
+   *  and the partner would see something like "Invalid upstream proxy
+   *  credentials." Now we:
+   *    1. Call web_crawl_retry_if_stuck on mount — idempotent, will
+   *       re-fire a stuck/failed crawl and leave a running one alone.
+   *    2. Track whether the crawl is "still gathering" so the UI can
+   *       show a friendly banner instead of an empty inventory or a
+   *       raw error.
+   */
+  const [crawlGathering, setCrawlGathering] = useState(false)
+
   useEffect(() => {
     if (!token || !sessionId) { setNotFound(true); setLoading(false); return }
     let cancelled = false
@@ -312,6 +327,39 @@ export default function ContentCollectionPage() {
     return () => { cancelled = true }
   }, [token, sessionId])
 
+  // Crawl-freshness check — runs once per session load. Calls the
+  // idempotent RPC; if the crawl is stuck or failed it retries, if
+  // it's still running it tells us so we can show the banner. We
+  // never display the raw RPC response or error_message to the
+  // partner.
+  useEffect(() => {
+    if (!session?.web_project_id) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const { data, error } = await supabase.rpc('web_crawl_retry_if_stuck', {
+          p_web_project_id: session.web_project_id,
+        })
+        if (cancelled) return
+        if (error) {
+          // Log raw for staff; don't surface to partner.
+          console.error('[content-collection] crawl-retry RPC failed:', error)
+          return
+        }
+        const result = (data ?? {}) as { action?: string; reason?: string }
+        // 'retried' and 'still_running' both mean: a crawl is currently
+        // in flight and the partner's inventory isn't ready yet. Show
+        // the friendly "still gathering" banner.
+        if (result.action === 'retried' || result.action === 'still_running') {
+          setCrawlGathering(true)
+        }
+      } catch (err) {
+        console.error('[content-collection] crawl-retry call threw:', err)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [session?.web_project_id])
+
   // Index topics by key for fast bucket lookups
   const topicsByKey = (() => {
     const out = new Map<string, TopicRow>()
@@ -405,6 +453,17 @@ export default function ContentCollectionPage() {
          *  and the recap/form 2-col layout (Step 2) line up with the
          *  header above. Header uses the same value. */}
         <div className="max-w-6xl mx-auto">
+          {crawlGathering && (
+            <div className="mb-5 rounded-xl border border-lavender bg-lavender-tint/40 px-4 py-3 flex items-start gap-3 text-sm text-deep-plum">
+              <Loader2 size={16} className="shrink-0 mt-0.5 animate-spin text-primary-purple" />
+              <div>
+                <p className="font-semibold">We're still gathering content from your website.</p>
+                <p className="text-xs text-purple-gray mt-0.5 leading-snug">
+                  This usually takes a minute or two. Your answers below are saved automatically — feel free to keep going, or refresh this page in a moment to see your site's content show up.
+                </p>
+              </div>
+            </div>
+          )}
           {step === 1 && (
             <Step1Review
               topicsByKey={topicsByKey}
