@@ -14,6 +14,8 @@ import { FacebookPostGenerator } from './generators/FacebookPostGenerator'
 import { SundayInviteGenerator } from './generators/SundayInviteGenerator'
 import { PhotoRecapGenerator } from './generators/PhotoRecapGenerator'
 import { CarouselGenerator } from './generators/CarouselGenerator'
+import { ReelCaptionsGenerator } from './generators/ReelCaptionsGenerator'
+import { ExportActions } from './ExportActions'
 
 export function ReviewStep({ session, onBack, onApprove, onChange }: {
   session: SmsSrpGeneration
@@ -50,6 +52,11 @@ export function ReviewStep({ session, onBack, onApprove, onChange }: {
       {selected.includes('photo_recap') && (
         <PhotoRecapGenerator session={session} onChange={onChange} />
       )}
+      {selected.includes('reel_captions') && (
+        <ReelCaptionsGenerator session={session} onChange={onChange} />
+      )}
+
+      <ExportActions session={session} onChange={onChange} />
 
       <div className="flex items-center justify-between gap-2 pt-3">
         <button onClick={onBack} className="inline-flex items-center gap-1.5 text-[12px] text-wm-text-muted hover:text-wm-text px-2 py-1.5">

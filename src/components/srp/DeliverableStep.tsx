@@ -18,6 +18,7 @@ const PHASE_1_KEYS: SrpDeliverableKey[] = [
   'sunday_invite',
   'photo_recap',
   'carousel_slides',
+  'reel_captions',
 ]
 
 export function DeliverableStep({ session, onBack, onContinue, onChange }: {

@@ -186,7 +186,7 @@ export const DELIVERABLE_LABELS: Record<SrpDeliverableKey, string> = {
   sunday_invite:    'Sunday invite',
   photo_recap:      'Photo recap',
   carousel_slides:  'Carousel slides',
-  reel_captions:    'Reel captions (coming soon)',
+  reel_captions:    'Reel captions (2)',
 }
 
 export const DELIVERABLE_DESCRIPTIONS: Record<SrpDeliverableKey, string> = {
@@ -194,5 +194,5 @@ export const DELIVERABLE_DESCRIPTIONS: Record<SrpDeliverableKey, string> = {
   sunday_invite:   '3 invite variants (warm / energetic / topical). Church name + service times at the bottom.',
   photo_recap:     '3-5 carousel caption options recapping the weekend service.',
   carousel_slides: '5-slide structure: hook · Bible verse · pastor quote · application · CTA.',
-  reel_captions:   'Short-form reel captions tied to clip selections. Deferred to Phase 2.',
+  reel_captions:   'Pick 2 clip moments from the transcript, then generate a short caption for each.',
 }
