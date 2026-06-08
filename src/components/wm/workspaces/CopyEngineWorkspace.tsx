@@ -19,32 +19,28 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Play, Loader2, CheckCircle2, AlertCircle, RefreshCw, Send, FileText, GitBranch,
-  ChevronRight, ChevronDown, Eye,
+  ChevronRight, ChevronDown, Eye, Edit3,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import type { StrategyWebProject } from '../../../types/database'
+import { SitemapPreview as RichSitemapPreview } from '../pipeline/previews/SitemapPreview'
 
-interface SitemapPage {
-  name: string
-  slug: string
-  nav_label?: string
-  phase?: string
-  parent_slug?: string | null
-  page_type?: string
-  strategic_purpose?: string
-  density?: string
-}
-interface NavItem {
-  label: string
-  kind: 'page' | 'group'
-  slug?: string
-  children?: NavItem[]
-}
 interface SitemapShape {
-  pages?: SitemapPage[]
-  header_nav?: NavItem[]
-  footer_nav?: Array<{ section_label: string; items?: Array<{ label: string; slug?: string }> }>
+  pages?: Array<{ name: string; slug: string }>
   _meta?: { status?: string }
+  [k: string]: unknown
+}
+
+interface PageBrief {
+  page_slug?: string
+  page_job?: string
+  persona_focus?: { primary?: string; secondary?: string | null; rationale?: string }
+  atoms_assigned?: Array<{ atom_id: string; treatment?: string; rationale?: string }>
+  reference_atoms?: Array<{ atom_id: string; reason?: string }>
+  voice_exemplars_to_imitate?: string[]
+  voice_anti_exemplars_to_avoid?: string[]
+  section_targets?: { section_count?: number; archetypes?: string[] }
+  aeo_geo_targets?: { search_phrases?: string[]; answer_intents?: string[]; geo_anchors?: string[] }
 }
 
 interface EngineState {
@@ -122,12 +118,15 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   const [engine,      setEngine]      = useState<EngineState>({})
   const [critique,    setCritique]    = useState<DirectorCritique | null>(null)
   const [drafts,      setDrafts]      = useState<Record<string, PageDraft>>({})
+  const [briefs,      setBriefs]      = useState<Record<string, PageBrief>>({})
   const [running,     setRunning]     = useState<string | null>(null)
   const [error,       setError]       = useState<string | null>(null)
   const [feedback,    setFeedback]    = useState('')
   const [routePreview, setRoutePreview] = useState<RoutePayload | null>(null)
   const [routing,     setRouting]     = useState(false)
   const [sitemapOpen, setSitemapOpen] = useState(false)
+  const [revisingSitemap, setRevisingSitemap] = useState(false)
+  const [sitemapFeedback, setSitemapFeedback] = useState('')
   const [expandedDraft, setExpandedDraft] = useState<string | null>(null)
   const [confirmAction, setConfirmAction] = useState<'iterate' | 'commit' | null>(null)
 
@@ -141,6 +140,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     setEngine(((state.engine_state as EngineState) ?? {}))
     setCritique(((state.director_critique as DirectorCritique) ?? null))
     setDrafts(((state.page_drafts as Record<string, PageDraft>) ?? {}))
+    setBriefs(((state.page_briefs as Record<string, PageBrief>) ?? {}))
   }, [project.id])
 
   useEffect(() => { void refreshFromDB() }, [refreshFromDB])
@@ -204,6 +204,32 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     })
   }, [drafts])
 
+  const submitSitemapRevision = useCallback(async () => {
+    const note = sitemapFeedback.trim()
+    if (!note) return
+    setRunning('revise_sitemap'); setError(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const jwt = session?.access_token
+      if (!jwt) throw new Error('Not authenticated')
+      const res = await fetch('/api/web/agents/draft-sitemap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ projectId: project.id, redoContext: note }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
+      setSitemapFeedback('')
+      setRevisingSitemap(false)
+      await refreshFromDB()
+      await onChange?.()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unknown error')
+    } finally {
+      setRunning(null)
+    }
+  }, [sitemapFeedback, project.id, refreshFromDB, onChange])
+
   return (
     <div className="px-4 md:px-6 py-6 max-w-6xl mx-auto space-y-6">
       <header className="flex items-baseline justify-between gap-4">
@@ -256,6 +282,15 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
               {sitemapOpen ? 'Hide' : 'View'}
             </button>
           )}
+          {hasStage2 && (
+            <button
+              onClick={() => { setRevisingSitemap(true); setSitemapOpen(true) }}
+              disabled={!!running}
+              className="inline-flex items-center gap-1 text-[11px] text-wm-text-muted hover:text-wm-text px-2 py-1 disabled:opacity-50"
+            >
+              <Edit3 size={12} /> Revise
+            </button>
+          )}
           {hasStage2 && !sitemapApproved && (
             <button
               onClick={() => void callOrchestrate('approve_sitemap')}
@@ -276,9 +311,48 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
             </button>
           )}
         </div>
+        {revisingSitemap && hasStage2 && (
+          <div className="border-t border-wm-border px-3 py-3 bg-wm-accent/5 space-y-2">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">Revise sitemap</p>
+            <p className="text-[11px] text-wm-text-muted leading-snug">
+              Name what to change. Be specific — only items you call out get touched.
+              Example: "Move Volunteer out of footer into header under Connect. Rename Beliefs to What We Believe."
+            </p>
+            <textarea
+              value={sitemapFeedback}
+              onChange={e => setSitemapFeedback(e.target.value)}
+              placeholder="What should change?"
+              rows={3}
+              autoFocus
+              className="w-full rounded-md border border-wm-border bg-wm-bg px-3 py-2 text-[13px] text-wm-text focus:outline-none focus:border-wm-accent"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setRevisingSitemap(false); setSitemapFeedback('') }}
+                disabled={running === 'revise_sitemap'}
+                className="text-[12px] text-wm-text-muted px-3 py-1 hover:text-wm-text"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void submitSitemapRevision()}
+                disabled={!sitemapFeedback.trim() || running === 'revise_sitemap'}
+                className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white disabled:opacity-50"
+              >
+                {running === 'revise_sitemap' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                Re-draft sitemap
+              </button>
+            </div>
+            {sitemapApproved && (
+              <p className="text-[11px] text-wm-warning">
+                Note: sitemap is currently approved. Re-drafting will create new draft revisions; you'll need to approve again after review.
+              </p>
+            )}
+          </div>
+        )}
         {sitemapOpen && sitemap && (
           <div className="border-t border-wm-border px-3 py-3">
-            <SitemapPreview sitemap={sitemap} />
+            <RichSitemapPreview output={sitemap as unknown as Record<string, unknown>} />
           </div>
         )}
       </div>
@@ -542,7 +616,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
                   </button>
                   {isOpen && (
                     <div className="border-t border-wm-border px-3 py-3">
-                      <DraftPreview draft={d} />
+                      <DraftPreview draft={d} brief={briefs[slug]} />
                       <div className="mt-3 flex justify-end">
                         <button
                           onClick={() => {
@@ -713,59 +787,78 @@ function ActionCard({ icon, title, description, busy, disabled, onClick }: {
   )
 }
 
-function SitemapPreview({ sitemap }: { sitemap: SitemapShape }) {
-  const pages = sitemap.pages ?? []
-  const header = sitemap.header_nav ?? []
-  const footer = sitemap.footer_nav ?? []
+function PageBriefHeader({ brief }: { brief: PageBrief | undefined }) {
+  if (!brief) return null
+  const persona = brief.persona_focus
+  const exemplars = brief.voice_exemplars_to_imitate ?? []
+  const antis = brief.voice_anti_exemplars_to_avoid ?? []
+  const aeo = brief.aeo_geo_targets
+  const archetypes = brief.section_targets?.archetypes ?? []
+  const atomCount = brief.atoms_assigned?.length ?? 0
+  const refCount = brief.reference_atoms?.length ?? 0
   return (
-    <div className="space-y-3">
-      <div>
-        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-muted mb-1.5">
-          Pages ({pages.length})
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
-          {pages.map((p, i) => (
-            <div key={i} className="flex items-baseline gap-2 text-[12px]">
-              <span className="font-semibold text-wm-text">{p.name}</span>
-              <span className="font-mono text-[10px] text-wm-text-muted">/{p.slug}</span>
-              {p.phase && p.phase !== '1' && (
-                <span className="text-[10px] uppercase tracking-wider text-wm-text-subtle">{p.phase}</span>
-              )}
-              {p.density && p.density !== 'medium' && (
-                <span className="text-[10px] uppercase tracking-wider text-wm-accent-strong">{p.density}</span>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-      {header.length > 0 && (
+    <div className="rounded-md border border-wm-accent/20 bg-wm-accent/5 p-3 mb-3 space-y-2">
+      {brief.page_job && (
         <div>
-          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-muted mb-1.5">
-            Header nav
-          </p>
-          <div className="flex flex-wrap gap-2 text-[12px]">
-            {header.map((n, i) => (
-              <NavChip key={i} item={n} />
-            ))}
-          </div>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">Page job</p>
+          <p className="text-[13px] text-wm-text leading-snug">{brief.page_job}</p>
         </div>
       )}
-      {footer.length > 0 && (
-        <details className="text-[12px]">
-          <summary className="cursor-pointer text-[10px] uppercase tracking-widest font-bold text-wm-text-muted">
-            Footer nav ({footer.reduce((sum, s) => sum + (s.items?.length ?? 0), 0)} items)
-          </summary>
-          <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-3">
-            {footer.map((sec, i) => (
-              <div key={i}>
-                <p className="text-[11px] font-semibold text-wm-text">{sec.section_label}</p>
-                <ul className="mt-0.5 space-y-0.5">
-                  {(sec.items ?? []).map((it, j) => (
-                    <li key={j} className="text-[11px] text-wm-text-muted">· {it.label}</li>
-                  ))}
-                </ul>
-              </div>
+      {persona?.primary && (
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">Persona focus</p>
+          <p className="text-[12px] text-wm-text">
+            <span className="font-semibold">{persona.primary}</span>
+            {persona.secondary && <span className="text-wm-text-muted"> · secondary: {persona.secondary}</span>}
+          </p>
+          {persona.rationale && <p className="text-[11px] text-wm-text-muted mt-0.5 leading-snug">{persona.rationale}</p>}
+        </div>
+      )}
+      {exemplars.length > 0 && (
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-success">Voice anchors (imitate)</p>
+          <ul className="mt-0.5 space-y-0.5">
+            {exemplars.map((e, i) => (
+              <li key={i} className="text-[11px] text-wm-text italic">"{e}"</li>
             ))}
+          </ul>
+        </div>
+      )}
+      {antis.length > 0 && (
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-danger">Avoid</p>
+          <ul className="mt-0.5 space-y-0.5">
+            {antis.map((a, i) => (
+              <li key={i} className="text-[11px] text-wm-text-muted">· {a}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-2 text-[11px]">
+        {archetypes.length > 0 && (
+          <div>
+            <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Section spine</p>
+            <p className="text-wm-text-muted">{archetypes.join(' → ')}</p>
+          </div>
+        )}
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Content</p>
+          <p className="text-wm-text-muted">{atomCount} primary atoms{refCount > 0 && ` · ${refCount} referenced`}</p>
+        </div>
+      </div>
+      {aeo && ((aeo.search_phrases?.length ?? 0) + (aeo.answer_intents?.length ?? 0) + (aeo.geo_anchors?.length ?? 0) > 0) && (
+        <details className="text-[11px]">
+          <summary className="cursor-pointer text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">SEO / AEO / GEO targets</summary>
+          <div className="mt-1 space-y-1">
+            {aeo.search_phrases && aeo.search_phrases.length > 0 && (
+              <p><span className="text-wm-text-subtle">Search: </span><span className="text-wm-text-muted">{aeo.search_phrases.join(' · ')}</span></p>
+            )}
+            {aeo.answer_intents && aeo.answer_intents.length > 0 && (
+              <p><span className="text-wm-text-subtle">Answer: </span><span className="text-wm-text-muted">{aeo.answer_intents.join(' · ')}</span></p>
+            )}
+            {aeo.geo_anchors && aeo.geo_anchors.length > 0 && (
+              <p><span className="text-wm-text-subtle">Geo: </span><span className="text-wm-text-muted">{aeo.geo_anchors.join(' · ')}</span></p>
+            )}
           </div>
         </details>
       )}
@@ -773,33 +866,24 @@ function SitemapPreview({ sitemap }: { sitemap: SitemapShape }) {
   )
 }
 
-function NavChip({ item }: { item: NavItem }) {
-  if (item.kind === 'group') {
-    return (
-      <span className="inline-flex items-baseline gap-1 px-2 py-1 rounded border border-wm-border bg-wm-bg text-[11px]">
-        <span className="font-semibold text-wm-text">{item.label}</span>
-        <span className="text-wm-text-muted">▾</span>
-        {item.children && (
-          <span className="text-wm-text-muted">({item.children.length})</span>
-        )}
-      </span>
-    )
-  }
+function DraftPreview({ draft, brief }: { draft: PageDraft; brief?: PageBrief }) {
+  const sections = Array.isArray(draft?.sections) ? draft.sections : []
   return (
-    <span className="inline-block px-2 py-1 rounded border border-wm-border bg-wm-bg text-[11px] text-wm-text">
-      {item.label}
-    </span>
+    <div>
+      <PageBriefHeader brief={brief} />
+      {sections.length === 0 ? (
+        <p className="text-[12px] text-wm-text-muted">No sections in this draft.</p>
+      ) : (
+        <div className="space-y-3">
+          {renderDraftSections(sections)}
+        </div>
+      )}
+    </div>
   )
 }
 
-function DraftPreview({ draft }: { draft: PageDraft }) {
-  const sections = Array.isArray(draft?.sections) ? draft.sections : []
-  if (sections.length === 0) {
-    return <p className="text-[12px] text-wm-text-muted">No sections in this draft.</p>
-  }
-  return (
-    <div className="space-y-3">
-      {sections.map((s: any, i: number) => {
+function renderDraftSections(sections: any[]) {
+  return sections.map((s: any, i: number) => {
         const copy = s?.copy ?? {}
         return (
           <div key={i} className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
@@ -848,9 +932,7 @@ function DraftPreview({ draft }: { draft: PageDraft }) {
             )}
           </div>
         )
-      })}
-    </div>
-  )
+      })
 }
 
 function ConfirmPanel({ title, children, onCancel, onConfirm, confirmLabel, busy }: {
