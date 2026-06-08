@@ -1790,6 +1790,69 @@ export interface AppConfig {
 }
 
 // ============================================================================
+// Social Media Squad — SRP Generator (sms_srp_generation, sms_prompt_settings)
+// ============================================================================
+
+/** One row per SRP generation session. All deliverable text fields are
+ *  free-form text — structured deliverables (selected_deliverables,
+ *  clip_selections, carousel_slides) are stored as JSON-encoded strings.
+ *  Helpers in src/lib/srpSessions.ts handle the JSON round-trip. */
+export interface SmsSrpGeneration {
+  id: number
+  session_id: string                     // e.g. "1802_Mosaic_20260608120000"
+  member: string | null                  // partner member number (text)
+  church_name: string | null
+  user_email: string | null
+  created_at: string | null
+  updated_at: string | null
+
+  current_step: SrpStep | null
+  status: 'in_progress' | 'completed' | 'archived' | null
+
+  selected_deliverables: string | null   // JSON-encoded SrpDeliverableKey[]
+
+  video_url: string | null
+  transcript: string | null
+
+  clip_selections: string | null         // JSON-encoded ClipSelection[]
+  reel1_caption: string | null
+  reel2_caption: string | null
+
+  facebook_post: string | null
+  sunday_invite: string | null
+  photo_recap_caption: string | null
+
+  carousel_slides: string | null         // JSON-encoded CarouselSlide[]
+  carousel_caption: string | null
+
+  clickup_task_id: string | null
+  clickup_url: string | null
+}
+
+export type SrpStep =
+  | 'account'
+  | 'deliverables'
+  | 'sermon'
+  | 'review'
+  | 'approved'
+  | 'reelCaptions'                       // legacy step name from older rows
+
+export type SrpDeliverableKey =
+  | 'facebook_post'
+  | 'sunday_invite'
+  | 'photo_recap'
+  | 'carousel_slides'
+  | 'reel_captions'                      // deferred (Phase 3)
+
+export interface SmsPromptSetting {
+  id: string
+  prompt_key: string
+  prompt_text: string
+  updated_at: string
+  updated_by: string | null
+}
+
+// ============================================================================
 // Supabase Database generic type (for typed client)
 // ============================================================================
 
@@ -1800,6 +1863,18 @@ export interface Database {
         Row: StrategyAccountProgress
         Insert: Partial<StrategyAccountProgress>
         Update: Partial<StrategyAccountProgress>
+        Relationships: []
+      }
+      sms_srp_generation: {
+        Row: SmsSrpGeneration
+        Insert: Partial<SmsSrpGeneration>
+        Update: Partial<SmsSrpGeneration>
+        Relationships: []
+      }
+      sms_prompt_settings: {
+        Row: SmsPromptSetting
+        Insert: Partial<SmsPromptSetting>
+        Update: Partial<SmsPromptSetting>
         Relationships: []
       }
       clickup_chat_channels: {

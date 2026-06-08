@@ -13,6 +13,8 @@ import WebContentManagerPage from './pages/web/WebContentManagerPage'
 import CopyReviewAdminPage from './pages/CopyReviewAdminPage'
 import BrandGuideEditorPage from './pages/BrandGuideEditorPage'
 import IntelAuditToolPage from './pages/IntelAuditToolPage'
+import SrpDashboardPage from './pages/SrpDashboardPage'
+import SrpWorkflowPage from './pages/SrpWorkflowPage'
 import LoginPage from './pages/LoginPage'
 import SubmitFormPage from './pages/SubmitFormPage'
 import TemplateEditorPage from './pages/TemplateEditorPage'
@@ -142,7 +144,8 @@ export default function App() {
             {/* Social Media — Prompt Settings nests under SRP Generator
                 (the only tool that consumes them). The legacy
                 /social/prompts URL still routes for old links. */}
-            <Route path="/social/srp" element={<ComingSoonPage title="SRP Generator" />} />
+            <Route path="/social/srp" element={<SrpDashboardPage />} />
+            <Route path="/social/srp/:sessionId" element={<SrpWorkflowPage />} />
             <Route path="/social/srp/prompts" element={<ComingSoonPage title="Prompt Settings (SRP)" />} />
             <Route path="/social/intel" element={<IntelAuditToolPage />} />
             <Route path="/social/prompts" element={<Navigate to="/social/srp/prompts" replace />} />
