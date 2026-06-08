@@ -228,6 +228,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     if (!note) return
     const startedAt = Date.now()
     const oldPageCount = (sitemap?.pages?.length ?? 0)
+    const oldSitemapSnapshot = sitemap
     const oldGeneratedAt = (sitemap as { _meta?: { generated_at?: string } } | null)?._meta?.generated_at ?? null
     setPendingStartedAt(startedAt)
     setSitemapConvo(c => [
@@ -278,15 +279,21 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       const newPageCount = newSitemap?.pages?.length ?? 0
       const delta = newPageCount - oldPageCount
       const tookSec = Math.round((Date.now() - startedAt) / 1000)
+      const diff = diffSitemaps(oldSitemapSnapshot, newSitemap)
+      const diffLines = formatSitemapDiff(diff)
       const countSummary =
         delta === 0 ? `${newPageCount} pages (no change in count)`
         : delta > 0 ? `${newPageCount} pages (+${delta})`
         : `${newPageCount} pages (${delta})`
-      setSitemapConvo(c => [...c, {
-        kind: 'system',
-        text: `Done in ${tookSec}s. ${countSummary}. Review the updates above and approve when ready.`,
-        at: Date.now(),
-      }])
+
+      let body: string
+      if (diffLines.length === 0) {
+        body = `Done in ${tookSec}s. ${countSummary}.\n\nNo structural changes detected — page list, nav, and vocabulary are byte-identical to before. The Director may have decided your feedback was already met, or the re-draft missed the ask. Try being more specific about what to change, naming exact labels or slugs.`
+      } else {
+        const bullets = diffLines.map(l => `• ${l}`).join('\n')
+        body = `Done in ${tookSec}s. ${countSummary}.\n\nChanges:\n${bullets}\n\nReview the preview above. Send another revision, or click Approve when ready.`
+      }
+      setSitemapConvo(c => [...c, { kind: 'system', text: body, at: Date.now() }])
     }
   }, [sitemapFeedback, callOrchestrate, sitemap, project.id, onChange])
 
@@ -431,7 +438,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
                   return (
                     <div key={i} className="rounded-md bg-wm-success-bg border border-wm-success/30 p-2.5">
                       <p className="text-[10px] uppercase tracking-widest font-bold text-wm-success mb-1">Director</p>
-                      <p className="text-[12px] text-wm-text leading-snug">{t.text}</p>
+                      <p className="text-[12px] text-wm-text leading-snug whitespace-pre-wrap">{t.text}</p>
                     </div>
                   )
                 })}
@@ -908,6 +915,106 @@ function ActionCard({ icon, title, description, busy, disabled, onClick }: {
       <p className="text-[11px] text-wm-text-muted leading-snug">{description}</p>
     </button>
   )
+}
+
+interface SitemapDiff {
+  addedPages:        Array<{ name: string; slug: string }>
+  removedPages:      Array<{ name: string; slug: string }>
+  renamedPages:      Array<{ slug: string; from: string; to: string }>
+  navLabelChanges:   Array<{ slug: string; from: string; to: string }>
+  phaseChanges:      Array<{ slug: string; from: string; to: string }>
+  groupLabelChanges: Array<{ from: string; to: string }>
+  newVocab:          Array<{ we_chose?: string; instead_of?: string; why?: string }>
+}
+
+function diffSitemaps(oldS: any, newS: any): SitemapDiff {
+  const oldPages = (oldS?.pages ?? []) as any[]
+  const newPages = (newS?.pages ?? []) as any[]
+  const oldBySlug = new Map(oldPages.map((p: any) => [p.slug, p]))
+  const newBySlug = new Map(newPages.map((p: any) => [p.slug, p]))
+
+  const addedPages: SitemapDiff['addedPages']           = []
+  const removedPages: SitemapDiff['removedPages']       = []
+  const renamedPages: SitemapDiff['renamedPages']       = []
+  const navLabelChanges: SitemapDiff['navLabelChanges'] = []
+  const phaseChanges: SitemapDiff['phaseChanges']       = []
+
+  for (const np of newPages) {
+    const op = oldBySlug.get(np.slug)
+    if (!op) {
+      addedPages.push({ name: np.name ?? np.slug, slug: np.slug })
+      continue
+    }
+    if ((op.name ?? '') !== (np.name ?? '')) {
+      renamedPages.push({ slug: np.slug, from: String(op.name ?? op.slug), to: String(np.name ?? np.slug) })
+    }
+    const oldNav = op.nav_label ?? op.name ?? op.slug
+    const newNav = np.nav_label ?? np.name ?? np.slug
+    if (oldNav !== newNav && (op.nav_label || np.nav_label)) {
+      navLabelChanges.push({ slug: np.slug, from: String(oldNav), to: String(newNav) })
+    }
+    if (String(op.phase ?? '') !== String(np.phase ?? '')) {
+      phaseChanges.push({ slug: np.slug, from: String(op.phase ?? ''), to: String(np.phase ?? '') })
+    }
+  }
+  for (const op of oldPages) {
+    if (!newBySlug.has(op.slug)) removedPages.push({ name: op.name ?? op.slug, slug: op.slug })
+  }
+
+  // Header nav: detect renamed top-level groups when child overlap is
+  // high enough that the group is "the same thing renamed".
+  const oldGroups = (oldS?.header_nav ?? []).filter((n: any) => n?.kind === 'group')
+  const newGroups = (newS?.header_nav ?? []).filter((n: any) => n?.kind === 'group')
+  const groupLabelChanges: SitemapDiff['groupLabelChanges'] = []
+  const used = new Set<number>()
+  for (const og of oldGroups) {
+    const oldChildSlugs = new Set<string>(
+      ((og.children ?? []) as any[]).map(c => c?.slug).filter((s): s is string => !!s)
+    )
+    let bestIx = -1
+    let bestOverlap = 0
+    newGroups.forEach((ng: any, ix: number) => {
+      if (used.has(ix)) return
+      const newChildSlugs = new Set<string>(
+        ((ng.children ?? []) as any[]).map((c: any) => c?.slug).filter((s: any): s is string => !!s)
+      )
+      const overlap = [...oldChildSlugs].filter(s => newChildSlugs.has(s)).length
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap
+        bestIx = ix
+      }
+    })
+    if (bestIx >= 0 && bestOverlap >= 1) {
+      used.add(bestIx)
+      const ng = newGroups[bestIx]
+      if (og.label !== ng.label) {
+        groupLabelChanges.push({ from: String(og.label ?? '—'), to: String(ng.label ?? '—') })
+      }
+    }
+  }
+
+  const oldVocab = Array.isArray(oldS?.vocabulary_decisions) ? oldS.vocabulary_decisions : []
+  const newVocab = Array.isArray(newS?.vocabulary_decisions) ? newS.vocabulary_decisions : []
+  const oldVocabKeys = new Set(oldVocab.map((v: any) => `${v?.we_chose ?? ''}|${v?.instead_of ?? ''}`))
+  const newVocabItems = newVocab.filter((v: any) => !oldVocabKeys.has(`${v?.we_chose ?? ''}|${v?.instead_of ?? ''}`))
+
+  return { addedPages, removedPages, renamedPages, navLabelChanges, phaseChanges, groupLabelChanges, newVocab: newVocabItems }
+}
+
+function formatSitemapDiff(d: SitemapDiff): string[] {
+  const lines: string[] = []
+  for (const c of d.groupLabelChanges) lines.push(`Renamed nav group "${c.from}" → "${c.to}"`)
+  for (const c of d.renamedPages)      lines.push(`Renamed page "${c.from}" → "${c.to}" (/${c.slug})`)
+  for (const c of d.navLabelChanges)   lines.push(`Nav label for /${c.slug}: "${c.from}" → "${c.to}"`)
+  if (d.addedPages.length > 0)   lines.push(`Added: ${d.addedPages.map(p => `${p.name} (/${p.slug})`).join(', ')}`)
+  if (d.removedPages.length > 0) lines.push(`Removed: ${d.removedPages.map(p => `${p.name} (/${p.slug})`).join(', ')}`)
+  for (const c of d.phaseChanges) lines.push(`Phase for /${c.slug}: ${c.from} → ${c.to}`)
+  for (const v of d.newVocab) {
+    const instead = v.instead_of ? ` instead of "${v.instead_of}"` : ''
+    const why = v.why ? ` — ${v.why}` : ''
+    lines.push(`New vocab: "${v.we_chose}"${instead}${why}`)
+  }
+  return lines
 }
 
 function pendingStatusFor(elapsed: number): string {
