@@ -30,7 +30,7 @@ export const maxDuration = 300
 const MAX_LOOPS = 3
 const PAGE_DRAFT_CONCURRENCY = 4
 
-type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status'
+type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap'
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -64,6 +64,21 @@ export default async function handler(req: any, res: any) {
   try {
     if (action === 'status') {
       return res.status(200).json({ ok: true, engine_state: engineState })
+    }
+
+    if (action === 'approve_sitemap' || action === 'unlock_sitemap') {
+      const stage2 = (roadmapState.stage_2 ?? {}) as Record<string, any>
+      if (!stage2 || Object.keys(stage2).length === 0) {
+        return res.status(400).json({ error: 'No stage_2 (sitemap) to approve' })
+      }
+      const stage2Meta = (stage2._meta ?? {}) as Record<string, any>
+      const next = action === 'approve_sitemap'
+        ? { ...stage2Meta, status: 'approved', approved_at: new Date().toISOString(), approved_by: userData.user.id }
+        : { ...stage2Meta, status: 'draft', unlocked_at: new Date().toISOString() }
+      await sb.from('strategy_web_projects').update({
+        roadmap_state: { ...roadmapState, stage_2: { ...stage2, _meta: next } },
+      }).eq('id', projectId)
+      return res.status(200).json({ ok: true, sitemap_status: next.status })
     }
 
     if (action === 'run_drafts') {

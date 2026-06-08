@@ -192,24 +192,51 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         </div>
       )}
 
-      {/* Gate 1 — Sitemap approval */}
+      {/* Gate 1 — Sitemap approval (inline approve button) */}
       <GateCard
         number={1}
         title="Sitemap approval"
-        subtitle="Synthesize + Sitemap upstream of this workspace. Approve in Planning."
+        subtitle={
+          sitemapApproved ? 'Sitemap is approved. The engine can run.'
+          : hasStage2 ? 'A sitemap exists. Approve it here to unlock the engine actions below.'
+          : 'No sitemap yet. Draft one in the Planning tab first.'
+        }
         status={sitemapApproved ? 'passed' : hasStage2 ? 'awaiting' : 'upstream'}
+        action={
+          hasStage2 && !sitemapApproved ? (
+            <button
+              onClick={() => void callOrchestrate('approve_sitemap')}
+              disabled={!!running}
+              className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white disabled:opacity-50"
+            >
+              {running === 'approve_sitemap' ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+              Approve sitemap
+            </button>
+          ) : hasStage2 && sitemapApproved ? (
+            <button
+              onClick={() => void callOrchestrate('unlock_sitemap')}
+              disabled={!!running}
+              className="text-[11px] text-wm-text-muted hover:text-wm-text"
+            >
+              Unlock
+            </button>
+          ) : null
+        }
       />
 
-      {/* Engine actions — only meaningful once sitemap is approved */}
-      {sitemapApproved && (
-        <section className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {/* Engine actions — visible at all times so the strategist can see
+          what's coming. Disabled with clear reasoning when prerequisites
+          aren't met. */}
+      <section className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <ActionCard
               icon={<Play size={14} />}
               title="Run drafts"
-              description="Page briefs + per-page drafts (parallel). Run after sitemap is approved or after major upstream changes."
+              description={sitemapApproved
+                ? "Page briefs + per-page drafts (parallel). Run after sitemap is approved or after major upstream changes."
+                : "Locked. Approve the sitemap above first."}
               busy={running === 'run_drafts'}
-              disabled={!!running}
+              disabled={!!running || !sitemapApproved}
               onClick={() => void callOrchestrate('run_drafts')}
             />
             <ActionCard
@@ -231,14 +258,15 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
             <ActionCard
               icon={<FileText size={14} />}
               title="Commit to pages"
-              description="Bind every page_draft to web_pages + web_sections. Strategist can upgrade to specific Brixies templates in the page editor."
+              description={draftSlugs.length === 0
+                ? "Locked. No drafts to commit yet — run drafts first."
+                : "Bind every page_draft to web_pages + web_sections. Strategist can upgrade to specific Brixies templates in the page editor."}
               busy={running === 'commit'}
               disabled={!!running || draftSlugs.length === 0}
               onClick={() => void callOrchestrate('commit')}
             />
           </div>
         </section>
-      )}
 
       {/* Critique summary */}
       {critique && (
@@ -459,9 +487,10 @@ function StatusBanner({ engine }: { engine: EngineState }) {
   )
 }
 
-function GateCard({ number, title, subtitle, status }: {
+function GateCard({ number, title, subtitle, status, action }: {
   number: 1 | 2; title: string; subtitle: string
   status: 'upstream' | 'awaiting' | 'passed'
+  action?: React.ReactNode
 }) {
   const icon =
     status === 'passed' ? <CheckCircle2 size={16} className="text-wm-success" />
@@ -475,7 +504,7 @@ function GateCard({ number, title, subtitle, status }: {
         <p className="text-[13px] font-semibold text-wm-text">{title}</p>
         <p className="text-[11px] text-wm-text-muted">{subtitle}</p>
       </div>
-      <span className="text-[10px] uppercase tracking-wider font-bold text-wm-text-subtle">{status}</span>
+      {action ?? <span className="text-[10px] uppercase tracking-wider font-bold text-wm-text-subtle">{status}</span>}
     </div>
   )
 }
