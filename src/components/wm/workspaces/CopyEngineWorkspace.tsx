@@ -213,6 +213,52 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     setFeedback('')
   }, [routePreview, callOrchestrate])
 
+  // Live engine poller — runs only while engine is in flight. Polls
+  // engine_state every 3s so the workspace shows current_phase +
+  // pages_drafted/total + loop_count without the user refreshing.
+  const [engineRunning, setEngineRunning] = useState(false)
+  useEffect(() => {
+    if (!engineRunning) return
+    let cancelled = false
+    const poll = async () => {
+      const { data } = await supabase
+        .from('strategy_web_projects')
+        .select('roadmap_state')
+        .eq('id', project.id)
+        .maybeSingle()
+      if (cancelled) return
+      const state = ((data?.roadmap_state ?? {}) as Record<string, unknown>) || {}
+      setEngine(((state.engine_state as EngineState) ?? {}))
+      setCritique(((state.director_critique as DirectorCritique) ?? null))
+      setDrafts(((state.page_drafts as Record<string, PageDraft>) ?? {}))
+      setBriefs(((state.page_briefs as Record<string, PageBrief>) ?? {}))
+    }
+    const id = window.setInterval(poll, 3000)
+    void poll()
+    return () => { cancelled = true; window.clearInterval(id) }
+  }, [engineRunning, project.id])
+
+  // Chains run_drafts → critique → iterate (if directives). The orchestrator
+  // already implements iterate as a self-contained loop server-side; this
+  // function just sequences the three top-level actions so the strategist
+  // doesn't have to click between them.
+  const runEngine = useCallback(async (): Promise<void> => {
+    setEngineRunning(true)
+    try {
+      const draftsResult = await callOrchestrate('run_drafts')
+      if (!draftsResult) return
+      const critiqueResult = await callOrchestrate('critique') as { engine_state?: EngineState } | null
+      if (!critiqueResult) return
+      const verdict = critiqueResult.engine_state?.last_verdict
+      const directiveCount = critiqueResult.engine_state?.last_directive_count ?? 0
+      if (verdict !== 'approved' && directiveCount > 0) {
+        await callOrchestrate('iterate')
+      }
+    } finally {
+      setEngineRunning(false)
+    }
+  }, [callOrchestrate])
+
   const openDraft = useCallback((slug: string) => {
     if (!slug || slug === '*') return
     if (!Object.prototype.hasOwnProperty.call(drafts, slug)) return
@@ -287,11 +333,13 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         : `${newPageCount} pages (${delta})`
 
       let body: string
-      if (diffLines.length === 0) {
-        body = `Done in ${tookSec}s. ${countSummary}.\n\nNo structural changes detected — page list, nav, and vocabulary are byte-identical to before. The Director may have decided your feedback was already met, or the re-draft missed the ask. Try being more specific about what to change, naming exact labels or slugs.`
-      } else {
+      if (diffLines.length > 0) {
         const bullets = diffLines.map(l => `• ${l}`).join('\n')
         body = `Done in ${tookSec}s. ${countSummary}.\n\nChanges:\n${bullets}\n\nReview the preview above. Send another revision, or click Approve when ready.`
+      } else if (diff.rawJsonChanged) {
+        body = `Done in ${tookSec}s. ${countSummary}.\n\nThe sitemap changed but the structural diff didn't catch a category (likely a rationale, strategic_purpose, or nav_presentation tweak). Compare the preview above against the prior state to confirm. If your specific ask isn't visible, re-send with more concrete instructions (e.g. quote the exact label to change and the new label to use).`
+      } else {
+        body = `Done in ${tookSec}s. ${countSummary}.\n\nNo changes detected — the model returned the same sitemap byte-for-byte. The Director may have decided your feedback was already met, or the re-draft missed the ask. Try being more specific about what to change, naming exact labels or slugs.`
       }
       setSitemapConvo(c => [...c, { kind: 'system', text: body, at: Date.now() }])
     }
@@ -360,12 +408,18 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
           )}
           {hasStage2 && !sitemapApproved && (
             <button
-              onClick={() => void callOrchestrate('approve_sitemap')}
+              onClick={async () => {
+                const ok = await callOrchestrate('approve_sitemap')
+                if (ok) {
+                  setRevisingSitemap(false)
+                  await runEngine()
+                }
+              }}
               disabled={!!running}
               className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white disabled:opacity-50"
             >
               {running === 'approve_sitemap' ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-              Approve
+              Approve & run
             </button>
           )}
           {hasStage2 && sitemapApproved && (
@@ -487,79 +541,24 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         )}
       </div>
 
-      {/* Engine actions — visible at all times so the strategist can see
-          what's coming. Disabled with clear reasoning when prerequisites
-          aren't met. */}
-      <section className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <ActionCard
-              icon={<Play size={14} />}
-              title="Run drafts"
-              description={sitemapApproved
-                ? "Page briefs + per-page drafts (parallel). Run after sitemap is approved or after major upstream changes."
-                : "Locked. Approve the sitemap above first."}
-              busy={running === 'run_drafts'}
-              disabled={!!running || !sitemapApproved}
-              onClick={() => void callOrchestrate('run_drafts')}
-            />
-            <ActionCard
-              icon={<GitBranch size={14} />}
-              title="Director critique"
-              description="Score each page vs. the spec. Emit directives for pages that need re-drafting."
-              busy={running === 'critique'}
-              disabled={!!running || draftSlugs.length === 0}
-              onClick={() => void callOrchestrate('critique')}
-            />
-            <ActionCard
-              icon={<RefreshCw size={14} />}
-              title="Iterate (up to 3 loops)"
-              description="Apply directives, re-draft flagged pages, re-critique. Stops when no directives or verdict approves."
-              busy={running === 'iterate'}
-              disabled={!!running || !critique?.directives?.length}
-              onClick={() => setConfirmAction('iterate')}
-            />
-            <ActionCard
-              icon={<FileText size={14} />}
-              title="Commit to pages"
-              description={draftSlugs.length === 0
-                ? "Locked. No drafts to commit yet — run drafts first."
-                : "Bind every page_draft to web_pages + web_sections. Strategist can upgrade to specific Brixies templates in the page editor."}
-              busy={running === 'commit'}
-              disabled={!!running || draftSlugs.length === 0}
-              onClick={() => setConfirmAction('commit')}
-            />
-          </div>
+      {/* Engine progress — single card. Reflects what the engine is doing
+          right now (or last did). The strategist's only manual entry is
+          Re-run (after a sitemap change) and Commit (the destination
+          action). Everything between Approve and Final review is the
+          engine's job. */}
+      <section>
+        <EngineStatusCard
+          engine={engine}
+          engineRunning={engineRunning || !!running}
+          sitemapApproved={sitemapApproved}
+          draftSlugs={draftSlugs}
+          onRerun={() => void runEngine()}
+          onCommit={() => setConfirmAction('commit')}
+          rerunBusy={!!running}
+        />
 
-          {confirmAction === 'iterate' && (
-            <ConfirmPanel
-              title="Iterate — preview"
-              busy={running === 'iterate'}
-              onCancel={() => setConfirmAction(null)}
-              onConfirm={async () => { setConfirmAction(null); await callOrchestrate('iterate') }}
-              confirmLabel="Run iteration"
-            >
-              <p className="text-[12px] text-wm-text leading-snug">
-                The orchestrator will:
-              </p>
-              <ul className="text-[12px] text-wm-text-muted space-y-1 list-disc list-inside">
-                {(critique?.directives ?? []).slice(0, 8).map((d, i) => (
-                  <li key={i}>
-                    <span className="font-semibold text-wm-text">{d.stage_to_rerun}</span>
-                    {d.page_slug && d.page_slug !== '*' && <> on <span className="font-mono">{d.page_slug}</span></>}
-                    {' — '}{d.note.slice(0, 100)}{d.note.length > 100 ? '…' : ''}
-                  </li>
-                ))}
-                {(critique?.directives?.length ?? 0) > 8 && (
-                  <li>… and {(critique?.directives?.length ?? 0) - 8} more</li>
-                )}
-              </ul>
-              <p className="text-[11px] text-wm-text-muted mt-1">
-                Then re-critique. Up to 3 loops total.
-              </p>
-            </ConfirmPanel>
-          )}
-
-          {confirmAction === 'commit' && (
+        {confirmAction === 'commit' && (
+          <div className="mt-3">
             <ConfirmPanel
               title="Commit to pages — preview"
               busy={running === 'commit'}
@@ -579,8 +578,9 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
                 Existing freehand sections on those pages will be replaced. Manually template-bound sections are preserved.
               </p>
             </ConfirmPanel>
-          )}
-        </section>
+          </div>
+        )}
+      </section>
 
       {/* Critique summary */}
       {critique && (
@@ -898,6 +898,115 @@ function GateCard({ number, title, subtitle, status, action }: {
   )
 }
 
+function EngineStatusCard({ engine, engineRunning, sitemapApproved, draftSlugs, onRerun, onCommit, rerunBusy }: {
+  engine: EngineState
+  engineRunning: boolean
+  sitemapApproved: boolean
+  draftSlugs: string[]
+  onRerun: () => void
+  onCommit: () => void
+  rerunBusy: boolean
+}) {
+  const status = engine.status ?? 'idle'
+  const phase = engine.current_phase ?? ''
+  const total = engine.pages_total ?? 0
+  const drafted = engine.pages_drafted ?? 0
+  const committed = engine.pages_committed ?? 0
+  const loopCount = engine.loop_count ?? 0
+  const verdict = engine.last_verdict
+  const directiveCount = engine.last_directive_count ?? 0
+  const lastError = engine.last_error
+
+  // Single phrase per state so the strategist always knows what's
+  // happening without parsing a status banner + 4 buttons.
+  const headline = (() => {
+    if (lastError) return `Engine errored: ${lastError}`
+    if (!sitemapApproved) return 'Waiting on sitemap approval'
+    if (engineRunning) {
+      if (phase === 'page_briefs')        return 'Briefing pages…'
+      if (phase === 'page_drafts')        return `Drafting pages · ${drafted}/${total || '?'}`
+      if (phase === 'director_critique')  return 'Director critiquing the drafts…'
+      if (phase === 'applying_directives') return `Iterating — loop ${loopCount} · re-drafting flagged pages…`
+      if (phase === 'awaiting_critique')  return 'Drafts ready. Critiquing…'
+      return 'Engine running…'
+    }
+    if (status === 'committing')       return `Committing · ${committed}/${total}`
+    if (status === 'committed')        return `Committed ${committed} pages.`
+    if (status === 'ready_for_review') return verdict === 'approved'
+      ? `Engine approved its own drafts. Review and commit when ready.`
+      : `Drafts ready for review. Verdict: ${verdict ?? 'needs_revision'} after ${loopCount} loop${loopCount === 1 ? '' : 's'}.`
+    if (draftSlugs.length > 0)         return `Drafts exist (${draftSlugs.length} pages). Re-run to refresh, or review below.`
+    return 'Ready to run. Approve the sitemap to start automatically, or re-run manually anytime.'
+  })()
+
+  const tone =
+    lastError ? 'danger'
+    : engineRunning ? 'running'
+    : status === 'committed' ? 'success'
+    : status === 'ready_for_review' ? 'ready'
+    : 'idle'
+
+  const toneClass = {
+    danger:  'border-wm-danger/30 bg-wm-danger-bg',
+    running: 'border-wm-accent/30 bg-wm-accent/5',
+    success: 'border-wm-success/30 bg-wm-success-bg',
+    ready:   'border-wm-accent/30 bg-wm-accent/5',
+    idle:    'border-wm-border bg-wm-bg-elevated',
+  }[tone]
+
+  return (
+    <div className={['rounded-lg border p-4', toneClass].join(' ')}>
+      <div className="flex items-center gap-3">
+        {engineRunning ? <Loader2 size={16} className="animate-spin text-wm-accent-strong" />
+          : lastError ? <AlertCircle size={16} className="text-wm-danger" />
+          : status === 'committed' ? <CheckCircle2 size={16} className="text-wm-success" />
+          : status === 'ready_for_review' ? <CheckCircle2 size={16} className="text-wm-accent-strong" />
+          : <Play size={16} className="text-wm-text-muted" />}
+        <div className="flex-1">
+          <p className="text-[14px] font-semibold text-wm-text">{headline}</p>
+          {engineRunning && phase && (
+            <p className="text-[11px] text-wm-text-muted mt-0.5">
+              Phase: <span className="font-mono">{phase}</span>
+              {loopCount > 0 && <span> · loop {loopCount}/3</span>}
+            </p>
+          )}
+          {!engineRunning && status === 'ready_for_review' && directiveCount > 0 && (
+            <p className="text-[11px] text-wm-text-muted mt-0.5">
+              Director flagged {directiveCount} item{directiveCount === 1 ? '' : 's'} during critique. See below.
+            </p>
+          )}
+        </div>
+        {!engineRunning && sitemapApproved && (
+          <button
+            onClick={onRerun}
+            disabled={rerunBusy}
+            className="inline-flex items-center gap-1.5 rounded-full border border-wm-border bg-wm-bg px-3 py-1.5 text-[12px] text-wm-text hover:bg-wm-accent/5 disabled:opacity-50"
+          >
+            <RefreshCw size={12} /> Re-run
+          </button>
+        )}
+        {!engineRunning && draftSlugs.length > 0 && status !== 'committed' && (
+          <button
+            onClick={onCommit}
+            disabled={rerunBusy}
+            className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white disabled:opacity-50"
+          >
+            <FileText size={12} /> Commit
+          </button>
+        )}
+      </div>
+      {engineRunning && total > 0 && phase === 'page_drafts' && (
+        <div className="mt-3 w-full bg-wm-border/40 rounded-full h-1.5 overflow-hidden">
+          <div
+            className="bg-wm-accent h-full transition-all"
+            style={{ width: `${Math.min(100, (drafted / total) * 100)}%` }}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ActionCard({ icon, title, description, busy, disabled, onClick }: {
   icon: React.ReactNode; title: string; description: string
   busy?: boolean; disabled?: boolean; onClick: () => void
@@ -924,7 +1033,12 @@ interface SitemapDiff {
   navLabelChanges:   Array<{ slug: string; from: string; to: string }>
   phaseChanges:      Array<{ slug: string; from: string; to: string }>
   groupLabelChanges: Array<{ from: string; to: string }>
+  addedGroups:       string[]
+  removedGroups:     string[]
+  headerPageRenames: Array<{ slug?: string; from: string; to: string }>
+  footerSectionChanges: Array<{ kind: 'renamed' | 'added' | 'removed'; from?: string; to?: string; label?: string }>
   newVocab:          Array<{ we_chose?: string; instead_of?: string; why?: string }>
+  rawJsonChanged:    boolean
 }
 
 function diffSitemaps(oldS: any, newS: any): SitemapDiff {
@@ -941,10 +1055,7 @@ function diffSitemaps(oldS: any, newS: any): SitemapDiff {
 
   for (const np of newPages) {
     const op = oldBySlug.get(np.slug)
-    if (!op) {
-      addedPages.push({ name: np.name ?? np.slug, slug: np.slug })
-      continue
-    }
+    if (!op) { addedPages.push({ name: np.name ?? np.slug, slug: np.slug }); continue }
     if ((op.name ?? '') !== (np.name ?? '')) {
       renamedPages.push({ slug: np.slug, from: String(op.name ?? op.slug), to: String(np.name ?? np.slug) })
     }
@@ -961,54 +1072,125 @@ function diffSitemaps(oldS: any, newS: any): SitemapDiff {
     if (!newBySlug.has(op.slug)) removedPages.push({ name: op.name ?? op.slug, slug: op.slug })
   }
 
-  // Header nav: detect renamed top-level groups when child overlap is
-  // high enough that the group is "the same thing renamed".
-  const oldGroups = (oldS?.header_nav ?? []).filter((n: any) => n?.kind === 'group')
-  const newGroups = (newS?.header_nav ?? []).filter((n: any) => n?.kind === 'group')
+  // Header nav diff. Pair groups by best-overlap on child slugs, then
+  // fall back to positional matching when overlap is zero (children
+  // may have been re-slugged or relabeled in the same revision).
+  const oldHdr = (oldS?.header_nav ?? []) as any[]
+  const newHdr = (newS?.header_nav ?? []) as any[]
+  const oldGroups = oldHdr.filter((n: any) => n?.kind === 'group')
+  const newGroups = newHdr.filter((n: any) => n?.kind === 'group')
+
   const groupLabelChanges: SitemapDiff['groupLabelChanges'] = []
-  const used = new Set<number>()
-  for (const og of oldGroups) {
-    const oldChildSlugs = new Set<string>(
-      ((og.children ?? []) as any[]).map(c => c?.slug).filter((s): s is string => !!s)
-    )
-    let bestIx = -1
-    let bestOverlap = 0
+  const addedGroups: string[] = []
+  const removedGroups: string[] = []
+  const matchedNew = new Set<number>()
+  const matchedOld = new Set<number>()
+  oldGroups.forEach((og: any, ogIx: number) => {
+    const oldChildSlugs = new Set<string>(((og.children ?? []) as any[]).map(c => c?.slug).filter((s): s is string => !!s))
+    let bestIx = -1, bestOverlap = 0
     newGroups.forEach((ng: any, ix: number) => {
-      if (used.has(ix)) return
-      const newChildSlugs = new Set<string>(
-        ((ng.children ?? []) as any[]).map((c: any) => c?.slug).filter((s: any): s is string => !!s)
-      )
+      if (matchedNew.has(ix)) return
+      const newChildSlugs = new Set<string>(((ng.children ?? []) as any[]).map((c: any) => c?.slug).filter((s: any): s is string => !!s))
       const overlap = [...oldChildSlugs].filter(s => newChildSlugs.has(s)).length
-      if (overlap > bestOverlap) {
-        bestOverlap = overlap
-        bestIx = ix
-      }
+      if (overlap > bestOverlap) { bestOverlap = overlap; bestIx = ix }
     })
-    if (bestIx >= 0 && bestOverlap >= 1) {
-      used.add(bestIx)
+    if (bestOverlap === 0 && newGroups[ogIx] && !matchedNew.has(ogIx)) bestIx = ogIx
+    if (bestIx >= 0) {
+      matchedNew.add(bestIx); matchedOld.add(ogIx)
       const ng = newGroups[bestIx]
-      if (og.label !== ng.label) {
+      if ((og.label ?? '') !== (ng.label ?? '')) {
         groupLabelChanges.push({ from: String(og.label ?? '—'), to: String(ng.label ?? '—') })
       }
     }
+  })
+  oldGroups.forEach((og: any, ix: number) => { if (!matchedOld.has(ix)) removedGroups.push(String(og.label ?? '—')) })
+  newGroups.forEach((ng: any, ix: number) => { if (!matchedNew.has(ix)) addedGroups.push(String(ng.label ?? '—')) })
+
+  // Header top-level page entries: detect label changes for items
+  // where kind === 'page'. Match by slug when present.
+  const oldHdrPages = oldHdr.filter((n: any) => n?.kind !== 'group' && n?.slug)
+  const newHdrPages = newHdr.filter((n: any) => n?.kind !== 'group' && n?.slug)
+  const newHdrPageBySlug = new Map<string, any>(newHdrPages.map((n: any) => [String(n.slug), n]))
+  const headerPageRenames: SitemapDiff['headerPageRenames'] = []
+  for (const op of oldHdrPages) {
+    const np = newHdrPageBySlug.get(String(op.slug))
+    if (np && (op.label ?? '') !== (np.label ?? '')) {
+      headerPageRenames.push({ slug: String(op.slug), from: String(op.label ?? '—'), to: String(np.label ?? '—') })
+    }
   }
+
+  // Footer sections — match by section_label literally first, fall
+  // back to positional. Detect added / removed / renamed.
+  const oldFooter = (oldS?.footer_nav ?? []) as any[]
+  const newFooter = (newS?.footer_nav ?? []) as any[]
+  const footerSectionChanges: SitemapDiff['footerSectionChanges'] = []
+  const newFooterMatched = new Set<number>()
+  const oldFooterMatched = new Set<number>()
+  // First pass: exact-label match
+  oldFooter.forEach((os: any, ix: number) => {
+    const matchIx = newFooter.findIndex((ns: any, jx: number) =>
+      !newFooterMatched.has(jx) && (os.section_label ?? '') === (ns.section_label ?? ''))
+    if (matchIx >= 0) { oldFooterMatched.add(ix); newFooterMatched.add(matchIx) }
+  })
+  // Second pass: positional match for unmatched (likely renamed)
+  oldFooter.forEach((os: any, ix: number) => {
+    if (oldFooterMatched.has(ix)) return
+    if (newFooter[ix] && !newFooterMatched.has(ix)) {
+      oldFooterMatched.add(ix); newFooterMatched.add(ix)
+      footerSectionChanges.push({
+        kind: 'renamed',
+        from: String(os.section_label ?? '—'),
+        to:   String(newFooter[ix].section_label ?? '—'),
+      })
+    }
+  })
+  oldFooter.forEach((os: any, ix: number) => {
+    if (!oldFooterMatched.has(ix)) footerSectionChanges.push({ kind: 'removed', label: String(os.section_label ?? '—') })
+  })
+  newFooter.forEach((ns: any, ix: number) => {
+    if (!newFooterMatched.has(ix)) footerSectionChanges.push({ kind: 'added', label: String(ns.section_label ?? '—') })
+  })
 
   const oldVocab = Array.isArray(oldS?.vocabulary_decisions) ? oldS.vocabulary_decisions : []
   const newVocab = Array.isArray(newS?.vocabulary_decisions) ? newS.vocabulary_decisions : []
   const oldVocabKeys = new Set(oldVocab.map((v: any) => `${v?.we_chose ?? ''}|${v?.instead_of ?? ''}`))
   const newVocabItems = newVocab.filter((v: any) => !oldVocabKeys.has(`${v?.we_chose ?? ''}|${v?.instead_of ?? ''}`))
 
-  return { addedPages, removedPages, renamedPages, navLabelChanges, phaseChanges, groupLabelChanges, newVocab: newVocabItems }
+  // Bottom-line truth flag: if a structural blob changed at all, flag it
+  // so an empty per-category diff doesn't lie. Skip _meta which always
+  // changes on a re-run.
+  const strip = (s: any) => {
+    if (!s) return null
+    const { _meta, ...rest } = s as Record<string, any>
+    void _meta
+    return rest
+  }
+  const rawJsonChanged = JSON.stringify(strip(oldS)) !== JSON.stringify(strip(newS))
+
+  return {
+    addedPages, removedPages, renamedPages, navLabelChanges, phaseChanges,
+    groupLabelChanges, addedGroups, removedGroups,
+    headerPageRenames, footerSectionChanges,
+    newVocab: newVocabItems, rawJsonChanged,
+  }
 }
 
 function formatSitemapDiff(d: SitemapDiff): string[] {
   const lines: string[] = []
-  for (const c of d.groupLabelChanges) lines.push(`Renamed nav group "${c.from}" → "${c.to}"`)
-  for (const c of d.renamedPages)      lines.push(`Renamed page "${c.from}" → "${c.to}" (/${c.slug})`)
-  for (const c of d.navLabelChanges)   lines.push(`Nav label for /${c.slug}: "${c.from}" → "${c.to}"`)
-  if (d.addedPages.length > 0)   lines.push(`Added: ${d.addedPages.map(p => `${p.name} (/${p.slug})`).join(', ')}`)
-  if (d.removedPages.length > 0) lines.push(`Removed: ${d.removedPages.map(p => `${p.name} (/${p.slug})`).join(', ')}`)
-  for (const c of d.phaseChanges) lines.push(`Phase for /${c.slug}: ${c.from} → ${c.to}`)
+  for (const c of d.groupLabelChanges)   lines.push(`Renamed nav group "${c.from}" → "${c.to}"`)
+  if (d.addedGroups.length > 0)          lines.push(`Added nav group: ${d.addedGroups.join(', ')}`)
+  if (d.removedGroups.length > 0)        lines.push(`Removed nav group: ${d.removedGroups.join(', ')}`)
+  for (const c of d.headerPageRenames)   lines.push(`Header nav rename: "${c.from}" → "${c.to}" (/${c.slug})`)
+  for (const c of d.renamedPages)        lines.push(`Renamed page "${c.from}" → "${c.to}" (/${c.slug})`)
+  for (const c of d.navLabelChanges)     lines.push(`Nav label for /${c.slug}: "${c.from}" → "${c.to}"`)
+  if (d.addedPages.length > 0)           lines.push(`Added page${d.addedPages.length > 1 ? 's' : ''}: ${d.addedPages.map(p => `${p.name} (/${p.slug})`).join(', ')}`)
+  if (d.removedPages.length > 0)         lines.push(`Removed page${d.removedPages.length > 1 ? 's' : ''}: ${d.removedPages.map(p => `${p.name} (/${p.slug})`).join(', ')}`)
+  for (const c of d.phaseChanges)        lines.push(`Phase for /${c.slug}: ${c.from} → ${c.to}`)
+  for (const c of d.footerSectionChanges) {
+    if (c.kind === 'renamed') lines.push(`Footer section: "${c.from}" → "${c.to}"`)
+    if (c.kind === 'added')   lines.push(`Footer section added: "${c.label}"`)
+    if (c.kind === 'removed') lines.push(`Footer section removed: "${c.label}"`)
+  }
   for (const v of d.newVocab) {
     const instead = v.instead_of ? ` instead of "${v.instead_of}"` : ''
     const why = v.why ? ` — ${v.why}` : ''
