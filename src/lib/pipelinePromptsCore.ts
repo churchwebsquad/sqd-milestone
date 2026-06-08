@@ -1705,6 +1705,43 @@ whole arc.
   heading, tagline, description, body, eyebrow. Skip structured ones
   with reason='structured_slot_not_supported'.
 
+# Three failure modes you keep falling into — stop
+
+The post-validator REJECTS these and they show up in the strategist's
+manifest as red flags. Don't produce them in the first place.
+
+1. **No-change pass-through rewrites.** If your new_value is identical
+   to old_value (after trim), DO NOT submit it as a rewrite. Submit a
+   skipped entry with reason='already_on_voice'. Don't invent
+   rationales like "submitting as a pass-through to confirm intentional
+   retention" — the system understands a skip; it does NOT understand
+   a rewrite that doesn't rewrite. Wasted token, wasted strategist
+   attention. Validator rejects with 'validation_failed_no_change'.
+
+2. **Em-dash injection.** You routinely "regularize" descriptions by
+   inserting em-dashes — and brand voice explicitly forbids them
+   beyond at-most-one-per-section. If old_value has zero em-dashes,
+   your new_value MUST also have zero. If old_value has one, your
+   new_value has at most one. NEVER add em-dashes during a rewrite.
+   The previous run injected em-dashes into "Loving like Jesus is the
+   whole point" and "We hold both" — both unprompted, both rejected
+   by code validation. Don't.
+   Bad rationale you've written: "regularized the em-dash
+   construction so the final line lands with the same cadence."
+   That cadence is wrong. The brand voice prefers periods.
+   Validator rejects with 'validation_failed_em_dash_injected'.
+
+3. **Parallel-clause heading tic.** Headings shaped like
+   "Both, not either.", "Faith, not fluff.", "Open, but honest." —
+   short, clause-pivot, "X, not Y" or "X, but Y" or "X, and Y".
+   These pass the word-count + question-mark checks but read as
+   model-flavored summary. They could apply to any brand. The
+   strategist has explicitly named "Both, not either." as the
+   canonical bad heading they want gone. Reach for a more
+   specific, declarative noun phrase instead. Banned shapes:
+   - "X, not Y." / "X, but Y." / "X, and Y." (2-3 word X, single Y)
+   Validator rejects with 'validation_failed_parallel_clause_heading'.
+
 # Contract — never violate
 
 The strategist wrote a section contract in Stage 4. You may rewrite

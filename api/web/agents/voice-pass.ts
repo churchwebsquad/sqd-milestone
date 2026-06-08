@@ -119,9 +119,42 @@ interface WebPage { id: string; slug: string; name: string }
 /** Hard structural rules applied AFTER the model returns. Any rewrite
  *  that fails ends up in skipped[] with reason='validation_failed_X'
  *  instead of getting silently shipped. */
+// Em dashes the model loves to introduce. The prompt rule "em dashes
+// at most ONE per section, zero is better" is a soft target the
+// model routinely violates by ADDING em dashes that weren't in the
+// source. This regex matches both Unicode em-dash and ASCII --.
+const EM_DASH_RE = /—|—|--/g
+
+// Parallel-clause heading tic. Headings shaped like "Both, not either.",
+// "Faith, not fluff.", "Open, on purpose.", "Tradition, but better." —
+// they pass the word-count and ? checks but read as model-flavored
+// summary-as-copy. The prompt says don't do this; reality says we have
+// to catch it in code too.
+const PARALLEL_CLAUSE_HEADING_RE = /^[A-Z]\S*(?:\s\S+){0,2},\s+(not|but|and|yet|or)\s+\S+\.?$/i
+
 function validateRewrite(r: Rewrite, contract?: SectionContract): { ok: true } | { ok: false; reason: string } {
   const isHeading = HEADING_PREFIX_RE.test(r.field_key.trim())
+  const oldValue = (r.old_value ?? '').trim()
   const value = (r.new_value ?? '').trim()
+
+  // No-change pass-through: model submitted a rewrite that's identical
+  // to the source. Should have been a skip with reason='already_on_voice'.
+  // We REJECT and route to skipped instead so the manifest stays clean
+  // and the strategist's Re-run output isn't noise of identical rows.
+  if (value === oldValue) {
+    return { ok: false, reason: 'validation_failed_no_change' }
+  }
+
+  // Em-dash injection check — applies to every slot, not just headings.
+  // If the model ADDS em-dashes that weren't in the source, reject.
+  // The model is told em-dashes are crutch punctuation; it nevertheless
+  // routinely "regularizes" descriptions by inserting them. Hard stop.
+  const oldEmDashes = (oldValue.match(EM_DASH_RE) ?? []).length
+  const newEmDashes = (value.match(EM_DASH_RE) ?? []).length
+  if (newEmDashes > oldEmDashes) {
+    return { ok: false, reason: `validation_failed_em_dash_injected_${newEmDashes}_vs_${oldEmDashes}` }
+  }
+
   if (isHeading) {
     if (value.includes('?')) {
       return { ok: false, reason: 'validation_failed_heading_has_question_mark' }
@@ -130,11 +163,15 @@ function validateRewrite(r: Rewrite, contract?: SectionContract): { ok: true } |
     if (wordCount > MAX_HEADING_WORDS) {
       return { ok: false, reason: `validation_failed_heading_${wordCount}_words_max_${MAX_HEADING_WORDS}` }
     }
-    // Detect the question-answer pattern even without an explicit `?`:
-    // "Either or? Neither." — clauses divided by `? ` and the second
-    // clause is a single word or two-word punchline.
-    // Already caught by the `?` check above, but keep this as a safety
-    // net if the model emits the pattern with em-dash or comma instead.
+    // Parallel-clause heading tic: "Both, not either.", "Faith, not fluff.",
+    // "Open, but honest." — banned. Catches the X-not-Y / X-but-Y /
+    // X-and-Y / X-or-Y short-heading construction Sonnet routinely emits
+    // as a "punchy" pivot phrase. Real Paradox brand voice prefers
+    // declarative noun phrases over clause-pivot summaries.
+    if (PARALLEL_CLAUSE_HEADING_RE.test(value)) {
+      return { ok: false, reason: 'validation_failed_parallel_clause_heading' }
+    }
+    // Question-answer punchline safety net (e.g. "Faith or thinking? Neither.").
     if (/^\S+(\s\S+){0,1}[.?!]$/.test(value) && /[?]/.test(value)) {
       return { ok: false, reason: 'validation_failed_question_answer_punchline' }
     }
@@ -145,9 +182,6 @@ function validateRewrite(r: Rewrite, contract?: SectionContract): { ok: true } |
   // should not be wholly absent if the OLD value contained them).
   if (contract && contract.required_messages.length > 0) {
     for (const rm of contract.required_messages) {
-      // Pull a few "signal" tokens from the required message — proper
-      // nouns and numeric tokens are load-bearing; if they appear in
-      // old_value but vanish from new_value, that's a drop.
       const signals = (rm.match(/\b[A-Z][a-z]+|\b\d+(?:[apm]+)?\b/g) ?? []).filter(Boolean)
       for (const sig of signals) {
         if (r.old_value.includes(sig) && !r.new_value.includes(sig)) {
