@@ -19,9 +19,33 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Play, Loader2, CheckCircle2, AlertCircle, RefreshCw, Send, FileText, GitBranch,
+  ChevronRight, ChevronDown, Eye,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import type { StrategyWebProject } from '../../../types/database'
+
+interface SitemapPage {
+  name: string
+  slug: string
+  nav_label?: string
+  phase?: string
+  parent_slug?: string | null
+  page_type?: string
+  strategic_purpose?: string
+  density?: string
+}
+interface NavItem {
+  label: string
+  kind: 'page' | 'group'
+  slug?: string
+  children?: NavItem[]
+}
+interface SitemapShape {
+  pages?: SitemapPage[]
+  header_nav?: NavItem[]
+  footer_nav?: Array<{ section_label: string; items?: Array<{ label: string; slug?: string }> }>
+  _meta?: { status?: string }
+}
 
 interface EngineState {
   status?: string
@@ -103,6 +127,9 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   const [feedback,    setFeedback]    = useState('')
   const [routePreview, setRoutePreview] = useState<RoutePayload | null>(null)
   const [routing,     setRouting]     = useState(false)
+  const [sitemapOpen, setSitemapOpen] = useState(false)
+  const [expandedDraft, setExpandedDraft] = useState<string | null>(null)
+  const [confirmAction, setConfirmAction] = useState<'iterate' | 'commit' | null>(null)
 
   const refreshFromDB = useCallback(async () => {
     const { data } = await supabase
@@ -142,15 +169,15 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     }
   }, [project.id, refreshFromDB, onChange])
 
-  const hasStage2 = Boolean((project.roadmap_state as Record<string, unknown> | null)?.stage_2)
+  const sitemap = useMemo<SitemapShape | null>(() => {
+    const rs = project.roadmap_state as Record<string, unknown> | null
+    const stage2 = rs?.stage_2 as SitemapShape | undefined
+    return stage2 ?? null
+  }, [project.roadmap_state])
+  const hasStage2 = sitemap !== null
   const draftSlugs = Object.keys(drafts).filter(k => k !== '_meta')
   const status = engine.status ?? 'idle'
-
-  const sitemapApproved = useMemo(() => {
-    const rs = project.roadmap_state as Record<string, unknown> | null
-    const stage2 = rs?.stage_2 as { _meta?: { status?: string } } | undefined
-    return stage2?._meta?.status === 'approved'
-  }, [project.roadmap_state])
+  const sitemapApproved = sitemap?._meta?.status === 'approved'
 
   const submitRoute = useCallback(async () => {
     if (!feedback.trim()) return
@@ -192,37 +219,59 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         </div>
       )}
 
-      {/* Gate 1 — Sitemap approval (inline approve button) */}
-      <GateCard
-        number={1}
-        title="Sitemap approval"
-        subtitle={
-          sitemapApproved ? 'Sitemap is approved. The engine can run.'
-          : hasStage2 ? 'A sitemap exists. Approve it here to unlock the engine actions below.'
-          : 'No sitemap yet. Draft one in the Planning tab first.'
-        }
-        status={sitemapApproved ? 'passed' : hasStage2 ? 'awaiting' : 'upstream'}
-        action={
-          hasStage2 && !sitemapApproved ? (
+      {/* Gate 1 — Sitemap approval. Card is expandable so the strategist
+          can review what they're approving before clicking. */}
+      <div className="rounded-lg border border-wm-border bg-wm-bg-elevated">
+        <div className="p-3 flex items-center gap-3">
+          <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Gate 1</span>
+          {sitemapApproved
+            ? <CheckCircle2 size={16} className="text-wm-success" />
+            : <AlertCircle size={16} className={hasStage2 ? 'text-wm-warning' : 'text-wm-text-subtle'} />}
+          <div className="flex-1">
+            <p className="text-[13px] font-semibold text-wm-text">Sitemap approval</p>
+            <p className="text-[11px] text-wm-text-muted">
+              {sitemapApproved
+                ? `Approved. ${sitemap?.pages?.length ?? 0} pages.`
+                : hasStage2
+                  ? `A sitemap exists (${sitemap?.pages?.length ?? 0} pages). Review below and approve to unlock the engine.`
+                  : 'No sitemap yet. Draft one in the Planning tab first.'}
+            </p>
+          </div>
+          {hasStage2 && (
+            <button
+              onClick={() => setSitemapOpen(s => !s)}
+              className="inline-flex items-center gap-1 text-[11px] text-wm-text-muted hover:text-wm-text px-2 py-1"
+            >
+              {sitemapOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              {sitemapOpen ? 'Hide' : 'View'}
+            </button>
+          )}
+          {hasStage2 && !sitemapApproved && (
             <button
               onClick={() => void callOrchestrate('approve_sitemap')}
               disabled={!!running}
               className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white disabled:opacity-50"
             >
               {running === 'approve_sitemap' ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-              Approve sitemap
+              Approve
             </button>
-          ) : hasStage2 && sitemapApproved ? (
+          )}
+          {hasStage2 && sitemapApproved && (
             <button
               onClick={() => void callOrchestrate('unlock_sitemap')}
               disabled={!!running}
-              className="text-[11px] text-wm-text-muted hover:text-wm-text"
+              className="text-[11px] text-wm-text-muted hover:text-wm-text px-2 py-1"
             >
               Unlock
             </button>
-          ) : null
-        }
-      />
+          )}
+        </div>
+        {sitemapOpen && sitemap && (
+          <div className="border-t border-wm-border px-3 py-3">
+            <SitemapPreview sitemap={sitemap} />
+          </div>
+        )}
+      </div>
 
       {/* Engine actions — visible at all times so the strategist can see
           what's coming. Disabled with clear reasoning when prerequisites
@@ -253,7 +302,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
               description="Apply directives, re-draft flagged pages, re-critique. Stops when no directives or verdict approves."
               busy={running === 'iterate'}
               disabled={!!running || !critique?.directives?.length}
-              onClick={() => void callOrchestrate('iterate')}
+              onClick={() => setConfirmAction('iterate')}
             />
             <ActionCard
               icon={<FileText size={14} />}
@@ -263,9 +312,60 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
                 : "Bind every page_draft to web_pages + web_sections. Strategist can upgrade to specific Brixies templates in the page editor."}
               busy={running === 'commit'}
               disabled={!!running || draftSlugs.length === 0}
-              onClick={() => void callOrchestrate('commit')}
+              onClick={() => setConfirmAction('commit')}
             />
           </div>
+
+          {confirmAction === 'iterate' && (
+            <ConfirmPanel
+              title="Iterate — preview"
+              busy={running === 'iterate'}
+              onCancel={() => setConfirmAction(null)}
+              onConfirm={async () => { setConfirmAction(null); await callOrchestrate('iterate') }}
+              confirmLabel="Run iteration"
+            >
+              <p className="text-[12px] text-wm-text leading-snug">
+                The orchestrator will:
+              </p>
+              <ul className="text-[12px] text-wm-text-muted space-y-1 list-disc list-inside">
+                {(critique?.directives ?? []).slice(0, 8).map((d, i) => (
+                  <li key={i}>
+                    <span className="font-semibold text-wm-text">{d.stage_to_rerun}</span>
+                    {d.page_slug && d.page_slug !== '*' && <> on <span className="font-mono">{d.page_slug}</span></>}
+                    {' — '}{d.note.slice(0, 100)}{d.note.length > 100 ? '…' : ''}
+                  </li>
+                ))}
+                {(critique?.directives?.length ?? 0) > 8 && (
+                  <li>… and {(critique?.directives?.length ?? 0) - 8} more</li>
+                )}
+              </ul>
+              <p className="text-[11px] text-wm-text-muted mt-1">
+                Then re-critique. Up to 3 loops total.
+              </p>
+            </ConfirmPanel>
+          )}
+
+          {confirmAction === 'commit' && (
+            <ConfirmPanel
+              title="Commit to pages — preview"
+              busy={running === 'commit'}
+              onCancel={() => setConfirmAction(null)}
+              onConfirm={async () => { setConfirmAction(null); await callOrchestrate('commit') }}
+              confirmLabel="Commit"
+            >
+              <p className="text-[12px] text-wm-text leading-snug">
+                Will write {draftSlugs.length} page{draftSlugs.length === 1 ? '' : 's'} to <span className="font-mono">web_pages</span> + <span className="font-mono">web_sections</span>:
+              </p>
+              <div className="flex flex-wrap gap-1 mt-1">
+                {draftSlugs.map(slug => (
+                  <span key={slug} className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-wm-accent/10 text-wm-accent-strong">{slug}</span>
+                ))}
+              </div>
+              <p className="text-[11px] text-wm-text-muted mt-2">
+                Existing freehand sections on those pages will be replaced. Manually template-bound sections are preserved.
+              </p>
+            </ConfirmPanel>
+          )}
         </section>
 
       {/* Critique summary */}
@@ -355,24 +455,50 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         </section>
       )}
 
-      {/* Drafts overview */}
+      {/* Drafts — expandable per page so the strategist can see the
+          actual copy before approving / committing / giving feedback. */}
       {draftSlugs.length > 0 && (
         <section className="rounded-lg border border-wm-border bg-wm-bg-elevated p-4">
           <h3 className="text-[14px] font-semibold text-wm-text mb-3">Drafted pages ({draftSlugs.length})</h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+          <div className="space-y-2">
             {draftSlugs.map(slug => {
               const d = drafts[slug]
               const sectionCount = Array.isArray(d?.sections) ? d.sections.length : 0
               const flags = Array.isArray(d?.validation?.flags) ? d.validation.flags.length : 0
               const redoCount = d?._meta?.redo_count ?? 0
+              const isOpen = expandedDraft === slug
               return (
-                <div key={slug} className="rounded-md border border-wm-border bg-wm-bg p-2.5">
-                  <p className="text-[12px] font-semibold text-wm-text">{slug}</p>
-                  <p className="text-[10px] text-wm-text-muted mt-0.5">
-                    {sectionCount} sections
-                    {flags > 0 && <span className="text-wm-warning"> · {flags} flags</span>}
-                    {redoCount > 0 && <span> · v{redoCount + 1}</span>}
-                  </p>
+                <div key={slug} className="rounded-md border border-wm-border bg-wm-bg">
+                  <button
+                    onClick={() => setExpandedDraft(isOpen ? null : slug)}
+                    className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-wm-accent/5"
+                  >
+                    {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                    <span className="text-[12px] font-semibold text-wm-text">{slug}</span>
+                    <span className="text-[10px] text-wm-text-muted ml-auto">
+                      {sectionCount} sections
+                      {flags > 0 && <span className="text-wm-warning"> · {flags} flags</span>}
+                      {redoCount > 0 && <span> · v{redoCount + 1}</span>}
+                    </span>
+                  </button>
+                  {isOpen && (
+                    <div className="border-t border-wm-border px-3 py-3">
+                      <DraftPreview draft={d} />
+                      <div className="mt-3 flex justify-end">
+                        <button
+                          onClick={() => {
+                            const note = window.prompt(`Re-draft "${slug}" with this feedback:`, '')
+                            if (note == null) return
+                            void callOrchestrate('apply', { dispatch: { stage_to_rerun: 'page_draft', page_slug: slug, note } })
+                          }}
+                          disabled={!!running}
+                          className="text-[11px] text-wm-accent-strong hover:underline disabled:opacity-50"
+                        >
+                          Re-draft this page
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -525,6 +651,169 @@ function ActionCard({ icon, title, description, busy, disabled, onClick }: {
       </div>
       <p className="text-[11px] text-wm-text-muted leading-snug">{description}</p>
     </button>
+  )
+}
+
+function SitemapPreview({ sitemap }: { sitemap: SitemapShape }) {
+  const pages = sitemap.pages ?? []
+  const header = sitemap.header_nav ?? []
+  const footer = sitemap.footer_nav ?? []
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-muted mb-1.5">
+          Pages ({pages.length})
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+          {pages.map((p, i) => (
+            <div key={i} className="flex items-baseline gap-2 text-[12px]">
+              <span className="font-semibold text-wm-text">{p.name}</span>
+              <span className="font-mono text-[10px] text-wm-text-muted">/{p.slug}</span>
+              {p.phase && p.phase !== '1' && (
+                <span className="text-[10px] uppercase tracking-wider text-wm-text-subtle">{p.phase}</span>
+              )}
+              {p.density && p.density !== 'medium' && (
+                <span className="text-[10px] uppercase tracking-wider text-wm-accent-strong">{p.density}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+      {header.length > 0 && (
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-muted mb-1.5">
+            Header nav
+          </p>
+          <div className="flex flex-wrap gap-2 text-[12px]">
+            {header.map((n, i) => (
+              <NavChip key={i} item={n} />
+            ))}
+          </div>
+        </div>
+      )}
+      {footer.length > 0 && (
+        <details className="text-[12px]">
+          <summary className="cursor-pointer text-[10px] uppercase tracking-widest font-bold text-wm-text-muted">
+            Footer nav ({footer.reduce((sum, s) => sum + (s.items?.length ?? 0), 0)} items)
+          </summary>
+          <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-3">
+            {footer.map((sec, i) => (
+              <div key={i}>
+                <p className="text-[11px] font-semibold text-wm-text">{sec.section_label}</p>
+                <ul className="mt-0.5 space-y-0.5">
+                  {(sec.items ?? []).map((it, j) => (
+                    <li key={j} className="text-[11px] text-wm-text-muted">· {it.label}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
+function NavChip({ item }: { item: NavItem }) {
+  if (item.kind === 'group') {
+    return (
+      <span className="inline-flex items-baseline gap-1 px-2 py-1 rounded border border-wm-border bg-wm-bg text-[11px]">
+        <span className="font-semibold text-wm-text">{item.label}</span>
+        <span className="text-wm-text-muted">▾</span>
+        {item.children && (
+          <span className="text-wm-text-muted">({item.children.length})</span>
+        )}
+      </span>
+    )
+  }
+  return (
+    <span className="inline-block px-2 py-1 rounded border border-wm-border bg-wm-bg text-[11px] text-wm-text">
+      {item.label}
+    </span>
+  )
+}
+
+function DraftPreview({ draft }: { draft: PageDraft }) {
+  const sections = Array.isArray(draft?.sections) ? draft.sections : []
+  if (sections.length === 0) {
+    return <p className="text-[12px] text-wm-text-muted">No sections in this draft.</p>
+  }
+  return (
+    <div className="space-y-3">
+      {sections.map((s: any, i: number) => {
+        const copy = s?.copy ?? {}
+        return (
+          <div key={i} className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
+            <div className="flex items-baseline gap-2 mb-2">
+              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">{s?.archetype ?? '—'}</span>
+              <span className="text-[10px] text-wm-text-subtle">#{i + 1}</span>
+              {Array.isArray(s?.atoms_used) && s.atoms_used.length > 0 && (
+                <span className="text-[10px] text-wm-text-muted ml-auto">{s.atoms_used.length} atoms</span>
+              )}
+            </div>
+            {copy.eyebrow && <p className="text-[10px] uppercase tracking-widest text-wm-accent-strong mb-1">{String(copy.eyebrow)}</p>}
+            {copy.heading && <p className="text-[15px] font-semibold text-wm-text">{String(copy.heading)}</p>}
+            {copy.tagline && <p className="text-[13px] italic text-wm-text-muted mt-0.5">{String(copy.tagline)}</p>}
+            {copy.description && <p className="text-[13px] text-wm-text mt-1 leading-snug">{String(copy.description)}</p>}
+            {copy.body && <p className="text-[12px] text-wm-text-muted mt-1 leading-snug whitespace-pre-wrap">{String(copy.body)}</p>}
+            {Array.isArray(copy.cards) && copy.cards.length > 0 && (
+              <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                {copy.cards.map((c: any, j: number) => (
+                  <div key={j} className="rounded border border-wm-border p-2">
+                    {c.heading && <p className="text-[12px] font-semibold text-wm-text">{String(c.heading)}</p>}
+                    {c.description && <p className="text-[11px] text-wm-text-muted mt-0.5">{String(c.description)}</p>}
+                    {c.cta_label && <p className="text-[11px] text-wm-accent-strong mt-0.5">{String(c.cta_label)} →</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {Array.isArray(copy.items) && copy.items.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                {copy.items.map((it: any, j: number) => (
+                  <div key={j} className="border-l-2 border-wm-accent/30 pl-2">
+                    {it.heading && <p className="text-[12px] font-semibold text-wm-text">{String(it.heading)}</p>}
+                    {it.body && <p className="text-[11px] text-wm-text-muted mt-0.5">{String(it.body)}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {copy.cta?.label && (
+              <p className="mt-2 text-[12px]">
+                <span className="inline-block px-2 py-0.5 rounded-full bg-wm-accent text-white text-[11px]">{String(copy.cta.label)} →</span>
+              </p>
+            )}
+            {s?.voice_notes && (
+              <p className="mt-2 text-[10px] italic text-wm-text-subtle border-t border-wm-border pt-2">
+                <Eye size={10} className="inline mr-1" />{String(s.voice_notes)}
+              </p>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ConfirmPanel({ title, children, onCancel, onConfirm, confirmLabel, busy }: {
+  title: string; children: React.ReactNode
+  onCancel: () => void; onConfirm: () => void | Promise<void>
+  confirmLabel: string; busy?: boolean
+}) {
+  return (
+    <div className="rounded-md border border-wm-accent/30 bg-wm-accent/5 p-3 space-y-2">
+      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">{title}</p>
+      {children}
+      <div className="flex justify-end gap-2 pt-1">
+        <button onClick={onCancel} className="text-[12px] text-wm-text-muted px-3 py-1 hover:text-wm-text">Cancel</button>
+        <button
+          onClick={() => void onConfirm()}
+          disabled={!!busy}
+          className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white disabled:opacity-50"
+        >
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} {confirmLabel}
+        </button>
+      </div>
+    </div>
   )
 }
 
