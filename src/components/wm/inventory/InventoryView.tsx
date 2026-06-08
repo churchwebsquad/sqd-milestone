@@ -1196,6 +1196,13 @@ function TopicCard({
       // legitimately reference seasonal terms (e.g. "Christmas Eve
       // service") without being filtered.
       if (reviewMode && SEASONAL_FILTERED_KINDS.has(String(it.kind ?? '')) && looksSeasonal(it)) continue
+      // Substance check — drop items that lack their primary content
+      // field. The categorizer sometimes emits empty placeholders
+      // (e.g. testimony items with no story, just `kind: 'testimony',
+      // person: null`); the partner doesn't need to see "92
+      // Anonymous testimonies" of empty quotes. Concrete case seen
+      // on baysidechurch.net 2026-06-08 inventory.
+      if (!hasSubstance(it)) continue
       switch (it.kind) {
         case 'program':           if (!programScope || it.scope === programScope) programs.push(it); break
         case 'detail':            details.push(it); break
@@ -1867,6 +1874,13 @@ function ScriptureRow({ item, reviewMode }: { item: Item; reviewMode: boolean })
 }
 
 function TestimonyRow({ item, reviewMode }: { item: Item; reviewMode: boolean }) {
+  // The categorizer emits the testimony text under varying field names
+  // depending on what the source page used (story / quote / text). Read
+  // through the same priority order the substance filter uses, so the
+  // rendered output never lands as an empty pair of quotes.
+  const r = item as Record<string, unknown>
+  const text = String(r.story ?? r.quote ?? r.text ?? '').trim()
+  if (!text) return null
   return (
     <div className={reviewMode
         ? 'bg-cream/40 border border-lavender/60 rounded-md px-3 py-2'
@@ -1877,7 +1891,7 @@ function TestimonyRow({ item, reviewMode }: { item: Item; reviewMode: boolean })
         {item.baptism_date && <span className={reviewMode ? 'text-xs text-purple-gray' : 'text-[11px] text-wm-text-muted'}>· {String(item.baptism_date)}</span>}
       </div>
       <p className={reviewMode ? 'text-sm text-deep-plum italic leading-relaxed mt-1 whitespace-pre-line' : 'text-[12px] text-wm-text italic leading-relaxed mt-1 whitespace-pre-line'}>
-        "{String(item.story ?? '')}"
+        "{text}"
       </p>
       {item.scripture_ref && (
         <p className={reviewMode ? 'text-[10px] font-mono text-primary-purple mt-1' : 'text-[10px] font-mono text-wm-accent mt-1'}>{String(item.scripture_ref)}</p>
@@ -2301,6 +2315,56 @@ function looksSeasonal(item: Item): boolean {
   const name = String(r.name ?? r.title ?? r.label ?? r.role ?? '').trim()
   if (!name) return false
   return SEASONAL_RE.test(name)
+}
+
+/** Per-kind primary content fields. An item with NO value in any of
+ *  these fields is empty — has nothing to show the partner. The
+ *  partner-facing inventory drops such items before rendering. */
+const SUBSTANCE_FIELDS: Record<string, string[]> = {
+  testimony:        ['story', 'quote', 'text'],
+  faq:              ['question', 'answer'],
+  detail:           ['value', 'text'],
+  key_phrase:       ['value', 'text', 'phrase'],
+  tier:             ['value', 'text', 'name'],
+  doctrine:         ['value', 'text', 'statement'],
+  scripture:        ['reference', 'text', 'verse'],
+  sermon:           ['title', 'name'],
+  event:            ['name', 'title'],
+  staff:            ['name', 'title'],
+  program:          ['name', 'title'],
+  newsletter_issue: ['title', 'date'],
+  contact_block:    ['phone', 'email', 'address'],
+  location_info:    ['address', 'name'],
+  meeting_time:     ['when', 'time', 'day'],
+  cta:              ['url', 'label'],     // CTAs have their own isBrokenCta gate too
+  link:             ['url', 'label'],
+}
+
+const META_KEYS = new Set(['kind', 'source_url', 'source_urls', 'audience'])
+
+function hasSubstance(item: Item): boolean {
+  const r = item as Record<string, unknown>
+  const kind = String(r.kind ?? '')
+  const required = SUBSTANCE_FIELDS[kind]
+  if (required) {
+    // Item has at least one filled primary field for its kind?
+    for (const f of required) {
+      const v = r[f]
+      if (typeof v === 'string' && v.trim().length > 0) return true
+      if (Array.isArray(v) && v.length > 0) return true
+      if (v && typeof v === 'object' && Object.keys(v).length > 0) return true
+    }
+    return false
+  }
+  // Unknown kind ('other' / unclassified) — keep if ANY non-meta
+  // field has a non-empty value. The catch-all guard.
+  for (const [k, v] of Object.entries(r)) {
+    if (META_KEYS.has(k)) continue
+    if (typeof v === 'string' && v.trim().length > 0) return true
+    if (Array.isArray(v) && v.length > 0) return true
+    if (v && typeof v === 'object' && Object.keys(v).length > 0) return true
+  }
+  return false
 }
 
 /**
