@@ -1,0 +1,350 @@
+/**
+ * Vercel Serverless Function — /api/web/agents/orchestrate
+ *
+ * The Director-driven orchestrator. Single endpoint, multiple actions:
+ *
+ *   action=run_drafts   — page_briefs (if missing) + page_drafts (parallel)
+ *   action=critique     — director critique on current drafts
+ *   action=iterate      — apply directives from latest critique:
+ *                         re-run flagged page_drafts, then re-critique.
+ *                         Loops up to maxLoops times or until directives
+ *                         empty or verdict=approved.
+ *   action=route        — director route on user feedback; returns dispatch
+ *   action=apply        — execute a dispatch (re-run the named stage)
+ *   action=commit       — page-bind every page_draft to web_pages + web_sections
+ *   action=status       — return engine_state without mutating
+ *
+ * Engine state lives in roadmap_state.engine_state. Each action updates
+ * status + phase + last_action_at + counters. The UI polls /status or
+ * triggers actions directly.
+ *
+ * Calls child agents over HTTP using the same VERCEL_URL the request
+ * arrived on. Auth: passes the strategist's JWT through to children.
+ */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+import { createClient } from '@supabase/supabase-js'
+
+export const maxDuration = 300
+
+const MAX_LOOPS = 3
+const PAGE_DRAFT_CONCURRENCY = 4
+
+type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status'
+
+export default async function handler(req: any, res: any) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+
+  const supabaseUrl    = process.env.VITE_SUPABASE_URL
+  const anonKey        = process.env.VITE_SUPABASE_ANON_KEY
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!supabaseUrl || !anonKey || !serviceRoleKey) {
+    return res.status(500).json({ error: 'Missing env vars' })
+  }
+
+  const jwt = (req.headers['authorization'] as string | undefined)?.replace(/^Bearer /, '') ?? null
+  if (!jwt) return res.status(401).json({ error: 'Missing Authorization bearer token' })
+  const { data: userData, error: userErr } = await createClient(supabaseUrl, anonKey).auth.getUser(jwt)
+  if (userErr || !userData?.user) return res.status(401).json({ error: 'Invalid session' })
+
+  const projectId = typeof req.body?.projectId === 'string' ? req.body.projectId : null
+  const action: Action = (req.body?.action as Action) ?? 'status'
+  if (!projectId) return res.status(400).json({ error: 'projectId required' })
+
+  const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
+  const baseUrl = resolveBaseUrl(req)
+
+  const { data: project } = await sb.from('strategy_web_projects')
+    .select('id, roadmap_state').eq('id', projectId).maybeSingle()
+  if (!project) return res.status(404).json({ error: 'Project not found' })
+
+  const roadmapState = (project.roadmap_state ?? {}) as Record<string, any>
+  const engineState = (roadmapState.engine_state ?? {}) as Record<string, any>
+
+  try {
+    if (action === 'status') {
+      return res.status(200).json({ ok: true, engine_state: engineState })
+    }
+
+    if (action === 'run_drafts') {
+      const updated = await runDrafts({ sb, projectId, jwt, baseUrl, roadmapState, engineState })
+      return res.status(200).json({ ok: true, engine_state: updated })
+    }
+
+    if (action === 'critique') {
+      const updated = await runCritique({ sb, projectId, jwt, baseUrl, roadmapState, engineState })
+      return res.status(200).json({ ok: true, engine_state: updated })
+    }
+
+    if (action === 'iterate') {
+      const maxLoops = typeof req.body?.maxLoops === 'number' ? req.body.maxLoops : MAX_LOOPS
+      const updated = await runIterate({ sb, projectId, jwt, baseUrl, maxLoops })
+      return res.status(200).json({ ok: true, engine_state: updated })
+    }
+
+    if (action === 'route') {
+      const feedback = typeof req.body?.user_feedback === 'string' ? req.body.user_feedback.trim() : ''
+      if (!feedback) return res.status(400).json({ error: 'user_feedback required for route' })
+      const route = await callAgent(baseUrl, jwt, 'director', { projectId, mode: 'route', user_feedback: feedback })
+      return res.status(200).json({ ok: true, route })
+    }
+
+    if (action === 'apply') {
+      const dispatch = req.body?.dispatch
+      if (!dispatch || typeof dispatch !== 'object') {
+        return res.status(400).json({ error: 'dispatch object required for apply' })
+      }
+      const result = await applyDispatch({ baseUrl, jwt, projectId, dispatch })
+      return res.status(200).json({ ok: true, result })
+    }
+
+    if (action === 'commit') {
+      const updated = await runCommit({ sb, projectId, jwt, baseUrl, roadmapState })
+      return res.status(200).json({ ok: true, engine_state: updated })
+    }
+
+    return res.status(400).json({ error: `Unknown action: ${action}` })
+  } catch (err: any) {
+    console.error('[orchestrate] error:', err?.message)
+    await writeEngineState(sb, projectId, { ...engineState, status: 'error', last_error: err?.message ?? 'unknown', last_action_at: new Date().toISOString() })
+    return res.status(500).json({ error: err?.message ?? 'orchestrate failed' })
+  }
+}
+
+// ── Actions ───────────────────────────────────────────────────────────
+
+async function runDrafts(ctx: {
+  sb: any; projectId: string; jwt: string; baseUrl: string
+  roadmapState: Record<string, any>; engineState: Record<string, any>
+}): Promise<Record<string, any>> {
+  const { sb, projectId, jwt, baseUrl, roadmapState } = ctx
+  const stage1 = roadmapState.stage_1
+  const stage2 = roadmapState.stage_2
+  if (!stage1 || !stage2) throw new Error('Synthesize + Sitemap must be complete before run_drafts')
+
+  await writeEngineState(sb, projectId, { ...ctx.engineState, status: 'briefing', current_phase: 'page_briefs', last_action_at: new Date().toISOString() })
+
+  // Run page_briefs unconditionally on each run_drafts — briefs are
+  // cheap to regenerate and ensure draft inputs are fresh.
+  await callAgent(baseUrl, jwt, 'page-briefs', { projectId })
+
+  const { data: refreshed } = await sb.from('strategy_web_projects')
+    .select('roadmap_state').eq('id', projectId).maybeSingle()
+  const refreshedState = (refreshed?.roadmap_state ?? {}) as Record<string, any>
+  const briefs = refreshedState.page_briefs ?? {}
+  const slugs = Object.keys(briefs).filter(k => k !== '_meta')
+
+  await writeEngineState(sb, projectId, {
+    ...ctx.engineState,
+    status: 'drafting',
+    current_phase: 'page_drafts',
+    pages_total: slugs.length,
+    pages_drafted: 0,
+    last_action_at: new Date().toISOString(),
+  })
+
+  // Drafts in parallel, capped at PAGE_DRAFT_CONCURRENCY.
+  let drafted = 0
+  for (let i = 0; i < slugs.length; i += PAGE_DRAFT_CONCURRENCY) {
+    const chunk = slugs.slice(i, i + PAGE_DRAFT_CONCURRENCY)
+    await Promise.all(chunk.map(async slug => {
+      await callAgent(baseUrl, jwt, 'page-draft', { projectId, pageSlug: slug })
+      drafted += 1
+    }))
+    await writeEngineState(sb, projectId, {
+      ...ctx.engineState,
+      status: 'drafting',
+      current_phase: 'page_drafts',
+      pages_total: slugs.length,
+      pages_drafted: drafted,
+      last_action_at: new Date().toISOString(),
+    })
+  }
+
+  const finalState = {
+    ...ctx.engineState,
+    status: 'drafts_ready',
+    current_phase: 'awaiting_critique',
+    pages_total: slugs.length,
+    pages_drafted: drafted,
+    last_action_at: new Date().toISOString(),
+  }
+  await writeEngineState(sb, projectId, finalState)
+  return finalState
+}
+
+async function runCritique(ctx: {
+  sb: any; projectId: string; jwt: string; baseUrl: string
+  roadmapState: Record<string, any>; engineState: Record<string, any>
+}): Promise<Record<string, any>> {
+  const { sb, projectId, jwt, baseUrl } = ctx
+  await writeEngineState(sb, projectId, { ...ctx.engineState, status: 'critiquing', current_phase: 'director_critique', last_action_at: new Date().toISOString() })
+
+  const critique = await callAgent(baseUrl, jwt, 'director', { projectId, mode: 'critique' })
+  const verdict = critique?.critique?.overall_verdict ?? 'unknown'
+  const directiveCount = Array.isArray(critique?.critique?.directives) ? critique.critique.directives.length : 0
+
+  const next = {
+    ...ctx.engineState,
+    status: verdict === 'approved' ? 'ready_for_review' : 'needs_iteration',
+    current_phase: verdict === 'approved' ? 'awaiting_final_review' : 'iterate',
+    last_verdict: verdict,
+    last_directive_count: directiveCount,
+    last_action_at: new Date().toISOString(),
+  }
+  await writeEngineState(sb, projectId, next)
+  return next
+}
+
+async function runIterate(ctx: {
+  sb: any; projectId: string; jwt: string; baseUrl: string; maxLoops: number
+}): Promise<Record<string, any>> {
+  const { sb, projectId, jwt, baseUrl, maxLoops } = ctx
+
+  for (let loop = 0; loop < maxLoops; loop++) {
+    const { data: current } = await sb.from('strategy_web_projects')
+      .select('roadmap_state').eq('id', projectId).maybeSingle()
+    const state = (current?.roadmap_state ?? {}) as Record<string, any>
+    const eng = (state.engine_state ?? {}) as Record<string, any>
+    const critique = state.director_critique
+    const directives = Array.isArray(critique?.directives) ? critique.directives : []
+
+    if (!directives.length) {
+      const done = { ...eng, status: 'ready_for_review', current_phase: 'awaiting_final_review', last_action_at: new Date().toISOString() }
+      await writeEngineState(sb, projectId, done)
+      return done
+    }
+
+    await writeEngineState(sb, projectId, {
+      ...eng,
+      status: 'iterating',
+      current_phase: 'applying_directives',
+      loop_count: (eng.loop_count ?? 0) + 1,
+      last_action_at: new Date().toISOString(),
+    })
+
+    // Apply directives. Group by stage_to_rerun + page_slug; page_draft
+    // directives carry a note — pass it through. Cap concurrency.
+    const pageDraftDirectives = directives.filter((d: any) => d?.stage_to_rerun === 'page_draft' && d?.page_slug && d.page_slug !== '*')
+    const otherDirectives = directives.filter((d: any) => d?.stage_to_rerun !== 'page_draft')
+
+    for (let i = 0; i < pageDraftDirectives.length; i += PAGE_DRAFT_CONCURRENCY) {
+      const chunk = pageDraftDirectives.slice(i, i + PAGE_DRAFT_CONCURRENCY)
+      await Promise.all(chunk.map((d: any) =>
+        callAgent(baseUrl, jwt, 'page-draft', { projectId, pageSlug: d.page_slug, feedback: d.note ?? '' })
+      ))
+    }
+
+    for (const d of otherDirectives) {
+      await applyDispatch({ baseUrl, jwt, projectId, dispatch: { stage_to_rerun: d.stage_to_rerun, page_slug: d.page_slug, note: d.note } })
+    }
+
+    // Re-critique
+    await callAgent(baseUrl, jwt, 'director', { projectId, mode: 'critique' })
+  }
+
+  const { data: final } = await sb.from('strategy_web_projects')
+    .select('roadmap_state').eq('id', projectId).maybeSingle()
+  const eng = ((final?.roadmap_state ?? {}).engine_state ?? {}) as Record<string, any>
+  const out = { ...eng, status: 'ready_for_review', current_phase: 'awaiting_final_review', max_loops_hit: true, last_action_at: new Date().toISOString() }
+  await writeEngineState(sb, projectId, out)
+  return out
+}
+
+async function applyDispatch(ctx: {
+  baseUrl: string; jwt: string; projectId: string; dispatch: any
+}): Promise<unknown> {
+  const { baseUrl, jwt, projectId, dispatch } = ctx
+  const stage = String(dispatch?.stage_to_rerun ?? '')
+  const note = String(dispatch?.note ?? '')
+
+  if (stage === 'synthesize') {
+    return callAgent(baseUrl, jwt, 'extract-strategy', { projectId, redoContext: note })
+  }
+  if (stage === 'sitemap') {
+    return callAgent(baseUrl, jwt, 'draft-sitemap', { projectId, redoContext: note })
+  }
+  if (stage === 'page_briefs') {
+    return callAgent(baseUrl, jwt, 'page-briefs', { projectId, redoContext: note })
+  }
+  if (stage === 'page_draft') {
+    const slug = dispatch?.page_slug
+    if (!slug) throw new Error('page_draft dispatch requires page_slug')
+    return callAgent(baseUrl, jwt, 'page-draft', { projectId, pageSlug: slug, feedback: note })
+  }
+  if (stage === 'single_slot') {
+    // Not implemented for v1 — single-slot rewrite would need a per-slot
+    // endpoint. Fallback: re-run the page_draft with a narrow note.
+    const slug = dispatch?.page_slug
+    if (!slug) throw new Error('single_slot dispatch requires page_slug')
+    const focused = `Targeted rewrite. Section index ${dispatch?.section_ix ?? '?'}, slot ${dispatch?.slot_key ?? '?'}. ${note}`
+    return callAgent(baseUrl, jwt, 'page-draft', { projectId, pageSlug: slug, feedback: focused })
+  }
+  if (stage === 'none') {
+    return { ok: true, skipped: true }
+  }
+  throw new Error(`Unknown stage_to_rerun: ${stage}`)
+}
+
+async function runCommit(ctx: {
+  sb: any; projectId: string; jwt: string; baseUrl: string
+  roadmapState: Record<string, any>
+}): Promise<Record<string, any>> {
+  const { sb, projectId, jwt, baseUrl, roadmapState } = ctx
+  const drafts = roadmapState.page_drafts ?? {}
+  const slugs = Object.keys(drafts).filter(k => k !== '_meta')
+
+  const engineState = (roadmapState.engine_state ?? {}) as Record<string, any>
+  await writeEngineState(sb, projectId, { ...engineState, status: 'committing', current_phase: 'page_bind', pages_committed: 0, pages_total: slugs.length, last_action_at: new Date().toISOString() })
+
+  let committed = 0
+  for (let i = 0; i < slugs.length; i += PAGE_DRAFT_CONCURRENCY) {
+    const chunk = slugs.slice(i, i + PAGE_DRAFT_CONCURRENCY)
+    await Promise.all(chunk.map(async slug => {
+      await callAgent(baseUrl, jwt, 'page-bind', { projectId, pageSlug: slug })
+      committed += 1
+    }))
+    await writeEngineState(sb, projectId, { ...engineState, status: 'committing', current_phase: 'page_bind', pages_committed: committed, pages_total: slugs.length, last_action_at: new Date().toISOString() })
+  }
+
+  const done = { ...engineState, status: 'committed', current_phase: 'done', pages_committed: committed, pages_total: slugs.length, last_action_at: new Date().toISOString() }
+  await writeEngineState(sb, projectId, done)
+  return done
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────
+
+async function callAgent(baseUrl: string, jwt: string, agentName: string, body: Record<string, unknown>): Promise<any> {
+  const url = `${baseUrl}/api/web/agents/${agentName}`
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${jwt}` },
+    body: JSON.stringify(body),
+  })
+  const text = await r.text()
+  let json: any
+  try { json = JSON.parse(text) } catch { json = { raw: text } }
+  if (!r.ok) {
+    throw new Error(`agent ${agentName} failed (${r.status}): ${json?.error ?? text}`)
+  }
+  return json
+}
+
+async function writeEngineState(sb: any, projectId: string, engineState: Record<string, any>): Promise<void> {
+  const { data: current } = await sb.from('strategy_web_projects')
+    .select('roadmap_state').eq('id', projectId).maybeSingle()
+  const state = (current?.roadmap_state ?? {}) as Record<string, any>
+  await sb.from('strategy_web_projects').update({
+    roadmap_state: { ...state, engine_state: engineState },
+  }).eq('id', projectId)
+}
+
+function resolveBaseUrl(req: any): string {
+  // Prefer the request's own origin so internal calls land on the same
+  // deployment. Falls back to VERCEL_URL / localhost.
+  const proto = (req.headers['x-forwarded-proto'] as string) || 'https'
+  const host = (req.headers['x-forwarded-host'] as string) || (req.headers.host as string)
+  if (host) return `${proto}://${host}`
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
+  return 'http://localhost:3000'
+}

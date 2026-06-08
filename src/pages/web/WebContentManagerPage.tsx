@@ -39,10 +39,12 @@ import { IntakeWorkspace } from '../../components/wm/workspaces/IntakeWorkspace'
 import { ReviewWorkspace } from '../../components/wm/workspaces/ReviewWorkspace'
 import { PlanningWorkspace } from '../../components/wm/workspaces/PlanningWorkspace'
 import { PipelineWorkspace } from '../../components/wm/workspaces/PipelineWorkspace'
+import { CopyEngineWorkspace } from '../../components/wm/workspaces/CopyEngineWorkspace'
 import type { StrategyWebProject } from '../../types/database'
 
 type TabKey =
   | 'planning'
+  | 'engine'
   | 'pipeline'
   | 'intake'
   | 'library'
@@ -54,7 +56,8 @@ type TabKey =
 const TABS: readonly WMTabItem<TabKey>[] = [
   { key: 'planning',   label: 'Planning',        icon: <CalendarClock size={13} /> },
   { key: 'intake',     label: 'Intake & Crawl',  icon: <ClipboardList size={13} /> },
-  { key: 'pipeline',   label: 'Copywriting',     icon: <Workflow      size={13} /> },
+  { key: 'engine',     label: 'Copy Engine',     icon: <Workflow      size={13} /> },
+  { key: 'pipeline',   label: 'Copywriting (legacy)', icon: <Workflow size={13} /> },
   { key: 'library',    label: 'Site Library',    icon: <LayoutGrid    size={13} /> },
   { key: 'pages',      label: 'Pages',           icon: <FileText      size={13} /> },
   { key: 'design',     label: 'Design Handoff',  icon: <Palette       size={13} /> },
@@ -78,7 +81,7 @@ export default function WebContentManagerPage() {
     }
     if (rawTab === 'settings') return DEFAULT_TAB   // moved to /web (org-wide)
     if (rawTab === 'crawl')    return 'intake'      // merged into intake
-    const known: ReadonlyArray<TabKey> = ['planning','pipeline','intake','library','pages','design','devhandoff','review']
+    const known: ReadonlyArray<TabKey> = ['planning','engine','pipeline','intake','library','pages','design','devhandoff','review']
     return (known as readonly string[]).includes(rawTab) ? (rawTab as TabKey) : DEFAULT_TAB
   })()
 
@@ -157,6 +160,7 @@ export default function WebContentManagerPage() {
         onRailToggle={setRailOpen}
       >
         {activeTab === 'planning'   && <PlanningWorkspace project={project} onChange={loadProject} />}
+        {activeTab === 'engine'     && <CopyEngineWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'pipeline'   && <PipelineWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'intake'     && <IntakeWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'library'    && <GlobalElementsWorkspace project={project} onChange={loadProject} />}

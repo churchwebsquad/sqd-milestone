@@ -1,0 +1,510 @@
+/**
+ * Copy Engine Workspace — the 2-gate replacement for the 8-stage stepper.
+ *
+ * Surfaces the redesigned self-sufficient copywriting engine. Strategist
+ * sees only two gates:
+ *
+ *   Gate 1: Sitemap approval (current pipeline stages 1-2; reuses
+ *           existing Synthesize + Sitemap actions in PlanningWorkspace
+ *           upstream — this workspace shows the approved sitemap)
+ *   Gate 2: Final review of bound copy (after Director loop converges)
+ *
+ * Between the gates: the orchestrator runs autonomously.
+ *   run_drafts → critique → iterate → ready_for_review → commit
+ *
+ * Final-gate feedback goes to the Director's ROUTE mode, which classifies
+ * it into a specific dispatch the engine executes.
+ */
+
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  Play, Loader2, CheckCircle2, AlertCircle, RefreshCw, Send, FileText, GitBranch,
+} from 'lucide-react'
+import { supabase } from '../../../lib/supabase'
+import type { StrategyWebProject } from '../../../types/database'
+
+interface EngineState {
+  status?: string
+  current_phase?: string
+  pages_total?: number
+  pages_drafted?: number
+  pages_committed?: number
+  last_verdict?: string
+  last_directive_count?: number
+  loop_count?: number
+  max_loops_hit?: boolean
+  last_action_at?: string
+  last_error?: string
+}
+
+interface DirectorCritique {
+  per_page?: Array<{
+    page_slug: string
+    voice_match: number
+    persona_fit: number
+    atom_coverage: number
+    slot_health: number
+    standout_lines?: string[]
+    problem_lines?: string[]
+    summary?: string
+  }>
+  directives?: Array<{
+    page_slug: string
+    stage_to_rerun: string
+    note: string
+    severity: 'blocker' | 'warning' | 'nit'
+  }>
+  cross_page_findings?: Array<{ kind: string; description: string; pages?: string[] }>
+  scores?: {
+    voice_consistency?: number
+    persona_coverage?: number
+    atom_coverage?: number
+    slot_health?: number
+    overall?: number
+  }
+  overall_verdict?: 'approved' | 'needs_revision' | 'needs_strategy_rework'
+}
+
+interface PageDraft {
+  sections?: Array<{
+    archetype: string
+    copy?: Record<string, unknown>
+    voice_notes?: string
+  }>
+  validation?: { ok?: boolean; flags?: unknown[]; unused_atoms?: string[] }
+  _meta?: { redo_count?: number; generated_at?: string }
+}
+
+interface Dispatch {
+  stage_to_rerun: string
+  page_slug?: string | null
+  section_ix?: number | null
+  slot_key?: string | null
+  note: string
+}
+
+interface RoutePayload {
+  dispatch?: Dispatch
+  rationale?: string
+  alternative_dispatches?: Array<{ stage_to_rerun: string; why_rejected: string }>
+}
+
+interface Props {
+  project: StrategyWebProject
+  onChange?: () => void | Promise<void>
+}
+
+export function CopyEngineWorkspace({ project, onChange }: Props) {
+  const [engine,      setEngine]      = useState<EngineState>({})
+  const [critique,    setCritique]    = useState<DirectorCritique | null>(null)
+  const [drafts,      setDrafts]      = useState<Record<string, PageDraft>>({})
+  const [running,     setRunning]     = useState<string | null>(null)
+  const [error,       setError]       = useState<string | null>(null)
+  const [feedback,    setFeedback]    = useState('')
+  const [routePreview, setRoutePreview] = useState<RoutePayload | null>(null)
+  const [routing,     setRouting]     = useState(false)
+
+  const refreshFromDB = useCallback(async () => {
+    const { data } = await supabase
+      .from('strategy_web_projects')
+      .select('roadmap_state')
+      .eq('id', project.id)
+      .maybeSingle()
+    const state = ((data?.roadmap_state ?? {}) as Record<string, unknown>) || {}
+    setEngine(((state.engine_state as EngineState) ?? {}))
+    setCritique(((state.director_critique as DirectorCritique) ?? null))
+    setDrafts(((state.page_drafts as Record<string, PageDraft>) ?? {}))
+  }, [project.id])
+
+  useEffect(() => { void refreshFromDB() }, [refreshFromDB])
+
+  const callOrchestrate = useCallback(async (action: string, extra: Record<string, unknown> = {}): Promise<unknown> => {
+    setRunning(action); setError(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const jwt = session?.access_token
+      if (!jwt) throw new Error('Not authenticated')
+      const res = await fetch('/api/web/agents/orchestrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ projectId: project.id, action, ...extra }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
+      await refreshFromDB()
+      await onChange?.()
+      return json
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unknown error')
+      return null
+    } finally {
+      setRunning(null)
+    }
+  }, [project.id, refreshFromDB, onChange])
+
+  const hasStage2 = Boolean((project.roadmap_state as Record<string, unknown> | null)?.stage_2)
+  const draftSlugs = Object.keys(drafts).filter(k => k !== '_meta')
+  const status = engine.status ?? 'idle'
+
+  const sitemapApproved = useMemo(() => {
+    const rs = project.roadmap_state as Record<string, unknown> | null
+    const stage2 = rs?.stage_2 as { _meta?: { status?: string } } | undefined
+    return stage2?._meta?.status === 'approved'
+  }, [project.roadmap_state])
+
+  const submitRoute = useCallback(async () => {
+    if (!feedback.trim()) return
+    setRouting(true); setRoutePreview(null)
+    const result = await callOrchestrate('route', { user_feedback: feedback.trim() }) as { route?: RoutePayload } | null
+    setRouting(false)
+    if (result?.route) setRoutePreview(result.route)
+  }, [feedback, callOrchestrate])
+
+  const applyRoute = useCallback(async () => {
+    if (!routePreview?.dispatch) return
+    await callOrchestrate('apply', { dispatch: routePreview.dispatch })
+    setRoutePreview(null)
+    setFeedback('')
+  }, [routePreview, callOrchestrate])
+
+  return (
+    <div className="px-4 md:px-6 py-6 max-w-6xl mx-auto space-y-6">
+      <header className="flex items-baseline justify-between gap-4">
+        <div>
+          <h2 className="text-[20px] font-semibold text-wm-text">Copy Engine</h2>
+          <p className="text-[13px] text-wm-text-muted mt-1">
+            Self-sufficient. Two human gates: sitemap, then final review.
+          </p>
+        </div>
+        <button
+          onClick={() => void refreshFromDB()}
+          className="text-[11px] text-wm-text-muted hover:text-wm-text inline-flex items-center gap-1"
+        >
+          <RefreshCw size={12} /> Refresh
+        </button>
+      </header>
+
+      <StatusBanner engine={engine} />
+
+      {error && (
+        <div className="rounded-md border border-wm-danger/30 bg-wm-danger-bg px-3 py-2 text-[13px] text-wm-danger">
+          {error}
+        </div>
+      )}
+
+      {/* Gate 1 — Sitemap approval */}
+      <GateCard
+        number={1}
+        title="Sitemap approval"
+        subtitle="Synthesize + Sitemap upstream of this workspace. Approve in Planning."
+        status={sitemapApproved ? 'passed' : hasStage2 ? 'awaiting' : 'upstream'}
+      />
+
+      {/* Engine actions — only meaningful once sitemap is approved */}
+      {sitemapApproved && (
+        <section className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <ActionCard
+              icon={<Play size={14} />}
+              title="Run drafts"
+              description="Page briefs + per-page drafts (parallel). Run after sitemap is approved or after major upstream changes."
+              busy={running === 'run_drafts'}
+              disabled={!!running}
+              onClick={() => void callOrchestrate('run_drafts')}
+            />
+            <ActionCard
+              icon={<GitBranch size={14} />}
+              title="Director critique"
+              description="Score each page vs. the spec. Emit directives for pages that need re-drafting."
+              busy={running === 'critique'}
+              disabled={!!running || draftSlugs.length === 0}
+              onClick={() => void callOrchestrate('critique')}
+            />
+            <ActionCard
+              icon={<RefreshCw size={14} />}
+              title="Iterate (up to 3 loops)"
+              description="Apply directives, re-draft flagged pages, re-critique. Stops when no directives or verdict approves."
+              busy={running === 'iterate'}
+              disabled={!!running || !critique?.directives?.length}
+              onClick={() => void callOrchestrate('iterate')}
+            />
+            <ActionCard
+              icon={<FileText size={14} />}
+              title="Commit to pages"
+              description="Bind every page_draft to web_pages + web_sections. Strategist can upgrade to specific Brixies templates in the page editor."
+              busy={running === 'commit'}
+              disabled={!!running || draftSlugs.length === 0}
+              onClick={() => void callOrchestrate('commit')}
+            />
+          </div>
+        </section>
+      )}
+
+      {/* Critique summary */}
+      {critique && (
+        <section className="rounded-lg border border-wm-border bg-wm-bg-elevated p-4 space-y-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <h3 className="text-[14px] font-semibold text-wm-text">Director critique</h3>
+            <span className={[
+              'text-[11px] uppercase tracking-wider font-bold px-2 py-0.5 rounded',
+              critique.overall_verdict === 'approved' ? 'bg-wm-success-bg text-wm-success'
+              : critique.overall_verdict === 'needs_strategy_rework' ? 'bg-wm-danger-bg text-wm-danger'
+              : 'bg-wm-warning-bg text-wm-warning',
+            ].join(' ')}>
+              {critique.overall_verdict ?? 'unknown'}
+            </span>
+          </div>
+
+          {critique.scores && (
+            <div className="grid grid-cols-5 gap-2 text-[11px]">
+              <ScoreChip label="Voice" value={critique.scores.voice_consistency ?? 0} />
+              <ScoreChip label="Persona" value={critique.scores.persona_coverage ?? 0} />
+              <ScoreChip label="Atoms" value={critique.scores.atom_coverage ?? 0} />
+              <ScoreChip label="Slots" value={critique.scores.slot_health ?? 0} />
+              <ScoreChip label="Overall" value={critique.scores.overall ?? 0} bold />
+            </div>
+          )}
+
+          {Array.isArray(critique.directives) && critique.directives.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-muted">Directives ({critique.directives.length})</p>
+              {critique.directives.map((d, i) => (
+                <div key={i} className="rounded-md border border-wm-border bg-wm-bg p-2.5">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[11px] uppercase tracking-wider font-bold text-wm-accent-strong">
+                      {d.stage_to_rerun} {d.page_slug !== '*' && `· ${d.page_slug}`}
+                    </span>
+                    <span className={[
+                      'text-[10px] uppercase tracking-wider font-bold',
+                      d.severity === 'blocker' ? 'text-wm-danger'
+                      : d.severity === 'warning' ? 'text-wm-warning' : 'text-wm-text-subtle',
+                    ].join(' ')}>{d.severity}</span>
+                  </div>
+                  <p className="text-[12px] text-wm-text mt-1 leading-snug">{d.note}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {Array.isArray(critique.per_page) && critique.per_page.length > 0 && (
+            <details className="text-[12px]">
+              <summary className="cursor-pointer text-[11px] text-wm-text-muted hover:text-wm-text">Per-page breakdown ({critique.per_page.length})</summary>
+              <div className="mt-2 space-y-2">
+                {critique.per_page.map((p, i) => (
+                  <div key={i} className="rounded-md border border-wm-border bg-wm-bg p-2.5">
+                    <div className="flex items-baseline gap-2 mb-1">
+                      <span className="font-semibold text-wm-text">{p.page_slug}</span>
+                      <span className="text-[10px] text-wm-text-muted">
+                        v {p.voice_match} · p {p.persona_fit} · a {p.atom_coverage} · s {p.slot_health}
+                      </span>
+                    </div>
+                    {p.summary && <p className="text-[12px] text-wm-text-muted leading-snug">{p.summary}</p>}
+                    {p.problem_lines?.length ? (
+                      <ul className="mt-1 space-y-0.5">
+                        {p.problem_lines.map((line, j) => (
+                          <li key={j} className="text-[11px] text-wm-danger">· {line}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+
+          {Array.isArray(critique.cross_page_findings) && critique.cross_page_findings.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-muted">Cross-page findings</p>
+              {critique.cross_page_findings.map((f, i) => (
+                <div key={i} className="text-[12px] text-wm-text">
+                  <span className="text-[10px] uppercase tracking-wider font-bold text-wm-accent-strong mr-2">{f.kind}</span>
+                  {f.description}
+                  {f.pages?.length ? <span className="text-[11px] text-wm-text-muted ml-2">({f.pages.join(', ')})</span> : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Drafts overview */}
+      {draftSlugs.length > 0 && (
+        <section className="rounded-lg border border-wm-border bg-wm-bg-elevated p-4">
+          <h3 className="text-[14px] font-semibold text-wm-text mb-3">Drafted pages ({draftSlugs.length})</h3>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+            {draftSlugs.map(slug => {
+              const d = drafts[slug]
+              const sectionCount = Array.isArray(d?.sections) ? d.sections.length : 0
+              const flags = Array.isArray(d?.validation?.flags) ? d.validation.flags.length : 0
+              const redoCount = d?._meta?.redo_count ?? 0
+              return (
+                <div key={slug} className="rounded-md border border-wm-border bg-wm-bg p-2.5">
+                  <p className="text-[12px] font-semibold text-wm-text">{slug}</p>
+                  <p className="text-[10px] text-wm-text-muted mt-0.5">
+                    {sectionCount} sections
+                    {flags > 0 && <span className="text-wm-warning"> · {flags} flags</span>}
+                    {redoCount > 0 && <span> · v{redoCount + 1}</span>}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Gate 2 — Final review */}
+      <GateCard
+        number={2}
+        title="Final review"
+        subtitle="Give feedback. The Director routes it to the right stage."
+        status={status === 'committed' ? 'passed' : status === 'ready_for_review' ? 'awaiting' : 'upstream'}
+      />
+
+      {(status === 'ready_for_review' || status === 'committed' || draftSlugs.length > 0) && (
+        <section className="rounded-lg border border-wm-border bg-wm-bg-elevated p-4 space-y-3">
+          <h3 className="text-[14px] font-semibold text-wm-text">Strategist feedback</h3>
+          <p className="text-[12px] text-wm-text-muted leading-snug">
+            Tell the Director what's off. It classifies into a single dispatch and shows you the plan before executing.
+            Examples: "the homepage hero is generic", "we're not really hitting Maria", "the giving page heading should be punchier".
+          </p>
+          <textarea
+            value={feedback}
+            onChange={e => setFeedback(e.target.value)}
+            placeholder="What's the issue?"
+            rows={3}
+            className="w-full rounded-md border border-wm-border bg-wm-bg px-3 py-2 text-[13px] text-wm-text focus:outline-none focus:border-wm-accent"
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => void submitRoute()}
+              disabled={routing || !feedback.trim()}
+              className="inline-flex items-center gap-1.5 rounded-full bg-wm-text px-4 py-1.5 text-[12px] text-wm-bg disabled:opacity-50"
+            >
+              {routing ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Route
+            </button>
+          </div>
+
+          {routePreview?.dispatch && (
+            <div className="rounded-md border border-wm-accent/30 bg-wm-accent/5 p-3 space-y-2">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">Director's plan</p>
+              <p className="text-[12px] text-wm-text">
+                Run <span className="font-semibold">{routePreview.dispatch.stage_to_rerun}</span>
+                {routePreview.dispatch.page_slug ? <> on <span className="font-mono">{routePreview.dispatch.page_slug}</span></> : null}
+                {routePreview.dispatch.slot_key ? <> · slot <span className="font-mono">{routePreview.dispatch.slot_key}</span></> : null}
+              </p>
+              <p className="text-[12px] text-wm-text-muted italic">"{routePreview.dispatch.note}"</p>
+              {routePreview.rationale && (
+                <p className="text-[11px] text-wm-text-muted">— {routePreview.rationale}</p>
+              )}
+              {Array.isArray(routePreview.alternative_dispatches) && routePreview.alternative_dispatches.length > 0 && (
+                <details className="text-[11px] text-wm-text-muted">
+                  <summary className="cursor-pointer">Alternatives considered ({routePreview.alternative_dispatches.length})</summary>
+                  <ul className="mt-1 space-y-0.5">
+                    {routePreview.alternative_dispatches.map((a, i) => (
+                      <li key={i}>· {a.stage_to_rerun}: {a.why_rejected}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={() => setRoutePreview(null)} className="text-[12px] text-wm-text-muted px-3 py-1 hover:text-wm-text">Cancel</button>
+                <button onClick={() => void applyRoute()} disabled={!!running}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white disabled:opacity-50">
+                  {running === 'apply' ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Execute
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  )
+}
+
+// ── Subcomponents ─────────────────────────────────────────────────────
+
+function StatusBanner({ engine }: { engine: EngineState }) {
+  const status = engine.status ?? 'idle'
+  const phase = engine.current_phase ?? '—'
+  const showProgress = (engine.pages_total ?? 0) > 0 && (engine.pages_drafted ?? engine.pages_committed) != null
+  const drafted = engine.pages_drafted ?? engine.pages_committed ?? 0
+  const total = engine.pages_total ?? 0
+
+  const tone =
+    status === 'committed' || status === 'ready_for_review' ? 'success'
+    : status === 'error' ? 'danger'
+    : status === 'idle' ? 'muted' : 'info'
+
+  const toneClass = {
+    success: 'border-wm-success/30 bg-wm-success-bg text-wm-success',
+    danger:  'border-wm-danger/30 bg-wm-danger-bg text-wm-danger',
+    info:    'border-wm-accent/30 bg-wm-accent/5 text-wm-accent-strong',
+    muted:   'border-wm-border bg-wm-bg-elevated text-wm-text-muted',
+  }[tone]
+
+  return (
+    <div className={['rounded-md border px-3 py-2 flex items-baseline gap-3', toneClass].join(' ')}>
+      <span className="text-[11px] uppercase tracking-widest font-bold">{status}</span>
+      <span className="text-[11px]">phase: {phase}</span>
+      {showProgress && (
+        <span className="text-[11px]">{drafted}/{total} pages</span>
+      )}
+      {typeof engine.loop_count === 'number' && engine.loop_count > 0 && (
+        <span className="text-[11px]">loops: {engine.loop_count}</span>
+      )}
+      {engine.last_error && (
+        <span className="text-[11px] text-wm-danger ml-auto">{engine.last_error}</span>
+      )}
+    </div>
+  )
+}
+
+function GateCard({ number, title, subtitle, status }: {
+  number: 1 | 2; title: string; subtitle: string
+  status: 'upstream' | 'awaiting' | 'passed'
+}) {
+  const icon =
+    status === 'passed' ? <CheckCircle2 size={16} className="text-wm-success" />
+    : status === 'awaiting' ? <AlertCircle size={16} className="text-wm-warning" />
+    : <AlertCircle size={16} className="text-wm-text-subtle" />
+  return (
+    <div className="rounded-lg border border-wm-border bg-wm-bg-elevated p-3 flex items-center gap-3">
+      <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Gate {number}</span>
+      {icon}
+      <div className="flex-1">
+        <p className="text-[13px] font-semibold text-wm-text">{title}</p>
+        <p className="text-[11px] text-wm-text-muted">{subtitle}</p>
+      </div>
+      <span className="text-[10px] uppercase tracking-wider font-bold text-wm-text-subtle">{status}</span>
+    </div>
+  )
+}
+
+function ActionCard({ icon, title, description, busy, disabled, onClick }: {
+  icon: React.ReactNode; title: string; description: string
+  busy?: boolean; disabled?: boolean; onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={!!disabled}
+      className="text-left rounded-lg border border-wm-border bg-wm-bg-elevated hover:border-wm-accent/40 hover:bg-wm-accent/5 p-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+    >
+      <div className="flex items-center gap-2 mb-1">
+        {busy ? <Loader2 size={14} className="animate-spin text-wm-accent" /> : icon}
+        <span className="text-[13px] font-semibold text-wm-text">{title}</span>
+      </div>
+      <p className="text-[11px] text-wm-text-muted leading-snug">{description}</p>
+    </button>
+  )
+}
+
+function ScoreChip({ label, value, bold }: { label: string; value: number; bold?: boolean }) {
+  const color = value >= 80 ? 'text-wm-success' : value >= 60 ? 'text-wm-warning' : 'text-wm-danger'
+  return (
+    <div className="rounded-md border border-wm-border bg-wm-bg p-2 text-center">
+      <p className="text-[10px] uppercase tracking-wider text-wm-text-muted">{label}</p>
+      <p className={['mt-0.5', color, bold ? 'text-[15px] font-bold' : 'text-[13px] font-semibold'].join(' ')}>{value}</p>
+    </div>
+  )
+}
