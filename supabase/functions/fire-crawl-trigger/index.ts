@@ -71,7 +71,9 @@ Deno.serve(async (req) => {
     // Returns { pages, hitCap } where hitCap is true when Firecrawl
     // returned ≥ requested limit (detail-page enumeration likely
     // soaked it all up). Throws on permanent failure.
-    const runFirecrawl = async (limit, excludePathsForRun) => {
+    // proxy: 'basic' (default; cheapest) | 'stealth' (~5x credits, but
+    // bypasses most Squarespace / Cloudflare bot walls).
+    const runFirecrawl = async (limit, excludePathsForRun, proxyMode = 'basic') => {
       const startRes = await fetch("https://api.firecrawl.dev/v1/crawl", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${fireCrawlApiKey}` },
@@ -82,7 +84,11 @@ Deno.serve(async (req) => {
           // the LLM categorizer can pick up site-wide details (address,
           // phone, social links) that live in the footer on most
           // church sites. The downstream LLM filters nav noise.
-          scrapeOptions: { formats: ["markdown", "html", "links"], onlyMainContent: false },
+          scrapeOptions: {
+            formats: ["markdown", "html", "links"],
+            onlyMainContent: false,
+            proxy: proxyMode,
+          },
         }),
       });
       if (!startRes.ok) {
@@ -209,7 +215,66 @@ Deno.serve(async (req) => {
         }
       }
       if (droppedFailures.length > 0) {
-        console.warn(`[fire-crawl-trigger] dropped ${droppedFailures.length} scrape failures:`, droppedFailures.slice(0, 10));
+        console.warn(`[fire-crawl-trigger] dropped ${droppedFailures.length} scrape failures (basic proxy):`, droppedFailures.slice(0, 10));
+      }
+
+      // ── Stealth proxy fallback ────────────────────────────────────
+      // When the basic proxy fails on a meaningful fraction of pages
+      // (Squarespace, Cloudflare bot walls, anti-scrape on dynamic
+      // pages), retry each failed URL with proxy='stealth' through
+      // Firecrawl's /v1/scrape per-URL endpoint. Stealth uses
+      // residential IPs + browser fingerprinting and gets through
+      // most basic-bot defenses. Costs ~5x credits per page, so we
+      // only run it for the failed subset and only when the failure
+      // rate clears a threshold (don't burn credits when 1 page out
+      // of 50 fails).
+      const totalAttempted = pages.length;
+      const failureRate = totalAttempted > 0 ? droppedFailures.length / totalAttempted : 0;
+      const STEALTH_TRIGGER_RATE = 0.20;            // ≥20% basic failures triggers stealth
+      const STEALTH_TRIGGER_FLOOR = 5;              // OR ≥5 absolute failures
+      const STEALTH_MAX_RETRIES   = 50;             // safety cap on credits
+      const stealthRecoveries = [];
+      const stillFailedAfterStealth = [];
+      if (
+        droppedFailures.length > 0 &&
+        (failureRate >= STEALTH_TRIGGER_RATE || droppedFailures.length >= STEALTH_TRIGGER_FLOOR)
+      ) {
+        const urlsToRetry = droppedFailures.slice(0, STEALTH_MAX_RETRIES).map(f => f.url).filter(Boolean);
+        console.log(`[fire-crawl-trigger] stealth retry: ${urlsToRetry.length} URLs (failure rate ${(failureRate * 100).toFixed(0)}%)`);
+        for (const url of urlsToRetry) {
+          try {
+            const sRes = await fetch("https://api.firecrawl.dev/v1/scrape", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${fireCrawlApiKey}` },
+              body: JSON.stringify({
+                url,
+                formats: ["markdown", "html", "links"],
+                onlyMainContent: false,
+                proxy: "stealth",
+              }),
+            });
+            if (!sRes.ok) {
+              stillFailedAfterStealth.push({ url, http: sRes.status });
+              continue;
+            }
+            const body = await sRes.json();
+            const page = body?.data ?? body;
+            if (isScrapeFailure(page)) {
+              stillFailedAfterStealth.push({
+                url,
+                statusCode: page?.metadata?.statusCode,
+                error: page?.metadata?.error,
+              });
+              continue;
+            }
+            // Stealth recovered the page — merge into okPages.
+            okPages.push(page);
+            stealthRecoveries.push(url);
+          } catch (e) {
+            stillFailedAfterStealth.push({ url, threw: String(e?.message ?? e) });
+          }
+        }
+        console.log(`[fire-crawl-trigger] stealth recovered ${stealthRecoveries.length}/${urlsToRetry.length}; still failed ${stillFailedAfterStealth.length}`);
       }
 
       // Map Firecrawl's actual response to our canonical storage shape.
@@ -232,11 +297,14 @@ Deno.serve(async (req) => {
 
       const jobStart = new Date(crawlJob.started_at || crawlJob.created_at);
       const durSec = Math.floor((Date.now() - jobStart.getTime()) / 1000);
-      const errorMessage = droppedFailures.length > 0
-        ? `Firecrawl returned ${droppedFailures.length} scrape failure(s); dropped from results. First few: ${
-            droppedFailures.slice(0, 3).map(f => `${f.url} (${f.statusCode})`).join(', ')
-          }`
-        : null;
+      const errorMessage = (droppedFailures.length === 0 && stealthRecoveries.length === 0 && stillFailedAfterStealth.length === 0)
+        ? null
+        : [
+            droppedFailures.length > 0 && `Basic proxy failed on ${droppedFailures.length} of ${pages.length} pages.`,
+            stealthRecoveries.length > 0 && `Stealth proxy recovered ${stealthRecoveries.length}.`,
+            stillFailedAfterStealth.length > 0 && `${stillFailedAfterStealth.length} pages still unreachable after stealth retry.`,
+            stillFailedAfterStealth.length > 0 && `Affected URLs (first 3): ${stillFailedAfterStealth.slice(0, 3).map(f => f.url).join(', ')}`,
+          ].filter(Boolean).join(' ');
       await supabase.schema("web-hub").from("crawl_jobs").update({
         status: "complete", pages_crawled: contentItems.length,
         completed_at: new Date().toISOString(), crawl_results: contentItems, duration_seconds: durSec,

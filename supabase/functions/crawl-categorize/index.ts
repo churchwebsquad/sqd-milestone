@@ -629,6 +629,7 @@ async function llmExtractPage(apiKey, page, urlHits) {
     "12a. SNIPPET DEDUP — ONE token per concept. Don't emit BOTH `service_time` AND `sunday_service_time` AND `main_service_times` for the same fact. Pick the most specific token name and use it exclusively. Same for any youth/student/kids text-keyword / phone / signup pairs. The reader only needs one canonical reference per concept.",
     "12b. COMPLETE VALUES — if the page lists multiple readings of the same fact (e.g. '9 AM and 11 AM' for service times, three campus phone numbers, two giving methods), the snippet `value` MUST contain ALL of them — joined naturally ('9:00 AM and 11:00 AM', 'AmEx, Visa, Mastercard'). Never truncate to just the first one. A snippet value `\"11 AM\"` is WRONG when the page also lists a 9 AM service.",
     "12c. NO HALLUCINATION — only emit snippets whose `value` appears VERBATIM somewhere in the page content provided above. Do not invent phone numbers, shortcodes, email addresses, names, dates, dollar amounts, or URLs. If the page says \"Text DSY to 55678\", you MAY emit `youth_text_keyword: \"DSY\"` and `youth_text_number: \"55678\"`, but you may NOT emit `youth_text_number: \"620-322-2390\"`. If a value isn't literally on the page, OMIT the snippet entirely.",
+    "12d. SERVICE TIMES ARE THE CHURCH'S, NOT A MINISTRY'S — when you see Sunday service times listed (e.g. \"9:15 AM and 11:00 AM\"), they belong to the whole church and route to the `service_times` / `main_service_times` token. NEVER prefix them with a ministry name (`kids_service_times`, `youth_service_times`, `family_service_times`) just because nearby text mentions that ministry. The line \"9:15 & 11:00 AM Worship services. Children's programs are available...\" describes ONE pair of services that the church holds and a side-note that kids programs run alongside — emit `main_service_times: \"9:15 AM and 11:00 AM\"`, NOT `kids_service_times`. Reserve ministry-prefixed time tokens (e.g. `student_ministry_meeting_time`, `young_adults_meeting_time`) for events that ONLY that ministry attends, on a SEPARATE schedule from the main service.",
     "13. Output JSON only. No prose. No markdown fences.",
   ].join("\n");
 
@@ -775,6 +776,52 @@ async function routeSnippetsAndUpsert(supabase, projectId, snippets) {
         if (cur === null || cur === undefined || (typeof cur === "string" && cur.trim() === "")) { updates[col] = globalFills[col]; globalsFilled.push(col); }
       }
       if (Object.keys(updates).length > 0) await supabase.from("strategy_web_projects").update(updates).eq("id", projectId);
+    }
+  }
+
+  // Mirror critical globals to a canonical snippet so the partner-
+  // facing inventory has a labelled, scannable entry. The router
+  // routes any *service*time* token (service_times, main_service_times,
+  // sunday_service_times, etc.) to the all_service_times column, which
+  // means no snippet gets created — and the inventory ends up
+  // surfacing the LLM's secondary, often mis-labeled snippets
+  // (e.g. "Kids Ministry Service Times") as the only thing the partner
+  // sees about service times. Concrete example: baysidechurch.net's
+  // crawl filled all_service_times="9:15 AM and 11:00 AM" but only
+  // created a kids_service_times snippet with the same value. Partner
+  // saw "Kids Ministry Service Times" as their service-times anchor.
+  //
+  // Mirroring fixes both gaps: a main_service_times snippet exists
+  // for display, and it carries the global value, not whatever the
+  // LLM secondary-named.
+  const GLOBAL_TO_SNIPPET_MIRROR = {
+    all_service_times: { token: "main_service_times", label: "Main Service Times" },
+  };
+  const mirrorRows = [];
+  for (const col of Object.keys(globalFills)) {
+    const m = GLOBAL_TO_SNIPPET_MIRROR[col];
+    if (!m) continue;
+    mirrorRows.push({
+      token: m.token, label: m.label, value: globalFills[col],
+    });
+  }
+  if (mirrorRows.length > 0) {
+    const mirrorTokens = mirrorRows.map(r => r.token);
+    const { data: existingMirrors } = await supabase.from("web_project_snippets")
+      .select("token").eq("web_project_id", projectId).eq("archived", false).in("token", mirrorTokens);
+    const existingMirrorSet = new Set((existingMirrors ?? []).map(r => r.token));
+    const insertable = mirrorRows.filter(r => !existingMirrorSet.has(r.token));
+    if (insertable.length > 0) {
+      const { error: mirrorErr } = await supabase.from("web_project_snippets").insert(
+        insertable.map(r => ({
+          web_project_id: projectId, token: r.token, label: r.label, expansion: r.value,
+          description: "Mirrored from global column for partner-facing inventory display.",
+          tags: ["auto","categorizer","global_mirror"],
+          source: "crawl_prefill", archived: false, used_count: 0,
+        }))
+      );
+      if (!mirrorErr) console.log("[Categorize] Mirrored globals to snippets:", insertable.map(r => r.token).join(", "));
+      else console.error("[Categorize] Global mirror insert failed:", mirrorErr);
     }
   }
   const customTokensAdded = [];
