@@ -916,6 +916,8 @@ function ExtractionSections({
 }: { data: Record<string, unknown>; viewMode: ViewMode }) {
   const audience       = data.audience            as Record<string, unknown> | undefined
   const voice          = data.voice_characteristics as Record<string, unknown> | undefined
+  const voiceExemplars     = data.voice_exemplars      as Array<Record<string, unknown>> | undefined
+  const voiceAntiExemplars = data.voice_anti_exemplars as Array<Record<string, unknown>> | undefined
   const personas       = data.personas             as Array<Record<string, unknown>> | undefined
   const xFactor        = data.x_factor             as Record<string, unknown> | undefined
   const goals          = data.project_goals        as Record<string, unknown> | undefined
@@ -958,6 +960,57 @@ function ExtractionSections({
               {voice.tone_examples_dont && (
                 <ExampleList tone="danger" label="Don't" items={voice.tone_examples_dont as string[]} />
               )}
+            </div>
+          )}
+        </ExtractionSection>
+      )}
+
+      {/* Voice exemplars — actual phrases downstream copywriting stages
+          imitate. The most load-bearing output of Stage 1; treat the
+          source attribution as a sanity check (a row with source
+          'Synthesized' on every entry means Stage 1 didn't dig hard
+          enough into the intake). */}
+      {((voiceExemplars && voiceExemplars.length > 0) || (voiceAntiExemplars && voiceAntiExemplars.length > 0)) && (
+        <ExtractionSection title="Voice exemplars">
+          <p className="text-[12px] text-wm-text-muted mb-3 leading-snug">
+            Few-shot examples downstream copywriting stages imitate. Pulled from intake when possible.
+          </p>
+          {voiceExemplars && voiceExemplars.length > 0 && (
+            <div className="space-y-2 mb-4">
+              {voiceExemplars.map((ex, i) => (
+                <div key={i} className="rounded-md border border-wm-success/20 bg-wm-success-bg p-2.5">
+                  <p className="text-[13px] text-wm-text font-medium leading-snug">"{String(ex.phrase ?? '')}"</p>
+                  <div className="flex items-baseline justify-between gap-2 mt-1.5">
+                    <p className="text-[11px] text-wm-text-muted leading-snug">{String(ex.why_exemplar ?? '')}</p>
+                    {ex.source && (
+                      <span className="text-[10px] text-wm-text-subtle uppercase tracking-wider whitespace-nowrap">{String(ex.source)}</span>
+                    )}
+                  </div>
+                  {Array.isArray(ex.slot_kind_fit) && ex.slot_kind_fit.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {(ex.slot_kind_fit as string[]).map((s, j) => (
+                        <span key={j} className="text-[10px] px-1.5 py-0.5 rounded bg-wm-accent/10 text-wm-accent-strong uppercase tracking-wider">{s}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {voiceAntiExemplars && voiceAntiExemplars.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-danger">Never produce</p>
+              {voiceAntiExemplars.map((ax, i) => (
+                <div key={i} className="rounded-md border border-wm-danger/20 bg-wm-danger-bg p-2.5">
+                  <p className="text-[13px] text-wm-text leading-snug">"{String(ax.pattern ?? '')}"</p>
+                  <div className="flex items-baseline justify-between gap-2 mt-1.5">
+                    <p className="text-[11px] text-wm-text-muted leading-snug">{String(ax.why_avoid ?? '')}</p>
+                    {ax.kind && (
+                      <span className="text-[10px] text-wm-danger uppercase tracking-wider whitespace-nowrap">{String(ax.kind).replace(/_/g,' ')}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </ExtractionSection>

@@ -212,6 +212,10 @@ findings.
 Required outputs:
 - audience (primary + secondary)
 - voice_characteristics (signature moves + sample sentences)
+- voice_exemplars (5-10 ACTUAL phrases this church would publish, sourced
+  from intake when possible; downstream copywriting stages imitate these)
+- voice_anti_exemplars (5-10 phrases or shapes this church should NEVER
+  produce — include the universal LLM tics AND project-specific traps)
 - personas (one per persona, with need/goal/voice_resonance)
 - x_factor (1-2 sentences on what makes this church distinct)
 - project_goals (3-5 outcomes the partner cares about)
@@ -221,7 +225,47 @@ Required outputs:
   destination_page or absorbed_into, rationale)
 - seo_aeo_geo_targets (per topic: search phrases, answer-engine intents,
   geographic anchors)
-- sources_used (which intake files informed each decision)`,
+- sources_used (which intake files informed each decision)
+
+# Voice exemplars + anti-exemplars (mission-critical)
+
+Downstream copywriting stages don't see the intake. They see your output.
+The voice descriptions you write are useful, but ACTUAL PHRASES are what
+the model imitates. Producing strong exemplars here is the single highest-
+leverage thing you do in Stage 1.
+
+## voice_exemplars — 5-10 phrases this church would actually publish
+
+Hunting strategy, in priority order:
+
+1. Verbatim from intake — Strategy Brief mission/voice, Discovery Q
+   open-text answers, AM handoff paragraphs, Brand Handoff voice samples.
+2. Lifted from current crawl topic passages.
+3. Synthesized from the voice card (last resort; mark source clearly).
+
+A good exemplar is concrete, plain, true to THIS church, and models a
+real slot shape (heading/tagline/description/body). Set slot_kind_fit
+on each so downstream stages know when to reach for it.
+
+Bad exemplars to avoid producing:
+- Generic transplantable phrases ("Authentic faith for everyday people.")
+- AI-polished welcomes ("We welcome you on your journey.")
+- Three-adjective clusters ("vibrant, dynamic, life-changing")
+
+## voice_anti_exemplars — 5-10 patterns this church should never produce
+
+Always include:
+- The parallel-clause heading tic: "X, not Y." / "X, but Y." / "X, and Y."
+  (e.g. "Both, not either." or "Faith, not fluff.") — kind='parallel_clause_tic'
+- Em-dash injection patterns — kind='em_dash_pattern'
+- Universal AI clichés: delve, tapestry, unlock, embark, beacon, elevate,
+  weave, navigate the journey — kind='ai_cliche'
+
+Then ADD project-specific anti-exemplars surfaced by intake. If Discovery
+Q says "we hate sounding corporate", list corporate phrasings. If the
+church rejects performative warmth, list warmth tics ("We can't wait to
+meet you!"). Anti-exemplars must be CONCRETE phrases the model would
+actually generate, not abstract rules.`,
 
   sitemap: `You are the Sitemap Drafter. Your job — and your only job — is to
 produce the page list, navigation structure, and vocabulary decisions

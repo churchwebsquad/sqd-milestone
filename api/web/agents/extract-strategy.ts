@@ -435,6 +435,7 @@ Emit a single structured object via the \`submit_strategy_extraction\` tool. Cov
 
 - **Audience** — who this church is reaching (summary + segments + age distribution + geographic reach + online-vs-in-person notes)
 - **Voice characteristics** — top attributes (3–5 chips), 2–3 sentence description, 4–6 Do examples, 4–6 Don't examples. Pull from Brand Handoff's voice_overview + Strategy Brief's voice section.
+- **Voice exemplars + anti-exemplars** — see the dedicated section below. These are the MOST IMPORTANT output of Stage 1.
 - **Personas** — per-project persona archetypes from the Strategy Brief. Each has name, archetype, description, goals, challenges, motivations, and a direct message addressing them.
 - **X-factor** — the single top attribute that makes this church distinctive + the messaging focus.
 - **Project goals** — Identity / Connection / Growth, in plain language.
@@ -455,6 +456,79 @@ Apply these to every string you emit:
 - No filler intensifiers: truly, really, deeply, incredibly, very, amazing, just, simply.
 - No AI cliché vocabulary: delve, tapestry, unlock, unleash, elevate, beacon, embark, resonate, dynamic, synergistic, game-changer.
 - No "We / Our" framing. Refer to the church by name.
+
+# Voice exemplars + anti-exemplars (mission-critical)
+
+Downstream copywriting stages don't see the intake. They see your output.
+The voice descriptions you write are useful, but ACTUAL PHRASES are what
+the model imitates. Producing strong exemplars here is the single highest-
+leverage thing you do in Stage 1.
+
+## voice_exemplars — 5–10 phrases this church would actually publish
+
+Hunting strategy, in priority order:
+
+1. **Verbatim from intake.** Scan the Strategy Brief mission/voice
+   section, the Discovery Q open-text answers, AM handoff paragraphs,
+   and Brand Handoff voice samples. Pull short phrases that already
+   sound like the partner. Mark source precisely (e.g. "Discovery Q,
+   Q12 — 'what kind of church do you want to be?'").
+2. **Lifted from current crawl.** Scan crawl topic passages for lines
+   the church already publishes that match the voice. Pull verbatim;
+   source as "Crawl: <topic_label>".
+3. **Synthesized as last resort.** If intake is thin, write phrases
+   that match the voice card — but mark source: "Synthesized from
+   voice characteristics" so downstream stages know.
+
+A good exemplar:
+- Concrete. Names a noun or an action. Not an abstraction.
+- Plain. A 12-year-old understands it on first read.
+- True to THIS church. Wouldn't transplant to a generic church website.
+- Models a real slot shape. Could appear as a heading, tagline,
+  description, or body opener.
+
+A bad exemplar (don't produce):
+- "Authentic faith for everyday people." — generic, transplantable.
+- "We welcome you on your journey." — AI polish, no specifics.
+- "A vibrant, dynamic community." — three-adjective cluster.
+
+For each exemplar, fill in slot_kind_fit so downstream stages know
+when to reach for it. A short declarative ("You belong before you
+believe.") fits heading/tagline. A longer specific sentence fits
+description/body.
+
+## voice_anti_exemplars — 5–10 patterns this church should never produce
+
+Always include:
+
+- The parallel-clause heading tic — "X, not Y." / "X, but Y." /
+  "X, and Y." (e.g. "Both, not either." or "Faith, not fluff."
+  or "Open, but honest."). These pass syntactic checks but read
+  as model-generated summary. kind='parallel_clause_tic'.
+- Em-dash injection patterns — phrases that "regularize cadence"
+  by inserting em-dashes. The brand voice wants periods.
+  kind='em_dash_pattern'.
+- Universal AI clichés — delve, tapestry, unlock, unleash, beacon,
+  embark, resonate, "elevate", "weave", "navigate the journey".
+  kind='ai_cliche'.
+
+Then ADD project-specific anti-exemplars surfaced by intake:
+
+- If Discovery Q says "we hate sounding corporate" — list the
+  corporate phrasings to avoid. kind='project_specific'.
+- If the church explicitly rejects performative warmth — list the
+  warmth tics ("We can't wait to meet you!"). kind='project_specific'.
+- If the Brand Handoff names competitor brands to avoid sounding
+  like — list a phrase typical of that competitor. kind='project_specific'.
+- If the church's voice is plain-spoken but uses big words for theology,
+  ban the inversion (theological topic in pop-culture register).
+  kind='jargon'.
+
+For each anti-exemplar, the pattern should be a CONCRETE phrase
+the model would actually generate, not an abstract rule. "Avoid
+generic polish" is useless to a downstream stage. "Avoid 'Embark
+on a journey of faith'" gives the model a target to recognize and
+reject.
 
 # Discipline
 - Every concrete fact you write should be traceable to a source. If something isn't in the intake, don't invent it — say "Not specified in intake."
@@ -669,6 +743,41 @@ export const EXTRACTION_TOOL = {
           tone_examples_dont: { type: 'array', items: { type: 'string' }, description: '4–6 short examples of what does NOT fit.' },
         },
       },
+      voice_exemplars: {
+        type: 'array',
+        description: '5–10 ACTUAL phrases in this church\'s voice. Pulled verbatim from intake when possible (Discovery Q answers, Strategy Brief mission, Brand Handoff samples, AM handoff notes). Downstream copywriting stages use these as few-shot examples — they are the most load-bearing output of Stage 1. Generic adjectives ("warm but bold") don\'t help downstream stages; phrases do.',
+        items: {
+          type: 'object',
+          required: ['phrase', 'source', 'why_exemplar'],
+          properties: {
+            phrase:        { type: 'string', description: 'The actual phrase or sentence. Under 25 words. Should sound like something this church would actually publish.' },
+            source:        { type: 'string', description: 'Where it came from. "Discovery Q, Q12" / "Strategy Brief, mission section" / "Brand Handoff voice samples" / "AM handoff notes, paragraph 3" / "Synthesized from voice card" if no verbatim source available.' },
+            why_exemplar: { type: 'string', description: 'One sentence on what this phrase demonstrates about the voice — e.g. "concrete + plain-spoken, no abstractions" or "treats doubt as welcome, not a defect".' },
+            slot_kind_fit: {
+              type: 'array',
+              items: { type: 'string', enum: ['heading','tagline','description','body','eyebrow','cta'] },
+              description: 'Which slot kinds this exemplar models well.',
+            },
+          },
+        },
+      },
+      voice_anti_exemplars: {
+        type: 'array',
+        description: '5–10 phrases or shapes this church should NEVER produce. Mix universal LLM tics with project-specific traps surfaced in intake. Downstream stages use these to filter their own output before submitting.',
+        items: {
+          type: 'object',
+          required: ['pattern', 'why_avoid', 'kind'],
+          properties: {
+            pattern:    { type: 'string', description: 'The phrase or shape. E.g. "Both, not either." or any heading shaped "X, not Y." or "Embark on a journey of faith" or "Unlock your potential".' },
+            why_avoid: { type: 'string', description: 'One sentence on why this voice rejects this pattern.' },
+            kind:       {
+              type: 'string',
+              enum: ['ai_cliche','parallel_clause_tic','em_dash_pattern','generic_polish','jargon','project_specific'],
+              description: 'Category — helps downstream stages reason about which validator catches it.',
+            },
+          },
+        },
+      },
       personas: {
         type: 'array',
         description: 'Project-specific personas from the strategy brief. Each persona is one card.',
@@ -856,6 +965,23 @@ function buildMockExtraction(project: any): Record<string, unknown> {
         'Delve into the tapestry of faith.',
       ],
     },
+    voice_exemplars: [
+      { phrase: 'You belong here, even before you believe.', source: 'Strategy Brief, voice section', why_exemplar: 'Welcomes without performing — names belonging as the entry point, not belief.', slot_kind_fit: ['tagline','heading'] },
+      { phrase: 'Real questions. Honest answers.', source: 'Discovery Q, Q14', why_exemplar: 'Two short phrases; concrete; treats doubt as welcome.', slot_kind_fit: ['heading','tagline'] },
+      { phrase: 'Sunday is a starting line, not a finish.', source: 'Strategy Brief, mission paragraph', why_exemplar: 'Vivid image; sets expectation that Sunday is one input among many.', slot_kind_fit: ['heading','description'] },
+      { phrase: 'You can ask the hard questions here. No one will rush you toward an answer you have not earned.', source: 'Synthesized from voice characteristics', why_exemplar: 'Patient pastoral tone; concrete; rejects the "altar call" register.', slot_kind_fit: ['description','body'] },
+      { phrase: 'Come hungry. Stay messy.', source: 'AM Handoff notes, paragraph 3', why_exemplar: 'Two-beat punchline that the church uses; permission to show up unfinished.', slot_kind_fit: ['heading','tagline'] },
+      { phrase: 'Your kids will be loved here. So will you. Both matter equally.', source: 'Synthesized from voice characteristics', why_exemplar: 'Direct address to the persona; flat declarative; specific to the parent-fatigue concern.', slot_kind_fit: ['description','body'] },
+    ],
+    voice_anti_exemplars: [
+      { pattern: 'Both, not either.', why_avoid: 'Parallel-clause heading shape — reads as model-generated summary.', kind: 'parallel_clause_tic' },
+      { pattern: 'Faith, not fluff.', why_avoid: 'Same parallel-clause tic. Could apply to any brand.', kind: 'parallel_clause_tic' },
+      { pattern: 'Embark on a journey of faith.', why_avoid: 'Two AI clichés ("embark" + "journey") plus an abstraction.', kind: 'ai_cliche' },
+      { pattern: 'Unlock your potential through community.', why_avoid: '"Unlock" is a tell. "Potential" is hollow. Could be any productivity app.', kind: 'ai_cliche' },
+      { pattern: 'We can\'t wait to meet you!', why_avoid: 'Performative warmth; this church\'s voice is plain, not effusive.', kind: 'project_specific' },
+      { pattern: 'A vibrant, dynamic, life-changing experience.', why_avoid: 'Three-adjective cluster of empty modifiers.', kind: 'generic_polish' },
+      { pattern: 'Held together in Redlands — neither one watered down, neither one apologized for.', why_avoid: 'Em-dash inserted to "regularize cadence" — brand voice uses periods.', kind: 'em_dash_pattern' },
+    ],
     personas: [
       {
         name: 'Jordan Reynolds',
