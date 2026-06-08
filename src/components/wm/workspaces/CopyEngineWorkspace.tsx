@@ -194,6 +194,16 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     setFeedback('')
   }, [routePreview, callOrchestrate])
 
+  const openDraft = useCallback((slug: string) => {
+    if (!slug || slug === '*') return
+    if (!Object.prototype.hasOwnProperty.call(drafts, slug)) return
+    setExpandedDraft(slug)
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`copy-engine-draft-${slug}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }, [drafts])
+
   return (
     <div className="px-4 md:px-6 py-6 max-w-6xl mx-auto space-y-6">
       <header className="flex items-baseline justify-between gap-4">
@@ -396,21 +406,39 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
           {Array.isArray(critique.directives) && critique.directives.length > 0 && (
             <div className="space-y-1.5">
               <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-muted">Directives ({critique.directives.length})</p>
-              {critique.directives.map((d, i) => (
-                <div key={i} className="rounded-md border border-wm-border bg-wm-bg p-2.5">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-[11px] uppercase tracking-wider font-bold text-wm-accent-strong">
-                      {d.stage_to_rerun} {d.page_slug !== '*' && `· ${d.page_slug}`}
-                    </span>
-                    <span className={[
-                      'text-[10px] uppercase tracking-wider font-bold',
-                      d.severity === 'blocker' ? 'text-wm-danger'
-                      : d.severity === 'warning' ? 'text-wm-warning' : 'text-wm-text-subtle',
-                    ].join(' ')}>{d.severity}</span>
+              {critique.directives.map((d, i) => {
+                const hasDraft = d.page_slug && d.page_slug !== '*' && Object.prototype.hasOwnProperty.call(drafts, d.page_slug)
+                return (
+                  <div key={i} className="rounded-md border border-wm-border bg-wm-bg p-2.5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-[11px] uppercase tracking-wider font-bold text-wm-accent-strong">
+                        {d.stage_to_rerun}
+                        {d.page_slug !== '*' && (
+                          <>
+                            {' · '}
+                            {hasDraft ? (
+                              <button
+                                onClick={() => openDraft(d.page_slug)}
+                                className="underline decoration-dotted underline-offset-2 hover:text-wm-accent"
+                              >
+                                {d.page_slug}
+                              </button>
+                            ) : (
+                              <span>{d.page_slug}</span>
+                            )}
+                          </>
+                        )}
+                      </span>
+                      <span className={[
+                        'text-[10px] uppercase tracking-wider font-bold',
+                        d.severity === 'blocker' ? 'text-wm-danger'
+                        : d.severity === 'warning' ? 'text-wm-warning' : 'text-wm-text-subtle',
+                      ].join(' ')}>{d.severity}</span>
+                    </div>
+                    <p className="text-[12px] text-wm-text mt-1 leading-snug">{d.note}</p>
                   </div>
-                  <p className="text-[12px] text-wm-text mt-1 leading-snug">{d.note}</p>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
 
@@ -418,24 +446,36 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
             <details className="text-[12px]">
               <summary className="cursor-pointer text-[11px] text-wm-text-muted hover:text-wm-text">Per-page breakdown ({critique.per_page.length})</summary>
               <div className="mt-2 space-y-2">
-                {critique.per_page.map((p, i) => (
-                  <div key={i} className="rounded-md border border-wm-border bg-wm-bg p-2.5">
-                    <div className="flex items-baseline gap-2 mb-1">
-                      <span className="font-semibold text-wm-text">{p.page_slug}</span>
-                      <span className="text-[10px] text-wm-text-muted">
-                        v {p.voice_match} · p {p.persona_fit} · a {p.atom_coverage} · s {p.slot_health}
-                      </span>
+                {critique.per_page.map((p, i) => {
+                  const hasDraft = Object.prototype.hasOwnProperty.call(drafts, p.page_slug)
+                  return (
+                    <div key={i} className="rounded-md border border-wm-border bg-wm-bg p-2.5">
+                      <div className="flex items-baseline gap-2 mb-1">
+                        {hasDraft ? (
+                          <button
+                            onClick={() => openDraft(p.page_slug)}
+                            className="font-semibold text-wm-text underline decoration-dotted underline-offset-2 hover:text-wm-accent"
+                          >
+                            {p.page_slug}
+                          </button>
+                        ) : (
+                          <span className="font-semibold text-wm-text">{p.page_slug}</span>
+                        )}
+                        <span className="text-[10px] text-wm-text-muted">
+                          v {p.voice_match} · p {p.persona_fit} · a {p.atom_coverage} · s {p.slot_health}
+                        </span>
+                      </div>
+                      {p.summary && <p className="text-[12px] text-wm-text-muted leading-snug">{p.summary}</p>}
+                      {p.problem_lines?.length ? (
+                        <ul className="mt-1 space-y-0.5">
+                          {p.problem_lines.map((line, j) => (
+                            <li key={j} className="text-[11px] text-wm-danger">· {line}</li>
+                          ))}
+                        </ul>
+                      ) : null}
                     </div>
-                    {p.summary && <p className="text-[12px] text-wm-text-muted leading-snug">{p.summary}</p>}
-                    {p.problem_lines?.length ? (
-                      <ul className="mt-1 space-y-0.5">
-                        {p.problem_lines.map((line, j) => (
-                          <li key={j} className="text-[11px] text-wm-danger">· {line}</li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </details>
           )}
@@ -447,7 +487,26 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
                 <div key={i} className="text-[12px] text-wm-text">
                   <span className="text-[10px] uppercase tracking-wider font-bold text-wm-accent-strong mr-2">{f.kind}</span>
                   {f.description}
-                  {f.pages?.length ? <span className="text-[11px] text-wm-text-muted ml-2">({f.pages.join(', ')})</span> : null}
+                  {f.pages?.length ? (
+                    <span className="text-[11px] text-wm-text-muted ml-2">
+                      ({f.pages.map((slug, j) => {
+                        const hasDraft = Object.prototype.hasOwnProperty.call(drafts, slug)
+                        return (
+                          <span key={j}>
+                            {j > 0 && ', '}
+                            {hasDraft ? (
+                              <button
+                                onClick={() => openDraft(slug)}
+                                className="underline decoration-dotted underline-offset-2 hover:text-wm-accent"
+                              >
+                                {slug}
+                              </button>
+                            ) : slug}
+                          </span>
+                        )
+                      })})
+                    </span>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -468,7 +527,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
               const redoCount = d?._meta?.redo_count ?? 0
               const isOpen = expandedDraft === slug
               return (
-                <div key={slug} className="rounded-md border border-wm-border bg-wm-bg">
+                <div key={slug} id={`copy-engine-draft-${slug}`} className="rounded-md border border-wm-border bg-wm-bg scroll-mt-4">
                   <button
                     onClick={() => setExpandedDraft(isOpen ? null : slug)}
                     className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-wm-accent/5"
