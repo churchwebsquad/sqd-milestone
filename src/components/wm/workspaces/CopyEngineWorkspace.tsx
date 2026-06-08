@@ -127,6 +127,11 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   const [sitemapOpen, setSitemapOpen] = useState(false)
   const [revisingSitemap, setRevisingSitemap] = useState(false)
   const [sitemapFeedback, setSitemapFeedback] = useState('')
+  const [sitemapConvo, setSitemapConvo] = useState<Array<{
+    kind: 'user' | 'system' | 'pending' | 'error'
+    text: string
+    at: number
+  }>>([])
   const [expandedDraft, setExpandedDraft] = useState<string | null>(null)
   const [confirmAction, setConfirmAction] = useState<'iterate' | 'commit' | null>(null)
 
@@ -212,17 +217,44 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   const submitSitemapRevision = useCallback(async () => {
     const note = sitemapFeedback.trim()
     if (!note) return
-    // Use `apply` with a sitemap dispatch — same code path orchestrate
-    // uses internally for Director-routed sitemap re-runs. Avoids
-    // depending on a freshly-deployed action that may not be live yet.
+    const now = Date.now()
+    const oldPageCount = (sitemap?.pages?.length ?? 0)
+    setSitemapConvo(c => [
+      ...c,
+      { kind: 'user', text: note, at: now },
+      { kind: 'pending', text: 'Re-drafting sitemap with your feedback…', at: now + 1 },
+    ])
+    setSitemapFeedback('')
     const result = await callOrchestrate('apply', {
       dispatch: { stage_to_rerun: 'sitemap', note },
     })
+    setSitemapConvo(c => {
+      const trimmed = c.filter(t => t.kind !== 'pending')
+      if (!result) {
+        return [...trimmed, { kind: 'error', text: 'Re-draft failed. See banner above and try again.', at: Date.now() }]
+      }
+      return trimmed
+    })
     if (result) {
-      setSitemapFeedback('')
-      setRevisingSitemap(false)
+      // refreshFromDB already ran inside callOrchestrate, but `sitemap`
+      // is a derived value off project.roadmap_state which only updates
+      // when onChange refetches the project. Pull the new sitemap from
+      // the DB directly so we can report what changed.
+      const { data } = await supabase
+        .from('strategy_web_projects')
+        .select('roadmap_state')
+        .eq('id', project.id)
+        .maybeSingle()
+      const newSitemap = (data?.roadmap_state as Record<string, any> | null)?.stage_2 as SitemapShape | undefined
+      const newPageCount = newSitemap?.pages?.length ?? 0
+      const delta = newPageCount - oldPageCount
+      const summary =
+        delta === 0 ? `Done. ${newPageCount} pages (no change in count). Review the updates above and approve when ready.`
+        : delta > 0 ? `Done. ${newPageCount} pages (+${delta}). Review the updates above and approve when ready.`
+        : `Done. ${newPageCount} pages (${delta}). Review the updates above and approve when ready.`
+      setSitemapConvo(c => [...c, { kind: 'system', text: summary, at: Date.now() }])
     }
-  }, [sitemapFeedback, callOrchestrate])
+  }, [sitemapFeedback, callOrchestrate, sitemap, project.id])
 
   return (
     <div className="px-4 md:px-6 py-6 max-w-6xl mx-auto space-y-6">
@@ -306,40 +338,90 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
           )}
         </div>
         {revisingSitemap && hasStage2 && (
-          <div className="border-t border-wm-border px-3 py-3 bg-wm-accent/5 space-y-2">
-            <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">Revise sitemap</p>
-            <p className="text-[11px] text-wm-text-muted leading-snug">
-              Name what to change. Be specific — only items you call out get touched.
-              Example: "Move Volunteer out of footer into header under Connect. Rename Beliefs to What We Believe."
-            </p>
+          <div className="border-t border-wm-border px-3 py-3 bg-wm-accent/5 space-y-3">
+            <div className="flex items-baseline justify-between">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">Revise sitemap</p>
+              <button
+                onClick={() => { setRevisingSitemap(false); setSitemapFeedback(''); setSitemapConvo([]) }}
+                disabled={running === 'apply'}
+                className="text-[11px] text-wm-text-muted hover:text-wm-text"
+              >
+                Done
+              </button>
+            </div>
+
+            {sitemapConvo.length === 0 ? (
+              <p className="text-[11px] text-wm-text-muted leading-snug">
+                Tell the Director what to change. Be specific — only items you call out get touched. You can chat back and forth until the sitemap is right, then click Approve above.
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+                {sitemapConvo.map((t, i) => {
+                  if (t.kind === 'user') {
+                    return (
+                      <div key={i} className="rounded-md bg-wm-bg-elevated border border-wm-border p-2.5">
+                        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">You</p>
+                        <p className="text-[12px] text-wm-text leading-snug whitespace-pre-wrap">{t.text}</p>
+                      </div>
+                    )
+                  }
+                  if (t.kind === 'pending') {
+                    return (
+                      <div key={i} className="rounded-md bg-wm-accent/10 border border-wm-accent/30 p-2.5 flex items-center gap-2">
+                        <Loader2 size={12} className="animate-spin text-wm-accent-strong shrink-0" />
+                        <p className="text-[12px] text-wm-text leading-snug">{t.text}</p>
+                      </div>
+                    )
+                  }
+                  if (t.kind === 'error') {
+                    return (
+                      <div key={i} className="rounded-md bg-wm-danger-bg border border-wm-danger/30 p-2.5">
+                        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-danger mb-1">Director</p>
+                        <p className="text-[12px] text-wm-danger leading-snug">{t.text}</p>
+                      </div>
+                    )
+                  }
+                  return (
+                    <div key={i} className="rounded-md bg-wm-success-bg border border-wm-success/30 p-2.5">
+                      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-success mb-1">Director</p>
+                      <p className="text-[12px] text-wm-text leading-snug">{t.text}</p>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
             <textarea
               value={sitemapFeedback}
               onChange={e => setSitemapFeedback(e.target.value)}
-              placeholder="What should change?"
+              onKeyDown={e => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && sitemapFeedback.trim() && running !== 'apply') {
+                  e.preventDefault()
+                  void submitSitemapRevision()
+                }
+              }}
+              placeholder={sitemapConvo.length > 0 ? 'Anything else to change? Or click Approve above when satisfied.' : 'What should change?'}
               rows={3}
               autoFocus
-              className="w-full rounded-md border border-wm-border bg-wm-bg px-3 py-2 text-[13px] text-wm-text focus:outline-none focus:border-wm-accent"
+              disabled={running === 'apply'}
+              className="w-full rounded-md border border-wm-border bg-wm-bg px-3 py-2 text-[13px] text-wm-text focus:outline-none focus:border-wm-accent disabled:opacity-50"
             />
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => { setRevisingSitemap(false); setSitemapFeedback('') }}
-                disabled={running === 'revise_sitemap'}
-                className="text-[12px] text-wm-text-muted px-3 py-1 hover:text-wm-text"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => void submitSitemapRevision()}
-                disabled={!sitemapFeedback.trim() || running === 'revise_sitemap'}
-                className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white disabled:opacity-50"
-              >
-                {running === 'revise_sitemap' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                Re-draft sitemap
-              </button>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] text-wm-text-subtle">⌘+Enter to send</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => void submitSitemapRevision()}
+                  disabled={!sitemapFeedback.trim() || running === 'apply'}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white disabled:opacity-50"
+                >
+                  {running === 'apply' ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                  {sitemapConvo.some(t => t.kind === 'system' || t.kind === 'user') ? 'Send' : 'Re-draft sitemap'}
+                </button>
+              </div>
             </div>
-            {sitemapApproved && (
+            {sitemapApproved && sitemapConvo.length === 0 && (
               <p className="text-[11px] text-wm-warning">
-                Note: sitemap is currently approved. Re-drafting will create new draft revisions; you'll need to approve again after review.
+                Sitemap is currently approved. Re-drafting will create new draft revisions; you'll need to approve again after review.
               </p>
             )}
           </div>
