@@ -132,6 +132,15 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     text: string
     at: number
   }>>([])
+  const [pendingStartedAt, setPendingStartedAt] = useState<number | null>(null)
+  const [elapsedSec, setElapsedSec] = useState(0)
+  useEffect(() => {
+    if (!pendingStartedAt) { setElapsedSec(0); return }
+    const tick = () => setElapsedSec(Math.floor((Date.now() - pendingStartedAt) / 1000))
+    tick()
+    const id = window.setInterval(tick, 1000)
+    return () => window.clearInterval(id)
+  }, [pendingStartedAt])
   const [expandedDraft, setExpandedDraft] = useState<string | null>(null)
   const [confirmAction, setConfirmAction] = useState<'iterate' | 'commit' | null>(null)
 
@@ -217,17 +226,41 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   const submitSitemapRevision = useCallback(async () => {
     const note = sitemapFeedback.trim()
     if (!note) return
-    const now = Date.now()
+    const startedAt = Date.now()
     const oldPageCount = (sitemap?.pages?.length ?? 0)
+    const oldGeneratedAt = (sitemap as { _meta?: { generated_at?: string } } | null)?._meta?.generated_at ?? null
+    setPendingStartedAt(startedAt)
     setSitemapConvo(c => [
       ...c,
-      { kind: 'user', text: note, at: now },
-      { kind: 'pending', text: 'Re-drafting sitemap with your feedback…', at: now + 1 },
+      { kind: 'user', text: note, at: startedAt },
+      { kind: 'pending', text: 'Re-drafting sitemap…', at: startedAt + 1 },
     ])
     setSitemapFeedback('')
+
+    // Poll the DB every 5s so the strategist sees the new sitemap land
+    // in the preview above as soon as draft-sitemap writes it, even if
+    // the orchestrate fetch hasn't yet returned. The fetch still
+    // completes normally — polling is just early-paint, not a
+    // replacement for the response.
+    const pollId = window.setInterval(async () => {
+      const { data } = await supabase
+        .from('strategy_web_projects')
+        .select('roadmap_state')
+        .eq('id', project.id)
+        .maybeSingle()
+      const s = (data?.roadmap_state as Record<string, any> | null)?.stage_2 as
+        { _meta?: { generated_at?: string } } | undefined
+      if (s?._meta?.generated_at && s._meta.generated_at !== oldGeneratedAt) {
+        await onChange?.()  // surface the new sitemap into project.roadmap_state
+      }
+    }, 5000)
+
     const result = await callOrchestrate('apply', {
       dispatch: { stage_to_rerun: 'sitemap', note },
     })
+
+    window.clearInterval(pollId)
+    setPendingStartedAt(null)
     setSitemapConvo(c => {
       const trimmed = c.filter(t => t.kind !== 'pending')
       if (!result) {
@@ -236,10 +269,6 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       return trimmed
     })
     if (result) {
-      // refreshFromDB already ran inside callOrchestrate, but `sitemap`
-      // is a derived value off project.roadmap_state which only updates
-      // when onChange refetches the project. Pull the new sitemap from
-      // the DB directly so we can report what changed.
       const { data } = await supabase
         .from('strategy_web_projects')
         .select('roadmap_state')
@@ -248,13 +277,18 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       const newSitemap = (data?.roadmap_state as Record<string, any> | null)?.stage_2 as SitemapShape | undefined
       const newPageCount = newSitemap?.pages?.length ?? 0
       const delta = newPageCount - oldPageCount
-      const summary =
-        delta === 0 ? `Done. ${newPageCount} pages (no change in count). Review the updates above and approve when ready.`
-        : delta > 0 ? `Done. ${newPageCount} pages (+${delta}). Review the updates above and approve when ready.`
-        : `Done. ${newPageCount} pages (${delta}). Review the updates above and approve when ready.`
-      setSitemapConvo(c => [...c, { kind: 'system', text: summary, at: Date.now() }])
+      const tookSec = Math.round((Date.now() - startedAt) / 1000)
+      const countSummary =
+        delta === 0 ? `${newPageCount} pages (no change in count)`
+        : delta > 0 ? `${newPageCount} pages (+${delta})`
+        : `${newPageCount} pages (${delta})`
+      setSitemapConvo(c => [...c, {
+        kind: 'system',
+        text: `Done in ${tookSec}s. ${countSummary}. Review the updates above and approve when ready.`,
+        at: Date.now(),
+      }])
     }
-  }, [sitemapFeedback, callOrchestrate, sitemap, project.id])
+  }, [sitemapFeedback, callOrchestrate, sitemap, project.id, onChange])
 
   return (
     <div className="px-4 md:px-6 py-6 max-w-6xl mx-auto space-y-6">
@@ -367,9 +401,22 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
                   }
                   if (t.kind === 'pending') {
                     return (
-                      <div key={i} className="rounded-md bg-wm-accent/10 border border-wm-accent/30 p-2.5 flex items-center gap-2">
-                        <Loader2 size={12} className="animate-spin text-wm-accent-strong shrink-0" />
-                        <p className="text-[12px] text-wm-text leading-snug">{t.text}</p>
+                      <div key={i} className="rounded-md bg-wm-accent/10 border border-wm-accent/30 p-2.5">
+                        <div className="flex items-center gap-2">
+                          <Loader2 size={12} className="animate-spin text-wm-accent-strong shrink-0" />
+                          <p className="text-[12px] text-wm-text leading-snug flex-1">{pendingStatusFor(elapsedSec)}</p>
+                          <span className="text-[10px] font-mono text-wm-text-subtle shrink-0">{elapsedSec}s</span>
+                        </div>
+                        {elapsedSec >= 120 && (
+                          <p className="text-[11px] text-wm-warning mt-1.5">
+                            Taking longer than usual. The agent may still be running on the server — check the sitemap preview above; if it updates, the re-draft succeeded.
+                          </p>
+                        )}
+                        {elapsedSec >= 240 && (
+                          <p className="text-[11px] text-wm-danger mt-1">
+                            Likely failed. Vercel functions cap at 5 min. Refresh the page; if the preview hasn't changed, retry.
+                          </p>
+                        )}
                       </div>
                     )
                   }
@@ -861,6 +908,15 @@ function ActionCard({ icon, title, description, busy, disabled, onClick }: {
       <p className="text-[11px] text-wm-text-muted leading-snug">{description}</p>
     </button>
   )
+}
+
+function pendingStatusFor(elapsed: number): string {
+  if (elapsed < 5)   return 'Sending feedback to the Director…'
+  if (elapsed < 20)  return 'Director is reading your current sitemap and feedback…'
+  if (elapsed < 45)  return 'Drafting revisions…'
+  if (elapsed < 75)  return 'Still drafting. Full sitemap re-writes usually take 30–90s.'
+  if (elapsed < 120) return 'Wrapping up. Saving to the database…'
+  return 'Still working.'
 }
 
 function PageBriefHeader({ brief }: { brief: PageBrief | undefined }) {
