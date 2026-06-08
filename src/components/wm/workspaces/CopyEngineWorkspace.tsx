@@ -212,7 +212,12 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   const submitSitemapRevision = useCallback(async () => {
     const note = sitemapFeedback.trim()
     if (!note) return
-    const result = await callOrchestrate('revise_sitemap', { note })
+    // Use `apply` with a sitemap dispatch — same code path orchestrate
+    // uses internally for Director-routed sitemap re-runs. Avoids
+    // depending on a freshly-deployed action that may not be live yet.
+    const result = await callOrchestrate('apply', {
+      dispatch: { stage_to_rerun: 'sitemap', note },
+    })
     if (result) {
       setSitemapFeedback('')
       setRevisingSitemap(false)
