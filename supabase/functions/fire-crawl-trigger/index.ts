@@ -175,10 +175,47 @@ Deno.serve(async (req) => {
         }
       }
 
+      // Drop pages that Firecrawl failed to scrape. Firecrawl returns
+      // failed pages with metadata.statusCode >= 400 + metadata.error
+      // set + markdown body containing the error string ("Invalid
+      // upstream proxy credentials", "Internal server error", etc.).
+      // Without this filter the error strings get stored as page
+      // content and poison everything downstream — categorizer reads
+      // them, web_project_topics inherits them, the partner-facing
+      // Content Collection page displays them. Real example seen on
+      // baysidechurch.net (2026-06-06 crawl): 44 of 66 pages came
+      // back with statusCode 597 + markdown="Invalid upstream proxy
+      // credentials".
+      const isScrapeFailure = (r) => {
+        const meta = r && r.metadata;
+        if (!meta) return false;
+        const status = Number(meta.statusCode);
+        if (Number.isFinite(status) && status >= 400) return true;
+        if (meta.error) return true;
+        return false;
+      };
+      const droppedFailures = [];
+      const okPages = [];
+      for (const r of pages) {
+        if (isScrapeFailure(r)) {
+          droppedFailures.push({
+            url: r.url || (r.metadata && r.metadata.sourceURL) || "",
+            statusCode: r.metadata && r.metadata.statusCode,
+            error: r.metadata && r.metadata.error,
+            proxyUsed: r.metadata && r.metadata.proxyUsed,
+          });
+        } else {
+          okPages.push(r);
+        }
+      }
+      if (droppedFailures.length > 0) {
+        console.warn(`[fire-crawl-trigger] dropped ${droppedFailures.length} scrape failures:`, droppedFailures.slice(0, 10));
+      }
+
       // Map Firecrawl's actual response to our canonical storage shape.
       // Firecrawl puts title under metadata; markdown at the root;
       // links as a top-level array.
-      const contentItems = pages.map((r) => ({
+      const contentItems = okPages.map((r) => ({
         url:       r.url || (r.metadata && r.metadata.sourceURL) || "",
         title:     (r.metadata && r.metadata.title) || "",
         markdown:  r.markdown || "",
@@ -195,9 +232,15 @@ Deno.serve(async (req) => {
 
       const jobStart = new Date(crawlJob.started_at || crawlJob.created_at);
       const durSec = Math.floor((Date.now() - jobStart.getTime()) / 1000);
+      const errorMessage = droppedFailures.length > 0
+        ? `Firecrawl returned ${droppedFailures.length} scrape failure(s); dropped from results. First few: ${
+            droppedFailures.slice(0, 3).map(f => `${f.url} (${f.statusCode})`).join(', ')
+          }`
+        : null;
       await supabase.schema("web-hub").from("crawl_jobs").update({
         status: "complete", pages_crawled: contentItems.length,
         completed_at: new Date().toISOString(), crawl_results: contentItems, duration_seconds: durSec,
+        error_message: errorMessage,
       }).eq("id", crawlJob.id);
 
       try {
