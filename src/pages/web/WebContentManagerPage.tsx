@@ -53,8 +53,8 @@ type TabKey =
 
 const TABS: readonly WMTabItem<TabKey>[] = [
   { key: 'planning',   label: 'Planning',        icon: <CalendarClock size={13} /> },
-  { key: 'pipeline',   label: 'Copywriting',     icon: <Workflow      size={13} /> },
   { key: 'intake',     label: 'Intake & Crawl',  icon: <ClipboardList size={13} /> },
+  { key: 'pipeline',   label: 'Copywriting',     icon: <Workflow      size={13} /> },
   { key: 'library',    label: 'Site Library',    icon: <LayoutGrid    size={13} /> },
   { key: 'pages',      label: 'Pages',           icon: <FileText      size={13} /> },
   { key: 'design',     label: 'Design Handoff',  icon: <Palette       size={13} /> },
