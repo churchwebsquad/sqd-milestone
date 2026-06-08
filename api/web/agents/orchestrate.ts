@@ -30,7 +30,7 @@ export const maxDuration = 300
 const MAX_LOOPS = 3
 const PAGE_DRAFT_CONCURRENCY = 4
 
-type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap'
+type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap'
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -64,6 +64,13 @@ export default async function handler(req: any, res: any) {
   try {
     if (action === 'status') {
       return res.status(200).json({ ok: true, engine_state: engineState })
+    }
+
+    if (action === 'revise_sitemap') {
+      const note = typeof req.body?.note === 'string' ? req.body.note.trim() : ''
+      if (!note) return res.status(400).json({ error: 'note (feedback) required for revise_sitemap' })
+      const result = await callAgent(baseUrl, jwt, 'draft-sitemap', { projectId, redoContext: note })
+      return res.status(200).json({ ok: true, sitemap: result })
     }
 
     if (action === 'approve_sitemap' || action === 'unlock_sitemap') {

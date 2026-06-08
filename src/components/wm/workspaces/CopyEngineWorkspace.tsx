@@ -156,8 +156,13 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
         body: JSON.stringify({ projectId: project.id, action, ...extra }),
       })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
+      const text = await res.text()
+      let json: any = null
+      try { json = JSON.parse(text) } catch { /* non-JSON response */ }
+      if (!res.ok) {
+        const detail = json?.error ?? (text ? text.slice(0, 200) : '')
+        throw new Error(`${action} → HTTP ${res.status}${detail ? ` · ${detail}` : ''}`)
+      }
       await refreshFromDB()
       await onChange?.()
       return json
@@ -207,28 +212,12 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   const submitSitemapRevision = useCallback(async () => {
     const note = sitemapFeedback.trim()
     if (!note) return
-    setRunning('revise_sitemap'); setError(null)
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      const jwt = session?.access_token
-      if (!jwt) throw new Error('Not authenticated')
-      const res = await fetch('/api/web/agents/draft-sitemap', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-        body: JSON.stringify({ projectId: project.id, redoContext: note }),
-      })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
+    const result = await callOrchestrate('revise_sitemap', { note })
+    if (result) {
       setSitemapFeedback('')
       setRevisingSitemap(false)
-      await refreshFromDB()
-      await onChange?.()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unknown error')
-    } finally {
-      setRunning(null)
     }
-  }, [sitemapFeedback, project.id, refreshFromDB, onChange])
+  }, [sitemapFeedback, callOrchestrate])
 
   return (
     <div className="px-4 md:px-6 py-6 max-w-6xl mx-auto space-y-6">
