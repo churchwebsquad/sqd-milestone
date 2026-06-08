@@ -1881,6 +1881,24 @@ function TestimonyRow({ item, reviewMode }: { item: Item; reviewMode: boolean })
   const r = item as Record<string, unknown>
   const text = String(r.story ?? r.quote ?? r.text ?? '').trim()
   if (!text) return null
+  // Context footnote — what is this testimony about? When the LLM
+  // wrote a `context` field, prefer that ("Acts Series", "Baptism
+  // Stories"). Otherwise derive a label from the source URL path so
+  // the partner sees the page the quote came from. Falls back to
+  // raw source_url for legacy items.
+  const explicitContext = typeof r.context === 'string' ? r.context.trim() : ''
+  const sourceUrl       = typeof r.source_url === 'string' ? r.source_url.trim() : ''
+  let context = explicitContext
+  if (!context && sourceUrl) {
+    try {
+      const path = new URL(sourceUrl).pathname.replace(/^\//, '').replace(/\/$/, '')
+      if (path) {
+        // "acts" → "Acts" · "stories/baptism" → "Stories Baptism"
+        context = path.split('/').map(seg => seg.replace(/[-_]/g, ' ')).join(' · ')
+          .replace(/\b\w/g, c => c.toUpperCase())
+      }
+    } catch { /* leave context empty */ }
+  }
   return (
     <div className={reviewMode
         ? 'bg-cream/40 border border-lavender/60 rounded-md px-3 py-2'
@@ -1895,6 +1913,13 @@ function TestimonyRow({ item, reviewMode }: { item: Item; reviewMode: boolean })
       </p>
       {item.scripture_ref && (
         <p className={reviewMode ? 'text-[10px] font-mono text-primary-purple mt-1' : 'text-[10px] font-mono text-wm-accent mt-1'}>{String(item.scripture_ref)}</p>
+      )}
+      {context && (
+        <p className={reviewMode
+            ? 'text-[10px] uppercase tracking-wider font-bold text-primary-purple/70 mt-1.5'
+            : 'text-[10px] uppercase tracking-wider font-bold text-wm-text-subtle mt-1.5'}>
+          From {context}
+        </p>
       )}
     </div>
   )

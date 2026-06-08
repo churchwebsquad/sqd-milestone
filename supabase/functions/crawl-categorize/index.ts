@@ -582,7 +582,7 @@ async function llmExtractPage(apiKey, page, urlHits) {
     "  • items[kind=cta]         — distinct buttons/calls-to-action with real http(s) URLs.",
     "  • items[kind=scripture]   — Bible references with verbatim text.",
     "  • items[kind=tier]        — commitment levels / membership tiers.",
-    "  • items[kind=testimony]   — personal stories (only in testimonies topic).",
+    "  • items[kind=testimony]   — personal stories. ROUTES BY KIND, NOT URL: a testimony belongs in the `testimonies` topic regardless of which page it came from. If you find a quote of life-change on a sermon-series page (/acts, /romans, /vision-2026), on an event page, on a campus page, on a campaign page — it's STILL a testimony and STILL goes into `testimonies`. The source page's URL goes in `source_url` and (when the page is about a specific series/ministry/campaign) ALSO in a `context` field with a human-readable label (e.g. `context: \"Acts Series\"`, `context: \"Baptism Stories\"`, `context: \"Vision 2026 Campaign\"`). The partner reviews testimonies as ONE bucket; if you split them across topics they become invisible. {person, role, story, scripture_ref, context, source_url}",
     "  • items[kind=newsletter_issue] — newsletter entries (only in newsletter_bulletin topic).",
     "  • items[kind=sermon/event/staff/link] — flat typed records for fact_rich LIST pages.",
     "",
