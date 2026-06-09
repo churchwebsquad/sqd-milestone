@@ -94,6 +94,11 @@ export function SectionDetailsPanel({
   const setValue = (key: string, v: unknown) => {
     onChange({ field_values: { ...values, [key]: v } })
   }
+  // Bumped by the bind-health pull to force the Fields editor + its
+  // child SlotEditors to remount, ensuring memoized inputs (TipTap
+  // richtext, in particular) pick up the new value prop rather than
+  // staying on whatever they had at mount.
+  const [fieldsRemountKey, setFieldsRemountKey] = useState(0)
 
   const presence = template ? summarizeSlotPresence(template, values) : null
   const fields: WebFieldDef[] = template?.fields ?? []
@@ -222,15 +227,39 @@ export function SectionDetailsPanel({
               template={template}
               fieldValues={values}
               onPullSuggestion={(slotKey, raw, sourceType) => {
-                // Coerce nested-richtext → top-level richtext: already
-                // HTML, paste through. Plain-text → richtext: wrap in <p>.
-                // Plain-text → plain-text: pass through unchanged.
+                // Coerce nested → top-level. Three cases:
+                //  - source richtext, value already HTML → pass through
+                //  - source richtext, value plain text  → wrap in <p>
+                //  - source text, target slot is richtext → wrap in <p> too,
+                //    otherwise the editor renders <p>-less plain string
+                const targetSlot = (template?.fields ?? []).find(
+                  (f): f is import('../../../types/database').WebSlotDef =>
+                    f.kind === 'slot' && f.key === slotKey,
+                )
                 let next = raw
                 const isHtml = typeof raw === 'string' && /<[a-z][^>]*>/i.test(raw)
-                if (sourceType === 'richtext' && !isHtml && typeof raw === 'string') {
+                if (typeof raw === 'string' && !isHtml && targetSlot?.type === 'richtext') {
                   next = `<p>${escapeHtml(raw)}</p>`
                 }
+                // Visible diagnostic so the strategist can confirm what
+                // landed where. The "pull writes but I don't see it"
+                // symptom is almost always one of: editor for slotKey
+                // isn't visible in the current panel scroll, OR the
+                // value matches what was already there. Logging shows
+                // both states.
+                console.info('[BindHealthPanel] pull', {
+                  slotKey,
+                  targetType: targetSlot?.type ?? '(no top-level field)',
+                  sourceType,
+                  valuePreview: typeof next === 'string' ? next.slice(0, 80) : next,
+                })
                 setValue(slotKey, next)
+                // Force the Fields editor below to remount so its
+                // memoized child editors (TipTap, in particular,
+                // shouldn't need this but does occasionally miss
+                // value-prop updates) pick up the new value.
+                setFieldsRemountKey(k => k + 1)
+                void sourceType  // referenced for the API contract; we now use targetSlot
               }}
             />
           </Section>
@@ -239,7 +268,7 @@ export function SectionDetailsPanel({
         {/* Field editors */}
         {template && visibleFields.length > 0 && (
           <Section title="Fields" defaultOpen>
-            <div className="space-y-3">
+            <div key={`fields-${fieldsRemountKey}`} className="space-y-3">
               {visibleFields.map((field, idx) => {
                 if (field.kind === 'slot') {
                   return (
