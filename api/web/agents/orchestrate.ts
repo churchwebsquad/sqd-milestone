@@ -30,7 +30,7 @@ export const maxDuration = 300
 const MAX_LOOPS = 3
 const PAGE_DRAFT_CONCURRENCY = 4
 
-type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit'
+type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state'
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -71,6 +71,18 @@ export default async function handler(req: any, res: any) {
       if (!note) return res.status(400).json({ error: 'note (feedback) required for revise_sitemap' })
       const result = await callAgent(baseUrl, jwt, 'draft-sitemap', { projectId, redoContext: note })
       return res.status(200).json({ ok: true, sitemap: result })
+    }
+
+    if (action === 'export_state') {
+      const result = await callAgent(baseUrl, jwt, 'export-state', { projectId })
+      return res.status(200).json({ ok: true, export: result })
+    }
+
+    if (action === 'import_state') {
+      const document = typeof req.body?.document === 'string' ? req.body.document : ''
+      if (!document) return res.status(400).json({ error: 'document required for import_state' })
+      const result = await callAgent(baseUrl, jwt, 'import-state', { projectId, document })
+      return res.status(200).json({ ok: true, import: result })
     }
 
     if (action === 'run_coverage_audit') {

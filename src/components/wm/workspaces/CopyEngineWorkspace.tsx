@@ -854,6 +854,11 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         </section>
       )}
 
+      {/* Export / Import — round-trip refinement through another tool */}
+      {(hasStage2 || draftSlugs.length > 0) && (
+        <ExportImportPanel projectId={project.id} onImported={async () => { await onChange?.() }} />
+      )}
+
       {/* Gate 2 — Final review */}
       <GateCard
         number={2}
@@ -1461,6 +1466,183 @@ function ConfirmPanel({ title, children, onCancel, onConfirm, confirmLabel, busy
         </button>
       </div>
     </div>
+  )
+}
+
+function ExportImportPanel({ projectId, onImported }: {
+  projectId: string
+  onImported: () => Promise<void>
+}) {
+  const [busy, setBusy] = useState<'export' | 'import' | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
+  const [importText, setImportText] = useState('')
+  const [exportResult, setExportResult] = useState<{ filename: string; bytes: number } | null>(null)
+  const [importMsg, setImportMsg] = useState<{
+    kind: 'ok' | 'err'
+    text: string
+    detail?: { warnings?: string[]; next_steps?: string[]; details?: string[] }
+  } | null>(null)
+
+  const handleExport = useCallback(async () => {
+    setBusy('export'); setExportResult(null)
+    try {
+      const { data: { session: authSession } } = await supabase.auth.getSession()
+      const jwt = authSession?.access_token
+      if (!jwt) throw new Error('Not authenticated')
+      const res = await fetch('/api/web/agents/orchestrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ projectId, action: 'export_state' }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error ?? 'Export failed')
+      const doc = json?.export?.document
+      const filename = json?.export?.filename ?? 'copy-engine-export.md'
+      if (typeof doc !== 'string') throw new Error('Export returned no document')
+      const blob = new Blob([doc], { type: 'text/markdown;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = filename; a.click()
+      URL.revokeObjectURL(url)
+      setExportResult({ filename, bytes: doc.length })
+    } catch (e) {
+      setExportResult(null)
+      setImportMsg({ kind: 'err', text: e instanceof Error ? e.message : 'Export failed' })
+    } finally { setBusy(null) }
+  }, [projectId])
+
+  const handleImport = useCallback(async () => {
+    if (!importText.trim()) return
+    setBusy('import'); setImportMsg(null)
+    try {
+      const { data: { session: authSession } } = await supabase.auth.getSession()
+      const jwt = authSession?.access_token
+      if (!jwt) throw new Error('Not authenticated')
+      const res = await fetch('/api/web/agents/orchestrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ projectId, action: 'import_state', document: importText }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setImportMsg({
+          kind: 'err',
+          text: json?.error ?? `HTTP ${res.status}`,
+          detail: { details: Array.isArray(json?.details) ? json.details : json?.hint ? [json.hint] : undefined },
+        })
+        return
+      }
+      const result = json?.import ?? {}
+      const changes = result.changes ?? {}
+      const summary: string[] = []
+      if (changes.sitemap) summary.push('sitemap')
+      if (Array.isArray(changes.briefs) && changes.briefs.length > 0) summary.push(`${changes.briefs.length} brief${changes.briefs.length === 1 ? '' : 's'}`)
+      if (Array.isArray(changes.drafts) && changes.drafts.length > 0) summary.push(`${changes.drafts.length} draft${changes.drafts.length === 1 ? '' : 's'}`)
+      setImportMsg({
+        kind: 'ok',
+        text: summary.length > 0 ? `Imported: ${summary.join(', ')}.` : 'Imported, but no sections changed.',
+        detail: { warnings: result.warnings, next_steps: result.next_steps },
+      })
+      setImportText('')
+      setImportOpen(false)
+      await onImported()
+    } catch (e) {
+      setImportMsg({ kind: 'err', text: e instanceof Error ? e.message : 'Import failed' })
+    } finally { setBusy(null) }
+  }, [importText, projectId, onImported])
+
+  return (
+    <section className="rounded-lg border border-wm-border bg-wm-bg-elevated p-4 space-y-3">
+      <header>
+        <h3 className="text-[14px] font-semibold text-wm-text">Round-trip refinement</h3>
+        <p className="text-[12px] text-wm-text-muted leading-snug">
+          Export the current sitemap, briefs, and drafts to a markdown file.
+          Edit it in another Claude / ChatGPT conversation or any text editor,
+          then paste it back here. Faster than turn-by-turn revising in app
+          when you need to rework multiple pages at once.
+        </p>
+      </header>
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void handleExport()}
+          disabled={busy != null}
+          className="inline-flex items-center gap-1.5 rounded-full border border-wm-border bg-wm-bg hover:bg-wm-accent/5 px-3 py-1.5 text-[12px] text-wm-text disabled:opacity-50"
+        >
+          {busy === 'export' ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
+          Export to markdown
+        </button>
+        <button
+          type="button"
+          onClick={() => { setImportOpen(o => !o); setImportMsg(null) }}
+          disabled={busy != null}
+          className="inline-flex items-center gap-1.5 rounded-full border border-wm-border bg-wm-bg hover:bg-wm-accent/5 px-3 py-1.5 text-[12px] text-wm-text disabled:opacity-50"
+        >
+          {importOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          {importOpen ? 'Hide importer' : 'Import refinements'}
+        </button>
+        {exportResult && (
+          <span className="text-[11px] text-wm-text-subtle ml-auto">
+            Downloaded {exportResult.filename} ({Math.round(exportResult.bytes / 1024)} KB)
+          </span>
+        )}
+      </div>
+
+      {importOpen && (
+        <div className="space-y-2">
+          <textarea
+            value={importText}
+            onChange={e => setImportText(e.target.value)}
+            placeholder="Paste the entire exported document here (including the metadata header at top)…"
+            rows={10}
+            className="w-full rounded-md border border-wm-border bg-wm-bg px-3 py-2 text-[12px] font-mono focus:outline-none focus:border-wm-accent"
+          />
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] text-wm-text-subtle">
+              {importText.length.toLocaleString()} characters · The importer parses ```json blocks under each section header
+            </p>
+            <button
+              type="button"
+              onClick={() => void handleImport()}
+              disabled={busy != null || !importText.trim()}
+              className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white font-semibold disabled:opacity-50"
+            >
+              {busy === 'import' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              Apply import
+            </button>
+          </div>
+        </div>
+      )}
+
+      {importMsg && (
+        <div className={[
+          'rounded-md border px-3 py-2 text-[12px] space-y-1',
+          importMsg.kind === 'ok' ? 'border-wm-success/30 bg-wm-success-bg text-wm-success'
+            : 'border-wm-danger/30 bg-wm-danger-bg text-wm-danger',
+        ].join(' ')}>
+          <p>{importMsg.text}</p>
+          {Array.isArray(importMsg.detail?.warnings) && importMsg.detail.warnings.length > 0 && (
+            <ul className="text-[11px] text-wm-text-muted">
+              {importMsg.detail.warnings.map((w, i) => <li key={i}>· {w}</li>)}
+            </ul>
+          )}
+          {Array.isArray(importMsg.detail?.next_steps) && importMsg.detail.next_steps.length > 0 && (
+            <div className="pt-1 text-[11px] text-wm-text-muted">
+              <p className="font-semibold">Next steps:</p>
+              <ul>
+                {importMsg.detail.next_steps.map((s, i) => <li key={i}>· {s}</li>)}
+              </ul>
+            </div>
+          )}
+          {Array.isArray(importMsg.detail?.details) && importMsg.detail.details.length > 0 && (
+            <ul className="text-[11px]">
+              {importMsg.detail.details.map((d, i) => <li key={i}>· {d}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+    </section>
   )
 }
 
