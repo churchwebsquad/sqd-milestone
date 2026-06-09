@@ -34,7 +34,7 @@ const PAGE_DRAFT_CONCURRENCY = 4
  *  via manual Revise feedback or by approving with known gaps. */
 const SITEMAP_AUDIT_MAX_LOOPS = 2
 
-type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state'
+type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize'
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -68,6 +68,15 @@ export default async function handler(req: any, res: any) {
   try {
     if (action === 'status') {
       return res.status(200).json({ ok: true, engine_state: engineState })
+    }
+
+    if (action === 'run_synthesize') {
+      // Stage 1 — strategy synthesis from intake. Either a fresh draft
+      // (no redoContext) or a redo driven by strategist feedback.
+      const note = typeof req.body?.note === 'string' ? req.body.note.trim() : ''
+      const result = await callAgent(baseUrl, jwt, 'extract-strategy',
+        note ? { projectId, redoContext: note } : { projectId })
+      return res.status(200).json({ ok: true, stage_1: result })
     }
 
     if (action === 'reset_engine_state') {

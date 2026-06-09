@@ -16,7 +16,7 @@
  * it into a specific dispatch the engine executes.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Play, Loader2, CheckCircle2, AlertCircle, RefreshCw, Send, FileText, GitBranch,
   ChevronRight, ChevronDown, Eye, Edit3, Wand2,
@@ -197,6 +197,16 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     return stage2 ?? null
   }, [project.roadmap_state])
   const hasStage2 = sitemap !== null
+  // Upstream stages — used to decide which setup CTA to render and
+  // whether the auto-cascade should kick in.
+  const hasStage0 = useMemo(() => {
+    const rs = project.roadmap_state as Record<string, unknown> | null
+    return rs?.stage_0 != null
+  }, [project.roadmap_state])
+  const hasStage1 = useMemo(() => {
+    const rs = project.roadmap_state as Record<string, unknown> | null
+    return rs?.stage_1 != null
+  }, [project.roadmap_state])
   const draftSlugs = Object.keys(drafts).filter(k => k !== '_meta')
   const status = engine.status ?? 'idle'
   const sitemapApproved = sitemap?._meta?.status === 'approved'
@@ -257,6 +267,35 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     void callOrchestrate('run_coverage_audit')
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasStage2, coverageMissing, coverageIsStale, sitemapGeneratedAt])
+
+  // ── Auto-cascade pre-Gate-1 (synthesize → sitemap with audit-loop) ──
+  //
+  // When a project lands in Copy Engine with intake complete but stage_1
+  // and/or stage_2 missing, walk the engine forward without making the
+  // strategist click between stages. Stops at Gate 1 (sitemap approval).
+  // The user can still hit Re-run / Revise on either stage after.
+  //
+  // Per-project ref guard so a state change mid-cascade (synthesize
+  // landing stage_1) doesn't re-trigger the synthesize call. The guard
+  // resets only on project change, so re-opening the workspace later
+  // (after the cascade already produced stage_2) is a no-op since the
+  // top-level conditions won't match anyway.
+  const cascadeStartedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (running) return
+    if (cascadeStartedFor.current === project.id) return
+    if (!hasStage0) return       // intake/normalization must be done
+    if (hasStage2) return        // already past Gate 1's setup
+    cascadeStartedFor.current = project.id
+    void (async () => {
+      if (!hasStage1) {
+        const ok = await callOrchestrate('run_synthesize')
+        if (!ok) return          // surfaced error in banner; user retries
+      }
+      await callOrchestrate('draft_sitemap_with_audit')
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, hasStage0, hasStage1, hasStage2])
 
   const submitRoute = useCallback(async () => {
     if (!feedback.trim()) return
@@ -469,9 +508,35 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
                 ? `Approved. ${sitemap?.pages?.length ?? 0} pages.`
                 : hasStage2
                   ? `A sitemap exists (${sitemap?.pages?.length ?? 0} pages). Review below and approve to unlock the engine.`
-                  : 'No sitemap yet. Draft one in the Planning tab first.'}
+                  : !hasStage1
+                    ? 'Strategy synthesis is missing. Start by synthesizing the intake into a strategic foundation.'
+                    : 'Strategy is ready. Draft a sitemap to open Gate 1.'}
             </p>
           </div>
+          {!hasStage2 && !hasStage1 && (
+            <button
+              onClick={() => void callOrchestrate('run_synthesize')}
+              disabled={!!running || !hasStage0}
+              title={!hasStage0
+                ? 'Stage 0 (intake normalization) must finish first — check the Intake & Crawl tab.'
+                : 'Synthesize the brief, AM handoff, discovery, brand handoff, and content collection into a strategic foundation. ~2–3 min.'}
+              className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white disabled:opacity-50"
+            >
+              {running === 'run_synthesize' ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+              Synthesize strategy
+            </button>
+          )}
+          {!hasStage2 && hasStage1 && (
+            <button
+              onClick={() => void callOrchestrate('draft_sitemap_with_audit')}
+              disabled={!!running}
+              title="Draft a sitemap from the strategy, then auto-run a coverage audit. If the audit flags gaps, the sitemap self-corrects (capped at 2 fix-loops). ~3–5 min."
+              className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white disabled:opacity-50"
+            >
+              {running === 'draft_sitemap_with_audit' ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+              Draft sitemap (with auto-audit)
+            </button>
+          )}
           {hasStage2 && (
             <button
               onClick={() => setSitemapOpen(s => !s)}
