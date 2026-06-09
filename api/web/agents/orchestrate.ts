@@ -30,7 +30,7 @@ export const maxDuration = 300
 const MAX_LOOPS = 3
 const PAGE_DRAFT_CONCURRENCY = 4
 
-type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap'
+type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit'
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -71,6 +71,17 @@ export default async function handler(req: any, res: any) {
       if (!note) return res.status(400).json({ error: 'note (feedback) required for revise_sitemap' })
       const result = await callAgent(baseUrl, jwt, 'draft-sitemap', { projectId, redoContext: note })
       return res.status(200).json({ ok: true, sitemap: result })
+    }
+
+    if (action === 'run_coverage_audit') {
+      // Stage 2.5 — checks every Stage 0 topic against the Stage 2
+      // sitemap. Strategist sees results at Gate 1 BEFORE approving
+      // the sitemap. Auto-triggered by the client after sitemap revise
+      // + on workspace mount when no audit exists yet.
+      const note = typeof req.body?.note === 'string' ? req.body.note.trim() : ''
+      const result = await callAgent(baseUrl, jwt, 'sitemap-coverage',
+        note ? { projectId, redoContext: note } : { projectId })
+      return res.status(200).json({ ok: true, coverage: result })
     }
 
     if (action === 'approve_sitemap' || action === 'unlock_sitemap') {
@@ -284,7 +295,17 @@ async function applyDispatch(ctx: {
     return callAgent(baseUrl, jwt, 'extract-strategy', { projectId, redoContext: note })
   }
   if (stage === 'sitemap') {
-    return callAgent(baseUrl, jwt, 'draft-sitemap', { projectId, redoContext: note })
+    const result = await callAgent(baseUrl, jwt, 'draft-sitemap', { projectId, redoContext: note })
+    // Auto-chain Stage 2.5 coverage audit so the strategist can see
+    // gaps before deciding to approve. Non-fatal — if coverage fails
+    // the sitemap re-draft still counts as a success; the workspace
+    // can re-run coverage manually if needed.
+    try {
+      await callAgent(baseUrl, jwt, 'sitemap-coverage', { projectId })
+    } catch (e: any) {
+      console.error('[apply.sitemap] coverage audit failed (non-fatal):', e?.message)
+    }
+    return result
   }
   if (stage === 'page_briefs') {
     return callAgent(baseUrl, jwt, 'page-briefs', { projectId, redoContext: note })

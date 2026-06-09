@@ -24,6 +24,7 @@ import {
 import { supabase } from '../../../lib/supabase'
 import type { StrategyWebProject } from '../../../types/database'
 import { SitemapPreview as RichSitemapPreview } from '../pipeline/previews/SitemapPreview'
+import { SitemapCoveragePreview } from '../pipeline/previews/SitemapCoveragePreview'
 
 interface SitemapShape {
   pages?: Array<{ name: string; slug: string }>
@@ -143,6 +144,8 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   }, [pendingStartedAt])
   const [expandedDraft, setExpandedDraft] = useState<string | null>(null)
   const [confirmAction, setConfirmAction] = useState<'iterate' | 'commit' | null>(null)
+  const [coverageOpen, setCoverageOpen] = useState(false)
+  const [autoCoverageStartedFor, setAutoCoverageStartedFor] = useState<string | null>(null)
 
   const refreshFromDB = useCallback(async () => {
     const { data } = await supabase
@@ -197,6 +200,56 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   const draftSlugs = Object.keys(drafts).filter(k => k !== '_meta')
   const status = engine.status ?? 'idle'
   const sitemapApproved = sitemap?._meta?.status === 'approved'
+
+  // ── Stage 2.5 coverage audit ───────────────────────────────────────
+  //
+  // Pulled from roadmap_state.stage_2_5. Auto-run when:
+  //   1. A sitemap exists but no audit has been generated yet
+  //   2. The sitemap was re-drafted after the last audit (stale)
+  // The strategist sees the result inline at Gate 1 BEFORE deciding
+  // to Approve — so they can act on coverage gaps without having
+  // approval be the unlock for the audit (which is the chicken-and-
+  // egg the legacy pipeline had).
+  interface CoverageShape {
+    recommended_action?: 'proceed_to_stage_3' | 'redo_stage_2_with_gaps'
+    summary?:            { overall_coverage_score?: number }
+    gaps?:               unknown[]
+    identity_gaps?:      unknown[]
+    _meta?:              { generated_at?: string }
+    [k: string]: unknown
+  }
+  const coverage = useMemo<{ data: CoverageShape | null; generatedAt: string | null }>(() => {
+    const rs = project.roadmap_state as Record<string, unknown> | null
+    const stage25 = rs?.stage_2_5 as CoverageShape | undefined
+    if (!stage25) return { data: null, generatedAt: null }
+    return { data: stage25, generatedAt: stage25._meta?.generated_at ?? null }
+  }, [project.roadmap_state])
+
+  const sitemapGeneratedAt = (sitemap as { _meta?: { generated_at?: string } } | null)?._meta?.generated_at ?? null
+  const coverageIsStale = !!sitemapGeneratedAt
+    && !!coverage.generatedAt
+    && new Date(coverage.generatedAt).getTime() < new Date(sitemapGeneratedAt).getTime()
+  const coverageMissing = hasStage2 && coverage.data === null
+  const coverageRunning = running === 'run_coverage_audit'
+  const recommendedAction = coverage.data?.recommended_action ?? null
+  const coverageGapCount =
+    (coverage.data?.gaps?.length ?? 0) +
+    (coverage.data?.identity_gaps?.length ?? 0)
+
+  // Auto-trigger when sitemap exists + audit is missing or stale.
+  // Track per-sitemap-timestamp so a single render doesn't fire it
+  // twice (key = sitemap generated_at timestamp).
+  useEffect(() => {
+    if (!hasStage2) return
+    if (coverageRunning) return
+    if (running) return  // don't pile on while another action is in flight
+    if (!coverageMissing && !coverageIsStale) return
+    const key = sitemapGeneratedAt ?? 'unknown'
+    if (autoCoverageStartedFor === key) return
+    setAutoCoverageStartedFor(key)
+    void callOrchestrate('run_coverage_audit')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasStage2, coverageMissing, coverageIsStale, sitemapGeneratedAt])
 
   const submitRoute = useCallback(async () => {
     if (!feedback.trim()) return
@@ -416,10 +469,23 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
                 }
               }}
               disabled={!!running}
-              className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white disabled:opacity-50"
+              className={[
+                'inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[12px] text-white disabled:opacity-50',
+                recommendedAction === 'redo_stage_2_with_gaps'
+                  ? 'bg-wm-warning hover:bg-wm-warning/90'
+                  : 'bg-wm-accent',
+              ].join(' ')}
+              title={recommendedAction === 'redo_stage_2_with_gaps'
+                ? `Coverage audit flagged ${coverageGapCount} gap${coverageGapCount === 1 ? '' : 's'}. Approving anyway is allowed — but review the coverage panel below first.`
+                : undefined}
             >
               {running === 'approve_sitemap' ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
               Approve & run
+              {recommendedAction === 'redo_stage_2_with_gaps' && coverageGapCount > 0 && (
+                <span className="ml-0.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-white/30 text-[10px] font-bold">
+                  {coverageGapCount}
+                </span>
+              )}
             </button>
           )}
           {hasStage2 && sitemapApproved && (
@@ -537,6 +603,25 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         {sitemapOpen && sitemap && (
           <div className="border-t border-wm-border px-3 py-3">
             <RichSitemapPreview output={sitemap as unknown as Record<string, unknown>} />
+          </div>
+        )}
+
+        {/* Stage 2.5 coverage — surfaced INSIDE Gate 1 so the strategist
+            sees gaps before deciding to approve. Always rendered when a
+            sitemap exists; auto-runs on mount + after every revise. */}
+        {hasStage2 && (
+          <div className="border-t border-wm-border px-3 py-3">
+            <CoverageGate
+              data={coverage.data}
+              running={coverageRunning}
+              stale={coverageIsStale}
+              recommendedAction={recommendedAction}
+              gapCount={coverageGapCount}
+              isOpen={coverageOpen}
+              onToggle={() => setCoverageOpen(o => !o)}
+              onRerun={() => void callOrchestrate('run_coverage_audit')}
+              disabled={!!running}
+            />
           </div>
         )}
       </div>
@@ -1375,6 +1460,119 @@ function ConfirmPanel({ title, children, onCancel, onConfirm, confirmLabel, busy
           {busy ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} {confirmLabel}
         </button>
       </div>
+    </div>
+  )
+}
+
+function CoverageGate({
+  data, running, stale, recommendedAction, gapCount,
+  isOpen, onToggle, onRerun, disabled,
+}: {
+  data: {
+    recommended_action?: 'proceed_to_stage_3' | 'redo_stage_2_with_gaps'
+    summary?:            { overall_coverage_score?: number }
+    [k: string]: unknown
+  } | null
+  running: boolean
+  stale: boolean
+  recommendedAction: 'proceed_to_stage_3' | 'redo_stage_2_with_gaps' | null
+  gapCount: number
+  isOpen: boolean
+  onToggle: () => void
+  onRerun: () => void
+  disabled: boolean
+}) {
+  // No audit yet, or running for the first time
+  if (running && !data) {
+    return (
+      <div className="rounded-md bg-wm-accent/5 border border-wm-accent/30 p-3 flex items-center gap-2">
+        <Loader2 size={12} className="animate-spin text-wm-accent-strong" />
+        <p className="text-[12px] text-wm-text">Running coverage audit on the current sitemap…</p>
+      </div>
+    )
+  }
+
+  if (!data) {
+    return (
+      <div className="rounded-md bg-wm-bg border border-wm-border p-3 flex items-center gap-3">
+        <AlertCircle size={14} className="text-wm-text-subtle" />
+        <p className="text-[12px] text-wm-text-muted flex-1">
+          Coverage audit not run yet. Click below to check whether every Stage 0 topic has a home in this sitemap.
+        </p>
+        <button
+          type="button"
+          onClick={onRerun}
+          disabled={disabled}
+          className="text-[11px] text-wm-accent-strong hover:underline disabled:opacity-50"
+        >
+          Run audit
+        </button>
+      </div>
+    )
+  }
+
+  const isProceed = recommendedAction === 'proceed_to_stage_3'
+  const tone = isProceed ? 'success' : 'warning'
+  const toneClass = tone === 'success'
+    ? 'border-wm-success/30 bg-wm-success-bg'
+    : 'border-wm-warning/30 bg-wm-warning-bg'
+  const iconClass = tone === 'success' ? 'text-wm-success' : 'text-wm-warning'
+
+  const score = data?.summary?.overall_coverage_score
+  const pct = typeof score === 'number' ? Math.round(score * 100) : null
+
+  return (
+    <div className={['rounded-md border p-3', toneClass].join(' ')}>
+      <div className="flex items-start gap-3">
+        {isProceed
+          ? <CheckCircle2 size={16} className={['mt-0.5 shrink-0', iconClass].join(' ')} />
+          : <AlertCircle  size={16} className={['mt-0.5 shrink-0', iconClass].join(' ')} />}
+        <div className="flex-1">
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <p className="text-[12px] font-semibold text-wm-text">
+              Coverage audit:{' '}
+              {isProceed ? 'clear to approve' : `${gapCount} ${gapCount === 1 ? 'gap' : 'gaps'} flagged — review before approving`}
+            </p>
+            {pct != null && (
+              <span className="text-[10px] uppercase tracking-wider font-bold text-wm-text-subtle">
+                {pct}% covered
+              </span>
+            )}
+            {stale && (
+              <span className="text-[10px] uppercase tracking-wider font-bold text-wm-warning ml-1">
+                stale
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-wm-text-muted mt-0.5 leading-snug">
+            {isProceed
+              ? 'Every Stage 0 topic has a home in this sitemap (dedicated page, anchored section, or intentional omission).'
+              : 'Some topics may be invisible (no nav reference, sparse anchor sections, etc.). Open the details to see exactly which.'}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onToggle}
+          className="inline-flex items-center gap-1 text-[11px] text-wm-text-muted hover:text-wm-text px-2 py-1"
+        >
+          {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          {isOpen ? 'Hide details' : 'View details'}
+        </button>
+        <button
+          type="button"
+          onClick={onRerun}
+          disabled={disabled || running}
+          className="inline-flex items-center gap-1 text-[11px] text-wm-text-muted hover:text-wm-text px-2 py-1 disabled:opacity-50"
+        >
+          {running ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+          Re-run
+        </button>
+      </div>
+      {isOpen && (
+        <div className="mt-3 pt-3 border-t border-wm-border">
+          <SitemapCoveragePreview output={data as Record<string, unknown>} />
+        </div>
+      )}
     </div>
   )
 }
