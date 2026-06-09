@@ -24,7 +24,7 @@ jobs:
       - run: node scripts/schema-guard.mjs
 
   typecheck:
-    name: typecheck
+    name: typecheck (ratchet)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,10 +33,14 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
+      # Ratchet — fails only on NEW errors above scripts/typecheck-baseline.json.
+      # Pre-existing errors are grandfathered. The floor only moves DOWN, by
+      # running `node scripts/typecheck-ratchet.mjs --update` locally + committing
+      # the new baseline. See scripts/typecheck-ratchet.mjs for the full mechanism.
+      - run: node scripts/typecheck-ratchet.mjs
 
   lint:
-    name: lint
+    name: lint (ratchet)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +49,9 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm run lint
+      # Same pattern as typecheck. Existing lint errors grandfathered;
+      # new errors block.
+      - run: node scripts/lint-ratchet.mjs
 
   build:
     name: build
