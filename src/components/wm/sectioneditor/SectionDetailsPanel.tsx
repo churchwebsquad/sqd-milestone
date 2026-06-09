@@ -617,12 +617,24 @@ function isEditableField(field: WebFieldDef): boolean {
 }
 
 function isImageGroup(g: WebGroupDef): boolean {
+  // Policy: any group whose layer name or key looks image-shaped is
+  // hidden from the editable panel entirely — including groups that
+  // also carry text-shaped children (alt text, captions, etc.). The
+  // team's strategist workflow never edits images through this panel,
+  // and surfacing them as "Item 1 / Item 2" expandables creates noise
+  // + the kind of empty-bind-and-disappear bug we hit on Connect.
+  // The image COUNT is still rendered separately via
+  // presence.images.expected — that's where the strategist confirms
+  // how many image placeholders the template carries.
   const layerLooksImage = /image|photo|picture|graphic|logo/i.test(
     `${g.layer_name ?? ''} ${g.key}`,
   )
+  if (layerLooksImage) return true
+  // Non-image-named group whose ONLY authored slot is an image — also
+  // not worth editing (e.g. a "Cards" group whose item_schema only
+  // declares an image slot).
   const itemSchema = Array.isArray(g.item_schema) ? g.item_schema : []
-  if (itemSchema.length === 0) return layerLooksImage
-  // Group whose only authored slot is an image.
+  if (itemSchema.length === 0) return false
   const editable = itemSchema.filter(f => !(f.kind === 'slot' && f.type === 'image'))
   return editable.length === 0
 }

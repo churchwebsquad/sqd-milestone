@@ -289,19 +289,43 @@ function neutralizeDefaultButtonLabels(root: Element): void {
  *  lost; the preview just stops showing buttons that have nothing
  *  to render.
  *
- *  Targets only LEAF button shells (no nested button-shell descendants)
- *  so wrapping containers like "Buttons" with multiple child CTAs stay
- *  visible — only the empty children disappear. */
+ *  Three-pass detection so we catch button shells whether they're
+ *  tagged with data-layer (Figma export convention) or are raw
+ *  <button> / <a> tags Brixies inlined without the layer attribute:
+ *
+ *  1. data-layer pass — leaf containers with layer name matching
+ *     button/cta/contact patterns. The original (and still primary)
+ *     signal for Brixies CTA wrappers.
+ *  2. <button> pass — any <button> tag with empty text + no img/svg.
+ *  3. <a> pass — anchor tags with empty text AND no meaningful href
+ *     (no href, href="#", href="", or href="javascript:..."). An
+ *     anchor with a real destination but no label is still hide-worthy
+ *     because the user can't see where it goes; bind inspector still
+ *     surfaces the empty label slot. */
 function hideEmptyButtonShells(root: Element): void {
-  const all = root.querySelectorAll<HTMLElement>('[data-layer]')
-  for (const el of Array.from(all)) {
+  // Pass 1 — data-layer button shells (leaf-only)
+  for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-layer]'))) {
     if (!isButtonShellLayer(el)) continue
     if (hasNestedButtonShell(el)) continue
-    const txt = (el.textContent ?? '').trim()
-    if (txt) continue
-    const existing = el.getAttribute('style') ?? ''
-    const cleaned = existing.replace(/;?\s*display\s*:\s*[^;]+;?/gi, '').replace(/^\s*;/, '').trim()
-    el.setAttribute('style', (cleaned ? cleaned + ';' : '') + 'display:none')
+    if (hasMeaningfulContent(el)) continue
+    forceHide(el)
+  }
+
+  // Pass 2 — raw <button> tags lacking content
+  for (const el of Array.from(root.querySelectorAll<HTMLElement>('button'))) {
+    if (hasMeaningfulContent(el)) continue
+    forceHide(el)
+  }
+
+  // Pass 3 — raw <a> tags lacking content (and ideally no real href)
+  for (const el of Array.from(root.querySelectorAll<HTMLAnchorElement>('a'))) {
+    if (hasMeaningfulContent(el)) continue
+    // Only target anchors that ALSO have no meaningful href, so we
+    // don't hide an icon-only link that intentionally has no visible
+    // text but does navigate somewhere. Brixies-generated empty CTAs
+    // typically have no href at all (the bind step would have set one).
+    if (hasMeaningfulHref(el)) continue
+    forceHide(el)
   }
 }
 
@@ -316,6 +340,29 @@ function hasNestedButtonShell(el: Element): boolean {
     if (isButtonShellLayer(child)) return true
   }
   return false
+}
+
+/** "Meaningful content" = visible text, OR an img/svg/input that
+ *  carries its own visual weight. An empty button with whitespace-only
+ *  text and no media is what we want to hide. */
+function hasMeaningfulContent(el: Element): boolean {
+  if ((el.textContent ?? '').trim().length > 0) return true
+  if (el.querySelector('img, svg, video, picture, iframe, input') !== null) return true
+  return false
+}
+
+function hasMeaningfulHref(a: HTMLAnchorElement): boolean {
+  const href = (a.getAttribute('href') ?? '').trim()
+  if (!href) return false
+  if (href === '#' || href.startsWith('#')) return false
+  if (/^javascript:/i.test(href)) return false
+  return true
+}
+
+function forceHide(el: Element): void {
+  const existing = el.getAttribute('style') ?? ''
+  const cleaned = existing.replace(/;?\s*display\s*:\s*[^;]+;?/gi, '').replace(/^\s*;/, '').trim()
+  el.setAttribute('style', (cleaned ? cleaned + ';' : '') + 'display:none')
 }
 
 /** When N identically-named siblings all carry `position: absolute`
