@@ -515,18 +515,30 @@ export function scoreTemplate(
   let s = 0
 
   // ── Slot match ───────────────────────────────────────────────────────
+  //
+  // Differentiated penalty for "template has slot, brief doesn't need it":
+  // empty MEDIA-SHAPED slots (video, large image) read as visibly broken
+  // in the preview ("why is there a blank video player?"); empty text-
+  // shaped slots (tagline, name, role) are mostly invisible. Calibrate
+  // accordingly so the scorer doesn't pick Content-80-with-empty-video
+  // over a leaner Content/Intro variant.
   const slotSignals: Array<keyof FieldShape> = [
     'has_tagline', 'has_heading', 'has_description', 'has_image', 'has_video',
     'has_name', 'has_title', 'has_email', 'has_role', 'has_quote',
     'has_date', 'has_speaker', 'has_step_number', 'has_question',
     'has_answer', 'has_address',
   ]
+  const HIGH_VISUAL_OVERFILL_PENALTY: Partial<Record<keyof FieldShape, number>> = {
+    has_video: 14,   // big rectangle in the canvas, can't hide
+    has_image: 5,    // image-shaped but smaller variants ship as icons, so middle ground
+    has_quote: 3,    // pull-quote layout looks weird empty
+  }
   for (const k of slotSignals) {
     const briefHas = Boolean(briefShape[k])
     const tplHas   = Boolean(template[k])
     if (briefHas && tplHas)        s += 4
-    else if (briefHas && !tplHas)  s -= 8     // brief insists, template can't hold
-    else if (!briefHas && tplHas)  s -= 1     // extra slots are mostly harmless
+    else if (briefHas && !tplHas)  s -= 8                                      // underfill
+    else if (!briefHas && tplHas)  s -= HIGH_VISUAL_OVERFILL_PENALTY[k] ?? 1   // overfill
   }
 
   // ── CTA cardinality ──────────────────────────────────────────────────

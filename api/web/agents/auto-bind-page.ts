@@ -137,7 +137,7 @@ export default async function handler(req: any, res: any) {
 
     `DECISION CRITERIA, in priority order:\n\n` +
 
-    `  1. STRUCTURAL FIT (HARD CONSTRAINTS — apply first).\n` +
+    `  1. STRUCTURAL FIT — UNDERFILL (HARD REJECT).\n` +
     `       The candidate's structure.* flags MUST be compatible with the section's ` +
     `context.has_*/count fields. Specifically:\n` +
     `         - If context.has_tagline=true, the candidate MUST have structure.has_tagline=true. ` +
@@ -149,26 +149,46 @@ export default async function handler(req: any, res: any) {
     `whose structure.step_group_size is close to context.step_count.\n` +
     `         - If context.card_count >= 2, prefer candidates with structure.card_group_count >= 1 ` +
     `whose structure.largest_card_group is close to context.card_count.\n` +
-    `         - If context.card_count = 0 and context.step_count = 0, prefer card_group_count=0 ` +
-    `(no empty groups in the editor).\n` +
     `         - If context.has_image=true, prefer structure.has_image=true.\n` +
     `       VIOLATIONS ARE A BIG DEAL. A bind that drops a tagline / drops a CTA / drops half ` +
     `the cards forces the strategist to manually paste them in. Always reject those candidates ` +
     `unless absolutely no alternative exists.\n\n` +
 
-    `  2. FAMILY APPROPRIATENESS. Match the section's content to the family's intended role. ` +
+    `  2. STRUCTURAL FIT — OVERFILL (HARD REJECT, equally important).\n` +
+    `       The candidate's structure.* flags should NOT have prominent slots the content can't ` +
+    `fill. An empty video frame, an empty card grid, an empty stat row — these read as a ` +
+    `broken layout. Specifically:\n` +
+    `         - If context.has_video=false, REJECT candidates with structure.has_video=true ` +
+    `unless no other family-appropriate candidate exists. A blank video player slot is visually ` +
+    `more broken than a slightly smaller variant.\n` +
+    `         - If context.card_count = 0 AND context.step_count = 0, REJECT candidates with ` +
+    `structure.card_group_count >= 1. Don't pick a card-grid variant for body-only content — ` +
+    `the empty cards stack at the bottom like a 404.\n` +
+    `         - If context.has_image=false AND the candidate has structure.has_image=true with ` +
+    `a LARGE image slot (image_count >= 1 AND the slot occupies > ~30% of the section visually), ` +
+    `prefer a no-image variant. Small icon images are fine; large hero/feature images aren't.\n` +
+    `         - If context.cta_count = 0 AND candidate.structure.cta_count >= 2, slight penalty. ` +
+    `Two empty CTA pills read worse than zero.\n` +
+    `       Concrete example to internalize: Content Section 80 has a prominent video player + ` +
+    `4 cards. If the content is description-only with no video and no card structure, ` +
+    `Content Section 80 is the WRONG pick even though it satisfies criterion 1 (it has the ` +
+    `description slot). Pick a variant from Content / Intro / Feature with just heading + ` +
+    `description + optional CTA instead.\n\n` +
+
+    `  3. FAMILY APPROPRIATENESS. Match the section's content to the family's intended role. ` +
     `If the brief says "Banner Sections" but the content has multi-paragraph body + CTA, ` +
     `PICK A NON-BANNER candidate (Feature/Content/CTA). Banner is a scrolling accent, not a ` +
     `body holder. Use is_narrow_use=true as the avoid-for-content flag.\n\n` +
 
-    `  3. SITE LIBRARY PREFERENCE. When TWO candidates BOTH satisfy criterion 1 (structural fit) ` +
-    `AND criterion 2 (family appropriateness), prefer is_site_pick=true. Do NOT pick a site ` +
-    `library candidate over a structurally-mismatched candidate — structure wins first.\n\n` +
+    `  4. SITE LIBRARY PREFERENCE. When TWO candidates BOTH satisfy criteria 1+2+3, prefer ` +
+    `is_site_pick=true. Do NOT pick a site library candidate over a structurally-mismatched ` +
+    `candidate — structure (both underfill AND overfill) wins first.\n\n` +
 
-    `  4. INFORMATION DENSITY. Match visual weight to prose length. Sparse prose ` +
-    `(body_length_chars < 200) → spacious variant. Dense content → tight variant.\n\n` +
+    `  5. INFORMATION DENSITY. Match visual weight to prose length. Sparse prose ` +
+    `(body_length_chars < 200) → spacious variant without large media frames. Dense content ` +
+    `→ tight variant.\n\n` +
 
-    `  5. PAGE BALANCE. Don't pick three identical heavy variants in a row; vary rhythm ` +
+    `  6. PAGE BALANCE. Don't pick three identical heavy variants in a row; vary rhythm ` +
     `across the page where the content allows.\n\n` +
 
     `OVERRIDES: if the brief's suggested_template_family is structurally wrong for the content ` +
@@ -178,8 +198,13 @@ export default async function handler(req: any, res: any) {
     `aside.\n\n` +
 
     `Return picks via the submit_picks tool. Always include every section_id in the input. ` +
-    `Rationale should be one short sentence — what made this variant win. When you override ` +
-    `the brief's family hint, say so. When you pick from the site library, say "Site library:".`
+    `Rationale should be one short sentence — what made this variant win. Two things the ` +
+    `rationale should ALWAYS surface when relevant: (a) which content shape signals (taglines, ` +
+    `CTAs, card_count, etc.) the chosen variant matches, AND (b) any structural slot the ` +
+    `variant has that the content WON'T fill, with a brief reason why it's still acceptable ` +
+    `(e.g. "small icon image stays decorative when empty" vs "would-be hero video is rejected"). ` +
+    `When you override the brief's family hint, say so. When you pick from the site library, ` +
+    `say "Site library:".`
 
   const userContent =
     `Page context:\n${pageContext || '(none)'}\n\n` +
