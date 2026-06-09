@@ -70,6 +70,11 @@ export function renderSectionToHtml(
   // 3-image centered fan layout regardless of how many image slots
   // the augmenter surfaced.
   fixHeroImageFan(root)
+  // Hero 34 ships two image strips designed to bleed past the artboard
+  // and clip via the hero's `overflow: hidden`. The generic
+  // wrapOverflowingFlexContainers pass mistakes the wide top row for
+  // a carousel that needs wrapping; this restores the intended bleed.
+  fixHero34BleedStrips(root)
 
   return root.outerHTML
 }
@@ -131,6 +136,63 @@ function fixHeroImageFan(root: Element): void {
         'box-shadow: 0 8px 24px rgba(22, 22, 22, 0.08)',
       ].join('; '))
       wrapper.appendChild(img)
+    }
+  }
+}
+
+/** Hero Section 34 ships two image rows engineered to overflow the
+ *  1512px artboard and clip cleanly via the hero's `overflow: hidden`:
+ *  a 4-image top row (~2026px wide) and a 3-image bottom row (~1512px
+ *  wide), with two absolute-positioned white-gradient "Rectangle"
+ *  elements painting edge fades over the bleed.
+ *
+ *  Two upstream passes break this layout:
+ *    1. wrapOverflowingFlexContainers sees the top row's >1612px width
+ *       and adds `flex-wrap: wrap`, creating two stacked rows of 2
+ *       images each ("orphan rows" the strategist sees).
+ *    2. fixDecorativeAbsoluteStacking sees the gradient Rectangles as
+ *       background-only absolute elements and shoves them to z-index:-1,
+ *       hiding the fade behind the images.
+ *
+ *  Fix targets Hero 34 specifically (by Hero Section 34 ancestor):
+ *    - Force `flex-wrap: nowrap` on the two image strips (removes the
+ *      wrap class the prior pass appended).
+ *    - Promote the Rectangle fades to a positive z-index so they paint
+ *      over the bleeding images.
+ *    - Constrain the strips to the artboard width (1512px) with
+ *      `width: 1512px` + the parent's `overflow: hidden` so the bleed
+ *      is contained to the section, not the page. */
+function fixHero34BleedStrips(root: Element): void {
+  const heroes = Array.from(root.querySelectorAll<HTMLElement>('[data-layer="Hero Section 34"]'))
+  for (const hero of heroes) {
+    // Ensure the hero itself clips — already in source, but defensive.
+    const heroStyle = hero.getAttribute('style') ?? ''
+    if (!/overflow\s*:\s*hidden/i.test(heroStyle)) {
+      hero.setAttribute('style', appendStyle(heroStyle, 'overflow: hidden'))
+    }
+
+    // Image strips: nowrap + center the bleed.
+    const strips = Array.from(hero.querySelectorAll<HTMLElement>(
+      '[data-layer="Container top images"], [data-layer="Container bot images"]',
+    ))
+    for (const strip of strips) {
+      let s = strip.getAttribute('style') ?? ''
+      // Strip any wrap directive a prior pass appended.
+      s = s.replace(/flex-wrap\s*:\s*(?:wrap|wrap-reverse)\s*;?/gi, '')
+      s = appendStyle(s, 'flex-wrap: nowrap')
+      strip.setAttribute('style', s)
+    }
+
+    // Gradient fade rectangles: keep them above the images.
+    const rects = Array.from(hero.querySelectorAll<HTMLElement>(
+      '[data-layer="Rectangle 1"], [data-layer="Rectangle 2"]',
+    ))
+    for (const rect of rects) {
+      let s = rect.getAttribute('style') ?? ''
+      s = s.replace(/z-index\s*:\s*-?\d+\s*;?/gi, '')
+      s = appendStyle(s, 'z-index: 2')
+      s = appendStyle(s, 'pointer-events: none')
+      rect.setAttribute('style', s)
     }
   }
 }

@@ -36,11 +36,34 @@ export function BindHealthPanel({ template, fieldValues, onPullSuggestion }: Pro
     [template, fieldValues],
   )
 
-  if (!template || health.totalText === 0) return null
-  if (health.emptyText === 0) {
+  if (!template || (health.totalText === 0 && health.totalAllFields === 0)) return null
+
+  // The "brixies fields" counter recursively walks ALL slot types
+  // (including nested item_schema slots, instance-counted) so a
+  // top-level intro being bound (3/3 text items) doesn't mask the
+  // fact that 4 of 6 card images are still placeholders.
+  const brixiesLine = health.totalAllFields > health.totalText
+    ? (health.emptyAllFields === 0
+        ? `all ${health.totalAllFields} brixies fields filled`
+        : `${health.emptyAllFields}/${health.totalAllFields} brixies fields empty`)
+    : null
+
+  if (health.emptyText === 0 && health.emptyAllFields === 0) {
     return (
       <div className="rounded-md border border-wm-success/30 bg-wm-success-bg px-3 py-2 text-[11px] text-wm-success font-semibold">
-        Bind health · all {health.filledText} text slots filled
+        Bind health · all {health.filledText} text items bound
+        {brixiesLine ? ` · ${brixiesLine}` : ''}
+      </div>
+    )
+  }
+
+  // Brixies-fields-only gap (top-level text is fine but nested slots
+  // / images are still empty). Same warning band, no nested-pull rows.
+  if (health.emptyText === 0) {
+    return (
+      <div className="rounded-md border border-wm-warning/40 bg-wm-warning-bg px-3 py-2 text-[11px] font-bold text-wm-text">
+        Bind health · {health.filledText}/{health.totalText} text items bound
+        {brixiesLine ? ` · ${brixiesLine}` : ''}
       </div>
     )
   }
@@ -51,8 +74,8 @@ export function BindHealthPanel({ template, fieldValues, onPullSuggestion }: Pro
   return (
     <div className="rounded-md border border-wm-warning/40 bg-wm-warning-bg p-3 space-y-2">
       <p className="text-[11px] font-bold text-wm-text">
-        Bind health · {health.filledText}/{health.totalText} text slots filled
-        · {health.emptyText} empty
+        Bind health · {health.filledText}/{health.totalText} text items bound
+        {brixiesLine ? ` · ${brixiesLine}` : ''}
       </p>
 
       {rowsWithSuggestions.length > 0 && (

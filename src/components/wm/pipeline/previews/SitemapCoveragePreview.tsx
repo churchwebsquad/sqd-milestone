@@ -108,7 +108,18 @@ interface CoverageData {
   recommended_action?:        'proceed_to_stage_3' | 'redo_stage_2_with_gaps'
 }
 
-export function SitemapCoveragePreview({ output }: { output: Record<string, unknown> }) {
+export function SitemapCoveragePreview({
+  output, sitemapPageCount,
+}: {
+  output: Record<string, unknown>
+  /** Total page count in the sitemap. Surfaces ALONGSIDE the audit's
+   *  `total_topics` count so the strategist can see that "18 sitemap
+   *  pages" and "20 audited topics" are different — pages can carry
+   *  multiple topics, and a topic doesn't necessarily get its own
+   *  page (anchored sections, intentional omissions). Optional so
+   *  callers without sitemap context can still render the preview. */
+  sitemapPageCount?: number
+}) {
   const data           = output as CoverageData
   const audit          = data.topic_audit ?? []
   const gaps           = data.gaps ?? []
@@ -127,7 +138,7 @@ export function SitemapCoveragePreview({ output }: { output: Record<string, unkn
     <div className="space-y-6">
       <RecommendationBanner action={action} score={summary.overall_coverage_score} />
 
-      <Summary summary={summary} />
+      <Summary summary={summary} sitemapPageCount={sitemapPageCount} />
 
       {gaps.length > 0            && <GapsPanel gaps={gaps} />}
       {identityGaps.length > 0    && <IdentityGapsPanel gaps={identityGaps} />}
@@ -167,11 +178,14 @@ function RecommendationBanner({ action, score }: { action?: CoverageData['recomm
   )
 }
 
-function Summary({ summary }: { summary: Summary }) {
+function Summary({ summary, sitemapPageCount }: { summary: Summary; sitemapPageCount?: number }) {
   const stats = [
-    { label: 'Total topics',         value: summary.total_topics },
-    { label: 'Dedicated pages',      value: summary.dedicated_pages,        tone: 'success' as const },
-    { label: 'Anchored sections',    value: summary.anchored_sections,      tone: 'accent'  as const },
+    // Sitemap page count is the FIRST tile so the strategist anchors on
+    // it before reading topic-derived counts that don't have to match.
+    { label: 'Sitemap pages',        value: sitemapPageCount,               tone: 'accent'  as const },
+    { label: 'Audited topics',       value: summary.total_topics },
+    { label: 'Topics → dedicated pages', value: summary.dedicated_pages,    tone: 'success' as const },
+    { label: 'Topics → anchored sections', value: summary.anchored_sections, tone: 'accent' as const },
     { label: 'Nav only',             value: summary.nav_only,               tone: 'muted'   as const },
     { label: 'Orphans',              value: summary.orphans,                tone: summary.orphans && summary.orphans > 0 ? 'warning' as const : 'muted' as const },
     { label: 'Intentional omissions', value: summary.intentional_omissions, tone: 'muted'   as const },
@@ -179,6 +193,13 @@ function Summary({ summary }: { summary: Summary }) {
   ]
   return (
     <Section label="Summary">
+      {sitemapPageCount != null && summary.total_topics != null && (
+        <p className="text-[11px] text-wm-text-muted mb-2 leading-snug">
+          Sitemap has <strong>{sitemapPageCount}</strong> page{sitemapPageCount === 1 ? '' : 's'};
+          {' '}audit reviewed <strong>{summary.total_topics}</strong> Stage 0 topic{summary.total_topics === 1 ? '' : 's'} against it.
+          {' '}These counts are different by design — pages can carry multiple topics, and not every topic gets its own page (some land as anchored sections or intentional omissions).
+        </p>
+      )}
       <div className="flex gap-2 flex-wrap">
         {stats.filter(s => s.value != null).map(s => (
           <div key={s.label} className={[

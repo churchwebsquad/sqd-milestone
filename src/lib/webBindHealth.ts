@@ -41,10 +41,21 @@ export interface EmptySlotRow {
 }
 
 export interface BindHealth {
+  /** Top-level text/richtext slots only — the headline "items bound"
+   *  counter the panel has shown since v1. */
   totalText:      number
   filledText:     number
   emptyText:      number
   emptyRows:      EmptySlotRow[]
+  /** Recursive count of EVERY bindable slot the template exposes —
+   *  including image slots, CTAs, and slots nested inside group items
+   *  (counted per actual item instance, not per item_schema entry).
+   *  Surfaces the gap between "the section's intro is bound" and
+   *  "every card in the section's grid has copy + an image", which
+   *  the text-only counter masked entirely. */
+  totalAllFields:  number
+  filledAllFields: number
+  emptyAllFields:  number
 }
 
 /** Strip HTML tags + collapse whitespace for previews + emptiness checks. */
@@ -119,12 +130,88 @@ function collectNestedSuggestions(
   return out
 }
 
-/** True when a slot value is missing or whitespace-only. Richtext
- *  values are also empty when they only contain markup. */
+/** True when a text/richtext slot value is missing or whitespace-only.
+ *  Richtext values are also empty when they only contain markup.
+ *  Used for the top-level "text items bound" counter — non-text slots
+ *  return false here so they don't show up as empty rows. */
 function isSlotEmpty(slot: WebSlotDef, value: unknown): boolean {
   if (value == null) return true
   if (typeof value !== 'string') return false        // images / bools / etc.
   return plainText(value).length === 0
+}
+
+/** True when ANY slot type's value reads as unbound. Mirrors the
+ *  preview pipeline's emptiness checks (placeholder images, blank
+ *  text, missing CTA url+label) so the brixies-fields counter reflects
+ *  what a viewer would actually see as a gap. */
+function isAnyFieldEmpty(slot: WebSlotDef, value: unknown): boolean {
+  if (value == null) return true
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return true
+    if (slot.type === 'image') {
+      // placehold.co + Brixies's via.placeholder.com fallbacks aren't
+      // a real bind — count them as empty.
+      return /placehold\.co|placeholder\.com/i.test(trimmed)
+    }
+    if (slot.type === 'text' || slot.type === 'richtext') {
+      return plainText(value).length === 0
+    }
+    return false
+  }
+  if (typeof value === 'object') {
+    // CTA / link shape: { label, url } — empty when neither resolves.
+    const obj = value as { label?: unknown; url?: unknown; src?: unknown }
+    if ('src' in obj) {
+      const src = typeof obj.src === 'string' ? obj.src.trim() : ''
+      if (!src) return true
+      return /placehold\.co|placeholder\.com/i.test(src)
+    }
+    if ('url' in obj || 'label' in obj) {
+      const label = typeof obj.label === 'string' ? plainText(obj.label) : ''
+      const url   = typeof obj.url   === 'string' ? obj.url.trim()       : ''
+      return !label && !url
+    }
+    return false
+  }
+  return false
+}
+
+/** Walk every slot the template exposes — top-level + every group's
+ *  item_schema, instance-counted against the actual items in
+ *  field_values — and return {total, filled}. The instance count is
+ *  important: a "cards" group with 3 cards × 2 slots = 6 fields, not
+ *  2 (the schema entry count) and not 0 (the top-level field count). */
+function countAllFields(
+  fields: ReadonlyArray<WebFieldDef>,
+  values: Record<string, unknown>,
+): { total: number; filled: number } {
+  let total = 0
+  let filled = 0
+  for (const field of fields) {
+    if (field.kind === 'slot') {
+      total++
+      if (!isAnyFieldEmpty(field, values[field.key])) filled++
+      continue
+    }
+    if (field.kind !== 'group') continue
+    const groupValue = values[field.key]
+    const items: Array<Record<string, unknown>> = Array.isArray(groupValue)
+      ? (groupValue as Array<Record<string, unknown>>)
+      : (groupValue && typeof groupValue === 'object'
+            && Array.isArray((groupValue as { items?: unknown }).items)
+          ? ((groupValue as { items: Array<Record<string, unknown>> }).items)
+          : [])
+    const itemSchema = Array.isArray(field.item_schema) ? field.item_schema : []
+    if (itemSchema.length === 0) continue
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue
+      const sub = countAllFields(itemSchema, item)
+      total  += sub.total
+      filled += sub.filled
+    }
+  }
+  return { total, filled }
 }
 
 export function computeBindHealth(
@@ -132,7 +219,10 @@ export function computeBindHealth(
   fieldValues: Record<string, unknown>,
 ): BindHealth {
   if (!template || !Array.isArray(template.fields)) {
-    return { totalText: 0, filledText: 0, emptyText: 0, emptyRows: [] }
+    return {
+      totalText: 0, filledText: 0, emptyText: 0, emptyRows: [],
+      totalAllFields: 0, filledAllFields: 0, emptyAllFields: 0,
+    }
   }
   let total = 0
   let filled = 0
@@ -150,10 +240,14 @@ export function computeBindHealth(
       suggestions: collectNestedSuggestions(field, template.fields, fieldValues),
     })
   }
+  const allFields = countAllFields(template.fields, fieldValues)
   return {
-    totalText:  total,
-    filledText: filled,
-    emptyText:  total - filled,
+    totalText:       total,
+    filledText:      filled,
+    emptyText:       total - filled,
     emptyRows,
+    totalAllFields:  allFields.total,
+    filledAllFields: allFields.filled,
+    emptyAllFields:  allFields.total - allFields.filled,
   }
 }

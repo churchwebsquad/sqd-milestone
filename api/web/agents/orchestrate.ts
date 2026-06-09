@@ -29,8 +29,12 @@ export const maxDuration = 300
 
 const MAX_LOOPS = 3
 const PAGE_DRAFT_CONCURRENCY = 4
+/** Audit → fix → audit cap. After this many fix attempts, the loop
+ *  halts even if gaps remain — the strategist resolves the residual
+ *  via manual Revise feedback or by approving with known gaps. */
+const SITEMAP_AUDIT_MAX_LOOPS = 2
 
-type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state'
+type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state'
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -66,11 +70,34 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({ ok: true, engine_state: engineState })
     }
 
+    if (action === 'reset_engine_state') {
+      // Recovery action — clears engine_state so the strategist can
+      // restart a stuck workflow without losing their sitemap, briefs,
+      // or drafts. Used by the workspace when the engine has been in
+      // an in-progress status (briefing/drafting/etc.) past the point
+      // a real run would have finished, indicating the agent call
+      // crashed mid-flight.
+      await sb.from('strategy_web_projects').update({
+        roadmap_state: { ...roadmapState, engine_state: {} },
+      }).eq('id', projectId)
+      return res.status(200).json({ ok: true, engine_state: {} })
+    }
+
     if (action === 'revise_sitemap') {
       const note = typeof req.body?.note === 'string' ? req.body.note.trim() : ''
       if (!note) return res.status(400).json({ error: 'note (feedback) required for revise_sitemap' })
-      const result = await callAgent(baseUrl, jwt, 'draft-sitemap', { projectId, redoContext: note })
-      return res.status(200).json({ ok: true, sitemap: result })
+      const result = await draftSitemapWithAuditLoop({ sb, baseUrl, jwt, projectId, initialContext: note })
+      return res.status(200).json({ ok: true, ...result })
+    }
+
+    if (action === 'draft_sitemap_with_audit') {
+      // Explicit invocation of the audit-loop sub-step. Same as the
+      // path the apply(stage='sitemap') + revise_sitemap actions take
+      // under the hood; exposed as a top-level action for clients that
+      // want to trigger the loop without going through dispatch / route.
+      const note = typeof req.body?.note === 'string' ? req.body.note.trim() : ''
+      const result = await draftSitemapWithAuditLoop({ sb, baseUrl, jwt, projectId, initialContext: note || undefined })
+      return res.status(200).json({ ok: true, ...result })
     }
 
     if (action === 'export_state') {
@@ -139,7 +166,7 @@ export default async function handler(req: any, res: any) {
       if (!dispatch || typeof dispatch !== 'object') {
         return res.status(400).json({ error: 'dispatch object required for apply' })
       }
-      const result = await applyDispatch({ baseUrl, jwt, projectId, dispatch })
+      const result = await applyDispatch({ sb, baseUrl, jwt, projectId, dispatch })
       return res.status(200).json({ ok: true, result })
     }
 
@@ -281,7 +308,7 @@ async function runIterate(ctx: {
     }
 
     for (const d of otherDirectives) {
-      await applyDispatch({ baseUrl, jwt, projectId, dispatch: { stage_to_rerun: d.stage_to_rerun, page_slug: d.page_slug, note: d.note } })
+      await applyDispatch({ sb, baseUrl, jwt, projectId, dispatch: { stage_to_rerun: d.stage_to_rerun, page_slug: d.page_slug, note: d.note } })
     }
 
     // Re-critique
@@ -297,7 +324,7 @@ async function runIterate(ctx: {
 }
 
 async function applyDispatch(ctx: {
-  baseUrl: string; jwt: string; projectId: string; dispatch: any
+  sb: any; baseUrl: string; jwt: string; projectId: string; dispatch: any
 }): Promise<unknown> {
   const { baseUrl, jwt, projectId, dispatch } = ctx
   const stage = String(dispatch?.stage_to_rerun ?? '')
@@ -307,17 +334,13 @@ async function applyDispatch(ctx: {
     return callAgent(baseUrl, jwt, 'extract-strategy', { projectId, redoContext: note })
   }
   if (stage === 'sitemap') {
-    const result = await callAgent(baseUrl, jwt, 'draft-sitemap', { projectId, redoContext: note })
-    // Auto-chain Stage 2.5 coverage audit so the strategist can see
-    // gaps before deciding to approve. Non-fatal — if coverage fails
-    // the sitemap re-draft still counts as a success; the workspace
-    // can re-run coverage manually if needed.
-    try {
-      await callAgent(baseUrl, jwt, 'sitemap-coverage', { projectId })
-    } catch (e: any) {
-      console.error('[apply.sitemap] coverage audit failed (non-fatal):', e?.message)
-    }
-    return result
+    // Treat audit as a non-skippable sub-step of stage 2. The loop
+    // drafts the sitemap, audits, and (up to SITEMAP_AUDIT_MAX_LOOPS
+    // times) feeds the audit's gap findings back as redoContext so
+    // the sitemap can self-correct. If the loop terminates without
+    // the audit recommending proceed, _meta.audit_loop_status is set
+    // to 'needs_human' so the workspace can warn the strategist.
+    return draftSitemapWithAuditLoop({ sb: ctx.sb, baseUrl, jwt, projectId, initialContext: note || undefined })
   }
   if (stage === 'page_briefs') {
     return callAgent(baseUrl, jwt, 'page-briefs', { projectId, redoContext: note })
@@ -339,6 +362,196 @@ async function applyDispatch(ctx: {
     return { ok: true, skipped: true }
   }
   throw new Error(`Unknown stage_to_rerun: ${stage}`)
+}
+
+/** Stage 2 sub-step: draft sitemap → audit → if gaps, redraft with
+ *  the audit's findings as redoContext → re-audit. Loop terminates on:
+ *    - audit recommends `proceed_to_stage_3` (success path)
+ *    - loop count reaches SITEMAP_AUDIT_MAX_LOOPS (needs_human path)
+ *    - the coverage agent itself errors (audit_failed — surfaced but
+ *      not fatal; the sitemap still landed and the strategist can
+ *      review manually)
+ *
+ *  Persists loop telemetry to stage_2._meta.audit_loop so the workspace
+ *  can show the strategist what just happened (how many iterations,
+ *  whether the audit terminated cleanly, residual gap count). */
+async function draftSitemapWithAuditLoop(ctx: {
+  sb: any; baseUrl: string; jwt: string; projectId: string; initialContext?: string
+}): Promise<{
+  sitemap: any
+  audit: any
+  audit_loop: {
+    status: 'proceeded' | 'needs_human' | 'audit_failed'
+    iterations: Array<{ loop: number; gaps_count: number; recommended_action: string }>
+    residual_gap_count: number
+    message: string
+  }
+}> {
+  const { sb, baseUrl, jwt, projectId, initialContext } = ctx
+  let loopContext = initialContext ?? ''
+  let lastSitemap: any = null
+  let lastAuditResponse: any = null
+  let lastAuditOutput: any = null
+  const iterations: Array<{ loop: number; gaps_count: number; recommended_action: string }> = []
+
+  for (let loop = 0; loop <= SITEMAP_AUDIT_MAX_LOOPS; loop++) {
+    lastSitemap = await callAgent(baseUrl, jwt, 'draft-sitemap',
+      loopContext ? { projectId, redoContext: loopContext } : { projectId })
+
+    try {
+      lastAuditResponse = await callAgent(baseUrl, jwt, 'sitemap-coverage', { projectId })
+      lastAuditOutput = lastAuditResponse?.output ?? lastAuditResponse
+    } catch (e: any) {
+      console.error('[draftSitemapWithAuditLoop] coverage failed:', e?.message)
+      const auditLoop = {
+        status: 'audit_failed' as const,
+        iterations,
+        residual_gap_count: 0,
+        message: `Sitemap drafted but audit could not run (${e?.message ?? 'unknown error'}). Review manually before approving.`,
+      }
+      await persistAuditLoopMeta(sb, projectId, auditLoop)
+      return { sitemap: lastSitemap, audit: null, audit_loop: auditLoop }
+    }
+
+    const recommended = String(lastAuditOutput?.recommended_action ?? '')
+    const gapsCount = Array.isArray(lastAuditOutput?.gaps) ? lastAuditOutput.gaps.length : 0
+    const identityGapsCount = Array.isArray(lastAuditOutput?.identity_gaps) ? lastAuditOutput.identity_gaps.length : 0
+    const totalGaps = gapsCount + identityGapsCount
+    iterations.push({ loop, gaps_count: totalGaps, recommended_action: recommended })
+
+    if (recommended === 'proceed_to_stage_3') {
+      const auditLoop = {
+        status: 'proceeded' as const,
+        iterations,
+        residual_gap_count: totalGaps,
+        message: loop === 0
+          ? 'Initial sitemap cleared the coverage audit on the first pass.'
+          : `Sitemap cleared the coverage audit after ${loop} fix-loop${loop === 1 ? '' : 's'}.`,
+      }
+      await persistAuditLoopMeta(sb, projectId, auditLoop)
+      return { sitemap: lastSitemap, audit: lastAuditResponse, audit_loop: auditLoop }
+    }
+
+    if (loop >= SITEMAP_AUDIT_MAX_LOOPS) {
+      const auditLoop = {
+        status: 'needs_human' as const,
+        iterations,
+        residual_gap_count: totalGaps,
+        message: `Audit still flagging ${totalGaps} gap${totalGaps === 1 ? '' : 's'} after ${SITEMAP_AUDIT_MAX_LOOPS} auto-fix attempt${SITEMAP_AUDIT_MAX_LOOPS === 1 ? '' : 's'}. Review the audit findings and either revise the sitemap manually or approve with the residual gaps acknowledged.`,
+      }
+      await persistAuditLoopMeta(sb, projectId, auditLoop)
+      return { sitemap: lastSitemap, audit: lastAuditResponse, audit_loop: auditLoop }
+    }
+
+    loopContext = composeAuditContext(lastAuditOutput, loopContext, loop + 1)
+  }
+
+  // Unreachable — every branch above returns. Defensive fallback.
+  const fallback = {
+    status: 'needs_human' as const,
+    iterations,
+    residual_gap_count: 0,
+    message: 'Audit loop exited unexpectedly. Review state manually.',
+  }
+  await persistAuditLoopMeta(sb, projectId, fallback)
+  return { sitemap: lastSitemap, audit: lastAuditResponse, audit_loop: fallback }
+}
+
+/** Format coverage-audit findings as a structured natural-language
+ *  note the draft-sitemap agent consumes as `redoContext`. Keeps
+ *  prior strategist feedback in scope so an explicit ask doesn't
+ *  get washed out by auto-fix items. */
+function composeAuditContext(audit: any, prevContext: string, nextLoop: number): string {
+  const lines: string[] = []
+  lines.push(`# Audit fix-loop ${nextLoop} of ${SITEMAP_AUDIT_MAX_LOOPS}`)
+  lines.push('')
+  lines.push('The previous sitemap draft was evaluated by the coverage audit. Address the following findings in this redraft — fix the gaps, keep what already worked.')
+  lines.push('')
+
+  const gaps = Array.isArray(audit?.gaps) ? audit.gaps : []
+  if (gaps.length > 0) {
+    lines.push('## Topic gaps')
+    for (const g of gaps.slice(0, 12)) {
+      lines.push(`- **${g.topic_label ?? g.topic_key}** (${g.importance ?? 'medium'}): ${g.why_a_gap}`)
+      if (g.suggested_fix) lines.push(`  Suggested fix: ${g.suggested_fix}`)
+    }
+    lines.push('')
+  }
+
+  const identityGaps = Array.isArray(audit?.identity_gaps) ? audit.identity_gaps : []
+  if (identityGaps.length > 0) {
+    lines.push('## Identity gaps (x-factor / project goals / persona needs)')
+    for (const g of identityGaps.slice(0, 8)) {
+      lines.push(`- **${g.label}** (${g.kind}): ${g.why_a_gap}`)
+      if (g.suggested_fix) lines.push(`  Suggested fix: ${g.suggested_fix}`)
+    }
+    lines.push('')
+  }
+
+  const headerGaps = (Array.isArray(audit?.header_completeness_audit) ? audit.header_completeness_audit : [])
+    .filter((h: any) => h && !h.has_visible_entry && h.severity !== 'low')
+  if (headerGaps.length > 0) {
+    lines.push('## Missing header nav categories')
+    for (const h of headerGaps.slice(0, 6)) {
+      lines.push(`- **${h.category}** (${h.severity}): ${h.rationale}`)
+      if (h.suggested_fix) lines.push(`  Suggested fix: ${h.suggested_fix}`)
+    }
+    lines.push('')
+  }
+
+  const groupingIssues = (Array.isArray(audit?.grouping_audit) ? audit.grouping_audit : [])
+    .filter((g: any) => g && g.issue !== 'clean' && g.severity !== 'low')
+  if (groupingIssues.length > 0) {
+    lines.push('## Nav grouping issues')
+    for (const g of groupingIssues.slice(0, 6)) {
+      lines.push(`- **${g.nav_path}** → ${g.parent_label} (${g.issue}, ${g.severity}): ${g.rationale}`)
+      if (g.suggested_fix) lines.push(`  Suggested fix: ${g.suggested_fix}`)
+    }
+    lines.push('')
+  }
+
+  const voiceIssues = (Array.isArray(audit?.voice_audit) ? audit.voice_audit : [])
+    .filter((v: any) => v && v.severity !== 'low')
+  if (voiceIssues.length > 0) {
+    lines.push('## Voice / label fixes')
+    for (const v of voiceIssues.slice(0, 10)) {
+      lines.push(`- "${v.current_label}" → "${v.suggested_label}" (${v.issue}, ${v.severity})`)
+    }
+    lines.push('')
+  }
+
+  if (prevContext) {
+    lines.push('---')
+    lines.push('## Strategist note from this revision (preserve)')
+    lines.push(prevContext)
+  }
+
+  return lines.join('\n')
+}
+
+/** Stamp the audit-loop telemetry onto stage_2._meta.audit_loop so the
+ *  UI can render the loop's outcome without recomputing it from scratch. */
+async function persistAuditLoopMeta(sb: any, projectId: string, auditLoop: {
+  status: string; iterations: Array<{ loop: number; gaps_count: number; recommended_action: string }>
+  residual_gap_count: number; message: string
+}): Promise<void> {
+  const { data: current } = await sb.from('strategy_web_projects')
+    .select('roadmap_state').eq('id', projectId).maybeSingle()
+  const state = (current?.roadmap_state ?? {}) as Record<string, any>
+  const stage2 = (state.stage_2 ?? {}) as Record<string, any>
+  const stage2Meta = (stage2._meta ?? {}) as Record<string, any>
+  await sb.from('strategy_web_projects').update({
+    roadmap_state: {
+      ...state,
+      stage_2: {
+        ...stage2,
+        _meta: {
+          ...stage2Meta,
+          audit_loop: { ...auditLoop, completed_at: new Date().toISOString() },
+        },
+      },
+    },
+  }).eq('id', projectId)
 }
 
 async function runCommit(ctx: {

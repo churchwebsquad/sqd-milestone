@@ -51,9 +51,10 @@ export default async function handler(req: any, res: any) {
   if (projErr || !project) return res.status(404).json({ error: projErr?.message ?? 'Project not found' })
 
   const state = (project.roadmap_state ?? {}) as Record<string, any>
-  const sitemap = state.stage_2 ?? null
-  const briefs  = stripMetaKey(state.page_briefs ?? {})
-  const drafts  = stripMetaKey(state.page_drafts ?? {})
+  const sitemap  = state.stage_2 ?? null
+  const coverage = state.stage_2_5 ?? null
+  const briefs   = stripMetaKey(state.page_briefs ?? {})
+  const drafts   = stripMetaKey(state.page_drafts ?? {})
 
   const document = renderExportDocument({
     projectName: project.name as string | null,
@@ -62,6 +63,7 @@ export default async function handler(req: any, res: any) {
     exportedAt:  new Date().toISOString(),
     exportedBy:  userData.user.email ?? userData.user.id,
     sitemap,
+    coverage,
     briefs,
     drafts,
   })
@@ -78,9 +80,10 @@ export default async function handler(req: any, res: any) {
     filename,
     format_version: FORMAT_VERSION,
     sections: {
-      sitemap_present: !!sitemap,
-      briefs_count:    Object.keys(briefs).length,
-      drafts_count:    Object.keys(drafts).length,
+      sitemap_present:  !!sitemap,
+      coverage_present: !!coverage,
+      briefs_count:     Object.keys(briefs).length,
+      drafts_count:     Object.keys(drafts).length,
     },
   })
 }
@@ -104,12 +107,24 @@ function renderExportDocument(input: {
   exportedAt:  string
   exportedBy:  string
   sitemap:     any
+  coverage:    any
   briefs:      Record<string, any>
   drafts:      Record<string, any>
 }): string {
   const sitemapBlock = input.sitemap
     ? '```json\n' + JSON.stringify(input.sitemap, null, 2) + '\n```'
     : '_(no sitemap drafted yet)_'
+
+  // Coverage audit is read-only context for the external AI conversation —
+  // the importer ignores any "## Coverage Audit" section so refining the
+  // audit in-conversation has no side-effect on import. Strip _meta so
+  // model usage telemetry doesn't leak into the editing surface.
+  const coverageForExport = input.coverage
+    ? Object.fromEntries(Object.entries(input.coverage as Record<string, any>).filter(([k]) => k !== '_meta'))
+    : null
+  const coverageBlock = coverageForExport
+    ? '```json\n' + JSON.stringify(coverageForExport, null, 2) + '\n```'
+    : '_(no coverage audit yet — runs automatically when a sitemap exists)_'
 
   const briefsBlock = Object.keys(input.briefs).length > 0
     ? '```json\n' + JSON.stringify(input.briefs, null, 2) + '\n```'
@@ -163,7 +178,6 @@ function renderExportDocument(input: {
     `**What's NOT in this export:**`,
     `- Content atoms / church facts (Stage 0) — those live on \`content_atoms\``,
     `  and \`church_facts\` tables and aren't roundtripped through here.`,
-    `- The coverage audit (Stage 2.5) — auto-recomputed after sitemap changes.`,
     `- Director critique results — auto-recomputed after draft changes.`,
     `- Engine state (last verdict, loop counts) — runtime telemetry only.`,
     ``,
@@ -184,6 +198,20 @@ function renderExportDocument(input: {
     `drafts blocks below.`,
     ``,
     sitemapBlock,
+    ``,
+    `---`,
+    ``,
+    `## Coverage Audit (read-only)`,
+    ``,
+    `Stage 2.5 output: per-topic coverage of the sitemap above, plus`,
+    `identity / nav grouping / voice / header-completeness findings. This`,
+    `section is included so the AI conversation can SEE which gaps the`,
+    `audit flagged when refining the sitemap. **The importer ignores this`,
+    `section entirely** — editing it has no effect. After re-importing a`,
+    `revised sitemap, the audit re-runs automatically against the new`,
+    `state, so any stale data here is replaced.`,
+    ``,
+    coverageBlock,
     ``,
     `---`,
     ``,

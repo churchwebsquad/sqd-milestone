@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Play, Loader2, CheckCircle2, AlertCircle, RefreshCw, Send, FileText, GitBranch,
-  ChevronRight, ChevronDown, Eye, Edit3,
+  ChevronRight, ChevronDown, Eye, Edit3, Wand2,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import type { StrategyWebProject } from '../../../types/database'
@@ -231,10 +231,17 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     && new Date(coverage.generatedAt).getTime() < new Date(sitemapGeneratedAt).getTime()
   const coverageMissing = hasStage2 && coverage.data === null
   const coverageRunning = running === 'run_coverage_audit'
+  const autoFixRunning  = running === 'draft_sitemap_with_audit'
   const recommendedAction = coverage.data?.recommended_action ?? null
   const coverageGapCount =
     (coverage.data?.gaps?.length ?? 0) +
     (coverage.data?.identity_gaps?.length ?? 0)
+  const auditLoopMeta = (sitemap as { _meta?: { audit_loop?: {
+    status: 'proceeded' | 'needs_human' | 'audit_failed'
+    iterations: Array<{ loop: number; gaps_count: number; recommended_action: string }>
+    residual_gap_count: number
+    message: string
+  } } } | null)?._meta?.audit_loop ?? null
 
   // Auto-trigger when sitemap exists + audit is missing or stale.
   // Track per-sitemap-timestamp so a single render doesn't fire it
@@ -385,6 +392,24 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         : delta > 0 ? `${newPageCount} pages (+${delta})`
         : `${newPageCount} pages (${delta})`
 
+      // Surface audit-loop telemetry stamped by the orchestrator. The
+      // loop ran draft-sitemap → coverage → (up to 2x) fix-and-redraft.
+      // Strategist sees how the loop terminated so they know whether to
+      // approve, revise further, or accept residual gaps.
+      const auditLoop = (newSitemap as { _meta?: { audit_loop?: {
+        status: 'proceeded' | 'needs_human' | 'audit_failed'
+        iterations: Array<{ loop: number; gaps_count: number; recommended_action: string }>
+        residual_gap_count: number
+        message: string
+      } } } | undefined)?._meta?.audit_loop
+      const loopLine = auditLoop
+        ? (auditLoop.status === 'proceeded'
+            ? `✓ Audit loop: ${auditLoop.message}`
+            : auditLoop.status === 'needs_human'
+              ? `⚠ Audit loop: ${auditLoop.message}`
+              : `· Audit loop: ${auditLoop.message}`)
+        : null
+
       let body: string
       if (diffLines.length > 0) {
         const bullets = diffLines.map(l => `• ${l}`).join('\n')
@@ -394,6 +419,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       } else {
         body = `Done in ${tookSec}s. ${countSummary}.\n\nNo changes detected — the model returned the same sitemap byte-for-byte. The Director may have decided your feedback was already met, or the re-draft missed the ask. Try being more specific about what to change, naming exact labels or slugs.`
       }
+      if (loopLine) body = `${loopLine}\n\n${body}`
       setSitemapConvo(c => [...c, { kind: 'system', text: body, at: Date.now() }])
     }
   }, [sitemapFeedback, callOrchestrate, sitemap, project.id, onChange])
@@ -415,7 +441,12 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         </button>
       </header>
 
-      <StatusBanner engine={engine} />
+      <StatusBanner
+        engine={engine}
+        stuck={isEngineStuck(engine, engineRunning || !!running)}
+        onReset={() => void callOrchestrate('reset_engine_state')}
+        resetBusy={running === 'reset_engine_state'}
+      />
 
       {error && (
         <div className="rounded-md border border-wm-danger/30 bg-wm-danger-bg px-3 py-2 text-[13px] text-wm-danger">
@@ -620,6 +651,10 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
               isOpen={coverageOpen}
               onToggle={() => setCoverageOpen(o => !o)}
               onRerun={() => void callOrchestrate('run_coverage_audit')}
+              onAutoFix={() => void callOrchestrate('draft_sitemap_with_audit')}
+              autoFixRunning={autoFixRunning}
+              auditLoop={auditLoopMeta}
+              sitemapPageCount={sitemap?.pages?.length ?? null}
               disabled={!!running}
             />
           </div>
@@ -930,7 +965,35 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
 
 // ── Subcomponents ─────────────────────────────────────────────────────
 
-function StatusBanner({ engine }: { engine: EngineState }) {
+/** Statuses the engine reports DURING a run. If the engine is in one
+ *  of these AND last_action_at is older than the stuck threshold, the
+ *  underlying agent call most likely crashed or timed out — the engine
+ *  will never reach a terminal state on its own. */
+const ENGINE_IN_PROGRESS_STATUSES = new Set([
+  'briefing', 'drafting', 'critiquing', 'iterating', 'committing',
+])
+/** A real run finishes well within this window. Beyond it, treat the
+ *  engine as stuck regardless of the displayed status. 8 minutes
+ *  comfortably covers a full run_drafts + critique cycle on a
+ *  20-page sitemap; anything past that is dead in the water. */
+const ENGINE_STUCK_THRESHOLD_MS = 8 * 60 * 1000
+
+function isEngineStuck(engine: EngineState, activelyRunning: boolean): boolean {
+  if (activelyRunning) return false
+  const status = engine.status
+  if (!status || !ENGINE_IN_PROGRESS_STATUSES.has(status)) return false
+  const lastActionAt = engine.last_action_at
+  if (!lastActionAt) return true
+  const ageMs = Date.now() - new Date(lastActionAt).getTime()
+  return ageMs > ENGINE_STUCK_THRESHOLD_MS
+}
+
+function StatusBanner({ engine, stuck, onReset, resetBusy }: {
+  engine: EngineState
+  stuck: boolean
+  onReset: () => void
+  resetBusy: boolean
+}) {
   const status = engine.status ?? 'idle'
   const phase = engine.current_phase ?? '—'
   const showProgress = (engine.pages_total ?? 0) > 0 && (engine.pages_drafted ?? engine.pages_committed) != null
@@ -938,7 +1001,8 @@ function StatusBanner({ engine }: { engine: EngineState }) {
   const total = engine.pages_total ?? 0
 
   const tone =
-    status === 'committed' || status === 'ready_for_review' ? 'success'
+    stuck ? 'danger'
+    : status === 'committed' || status === 'ready_for_review' ? 'success'
     : status === 'error' ? 'danger'
     : status === 'idle' ? 'muted' : 'info'
 
@@ -948,6 +1012,32 @@ function StatusBanner({ engine }: { engine: EngineState }) {
     info:    'border-wm-accent/30 bg-wm-accent/5 text-wm-accent-strong',
     muted:   'border-wm-border bg-wm-bg-elevated text-wm-text-muted',
   }[tone]
+
+  if (stuck) {
+    return (
+      <div className={['rounded-md border px-3 py-2', toneClass].join(' ')}>
+        <div className="flex items-baseline gap-3">
+          <span className="text-[11px] uppercase tracking-widest font-bold">stuck</span>
+          <span className="text-[11px]">status was {status} / phase {phase}</span>
+          {engine.last_action_at && (
+            <span className="text-[11px]">since {new Date(engine.last_action_at).toLocaleString()}</span>
+          )}
+          <button
+            type="button"
+            onClick={onReset}
+            disabled={resetBusy}
+            className="ml-auto inline-flex items-center gap-1 rounded-full border border-wm-danger/40 bg-white px-3 py-0.5 text-[11px] font-semibold text-wm-danger hover:bg-wm-danger/5 disabled:opacity-50"
+          >
+            {resetBusy ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+            Reset engine state
+          </button>
+        </div>
+        <p className="text-[11px] mt-1.5 text-wm-text-muted leading-snug">
+          The engine has been in an in-progress status for over 8 minutes — the underlying agent call most likely crashed. Reset clears <code>engine_state</code> so you can re-run from a clean slate. Your sitemap, briefs, and drafts are untouched.
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className={['rounded-md border px-3 py-2 flex items-baseline gap-3', toneClass].join(' ')}>
@@ -1648,7 +1738,8 @@ function ExportImportPanel({ projectId, onImported }: {
 
 function CoverageGate({
   data, running, stale, recommendedAction, gapCount,
-  isOpen, onToggle, onRerun, disabled,
+  isOpen, onToggle, onRerun, onAutoFix, autoFixRunning,
+  auditLoop, sitemapPageCount, disabled,
 }: {
   data: {
     recommended_action?: 'proceed_to_stage_3' | 'redo_stage_2_with_gaps'
@@ -1662,6 +1753,15 @@ function CoverageGate({
   isOpen: boolean
   onToggle: () => void
   onRerun: () => void
+  onAutoFix: () => void
+  autoFixRunning: boolean
+  auditLoop: {
+    status: 'proceeded' | 'needs_human' | 'audit_failed'
+    iterations: Array<{ loop: number; gaps_count: number; recommended_action: string }>
+    residual_gap_count: number
+    message: string
+  } | null
+  sitemapPageCount: number | null
   disabled: boolean
 }) {
   // No audit yet, or running for the first time
@@ -1731,6 +1831,16 @@ function CoverageGate({
               ? 'Every Stage 0 topic has a home in this sitemap (dedicated page, anchored section, or intentional omission).'
               : 'Some topics may be invisible (no nav reference, sparse anchor sections, etc.). Open the details to see exactly which.'}
           </p>
+          {auditLoop && (
+            <p className={[
+              'text-[11px] mt-1 leading-snug',
+              auditLoop.status === 'proceeded' ? 'text-wm-success'
+                : auditLoop.status === 'needs_human' ? 'text-wm-warning' : 'text-wm-text-muted',
+            ].join(' ')}>
+              {auditLoop.status === 'proceeded' ? '✓ ' : auditLoop.status === 'needs_human' ? '⚠ ' : '· '}
+              {auditLoop.message}
+            </p>
+          )}
         </div>
         <button
           type="button"
@@ -1740,6 +1850,18 @@ function CoverageGate({
           {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
           {isOpen ? 'Hide details' : 'View details'}
         </button>
+        {!isProceed && (
+          <button
+            type="button"
+            onClick={onAutoFix}
+            disabled={disabled || autoFixRunning || running}
+            className="inline-flex items-center gap-1 rounded-full bg-wm-warning px-3 py-1 text-[11px] font-semibold text-white hover:bg-wm-warning/90 disabled:opacity-50"
+            title={`Auto-redraft the sitemap using the audit's findings as feedback. Caps at 2 loops; pauses if gaps remain after that.`}
+          >
+            {autoFixRunning ? <Loader2 size={11} className="animate-spin" /> : <Wand2 size={11} />}
+            Auto-fix gaps
+          </button>
+        )}
         <button
           type="button"
           onClick={onRerun}
@@ -1747,12 +1869,15 @@ function CoverageGate({
           className="inline-flex items-center gap-1 text-[11px] text-wm-text-muted hover:text-wm-text px-2 py-1 disabled:opacity-50"
         >
           {running ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-          Re-run
+          Re-run audit
         </button>
       </div>
       {isOpen && (
         <div className="mt-3 pt-3 border-t border-wm-border">
-          <SitemapCoveragePreview output={data as Record<string, unknown>} />
+          <SitemapCoveragePreview
+            output={data as Record<string, unknown>}
+            sitemapPageCount={sitemapPageCount ?? undefined}
+          />
         </div>
       )}
     </div>
