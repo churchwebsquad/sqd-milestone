@@ -672,5 +672,23 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   )
 }
 
+// Local chip — mirrors the Tag helper in SitemapPreview.tsx. This file
+// uses <Tag tone="warning"> / <Tag tone="muted"> in four places but
+// never imported or defined Tag — a copy-paste oversight from the
+// sister file. Was a latent ReferenceError that only surfaced now that
+// the app has a top-level error boundary catching render-phase throws.
+function Tag({ children, tone = 'muted' }: { children: React.ReactNode; tone?: 'muted' | 'warning' }) {
+  return (
+    <span className={[
+      'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono',
+      tone === 'warning'
+        ? 'bg-wm-warning/10 text-wm-warning border border-wm-warning/30'
+        : 'bg-wm-bg-hover text-wm-text-muted border border-wm-border',
+    ].join(' ')}>
+      {children}
+    </span>
+  )
+}
+
 // re-exporting unused icon to avoid lint
 void AlertCircle
