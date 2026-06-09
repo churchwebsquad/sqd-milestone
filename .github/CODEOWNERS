@@ -1,0 +1,80 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CODEOWNERS — collaboration governance for sqd-milestone
+#
+# How this works: when "Require review from Code Owners" is enabled in branch
+# protection, any PR that changes a path below cannot merge without an approval
+# from the listed owner. This is the approval queue.
+#
+# Ownership is by DOMAIN, not just existing files. A folder line (e.g.
+# /src/components/srp/) owns everything in that folder — INCLUDING files that
+# don't exist yet — so a director can add new components, features, and whole
+# new tools inside their lane without extra permission. They only hit Ashley's
+# review when a change reaches OUTSIDE their domain (e.g. a route in App.tsx).
+#
+# PLACEHOLDERS: swap @SPENCER_GH / @AMBER_GH for real GitHub usernames once the
+# directors accept their repo invites. Until then the catch-all `*` line routes
+# everything to @churchwebsquad — safe by default.
+#   @SPENCER_GH = Branding Director (spencer@churchmediasquad.com)
+#   @AMBER_GH   = Social Media Director (amber@churchmediasquad.com)
+#   @churchwebsquad = Ashley (VP, owns foundations + catch-all)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Catch-all — Ashley owns anything not claimed below ──
+# (Listed first; later, more-specific matches win in CODEOWNERS.)
+*                                                  @churchwebsquad
+
+# ── Social Media Squad — @AMBER_GH (amber@churchmediasquad.com) ──
+/src/components/srp/                               @AMBER_GH
+/src/components/intel/                             @AMBER_GH
+/src/pages/SrpDashboardPage.tsx                    @AMBER_GH
+/src/pages/SrpWorkflowPage.tsx                     @AMBER_GH
+/src/pages/SrpPromptSettingsPage.tsx               @AMBER_GH
+/src/pages/IntelAuditToolPage.tsx                  @AMBER_GH
+/api/srp/                                          @AMBER_GH
+/api/church-intel/                                 @AMBER_GH
+# Social section of the Churches Dashboard
+/src/components/churches/SocialMediaSection.tsx    @AMBER_GH
+# Reserved home for net-new social tools (create when the first one lands)
+/src/pages/social/                                 @AMBER_GH
+
+# ── Branding Squad — @SPENCER_GH (spencer@churchmediasquad.com) ──
+/src/components/brand/                             @SPENCER_GH
+/src/pages/BrandGuideEditorPage.tsx                @SPENCER_GH
+/src/pages/BrandingIndexPage.tsx                   @SPENCER_GH
+/src/pages/BrandHandoffPage.tsx                    @SPENCER_GH
+/src/pages/BrandGuidePortalPage.tsx                @SPENCER_GH
+/src/lib/brandGuide.ts                             @SPENCER_GH
+/src/lib/brandHandoff.ts                           @SPENCER_GH
+# Brand sections of the Churches Dashboard
+/src/components/churches/BrandSquadSection.tsx     @SPENCER_GH
+/src/components/churches/BrandVoiceSection.tsx     @SPENCER_GH
+# Reserved home for net-new brand tools (create when the first one lands)
+/src/pages/brand/                                  @SPENCER_GH
+
+# ── PROTECTED FOUNDATIONS — Ashley reviews everything here ──
+# Database, infra, auth, routing, and shared scaffolding. These override the
+# squad lines above because they're listed later and are equally/more specific.
+/schema/                                           @churchwebsquad
+/supabase/                                         @churchwebsquad
+/.github/                                          @churchwebsquad
+/scripts/                                          @churchwebsquad
+/src/contexts/AuthContext.tsx                      @churchwebsquad
+/src/lib/admin.ts                                  @churchwebsquad
+/src/lib/supabase.ts                               @churchwebsquad
+/src/App.tsx                                       @churchwebsquad
+/src/main.tsx                                      @churchwebsquad
+/src/components/AppLayout.tsx                      @churchwebsquad
+/src/components/ProtectedRoute.tsx                 @churchwebsquad
+# Shared Churches Dashboard scaffolding (not any one squad's section)
+/src/pages/ChurchesDashboardPage.tsx               @churchwebsquad
+/src/pages/ChurchDetailPage.tsx                    @churchwebsquad
+/src/components/churches/ChurchInfoSection.tsx     @churchwebsquad
+/src/components/churches/ChurchUI.tsx              @churchwebsquad
+/src/components/churches/EditableField.tsx         @churchwebsquad
+# Build + config
+/CLAUDE.md                                         @churchwebsquad
+/package.json                                      @churchwebsquad
+/package-lock.json                                 @churchwebsquad
+/vite.config.ts                                    @churchwebsquad
+/vercel.json                                       @churchwebsquad
+/tsconfig*.json                                    @churchwebsquad

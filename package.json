@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc -b",
+    "typecheck:ratchet": "node scripts/typecheck-ratchet.mjs",
+    "typecheck:ratchet:update": "node scripts/typecheck-ratchet.mjs --update",
     "lint": "eslint .",
+    "lint:ratchet": "node scripts/lint-ratchet.mjs",
+    "lint:ratchet:update": "node scripts/lint-ratchet.mjs --update",
     "preview": "vite preview"
   },
   "dependencies": {
