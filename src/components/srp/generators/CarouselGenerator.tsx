@@ -98,10 +98,10 @@ function CarouselSlidesEditor({ session, slides, onChange }: {
               {savingIx === i && <span className="text-[10px] text-wm-text-subtle">Saving…</span>}
             </div>
             <textarea
-              value={s.text}
+              value={s.text ?? ''}
               onChange={e => setDraft(d => d.map((x, j) => j === i ? { ...x, text: e.target.value } : x))}
-              onBlur={e => { if (e.target.value !== slides[i]?.text) void save(i, e.target.value) }}
-              rows={Math.min(6, Math.max(2, s.text.split('\n').length + 1))}
+              onBlur={e => { if (e.target.value !== (slides[i]?.text ?? '')) void save(i, e.target.value) }}
+              rows={Math.min(6, Math.max(2, (s.text ?? '').split('\n').length + 1))}
               className="w-full rounded-md border border-wm-border bg-wm-bg px-3 py-2 text-[13px] focus:outline-none focus:border-wm-accent whitespace-pre-wrap"
             />
           </div>

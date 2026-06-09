@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
+import { AppErrorBoundary } from './components/AppErrorBoundary'
 import ProtectedRoute from './components/ProtectedRoute'
 import AppLayout from './components/AppLayout'
 import ComingSoonPage from './components/ComingSoonPage'
@@ -63,19 +64,22 @@ const isBrandPortalHost =
 export default function App() {
   if (isBrandPortalHost) {
     return (
-      <BrowserRouter>
-        <Routes>
-          <Route path="/:churchSlug" element={<BrandGuidePortalPage />} />
-          <Route path="/:churchSlug/:ministrySlug" element={<BrandGuidePortalPage />} />
-          {/* Anything else — the bare root, typos, /login probes — renders
-               a plain info page. Never redirects to the staff app. */}
-          <Route path="*" element={<BrandPortalLanding />} />
-        </Routes>
-      </BrowserRouter>
+      <AppErrorBoundary>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/:churchSlug" element={<BrandGuidePortalPage />} />
+            <Route path="/:churchSlug/:ministrySlug" element={<BrandGuidePortalPage />} />
+            {/* Anything else — the bare root, typos, /login probes — renders
+                 a plain info page. Never redirects to the staff app. */}
+            <Route path="*" element={<BrandPortalLanding />} />
+          </Routes>
+        </BrowserRouter>
+      </AppErrorBoundary>
     )
   }
 
   return (
+    <AppErrorBoundary>
     <AuthProvider>
       <BrowserRouter>
         <Routes>
@@ -189,6 +193,7 @@ export default function App() {
         </Routes>
       </BrowserRouter>
     </AuthProvider>
+    </AppErrorBoundary>
   )
 }
 

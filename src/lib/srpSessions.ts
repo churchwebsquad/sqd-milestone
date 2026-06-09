@@ -162,8 +162,20 @@ export function stringifyClipSelections(c: ClipSelection[]): string {
 
 export function parseCarouselSlides(raw: string | null | undefined): CarouselSlide[] {
   if (!raw) return []
-  try { return (JSON.parse(raw) ?? []) as CarouselSlide[] }
-  catch { return [] }
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    // Filter + coerce: drop slides without text, default missing fields.
+    // Defensive against malformed AI output that previously crashed the
+    // slide editor (Array.map → s.text.split → "Cannot read split of undefined").
+    return parsed
+      .filter((s): s is Record<string, unknown> => s != null && typeof s === 'object')
+      .map((s, i) => ({
+        slide_number: typeof s.slide_number === 'number' ? s.slide_number : i + 1,
+        kind: (typeof s.kind === 'string' ? s.kind : 'hook') as CarouselSlide['kind'],
+        text: typeof s.text === 'string' ? s.text : '',
+      }))
+  } catch { return [] }
 }
 export function stringifyCarouselSlides(s: CarouselSlide[]): string {
   return JSON.stringify(s)

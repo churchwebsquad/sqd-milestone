@@ -73,7 +73,7 @@ export function GeneratorShell({
             <textarea
               value={draft}
               onChange={e => setDraft(e.target.value)}
-              rows={Math.min(20, Math.max(6, draft.split('\n').length + 1))}
+              rows={Math.min(20, Math.max(6, (draft ?? '').split('\n').length + 1))}
               className="w-full rounded-md border border-wm-border bg-wm-bg px-3 py-2 text-[13px] focus:outline-none focus:border-wm-accent whitespace-pre-wrap"
             />
             <div className="flex items-center justify-between gap-2">
