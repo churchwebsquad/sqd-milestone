@@ -34,7 +34,7 @@ const PAGE_DRAFT_CONCURRENCY = 4
  *  via manual Revise feedback or by approving with known gaps. */
 const SITEMAP_AUDIT_MAX_LOOPS = 2
 
-type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize'
+type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize' | 'apply_audit_to_nav' | 'rename_sitemap_page'
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -77,6 +77,52 @@ export default async function handler(req: any, res: any) {
       const result = await callAgent(baseUrl, jwt, 'extract-strategy',
         note ? { projectId, redoContext: note } : { projectId })
       return res.status(200).json({ ok: true, stage_1: result })
+    }
+
+    if (action === 'apply_audit_to_nav') {
+      // Targeted additive sitemap surgery — apply the current audit's
+      // findings as add_page / add_header_entry / add_footer_entry
+      // edits. Does NOT redraft existing pages, labels, or structure.
+      const result = await callAgent(baseUrl, jwt, 'apply-audit-to-nav', { projectId })
+      // Re-run coverage so the strategist sees the updated audit immediately.
+      try { await callAgent(baseUrl, jwt, 'sitemap-coverage', { projectId }) }
+      catch (e: any) { console.error('[apply_audit_to_nav] post-edit coverage failed (non-fatal):', e?.message) }
+      return res.status(200).json({ ok: true, audit_apply: result })
+    }
+
+    if (action === 'rename_sitemap_page') {
+      // Deterministic rename — no LLM call. Updates page.name +
+      // optional nav_label + optional slug across pages[] and the
+      // nav trees. Skipped: footer_nav (uses labels not bound to
+      // page slugs, edit-via-Revise instead).
+      const slug = typeof req.body?.slug === 'string' ? req.body.slug.trim() : ''
+      const newName = typeof req.body?.newName === 'string' ? req.body.newName.trim() : null
+      const newNavLabel = typeof req.body?.newNavLabel === 'string' ? req.body.newNavLabel.trim() : null
+      const newSlug = typeof req.body?.newSlug === 'string' ? req.body.newSlug.trim() : null
+      if (!slug) return res.status(400).json({ error: 'slug required' })
+      if (newName == null && newNavLabel == null && newSlug == null) {
+        return res.status(400).json({ error: 'At least one of newName, newNavLabel, newSlug required' })
+      }
+      const stage2 = roadmapState.stage_2 as Record<string, any> | undefined
+      if (!stage2) return res.status(400).json({ error: 'No sitemap (stage_2) to edit.' })
+      const result = renameSitemapPage(stage2, { slug, newName, newNavLabel, newSlug })
+      if (!result.found) return res.status(404).json({ error: `Page with slug "${slug}" not found.` })
+
+      const nowIso = new Date().toISOString()
+      const prevMeta = (stage2._meta ?? {}) as Record<string, any>
+      result.sitemap._meta = {
+        ...prevMeta,
+        // Inline label edits keep the sitemap APPROVED if it was approved —
+        // these are cosmetic / non-structural. Slug changes invalidate
+        // approval because downstream stages key off slugs.
+        status: newSlug ? 'draft' : (prevMeta.status ?? 'draft'),
+        last_inline_edit_at: nowIso,
+        last_inline_edit_by: userData.user.email ?? userData.user.id,
+      }
+      await sb.from('strategy_web_projects').update({
+        roadmap_state: { ...roadmapState, stage_2: result.sitemap },
+      }).eq('id', projectId)
+      return res.status(200).json({ ok: true, page: result.updatedPage, nav_updates: result.navUpdates })
     }
 
     if (action === 'reset_engine_state') {
@@ -614,6 +660,79 @@ async function writeEngineState(sb: any, projectId: string, engineState: Record<
   await sb.from('strategy_web_projects').update({
     roadmap_state: { ...state, engine_state: engineState },
   }).eq('id', projectId)
+}
+
+/** Deterministic page rename — updates the matching page in
+ *  stage_2.pages and any header_nav entry pointing at the same slug.
+ *  Returns whether the page was found, the new sitemap, and a list
+ *  of nav updates that landed (for telemetry). Pure function — no
+ *  I/O, no LLM. */
+function renameSitemapPage(
+  stage2: Record<string, any>,
+  edit: { slug: string; newName: string | null; newNavLabel: string | null; newSlug: string | null },
+): { found: boolean; sitemap: Record<string, any>; updatedPage: Record<string, any> | null; navUpdates: string[] } {
+  const next = JSON.parse(JSON.stringify(stage2)) as Record<string, any>
+  const pages = Array.isArray(next.pages) ? next.pages : []
+  const target = pages.find((p: any) => String(p?.slug ?? '') === edit.slug)
+  if (!target) return { found: false, sitemap: next, updatedPage: null, navUpdates: [] }
+
+  const navUpdates: string[] = []
+  const oldSlug = String(target.slug)
+
+  if (edit.newName != null && edit.newName.length > 0) target.name = edit.newName
+  if (edit.newNavLabel != null) target.nav_label = edit.newNavLabel || undefined
+  if (edit.newSlug != null && edit.newSlug.length > 0 && edit.newSlug !== oldSlug) {
+    target.slug = edit.newSlug
+    // Cascade slug change into parent_slug references.
+    for (const p of pages) {
+      if (p?.parent_slug === oldSlug) { p.parent_slug = edit.newSlug; navUpdates.push(`pages.${p.slug}.parent_slug → ${edit.newSlug}`) }
+    }
+  }
+
+  // Header nav — update entries that point at the renamed slug.
+  const walkNav = (entries: any[], path: string): void => {
+    for (const e of entries) {
+      if (!e || typeof e !== 'object') continue
+      if (e.kind === 'page' && String(e.slug ?? '') === oldSlug) {
+        if (edit.newNavLabel != null && edit.newNavLabel.length > 0) {
+          e.label = edit.newNavLabel
+          navUpdates.push(`${path} label → ${edit.newNavLabel}`)
+        } else if (edit.newName != null && edit.newName.length > 0) {
+          e.label = edit.newName
+          navUpdates.push(`${path} label → ${edit.newName}`)
+        }
+        if (edit.newSlug != null && edit.newSlug.length > 0 && edit.newSlug !== oldSlug) {
+          e.slug = edit.newSlug
+          navUpdates.push(`${path} slug → ${edit.newSlug}`)
+        }
+      }
+      if (Array.isArray(e.children)) walkNav(e.children, `${path} > ${e.label ?? '?'}`)
+    }
+  }
+  if (Array.isArray(next.header_nav)) walkNav(next.header_nav, 'header_nav')
+  // Footer items also carry slugs — same treatment.
+  if (Array.isArray(next.footer_nav)) {
+    for (const section of next.footer_nav) {
+      if (!Array.isArray(section?.items)) continue
+      for (const item of section.items) {
+        if (!item || typeof item !== 'object') continue
+        if (String(item.slug ?? '') !== oldSlug) continue
+        if (edit.newNavLabel != null && edit.newNavLabel.length > 0) {
+          item.label = edit.newNavLabel
+          navUpdates.push(`footer ${section.section_label} label → ${edit.newNavLabel}`)
+        } else if (edit.newName != null && edit.newName.length > 0) {
+          item.label = edit.newName
+          navUpdates.push(`footer ${section.section_label} label → ${edit.newName}`)
+        }
+        if (edit.newSlug != null && edit.newSlug.length > 0 && edit.newSlug !== oldSlug) {
+          item.slug = edit.newSlug
+          navUpdates.push(`footer ${section.section_label} slug → ${edit.newSlug}`)
+        }
+      }
+    }
+  }
+
+  return { found: true, sitemap: next, updatedPage: target, navUpdates }
 }
 
 function resolveBaseUrl(req: any): string {

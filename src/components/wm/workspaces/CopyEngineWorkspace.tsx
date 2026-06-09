@@ -146,6 +146,9 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   const [confirmAction, setConfirmAction] = useState<'iterate' | 'commit' | null>(null)
   const [coverageOpen, setCoverageOpen] = useState(false)
   const [autoCoverageStartedFor, setAutoCoverageStartedFor] = useState<string | null>(null)
+  const [renamePanelOpen, setRenamePanelOpen] = useState(false)
+  // Slug currently being saved — disables the row while the request is in flight.
+  const [renameSavingSlug, setRenameSavingSlug] = useState<string | null>(null)
 
   const refreshFromDB = useCallback(async () => {
     const { data } = await supabase
@@ -242,6 +245,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   const coverageMissing = hasStage2 && coverage.data === null
   const coverageRunning = running === 'run_coverage_audit'
   const autoFixRunning  = running === 'draft_sitemap_with_audit'
+  const pushToNavRunning = running === 'apply_audit_to_nav'
   const recommendedAction = coverage.data?.recommended_action ?? null
   const coverageGapCount =
     (coverage.data?.gaps?.length ?? 0) +
@@ -357,6 +361,28 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       setEngineRunning(false)
     }
   }, [callOrchestrate])
+
+  // ── Auto-cascade post-Gate-1 (drafts → critique → iterate) ──────────
+  //
+  // If the strategist approved the sitemap in a previous session (or
+  // approved it just now and the cascade got interrupted), pick up
+  // where they left off. Conditions: sitemap approved + no drafts yet
+  // + engine isn't stuck (8min threshold) + engine isn't actively
+  // running. The downstreamCascadeStartedFor ref guards against re-fire
+  // when state changes mid-run.
+  const downstreamCascadeStartedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (running) return
+    if (engineRunning) return
+    if (!sitemapApproved) return
+    if (draftSlugs.length > 0) return
+    if (isEngineStuck(engine, false)) return       // user must hit Reset first
+    if (engine.status && ENGINE_IN_PROGRESS_STATUSES.has(engine.status)) return
+    if (downstreamCascadeStartedFor.current === project.id) return
+    downstreamCascadeStartedFor.current = project.id
+    void runEngine()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, sitemapApproved, draftSlugs.length, engine.status, running, engineRunning])
 
   const openDraft = useCallback((slug: string) => {
     if (!slug || slug === '*') return
@@ -548,6 +574,16 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
           )}
           {hasStage2 && (
             <button
+              onClick={() => setRenamePanelOpen(o => !o)}
+              disabled={!!running}
+              className="inline-flex items-center gap-1 text-[11px] text-wm-text-muted hover:text-wm-text px-2 py-1 disabled:opacity-50"
+              title="Quick rename — edit page names and nav labels in place. No LLM call."
+            >
+              <Edit3 size={12} /> {renamePanelOpen ? 'Done renaming' : 'Rename pages'}
+            </button>
+          )}
+          {hasStage2 && (
+            <button
               onClick={() => { setRevisingSitemap(true); setSitemapOpen(true) }}
               disabled={!!running}
               className="inline-flex items-center gap-1 text-[11px] text-wm-text-muted hover:text-wm-text px-2 py-1 disabled:opacity-50"
@@ -702,6 +738,49 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
           </div>
         )}
 
+        {/* Quick rename panel — deterministic JSON edits, no LLM. Each
+            row commits via rename_sitemap_page on blur or Enter. Slug
+            edits are allowed but invalidate sitemap approval since
+            downstream stages key off slugs. */}
+        {renamePanelOpen && hasStage2 && (
+          <div className="border-t border-wm-border px-3 py-3 bg-wm-accent/5">
+            <div className="flex items-baseline justify-between mb-2">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">Quick rename</p>
+              <p className="text-[10px] text-wm-text-subtle">
+                Editing the <strong>slug</strong> reverts the sitemap to draft status. Name + nav label edits keep approval.
+              </p>
+            </div>
+            <ul className="space-y-1.5">
+              {(sitemap.pages ?? []).map(page => (
+                <PageRenameRow
+                  // Identity-based key — when any rendered field changes
+                  // (rename lands, slug changes), the row remounts with
+                  // the fresh prop values. Keeps the form in sync without
+                  // a setState-in-useEffect.
+                  key={`${page.slug}:${page.name}:${((page as { nav_label?: string }).nav_label) ?? ''}`}
+                  page={page as { name: string; slug: string; nav_label?: string }}
+                  saving={renameSavingSlug === page.slug}
+                  disabled={!!running || renameSavingSlug !== null}
+                  onSave={async (next) => {
+                    const p = page as { name?: string; slug?: string; nav_label?: string }
+                    setRenameSavingSlug(page.slug)
+                    try {
+                      await callOrchestrate('rename_sitemap_page', {
+                        slug: page.slug,
+                        newName:     next.name     !== (p.name ?? '')      ? next.name     : undefined,
+                        newNavLabel: next.navLabel !== (p.nav_label ?? '') ? next.navLabel : undefined,
+                        newSlug:     next.slug     !== page.slug           ? next.slug     : undefined,
+                      })
+                    } finally {
+                      setRenameSavingSlug(null)
+                    }
+                  }}
+                />
+              ))}
+            </ul>
+          </div>
+        )}
+
         {/* Stage 2.5 coverage — surfaced INSIDE Gate 1 so the strategist
             sees gaps before deciding to approve. Always rendered when a
             sitemap exists; auto-runs on mount + after every revise. */}
@@ -718,6 +797,8 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
               onRerun={() => void callOrchestrate('run_coverage_audit')}
               onAutoFix={() => void callOrchestrate('draft_sitemap_with_audit')}
               autoFixRunning={autoFixRunning}
+              onPushToNav={() => void callOrchestrate('apply_audit_to_nav')}
+              pushToNavRunning={pushToNavRunning}
               auditLoop={auditLoopMeta}
               sitemapPageCount={sitemap?.pages?.length ?? null}
               disabled={!!running}
@@ -1804,7 +1885,7 @@ function ExportImportPanel({ projectId, onImported }: {
 function CoverageGate({
   data, running, stale, recommendedAction, gapCount,
   isOpen, onToggle, onRerun, onAutoFix, autoFixRunning,
-  auditLoop, sitemapPageCount, disabled,
+  onPushToNav, pushToNavRunning, auditLoop, sitemapPageCount, disabled,
 }: {
   data: {
     recommended_action?: 'proceed_to_stage_3' | 'redo_stage_2_with_gaps'
@@ -1820,6 +1901,8 @@ function CoverageGate({
   onRerun: () => void
   onAutoFix: () => void
   autoFixRunning: boolean
+  onPushToNav: () => void
+  pushToNavRunning: boolean
   auditLoop: {
     status: 'proceeded' | 'needs_human' | 'audit_failed'
     iterations: Array<{ loop: number; gaps_count: number; recommended_action: string }>
@@ -1918,10 +2001,22 @@ function CoverageGate({
         {!isProceed && (
           <button
             type="button"
+            onClick={onPushToNav}
+            disabled={disabled || pushToNavRunning || autoFixRunning || running}
+            className="inline-flex items-center gap-1 rounded-full border border-wm-accent/40 bg-white px-3 py-1 text-[11px] font-semibold text-wm-accent-strong hover:bg-wm-accent/5 disabled:opacity-50"
+            title="Push audit findings into the sitemap as additive edits only (new pages, new nav entries, new footer items). Does NOT redraft or rename existing pages."
+          >
+            {pushToNavRunning ? <Loader2 size={11} className="animate-spin" /> : <GitBranch size={11} />}
+            Push to nav
+          </button>
+        )}
+        {!isProceed && (
+          <button
+            type="button"
             onClick={onAutoFix}
-            disabled={disabled || autoFixRunning || running}
+            disabled={disabled || autoFixRunning || pushToNavRunning || running}
             className="inline-flex items-center gap-1 rounded-full bg-wm-warning px-3 py-1 text-[11px] font-semibold text-white hover:bg-wm-warning/90 disabled:opacity-50"
-            title={`Auto-redraft the sitemap using the audit's findings as feedback. Caps at 2 loops; pauses if gaps remain after that.`}
+            title={`Auto-redraft the sitemap using the audit's findings as feedback. Caps at 2 loops; pauses if gaps remain after that. Heavier than "Push to nav" — can rename/restructure pages.`}
           >
             {autoFixRunning ? <Loader2 size={11} className="animate-spin" /> : <Wand2 size={11} />}
             Auto-fix gaps
@@ -1946,6 +2041,97 @@ function CoverageGate({
         </div>
       )}
     </div>
+  )
+}
+
+/** One row in the quick-rename panel. Edits stay local until the user
+ *  blurs the field or presses Enter; then `onSave` fires with the
+ *  triple. The parent decides which fields actually changed before
+ *  calling the orchestrate action — empty diffs are no-ops. Slug
+ *  edits warn inline since they invalidate sitemap approval. */
+function PageRenameRow({
+  page, saving, disabled, onSave,
+}: {
+  page: { name: string; slug: string; nav_label?: string }
+  saving: boolean
+  disabled: boolean
+  onSave: (next: { name: string; navLabel: string; slug: string }) => Promise<void> | void
+}) {
+  // Local form state, seeded from props on mount. The parent re-keys
+  // each row with the page's identity key so a remote rename (or slug
+  // change) forces a clean remount with the new values — no in-place
+  // sync needed.
+  const [name, setName] = useState(page.name ?? '')
+  const [navLabel, setNavLabel] = useState(page.nav_label ?? '')
+  const [slug, setSlug] = useState(page.slug ?? '')
+
+  const dirty = name !== (page.name ?? '') || navLabel !== (page.nav_label ?? '') || slug !== (page.slug ?? '')
+  const slugChanged = slug !== (page.slug ?? '')
+
+  const commit = async () => {
+    if (!dirty || saving || disabled) return
+    await onSave({ name, navLabel, slug })
+  }
+
+  return (
+    <li className="rounded-md bg-white border border-wm-border p-2">
+      <div className="flex items-center gap-2">
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-[1fr_1fr_180px] gap-2">
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[9px] uppercase tracking-widest font-bold text-wm-text-subtle">Name</span>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              onBlur={() => void commit()}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void commit() } }}
+              disabled={saving || disabled}
+              className="rounded border border-wm-border bg-white px-2 py-1 text-[12px] text-wm-text focus:outline-none focus:border-wm-accent disabled:opacity-50"
+            />
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[9px] uppercase tracking-widest font-bold text-wm-text-subtle">Nav label</span>
+            <input
+              type="text"
+              value={navLabel}
+              placeholder={name}
+              onChange={e => setNavLabel(e.target.value)}
+              onBlur={() => void commit()}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void commit() } }}
+              disabled={saving || disabled}
+              className="rounded border border-wm-border bg-white px-2 py-1 text-[12px] text-wm-text focus:outline-none focus:border-wm-accent disabled:opacity-50"
+            />
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[9px] uppercase tracking-widest font-bold text-wm-text-subtle">Slug</span>
+            <input
+              type="text"
+              value={slug}
+              onChange={e => setSlug(e.target.value.replace(/[^a-z0-9-]/gi, '-').toLowerCase())}
+              onBlur={() => void commit()}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void commit() } }}
+              disabled={saving || disabled}
+              className={[
+                'rounded border bg-white px-2 py-1 text-[12px] font-mono focus:outline-none disabled:opacity-50',
+                slugChanged ? 'border-wm-warning text-wm-warning focus:border-wm-warning' : 'border-wm-border text-wm-text focus:border-wm-accent',
+              ].join(' ')}
+            />
+          </label>
+        </div>
+        <div className="shrink-0 w-[60px] text-right">
+          {saving
+            ? <Loader2 size={12} className="inline-block animate-spin text-wm-accent-strong" />
+            : dirty
+              ? <span className="text-[10px] text-wm-text-subtle">unsaved</span>
+              : null}
+        </div>
+      </div>
+      {slugChanged && (
+        <p className="text-[10px] text-wm-warning mt-1.5">
+          ⚠ Slug changes revert sitemap approval — downstream stages key off slugs.
+        </p>
+      )}
+    </li>
   )
 }
 
