@@ -64,8 +64,75 @@ export function renderSectionToHtml(
   neutralizeLoremPlaceholders(root)
   neutralizeDefaultButtonLabels(root)
   hideEmptyButtonShells(root)
+  // Hard-coded layout fix for Hero 44 (and any other Brixies template
+  // using the `data-layer="Image fan"` convention). Image bind data
+  // never feeds these — they're decorative — so we force a canonical
+  // 3-image centered fan layout regardless of how many image slots
+  // the augmenter surfaced.
+  fixHeroImageFan(root)
 
   return root.outerHTML
+}
+
+/** Force the Hero "Image fan" wrapper to a centered 3-image layout
+ *  with subtle outer rotations. The Brixies source ships three
+ *  absolute-positioned <img>s for the fan, but `unstackAbsoluteSiblings`
+ *  strips their positioning (intended for buggy absolute stacks) which
+ *  breaks the intended visual. Combined with the schema augmenter
+ *  treating three same-data-layer siblings as a 3-item image group —
+ *  and bind data only filling 2 of those — the third image drops out
+ *  entirely.
+ *
+ *  Solution: detect the wrapper by `data-layer="Image fan"` and replace
+ *  its contents with three hard-coded image placeholders. The team's
+ *  strategist workflow doesn't bind images, so there's no real content
+ *  to preserve — the fan is purely decorative. Existing src values
+ *  (if any) are kept; missing ones fall back to placehold.co. */
+function fixHeroImageFan(root: Element): void {
+  const wrappers = Array.from(root.querySelectorAll<HTMLElement>('[data-layer="Image fan"]'))
+  for (const wrapper of wrappers) {
+    // Reset wrapper to flex centered layout. margin: 0 auto guarantees
+    // it centers within the parent even if the parent loses align-items.
+    wrapper.setAttribute('style', [
+      'position: relative',
+      'width: 100%',
+      'max-width: 900px',
+      'height: 420px',
+      'margin: 0 auto',
+      'display: flex',
+      'justify-content: center',
+      'align-items: center',
+      'gap: 16px',
+      'overflow: visible',
+    ].join('; '))
+
+    // Preserve any src values that survived bind/substitute so a
+    // future binding flow could still inject real photos.
+    const existingSrcs = Array.from(wrapper.querySelectorAll('img'))
+      .map(img => img.getAttribute('src') ?? '')
+      .filter(s => s && !s.includes('placehold.co'))
+
+    // Strip current children + re-emit exactly 3 image elements.
+    while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild)
+    for (let i = 0; i < 3; i++) {
+      const img = wrapper.ownerDocument.createElement('img')
+      img.setAttribute('data-layer', 'Image')
+      img.setAttribute('class', 'Image')
+      img.setAttribute('src', existingSrcs[i] ?? 'https://placehold.co/280x374')
+      const rotate = i === 0 ? '-6deg' : i === 2 ? '6deg' : '0deg'
+      const translateY = i === 1 ? '-8px' : '0px'
+      img.setAttribute('style', [
+        'width: 280px',
+        'height: 374px',
+        'border-radius: 8px',
+        'border: 1px solid rgba(22, 22, 22, 0.1)',
+        'object-fit: cover',
+        `transform: rotate(${rotate}) translateY(${translateY})`,
+        'box-shadow: 0 8px 24px rgba(22, 22, 22, 0.08)',
+      ].join('; '))
+      wrapper.appendChild(img)
+    }
+  }
 }
 
 /** Brixies sources often use horizontal carousels (`data-layer="Slider"`
