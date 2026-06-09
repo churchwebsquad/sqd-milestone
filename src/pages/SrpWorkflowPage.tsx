@@ -14,14 +14,15 @@
  * Step state lives in sms_srp_generation.current_step.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft, Loader2, Wifi, WifiOff } from 'lucide-react'
 import {
-  getSession, updateSession,
-  SRP_STEPS, STEP_LABELS,
+  updateSession,
+  SRP_STEPS,
 } from '../lib/srpSessions'
-import type { SmsSrpGeneration, SrpStep } from '../types/database'
+import { useSrpSession } from '../lib/srpRealtime'
+import type { SrpStep } from '../types/database'
 import { SrpStepIndicator } from '../components/srp/SrpStepIndicator'
 import { AccountStep } from '../components/srp/AccountStep'
 import { DeliverableStep } from '../components/srp/DeliverableStep'
@@ -31,26 +32,12 @@ import { ReviewStep } from '../components/srp/ReviewStep'
 export default function SrpWorkflowPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
-  const [session, setSession] = useState<SmsSrpGeneration | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState<string | null>(null)
+  // Realtime subscription pushes row updates instead of polling.
+  // Falls back to manual `refresh()` calls (still wired below) when
+  // the channel can't connect.
+  const { session, loading, error, connected, refresh } = useSrpSession(sessionId ?? null)
 
-  const reload = useCallback(async () => {
-    if (!sessionId) return
-    setLoading(true)
-    try {
-      const s = await getSession(sessionId)
-      setSession(s)
-      if (!s) setError(`Session ${sessionId} not found.`)
-      else setError(null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load session')
-    } finally {
-      setLoading(false)
-    }
-  }, [sessionId])
-
-  useEffect(() => { void reload() }, [reload])
+  const reload = useCallback(async () => { await refresh() }, [refresh])
 
   const goToStep = useCallback(async (step: SrpStep) => {
     if (!sessionId) return
@@ -89,9 +76,21 @@ export default function SrpWorkflowPage() {
         </Link>
 
         <header className="mb-5">
-          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
-            SRP · {session.member ?? '—'} · <span className="font-mono">{session.session_id}</span>
-          </p>
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
+              SRP · {session.member ?? '—'} · <span className="font-mono">{session.session_id}</span>
+            </p>
+            <span
+              className={[
+                'inline-flex items-center gap-1 text-[10px] uppercase tracking-wider',
+                connected ? 'text-wm-success' : 'text-wm-text-subtle',
+              ].join(' ')}
+              title={connected ? 'Realtime updates connected' : 'Realtime disconnected — refresh manually'}
+            >
+              {connected ? <Wifi size={10} /> : <WifiOff size={10} />}
+              {connected ? 'live' : 'polling'}
+            </span>
+          </div>
           <h1 className="text-[22px] font-semibold text-wm-text mt-0.5">{session.church_name ?? 'SRP session'}</h1>
         </header>
 

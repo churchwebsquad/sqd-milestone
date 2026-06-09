@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react'
-import { Download, Loader2, MessageSquare } from 'lucide-react'
+import { Download, Loader2, MessageSquare, Send } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { parseCarouselSlides, updateSession } from '../../lib/srpSessions'
 import type { SmsSrpGeneration } from '../../types/database'
@@ -21,6 +21,8 @@ export function ExportActions({ session, onChange }: {
   const [clickupTaskId, setClickupTaskId] = useState(session.clickup_task_id ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [submitMsg, setSubmitMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [pushingVista, setPushingVista] = useState(false)
+  const [vistaMsg, setVistaMsg] = useState<{ kind: 'ok' | 'err' | 'config'; text: string; detail?: any } | null>(null)
 
   const handleCsv = () => {
     const csv = buildVistaCsv(session)
@@ -31,6 +33,40 @@ export function ExportActions({ session, onChange }: {
     a.download = `${session.session_id}.csv`
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const handleVistaPush = async () => {
+    setPushingVista(true); setVistaMsg(null)
+    try {
+      const { data: { session: authSession } } = await supabase.auth.getSession()
+      const jwt = authSession?.access_token
+      if (!jwt) throw new Error('Not authenticated')
+      const res = await fetch('/api/srp/push-to-vista', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ sessionId: session.session_id }),
+      })
+      const text = await res.text()
+      let json: any
+      try { json = JSON.parse(text) } catch { json = { raw: text } }
+      if (res.status === 503) {
+        setVistaMsg({ kind: 'config', text: json?.error ?? 'Vista push not configured', detail: json })
+        return
+      }
+      if (!res.ok) {
+        setVistaMsg({ kind: 'err', text: json?.error ?? `HTTP ${res.status}`, detail: json })
+        return
+      }
+      const okCount = Number(json?.pushed ?? 0)
+      const failCount = Number(json?.failed ?? 0)
+      setVistaMsg({
+        kind: failCount === 0 ? 'ok' : 'err',
+        text: `Pushed ${okCount} deliverable${okCount === 1 ? '' : 's'} to Vista${failCount > 0 ? ` · ${failCount} failed` : ''}.`,
+        detail: json,
+      })
+    } catch (e) {
+      setVistaMsg({ kind: 'err', text: e instanceof Error ? e.message : 'Push failed' })
+    } finally { setPushingVista(false) }
   }
 
   const handleClickupSubmit = async () => {
@@ -68,8 +104,9 @@ export function ExportActions({ session, onChange }: {
         <p className="text-[11px] text-wm-text-muted mt-0.5">Export to CSV for the Vista Social scheduler, or post all deliverables to a ClickUp task.</p>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <button
+          type="button"
           onClick={handleCsv}
           className="rounded-md border border-wm-border bg-wm-bg hover:bg-wm-accent/5 px-3 py-3 text-left"
         >
@@ -77,8 +114,27 @@ export function ExportActions({ session, onChange }: {
             <Download size={14} className="text-wm-accent-strong" />
             <span className="text-[13px] font-semibold text-wm-text">Download CSV</span>
           </div>
-          <p className="text-[11px] text-wm-text-muted leading-snug">One row per deliverable. Drop into Vista Social or the team's scheduler import.</p>
+          <p className="text-[11px] text-wm-text-muted leading-snug">One row per deliverable. Manual import into Vista Social.</p>
         </button>
+
+        <div className="rounded-md border border-wm-border bg-wm-bg px-3 py-3">
+          <div className="flex items-center gap-1.5 mb-2">
+            <Send size={14} className="text-wm-accent-strong" />
+            <span className="text-[13px] font-semibold text-wm-text">Push to Vista</span>
+          </div>
+          <p className="text-[11px] text-wm-text-muted leading-snug mb-2">
+            Ship every deliverable directly to the church's connected Vista profiles as drafts.
+          </p>
+          <button
+            type="button"
+            onClick={() => void handleVistaPush()}
+            disabled={pushingVista}
+            className="w-full inline-flex items-center justify-center gap-1.5 rounded-full bg-wm-accent px-3 py-1 text-[12px] text-white font-semibold disabled:opacity-50"
+          >
+            {pushingVista ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+            Push to Vista
+          </button>
+        </div>
 
         <div className="rounded-md border border-wm-border bg-wm-bg px-3 py-3">
           <div className="flex items-center gap-1.5 mb-2">
@@ -111,6 +167,36 @@ export function ExportActions({ session, onChange }: {
           {submitMsg.text}
           {session.clickup_url && submitMsg.kind === 'ok' && (
             <> · <a href={session.clickup_url} target="_blank" rel="noreferrer" className="underline">open task</a></>
+          )}
+        </div>
+      )}
+
+      {vistaMsg && (
+        <div className={[
+          'text-[12px] rounded-md px-3 py-2 border space-y-1',
+          vistaMsg.kind === 'ok'     ? 'border-wm-success/30 bg-wm-success-bg text-wm-success'
+          : vistaMsg.kind === 'config' ? 'border-wm-warning/30 bg-wm-warning-bg text-wm-warning'
+          : 'border-wm-danger/30 bg-wm-danger-bg text-wm-danger',
+        ].join(' ')}>
+          <p>{vistaMsg.text}</p>
+          {vistaMsg.kind === 'config' && vistaMsg.detail?.fallback && (
+            <p className="text-wm-text-muted">{vistaMsg.detail.fallback}</p>
+          )}
+          {Array.isArray(vistaMsg.detail?.missing_env_vars) && vistaMsg.detail.missing_env_vars.length > 0 && (
+            <p className="text-wm-text-muted">Missing env: <span className="font-mono">{vistaMsg.detail.missing_env_vars.join(', ')}</span></p>
+          )}
+          {Array.isArray(vistaMsg.detail?.results) && vistaMsg.detail.results.length > 0 && (
+            <details className="text-[11px]">
+              <summary className="cursor-pointer text-wm-text-muted">Per-deliverable results ({vistaMsg.detail.results.length})</summary>
+              <ul className="mt-1 space-y-0.5">
+                {vistaMsg.detail.results.map((r: any, i: number) => (
+                  <li key={i} className="text-wm-text-muted">
+                    {r.ok ? '✓' : '✗'} {r.kind} · {r.platform}
+                    {r.detail && typeof r.detail === 'string' && <span className="text-wm-text-subtle"> — {r.detail.slice(0, 120)}</span>}
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
         </div>
       )}

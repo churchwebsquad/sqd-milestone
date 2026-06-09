@@ -11,13 +11,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ExternalLink, Loader2, RefreshCw, Save, Scissors, Sparkles, X } from 'lucide-react'
+import { ExternalLink, Loader2, Play, RefreshCw, Save, Scissors, Sparkles, X } from 'lucide-react'
 import { parseClipSelections, updateSession, type ClipSelection } from '../../../lib/srpSessions'
 import { deepLinkAtTime, validateMediaUrl } from '../../../lib/mediaUrlValidator'
 import { supabase } from '../../../lib/supabase'
 import { getSession } from '../../../lib/srpSessions'
 import type { SmsSrpGeneration } from '../../../types/database'
 import { useSrpGenerator } from './useSrpGenerator'
+import { ClipPreview } from '../ClipPreview'
 
 interface ClipCandidate extends ClipSelection {
   label?: string
@@ -88,6 +89,10 @@ export function ReelCaptionsGenerator({ session, onChange }: {
   const [cutElapsed, setCutElapsed] = useState(0)
   const cutStartRef = useRef<number | null>(null)
   const cutAbortRef = useRef(false)
+  // Per-reel inline preview toggle. null = closed; 'rendered' = play the
+  // clipcutter MP4; 'source' = play the original video at the clip's
+  // in-point.
+  const [previewing, setPreviewing] = useState<Record<number, 'rendered' | 'source' | null>>({})
 
   useEffect(() => {
     if (!cutting || !cutStartRef.current) return
@@ -279,37 +284,76 @@ export function ReelCaptionsGenerator({ session, onChange }: {
                   <span className="text-[11px] text-wm-danger">{cutError}</span>
                 )}
               </div>
-              {/* Per-clip render status + preview links */}
+              {/* Per-clip render status + preview controls */}
               {pickedIxs.length > 0 && (
-                <ul className="space-y-1.5 pt-1">
+                <ul className="space-y-2 pt-1">
                   {pickedIxs.map((ix, slot) => {
                     const c = candidates[ix]
                     if (!c) return null
                     const deepLink = validatedVideo
                       ? deepLinkAtTime(validatedVideo.sourceType as any, validatedVideo.normalizedUrl, c.startTime)
                       : null
+                    const previewMode = previewing[ix] ?? null
                     return (
-                      <li key={ix} className="flex items-center gap-2 text-[11px]">
-                        <span className="text-wm-text-subtle">Reel {slot + 1}</span>
-                        <span className="text-wm-text-muted">·</span>
-                        <ClipStatusBadge status={c.processing_status ?? null} />
-                        {c.video_url && (
-                          <a href={c.video_url} target="_blank" rel="noreferrer" className="text-wm-accent-strong inline-flex items-center gap-0.5 hover:underline">
-                            <ExternalLink size={10} /> Rendered MP4
-                          </a>
+                      <li key={ix} className="space-y-1.5">
+                        <div className="flex items-center gap-2 text-[11px]">
+                          <span className="text-wm-text-subtle">Reel {slot + 1}</span>
+                          <span className="text-wm-text-muted">·</span>
+                          <ClipStatusBadge status={c.processing_status ?? null} />
+                          {c.video_url && (
+                            <button
+                              type="button"
+                              onClick={() => setPreviewing(p => ({ ...p, [ix]: previewMode === 'rendered' ? null : 'rendered' }))}
+                              className="text-wm-accent-strong inline-flex items-center gap-0.5 hover:underline"
+                            >
+                              <Play size={10} /> {previewMode === 'rendered' ? 'Hide MP4' : 'Preview MP4'}
+                            </button>
+                          )}
+                          {validatedVideo && (
+                            <button
+                              type="button"
+                              onClick={() => setPreviewing(p => ({ ...p, [ix]: previewMode === 'source' ? null : 'source' }))}
+                              className="text-wm-text-muted inline-flex items-center gap-0.5 hover:underline"
+                            >
+                              <Play size={10} /> {previewMode === 'source' ? 'Hide source' : 'Preview source'}
+                            </button>
+                          )}
+                          {c.video_url && (
+                            <a href={c.video_url} target="_blank" rel="noreferrer" className="text-wm-text-muted inline-flex items-center gap-0.5 hover:underline" title="Download MP4">
+                              <ExternalLink size={10} />
+                            </a>
+                          )}
+                          {c.srt_url && (
+                            <a href={c.srt_url} target="_blank" rel="noreferrer" className="text-wm-text-muted inline-flex items-center gap-0.5 hover:underline">
+                              <ExternalLink size={10} /> SRT
+                            </a>
+                          )}
+                          {deepLink && (
+                            <a href={deepLink} target="_blank" rel="noreferrer" className="text-wm-text-muted inline-flex items-center gap-0.5 hover:underline">
+                              <ExternalLink size={10} /> Open in source
+                            </a>
+                          )}
+                          {c.processing_error && (
+                            <span className="text-wm-danger">· {c.processing_error}</span>
+                          )}
+                        </div>
+
+                        {previewMode === 'rendered' && c.video_url && (
+                          <ClipPreview
+                            renderedUrl={c.video_url}
+                            title={`Reel ${slot + 1} · rendered MP4`}
+                            onClose={() => setPreviewing(p => ({ ...p, [ix]: null }))}
+                          />
                         )}
-                        {c.srt_url && (
-                          <a href={c.srt_url} target="_blank" rel="noreferrer" className="text-wm-text-muted inline-flex items-center gap-0.5 hover:underline">
-                            <ExternalLink size={10} /> SRT
-                          </a>
-                        )}
-                        {deepLink && (
-                          <a href={deepLink} target="_blank" rel="noreferrer" className="text-wm-text-muted inline-flex items-center gap-0.5 hover:underline">
-                            <ExternalLink size={10} /> Play in source
-                          </a>
-                        )}
-                        {c.processing_error && (
-                          <span className="text-wm-danger">· {c.processing_error}</span>
+                        {previewMode === 'source' && validatedVideo && (
+                          <ClipPreview
+                            sourceUrl={validatedVideo.normalizedUrl}
+                            sourceType={validatedVideo.sourceType as any}
+                            startSec={c.startTime ?? null}
+                            endSec={c.endTime ?? null}
+                            title={`Reel ${slot + 1} · source preview${c.startTime != null ? ` (from ${formatTime(c.startTime)})` : ''}`}
+                            onClose={() => setPreviewing(p => ({ ...p, [ix]: null }))}
+                          />
                         )}
                       </li>
                     )
