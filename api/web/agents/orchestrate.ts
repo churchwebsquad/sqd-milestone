@@ -34,7 +34,7 @@ const PAGE_DRAFT_CONCURRENCY = 4
  *  via manual Revise feedback or by approving with known gaps. */
 const SITEMAP_AUDIT_MAX_LOOPS = 2
 
-type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize' | 'apply_audit_to_nav' | 'rename_sitemap_page' | 'cancel_run' | 'restructure_sections'
+type Action = 'run_drafts' | 'run_briefs' | 'draft_one_page' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize' | 'apply_audit_to_nav' | 'rename_sitemap_page' | 'cancel_run' | 'restructure_sections'
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -261,8 +261,74 @@ export default async function handler(req: any, res: any) {
     }
 
     if (action === 'run_drafts') {
+      // Legacy single-shot run_drafts (briefs + all drafts in one
+      // Vercel invocation). Kept for back-compat callers but the
+      // client should prefer the split run_briefs + draft_one_page
+      // flow below — single-shot blows the 300s function timeout
+      // on projects with 15+ pages (page-briefs ~60s + 15 page
+      // drafts at ~20s each = 360s, over the cap).
       const updated = await runDrafts({ sb, projectId, jwt, baseUrl, roadmapState, engineState })
       return res.status(200).json({ ok: true, engine_state: updated })
+    }
+
+    if (action === 'run_briefs') {
+      // Phase 1 of the split drafting flow. Runs page-briefs only
+      // (fast — single agent call processes all pages at once), then
+      // returns the list of slugs the client should draft per-page.
+      // Each per-page draft is its own Vercel invocation so even a
+      // 30-page sitemap fits comfortably under the timeout.
+      try {
+        await clearCancelledMarker(sb, projectId)
+        await bailIfCancelled(sb, projectId)
+        await writeEngineState(sb, projectId, {
+          ...engineState, status: 'briefing', current_phase: 'page_briefs',
+          last_action_at: new Date().toISOString(),
+        })
+        await callAgent(baseUrl, jwt, 'page-briefs', { projectId })
+        await bailIfCancelled(sb, projectId)
+        const { data: refreshed } = await sb.from('strategy_web_projects')
+          .select('roadmap_state').eq('id', projectId).maybeSingle()
+        const refreshedState = (refreshed?.roadmap_state ?? {}) as Record<string, any>
+        const briefs = refreshedState.page_briefs ?? {}
+        const slugs = Object.keys(briefs).filter(k => k !== '_meta')
+        await writeEngineState(sb, projectId, {
+          ...engineState, status: 'drafting', current_phase: 'page_drafts',
+          pages_total: slugs.length, pages_drafted: 0,
+          last_action_at: new Date().toISOString(),
+        })
+        return res.status(200).json({ ok: true, slugs })
+      } catch (e: any) {
+        if (e instanceof CancelledError) {
+          await writeCancelledState(sb, projectId, { current_phase: 'cancelled_during_briefs' })
+          return res.status(200).json({ ok: true, slugs: [], cancelled: true })
+        }
+        throw e
+      }
+    }
+
+    if (action === 'draft_one_page') {
+      // Phase 2 of the split drafting flow. Drafts ONE page. Client
+      // iterates the slugs returned by run_briefs and calls this
+      // action per slug, with whatever client-side concurrency the
+      // user's browser can tolerate (typically 3-4 parallel fetches).
+      const pageSlug = typeof req.body?.pageSlug === 'string' ? req.body.pageSlug : null
+      if (!pageSlug) return res.status(400).json({ error: 'pageSlug required for draft_one_page' })
+      await bailIfCancelled(sb, projectId)
+      const result = await callAgent(baseUrl, jwt, 'page-draft', { projectId, pageSlug })
+      // Increment the pages_drafted counter atomically — re-read DB
+      // since other in-flight draft_one_page calls may have bumped
+      // it between our read and write.
+      const { data: cur } = await sb.from('strategy_web_projects')
+        .select('roadmap_state').eq('id', projectId).maybeSingle()
+      const curState = (cur?.roadmap_state ?? {}) as Record<string, any>
+      const curEng = (curState.engine_state ?? {}) as Record<string, any>
+      const drafted = (typeof curEng.pages_drafted === 'number' ? curEng.pages_drafted : 0) + 1
+      await writeEngineState(sb, projectId, {
+        ...curEng, status: 'drafting', current_phase: 'page_drafts',
+        pages_drafted: drafted,
+        last_action_at: new Date().toISOString(),
+      })
+      return res.status(200).json({ ok: true, slug: pageSlug, pages_drafted: drafted, result })
     }
 
     if (action === 'critique') {

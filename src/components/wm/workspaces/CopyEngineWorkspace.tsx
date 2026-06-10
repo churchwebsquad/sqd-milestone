@@ -412,8 +412,30 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   const runEngine = useCallback(async (): Promise<void> => {
     setEngineRunning(true)
     try {
-      const draftsResult = await callOrchestrate('run_drafts')
-      if (!draftsResult) return
+      // Phase 1: page-briefs (one fast invocation). Server returns
+      // the list of slugs to draft.
+      const briefsResult = await callOrchestrate('run_briefs') as { slugs?: string[]; cancelled?: boolean } | null
+      if (!briefsResult || briefsResult.cancelled) return
+      const slugs = Array.isArray(briefsResult.slugs) ? briefsResult.slugs : []
+
+      // Phase 2: draft each page in its own invocation. This avoids
+      // the Vercel 300s function timeout that bit when run_drafts
+      // tried to handle briefs + N page drafts in one shot. Client-
+      // side concurrency cap keeps the browser from spawning 30
+      // parallel fetches and saturating the gateway.
+      const CLIENT_DRAFT_CONCURRENCY = 4
+      for (let i = 0; i < slugs.length; i += CLIENT_DRAFT_CONCURRENCY) {
+        const chunk = slugs.slice(i, i + CLIENT_DRAFT_CONCURRENCY)
+        // Promise.allSettled so one failed page doesn't abort the
+        // whole batch — the iterate loop will catch under-filled
+        // critique scores and the strategist can re-draft any page
+        // that errored individually.
+        await Promise.allSettled(chunk.map(slug =>
+          callOrchestrate('draft_one_page', { pageSlug: slug }),
+        ))
+      }
+
+      // Phase 3: critique + (if directives) iterate.
       const critiqueResult = await callOrchestrate('critique') as { engine_state?: EngineState } | null
       if (!critiqueResult) return
       const directiveCount = critiqueResult.engine_state?.last_directive_count ?? 0
@@ -1186,8 +1208,14 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       {/* Gate 2 — Final review */}
       <GateCard
         number={2}
-        title="Final review"
-        subtitle="Give feedback. The Director routes it to the right stage."
+        title="Final review — copy drafts (pre-bind)"
+        subtitle={
+          status === 'committed'
+            ? 'Committed. The copy is now live in web_pages + web_sections.'
+            : status === 'ready_for_review'
+              ? 'Review the page drafts above (archetype + slot copy). Approve to commit — commit binds each section to a Brixies template, writes web_pages + web_sections, and renders the final bound pages in the Pages tab.'
+              : 'Upstream — drafts are still being written or critiqued.'
+        }
         status={status === 'committed' ? 'passed' : status === 'ready_for_review' ? 'awaiting' : 'upstream'}
       />
 
@@ -1923,36 +1951,18 @@ function DraftPreview({
         </div>
       )}
       {(() => {
-        // Validation flags + unused atoms — the page-draft agent
-        // self-reports these, and they're the strongest signal that
-        // a page has known issues even when Director's per-page
-        // critique is silent. Surface inline so the strategist sees
-        // them next to the actual copy.
         const validation = (draft as { validation?: { flags?: unknown[]; unused_atoms?: string[] } } | undefined)?.validation
         const flags = Array.isArray(validation?.flags) ? validation.flags : []
         const unusedAtoms = Array.isArray(validation?.unused_atoms) ? validation.unused_atoms : []
         if (flags.length === 0 && unusedAtoms.length === 0) return null
         return (
-          <div className="rounded-md border border-wm-warning/40 bg-wm-warning-bg p-3 mb-3 space-y-1.5">
-            <p className="text-[10px] uppercase tracking-widest font-bold text-wm-warning">
-              Draft flags ({flags.length + (unusedAtoms.length > 0 ? 1 : 0)})
-            </p>
-            {flags.length > 0 && (
-              <ul className="space-y-0.5">
-                {flags.map((f, i) => (
-                  <li key={i} className="text-[11px] text-wm-text leading-snug">
-                    · {typeof f === 'string' ? f : JSON.stringify(f)}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {unusedAtoms.length > 0 && (
-              <p className="text-[11px] text-wm-text leading-snug">
-                <span className="font-semibold">Unused atoms ({unusedAtoms.length}):</span>{' '}
-                <span className="font-mono text-wm-text-muted">{unusedAtoms.join(', ')}</span>
-              </p>
-            )}
-          </div>
+          <DraftFlagsPanel
+            flags={flags}
+            unusedAtoms={unusedAtoms}
+            onEditSlot={onEditSlot}
+            onRedraftSection={onRedraftSection}
+            busy={busy ?? false}
+          />
         )
       })()}
       {sections.length === 0 ? (
@@ -2774,6 +2784,222 @@ function PageRenameRow({
         <p className="text-[10px] text-wm-warning mt-1.5">
           ⚠ Slug changes revert sitemap approval — downstream stages key off slugs.
         </p>
+      )}
+    </li>
+  )
+}
+
+/** Validation flags panel — splits the draft's flags into "the engine
+ *  already auto-fixed this for you" vs "you need to decide what to do."
+ *  Snippet substitutions land as plain strings (the post-draft snippet
+ *  enforcer logs each "{literal} → {{token}}" replacement); the
+ *  page-draft validator emits structured {section_ix, kind, field,
+ *  value} objects for things the model can't auto-fix (em-dashes,
+ *  heading length, parallel-clause tics). Both render distinctly so
+ *  the strategist sees what's already handled and what still needs a
+ *  call. */
+interface StructuredFlag {
+  section_ix: number
+  kind: string
+  field: string
+  value: string
+}
+
+function DraftFlagsPanel({
+  flags, unusedAtoms, onEditSlot, onRedraftSection, busy,
+}: {
+  flags: unknown[]
+  unusedAtoms: string[]
+  onEditSlot?: (sectionIx: number, slotKey: string, instruction: string) => void
+  onRedraftSection?: (sectionIx: number, instruction: string) => void
+  busy: boolean
+}) {
+  // Separate auto-fixed messages (strings) from issues that still
+  // need a decision (objects with section_ix + kind).
+  const autoFixedNotes: string[] = []
+  const structured: StructuredFlag[] = []
+  for (const f of flags) {
+    if (typeof f === 'string') autoFixedNotes.push(f)
+    else if (f && typeof f === 'object' && 'kind' in f && 'section_ix' in f) {
+      structured.push(f as StructuredFlag)
+    }
+  }
+
+  const kindLabel = (kind: string): string => {
+    switch (kind) {
+      case 'em_dash_overload':         return 'Em-dashes (LLM tic)'
+      case 'heading_too_long':         return 'Heading over 8 words'
+      case 'heading_has_question_mark': return 'Question-mark heading'
+      case 'parallel_clause_heading':  return 'Parallel-clause heading'
+      default:                          return kind.replace(/_/g, ' ')
+    }
+  }
+  const kindFixInstruction = (kind: string, field: string): string => {
+    switch (kind) {
+      case 'em_dash_overload':
+        return `Replace every em-dash (—) and en-dash (–) in this ${field} with a period or comma. If a sentence feels like it needs an em-dash, split into two sentences instead.`
+      case 'heading_too_long':
+        return `Tighten this heading to 8 words or fewer. Pick the strongest noun phrase; drop modifiers.`
+      case 'heading_has_question_mark':
+        return `Convert this question heading into a declarative noun phrase.`
+      case 'parallel_clause_heading':
+        return `Rewrite this heading without the "X, not Y" / "X, but Y" parallel-clause shape. Reach for a single declarative.`
+      default:
+        return `Address the ${kind.replace(/_/g, ' ')} flag in this ${field}.`
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-wm-warning/40 bg-wm-warning-bg p-3 mb-3 space-y-2">
+      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-warning">
+        Draft flags
+        {autoFixedNotes.length > 0 && structured.length > 0 && (
+          <> · {structured.length} need{structured.length === 1 ? 's' : ''} a call · {autoFixedNotes.length} auto-fixed</>
+        )}
+        {autoFixedNotes.length === 0 && structured.length > 0 && (
+          <> · {structured.length} need{structured.length === 1 ? 's' : ''} a call</>
+        )}
+        {autoFixedNotes.length > 0 && structured.length === 0 && (
+          <> · {autoFixedNotes.length} auto-fixed</>
+        )}
+      </p>
+
+      {/* Actionable: model emitted, engine couldn't auto-fix. Each
+          card surfaces the kind + the offending text + a primary
+          "fix this slot" action that fires slot-edit with the
+          right default instruction. */}
+      {structured.length > 0 && (
+        <ul className="space-y-2">
+          {structured.map((f, i) => (
+            <FlagCard
+              key={`${f.section_ix}-${f.kind}-${f.field}-${i}`}
+              flag={f}
+              label={kindLabel(f.kind)}
+              defaultInstruction={kindFixInstruction(f.kind, f.field)}
+              onEditSlot={onEditSlot}
+              onRedraftSection={onRedraftSection}
+              busy={busy}
+            />
+          ))}
+        </ul>
+      )}
+
+      {/* Auto-fixed notes (snippet substitutions). No action needed —
+          just informational. Collapsed by default since the engine
+          already handled them and the strategist doesn't need to
+          decide anything. */}
+      {autoFixedNotes.length > 0 && (
+        <details className="text-[11px]">
+          <summary className="cursor-pointer text-[11px] text-wm-text-muted hover:text-wm-text">
+            ✓ Auto-fixed by the engine ({autoFixedNotes.length}) — no action needed
+          </summary>
+          <ul className="mt-1.5 space-y-1 ml-3">
+            {autoFixedNotes.map((note, i) => (
+              <li key={i} className="text-[11px] text-wm-text-muted leading-snug">· {note}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {unusedAtoms.length > 0 && (
+        <p className="text-[11px] text-wm-text leading-snug">
+          <span className="font-semibold">Unused atoms ({unusedAtoms.length}):</span>{' '}
+          <span className="font-mono text-wm-text-muted">{unusedAtoms.join(', ')}</span>
+          <span className="text-wm-text-subtle"> — the brief assigned these but no section used them.</span>
+        </p>
+      )}
+    </div>
+  )
+}
+
+function FlagCard({
+  flag, label, defaultInstruction, onEditSlot, onRedraftSection, busy,
+}: {
+  flag: StructuredFlag
+  label: string
+  defaultInstruction: string
+  onEditSlot?: (sectionIx: number, slotKey: string, instruction: string) => void
+  onRedraftSection?: (sectionIx: number, instruction: string) => void
+  busy: boolean
+}) {
+  const preview = (flag.value ?? '').toString().trim()
+  const truncated = preview.length > 160 ? preview.slice(0, 157) + '…' : preview
+  const [editing, setEditing] = useState(false)
+  const [instruction, setInstruction] = useState(defaultInstruction)
+  return (
+    <li className="rounded border border-wm-warning/30 bg-white p-2.5">
+      <div className="flex items-baseline gap-2 mb-1 flex-wrap">
+        <span className="text-[11px] font-bold text-wm-warning">{label}</span>
+        <span className="text-[10px] text-wm-text-subtle">
+          Section #{flag.section_ix + 1} · slot <code className="font-mono">{flag.field}</code>
+        </span>
+      </div>
+      {truncated && (
+        <p className="text-[11px] text-wm-text-muted italic leading-snug bg-wm-bg p-1.5 rounded mb-2 whitespace-pre-wrap">"{truncated}"</p>
+      )}
+      {!editing ? (
+        <div className="flex gap-2 flex-wrap">
+          {onEditSlot && (
+            <button
+              type="button"
+              onClick={() => onEditSlot(flag.section_ix, flag.field, defaultInstruction)}
+              disabled={busy}
+              className="inline-flex items-center gap-1 rounded-full bg-wm-accent px-3 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+              title="Send this slot through slot-edit with the recommended fix instruction."
+            >
+              {busy ? <Loader2 size={10} className="animate-spin" /> : <Send size={10} />}
+              Fix this slot
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            disabled={busy}
+            className="text-[11px] text-wm-accent-strong hover:underline disabled:opacity-50"
+          >
+            Customize the fix…
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          <textarea
+            value={instruction}
+            onChange={e => setInstruction(e.target.value)}
+            disabled={busy}
+            rows={2}
+            className="w-full rounded border border-wm-border bg-white px-2 py-1 text-[11px] focus:outline-none focus:border-wm-accent disabled:opacity-50"
+          />
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={() => { setEditing(false); setInstruction(defaultInstruction) }}
+              disabled={busy}
+              className="text-[10px] text-wm-text-muted hover:text-wm-text"
+            >
+              Cancel
+            </button>
+            {onRedraftSection && (
+              <button
+                type="button"
+                onClick={() => { onRedraftSection(flag.section_ix, instruction); setEditing(false) }}
+                disabled={busy || !instruction.trim()}
+                className="inline-flex items-center gap-1 rounded-full border border-wm-accent/40 bg-white hover:bg-wm-accent/5 px-2.5 py-1 text-[10px] font-semibold text-wm-accent-strong disabled:opacity-50"
+              >
+                Rewrite whole section
+              </button>
+            )}
+            {onEditSlot && (
+              <button
+                type="button"
+                onClick={() => { onEditSlot(flag.section_ix, flag.field, instruction); setEditing(false) }}
+                disabled={busy || !instruction.trim()}
+                className="inline-flex items-center gap-1 rounded-full bg-wm-accent px-3 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+              >
+                Edit this slot
+              </button>
+            )}
+          </div>
+        </div>
       )}
     </li>
   )
