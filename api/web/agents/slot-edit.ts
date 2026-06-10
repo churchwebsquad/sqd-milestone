@@ -31,6 +31,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
+import { loadSnippetsForAgent } from './_lib/loadSnippets.js'
 
 export const maxDuration = 60
 
@@ -128,7 +129,7 @@ export default async function handler(req: any, res: any) {
   // can reach for {{church_name}} / {{address}} / etc. instead of
   // typing literals. Failure to load is non-fatal; the rewrite still
   // works without them, just without snippet-awareness.
-  const snippets = await loadSnippetsForProject(sb, projectId)
+  const snippets = await loadSnippetsForAgent(sb, projectId)
 
   const copy = (section.copy ?? {}) as Record<string, any>
   const oldValue = readSlotValue(copy, slotKey)
@@ -291,24 +292,7 @@ function writeSlotValue(copy: Record<string, any>, slotKey: string, value: unkno
   }
 }
 
-/** Snippet inventory for the project — token + expansion. Falls back
- *  silently if the table doesn't exist or has no rows. Includes both
- *  per-project snippets AND the 16 global merge-field columns the
- *  editor surfaces (church_name, address, etc.). */
-async function loadSnippetsForProject(
-  sb: any, projectId: string,
-): Promise<Array<{ token: string; expansion: string }>> {
-  const out: Array<{ token: string; expansion: string }> = []
-  try {
-    const { data } = await sb.from('web_project_snippets')
-      .select('token, expansion').eq('web_project_id', projectId).eq('archived', false)
-    if (Array.isArray(data)) {
-      for (const row of data) {
-        if (typeof row?.token === 'string' && typeof row?.expansion === 'string' && row.expansion) {
-          out.push({ token: row.token, expansion: row.expansion })
-        }
-      }
-    }
-  } catch { /* table absence is non-fatal */ }
-  return out
-}
+// Snippet loading moved to ./_lib/loadSnippets.ts so all 4 copywriting
+// agents (page-draft, slot-edit, reorg, content-collection) share one
+// implementation that pulls both the 16 global merge-field columns on
+// strategy_web_projects AND the custom rows in web_project_snippets.

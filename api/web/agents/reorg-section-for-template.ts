@@ -25,6 +25,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
+import { loadSnippetsForAgent } from './_lib/loadSnippets.js'
 
 export const maxDuration = 60
 
@@ -135,18 +136,9 @@ export default async function handler(req: any, res: any) {
 
   const brief = (state.page_briefs ?? {})[pageSlug]
 
-  // Snippets — same load pattern as page-draft + slot-edit. Lets the
-  // reorg use {{token}} form for project values.
-  let snippets: Array<{ token: string; expansion: string }> = []
-  try {
-    const { data: sn } = await sb.from('web_project_snippets')
-      .select('token, expansion').eq('web_project_id', projectId).eq('archived', false)
-    if (Array.isArray(sn)) {
-      snippets = sn
-        .filter((r: any) => typeof r?.token === 'string' && typeof r?.expansion === 'string' && r.expansion)
-        .map((r: any) => ({ token: r.token, expansion: r.expansion }))
-    }
-  } catch { /* non-fatal */ }
+  // Snippets — 16 global merge fields + custom snippets table. Same
+  // shared loader as page-draft + slot-edit.
+  const snippets = await loadSnippetsForAgent(sb, projectId)
 
   // Slim the template fields for the prompt — keep only what the
   // model needs to understand the slot shape (key + kind + label).

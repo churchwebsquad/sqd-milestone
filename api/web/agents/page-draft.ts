@@ -25,6 +25,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
 import { resolvePromptServer } from './_lib/resolvePrompt.js'
+import { loadSnippetsForAgent } from './_lib/loadSnippets.js'
 
 export const maxDuration = 300
 const MODEL = 'anthropic/claude-sonnet-4-6'
@@ -165,20 +166,15 @@ export default async function handler(req: any, res: any) {
   const previousDraft = roadmapState.page_drafts?.[pageSlug]
   const resolved = await resolvePromptServer(sb, 'page_draft', projectId)
 
-  // Load project snippets so the writer references {{church_name}}
-  // and similar tokens instead of literal values. Non-fatal on
-  // failure — drafts still produce without snippets, just less
-  // normalized.
-  let snippets: Array<{ token: string; expansion: string }> = []
-  try {
-    const { data: sn } = await sb.from('web_project_snippets')
-      .select('token, expansion').eq('web_project_id', projectId).eq('archived', false)
-    if (Array.isArray(sn)) {
-      snippets = sn
-        .filter((r: any) => typeof r?.token === 'string' && typeof r?.expansion === 'string' && r.expansion)
-        .map((r: any) => ({ token: r.token, expansion: r.expansion }))
-    }
-  } catch { /* table absence is non-fatal */ }
+  // Load project snippets — BOTH the 16 global merge fields on
+  // strategy_web_projects AND the custom rows in web_project_snippets.
+  // The prior implementation only loaded the custom table, which is
+  // why the copywriter kept writing "Desert Springs" as a literal:
+  // church_name/church_short_name/address/etc. live as columns on the
+  // project row, not as snippet table rows. Shared loader keeps the
+  // 4 copywriting agents (page-draft, slot-edit, reorg, content-
+  // collection) in sync.
+  const snippets = await loadSnippetsForAgent(sb, projectId)
 
   const stage1Slim = {
     audience:             stage1.audience,

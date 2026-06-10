@@ -43,7 +43,13 @@ import { resolvePromptServer } from './_lib/resolvePrompt.js'
 export const maxDuration = 300
 
 const MODEL = 'anthropic/claude-opus-4-7'
-const MAX_OUTPUT_TOKENS = 8000
+// Bumped from 8000 → 24000 after we hit a silent truncation on
+// 3886 (large strategy brief + 100 snippets + 24 crawl topics
+// pushed the Opus output past 8000 tokens; the tool_use call cut
+// mid-write and toolResult landed as {} — downstream stages then
+// ran with an empty Stage 1 and produced garbage). Opus output
+// cap is comfortably higher; pad for the long-coverage-plan case.
+const MAX_OUTPUT_TOKENS = 24000
 
 // File formats we can feed Claude without an external parser
 const TEXT_FORMATS = new Set([
