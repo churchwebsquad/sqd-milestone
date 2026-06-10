@@ -64,6 +64,10 @@ export default async function handler(req: any, res: any) {
   const briefs   = scope === 'sitemap' ? {} : stripMetaKey(state.page_briefs ?? {})
   const drafts   = scope === 'sitemap' ? {} : stripMetaKey(state.page_drafts ?? {})
   const stage1   = scope === 'sitemap' ? null : (state.stage_1 ?? null)
+  // Director's per-page critique scores + directives. Included for
+  // copy/full scopes so an external conversation editing the drafts
+  // sees what the Director flagged + why each page was approved.
+  const critique = scope === 'sitemap' ? null : (state.director_critique ?? null)
 
   // Snippets — included for 'copy' and 'full' scopes so an external
   // AI editing the draft sees which tokens are available + their
@@ -94,6 +98,7 @@ export default async function handler(req: any, res: any) {
     drafts,
     stage1,
     snippets,
+    critique,
   })
 
   const safeName = String(project.name ?? `project-${project.id}`)
@@ -145,6 +150,7 @@ function renderExportDocument(input: {
   drafts:      Record<string, any>
   stage1:      any
   snippets:    Array<{ token: string; expansion: string }>
+  critique:    any
 }): string {
   const sitemapBlock = input.sitemap
     ? '```json\n' + JSON.stringify(input.sitemap, null, 2) + '\n```'
@@ -190,6 +196,16 @@ function renderExportDocument(input: {
   const snippetsBlock = input.snippets.length > 0
     ? '```json\n' + JSON.stringify(input.snippets, null, 2) + '\n```'
     : '_(no project snippets defined)_'
+
+  // Director critique — Gate 2 output. Strip _meta (model usage
+  // telemetry) and include per-page scores + directives + verdict so
+  // an external conversation sees how the Director graded the run.
+  const critiqueForExport = input.critique
+    ? Object.fromEntries(Object.entries(input.critique as Record<string, any>).filter(([k]) => k !== '_meta'))
+    : null
+  const critiqueBlock = critiqueForExport
+    ? '```json\n' + JSON.stringify(critiqueForExport, null, 2) + '\n```'
+    : '_(no Director critique yet — runs automatically after page drafts complete)_'
 
   const scopeTitle =
     input.scope === 'sitemap' ? 'Sitemap Export'
@@ -269,6 +285,18 @@ function renderExportDocument(input: {
       ``,
       draftsBlock,
       ``,
+      `---`,
+      ``,
+      `## Director Critique (read-only)`,
+      ``,
+      `Gate 2 output: per-page voice/persona/atom/slot scores +`,
+      `directives + overall verdict. Read this to see WHY the Director`,
+      `approved (or flagged) each page. The importer ignores this`,
+      `section — a re-import refreshes drafts; the critique then`,
+      `auto-recomputes against the new drafts.`,
+      ``,
+      critiqueBlock,
+      ``,
     )
   } else {
     // 'full' — original layout (sitemap + briefs + drafts + coverage)
@@ -311,6 +339,16 @@ function renderExportDocument(input: {
       `these to \`web_pages\` + \`web_sections\`.`,
       ``,
       draftsBlock,
+      ``,
+      `---`,
+      ``,
+      `## Director Critique (read-only)`,
+      ``,
+      `Gate 2 output — per-page scores + directives + verdict. The`,
+      `importer ignores this; re-importing drafts auto-stales the`,
+      `critique for re-run.`,
+      ``,
+      critiqueBlock,
       ``,
     )
   }

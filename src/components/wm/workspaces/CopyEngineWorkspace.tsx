@@ -116,10 +116,22 @@ interface Props {
 }
 
 export function CopyEngineWorkspace({ project, onChange }: Props) {
-  const [engine,      setEngine]      = useState<EngineState>({})
-  const [critique,    setCritique]    = useState<DirectorCritique | null>(null)
-  const [drafts,      setDrafts]      = useState<Record<string, PageDraft>>({})
-  const [briefs,      setBriefs]      = useState<Record<string, PageBrief>>({})
+  // Initialize from the prop's roadmap_state instead of empty objects.
+  // The auto-cascades and Gate-2 visibility checks read these on
+  // mount — if they start empty (the previous behavior), the cascade
+  // mis-reads "no drafts" before refreshFromDB has a chance to land
+  // and re-fires run_drafts (a $$$ tokens waste) and the Commit button
+  // stays hidden. Seeding from props means the very first render
+  // already reflects whatever's in the DB.
+  const initialRoadmap = (project.roadmap_state ?? {}) as Record<string, any>
+  const [engine,      setEngine]      = useState<EngineState>(() =>
+    (initialRoadmap.engine_state ?? {}) as EngineState)
+  const [critique,    setCritique]    = useState<DirectorCritique | null>(() =>
+    (initialRoadmap.director_critique ?? null) as DirectorCritique | null)
+  const [drafts,      setDrafts]      = useState<Record<string, PageDraft>>(() =>
+    (initialRoadmap.page_drafts ?? {}) as Record<string, PageDraft>)
+  const [briefs,      setBriefs]      = useState<Record<string, PageBrief>>(() =>
+    (initialRoadmap.page_briefs ?? {}) as Record<string, PageBrief>)
   const [running,     setRunning]     = useState<string | null>(null)
   const [error,       setError]       = useState<string | null>(null)
   const [feedback,    setFeedback]    = useState('')
@@ -420,7 +432,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     if (draftSlugs.length > 0) return
     if (isEngineStuck(engine, false)) return       // user must hit Reset first
     if (engine.status && ENGINE_IN_PROGRESS_STATUSES.has(engine.status)) return
-    if (engine.status === 'cancelled') return      // respect explicit Stop
+    if (engine.status && ENGINE_TERMINAL_STATUSES.has(engine.status)) return
     if (downstreamCascadeStartedFor.current === project.id) return
     downstreamCascadeStartedFor.current = project.id
     void runEngine()
@@ -1076,7 +1088,21 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
                   </button>
                   {isOpen && (
                     <div className="border-t border-wm-border px-3 py-3">
-                      <DraftPreview draft={d} brief={briefs[slug]} />
+                      <DraftPreview
+                        draft={d}
+                        brief={briefs[slug]}
+                        critique={critique?.per_page?.find(p => p.page_slug === slug) ?? null}
+                        onEditSlot={(sectionIx, slotKey, instruction) =>
+                          void callOrchestrate('apply', {
+                            dispatch: { stage_to_rerun: 'single_slot', page_slug: slug, section_ix: sectionIx, slot_key: slotKey, note: instruction },
+                          })
+                        }
+                        onRedraftSection={(sectionIx, instruction) => {
+                          const focused = `Section ${sectionIx + 1} needs a rewrite. ${instruction}. Keep all OTHER sections on this page byte-for-byte the same — only re-draft section ${sectionIx + 1}.`
+                          void callOrchestrate('apply', { dispatch: { stage_to_rerun: 'page_draft', page_slug: slug, note: focused } })
+                        }}
+                        busy={!!running}
+                      />
                       <div className="mt-3 flex justify-end">
                         <button
                           onClick={() => {
@@ -1087,7 +1113,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
                           disabled={!!running}
                           className="text-[11px] text-wm-accent-strong hover:underline disabled:opacity-50"
                         >
-                          Re-draft this page
+                          Re-draft this whole page
                         </button>
                       </div>
                     </div>
@@ -1181,6 +1207,14 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
  *  will never reach a terminal state on its own. */
 const ENGINE_IN_PROGRESS_STATUSES = new Set([
   'briefing', 'drafting', 'critiquing', 'iterating', 'committing',
+])
+/** Terminal statuses — the engine has reached a stopping point that
+ *  requires the strategist's explicit input to advance. Auto-cascades
+ *  MUST skip these or they'll waste tokens re-firing work that already
+ *  completed. */
+const ENGINE_TERMINAL_STATUSES = new Set([
+  'ready_for_review', 'committed', 'cancelled', 'error',
+  'drafts_ready', 'needs_iteration',
 ])
 /** A real run finishes well within this window. Beyond it, treat the
  *  engine as stuck regardless of the displayed status. 8 minutes
@@ -1677,24 +1711,87 @@ function PageBriefHeader({ brief }: { brief: PageBrief | undefined }) {
   )
 }
 
-function DraftPreview({ draft, brief }: { draft: PageDraft; brief?: PageBrief }) {
+function DraftPreview({
+  draft, brief, critique, onEditSlot, onRedraftSection, busy,
+}: {
+  draft: PageDraft
+  brief?: PageBrief
+  /** Director's per-page critique row for this slug. Surfaces inline
+   *  with the draft so the strategist sees scores + problem lines
+   *  alongside the copy they're reviewing. */
+  critique?: {
+    voice_match?: number; persona_fit?: number; atom_coverage?: number; slot_health?: number
+    summary?: string
+    standout_lines?: string[]
+    problem_lines?: string[]
+  } | null
+  /** Per-slot edit. Fires the slot-edit agent via the orchestrate
+   *  single_slot dispatch — rewrites ONE slot, preserves everything
+   *  else byte-for-byte. */
+  onEditSlot?: (sectionIx: number, slotKey: string, instruction: string) => void
+  /** Re-draft just one section by pinning the page-draft prompt to a
+   *  section index + instruction. Other sections aren't touched. */
+  onRedraftSection?: (sectionIx: number, instruction: string) => void
+  busy?: boolean
+}) {
   const sections = Array.isArray(draft?.sections) ? draft.sections : []
   return (
     <div>
       <PageBriefHeader brief={brief} />
+      {critique && (
+        <div className="rounded-md border border-wm-border bg-wm-bg p-3 mb-3 space-y-1.5">
+          <div className="flex items-baseline gap-2">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Director critique</p>
+            <span className="text-[10px] text-wm-text-muted">
+              voice {critique.voice_match ?? '—'} · persona {critique.persona_fit ?? '—'} · atoms {critique.atom_coverage ?? '—'} · slots {critique.slot_health ?? '—'}
+            </span>
+          </div>
+          {critique.summary && <p className="text-[12px] text-wm-text leading-snug">{critique.summary}</p>}
+          {critique.standout_lines && critique.standout_lines.length > 0 && (
+            <div>
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-success">Working</p>
+              <ul className="space-y-0.5">
+                {critique.standout_lines.map((line, i) => (
+                  <li key={i} className="text-[11px] text-wm-text italic">"{line}"</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {critique.problem_lines && critique.problem_lines.length > 0 && (
+            <div>
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-danger">Flagged</p>
+              <ul className="space-y-0.5">
+                {critique.problem_lines.map((line, i) => (
+                  <li key={i} className="text-[11px] text-wm-danger">· {line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
       {sections.length === 0 ? (
         <p className="text-[12px] text-wm-text-muted">No sections in this draft.</p>
       ) : (
         <div className="space-y-3">
-          {renderDraftSections(sections)}
+          {renderDraftSections(sections, { onEditSlot, onRedraftSection, busy })}
         </div>
       )}
     </div>
   )
 }
 
-function renderDraftSections(sections: any[]) {
-  return sections.map((s: any, i: number) => {
+function renderDraftSections(
+  // Section shape is intentionally loose — the page-draft agent emits
+  // an open `copy` object whose keys depend on archetype, so a strict
+  // type would fight us. Cast at the leaf access sites.
+  sections: Array<Record<string, unknown>>,
+  actions?: {
+    onEditSlot?: (sectionIx: number, slotKey: string, instruction: string) => void
+    onRedraftSection?: (sectionIx: number, instruction: string) => void
+    busy?: boolean
+  },
+) {
+  return sections.map((s, i: number) => {
         const copy = s?.copy ?? {}
         return (
           <div key={i} className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
@@ -1741,9 +1838,143 @@ function renderDraftSections(sections: any[]) {
                 <Eye size={10} className="inline mr-1" />{String(s.voice_notes)}
               </p>
             )}
+            {actions && (actions.onEditSlot || actions.onRedraftSection) && (
+              <SectionEditActions
+                copy={copy}
+                sectionIx={i}
+                onEditSlot={actions.onEditSlot}
+                onRedraftSection={actions.onRedraftSection}
+                busy={actions.busy ?? false}
+              />
+            )}
           </div>
         )
       })
+}
+
+/** Per-section edit affordances rendered beneath each draft section.
+ *  Two operations: "Edit one slot" (calls slot-edit via orchestrate
+ *  single_slot dispatch) and "Rewrite this section" (calls page-draft
+ *  pinned to this section's index). Both expand inline so the editor
+ *  doesn't shift the entire workspace. */
+function SectionEditActions({
+  copy, sectionIx, onEditSlot, onRedraftSection, busy,
+}: {
+  copy: Record<string, any>
+  sectionIx: number
+  onEditSlot?: (sectionIx: number, slotKey: string, instruction: string) => void
+  onRedraftSection?: (sectionIx: number, instruction: string) => void
+  busy: boolean
+}) {
+  const [mode, setMode] = useState<'idle' | 'slot' | 'section'>('idle')
+  const [instruction, setInstruction] = useState('')
+  // Build the slot key options from the copy keys actually present.
+  // Nested arrays surface as "cards[0].heading" / "items[2].body".
+  const slotOptions = useMemo<string[]>(() => {
+    const out: string[] = []
+    for (const [k, v] of Object.entries(copy ?? {})) {
+      if (Array.isArray(v)) {
+        v.forEach((item, j) => {
+          if (item && typeof item === 'object') {
+            for (const innerKey of Object.keys(item as Record<string, unknown>)) {
+              out.push(`${k}[${j}].${innerKey}`)
+            }
+          }
+        })
+      } else if (v != null && (typeof v === 'string' || typeof v === 'object')) {
+        out.push(k)
+      }
+    }
+    return out
+  }, [copy])
+  const [slotKey, setSlotKey] = useState<string>(() => slotOptions[0] ?? '')
+
+  if (mode === 'idle') {
+    return (
+      <div className="mt-2 pt-2 border-t border-wm-border flex items-center gap-2">
+        {onEditSlot && (
+          <button
+            type="button"
+            onClick={() => setMode('slot')}
+            disabled={busy}
+            className="text-[10px] text-wm-accent-strong hover:underline disabled:opacity-50"
+          >
+            Edit one slot
+          </button>
+        )}
+        {onRedraftSection && (
+          <button
+            type="button"
+            onClick={() => setMode('section')}
+            disabled={busy}
+            className="text-[10px] text-wm-accent-strong hover:underline disabled:opacity-50"
+          >
+            Rewrite this section
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  const submit = () => {
+    if (!instruction.trim()) return
+    if (mode === 'slot' && slotKey && onEditSlot) {
+      onEditSlot(sectionIx, slotKey, instruction.trim())
+    } else if (mode === 'section' && onRedraftSection) {
+      onRedraftSection(sectionIx, instruction.trim())
+    }
+    setMode('idle'); setInstruction('')
+  }
+
+  return (
+    <div className="mt-2 pt-2 border-t border-wm-border space-y-2">
+      <div className="flex items-baseline gap-2">
+        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">
+          {mode === 'slot' ? 'Edit one slot' : 'Rewrite this section'}
+        </p>
+        <button
+          type="button"
+          onClick={() => { setMode('idle'); setInstruction('') }}
+          disabled={busy}
+          className="text-[10px] text-wm-text-muted hover:text-wm-text ml-auto"
+        >
+          Cancel
+        </button>
+      </div>
+      {mode === 'slot' && (
+        <select
+          value={slotKey}
+          onChange={e => setSlotKey(e.target.value)}
+          disabled={busy}
+          className="w-full rounded border border-wm-border bg-white px-2 py-1 text-[11px] font-mono"
+        >
+          {slotOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+        </select>
+      )}
+      <textarea
+        value={instruction}
+        onChange={e => setInstruction(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit() } }}
+        placeholder={mode === 'slot'
+          ? 'What\'s wrong with this slot? e.g. "Heading reads like an ad slogan; anchor on the discovery Q14 phrase"'
+          : 'What\'s wrong with this section? e.g. "Wrong atom emphasis — lead with the visit experience, not the service times"'}
+        rows={3}
+        disabled={busy}
+        className="w-full rounded border border-wm-border bg-white px-2 py-1.5 text-[12px] focus:outline-none focus:border-wm-accent disabled:opacity-50"
+      />
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={submit}
+          disabled={busy || !instruction.trim()}
+          className="inline-flex items-center gap-1 rounded-full bg-wm-accent px-3 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+        >
+          {busy ? <Loader2 size={10} className="animate-spin" /> : <Send size={10} />}
+          {mode === 'slot' ? 'Edit slot' : 'Rewrite section'}
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function ConfirmPanel({ title, children, onCancel, onConfirm, confirmLabel, busy }: {
