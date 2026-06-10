@@ -496,7 +496,13 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     if (running) return
     if (engineRunning) return
     if (upstreamHealStartedFor.current === project.id) return
-    if (!hasStage0) return
+    // Note: NO `!hasStage0 return` gate. Imported projects (user
+    // uploaded a sitemap doc) skip stage_0 entirely — their
+    // roadmap_state arrives with just stage_2 + stage_2_5. The
+    // synthesize agent reads intake from DB tables (discovery,
+    // brand guide, intake_documents) directly, not from stage_0,
+    // so it can run fine on imported projects. Gating on stage_0
+    // would leave imported projects permanently broken.
     if (engine.status === 'cancelled') return
     if (engine.status && ENGINE_IN_PROGRESS_STATUSES.has(engine.status)) return
 
@@ -581,7 +587,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       }
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id, hasStage0, hasStage1, hasStage2, stage1Meta?.looks_empty, engine.status, engine.last_error, running])
+  }, [project.id, hasStage1, hasStage2, stage1Meta?.looks_empty, engine.status, engine.last_error, running])
 
   const submitRoute = useCallback(async () => {
     if (!feedback.trim()) return
@@ -669,27 +675,50 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
           .maybeSingle()
         return ((data?.roadmap_state ?? {}) as Record<string, unknown>) || {}
       }
-      const initialState = await readState()
+      let initialState = await readState()
+
+      // PHASE 0 — UPSTREAM HEAL. Page-outlines + page-draft + director
+      // all reject with 400 if site_strategy / ministry_model / stage_1
+      // is missing. The auto-heal effect on the workspace handles this
+      // when the user lands on the project, but the Approve & Run
+      // button calls runEngine() DIRECTLY without going through the
+      // heal effect — so an imported project whose upstream chain was
+      // never run (e.g., user uploaded a sitemap doc that only had
+      // stage_2) blows up on the first page-outlines call.
+      //
+      // Inline the heal here so runEngine is self-contained: if the
+      // upstream chain isn't complete, run it before any page work.
+      // Each agent is idempotent (returns 200 with cached state if its
+      // slot already exists), and the atomic JSONB writes in v68 mean
+      // these calls can no longer race each other into oblivion.
+      const needsSynthesize  = initialState.stage_1        == null
+      const needsAcfPlan     = initialState.acf_plan       == null
+      const needsMinistry    = initialState.ministry_model == null
+      const needsStrategist  = initialState.site_strategy  == null
+      if (needsSynthesize || needsAcfPlan || needsMinistry || needsStrategist) {
+        if (needsSynthesize) {
+          const ok = await callOrchestrate('run_synthesize')
+          if (!ok) return
+        }
+        if (needsAcfPlan)    await callOrchestrate('run_acf_organizer')
+        if (needsMinistry)   await callOrchestrate('run_ministry_model')
+        if (needsStrategist) await callOrchestrate('run_strategist')
+        // Re-read so the outline / draft / critique phases see what
+        // the heal just wrote.
+        initialState = await readState()
+      }
+
       const existingOutlines = (initialState.page_outlines ?? {}) as Record<string, unknown>
       const existingDrafts   = (initialState.page_drafts   ?? {}) as Record<string, unknown>
 
-      // SERIALIZED on purpose — DO NOT re-parallelize without first
-      // landing atomic JSONB updates on the server side.
-      //
-      // Each agent below does a read-modify-write of
-      // `strategy_web_projects.roadmap_state` (a single JSONB column
-      // on a single row). Running these in parallel produces a
-      // last-write-wins race: agent A reads state at T=0, writes back
-      // at T=60s with {page_outlines: {A: ...}}. Agent B read at T=1
-      // (also no outlines), writes at T=61s with {page_outlines:
-      // {B: ...}} — clobbering A. Net effect: only ~1 outline per
-      // chunk lands on the row. We saw this in 3886 — 3 outlines /
-      // 12 drafts persisted of 21 sitemap pages because parallel
-      // chunks kept stepping on each other.
-      //
-      // Real fix is server-side: a Postgres RPC that does jsonb_set
-      // in a single UPDATE, or pg_advisory_xact_lock around the
-      // read-modify-write. Until that exists, serialize here.
+      // SERIALIZED on purpose, even though the v68 atomic JSONB merge
+      // means parallel writes no longer corrupt sibling keys. The
+      // serialization remains a cost guard: each page-outlines /
+      // page-draft call is 30-90s of LLM time, and running them in
+      // chunks would only save wall-clock if Vercel could parallelize
+      // the function instances — which it does, but with no benefit
+      // to the strategist since the engine still has to wait for ALL
+      // pages before critique runs. Stays serial.
       //
       // Phase 1: page-outlines per slug. Skip slugs that already
       // have an outline landed (resume semantic).
