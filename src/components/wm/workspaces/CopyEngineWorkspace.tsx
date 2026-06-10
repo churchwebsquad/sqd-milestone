@@ -61,10 +61,17 @@ interface EngineState {
 interface DirectorCritique {
   per_page?: Array<{
     page_slug: string
-    voice_match: number
+    // New 5-axis schema
+    dignity?: number
+    voice_character?: number
     persona_fit: number
     atom_coverage: number
-    slot_health: number
+    claim_plausibility?: number
+    // Legacy 4-axis fields kept for back-compat with critiques written
+    // before the Director prompt overhaul. Read the new field first
+    // and fall back to the legacy one when rendering.
+    voice_match?: number
+    slot_health?: number
     standout_lines?: string[]
     problem_lines?: string[]
     summary?: string
@@ -77,6 +84,12 @@ interface DirectorCritique {
   }>
   cross_page_findings?: Array<{ kind: string; description: string; pages?: string[] }>
   scores?: {
+    // New 5-axis cross-page scores
+    dignity?: number
+    voice_character?: number
+    persona_fit?: number
+    claim_plausibility?: number
+    // Legacy 4-axis (kept for back-compat)
     voice_consistency?: number
     persona_coverage?: number
     atom_coverage?: number
@@ -1302,11 +1315,21 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
           </div>
 
           {critique.scores && (
-            <div className="grid grid-cols-5 gap-2 text-[11px]">
-              <ScoreChip label="Voice" value={critique.scores.voice_consistency ?? 0} />
-              <ScoreChip label="Persona" value={critique.scores.persona_coverage ?? 0} />
-              <ScoreChip label="Atoms" value={critique.scores.atom_coverage ?? 0} />
-              <ScoreChip label="Slots" value={critique.scores.slot_health ?? 0} />
+            // New 5-axis schema (dignity first because it's the non-
+            // negotiable floor — anything ≤40 there is a blocker no
+            // matter what the rest scores). Old critiques written
+            // before the prompt overhaul fall back to legacy field
+            // names via the ?? chain below.
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-[11px]">
+              <ScoreChip
+                label="Dignity"
+                value={critique.scores.dignity ?? 0}
+                tone={(critique.scores.dignity ?? 100) < 70 ? 'danger' : 'default'}
+              />
+              <ScoreChip label="Voice"   value={critique.scores.voice_character ?? critique.scores.voice_consistency ?? 0} />
+              <ScoreChip label="Persona" value={critique.scores.persona_fit ?? critique.scores.persona_coverage ?? 0} />
+              <ScoreChip label="Atoms"   value={critique.scores.atom_coverage ?? 0} />
+              <ScoreChip label="Claims"  value={critique.scores.claim_plausibility ?? 0} />
               <ScoreChip label="Overall" value={critique.scores.overall ?? 0} bold />
             </div>
           )}
@@ -1370,7 +1393,8 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
                           <span className="font-semibold text-wm-text">{p.page_slug}</span>
                         )}
                         <span className="text-[10px] text-wm-text-muted">
-                          v {p.voice_match} · p {p.persona_fit} · a {p.atom_coverage} · s {p.slot_health}
+                          {/* 5-axis (new) when available, falls back to legacy 4-axis for pre-overhaul critiques. */}
+                          d {p.dignity ?? '—'} · v {p.voice_character ?? p.voice_match ?? '—'} · p {p.persona_fit} · a {p.atom_coverage} · c {p.claim_plausibility ?? '—'}
                         </span>
                       </div>
                       {p.summary && <p className="text-[12px] text-wm-text-muted leading-snug">{p.summary}</p>}
@@ -2195,7 +2219,12 @@ function DraftPreview({
    *  with the draft so the strategist sees scores + problem lines
    *  alongside the copy they're reviewing. */
   critique?: {
-    voice_match?: number; persona_fit?: number; atom_coverage?: number; slot_health?: number
+    // New 5-axis
+    dignity?: number; voice_character?: number; claim_plausibility?: number
+    // Common
+    persona_fit?: number; atom_coverage?: number
+    // Legacy 4-axis (back-compat)
+    voice_match?: number; slot_health?: number
     summary?: string
     standout_lines?: string[]
     problem_lines?: string[]
@@ -2256,7 +2285,12 @@ function DraftPreview({
           <div className="flex items-baseline gap-2">
             <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Director critique</p>
             <span className="text-[10px] text-wm-text-muted">
-              voice {critique.voice_match ?? '—'} · persona {critique.persona_fit ?? '—'} · atoms {critique.atom_coverage ?? '—'} · slots {critique.slot_health ?? '—'}
+              {/* 5-axis when present; falls back to legacy 4-axis. Dignity rendered in danger color if <70. */}
+              <span className={(critique.dignity != null && critique.dignity < 70) ? 'text-wm-danger font-semibold' : ''}>dignity {critique.dignity ?? '—'}</span>
+              {' · '}voice {critique.voice_character ?? critique.voice_match ?? '—'}
+              {' · '}persona {critique.persona_fit ?? '—'}
+              {' · '}atoms {critique.atom_coverage ?? '—'}
+              {' · '}claims {critique.claim_plausibility ?? '—'}
             </span>
           </div>
           {critique.summary && <p className="text-[12px] text-wm-text leading-snug">{critique.summary}</p>}
@@ -3854,8 +3888,15 @@ function buildEmptyImportTemplate(projectId: string): string {
   ].join('\n')
 }
 
-function ScoreChip({ label, value, bold }: { label: string; value: number; bold?: boolean }) {
-  const color = value >= 80 ? 'text-wm-success' : value >= 60 ? 'text-wm-warning' : 'text-wm-danger'
+function ScoreChip({ label, value, bold, tone }: { label: string; value: number; bold?: boolean; tone?: 'default' | 'danger' }) {
+  // `tone='danger'` forces the danger color regardless of the score
+  // band — used for Dignity, where any score below the 70 floor is
+  // a blocker even if the number itself isn't in the typical "red"
+  // band yet. Without that override, Dignity=65 would render the
+  // same warning yellow as a Voice score in the same range, which
+  // hides the severity floor from the strategist.
+  const baseColor = value >= 80 ? 'text-wm-success' : value >= 60 ? 'text-wm-warning' : 'text-wm-danger'
+  const color = tone === 'danger' ? 'text-wm-danger' : baseColor
   return (
     <div className="rounded-md border border-wm-border bg-wm-bg p-2 text-center">
       <p className="text-[10px] uppercase tracking-wider text-wm-text-muted">{label}</p>

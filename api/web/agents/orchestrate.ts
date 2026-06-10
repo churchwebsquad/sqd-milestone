@@ -813,30 +813,96 @@ async function runIterate(ctx: {
       return k !== 'slot_edit' && k !== 'page_redraft'
     })
 
-    // Slot edits in parallel (no cap — they're narrow + fast).
-    if (slotEditDirectives.length > 0) {
-      await Promise.all(slotEditDirectives.map((d: any) =>
-        callAgent(baseUrl, jwt, 'slot-edit', {
+    // Slot edits — SERIALIZED to avoid the same race that drops drafts
+    // (multiple writes to roadmap_state.page_drafts in flight against
+    // a single JSONB column). slot-edit also verifies its own write
+    // landed; orchestrate tracks repeat failures per slot below.
+    //
+    // Failure tracking: engine_state.slot_edit_failures is a map of
+    // "<page_slug>|<section_ix>|<slot_key>" → attempt_count. Each time
+    // a slot-edit returns verified=false we increment the counter. On
+    // the next iteration, any slot at ≥2 failures is converted to a
+    // page_redraft directive (escalation) — slot-level rewrites
+    // clearly can't fix the issue (whether due to a structural
+    // locator mismatch or a race we don't see in this layer). Three
+    // attempts of "claimed success but didn't persist" is too many.
+    const slotFailKey = (d: any): string =>
+      `${d.page_slug}|${d.slot_locator?.section_ix}|${d.slot_locator?.slot_key}`
+    const priorFailures = (eng.slot_edit_failures ?? {}) as Record<string, number>
+    const updatedFailures: Record<string, number> = { ...priorFailures }
+
+    // Auto-escalate: any directive whose slot is already past the
+    // retry budget (≥2 prior failures) routes to page_redraft instead.
+    const slotEditToRun: any[] = []
+    for (const d of slotEditDirectives) {
+      const key = slotFailKey(d)
+      if ((priorFailures[key] ?? 0) >= 2) {
+        // Move this directive to page_redraft for THIS iteration. We
+        // don't mutate the original directive on the critique blob —
+        // just route it through the page-draft path here and clear
+        // the failure counter so a fresh draft gets a clean slate.
+        pageRedraftDirectives.push({
+          ...d,
+          fix_kind: 'page_redraft',
+          stage_to_rerun: 'page_draft',
+          note: `Escalated from slot_edit after ${priorFailures[key]} verified failures on slot ${d.slot_locator?.slot_key}. Original instruction: ${d.note ?? ''}`,
+        })
+        delete updatedFailures[key]
+        console.warn('[iterate] escalating slot-edit to page-redraft after repeat failures', { key })
+      } else {
+        slotEditToRun.push(d)
+      }
+    }
+
+    for (const d of slotEditToRun) {
+      const key = slotFailKey(d)
+      let response: any = null
+      try {
+        response = await callAgent(baseUrl, jwt, 'slot-edit', {
           projectId,
           pageSlug:    d.page_slug,
           sectionIx:   d.slot_locator?.section_ix,
           slotKey:     d.slot_locator?.slot_key,
           instruction: d.note ?? '',
-        }).catch((e: any) => {
-          // Swallow individual slot-edit failures so one bad locator
-          // doesn't kill the whole iterate loop.
-          console.error('[iterate.slot-edit] failed for', d.page_slug, d.slot_locator, e?.message)
         })
-      ))
+      } catch (e: any) {
+        // Network/SDK failure — treat as a failure attempt but don't
+        // block the loop. The directive remains and will retry next
+        // iteration (unless it crosses the escalation threshold).
+        console.error('[iterate.slot-edit] network failure', { key, msg: e?.message })
+        updatedFailures[key] = (updatedFailures[key] ?? 0) + 1
+        continue
+      }
+      // slot-edit returns ok=true with verified=true on success, or
+      // ok=false with verified=false + verification_failure_reason on
+      // a silent miss. Count both kinds of failure toward the budget.
+      if (response?.verified === false) {
+        updatedFailures[key] = (updatedFailures[key] ?? 0) + 1
+        console.warn('[iterate.slot-edit] verification failed', { key, reason: response?.verification_failure_reason })
+      } else if (response?.ok === false) {
+        updatedFailures[key] = (updatedFailures[key] ?? 0) + 1
+      } else {
+        // Verified success — clear the counter so unrelated regressions
+        // on this slot in the future start from zero.
+        delete updatedFailures[key]
+      }
     }
 
-    // Page redrafts capped.
+    // Page redrafts capped — INCLUDES any directives that just got
+    // escalated above.
     for (let i = 0; i < pageRedraftDirectives.length; i += PAGE_DRAFT_CONCURRENCY) {
       const chunk = pageRedraftDirectives.slice(i, i + PAGE_DRAFT_CONCURRENCY)
       await Promise.all(chunk.map((d: any) =>
         callAgent(baseUrl, jwt, 'page-draft', { projectId, pageSlug: d.page_slug, feedback: d.note ?? '' })
       ))
     }
+
+    // Persist the failure counter so the NEXT iteration can read it.
+    await writeEngineState(sb, projectId, {
+      ...eng,
+      slot_edit_failures: updatedFailures,
+      last_action_at: new Date().toISOString(),
+    })
 
     // Everything else (brief_update / sitemap_redraft / synthesize_rework) via dispatch.
     for (const d of otherDirectives) {

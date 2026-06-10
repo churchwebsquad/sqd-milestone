@@ -32,6 +32,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
 import { loadSnippetsForAgent } from './_lib/loadSnippets.js'
+import { stripDashesFromValue, type DashStripReport } from './_lib/stripDashes.js'
 
 export const maxDuration = 60
 
@@ -204,11 +205,19 @@ export default async function handler(req: any, res: any) {
     return res.status(502).json({ error: `AI Gateway error: ${err?.message ?? 'unknown'}` })
   }
 
+  // Deterministic dash strip before persisting. The slot-edit prompt
+  // tells the model not to use em-dashes, but it sometimes injects
+  // them anyway (especially when "regularizing" a description). We
+  // strip mechanically here so a slot-edit can never reintroduce a
+  // dash the Director will flag on the next pass.
+  const dashReport: DashStripReport = { count: 0, samples: [] }
+  const cleanedNewValue = stripDashesFromValue(toolInput.new_value, `slot[${slotKey}]`, dashReport)
+
   // Write back into the draft. Apply at the exact locator path so
   // grouped slots ("cards[0].heading") only update that one entry.
   const nextSections = [...sections]
   const nextSection = { ...section, copy: { ...(section.copy ?? {}) } }
-  writeSlotValue(nextSection.copy as Record<string, any>, slotKey, toolInput.new_value)
+  writeSlotValue(nextSection.copy as Record<string, any>, slotKey, cleanedNewValue)
   // Append edit log to section._meta.slot_edits so re-runs see the
   // history (Director can decide whether to escalate to page_redraft
   // if a slot keeps getting touched without converging).
@@ -221,7 +230,9 @@ export default async function handler(req: any, res: any) {
       instruction,
       rationale:   toolInput.rationale,
       old_value:   oldValue,
-      new_value:   toolInput.new_value,
+      new_value:   cleanedNewValue,
+      raw_new_value_pre_dash_strip: dashReport.count > 0 ? toolInput.new_value : undefined,
+      dash_strip:  { count: dashReport.count, samples: dashReport.samples },
       edited_at:   new Date().toISOString(),
       edited_by:   userData.user.email ?? userData.user.id,
     },
@@ -249,13 +260,62 @@ export default async function handler(req: any, res: any) {
     .eq('id', projectId)
   if (writeErr) return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
 
+  // Re-read verification. The old iterate loop trusted slot-edit's
+  // success response and re-critiqued without confirming the slot
+  // actually changed. When a slot_key path was malformed or another
+  // concurrent write trampled this one (the run_engine race we just
+  // fixed elsewhere), the Director re-saw the SAME bad value and
+  // flagged it again, burning iterate loops. Verify the write by
+  // reading the slot back from DB and comparing to what we just wrote.
+  const { data: postWrite } = await sb.from('strategy_web_projects')
+    .select('roadmap_state').eq('id', projectId).maybeSingle()
+  const postState   = (postWrite?.roadmap_state ?? {}) as Record<string, any>
+  const postDrafts  = (postState.page_drafts ?? {}) as Record<string, any>
+  const postDraft   = postDrafts[pageSlug] ?? {}
+  const postSection = Array.isArray(postDraft.sections) ? postDraft.sections[sectionIx] : null
+  const persistedValue = postSection?.copy
+    ? readSlotValue(postSection.copy as Record<string, any>, slotKey)
+    : undefined
+  const verified = JSON.stringify(persistedValue) === JSON.stringify(cleanedNewValue)
+  if (!verified) {
+    // The write didn't land where we expected. Most likely cause: a
+    // sibling write to roadmap_state landed between our read and our
+    // write (read-modify-write race) OR the slotKey path the Director
+    // supplied doesn't match the draft's actual structure. Surface
+    // both possibilities so the iterate loop can decide whether to
+    // retry or escalate to page_redraft.
+    console.error('[slot-edit] verification failed', {
+      pageSlug, sectionIx, slotKey,
+      expected: cleanedNewValue,
+      actual:   persistedValue,
+    })
+    return res.status(200).json({
+      ok: false,
+      verified: false,
+      verification_failure_reason: persistedValue === undefined
+        ? 'slot_path_not_found'   // slotKey doesn't address a real field on the section
+        : 'write_was_overwritten', // value exists but doesn't match — likely a race
+      page_slug: pageSlug,
+      section_ix: sectionIx,
+      slot_key: slotKey,
+      old_value: oldValue,
+      expected_new_value: cleanedNewValue,
+      actual_value: persistedValue,
+      dash_strip: dashReport,
+      rationale: toolInput.rationale,
+      usage,
+    })
+  }
+
   return res.status(200).json({
     ok: true,
+    verified: true,
     page_slug: pageSlug,
     section_ix: sectionIx,
     slot_key: slotKey,
     old_value: oldValue,
-    new_value: toolInput.new_value,
+    new_value: cleanedNewValue,
+    dash_strip: dashReport,
     rationale: toolInput.rationale,
     usage,
   })

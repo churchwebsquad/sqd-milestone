@@ -26,6 +26,7 @@ import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
 import { resolvePromptServer } from './_lib/resolvePrompt.js'
 import { loadSnippetsForAgent } from './_lib/loadSnippets.js'
+import { stripDashesFromSections } from './_lib/stripDashes.js'
 
 export const maxDuration = 300
 const MODEL = 'anthropic/claude-sonnet-4-6'
@@ -340,7 +341,20 @@ export default async function handler(req: any, res: any) {
     return res.status(502).json({ error: `AI Gateway error: ${err?.message ?? 'unknown'}` })
   }
 
-  const sections = Array.isArray((toolResult as any)?.sections) ? (toolResult as any).sections : []
+  const rawSections = Array.isArray((toolResult as any)?.sections) ? (toolResult as any).sections : []
+  // Deterministic em-dash / en-dash / double-hyphen strip BEFORE the
+  // Director ever sees the draft. Em-dashes are a mechanical issue a
+  // regex resolves in microseconds; the Director used to flag every
+  // one with an automatic warning and kick a slot-edit round per
+  // occurrence — that drowned out substantive content critique
+  // (offensive framings, voice mismatch, persona gaps). With the
+  // mechanical layer handled here, Director iterations focus on
+  // things only a model can judge.
+  //
+  // Telemetry lands on _meta.dash_strip below so we can see if the
+  // copywriter is regressing toward heavier dash usage over time.
+  const { sections: stripped, report: dashReport } = stripDashesFromSections(rawSections)
+  const sections = stripped as any[]
   // Post-write snippet enforcement. The model is instructed to use
   // {{token}} form for known snippets, but slip-throughs are common
   // (e.g. writes "Desert Springs" instead of {{church_short_name}}).
@@ -401,6 +415,7 @@ export default async function handler(req: any, res: any) {
       atom_resolution_rate: Math.round(atomResolutionRate * 100) / 100,
       truncation_suspected: truncationSuspected,
       truncation_pct:       outputTokensCount > 0 ? Math.round((outputTokensCount / MAX_OUTPUT_TOKENS) * 100) : 0,
+      dash_strip:           { count: dashReport.count, samples: dashReport.samples },
     },
   }
 
