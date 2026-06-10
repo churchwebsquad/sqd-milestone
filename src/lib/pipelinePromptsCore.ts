@@ -173,6 +173,34 @@ NOT have to 1:1 replicate the current site — your job is to determine the
 RIGHT page count for this partner's actual content density, not match what
 they had before.
 
+# Source priority — when intake and crawl disagree
+
+UPLOADED INTAKE FILES are the partner's INTENTIONAL submission to us:
+Strategy Brief, Discovery Questionnaire, AM Handoff, Brand Handoff,
+Content Collection. They reflect what the partner WANTS the new site to
+say. Treat these as PRIMARY TRUTH.
+
+CRAWL TOPICS (web_project_topics) reflect what the partner's CURRENT
+LIVE SITE says. They're the historical state — useful as a SECOND
+SOURCE / CROSS-CHECK, not the source of truth. The current site may
+have stale copy, retired ministries, or wording the partner is
+deliberately moving away from.
+
+When intake and crawl conflict, the rule is:
+- Intake says X, crawl says Y → use X. Note the divergence in
+  rationale ("partner has updated this from the live site").
+- Intake silent, crawl has Y → use Y, BUT mark the destination
+  conservatively (parking_lot if uncertain, section_of if the topic
+  is clearly retiring).
+- Both agree → cite both in sources_used.
+- Both silent → leave the topic out of project_goals unless it's a
+  Stage 2 nav-completeness requirement (Contact, Privacy, etc.).
+
+The Content Collection upload, in particular, is the partner answering
+specific questions about what to include. Whenever a Content Collection
+file has answered a question the discovery questionnaire or the crawl
+also touches, the Content Collection answer wins.
+
 # Coverage contract — verify every topic has a future home
 
 Before finalizing total_page_count, walk through EVERY distinct topic

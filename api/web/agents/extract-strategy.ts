@@ -623,13 +623,21 @@ ${guide.handoff_notes ?? '(none)'}`,
     blocks.push({ type: 'text', text: '# Source: Brand Handoff\n\n(No brand guide AND no handoff_brand_form on file)' })
   }
 
-  // Content collection (highest detail volume)
-  blocks.push({ type: 'text', text: '# Source: Content Collection (every concrete fact must find a home on the new site)' })
+  // Content collection — the partner's intentional submission about
+  // what the new site should include. PRIMARY TRUTH. Listed BEFORE
+  // the crawl so the model anchors on it first.
+  blocks.push({
+    type: 'text',
+    text: '# Source: Content Collection (PRIMARY TRUTH — every concrete fact must find a home on the new site; wins conflicts against the crawl)',
+  })
   appendCategoryFiles(blocks, inputs.filesLoaded, 'content_collection', 'Content Collection file')
 
-  // Crawl topics — the partner's current website inventory. Stage 1
-  // uses this list to build topic_coverage_plan, the contract Stage 2
-  // must honor.
+  // Crawl topics — the partner's CURRENT live site. SECONDARY: useful
+  // as a cross-check / inventory of what's there today, but a topic
+  // present on the live site doesn't mean it survives. If Content
+  // Collection (above) doesn't mention a topic, default the crawl
+  // entry's destination conservatively (parking_lot or section_of)
+  // rather than assuming own_page.
   if (inputs.crawlTopics && inputs.crawlTopics.length > 0) {
     const slim = inputs.crawlTopics
       .filter((t: any) => (Array.isArray(t.passages) && t.passages.length > 0)
@@ -645,10 +653,17 @@ ${guide.handoff_notes ?? '(none)'}`,
       }))
     blocks.push({
       type: 'text',
-      text: `# Source: Crawl topics (the partner's CURRENT live site, by topic)\n` +
+      text: `# Source: Crawl topics (SECONDARY — partner's CURRENT live site, by topic)\n` +
+            `This is a cross-check, NOT primary truth. The Content Collection ` +
+            `section above takes priority on every overlap. Use the crawl to:\n` +
+            `  - confirm a topic the partner mentioned in Content Collection\n` +
+            `  - surface topics the partner forgot to address in their upload\n` +
+            `  - identify what's currently live that the partner is moving away from\n\n` +
             `Every entry below must appear in your topic_coverage_plan output. ` +
             `Decide own_page / section_of / retire / parking_lot for each, with ` +
-            `rationale. This is the coverage contract Stage 2 will honor.\n\n` +
+            `rationale. When Content Collection disagrees with the crawl, follow ` +
+            `Content Collection and note the divergence ("partner has updated this ` +
+            `from the live site").\n\n` +
             `\`\`\`json\n${JSON.stringify(slim, null, 2)}\n\`\`\``,
     })
   }

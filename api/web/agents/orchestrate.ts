@@ -34,7 +34,7 @@ const PAGE_DRAFT_CONCURRENCY = 4
  *  via manual Revise feedback or by approving with known gaps. */
 const SITEMAP_AUDIT_MAX_LOOPS = 2
 
-type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize' | 'apply_audit_to_nav' | 'rename_sitemap_page' | 'cancel_run'
+type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize' | 'apply_audit_to_nav' | 'rename_sitemap_page' | 'cancel_run' | 'restructure_sections'
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -68,6 +68,39 @@ export default async function handler(req: any, res: any) {
   try {
     if (action === 'status') {
       return res.status(200).json({ ok: true, engine_state: engineState })
+    }
+
+    if (action === 'restructure_sections') {
+      // One action covers two related operations the strategist runs
+      // on a page draft:
+      //   mode='swap'        — change ONE section's archetype, re-derive
+      //                        its copy to fit the new slot shape.
+      //   mode='consolidate' — merge N sections into a single new
+      //                        section of the target archetype (e.g.
+      //                        3 image_text_split → 1 cards_grid).
+      // Both are implemented as a page-draft re-run with a carefully
+      // worded feedback note that pins WHICH sections to change and
+      // explicitly tells the writer to preserve everything else.
+      // The page-draft agent already supports this via its `feedback`
+      // param + "previous draft to refine" handling.
+      const pageSlug = typeof req.body?.pageSlug === 'string' ? req.body.pageSlug : null
+      const targetArchetype = typeof req.body?.targetArchetype === 'string' ? req.body.targetArchetype.trim() : ''
+      const mode = req.body?.mode === 'consolidate' ? 'consolidate' : 'swap'
+      const instruction = typeof req.body?.instruction === 'string' ? req.body.instruction.trim() : ''
+      const rawIxs = Array.isArray(req.body?.sectionIxs) ? req.body.sectionIxs : []
+      const sectionIxs = rawIxs.filter((n: unknown) => typeof n === 'number' && Number.isInteger(n) && n >= 0) as number[]
+      if (!pageSlug || sectionIxs.length === 0 || !targetArchetype) {
+        return res.status(400).json({ error: 'pageSlug, sectionIxs (non-empty array of integers), and targetArchetype required' })
+      }
+      if (mode === 'consolidate' && sectionIxs.length < 2) {
+        return res.status(400).json({ error: 'consolidate mode requires at least 2 sections to merge' })
+      }
+      const ixList = [...new Set(sectionIxs)].sort((a, b) => a - b).join(', ')
+      const note = mode === 'consolidate'
+        ? `CONSOLIDATE — combine sections [${ixList}] (zero-indexed in the current draft) into ONE new section using archetype "${targetArchetype}". Merge their content + atoms_used into the new section's slot shape. PRESERVE all OTHER sections byte-for-byte; only sections ${ixList} should be removed and replaced with the single merged result.${instruction ? ` Strategist note: ${instruction}` : ''}`
+        : `SWAP ARCHETYPE — change section ${ixList} (zero-indexed in the current draft) to archetype "${targetArchetype}". Re-derive the copy to fit the new archetype's slot shape while preserving the section's content intent (same heading topic, same atoms_used where compatible). PRESERVE all OTHER sections byte-for-byte; only section ${ixList} should change.${instruction ? ` Strategist note: ${instruction}` : ''}`
+      const result = await callAgent(baseUrl, jwt, 'page-draft', { projectId, pageSlug, feedback: note })
+      return res.status(200).json({ ok: true, mode, target_archetype: targetArchetype, section_ixs: sectionIxs, result })
     }
 
     if (action === 'run_synthesize') {

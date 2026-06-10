@@ -1101,6 +1101,11 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
                           const focused = `Section ${sectionIx + 1} needs a rewrite. ${instruction}. Keep all OTHER sections on this page byte-for-byte the same — only re-draft section ${sectionIx + 1}.`
                           void callOrchestrate('apply', { dispatch: { stage_to_rerun: 'page_draft', page_slug: slug, note: focused } })
                         }}
+                        onRestructure={({ mode, sectionIxs, targetArchetype, instruction }) =>
+                          void callOrchestrate('restructure_sections', {
+                            pageSlug: slug, mode, sectionIxs, targetArchetype, instruction,
+                          })
+                        }
                         busy={!!running}
                       />
                       <div className="mt-3 flex justify-end">
@@ -1125,10 +1130,11 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         </section>
       )}
 
-      {/* Export / Import — round-trip refinement through another tool */}
-      {(hasStage2 || draftSlugs.length > 0) && (
-        <ExportImportPanel projectId={project.id} onImported={async () => { await onChange?.() }} />
-      )}
+      {/* Export / Import — always rendered. Even with no sitemap yet,
+          a partner may arrive with one they drafted in another tool
+          and want to upload directly into Copy Engine. Downloads
+          gracefully no-op when there's nothing to export. */}
+      <ExportImportPanel projectId={project.id} onImported={async () => { await onChange?.() }} />
 
       {/* Gate 2 — Final review */}
       <GateCard
@@ -1711,8 +1717,19 @@ function PageBriefHeader({ brief }: { brief: PageBrief | undefined }) {
   )
 }
 
+/** Section archetypes the page-draft agent emits — kept in sync with
+ *  TOOL.input_schema.properties.sections.items.properties.archetype
+ *  in api/web/agents/page-draft.ts. Used to populate the "Change
+ *  archetype" and "Consolidate into..." dropdowns. */
+const ARCHETYPES = [
+  'hero', 'tagline_band', 'two_up', 'three_up', 'cards_grid',
+  'featured_card', 'image_text_split', 'accordion', 'cta_band',
+  'testimonial_block', 'stat_block', 'steps_row', 'contact_band',
+  'footer_cta', 'intro_paragraph', 'rich_body',
+] as const
+
 function DraftPreview({
-  draft, brief, critique, onEditSlot, onRedraftSection, busy,
+  draft, brief, critique, onEditSlot, onRedraftSection, onRestructure, busy,
 }: {
   draft: PageDraft
   brief?: PageBrief
@@ -1732,8 +1749,24 @@ function DraftPreview({
   /** Re-draft just one section by pinning the page-draft prompt to a
    *  section index + instruction. Other sections aren't touched. */
   onRedraftSection?: (sectionIx: number, instruction: string) => void
+  /** Restructure operation — swap a single section's archetype OR
+   *  consolidate multiple sections into one new archetype. Dispatches
+   *  to orchestrate's `restructure_sections` action which wraps a
+   *  page-draft re-run with a carefully pinned feedback note. */
+  onRestructure?: (params: {
+    mode: 'swap' | 'consolidate'
+    sectionIxs: number[]
+    targetArchetype: string
+    instruction: string
+  }) => void
   busy?: boolean
 }) {
+  // Selection state for multi-section operations. Set of zero-indexed
+  // section ixs. Persists across the draft's expanded lifetime; resets
+  // when the user clicks "Clear selection".
+  const [selectedIxs, setSelectedIxs] = useState<Set<number>>(() => new Set())
+  const [restructureArchetype, setRestructureArchetype] = useState<string>(ARCHETYPES[0])
+  const [restructureNote, setRestructureNote] = useState('')
   const sections = Array.isArray(draft?.sections) ? draft.sections : []
   return (
     <div>
@@ -1769,11 +1802,76 @@ function DraftPreview({
           )}
         </div>
       )}
+      {/* Restructure toolbar — appears when 1+ sections are selected.
+          Single section → swap archetype. Multiple → consolidate
+          into one section of the picked archetype. */}
+      {onRestructure && selectedIxs.size > 0 && (
+        <div className="rounded-md border border-wm-accent/40 bg-wm-accent/5 p-3 mb-3 flex items-center gap-2 flex-wrap">
+          <p className="text-[11px] font-bold text-wm-accent-strong">
+            {selectedIxs.size === 1
+              ? `Section ${[...selectedIxs][0] + 1} selected · Swap archetype:`
+              : `${selectedIxs.size} sections selected · Consolidate into:`}
+          </p>
+          <select
+            value={restructureArchetype}
+            onChange={e => setRestructureArchetype(e.target.value)}
+            disabled={busy}
+            className="rounded border border-wm-border bg-white px-2 py-1 text-[11px] font-mono disabled:opacity-50"
+          >
+            {ARCHETYPES.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+          <input
+            type="text"
+            value={restructureNote}
+            onChange={e => setRestructureNote(e.target.value)}
+            placeholder='Optional note: "use the discovery Q14 phrase as the anchor"'
+            disabled={busy}
+            className="flex-1 min-w-[200px] rounded border border-wm-border bg-white px-2 py-1 text-[11px] disabled:opacity-50"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              const ixs = [...selectedIxs].sort((a, b) => a - b)
+              onRestructure({
+                mode: selectedIxs.size === 1 ? 'swap' : 'consolidate',
+                sectionIxs: ixs,
+                targetArchetype: restructureArchetype,
+                instruction: restructureNote.trim(),
+              })
+              setSelectedIxs(new Set())
+              setRestructureNote('')
+            }}
+            disabled={busy}
+            className="inline-flex items-center gap-1 rounded-full bg-wm-accent px-3 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+          >
+            {busy ? <Loader2 size={10} className="animate-spin" /> : <Send size={10} />}
+            {selectedIxs.size === 1 ? 'Swap' : 'Consolidate'}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setSelectedIxs(new Set()); setRestructureNote('') }}
+            disabled={busy}
+            className="text-[10px] text-wm-text-muted hover:text-wm-text"
+          >
+            Clear
+          </button>
+        </div>
+      )}
       {sections.length === 0 ? (
         <p className="text-[12px] text-wm-text-muted">No sections in this draft.</p>
       ) : (
         <div className="space-y-3">
-          {renderDraftSections(sections, { onEditSlot, onRedraftSection, busy })}
+          {renderDraftSections(sections, {
+            onEditSlot, onRedraftSection, busy,
+            selectedIxs: onRestructure ? selectedIxs : null,
+            toggleSelected: onRestructure ? (ix: number) => {
+              setSelectedIxs(prev => {
+                const next = new Set(prev)
+                if (next.has(ix)) next.delete(ix); else next.add(ix)
+                return next
+              })
+            } : undefined,
+          })}
         </div>
       )}
     </div>
@@ -1789,14 +1887,40 @@ function renderDraftSections(
     onEditSlot?: (sectionIx: number, slotKey: string, instruction: string) => void
     onRedraftSection?: (sectionIx: number, instruction: string) => void
     busy?: boolean
+    /** When non-null, sections are selectable. The set tracks which
+     *  zero-indexed section ixs are currently checked. */
+    selectedIxs?: Set<number> | null
+    toggleSelected?: (sectionIx: number) => void
   },
 ) {
   return sections.map((s, i: number) => {
-        const copy = s?.copy ?? {}
+        // Section copy is open-shaped (slots vary per archetype). The
+        // leaf accesses below already guard with `&&`/`Array.isArray`
+        // and wrap text in String(), so an `any` cast here is the
+        // pragmatic choice rather than typing every slot.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const copy = (s?.copy ?? {}) as any
+        const isSelected = !!actions?.selectedIxs?.has(i)
         return (
-          <div key={i} className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
+          <div
+            key={i}
+            className={[
+              'rounded-md border bg-wm-bg-elevated p-3',
+              isSelected ? 'border-wm-accent' : 'border-wm-border',
+            ].join(' ')}
+          >
             <div className="flex items-baseline gap-2 mb-2">
-              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">{s?.archetype ?? '—'}</span>
+              {actions?.toggleSelected && (
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => actions.toggleSelected?.(i)}
+                  disabled={actions.busy}
+                  title="Select for restructure (swap archetype or consolidate)"
+                  className="shrink-0"
+                />
+              )}
+              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">{(s?.archetype as string | undefined) ?? '—'}</span>
               <span className="text-[10px] text-wm-text-subtle">#{i + 1}</span>
               {Array.isArray(s?.atoms_used) && s.atoms_used.length > 0 && (
                 <span className="text-[10px] text-wm-text-muted ml-auto">{s.atoms_used.length} atoms</span>
