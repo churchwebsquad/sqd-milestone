@@ -756,12 +756,20 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       // Phase 4: pre-bind suggestion per page (BEFORE Gate 2). Per-
       // section template pick + swap UI lives at Gate 2. Suggestions
       // store on roadmap_state.page_bind_suggestions[slug] — web_sections
-      // rows don't land until Commit. Skip slugs that already have a
-      // suggestion landed. Same race concern as outlines/drafts above:
-      // serialized until atomic JSONB updates land server-side.
+      // rows don't land until Commit.
+      //
+      // ONLY iterate over slugs that ACTUALLY HAVE A DRAFT. The prior
+      // version iterated over every sitemap slug, which 404'd on pages
+      // whose draft never landed (the "No draft found for page 'privacy'"
+      // error). When upstream phases drop pages, suggest_bind_for_page
+      // can't do anything for them — let those land at Gate 2 as
+      // visibly-incomplete instead of throwing 404s the user has to
+      // decode.
       const postDraftState = await readState()
+      const postDraftDrafts = (postDraftState.page_drafts ?? {}) as Record<string, unknown>
       const existingSuggestions = (postDraftState.page_bind_suggestions ?? {}) as Record<string, unknown>
-      const slugsNeedingBindSuggestions = slugs.filter(s => existingSuggestions[s] == null)
+      const slugsWithDrafts = slugs.filter(s => postDraftDrafts[s] != null && s !== '_meta')
+      const slugsNeedingBindSuggestions = slugsWithDrafts.filter(s => existingSuggestions[s] == null)
       for (const slug of slugsNeedingBindSuggestions) {
         await callOrchestrate('suggest_bind_for_page', { pageSlug: slug })
       }

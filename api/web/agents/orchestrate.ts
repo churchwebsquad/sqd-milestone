@@ -643,18 +643,33 @@ async function runDrafts(ctx: {
   try {
     await clearCancelledMarker(sb, projectId)
     await bailIfCancelled(sb, projectId)
-    await writeEngineState(sb, projectId, { ...ctx.engineState, status: 'briefing', current_phase: 'page_briefs', last_action_at: new Date().toISOString() })
+    await writeEngineState(sb, projectId, { ...ctx.engineState, status: 'outlining', current_phase: 'page_outlines', last_action_at: new Date().toISOString() })
 
-    // Run page_briefs unconditionally on each run_drafts — briefs are
-    // cheap to regenerate and ensure draft inputs are fresh.
-    await callAgent(baseUrl, jwt, 'page-briefs', { projectId })
-    await bailIfCancelled(sb, projectId)
+    // page-briefs was deleted when we shifted to the outlines pipeline.
+    // The legacy run_drafts action used to call page-briefs first; that
+    // 404s on Vercel now. New flow: outline every sitemap slug, then
+    // draft each one. Mirrors the client-side runEngine cascade in
+    // CopyEngineWorkspace but server-side so this action remains a
+    // self-contained "drafts please" command for tooling that needs it
+    // (e.g., scripts, retry handlers).
+    const sitemap = (roadmapState.stage_2 ?? {}) as Record<string, any>
+    const sitemapPages = Array.isArray(sitemap.pages) ? sitemap.pages : []
+    const slugs: string[] = sitemapPages
+      .map((p: any) => (typeof p?.slug === 'string' ? p.slug : null))
+      .filter(Boolean) as string[]
 
-    const { data: refreshed } = await sb.from('strategy_web_projects')
+    // Outline each slug serially. page-outlines uses atomic JSONB writes
+    // (v68), so the cascade can't race itself, but the LLM calls are
+    // expensive and serializing keeps Vercel function budget predictable.
+    const { data: existing } = await sb.from('strategy_web_projects')
       .select('roadmap_state').eq('id', projectId).maybeSingle()
-    const refreshedState = (refreshed?.roadmap_state ?? {}) as Record<string, any>
-    const briefs = refreshedState.page_briefs ?? {}
-    const slugs = Object.keys(briefs).filter(k => k !== '_meta')
+    const existingState   = (existing?.roadmap_state ?? {}) as Record<string, any>
+    const existingOutlines = (existingState.page_outlines ?? {}) as Record<string, any>
+    for (const slug of slugs) {
+      await bailIfCancelled(sb, projectId)
+      if (existingOutlines[slug] != null) continue
+      await callAgent(baseUrl, jwt, 'page-outlines', { projectId, pageSlug: slug })
+    }
 
     await writeEngineState(sb, projectId, {
       ...ctx.engineState,
@@ -763,22 +778,26 @@ async function runIterate(ctx: {
     // fix_kind is the director's explicit signal; stage_to_rerun is
     // the legacy fallback for older critiques that pre-date fix_kind.
     //
-    //   slot_edit       → slot-edit agent (one slot)
-    //   page_redraft    → page-draft   (whole page)
-    //   brief_update    → page-briefs  (re-allocate atoms/persona)
-    //   sitemap_redraft → draft-sitemap with audit loop
+    //   slot_edit         → slot-edit agent (one slot)
+    //   page_redraft      → page-draft     (whole page)
+    //   sitemap_redraft   → draft-sitemap  (with audit loop)
     //   synthesize_rework → extract-strategy
     //
-    // Slot edits parallelize freely (narrow context, fast). Page
-    // redrafts cap at PAGE_DRAFT_CONCURRENCY to avoid hammering the
-    // gateway.
+    // 'brief_update' / stage 'page_briefs' is OBSOLETE — page-briefs.ts
+    // was deleted in the outlines refactor. Any legacy directive that
+    // names brief_update or page_briefs is escalated to page_redraft
+    // below so the iterate loop can still resolve it without 404ing
+    // on a deleted endpoint.
     const inferFixKind = (d: any): string => {
-      if (typeof d?.fix_kind === 'string' && d.fix_kind) return d.fix_kind
+      const explicit = typeof d?.fix_kind === 'string' ? d.fix_kind : ''
+      // Legacy brief_update is now a page_redraft — same destination.
+      if (explicit === 'brief_update') return 'page_redraft'
+      if (explicit) return explicit
       // Legacy directives without fix_kind — map from stage_to_rerun.
       const s = String(d?.stage_to_rerun ?? '')
       if (s === 'single_slot') return 'slot_edit'
       if (s === 'page_draft')  return 'page_redraft'
-      if (s === 'page_briefs') return 'brief_update'
+      if (s === 'page_briefs') return 'page_redraft'   // ← was brief_update
       if (s === 'sitemap')     return 'sitemap_redraft'
       if (s === 'synthesize')  return 'synthesize_rework'
       return 'page_redraft'
@@ -884,12 +903,13 @@ async function runIterate(ctx: {
       last_action_at: new Date().toISOString(),
     })
 
-    // Everything else (brief_update / sitemap_redraft / synthesize_rework) via dispatch.
+    // Everything else (sitemap_redraft / synthesize_rework) via dispatch.
+    // brief_update is gone — inferFixKind now maps it to page_redraft so
+    // it gets handled in the redraft loop above.
     for (const d of otherDirectives) {
       // Translate fix_kind back to stage_to_rerun for the legacy dispatcher.
       const kind = inferFixKind(d)
       const stage =
-        kind === 'brief_update'       ? 'page_briefs' :
         kind === 'sitemap_redraft'    ? 'sitemap'     :
         kind === 'synthesize_rework'  ? 'synthesize'  :
         String(d.stage_to_rerun ?? '')
@@ -937,7 +957,21 @@ async function applyDispatch(ctx: {
     return draftSitemapWithAuditLoop({ sb: ctx.sb, baseUrl, jwt, projectId, initialContext: note || undefined })
   }
   if (stage === 'page_briefs') {
-    return callAgent(baseUrl, jwt, 'page-briefs', { projectId, redoContext: note })
+    // page-briefs was deleted in the outlines refactor. Legacy directives
+    // (from old critiques persisted in DB, or older Director schemas
+    // that still emit 'page_briefs') get escalated to a full page_redraft
+    // instead — re-running page-draft on EVERY sitemap slug is heavier
+    // than a brief update would have been, but it's also the only path
+    // that re-allocates content the way brief_update used to. The note
+    // carries the original guidance forward so the redraft has context.
+    const sitemap = await loadSitemap(ctx.sb, projectId)
+    const slugs   = (sitemap?.pages ?? [])
+      .map((p: any) => (typeof p?.slug === 'string' ? p.slug : null))
+      .filter(Boolean) as string[]
+    for (const slug of slugs) {
+      await callAgent(baseUrl, jwt, 'page-draft', { projectId, pageSlug: slug, feedback: `[escalated from legacy brief_update directive] ${note}` })
+    }
+    return { ok: true, escalated_from: 'page_briefs', re_drafted_count: slugs.length }
   }
   if (stage === 'page_draft') {
     const slug = dispatch?.page_slug
@@ -1408,6 +1442,16 @@ async function writeCancelledState(sb: any, projectId: string, ctxState: Record<
   eng.cancelled_at = new Date().toISOString()
   eng.last_action_at = eng.cancelled_at
   await setRoadmapStateAtomic(sb, projectId, ['engine_state'], eng)
+}
+
+/** Read just the sitemap (stage_2) from a project. Used by
+ *  applyDispatch paths that need slug iteration without pulling the
+ *  whole roadmap_state into memory. */
+async function loadSitemap(sb: any, projectId: string): Promise<{ pages?: Array<{ slug?: string }> } | null> {
+  const { data } = await sb.from('strategy_web_projects')
+    .select('roadmap_state').eq('id', projectId).maybeSingle()
+  const rs = (data?.roadmap_state ?? {}) as Record<string, any>
+  return (rs.stage_2 ?? null) as { pages?: Array<{ slug?: string }> } | null
 }
 
 async function writeEngineState(sb: any, projectId: string, engineState: Record<string, any>): Promise<void> {

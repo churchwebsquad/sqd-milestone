@@ -71,7 +71,13 @@ const CRITIQUE_TOOL = {
           required: ['page_slug','stage_to_rerun','fix_kind','note','severity'],
           properties: {
             page_slug:       { type: 'string', description: 'Which page this directive targets. Use "*" for project-wide directives (synthesize re-run).' },
-            stage_to_rerun:  { type: 'string', enum: ['synthesize','sitemap','page_briefs','page_draft','single_slot'] },
+            // 'page_briefs' was removed in the outlines refactor — the
+            // file no longer exists and the orchestrator now routes
+            // brief-style fixes through page_draft (full redraft) or
+            // single_slot (slot-edit). Leaving page_briefs in this enum
+            // caused the Director to emit directives the iterate loop
+            // would 404 on when calling the deleted endpoint.
+            stage_to_rerun:  { type: 'string', enum: ['synthesize','sitemap','page_draft','single_slot'] },
             fix_kind: {
               type: 'string',
               enum: ['slot_edit','page_redraft','brief_update','sitemap_redraft','synthesize_rework'],
@@ -134,7 +140,7 @@ const ROUTE_TOOL = {
         type: 'object',
         required: ['stage_to_rerun','note'],
         properties: {
-          stage_to_rerun: { type: 'string', enum: ['synthesize','sitemap','page_briefs','page_draft','single_slot','none'] },
+          stage_to_rerun: { type: 'string', enum: ['synthesize','sitemap','page_draft','single_slot','none'] },
           page_slug:      { type: ['string','null'], description: 'When stage_to_rerun is page_draft or single_slot.' },
           section_ix:     { type: ['number','null'], description: 'When stage_to_rerun is single_slot.' },
           slot_key:       { type: ['string','null'], description: 'When stage_to_rerun is single_slot — e.g. "heading", "description".' },
