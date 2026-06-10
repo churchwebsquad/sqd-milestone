@@ -7,7 +7,7 @@
  */
 
 import { useMemo } from 'react'
-import { ArrowLeft, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Sparkles, AlertTriangle } from 'lucide-react'
 import { parseDeliverables } from '../../lib/srpSessions'
 import type { SmsSrpGeneration, SrpDeliverableKey } from '../../types/database'
 import { FacebookPostGenerator } from './generators/FacebookPostGenerator'
@@ -16,6 +16,9 @@ import { PhotoRecapGenerator } from './generators/PhotoRecapGenerator'
 import { CarouselGenerator } from './generators/CarouselGenerator'
 import { ReelCaptionsGenerator } from './generators/ReelCaptionsGenerator'
 import { ExportActions } from './ExportActions'
+import { SrpStepPanel } from './_shared/SrpStepPanel'
+import { SrpButton } from './_shared/SrpButton'
+import { SrpStatusCard } from './_shared/SrpStatusCard'
 
 export function ReviewStep({ session, onBack, onApprove, onChange }: {
   session: SmsSrpGeneration
@@ -26,19 +29,24 @@ export function ReviewStep({ session, onBack, onApprove, onChange }: {
   const selected = useMemo(() => parseDeliverables(session.selected_deliverables), [session.selected_deliverables])
 
   return (
-    <section className="space-y-4">
-      <div className="rounded-lg border border-wm-border bg-wm-bg-elevated p-4">
-        <h2 className="text-[16px] font-semibold text-wm-text">Review & generate</h2>
-        <p className="text-[12px] text-wm-text-muted mt-1">
-          Each deliverable is independent. Generate, edit, regenerate. When you're happy with everything, click Approve.
-        </p>
-      </div>
-
-      {selected.length === 0 && (
-        <div className="rounded-md border border-wm-warning/30 bg-wm-warning-bg p-3 text-[12px] text-wm-warning">
-          No deliverables selected. Go back and pick some.
-        </div>
-      )}
+    <div className="space-y-5">
+      <SrpStepPanel
+        tone="accent"
+        eyebrow="Step 4 of 4"
+        icon={Sparkles}
+        title="Review &amp; generate"
+        description="Each deliverable is independent. Generate, edit, regenerate. When everything reads right, click Approve to mark this session complete."
+      >
+        {selected.length === 0 ? (
+          <SrpStatusCard tone="warning" icon={AlertTriangle} title="No deliverables selected">
+            Head back to step 2 and pick at least one.
+          </SrpStatusCard>
+        ) : (
+          <p className="text-[12px] text-[var(--color-purple-gray)]">
+            <span className="font-semibold text-[var(--color-deep-plum)]">{selected.length}</span> deliverable{selected.length === 1 ? '' : 's'} ready to generate below.
+          </p>
+        )}
+      </SrpStepPanel>
 
       {selected.includes('facebook_post') && (
         <FacebookPostGenerator session={session} onChange={onChange} />
@@ -58,18 +66,19 @@ export function ReviewStep({ session, onBack, onApprove, onChange }: {
 
       <ExportActions session={session} onChange={onChange} />
 
-      <div className="flex items-center justify-between gap-2 pt-3">
-        <button onClick={onBack} className="inline-flex items-center gap-1.5 text-[12px] text-wm-text-muted hover:text-wm-text px-2 py-1.5">
-          <ArrowLeft size={12} /> Back
-        </button>
-        <button
+      <div className="flex items-center justify-between gap-2 rounded-xl border border-[var(--color-lavender)] bg-white px-5 py-3">
+        <SrpButton variant="ghost" onClick={onBack} leadingIcon={<ArrowLeft size={14} />}>
+          Back
+        </SrpButton>
+        <SrpButton
+          variant="primary"
           onClick={onApprove}
-          className="inline-flex items-center gap-1.5 rounded-full bg-wm-success px-4 py-1.5 text-[12px] text-white font-semibold"
+          leadingIcon={<CheckCircle2 size={14} />}
         >
-          <CheckCircle2 size={12} /> Approve & finish
-        </button>
+          Approve &amp; finish
+        </SrpButton>
       </div>
-    </section>
+    </div>
   )
 }
 

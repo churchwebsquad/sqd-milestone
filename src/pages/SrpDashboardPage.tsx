@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Loader2, Plus, RefreshCw, Search, X } from 'lucide-react'
+import { Loader2, Plus, RefreshCw, Search, X, Sparkles, ArrowRight, Settings2, Building2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import {
@@ -23,6 +23,8 @@ import {
   type SessionListRow,
   STEP_LABELS,
 } from '../lib/srpSessions'
+import { SrpHeroHeading } from '../components/srp/_shared/SrpHeading'
+import { SrpButton } from '../components/srp/_shared/SrpButton'
 
 interface AccountOption {
   member: string
@@ -80,92 +82,119 @@ export default function SrpDashboardPage() {
   }, [navigate, userEmail])
 
   return (
-    <div className="min-h-full bg-wm-bg py-6 px-4 md:px-6">
-      <div className="max-w-5xl mx-auto">
-        <header className="flex items-baseline justify-between gap-3 mb-6">
-          <div>
-            <h1 className="text-[24px] font-semibold text-wm-text">SRP Generator</h1>
-            <p className="text-[13px] text-wm-text-muted mt-1">Sermon Recap Pipeline — text deliverables for the weekly social run.</p>
-          </div>
+    <div className="min-h-full bg-[var(--color-cream)] py-8 px-4 md:px-8">
+      <div className="max-w-5xl mx-auto space-y-6">
+        <div className="flex items-end justify-between gap-3 flex-wrap">
+          <SrpHeroHeading
+            kicker="Social Squad"
+            prefix="The"
+            emphasis="Sermon Recap"
+            suffix="Pipeline."
+            subtitle="Text deliverables for the weekly social run — captions, posts, carousels, photo recaps. Open a session per partner, generate, and ship."
+          />
           <div className="flex items-center gap-2">
             <Link
               to="/social/srp/prompts"
-              className="text-[12px] text-wm-text-muted hover:text-wm-text px-2 py-1"
+              className="inline-flex items-center gap-1.5 text-[12px] text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] px-2 py-1 transition-colors"
             >
-              Prompt settings
+              <Settings2 size={12} /> Prompt settings
             </Link>
-            <button
+            <SrpButton
               onClick={() => setPickerOpen(true)}
               disabled={!userEmail}
-              className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-2 text-[13px] text-white font-semibold disabled:opacity-50"
+              leadingIcon={<Plus size={14} />}
+              trailingIcon={<ArrowRight size={14} />}
             >
-              <Plus size={14} /> New SRP
-            </button>
+              New SRP
+            </SrpButton>
           </div>
-        </header>
+        </div>
 
-        <div className="flex items-baseline gap-3 mb-3">
-          <div className="inline-flex rounded-full border border-wm-border overflow-hidden text-[12px]">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="inline-flex rounded-full border border-[var(--color-lavender)] overflow-hidden text-[12px] bg-white">
             <button
               onClick={() => setFilter('mine')}
-              className={['px-3 py-1', filter === 'mine' ? 'bg-wm-accent text-white' : 'text-wm-text-muted hover:text-wm-text'].join(' ')}
+              className={[
+                'px-3 py-1.5 transition-colors',
+                filter === 'mine'
+                  ? 'bg-[var(--color-deep-plum)] text-white font-semibold'
+                  : 'text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] hover:bg-[var(--color-lavender-tint)]',
+              ].join(' ')}
             >My sessions</button>
             <button
               onClick={() => setFilter('all')}
-              className={['px-3 py-1', filter === 'all' ? 'bg-wm-accent text-white' : 'text-wm-text-muted hover:text-wm-text'].join(' ')}
+              className={[
+                'px-3 py-1.5 transition-colors',
+                filter === 'all'
+                  ? 'bg-[var(--color-deep-plum)] text-white font-semibold'
+                  : 'text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] hover:bg-[var(--color-lavender-tint)]',
+              ].join(' ')}
             >All sessions</button>
           </div>
           <button
             onClick={() => void refresh()}
-            className="inline-flex items-center gap-1 text-[11px] text-wm-text-muted hover:text-wm-text ml-auto"
+            className="inline-flex items-center gap-1 text-[11px] text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] ml-auto transition-colors"
           >
             <RefreshCw size={12} /> Refresh
           </button>
         </div>
 
         {error && (
-          <div className="rounded-md border border-wm-danger/30 bg-wm-danger-bg px-3 py-2 text-[12px] text-wm-danger mb-3">{error}</div>
+          <div className="rounded-lg border border-wm-danger/30 bg-wm-danger-bg px-4 py-3 text-[12px] text-wm-danger">{error}</div>
         )}
 
-        <div className="rounded-lg border border-wm-border bg-wm-bg-elevated overflow-hidden">
+        <div className="rounded-xl border border-[var(--color-lavender)] bg-white overflow-hidden">
           {loading ? (
-            <div className="p-8 text-center text-[12px] text-wm-text-muted">
+            <div className="p-10 text-center text-[12px] text-[var(--color-purple-gray)]">
               <Loader2 size={16} className="animate-spin inline mr-2" /> Loading sessions…
             </div>
           ) : sessions.length === 0 ? (
-            <div className="p-8 text-center text-[13px] text-wm-text-muted">
-              No sessions yet. Click <span className="font-semibold">New SRP</span> to start one.
+            <div className="p-10 text-center space-y-3">
+              <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-[var(--color-lavender-tint)] text-[var(--color-primary-purple)]">
+                <Sparkles size={20} />
+              </span>
+              <p className="text-[14px] font-semibold text-[var(--color-deep-plum)]">No sessions yet.</p>
+              <p className="text-[12px] text-[var(--color-purple-gray)] max-w-sm mx-auto">
+                Click <span className="font-semibold">New SRP</span> to open your first one — pick the partner, drop in the sermon, and the pipeline takes it from there.
+              </p>
             </div>
           ) : (
             <table className="w-full text-[13px]">
-              <thead className="bg-wm-bg text-[10px] uppercase tracking-widest text-wm-text-subtle">
+              <thead className="bg-[var(--color-cream)] text-[10px] uppercase tracking-[0.12em] text-[var(--color-purple-gray)]">
                 <tr>
-                  <th className="text-left px-3 py-2 font-semibold">Church</th>
-                  <th className="text-left px-3 py-2 font-semibold">Member</th>
-                  <th className="text-left px-3 py-2 font-semibold">Step</th>
-                  <th className="text-left px-3 py-2 font-semibold">Status</th>
-                  <th className="text-left px-3 py-2 font-semibold">Updated</th>
-                  {filter === 'all' && <th className="text-left px-3 py-2 font-semibold">Created by</th>}
+                  <th className="text-left px-4 py-3 font-bold">Church</th>
+                  <th className="text-left px-4 py-3 font-bold">Member</th>
+                  <th className="text-left px-4 py-3 font-bold">Step</th>
+                  <th className="text-left px-4 py-3 font-bold">Status</th>
+                  <th className="text-left px-4 py-3 font-bold">Updated</th>
+                  {filter === 'all' && <th className="text-left px-4 py-3 font-bold">Created by</th>}
                 </tr>
               </thead>
               <tbody>
                 {sessions.map(s => (
                   <tr
                     key={s.id}
-                    className="border-t border-wm-border hover:bg-wm-accent/5 cursor-pointer"
+                    className="border-t border-[var(--color-lavender)] hover:bg-[var(--color-lavender-tint)]/60 cursor-pointer transition-colors"
                     onClick={() => navigate(`/social/srp/${encodeURIComponent(s.session_id)}`)}
                   >
-                    <td className="px-3 py-2 font-medium text-wm-text">{s.church_name ?? '—'}</td>
-                    <td className="px-3 py-2 font-mono text-[12px] text-wm-text-muted">{s.member ?? '—'}</td>
-                    <td className="px-3 py-2 text-wm-text-muted">{STEP_LABELS[s.current_step ?? ''] ?? s.current_step ?? '—'}</td>
-                    <td className="px-3 py-2">
+                    <td className="px-4 py-3 font-medium text-[var(--color-deep-plum)]">
+                      <span className="inline-flex items-center gap-2">
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[var(--color-lavender-tint)] text-[var(--color-primary-purple)]">
+                          <Building2 size={12} />
+                        </span>
+                        {s.church_name ?? '—'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-[12px] text-[var(--color-purple-gray)]">{s.member ?? '—'}</td>
+                    <td className="px-4 py-3 text-[var(--color-purple-gray)]">{STEP_LABELS[s.current_step ?? ''] ?? s.current_step ?? '—'}</td>
+                    <td className="px-4 py-3">
                       <StatusPill status={s.status} />
                     </td>
-                    <td className="px-3 py-2 text-[11px] text-wm-text-muted whitespace-nowrap">
+                    <td className="px-4 py-3 text-[11px] text-[var(--color-purple-gray)] whitespace-nowrap">
                       {s.updated_at ? new Date(s.updated_at).toLocaleString() : '—'}
                     </td>
                     {filter === 'all' && (
-                      <td className="px-3 py-2 text-[11px] text-wm-text-muted">{s.user_email ?? '—'}</td>
+                      <td className="px-4 py-3 text-[11px] text-[var(--color-purple-gray)]">{s.user_email ?? '—'}</td>
                     )}
                   </tr>
                 ))}
@@ -189,10 +218,10 @@ export default function SrpDashboardPage() {
 function StatusPill({ status }: { status: string | null }) {
   const tone =
     status === 'completed' ? 'bg-wm-success-bg text-wm-success'
-    : status === 'archived' ? 'bg-wm-border/40 text-wm-text-subtle'
-    : 'bg-wm-accent/10 text-wm-accent-strong'
+    : status === 'archived' ? 'bg-[var(--color-lavender)]/50 text-[var(--color-purple-gray)]'
+    : 'bg-[var(--color-lavender-tint)] text-[var(--color-primary-purple)]'
   return (
-    <span className={['text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded', tone].join(' ')}>
+    <span className={['text-[10px] uppercase tracking-[0.12em] font-bold px-2 py-1 rounded-full', tone].join(' ')}>
       {status ?? 'unknown'}
     </span>
   )
@@ -233,50 +262,59 @@ function AccountPickerModal({ onCancel, onPick, busy }: {
   const hasResults = useMemo(() => results.length > 0, [results])
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center pt-24 px-4" onClick={onCancel}>
+    <div className="fixed inset-0 z-50 bg-[var(--color-deep-plum)]/40 backdrop-blur-sm flex items-start justify-center pt-24 px-4" onClick={onCancel}>
       <div
-        className="w-full max-w-lg rounded-lg bg-wm-bg-elevated border border-wm-border shadow-2xl"
+        className="w-full max-w-lg rounded-xl bg-white border border-[var(--color-lavender)] shadow-2xl overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        <div className="px-4 py-3 flex items-center justify-between border-b border-wm-border">
-          <h2 className="text-[14px] font-semibold text-wm-text">Pick an account</h2>
-          <button onClick={onCancel} className="text-wm-text-muted hover:text-wm-text"><X size={16} /></button>
+        <div className="px-5 py-3.5 flex items-center justify-between border-b border-[var(--color-lavender)] bg-[var(--color-lavender-tint)]">
+          <h2 className="text-[14px] font-semibold text-[var(--color-deep-plum)]">Pick an account</h2>
+          <button
+            onClick={onCancel}
+            className="text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] transition-colors"
+            aria-label="Close"
+          ><X size={16} /></button>
         </div>
-        <div className="p-4 space-y-3">
+        <div className="p-5 space-y-3">
           <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-wm-text-subtle" />
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-purple-gray)]" />
             <input
               type="text"
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder="Member number or church name"
               autoFocus
-              className="w-full rounded-md border border-wm-border bg-wm-bg pl-9 pr-3 py-2 text-[13px] focus:outline-none focus:border-wm-accent"
+              className="w-full rounded-full border border-[var(--color-lavender)] bg-white pl-9 pr-3 py-2 text-[13px] text-[var(--color-deep-plum)] placeholder:text-[var(--color-purple-gray)] focus:outline-none focus:border-[var(--color-primary-purple)] focus:ring-2 focus:ring-[var(--color-lavender)]"
             />
           </div>
           <div className="max-h-[300px] overflow-y-auto">
             {searching && (
-              <p className="text-[12px] text-wm-text-muted py-2 px-1">
+              <p className="text-[12px] text-[var(--color-purple-gray)] py-2 px-1">
                 <Loader2 size={12} className="animate-spin inline mr-1.5" /> Searching…
               </p>
             )}
             {!searching && query.trim().length >= 2 && !hasResults && (
-              <p className="text-[12px] text-wm-text-muted py-2 px-1">No matches.</p>
+              <p className="text-[12px] text-[var(--color-purple-gray)] py-2 px-1">No matches.</p>
             )}
             {hasResults && (
-              <ul className="divide-y divide-wm-border">
+              <ul className="divide-y divide-[var(--color-lavender)] rounded-lg border border-[var(--color-lavender)] overflow-hidden">
                 {results.map(r => (
                   <li key={r.member}>
                     <button
                       onClick={() => onPick(r)}
                       disabled={busy}
-                      className="w-full text-left px-3 py-2 hover:bg-wm-accent/5 disabled:opacity-50"
+                      className="w-full text-left px-4 py-2.5 hover:bg-[var(--color-lavender-tint)] disabled:opacity-50 transition-colors flex items-center gap-3"
                     >
-                      <p className="text-[13px] font-medium text-wm-text">{r.church_name}</p>
-                      <p className="text-[11px] text-wm-text-muted">
-                        <span className="font-mono">{r.member}</span>
-                        {r.css_rep && <span> · {r.css_rep}</span>}
-                      </p>
+                      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-[var(--color-lavender-tint)] text-[var(--color-primary-purple)]">
+                        <Building2 size={12} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <p className="text-[13px] font-medium text-[var(--color-deep-plum)] truncate">{r.church_name}</p>
+                        <p className="text-[11px] text-[var(--color-purple-gray)] truncate">
+                          <span className="font-mono">{r.member}</span>
+                          {r.css_rep && <span> · {r.css_rep}</span>}
+                        </p>
+                      </span>
                     </button>
                   </li>
                 ))}
@@ -284,7 +322,7 @@ function AccountPickerModal({ onCancel, onPick, busy }: {
             )}
           </div>
           {busy && (
-            <p className="text-[11px] text-wm-accent-strong">
+            <p className="text-[11px] text-[var(--color-primary-purple)]">
               <Loader2 size={12} className="animate-spin inline mr-1.5" /> Creating session…
             </p>
           )}

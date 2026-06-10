@@ -5,13 +5,15 @@
  */
 
 import { useCallback, useMemo } from 'react'
-import { ArrowLeft, ArrowRight, CheckSquare, Square } from 'lucide-react'
+import { ArrowLeft, ArrowRight, CheckCircle2, Circle, ListChecks } from 'lucide-react'
 import {
   updateSession,
   parseDeliverables, stringifyDeliverables,
   DELIVERABLE_LABELS, DELIVERABLE_DESCRIPTIONS,
 } from '../../lib/srpSessions'
 import type { SmsSrpGeneration, SrpDeliverableKey } from '../../types/database'
+import { SrpStepPanel } from './_shared/SrpStepPanel'
+import { SrpButton } from './_shared/SrpButton'
 
 const PHASE_1_KEYS: SrpDeliverableKey[] = [
   'facebook_post',
@@ -38,50 +40,53 @@ export function DeliverableStep({ session, onBack, onContinue, onChange }: {
   const canContinue = selected.length > 0
 
   return (
-    <section className="rounded-lg border border-wm-border bg-wm-bg-elevated p-5 space-y-4">
-      <header>
-        <h2 className="text-[16px] font-semibold text-wm-text">Pick deliverables</h2>
-        <p className="text-[12px] text-wm-text-muted mt-1">
-          Choose which pieces to generate for this session. You can edit each one independently in the review step.
-        </p>
-      </header>
-
-      <div className="space-y-2">
+    <SrpStepPanel
+      eyebrow="Step 2 of 4"
+      icon={ListChecks}
+      title="Pick deliverables"
+      description={`Choose what to generate for this session. Each piece can be edited independently in review. ${selected.length} of ${PHASE_1_KEYS.length} selected.`}
+      footer={
+        <>
+          <SrpButton variant="ghost" onClick={onBack} leadingIcon={<ArrowLeft size={14} />}>
+            Back
+          </SrpButton>
+          <SrpButton
+            variant="secondary"
+            onClick={onContinue}
+            disabled={!canContinue}
+            trailingIcon={<ArrowRight size={14} />}
+          >
+            Continue
+          </SrpButton>
+        </>
+      }
+    >
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
         {PHASE_1_KEYS.map(k => {
           const checked = selected.includes(k)
           return (
             <button
               key={k}
               onClick={() => void toggle(k)}
+              aria-pressed={checked}
               className={[
-                'w-full text-left flex items-start gap-3 rounded-md border px-3 py-2.5 transition-colors',
-                checked ? 'border-wm-accent bg-wm-accent/5' : 'border-wm-border bg-wm-bg hover:bg-wm-accent/5',
+                'group w-full text-left flex items-start gap-3 rounded-lg border px-4 py-3 transition-all',
+                checked
+                  ? 'border-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)] shadow-sm'
+                  : 'border-[var(--color-lavender)] bg-white hover:border-[var(--color-primary-purple)] hover:bg-[var(--color-lavender-tint)]/40',
               ].join(' ')}
             >
               {checked
-                ? <CheckSquare size={16} className="text-wm-accent-strong shrink-0 mt-0.5" />
-                : <Square size={16} className="text-wm-text-subtle shrink-0 mt-0.5" />}
-              <div className="flex-1">
-                <p className="text-[13px] font-semibold text-wm-text">{DELIVERABLE_LABELS[k]}</p>
-                <p className="text-[11px] text-wm-text-muted mt-0.5 leading-snug">{DELIVERABLE_DESCRIPTIONS[k]}</p>
+                ? <CheckCircle2 size={18} className="text-[var(--color-primary-purple)] shrink-0 mt-0.5" strokeWidth={2.5} />
+                : <Circle size={18} className="text-[var(--color-lavender)] shrink-0 mt-0.5 group-hover:text-[var(--color-primary-purple)]/60 transition-colors" />}
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-semibold text-[var(--color-deep-plum)]">{DELIVERABLE_LABELS[k]}</p>
+                <p className="text-[11px] text-[var(--color-purple-gray)] mt-1 leading-snug">{DELIVERABLE_DESCRIPTIONS[k]}</p>
               </div>
             </button>
           )
         })}
       </div>
-
-      <div className="flex items-center justify-between gap-2">
-        <button onClick={onBack} className="inline-flex items-center gap-1.5 text-[12px] text-wm-text-muted hover:text-wm-text px-2 py-1.5">
-          <ArrowLeft size={12} /> Back
-        </button>
-        <button
-          onClick={onContinue}
-          disabled={!canContinue}
-          className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white disabled:opacity-50"
-        >
-          Continue <ArrowRight size={12} />
-        </button>
-      </div>
-    </section>
+    </SrpStepPanel>
   )
 }

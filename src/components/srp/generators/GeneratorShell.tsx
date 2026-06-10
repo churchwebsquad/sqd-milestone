@@ -3,10 +3,15 @@
  * input controls + onGenerate callback; this shell renders the header,
  * the generate button, the elapsed-time signal, and the output area
  * with an editable textarea + save flow.
+ *
+ * Visual styling matches the new SRP step panels (white card on Cream
+ * canvas, Lavender 1px border, Deep Plum text). Buttons go through
+ * SrpButton so pill shape + CMS-brand colors stay consistent.
  */
 
 import { useEffect, useState } from 'react'
-import { Loader2, RefreshCw, Save, Sparkles } from 'lucide-react'
+import { RefreshCw, Save, Sparkles, FileText, AlertCircle } from 'lucide-react'
+import { SrpButton } from '../_shared/SrpButton'
 
 export function GeneratorShell({
   title, description, value, onSave, onGenerate, busy, error, lastTook,
@@ -35,37 +40,51 @@ export function GeneratorShell({
   const empty = !value
 
   return (
-    <div className="rounded-lg border border-wm-border bg-wm-bg-elevated">
-      <header className="px-4 py-3 border-b border-wm-border">
-        <h3 className="text-[14px] font-semibold text-wm-text">{title}</h3>
-        <p className="text-[11px] text-wm-text-muted mt-0.5">{description}</p>
+    <section className="rounded-xl border border-[var(--color-lavender)] bg-white overflow-hidden">
+      <header className="px-5 py-4 border-b border-[var(--color-lavender)] bg-white flex items-start gap-3">
+        <span className="shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-lg bg-[var(--color-lavender-tint)] text-[var(--color-primary-purple)]">
+          <FileText size={16} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-[14px] font-semibold text-[var(--color-deep-plum)]">{title}</h3>
+          <p className="text-[11px] text-[var(--color-purple-gray)] mt-0.5 leading-snug">{description}</p>
+        </div>
+        {value && !empty && (
+          <span className="shrink-0 text-[10px] uppercase tracking-[0.12em] font-bold text-wm-success bg-wm-success-bg px-2 py-1 rounded-full">
+            Generated
+          </span>
+        )}
       </header>
 
-      <div className="p-4 space-y-3">
+      <div className="p-5 space-y-4">
         {extraControls}
 
-        <div className="flex items-center gap-3">
-          <button
+        <div className="flex items-center flex-wrap gap-3">
+          <SrpButton
+            variant="secondary"
             onClick={() => void onGenerate()}
-            disabled={busy}
-            className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white font-semibold disabled:opacity-50"
+            busy={busy}
+            leadingIcon={empty ? <Sparkles size={14} /> : <RefreshCw size={14} />}
           >
-            {busy
-              ? <><Loader2 size={12} className="animate-spin" /> Generating…</>
-              : empty
-                ? <><Sparkles size={12} /> Generate</>
-                : <><RefreshCw size={12} /> Regenerate</>}
-          </button>
+            {busy ? 'Generating…' : empty ? 'Generate' : 'Regenerate'}
+          </SrpButton>
           {lastTook != null && !busy && (
-            <span className="text-[11px] text-wm-text-subtle">Last run: {lastTook}s</span>
+            <span className="text-[11px] text-[var(--color-purple-gray)]">Last run: {lastTook}s</span>
           )}
           {error && (
-            <span className="text-[11px] text-wm-danger">{error}</span>
+            <span className="inline-flex items-center gap-1 text-[11px] text-wm-danger">
+              <AlertCircle size={11} /> {error}
+            </span>
           )}
         </div>
 
         {empty && !busy && (
-          <p className="text-[12px] text-wm-text-muted italic">No output yet. Click Generate to start.</p>
+          <div className="rounded-lg border border-dashed border-[var(--color-lavender)] bg-[var(--color-cream)] px-4 py-6 text-center">
+            <Sparkles size={18} className="inline text-[var(--color-primary-purple)] mb-1.5" />
+            <p className="text-[12px] text-[var(--color-purple-gray)] italic">
+              No output yet — click <span className="font-semibold text-[var(--color-deep-plum)] not-italic">Generate</span> to start.
+            </p>
+          </div>
         )}
 
         {(value || draft) && (
@@ -74,20 +93,22 @@ export function GeneratorShell({
               value={draft}
               onChange={e => setDraft(e.target.value)}
               rows={Math.min(20, Math.max(6, (draft ?? '').split('\n').length + 1))}
-              className="w-full rounded-md border border-wm-border bg-wm-bg px-3 py-2 text-[13px] focus:outline-none focus:border-wm-accent whitespace-pre-wrap"
+              className="w-full rounded-lg border border-[var(--color-lavender)] bg-[var(--color-cream)] px-4 py-3 text-[13px] text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)] focus:ring-2 focus:ring-[var(--color-lavender)] whitespace-pre-wrap leading-relaxed"
             />
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] text-wm-text-subtle">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-[10px] text-[var(--color-purple-gray)]">
                 {draft.length.toLocaleString()} characters
               </span>
               <div className="flex items-center gap-2">
                 {savedAt && !dirty && (
-                  <span className="text-[11px] text-wm-text-subtle inline-flex items-center gap-1">
+                  <span className="text-[11px] text-[var(--color-purple-gray)] inline-flex items-center gap-1">
                     <Save size={11} /> Saved {new Date(savedAt).toLocaleTimeString()}
                   </span>
                 )}
                 {dirty && (
-                  <button
+                  <SrpButton
+                    variant="primary"
+                    size="sm"
                     onClick={async () => {
                       setSavingEdit(true)
                       try {
@@ -95,23 +116,22 @@ export function GeneratorShell({
                         setSavedAt(new Date().toISOString())
                       } finally { setSavingEdit(false) }
                     }}
-                    disabled={savingEdit}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-3 py-1 text-[11px] text-white disabled:opacity-50"
+                    busy={savingEdit}
+                    leadingIcon={<Save size={12} />}
                   >
-                    {savingEdit ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
                     Save edit
-                  </button>
+                  </SrpButton>
                 )}
               </div>
             </div>
             {outputRenderer && !dirty && (
-              <div className="pt-2 border-t border-wm-border">
+              <div className="pt-3 border-t border-[var(--color-lavender)]">
                 {outputRenderer(value)}
               </div>
             )}
           </div>
         )}
       </div>
-    </div>
+    </section>
   )
 }

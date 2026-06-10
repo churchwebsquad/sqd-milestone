@@ -15,19 +15,35 @@
  */
 
 import { useCallback } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Loader2, Wifi, WifiOff } from 'lucide-react'
-import {
-  updateSession,
-  SRP_STEPS,
-} from '../lib/srpSessions'
+import { useNavigate, useParams } from 'react-router-dom'
+import { Loader2, Building2, ListChecks, FileVideo, Sparkles } from 'lucide-react'
+import { updateSession, SRP_STEPS } from '../lib/srpSessions'
 import { useSrpSession } from '../lib/srpRealtime'
 import type { SrpStep } from '../types/database'
-import { SrpStepIndicator } from '../components/srp/SrpStepIndicator'
+import { SrpWorkflowShell } from '../components/srp/_shared/SrpWorkflowShell'
+import type { SrpSidebarStepperItem } from '../components/srp/_shared/SrpSidebarStepper'
 import { AccountStep } from '../components/srp/AccountStep'
 import { DeliverableStep } from '../components/srp/DeliverableStep'
 import { SermonInputStep } from '../components/srp/SermonInputStep'
 import { ReviewStep } from '../components/srp/ReviewStep'
+
+const STEP_META: Record<SrpStep, { icon: SrpSidebarStepperItem['icon']; description: string }> = {
+  account:      { icon: Building2,  description: 'Partner this run is for'        },
+  deliverables: { icon: ListChecks, description: 'What this run will produce'     },
+  sermon:       { icon: FileVideo,  description: 'Drop in sermon URL + transcript'},
+  review:       { icon: Sparkles,   description: 'Generate, polish, and approve'  },
+  approved:     { icon: Sparkles,   description: 'Live in ClickUp / Vista'        },
+  // Legacy step name from old rows — normalize coerces it to 'review',
+  // so it never appears in the sidebar. Entry kept to satisfy the
+  // Record<SrpStep, ...> contract.
+  reelCaptions: { icon: Sparkles,   description: '(legacy — see review)'          },
+}
+
+const STEP_ITEMS: SrpSidebarStepperItem[] = SRP_STEPS.map(step => ({
+  step,
+  icon:        STEP_META[step].icon,
+  description: STEP_META[step].description,
+}))
 
 export default function SrpWorkflowPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
@@ -47,18 +63,15 @@ export default function SrpWorkflowPage() {
 
   if (loading) {
     return (
-      <div className="min-h-full grid place-items-center text-wm-text-muted">
+      <div className="min-h-full grid place-items-center bg-[var(--color-cream)] text-[var(--color-purple-gray)]">
         <Loader2 className="animate-spin" />
       </div>
     )
   }
   if (error || !session) {
     return (
-      <div className="min-h-full py-6 px-4 md:px-6 max-w-3xl mx-auto">
-        <Link to="/social/srp" className="inline-flex items-center gap-1 text-[12px] text-wm-text-muted hover:text-wm-text mb-3">
-          <ArrowLeft size={12} /> Dashboard
-        </Link>
-        <div className="rounded-md border border-wm-danger/30 bg-wm-danger-bg px-4 py-3 text-[13px] text-wm-danger">
+      <div className="min-h-full py-10 px-4 bg-[var(--color-cream)]">
+        <div className="max-w-2xl mx-auto rounded-xl border border-wm-danger/30 bg-wm-danger-bg px-5 py-4 text-[13px] text-wm-danger">
           {error ?? 'Session not found.'}
         </div>
       </div>
@@ -66,82 +79,52 @@ export default function SrpWorkflowPage() {
   }
 
   const step = normalizeStep(session.current_step)
-  const stepIx = SRP_STEPS.indexOf(step)
 
   return (
-    <div className="min-h-full bg-wm-bg py-6 px-4 md:px-6">
-      <div className="max-w-5xl mx-auto">
-        <Link to="/social/srp" className="inline-flex items-center gap-1 text-[12px] text-wm-text-muted hover:text-wm-text mb-3">
-          <ArrowLeft size={12} /> Dashboard
-        </Link>
-
-        <header className="mb-5">
-          <div className="flex items-baseline justify-between gap-2">
-            <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
-              SRP · {session.member ?? '—'} · <span className="font-mono">{session.session_id}</span>
-            </p>
-            <span
-              className={[
-                'inline-flex items-center gap-1 text-[10px] uppercase tracking-wider',
-                connected ? 'text-wm-success' : 'text-wm-text-subtle',
-              ].join(' ')}
-              title={connected ? 'Realtime updates connected' : 'Realtime disconnected — refresh manually'}
-            >
-              {connected ? <Wifi size={10} /> : <WifiOff size={10} />}
-              {connected ? 'live' : 'polling'}
-            </span>
-          </div>
-          <h1 className="text-[22px] font-semibold text-wm-text mt-0.5">{session.church_name ?? 'SRP session'}</h1>
-        </header>
-
-        <SrpStepIndicator
-          steps={SRP_STEPS}
-          currentStep={step}
-          onJump={async s => {
-            // Allow jumping back to any earlier step, never forward beyond
-            // the saved progress (each step has its own completion check).
-            const targetIx = SRP_STEPS.indexOf(s)
-            if (targetIx <= stepIx) await goToStep(s)
-          }}
+    <SrpWorkflowShell
+      backHref="/social/srp"
+      backLabel="Back to SRP dashboard"
+      kicker={`SRP · ${session.member ?? '—'}`}
+      title={session.church_name ?? 'SRP session'}
+      connected={connected}
+      stepItems={STEP_ITEMS}
+      currentStep={step}
+      onJump={goToStep}
+    >
+      {step === 'account' && (
+        <AccountStep
+          session={session}
+          onContinue={() => void goToStep('deliverables')}
         />
-
-        <div className="mt-5">
-          {step === 'account' && (
-            <AccountStep
-              session={session}
-              onContinue={() => void goToStep('deliverables')}
-            />
-          )}
-          {step === 'deliverables' && (
-            <DeliverableStep
-              session={session}
-              onBack={() => void goToStep('account')}
-              onContinue={() => void goToStep('sermon')}
-              onChange={() => void reload()}
-            />
-          )}
-          {step === 'sermon' && (
-            <SermonInputStep
-              session={session}
-              onBack={() => void goToStep('deliverables')}
-              onContinue={() => void goToStep('review')}
-              onChange={() => void reload()}
-            />
-          )}
-          {step === 'review' && (
-            <ReviewStep
-              session={session}
-              onBack={() => void goToStep('sermon')}
-              onApprove={async () => {
-                await updateSession(session.session_id, { status: 'completed', current_step: 'approved' })
-                navigate('/social/srp')
-              }}
-              onChange={() => void reload()}
-            />
-          )}
-        </div>
-      </div>
-    </div>
+      )}
+      {step === 'deliverables' && (
+        <DeliverableStep
+          session={session}
+          onBack={() => void goToStep('account')}
+          onContinue={() => void goToStep('sermon')}
+          onChange={() => void reload()}
+        />
+      )}
+      {step === 'sermon' && (
+        <SermonInputStep
+          session={session}
+          onBack={() => void goToStep('deliverables')}
+          onContinue={() => void goToStep('review')}
+          onChange={() => void reload()}
+        />
+      )}
+      {step === 'review' && (
+        <ReviewStep
+          session={session}
+          onBack={() => void goToStep('sermon')}
+          onApprove={async () => {
+            await updateSession(session.session_id, { status: 'completed', current_step: 'approved' })
+            navigate('/social/srp')
+          }}
+          onChange={() => void reload()}
+        />
+      )}
+    </SrpWorkflowShell>
   )
 }
 

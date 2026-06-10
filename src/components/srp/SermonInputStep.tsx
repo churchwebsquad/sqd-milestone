@@ -5,11 +5,14 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Loader2, Save, Sparkles, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Loader2, Save, Sparkles, X, FileVideo, AlertTriangle } from 'lucide-react'
 import { updateSession, getSession } from '../../lib/srpSessions'
 import { validateMediaUrl } from '../../lib/mediaUrlValidator'
 import { supabase } from '../../lib/supabase'
 import type { SmsSrpGeneration } from '../../types/database'
+import { SrpStepPanel } from './_shared/SrpStepPanel'
+import { SrpButton } from './_shared/SrpButton'
+import { SrpStatusCard } from './_shared/SrpStatusCard'
 
 const FAILED_PREFIX = '__TRANSCRIPTION_FAILED__'
 
@@ -127,109 +130,128 @@ export function SermonInputStep({ session, onBack, onContinue, onChange }: {
   }, [])
 
   const canContinue = transcript.trim().length > 0
+  const wordCount = transcript.split(/\s+/).filter(Boolean).length
 
   return (
-    <section className="rounded-lg border border-wm-border bg-wm-bg-elevated p-5 space-y-4">
-      <header>
-        <h2 className="text-[16px] font-semibold text-wm-text">Sermon input</h2>
-        <p className="text-[12px] text-wm-text-muted mt-1">
-          Paste the sermon transcript and optionally link the recording. Fields auto-save when you click outside them.
-        </p>
-      </header>
-
-      <div className="space-y-3">
-        <div>
-          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
-            Video URL <span className="text-wm-text-muted normal-case font-normal">(optional — for transcription + clip rendering)</span>
-          </p>
-          <div className="mt-1 flex items-center gap-2">
-            <input
-              type="url"
-              value={videoUrl}
-              onChange={e => setVideoUrl(e.target.value)}
-              onBlur={() => void saveVideoUrl()}
-              placeholder="https://… (YouTube, Vimeo, Dropbox, Drive)"
-              disabled={transcribing}
-              className="flex-1 rounded-md border border-wm-border bg-wm-bg px-3 py-2 text-[13px] focus:outline-none focus:border-wm-accent disabled:opacity-50"
-            />
-            <button
-              type="button"
-              onClick={() => void transcribeFromUrl()}
-              disabled={transcribing || !videoUrl.trim()}
-              className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-2 text-[12px] text-white font-semibold disabled:opacity-50 whitespace-nowrap"
+    <SrpStepPanel
+      eyebrow="Step 3 of 4"
+      icon={FileVideo}
+      title="Sermon input"
+      description="Paste the sermon transcript and optionally link the recording. Fields auto-save when you click outside them."
+      footer={
+        <>
+          <SrpButton variant="ghost" onClick={onBack} leadingIcon={<ArrowLeft size={14} />}>
+            Back
+          </SrpButton>
+          <div className="flex items-center gap-3">
+            {saving && (
+              <span className="text-[11px] text-[var(--color-purple-gray)] inline-flex items-center gap-1">
+                <Loader2 size={11} className="animate-spin" /> Saving {saving}…
+              </span>
+            )}
+            {!saving && savedAt && (
+              <span className="text-[11px] text-[var(--color-purple-gray)] inline-flex items-center gap-1">
+                <Save size={11} /> Saved {new Date(savedAt).toLocaleTimeString()}
+              </span>
+            )}
+            <SrpButton
+              variant="secondary"
+              onClick={onContinue}
+              disabled={!canContinue}
+              trailingIcon={<ArrowRight size={14} />}
             >
-              {transcribing
-                ? <><Loader2 size={12} className="animate-spin" /> Transcribing…</>
-                : <><Sparkles size={12} /> Transcribe</>}
-            </button>
+              Continue
+            </SrpButton>
           </div>
-          {transcribing && (
-            <div className="mt-2 rounded-md border border-wm-accent/30 bg-wm-accent/5 px-3 py-2 flex items-center gap-2">
-              <Loader2 size={12} className="animate-spin text-wm-accent-strong shrink-0" />
-              <p className="text-[12px] text-wm-text leading-snug flex-1">
+        </>
+      }
+    >
+      {/* Video URL block — input + transcribe trigger + live progress */}
+      <div className="space-y-2">
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="text-[10px] uppercase tracking-[0.12em] font-bold text-[var(--color-purple-gray)]">Video URL</p>
+          <p className="text-[10px] text-[var(--color-purple-gray)]">Optional — for transcription &amp; clip rendering</p>
+        </div>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          <input
+            type="url"
+            value={videoUrl}
+            onChange={e => setVideoUrl(e.target.value)}
+            onBlur={() => void saveVideoUrl()}
+            placeholder="https://… (YouTube, Vimeo, Dropbox, Drive)"
+            disabled={transcribing}
+            className="flex-1 rounded-full border border-[var(--color-lavender)] bg-white px-4 py-2 text-[13px] text-[var(--color-deep-plum)] placeholder:text-[var(--color-purple-gray)] focus:outline-none focus:border-[var(--color-primary-purple)] focus:ring-2 focus:ring-[var(--color-lavender)] disabled:opacity-50"
+          />
+          <SrpButton
+            variant="secondary"
+            onClick={() => void transcribeFromUrl()}
+            disabled={!videoUrl.trim()}
+            busy={transcribing}
+            leadingIcon={<Sparkles size={14} />}
+          >
+            {transcribing ? 'Transcribing…' : 'Transcribe'}
+          </SrpButton>
+        </div>
+
+        {transcribing && (
+          <SrpStatusCard
+            tone="accent"
+            icon={Loader2}
+            actions={
+              <button
+                onClick={cancelTranscribePolling}
+                className="text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] transition-colors"
+                title="Stop polling (n8n continues in background)"
+                aria-label="Stop polling"
+              >
+                <X size={14} />
+              </button>
+            }
+          >
+            <div className="flex items-baseline justify-between gap-3">
+              <span>
                 {transcribeElapsed < 30   ? 'Sending to the transcription service…'
                 : transcribeElapsed < 90  ? 'Audio extraction + transcription in progress…'
                 : transcribeElapsed < 240 ? 'Still working. Sermon transcription typically takes 3-7 minutes.'
                 : 'Long-running. Check back, the result lands in this textarea when n8n completes.'}
-              </p>
-              <span className="text-[10px] font-mono text-wm-text-subtle">{Math.floor(transcribeElapsed / 60)}:{String(transcribeElapsed % 60).padStart(2, '0')}</span>
-              <button onClick={cancelTranscribePolling} className="text-wm-text-muted hover:text-wm-text" title="Stop polling (n8n continues in background)">
-                <X size={12} />
-              </button>
+              </span>
+              <span className="text-[10px] font-mono text-[var(--color-purple-gray)]">
+                {Math.floor(transcribeElapsed / 60)}:{String(transcribeElapsed % 60).padStart(2, '0')}
+              </span>
             </div>
-          )}
-          {transcribeError && !transcribing && (
-            <div className="mt-2 rounded-md border border-wm-danger/30 bg-wm-danger-bg px-3 py-2 text-[12px] text-wm-danger">
-              {transcribeError}
-            </div>
-          )}
-          {failedMessage && !transcribing && (
-            <div className="mt-2 rounded-md border border-wm-danger/30 bg-wm-danger-bg px-3 py-2 text-[12px] text-wm-danger">
-              Last transcription failed: {failedMessage}
-            </div>
-          )}
-        </div>
+          </SrpStatusCard>
+        )}
+        {transcribeError && !transcribing && (
+          <SrpStatusCard tone="danger" icon={AlertTriangle} title="Transcription error">
+            {transcribeError}
+          </SrpStatusCard>
+        )}
+        {failedMessage && !transcribing && (
+          <SrpStatusCard tone="danger" icon={AlertTriangle} title="Last transcription failed">
+            {failedMessage}
+          </SrpStatusCard>
+        )}
+      </div>
 
-        <label className="block">
-          <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Transcript <span className="text-wm-danger normal-case font-normal">(required)</span></span>
-          <textarea
-            value={transcript}
-            onChange={e => setTranscript(e.target.value)}
-            onBlur={() => void saveTranscript()}
-            placeholder="Paste the sermon transcript here…"
-            rows={14}
-            className="mt-1 w-full rounded-md border border-wm-border bg-wm-bg px-3 py-2 text-[13px] focus:outline-none focus:border-wm-accent font-mono"
-          />
-          <p className="text-[10px] text-wm-text-subtle mt-1">
-            {transcript.length.toLocaleString()} characters · ~{Math.round(transcript.split(/\s+/).filter(Boolean).length).toLocaleString()} words
+      {/* Transcript block */}
+      <div className="space-y-2">
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="text-[10px] uppercase tracking-[0.12em] font-bold text-[var(--color-purple-gray)]">
+            Transcript <span className="text-wm-danger normal-case font-normal">· required</span>
           </p>
-        </label>
-      </div>
-
-      <div className="flex items-center justify-between gap-2">
-        <button onClick={onBack} className="inline-flex items-center gap-1.5 text-[12px] text-wm-text-muted hover:text-wm-text px-2 py-1.5">
-          <ArrowLeft size={12} /> Back
-        </button>
-        <div className="flex items-center gap-3">
-          {saving && (
-            <span className="text-[11px] text-wm-text-muted inline-flex items-center gap-1">
-              <Loader2 size={11} className="animate-spin" /> Saving {saving}…
-            </span>
-          )}
-          {!saving && savedAt && (
-            <span className="text-[11px] text-wm-text-subtle inline-flex items-center gap-1">
-              <Save size={11} /> Saved {new Date(savedAt).toLocaleTimeString()}
-            </span>
-          )}
-          <button
-            onClick={onContinue}
-            disabled={!canContinue}
-            className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white disabled:opacity-50"
-          >
-            Continue <ArrowRight size={12} />
-          </button>
+          <p className="text-[10px] text-[var(--color-purple-gray)]">
+            {transcript.length.toLocaleString()} chars · {wordCount.toLocaleString()} words
+          </p>
         </div>
+        <textarea
+          value={transcript}
+          onChange={e => setTranscript(e.target.value)}
+          onBlur={() => void saveTranscript()}
+          placeholder="Paste the sermon transcript here…"
+          rows={14}
+          className="w-full rounded-lg border border-[var(--color-lavender)] bg-white px-4 py-3 text-[13px] text-[var(--color-deep-plum)] placeholder:text-[var(--color-purple-gray)] focus:outline-none focus:border-[var(--color-primary-purple)] focus:ring-2 focus:ring-[var(--color-lavender)] font-mono leading-relaxed"
+        />
       </div>
-    </section>
+    </SrpStepPanel>
   )
 }
