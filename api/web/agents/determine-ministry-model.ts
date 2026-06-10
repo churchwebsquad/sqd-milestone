@@ -33,6 +33,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
+import { setRoadmapStateAtomic } from './_lib/roadmapStateMerge.js'
 
 export const maxDuration = 60
 
@@ -248,13 +249,11 @@ export default async function handler(req: any, res: any) {
     },
   }
 
-  const nextState = {
-    ...(project.roadmap_state ?? {}),
-    ministry_model: ministryModel,
+  try {
+    await setRoadmapStateAtomic(sb, projectId, ['ministry_model'], ministryModel)
+  } catch (e: any) {
+    return res.status(500).json({ error: `DB write failed: ${e?.message ?? 'unknown'}` })
   }
-  const { error: writeErr } = await sb.from('strategy_web_projects')
-    .update({ roadmap_state: nextState }).eq('id', projectId)
-  if (writeErr) return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
 
   return res.status(200).json({
     ok: true,

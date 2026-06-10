@@ -26,6 +26,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
 import { loadSnippetsForAgent } from './_lib/loadSnippets.js'
+import { setRoadmapStateAtomic } from './_lib/roadmapStateMerge.js'
 
 export const maxDuration = 60
 
@@ -244,18 +245,16 @@ export default async function handler(req: any, res: any) {
     },
   }
   nextSections[sectionIx] = nextSection
-  const nextDrafts = {
-    ...(state.page_drafts ?? {}),
-    [pageSlug]: {
-      ...(draft as any),
-      sections: nextSections,
-      _meta: { ...((draft as any)?._meta ?? {}), last_reorg_at: new Date().toISOString() },
-    },
+  const nextDraft = {
+    ...(draft as any),
+    sections: nextSections,
+    _meta: { ...((draft as any)?._meta ?? {}), last_reorg_at: new Date().toISOString() },
   }
-  const { error: writeErr } = await sb.from('strategy_web_projects')
-    .update({ roadmap_state: { ...state, page_drafts: nextDrafts } })
-    .eq('id', projectId)
-  if (writeErr) return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
+  try {
+    await setRoadmapStateAtomic(sb, projectId, ['page_drafts', pageSlug], nextDraft)
+  } catch (e: any) {
+    return res.status(500).json({ error: `DB write failed: ${e?.message ?? 'unknown'}` })
+  }
 
   return res.status(200).json({
     ok: true,

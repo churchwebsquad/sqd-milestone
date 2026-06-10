@@ -11,6 +11,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
 import { resolvePromptServer } from './_lib/resolvePrompt.js'
+import { setRoadmapStateAtomic } from './_lib/roadmapStateMerge.js'
 
 export const maxDuration = 180
 const MODEL = 'anthropic/claude-opus-4-7'
@@ -175,12 +176,11 @@ export default async function handler(req: any, res: any) {
     usage,
   }
 
-  const { error: writeErr } = await sb.from('strategy_web_projects')
-    .update({
-      roadmap_state: { ...(project.roadmap_state ?? {}), stage_6: { ...toolResult, _meta: meta } },
-    })
-    .eq('id', projectId)
-  if (writeErr) return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
+  try {
+    await setRoadmapStateAtomic(sb, projectId, ['stage_6'], { ...toolResult, _meta: meta })
+  } catch (e: any) {
+    return res.status(500).json({ error: `DB write failed: ${e?.message ?? 'unknown'}` })
+  }
 
   return res.status(200).json({ ok: true, output: toolResult, usage })
 }

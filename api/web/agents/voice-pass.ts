@@ -30,6 +30,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
 import { resolvePromptServer } from './_lib/resolvePrompt.js'
+import { setRoadmapStateAtomic } from './_lib/roadmapStateMerge.js'
 
 export const maxDuration = 600  // 17 pages × ~10 sec parallel + overhead
 // Sonnet 4.6 is the target model for voice work. If the AI Gateway
@@ -641,12 +642,11 @@ async function voicePassHandler(req: any, res: any) {
     _meta:    meta,
   }
 
-  const { error: writeErr } = await sb.from('strategy_web_projects')
-    .update({
-      roadmap_state: { ...(project.roadmap_state ?? {}), stage_7: stage7Write },
-    })
-    .eq('id', projectId)
-  if (writeErr) return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
+  try {
+    await setRoadmapStateAtomic(sb, projectId, ['stage_7'], stage7Write)
+  } catch (e: any) {
+    return res.status(500).json({ error: `DB write failed: ${e?.message ?? 'unknown'}` })
+  }
 
   return res.status(200).json({ ok: true, output: stage7Write, usage })
 }

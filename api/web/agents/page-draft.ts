@@ -27,6 +27,7 @@ import { generateText, jsonSchema, tool } from 'ai'
 import { resolvePromptServer } from './_lib/resolvePrompt.js'
 import { loadSnippetsForAgent } from './_lib/loadSnippets.js'
 import { stripDashesFromSections } from './_lib/stripDashes.js'
+import { setRoadmapStateAtomic } from './_lib/roadmapStateMerge.js'
 
 export const maxDuration = 300
 const MODEL = 'anthropic/claude-sonnet-4-6'
@@ -419,16 +420,11 @@ export default async function handler(req: any, res: any) {
     },
   }
 
-  const prevPageDrafts = roadmapState.page_drafts ?? {}
-  const { error: writeErr } = await sb.from('strategy_web_projects')
-    .update({
-      roadmap_state: {
-        ...roadmapState,
-        page_drafts: { ...prevPageDrafts, [pageSlug]: draft },
-      },
-    })
-    .eq('id', projectId)
-  if (writeErr) return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
+  try {
+    await setRoadmapStateAtomic(sb, projectId, ['page_drafts', pageSlug], draft)
+  } catch (e: any) {
+    return res.status(500).json({ error: `DB write failed: ${e?.message ?? 'unknown'}` })
+  }
 
   return res.status(200).json({ ok: true, draft, validation, usage })
 }

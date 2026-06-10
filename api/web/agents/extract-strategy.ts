@@ -35,6 +35,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
 import { resolvePromptServer } from './_lib/resolvePrompt.js'
+import { setRoadmapStateAtomic } from './_lib/roadmapStateMerge.js'
 
 // Vercel AI Gateway routes by `provider/model` slug. The gateway auths
 // via AI_GATEWAY_API_KEY locally and VERCEL_OIDC_TOKEN on Vercel deploys
@@ -413,10 +414,19 @@ export default async function handler(req: any, res: any) {
   const derivedOpening = deriveOpeningParagraph(toolResult)
   const openingToWrite = project.roadmap_opening_paragraph || derivedOpening || null
 
+  // Two writes: the atomic roadmap_state slot for stage_1 (race-safe),
+  // and a separate update for the project columns. Columns are
+  // distinct fields on the row, not part of the JSONB column, so they
+  // can't race in the same way — a normal partial UPDATE is fine.
+  try {
+    await setRoadmapStateAtomic(sb, projectId, ['stage_1'], roadmapStatePatch.stage_1)
+  } catch (e: any) {
+    console.error('[extract-strategy] atomic write failed:', e?.message)
+    return res.status(500).json({ error: `DB write failed: ${e?.message ?? 'unknown'}` })
+  }
   const { error: writeErr } = await sb
     .from('strategy_web_projects')
     .update({
-      roadmap_state: { ...(project.roadmap_state ?? {}), ...roadmapStatePatch },
       roadmap_stage: 'strategy_done',
       roadmap_opening_paragraph: openingToWrite,
       roadmap_properties: mergedProps,

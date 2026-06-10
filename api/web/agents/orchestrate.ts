@@ -24,6 +24,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { createClient } from '@supabase/supabase-js'
+import { setRoadmapStateAtomic } from './_lib/roadmapStateMerge.js'
 
 export const maxDuration = 300
 
@@ -223,9 +224,7 @@ export default async function handler(req: any, res: any) {
         last_inline_edit_at: nowIso,
         last_inline_edit_by: userData.user.email ?? userData.user.id,
       }
-      await sb.from('strategy_web_projects').update({
-        roadmap_state: { ...roadmapState, stage_2: result.sitemap },
-      }).eq('id', projectId)
+      await setRoadmapStateAtomic(sb, projectId, ['stage_2'], result.sitemap)
       return res.status(200).json({ ok: true, page: result.updatedPage, nav_updates: result.navUpdates })
     }
 
@@ -244,19 +243,14 @@ export default async function handler(req: any, res: any) {
       //      cancelled mid-call but whose downstream cascade should
       //      still be blocked).
       const now = new Date().toISOString()
-      await sb.from('strategy_web_projects').update({
-        roadmap_state: {
-          ...roadmapState,
-          engine_state: {
-            ...engineState,
-            cancel_requested:     true,
-            cancel_requested_at:  now,
-            status:               'cancelled',
-            cancelled_at:         now,
-            last_action_at:       now,
-          },
-        },
-      }).eq('id', projectId)
+      await setRoadmapStateAtomic(sb, projectId, ['engine_state'], {
+        ...engineState,
+        cancel_requested:     true,
+        cancel_requested_at:  now,
+        status:               'cancelled',
+        cancelled_at:         now,
+        last_action_at:       now,
+      })
       return res.status(200).json({ ok: true, cancel_requested: true })
     }
 
@@ -267,9 +261,7 @@ export default async function handler(req: any, res: any) {
       // an in-progress status (briefing/drafting/etc.) past the point
       // a real run would have finished, indicating the agent call
       // crashed mid-flight.
-      await sb.from('strategy_web_projects').update({
-        roadmap_state: { ...roadmapState, engine_state: {} },
-      }).eq('id', projectId)
+      await setRoadmapStateAtomic(sb, projectId, ['engine_state'], {})
       return res.status(200).json({ ok: true, engine_state: {} })
     }
 
@@ -325,9 +317,7 @@ export default async function handler(req: any, res: any) {
       const next = action === 'approve_sitemap'
         ? { ...stage2Meta, status: 'approved', approved_at: new Date().toISOString(), approved_by: userData.user.id }
         : { ...stage2Meta, status: 'draft', unlocked_at: new Date().toISOString() }
-      await sb.from('strategy_web_projects').update({
-        roadmap_state: { ...roadmapState, stage_2: { ...stage2, _meta: next } },
-      }).eq('id', projectId)
+      await setRoadmapStateAtomic(sb, projectId, ['stage_2'], { ...stage2, _meta: next })
       return res.status(200).json({ ok: true, sitemap_status: next.status })
     }
 
@@ -416,12 +406,7 @@ export default async function handler(req: any, res: any) {
       const pageSuggestion = allSuggestions[pageSlug] ?? { sections: [], user_overrides: {} }
       const nextOverrides = { ...(pageSuggestion.user_overrides ?? {}), [String(sectionIx)]: templateId }
       const nextSuggestion = { ...pageSuggestion, user_overrides: nextOverrides }
-      await sb.from('strategy_web_projects').update({
-        roadmap_state: {
-          ...curState,
-          page_bind_suggestions: { ...allSuggestions, [pageSlug]: nextSuggestion },
-        },
-      }).eq('id', projectId)
+      await setRoadmapStateAtomic(sb, projectId, ['page_bind_suggestions', pageSlug], nextSuggestion)
       return res.status(200).json({
         ok: true,
         page_slug: pageSlug,
@@ -559,23 +544,18 @@ export default async function handler(req: any, res: any) {
       // Persist on roadmap_state.page_bind_suggestions[slug]. We DON'T
       // touch web_pages/web_sections — those land on Commit. This is
       // purely a preview the user can swap before locking in.
+      // We DO need to preserve any prior user_overrides — read just to
+      // capture those, then write atomically to the slug's slot.
       const { data: cur } = await sb.from('strategy_web_projects')
         .select('roadmap_state').eq('id', projectId).maybeSingle()
       const curState = (cur?.roadmap_state ?? {}) as Record<string, any>
       const prev = (curState.page_bind_suggestions ?? {}) as Record<string, any>
-      const next = {
-        ...prev,
-        [pageSlug]: {
-          sections: sectionPicks,
-          generated_at: new Date().toISOString(),
-          // Preserve any user_overrides the strategist already set —
-          // those take precedence at commit time.
-          user_overrides: prev[pageSlug]?.user_overrides ?? {},
-        },
+      const nextSuggestion = {
+        sections: sectionPicks,
+        generated_at: new Date().toISOString(),
+        user_overrides: prev[pageSlug]?.user_overrides ?? {},
       }
-      await sb.from('strategy_web_projects').update({
-        roadmap_state: { ...curState, page_bind_suggestions: next },
-      }).eq('id', projectId)
+      await setRoadmapStateAtomic(sb, projectId, ['page_bind_suggestions', pageSlug], nextSuggestion)
 
       return res.status(200).json({
         ok: true, page_slug: pageSlug,
@@ -1184,23 +1164,20 @@ async function persistAuditLoopMeta(sb: any, projectId: string, auditLoop: {
   status: string; iterations: Array<{ loop: number; gaps_count: number; recommended_action: string }>
   residual_gap_count: number; message: string
 }): Promise<void> {
+  // Read just enough to preserve sibling fields under stage_2 + its
+  // _meta; the WRITE only sets stage_2 (atomic top-level slot).
   const { data: current } = await sb.from('strategy_web_projects')
     .select('roadmap_state').eq('id', projectId).maybeSingle()
   const state = (current?.roadmap_state ?? {}) as Record<string, any>
   const stage2 = (state.stage_2 ?? {}) as Record<string, any>
   const stage2Meta = (stage2._meta ?? {}) as Record<string, any>
-  await sb.from('strategy_web_projects').update({
-    roadmap_state: {
-      ...state,
-      stage_2: {
-        ...stage2,
-        _meta: {
-          ...stage2Meta,
-          audit_loop: { ...auditLoop, completed_at: new Date().toISOString() },
-        },
-      },
+  await setRoadmapStateAtomic(sb, projectId, ['stage_2'], {
+    ...stage2,
+    _meta: {
+      ...stage2Meta,
+      audit_loop: { ...auditLoop, completed_at: new Date().toISOString() },
     },
-  }).eq('id', projectId)
+  })
 }
 
 async function runCommit(ctx: {
@@ -1410,9 +1387,7 @@ async function clearCancelledMarker(sb: any, projectId: string): Promise<void> {
   delete eng.cancel_requested_at
   delete eng.cancelled_at
   if (eng.status === 'cancelled') eng.status = 'idle'
-  await sb.from('strategy_web_projects').update({
-    roadmap_state: { ...state, engine_state: eng },
-  }).eq('id', projectId)
+  await setRoadmapStateAtomic(sb, projectId, ['engine_state'], eng)
 }
 
 /** Write the canonical cancelled engine state. Clears the
@@ -1420,6 +1395,9 @@ async function clearCancelledMarker(sb: any, projectId: string): Promise<void> {
  *  slate. Preserves any other engine_state telemetry the helper had
  *  accumulated (loop counts, pages_drafted, etc.). */
 async function writeCancelledState(sb: any, projectId: string, ctxState: Record<string, any> = {}): Promise<void> {
+  // We DO need to read engine_state first to preserve telemetry
+  // (loop_count, pages_drafted, etc.). But the WRITE is atomic on
+  // the engine_state slot only — never touches sibling keys.
   const { data: current } = await sb.from('strategy_web_projects')
     .select('roadmap_state').eq('id', projectId).maybeSingle()
   const state = (current?.roadmap_state ?? {}) as Record<string, any>
@@ -1429,18 +1407,18 @@ async function writeCancelledState(sb: any, projectId: string, ctxState: Record<
   eng.status = 'cancelled'
   eng.cancelled_at = new Date().toISOString()
   eng.last_action_at = eng.cancelled_at
-  await sb.from('strategy_web_projects').update({
-    roadmap_state: { ...state, engine_state: eng },
-  }).eq('id', projectId)
+  await setRoadmapStateAtomic(sb, projectId, ['engine_state'], eng)
 }
 
 async function writeEngineState(sb: any, projectId: string, engineState: Record<string, any>): Promise<void> {
-  const { data: current } = await sb.from('strategy_web_projects')
-    .select('roadmap_state').eq('id', projectId).maybeSingle()
-  const state = (current?.roadmap_state ?? {}) as Record<string, any>
-  await sb.from('strategy_web_projects').update({
-    roadmap_state: { ...state, engine_state: engineState },
-  }).eq('id', projectId)
+  // Atomic top-level set of engine_state. Replaces the prior
+  // read-modify-write that was the worst racer — engine_state is
+  // updated many times during a single iterate loop and used to
+  // overwrite OTHER agents' in-flight writes to sibling keys
+  // (stage_1, site_strategy, etc.) when those agents' frozen-state
+  // snapshots wrote back. Single jsonb_set means we touch only this
+  // slot; everything else in the column is undisturbed.
+  await setRoadmapStateAtomic(sb, projectId, ['engine_state'], engineState)
 }
 
 /** Deterministic page rename — updates the matching page in

@@ -46,6 +46,7 @@ import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { setRoadmapStateAtomic } from './_lib/roadmapStateMerge.js'
 
 export const maxDuration = 180
 
@@ -406,14 +407,15 @@ export default async function handler(req: any, res: any) {
     },
   }
 
-  const prevOutlines = (state.page_outlines ?? {}) as Record<string, any>
-  const nextState = {
-    ...state,
-    page_outlines: { ...prevOutlines, [pageSlug]: outline },
+  // Atomic write — sets ONLY this page's slot inside page_outlines.
+  // Server-side jsonb_set; never overwrites siblings (other pages'
+  // outlines OR completely unrelated keys like stage_1 / site_strategy)
+  // that the prior read-modify-write pattern was clobbering.
+  try {
+    await setRoadmapStateAtomic(sb, projectId, ['page_outlines', pageSlug], outline)
+  } catch (e: any) {
+    return res.status(500).json({ error: `DB write failed: ${e?.message ?? 'unknown'}` })
   }
-  const { error: writeErr } = await sb.from('strategy_web_projects')
-    .update({ roadmap_state: nextState }).eq('id', projectId)
-  if (writeErr) return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
 
   return res.status(200).json({
     ok: true,

@@ -24,6 +24,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
 import { resolvePromptServer } from './_lib/resolvePrompt.js'
+import { setRoadmapStateAtomic } from './_lib/roadmapStateMerge.js'
 import { FALLBACK_PROMPTS } from '../../../src/lib/pipelinePromptsCore.js'
 
 // Vercel serverless functions default to a short timeout (10s Hobby / 60s
@@ -287,14 +288,16 @@ export default async function handler(req: any, res: any) {
     },
   }
 
+  try {
+    await setRoadmapStateAtomic(sb, projectId, ['stage_2'], patch.stage_2)
+  } catch (e: any) {
+    await sb.from('strategy_web_projects').update({ roadmap_stage: 'strategy_done' }).eq('id', projectId)
+    return res.status(500).json({ error: `DB write failed: ${e?.message ?? 'unknown'}` })
+  }
   const { error: writeErr } = await sb
     .from('strategy_web_projects')
-    .update({
-      roadmap_state: { ...(project.roadmap_state ?? {}), ...patch },
-      roadmap_stage: 'sitemap_done',
-    })
+    .update({ roadmap_stage: 'sitemap_done' })
     .eq('id', projectId)
-
   if (writeErr) {
     await sb.from('strategy_web_projects').update({ roadmap_stage: 'strategy_done' }).eq('id', projectId)
     return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
