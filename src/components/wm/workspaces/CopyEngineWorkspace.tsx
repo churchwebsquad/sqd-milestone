@@ -1709,18 +1709,19 @@ function ExportImportPanel({ projectId, onImported }: {
   projectId: string
   onImported: () => Promise<void>
 }) {
-  const [busy, setBusy] = useState<'export' | 'import' | null>(null)
+  type Scope = 'sitemap' | 'copy' | 'full'
+  const [busy, setBusy] = useState<{ kind: 'export'; scope: Scope } | { kind: 'import' } | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [importText, setImportText] = useState('')
-  const [exportResult, setExportResult] = useState<{ filename: string; bytes: number } | null>(null)
+  const [exportResult, setExportResult] = useState<{ filename: string; bytes: number; scope: Scope } | null>(null)
   const [importMsg, setImportMsg] = useState<{
     kind: 'ok' | 'err'
     text: string
     detail?: { warnings?: string[]; next_steps?: string[]; details?: string[] }
   } | null>(null)
 
-  const handleExport = useCallback(async () => {
-    setBusy('export'); setExportResult(null)
+  const handleExport = useCallback(async (scope: Scope) => {
+    setBusy({ kind: 'export', scope }); setExportResult(null)
     try {
       const { data: { session: authSession } } = await supabase.auth.getSession()
       const jwt = authSession?.access_token
@@ -1728,19 +1729,19 @@ function ExportImportPanel({ projectId, onImported }: {
       const res = await fetch('/api/web/agents/orchestrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-        body: JSON.stringify({ projectId, action: 'export_state' }),
+        body: JSON.stringify({ projectId, action: 'export_state', scope }),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json?.error ?? 'Export failed')
       const doc = json?.export?.document
-      const filename = json?.export?.filename ?? 'copy-engine-export.md'
+      const filename = json?.export?.filename ?? `${scope}-export.md`
       if (typeof doc !== 'string') throw new Error('Export returned no document')
       const blob = new Blob([doc], { type: 'text/markdown;charset=utf-8' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url; a.download = filename; a.click()
       URL.revokeObjectURL(url)
-      setExportResult({ filename, bytes: doc.length })
+      setExportResult({ filename, bytes: doc.length, scope })
     } catch (e) {
       setExportResult(null)
       setImportMsg({ kind: 'err', text: e instanceof Error ? e.message : 'Export failed' })
@@ -1749,7 +1750,7 @@ function ExportImportPanel({ projectId, onImported }: {
 
   const handleImport = useCallback(async () => {
     if (!importText.trim()) return
-    setBusy('import'); setImportMsg(null)
+    setBusy({ kind: 'import' }); setImportMsg(null)
     try {
       const { data: { session: authSession } } = await supabase.auth.getSession()
       const jwt = authSession?.access_token
@@ -1787,36 +1788,62 @@ function ExportImportPanel({ projectId, onImported }: {
     } finally { setBusy(null) }
   }, [importText, projectId, onImported])
 
+  const isExportingScope = (scope: Scope): boolean =>
+    busy?.kind === 'export' && busy.scope === scope
+  const isBusy = busy != null
+
   return (
     <section className="rounded-lg border border-wm-border bg-wm-bg-elevated p-4 space-y-3">
       <header>
-        <h3 className="text-[14px] font-semibold text-wm-text">Round-trip refinement</h3>
+        <h3 className="text-[14px] font-semibold text-wm-text">Download &amp; refine</h3>
         <p className="text-[12px] text-wm-text-muted leading-snug">
-          Export the current sitemap, briefs, and drafts to a markdown file.
-          Edit it in another Claude / ChatGPT conversation or any text editor,
-          then paste it back here. Faster than turn-by-turn revising in app
-          when you need to rework multiple pages at once.
+          Pull the project out as markdown to edit elsewhere — paste back to
+          apply. Sitemap download is light (nav + audit only); copy download
+          carries the full strategic foundation (voice card, personas, SEO
+          targets, snippets) so an external AI conversation has everything
+          it needs to stay on-voice.
         </p>
       </header>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <button
           type="button"
-          onClick={() => void handleExport()}
-          disabled={busy != null}
+          onClick={() => void handleExport('sitemap')}
+          disabled={isBusy}
+          title="Download the sitemap + coverage audit only. Lightweight, focused on nav refinement."
+          className="inline-flex items-center gap-1.5 rounded-full border border-wm-accent/40 bg-white hover:bg-wm-accent/5 px-3 py-1.5 text-[12px] font-semibold text-wm-accent-strong disabled:opacity-50"
+        >
+          {isExportingScope('sitemap') ? <Loader2 size={12} className="animate-spin" /> : <GitBranch size={12} />}
+          Download sitemap
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleExport('copy')}
+          disabled={isBusy}
+          title="Download the page briefs + drafts + voice card + personas + SEO targets + snippets + audit. Everything an external copywriting conversation needs."
+          className="inline-flex items-center gap-1.5 rounded-full border border-wm-accent/40 bg-white hover:bg-wm-accent/5 px-3 py-1.5 text-[12px] font-semibold text-wm-accent-strong disabled:opacity-50"
+        >
+          {isExportingScope('copy') ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
+          Download copy
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleExport('full')}
+          disabled={isBusy}
+          title="Download everything — sitemap + audit + briefs + drafts + voice + snippets. Largest payload."
           className="inline-flex items-center gap-1.5 rounded-full border border-wm-border bg-wm-bg hover:bg-wm-accent/5 px-3 py-1.5 text-[12px] text-wm-text disabled:opacity-50"
         >
-          {busy === 'export' ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
-          Export to markdown
+          {isExportingScope('full') ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
+          Download everything
         </button>
         <button
           type="button"
           onClick={() => { setImportOpen(o => !o); setImportMsg(null) }}
-          disabled={busy != null}
+          disabled={isBusy}
           className="inline-flex items-center gap-1.5 rounded-full border border-wm-border bg-wm-bg hover:bg-wm-accent/5 px-3 py-1.5 text-[12px] text-wm-text disabled:opacity-50"
         >
           {importOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          {importOpen ? 'Hide importer' : 'Import refinements'}
+          {importOpen ? 'Hide importer' : 'Upload refinements'}
         </button>
         {exportResult && (
           <span className="text-[11px] text-wm-text-subtle ml-auto">
@@ -1844,7 +1871,7 @@ function ExportImportPanel({ projectId, onImported }: {
               disabled={busy != null || !importText.trim()}
               className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white font-semibold disabled:opacity-50"
             >
-              {busy === 'import' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              {busy?.kind === 'import' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
               Apply import
             </button>
           </div>

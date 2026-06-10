@@ -66,10 +66,23 @@ const CRITIQUE_TOOL = {
         description: 'Actions the orchestration loop should take. Order matters — earliest first. Empty array means everything passes; no re-runs needed.',
         items: {
           type: 'object',
-          required: ['page_slug','stage_to_rerun','note','severity'],
+          required: ['page_slug','stage_to_rerun','fix_kind','note','severity'],
           properties: {
             page_slug:       { type: 'string', description: 'Which page this directive targets. Use "*" for project-wide directives (synthesize re-run).' },
             stage_to_rerun:  { type: 'string', enum: ['synthesize','sitemap','page_briefs','page_draft','single_slot'] },
+            fix_kind: {
+              type: 'string',
+              enum: ['slot_edit','page_redraft','brief_update','sitemap_redraft','synthesize_rework'],
+              description: 'How the orchestrator should apply this directive. Pick the LEAST invasive fix that solves the issue — slot_edit beats page_redraft because page_redraft can re-introduce other slots\' issues. Use slot_edit when ONE slot/heading/CTA reads wrong; page_redraft when the page\'s structure or atom usage is wrong; brief_update when the brief itself misdirected the writer; sitemap_redraft when the page shouldn\'t exist OR is the wrong page_type; synthesize_rework when the strategy is wrong.',
+            },
+            slot_locator: {
+              type: ['object','null'],
+              description: 'Required when fix_kind=slot_edit. Identifies the single slot to rewrite — section_ix is zero-indexed against page_drafts[slug].sections, slot_key is one of "eyebrow","heading","tagline","description","body","cta", OR for group slots use "cards[N].heading" / "items[N].body" form.',
+              properties: {
+                section_ix: { type: 'number' },
+                slot_key:   { type: 'string' },
+              },
+            },
             note:            { type: 'string', description: 'Specific feedback to pass to the re-running stage. Concrete, not vague — "Hero heading reads like an ad slogan; use the discovery Q14 phrase instead" beats "make hero better".' },
             severity:        { type: 'string', enum: ['blocker','warning','nit'] },
           },

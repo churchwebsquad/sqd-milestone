@@ -2055,6 +2055,38 @@ exemplar you imitated OR which anti-exemplar you actively avoided.
 The Director uses voice_notes to judge whether the brand voice is
 landing intentionally vs. coincidentally.
 
+# Snippets — use {{token}} form for repeated references
+
+The user message includes a list of project snippets (church name,
+address, primary phone, primary email, denomination, founding year,
+service times, etc.). WHENEVER the copy needs to reference one of
+these values, USE the {{token}} form rather than typing the literal
+value. Two reasons:
+
+1. Consistency. If church_name appears in 12 places across the site
+   and the strategist changes spelling or punctuation later,
+   {{church_name}} updates everywhere automatically. Hand-typed
+   "Riverwood Chapel" stays stale in 11 places.
+2. Render-time substitution. The Brixies render pipeline expands
+   {{token}} into the value AFTER your draft is bound to templates,
+   so the final viewer sees the real value while the underlying
+   draft stays normalized.
+
+Examples — RIGHT:
+- Hero heading: "Welcome to {{church_name}}."
+- Contact band body: "Visit us at {{address}}, or call {{primary_phone}}."
+- Footer description: "{{church_name}} has gathered in {{city}} since {{founding_year}}."
+
+Examples — WRONG (don't do this):
+- Hero heading: "Welcome to Riverwood Chapel."   <- bypasses snippet
+- Contact band body: "Visit us at 123 Main St."  <- bypasses snippet
+
+Snippets are listed in the user message in the form:
+{{token}} -> "expansion". Only inline a literal value when the slot
+needs a VARIANT the snippet doesn't cover (e.g., snippet is
+"Riverwood Chapel" but the slot wants "the Riverwood community" —
+that's a different phrase, type it directly).
+
 # Output
 
 Submit via submit_page_draft with sections[]. If you deviate from
@@ -2096,6 +2128,13 @@ names:
 - page_slug
 - stage_to_rerun: one of synthesize / sitemap / page_briefs /
   page_draft / single_slot
+- fix_kind: one of slot_edit / page_redraft / brief_update /
+  sitemap_redraft / synthesize_rework
+- slot_locator: { section_ix, slot_key } — REQUIRED when fix_kind is
+  slot_edit. section_ix is zero-indexed against page_drafts[slug].
+  sections. slot_key is one of "eyebrow" / "heading" / "tagline" /
+  "description" / "body" / "cta", or for grouped slots use the
+  "cards[0].heading" / "items[2].body" form.
 - note: CONCRETE feedback the re-running stage can act on. "Hero
   reads like an ad slogan; the discovery brief uses the phrase
   'starting line, not a finish' — anchor the hero on that shape"
@@ -2107,20 +2146,45 @@ directive for it. The orchestration loop's job is to act on
 directives — empty directives means everything's ready for human
 review.
 
+# Fix kinds — pick the LEAST invasive that solves the problem
+
+The orchestrator routes each directive based on fix_kind. Picking too
+heavy a fix re-introduces issues on OTHER slots the writer had right.
+Order from least to most invasive:
+
+- slot_edit: ONE specific slot reads wrong. A heading is too long,
+  a CTA label is generic, a card body wanders. The slot-edit agent
+  rewrites JUST that slot, preserving everything else. ALWAYS prefer
+  this when the problem is contained to one element.
+- page_redraft: the page's STRUCTURE is wrong (section order, atom
+  distribution, missing archetype). Re-drafts the whole page from
+  the brief. Use ONLY when slot_edit can't fix it because the issue
+  spans multiple slots or sections.
+- brief_update: the page is executing correctly but the brief itself
+  pointed it at the wrong persona / wrong atoms. Re-runs page_briefs
+  for this page (and downstream page_draft).
+- sitemap_redraft: the page shouldn't exist OR has the wrong
+  page_type. Re-runs Stage 2.
+- synthesize_rework: the voice card / personas / x_factor is wrong.
+  Most expensive — only when you've ruled out everything else.
+
 # Dispatch escalation ladder
 
 Always pick the most specific stage that resolves the problem:
 
-- single_slot: one heading needs a rewrite. Lowest-cost dispatch.
-- page_draft: the whole page is off-voice or missing atoms.
-- page_briefs: the page is on-voice but talking to the wrong persona
-  OR missing atoms the brief should have assigned.
-- sitemap: the page shouldn't exist at all OR a critical page is
-  missing.
-- synthesize: the voice card itself is the problem (exemplars don't
-  represent the church; persona definitions are too vague). This is
-  the most expensive dispatch — only use when you've ruled out the
-  others.
+- single_slot (fix_kind=slot_edit): one heading needs a rewrite.
+  Lowest-cost dispatch.
+- page_draft (fix_kind=page_redraft): the whole page is off-voice
+  or missing atoms.
+- page_briefs (fix_kind=brief_update): the page is on-voice but
+  talking to the wrong persona OR missing atoms the brief should
+  have assigned.
+- sitemap (fix_kind=sitemap_redraft): the page shouldn't exist at all
+  OR a critical page is missing.
+- synthesize (fix_kind=synthesize_rework): the voice card itself is
+  the problem (exemplars don't represent the church; persona
+  definitions are too vague). This is the most expensive dispatch —
+  only use when you've ruled out the others.
 
 Pick overall_verdict:
 - approved: ship to strategist as-is. directives is empty.

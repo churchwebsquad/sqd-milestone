@@ -156,7 +156,10 @@ export default async function handler(req: any, res: any) {
     }
 
     if (action === 'export_state') {
-      const result = await callAgent(baseUrl, jwt, 'export-state', { projectId })
+      // scope: 'full' (everything) | 'sitemap' (sitemap+audit only) |
+      // 'copy' (drafts+briefs+audit+voice+snippets, no sitemap).
+      const scope = typeof req.body?.scope === 'string' ? req.body.scope : 'full'
+      const result = await callAgent(baseUrl, jwt, 'export-state', { projectId, scope })
       return res.status(200).json({ ok: true, export: result })
     }
 
@@ -350,20 +353,77 @@ async function runIterate(ctx: {
       last_action_at: new Date().toISOString(),
     })
 
-    // Apply directives. Group by stage_to_rerun + page_slug; page_draft
-    // directives carry a note — pass it through. Cap concurrency.
-    const pageDraftDirectives = directives.filter((d: any) => d?.stage_to_rerun === 'page_draft' && d?.page_slug && d.page_slug !== '*')
-    const otherDirectives = directives.filter((d: any) => d?.stage_to_rerun !== 'page_draft')
+    // Route each directive to the cheapest agent that can resolve it.
+    // fix_kind is the director's explicit signal; stage_to_rerun is
+    // the legacy fallback for older critiques that pre-date fix_kind.
+    //
+    //   slot_edit       → slot-edit agent (one slot)
+    //   page_redraft    → page-draft   (whole page)
+    //   brief_update    → page-briefs  (re-allocate atoms/persona)
+    //   sitemap_redraft → draft-sitemap with audit loop
+    //   synthesize_rework → extract-strategy
+    //
+    // Slot edits parallelize freely (narrow context, fast). Page
+    // redrafts cap at PAGE_DRAFT_CONCURRENCY to avoid hammering the
+    // gateway.
+    const inferFixKind = (d: any): string => {
+      if (typeof d?.fix_kind === 'string' && d.fix_kind) return d.fix_kind
+      // Legacy directives without fix_kind — map from stage_to_rerun.
+      const s = String(d?.stage_to_rerun ?? '')
+      if (s === 'single_slot') return 'slot_edit'
+      if (s === 'page_draft')  return 'page_redraft'
+      if (s === 'page_briefs') return 'brief_update'
+      if (s === 'sitemap')     return 'sitemap_redraft'
+      if (s === 'synthesize')  return 'synthesize_rework'
+      return 'page_redraft'
+    }
 
-    for (let i = 0; i < pageDraftDirectives.length; i += PAGE_DRAFT_CONCURRENCY) {
-      const chunk = pageDraftDirectives.slice(i, i + PAGE_DRAFT_CONCURRENCY)
+    const slotEditDirectives = directives.filter((d: any) =>
+      inferFixKind(d) === 'slot_edit' && d?.page_slug && d.page_slug !== '*' && d?.slot_locator)
+    const pageRedraftDirectives = directives.filter((d: any) =>
+      inferFixKind(d) === 'page_redraft' && d?.page_slug && d.page_slug !== '*')
+    const otherDirectives = directives.filter((d: any) => {
+      const k = inferFixKind(d)
+      return k !== 'slot_edit' && k !== 'page_redraft'
+    })
+
+    // Slot edits in parallel (no cap — they're narrow + fast).
+    if (slotEditDirectives.length > 0) {
+      await Promise.all(slotEditDirectives.map((d: any) =>
+        callAgent(baseUrl, jwt, 'slot-edit', {
+          projectId,
+          pageSlug:    d.page_slug,
+          sectionIx:   d.slot_locator?.section_ix,
+          slotKey:     d.slot_locator?.slot_key,
+          instruction: d.note ?? '',
+        }).catch((e: any) => {
+          // Swallow individual slot-edit failures so one bad locator
+          // doesn't kill the whole iterate loop.
+          console.error('[iterate.slot-edit] failed for', d.page_slug, d.slot_locator, e?.message)
+        })
+      ))
+    }
+
+    // Page redrafts capped.
+    for (let i = 0; i < pageRedraftDirectives.length; i += PAGE_DRAFT_CONCURRENCY) {
+      const chunk = pageRedraftDirectives.slice(i, i + PAGE_DRAFT_CONCURRENCY)
       await Promise.all(chunk.map((d: any) =>
         callAgent(baseUrl, jwt, 'page-draft', { projectId, pageSlug: d.page_slug, feedback: d.note ?? '' })
       ))
     }
 
+    // Everything else (brief_update / sitemap_redraft / synthesize_rework) via dispatch.
     for (const d of otherDirectives) {
-      await applyDispatch({ sb, baseUrl, jwt, projectId, dispatch: { stage_to_rerun: d.stage_to_rerun, page_slug: d.page_slug, note: d.note } })
+      // Translate fix_kind back to stage_to_rerun for the legacy dispatcher.
+      const kind = inferFixKind(d)
+      const stage =
+        kind === 'brief_update'       ? 'page_briefs' :
+        kind === 'sitemap_redraft'    ? 'sitemap'     :
+        kind === 'synthesize_rework'  ? 'synthesize'  :
+        String(d.stage_to_rerun ?? '')
+      await applyDispatch({ sb, baseUrl, jwt, projectId,
+        dispatch: { stage_to_rerun: stage, page_slug: d.page_slug, note: d.note },
+      })
     }
 
     // Re-critique
@@ -406,10 +466,18 @@ async function applyDispatch(ctx: {
     return callAgent(baseUrl, jwt, 'page-draft', { projectId, pageSlug: slug, feedback: note })
   }
   if (stage === 'single_slot') {
-    // Not implemented for v1 — single-slot rewrite would need a per-slot
-    // endpoint. Fallback: re-run the page_draft with a narrow note.
-    const slug = dispatch?.page_slug
+    const slug      = dispatch?.page_slug
+    const sectionIx = typeof dispatch?.section_ix === 'number' ? dispatch.section_ix : null
+    const slotKey   = typeof dispatch?.slot_key   === 'string' ? dispatch.slot_key   : null
     if (!slug) throw new Error('single_slot dispatch requires page_slug')
+    if (sectionIx !== null && slotKey) {
+      // Real single-slot rewrite via the slot-edit agent.
+      return callAgent(baseUrl, jwt, 'slot-edit', {
+        projectId, pageSlug: slug, sectionIx, slotKey, instruction: note,
+      })
+    }
+    // Locator missing — fall back to a narrow page_draft re-run so
+    // the request still lands SOMEWHERE rather than erroring.
     const focused = `Targeted rewrite. Section index ${dispatch?.section_ix ?? '?'}, slot ${dispatch?.slot_key ?? '?'}. ${note}`
     return callAgent(baseUrl, jwt, 'page-draft', { projectId, pageSlug: slug, feedback: focused })
   }

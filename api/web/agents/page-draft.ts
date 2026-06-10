@@ -165,6 +165,21 @@ export default async function handler(req: any, res: any) {
   const previousDraft = roadmapState.page_drafts?.[pageSlug]
   const resolved = await resolvePromptServer(sb, 'page_draft', projectId)
 
+  // Load project snippets so the writer references {{church_name}}
+  // and similar tokens instead of literal values. Non-fatal on
+  // failure — drafts still produce without snippets, just less
+  // normalized.
+  let snippets: Array<{ token: string; expansion: string }> = []
+  try {
+    const { data: sn } = await sb.from('web_project_snippets')
+      .select('token, expansion').eq('web_project_id', projectId).eq('archived', false)
+    if (Array.isArray(sn)) {
+      snippets = sn
+        .filter((r: any) => typeof r?.token === 'string' && typeof r?.expansion === 'string' && r.expansion)
+        .map((r: any) => ({ token: r.token, expansion: r.expansion }))
+    }
+  } catch { /* table absence is non-fatal */ }
+
   const stage1Slim = {
     audience:             stage1.audience,
     voice_characteristics: stage1.voice_characteristics,
@@ -183,6 +198,13 @@ export default async function handler(req: any, res: any) {
     ``,
     `# Atoms available to this page (primary + reference)`,
     JSON.stringify(atoms ?? [], null, 2),
+    ``,
+    snippets.length > 0
+      ? [
+          `# Project snippets (use the {{token}} form in your copy where these values appear — don't type the literal)`,
+          ...snippets.map(s => `- {{${s.token}}} -> "${s.expansion}"`),
+        ].join('\n')
+      : '',
     ``,
     previousDraft && !feedback
       ? `# Previous draft exists for this page — overwrite it cleanly with a fresh draft.\n${JSON.stringify(previousDraft.sections ?? [], null, 2)}`
