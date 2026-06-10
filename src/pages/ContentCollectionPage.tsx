@@ -759,6 +759,15 @@ function Step2Form({
         <DiscoveryRecapSection recap={recap} />
       </aside>
       <div className="space-y-6 min-w-0">
+        {/* AI auto-fill from uploaded intake files. Surfaces at the
+            top of the form so partners see the affordance before
+            they start manually answering. Suggestions are reviewed
+            individually — partner accepts or dismisses each one. */}
+        <ContentCollectionAutoFill
+          webProjectId={session.web_project_id}
+          session={session}
+          saveField={saveField}
+        />
         {fromScratch && (
           <ProvideInfoSection
             session={session}
@@ -2098,5 +2107,231 @@ function firstExternalCtaUrl(topic: TopicRow | undefined): string | null {
     return null
   }
   return walk(topic.items ?? [])
+}
+
+// ── AI auto-fill from uploaded intake files ──────────────────────────
+
+/** Fields the auto-fill agent can propose values for. Subset of
+ *  SessionRow keys — must stay in sync with the enum in
+ *  api/web/agents/answer-content-collection.ts. */
+type AutoFillField =
+  | 'cms_managed_types' | 'blog_handling' | 'blog_existing_url' | 'blog_new_description'
+  | 'events_display_preference' | 'events_external_url' | 'events_wordpress_source_of_truth'
+  | 'sermons_display_preference' | 'sermons_external_url'
+  | 'sermon_youtube_playlist_exists' | 'sermon_youtube_playlist_url'
+  | 'groups_display_preference' | 'groups_external_url' | 'groups_wordpress_source_of_truth'
+  | 'merch_store_url' | 'ministries_to_grow'
+  | 'ministries_list_html' | 'discipleship_pathway_html'
+
+interface AutoFillSuggestion {
+  field:           AutoFillField
+  value:           unknown
+  confidence:      'high' | 'medium' | 'low'
+  source_category: string
+  source_quote:    string
+  rationale:       string
+}
+
+function ContentCollectionAutoFill({
+  webProjectId, session, saveField,
+}: {
+  webProjectId: string
+  session:      SessionRow
+  saveField:    <K extends keyof SessionRow>(field: K, value: SessionRow[K]) => Promise<void>
+}) {
+  const { token, sessionId } = useParams<{ token: string; sessionId: string }>()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [suggestions, setSuggestions] = useState<AutoFillSuggestion[] | null>(null)
+  const [coverageNotes, setCoverageNotes] = useState<string | null>(null)
+  const [docsRead, setDocsRead] = useState<number | null>(null)
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set())
+  const [accepting, setAccepting] = useState<string | null>(null)
+
+  const run = async () => {
+    if (!token || !sessionId) return
+    setBusy(true); setError(null); setSuggestions(null)
+    try {
+      // Pre-filter: don't let the agent propose over fields the
+      // partner has already answered. We pass the list along; the
+      // server also enforces this defensively.
+      const alreadyFilled: AutoFillField[] = []
+      for (const k of [
+        'cms_managed_types', 'blog_handling', 'blog_existing_url', 'blog_new_description',
+        'events_display_preference', 'events_external_url', 'events_wordpress_source_of_truth',
+        'sermons_display_preference', 'sermons_external_url',
+        'sermon_youtube_playlist_exists', 'sermon_youtube_playlist_url',
+        'groups_display_preference', 'groups_external_url', 'groups_wordpress_source_of_truth',
+        'merch_store_url', 'ministries_to_grow',
+        'ministries_list_html', 'discipleship_pathway_html',
+      ] as AutoFillField[]) {
+        const v = (session as unknown as Record<string, unknown>)[k]
+        if (v != null && v !== '' && !(Array.isArray(v) && v.length === 0)) {
+          alreadyFilled.push(k)
+        }
+      }
+      const res = await fetch('/api/web/agents/answer-content-collection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ portalToken: token, sessionId, alreadyFilled }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
+      setSuggestions(Array.isArray(json.suggestions) ? json.suggestions : [])
+      setCoverageNotes(json.coverage_notes ?? null)
+      setDocsRead(typeof json.docs_read === 'number' ? json.docs_read : null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Auto-fill failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const accept = async (s: AutoFillSuggestion) => {
+    setAccepting(s.field)
+    try {
+      // Coerce the agent's value to the field's expected type.
+      // Most fields are strings; cms_managed_types / blog_new_filters
+      // are string[]; *_exists is boolean.
+      let coerced: unknown = s.value
+      if (s.field === 'sermon_youtube_playlist_exists') {
+        coerced = typeof s.value === 'boolean'
+          ? s.value
+          : (String(s.value).toLowerCase() === 'true' || String(s.value).toLowerCase() === 'yes')
+      } else if (s.field === 'cms_managed_types') {
+        coerced = Array.isArray(s.value)
+          ? s.value.filter(v => typeof v === 'string')
+          : typeof s.value === 'string' ? s.value.split(',').map(v => v.trim()).filter(Boolean) : []
+      }
+      await saveField(s.field as keyof SessionRow, coerced as never)
+      setDismissed(prev => new Set(prev).add(s.field))
+    } catch (e) {
+      setError(e instanceof Error ? `Could not save: ${e.message}` : 'Save failed')
+    } finally {
+      setAccepting(null)
+    }
+  }
+
+  const dismiss = (field: string) => {
+    setDismissed(prev => new Set(prev).add(field))
+  }
+
+  // Hide suggestions the user has already accepted or dismissed.
+  const visibleSuggestions = (suggestions ?? []).filter(s => !dismissed.has(s.field))
+
+  if (suggestions === null) {
+    // Initial state — show the trigger button.
+    return (
+      <div className="rounded-lg border border-purple-200 bg-purple-50/50 p-4">
+        <div className="flex items-start gap-3">
+          <span className="text-2xl shrink-0">✨</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-[14px] font-semibold text-purple-900 mb-1">Use your uploaded files to pre-fill this form</p>
+            <p className="text-[12px] text-purple-900/80 leading-snug">
+              If you've uploaded a strategy brief, discovery questionnaire, or content collection files, we can scan them for answers and propose values for these fields. You'll review each suggestion before it lands — nothing auto-saves without your OK.
+            </p>
+            <button
+              type="button"
+              onClick={() => void run()}
+              disabled={busy || !webProjectId}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-purple-600 hover:bg-purple-700 px-4 py-1.5 text-[12px] text-white font-semibold disabled:opacity-50"
+            >
+              {busy ? <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> : '✨'}
+              {busy ? 'Reading your uploaded files…' : 'Suggest answers from my uploads'}
+            </button>
+            {error && <p className="text-[11px] text-red-600 mt-2">{error}</p>}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Post-fetch state — show the suggestions list (or empty state).
+  return (
+    <div className="rounded-lg border border-purple-200 bg-purple-50/50 p-4 space-y-3">
+      <div className="flex items-baseline justify-between gap-2 flex-wrap">
+        <p className="text-[13px] font-semibold text-purple-900">
+          ✨ Suggested answers ({visibleSuggestions.length})
+          {docsRead != null && <span className="text-[11px] font-normal text-purple-900/70 ml-2">· read {docsRead} file{docsRead === 1 ? '' : 's'}</span>}
+        </p>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void run()}
+            disabled={busy}
+            className="text-[11px] text-purple-700 hover:underline disabled:opacity-50"
+          >
+            {busy ? 'Re-reading…' : 'Re-scan files'}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setSuggestions(null); setError(null); setDismissed(new Set()) }}
+            className="text-[11px] text-purple-700/70 hover:text-purple-900"
+          >
+            Hide
+          </button>
+        </div>
+      </div>
+      {coverageNotes && (
+        <p className="text-[11px] text-purple-900/80 leading-snug italic">{coverageNotes}</p>
+      )}
+      {error && <p className="text-[11px] text-red-600">{error}</p>}
+      {visibleSuggestions.length === 0 ? (
+        <p className="text-[12px] text-purple-900/80 leading-snug">
+          {suggestions.length === 0
+            ? 'No high-confidence answers found in your uploaded files. Fill the form below manually.'
+            : 'All suggestions handled. Fill any remaining fields manually below.'}
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {visibleSuggestions.map(s => (
+            <li key={s.field} className="rounded-md border border-purple-200 bg-white p-3">
+              <div className="flex items-baseline gap-2 mb-1 flex-wrap">
+                <span className="text-[11px] font-mono font-semibold text-purple-900">{s.field}</span>
+                <span className={[
+                  'text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded',
+                  s.confidence === 'high'   ? 'bg-green-100 text-green-800' :
+                  s.confidence === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                                              'bg-gray-100 text-gray-700',
+                ].join(' ')}>
+                  {s.confidence}
+                </span>
+                <span className="text-[10px] text-purple-900/60">from {s.source_category}</span>
+              </div>
+              <div className="rounded bg-purple-50 px-2 py-1.5 mb-1.5 text-[12px] text-purple-950 leading-snug break-words">
+                {typeof s.value === 'string' && s.value.startsWith('<')
+                  ? <code className="text-[11px]">{s.value.slice(0, 200)}{s.value.length > 200 ? '…' : ''}</code>
+                  : Array.isArray(s.value)
+                    ? <span className="font-mono text-[11px]">{(s.value as unknown[]).join(', ')}</span>
+                    : <span>{String(s.value)}</span>}
+              </div>
+              {s.source_quote && (
+                <p className="text-[11px] text-purple-900/70 italic leading-snug mb-1.5">"{s.source_quote}"</p>
+              )}
+              <p className="text-[11px] text-purple-900/80 leading-snug mb-2">{s.rationale}</p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void accept(s)}
+                  disabled={accepting === s.field}
+                  className="inline-flex items-center gap-1 rounded-full bg-purple-600 hover:bg-purple-700 px-3 py-1 text-[11px] text-white font-semibold disabled:opacity-50"
+                >
+                  {accepting === s.field ? 'Saving…' : 'Accept'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => dismiss(s.field)}
+                  disabled={accepting !== null}
+                  className="text-[11px] text-purple-700 hover:underline disabled:opacity-50"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
