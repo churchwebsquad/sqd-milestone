@@ -1,324 +1,418 @@
 /**
  * Vercel Serverless Function — /api/web/agents/page-outlines
  *
- * Stage 4 of the copywriting pipeline. Per page in stage_2 sitemap,
- * drafts plain-prose section outlines + display option suggestions
- * using stage_3 atom placements. PRE-binding — no Brixies awareness.
- * Writes to roadmap_state.stage_4.
+ * Replaces page-briefs. Builds the section-by-section blueprint for
+ * ONE page (called once per slug). The blueprint is what page-draft
+ * reads to write copy — it carries which atoms feed which section,
+ * what treatment each atom gets (verbatim / light edit / heavy edit
+ * / synthesize), and which sections are CMS-managed repeaters vs
+ * hand-crafted content.
+ *
+ * The brand voice champion (page-draft) reads this output. The
+ * outline IS the contract — page-draft must honor every atom_id
+ * mapped to a section and respect every treatment signal.
+ *
+ * Inputs (READ-ONLY for protected tables):
+ *   - content_atoms (filtered by topic-relevance to this page)
+ *   - strategy_content_collection_marks (do_not_rewrite flags)
+ *   - strategy_content_collection_sessions (display preferences,
+ *     ministries_list_html, discipleship_pathway_html for the
+ *     respective page slugs)
+ *   - strategy_discovery_questionnaire (copy_approach treatment
+ *     default, voice register signals)
+ *
+ * Upstream pivots:
+ *   - roadmap_state.ministry_model (the SPINE)
+ *   - roadmap_state.site_strategy (persona journey for this page,
+ *     key info this page must surface, elevation signals)
+ *   - roadmap_state.acf_plan (which sections are CMS-managed)
+ *   - roadmap_state.stage_2 (the sitemap — this page's entry)
+ *   - cowork-skills/page-outlines-by-ministry-model.md (frame of
+ *     reference, NOT template-first — loaded at runtime)
+ *
+ * Output: writes to roadmap_state.page_outlines[<slug>]. No new
+ * tables. page_briefs is left untouched (will be deleted in the
+ * orchestrator-wiring step).
+ *
+ * NOTE: this file overwrites a prior page-outlines.ts that was part
+ * of an earlier (never-shipped) Stage 4 pipeline. The original was
+ * referenced only by PipelineWorkspace's pipeline tab — not by the
+ * Copy Engine cascade. Removing it is safe in the orchestrator-
+ * wiring step.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
-import { resolvePromptServer } from './_lib/resolvePrompt.js'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
-export const maxDuration = 300
+export const maxDuration = 180
+
 const MODEL = 'anthropic/claude-opus-4-7'
-const MAX_OUTPUT_TOKENS = 12000
-
-const DISPLAY_OPTIONS = [
-  'card_grid','split_column','accordion','tabs','timeline',
-  'cta_hero','feature_strip','staff_grid','gallery','rich_text_long','process_steps',
-]
-
-// CTA intent — what the visitor is being asked to do. The button-or-
-// not decision belongs to Stage 5 (some templates have button slots,
-// some don't); Stage 4 commits to whether the section needs a CTA at
-// all + what the action should be.
-const CTA_INTENTS = [
-  'visit',           // plan an in-person visit
-  'attend',          // join a specific event/service
-  'contact',         // talk to a person
-  'give',            // donation
-  'subscribe',       // newsletter / email
-  'signup',          // small group / volunteer signup
-  'watch',           // watch sermon / video
-  'read',            // read further content / blog
-  'navigate',        // go to a related hub page
-  'other',
-]
+const MAX_OUTPUT_TOKENS = 16000
 
 const TOOL = {
-  description: 'Submit page outlines with display options and section contracts for every page.',
+  description: 'Submit the section-by-section blueprint for ONE page.',
   input_schema: {
     type: 'object',
+    required: ['page_slug', 'sections', 'persona_journey_for_this_page', 'rationale'],
     properties: {
-      page_outlines: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            page_slug: { type: 'string' },
-            /** Stage 1 persona label this page is primarily designed to
-             *  serve. Pages may serve secondary personas in individual
-             *  sections — those go in section.serves_personas. */
-            primary_persona: { type: ['string','null'] },
-            /** Per-page SEO/AEO/GEO bundle pulled from Stage 1's
-             *  seo_aeo_geo_targets and refined for this page. Stage 5's
-             *  page_seo writes title/meta_description directly from
-             *  this; the rest distributes down to section.keyword_assignments. */
-            page_seo_targets: {
-              type: ['object','null'],
-              properties: {
-                search_phrases: { type: 'array', items: { type: 'string' },
-                  description: 'SEO — phrases users would type into Google for this page.' },
-                answer_intents: { type: 'array', items: { type: 'string' },
-                  description: 'AEO — conversational queries this page should answer (e.g. "what time is church", "is X church welcoming").' },
-                geo_anchors:    { type: 'array', items: { type: 'string' },
-                  description: 'GEO — local landmarks, neighborhoods, city/region references this page should mention.' },
-                title_target:   { type: ['string','null'],
-                  description: 'Suggested <title> tag — keyword-led, under 60 chars. Stage 5 writes this verbatim into page_seo.title.' },
-                meta_description_target: { type: ['string','null'],
-                  description: 'Suggested meta description — under 160 chars. Stage 5 writes verbatim into page_seo.meta_description.' },
-              },
-            },
-            sections: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  section_id:      { type: 'string' },
-                  section_job:     { type: 'string',
-                    description: 'One sentence: what this section accomplishes for the visitor.' },
-                  content_summary: { type: 'string',
-                    description: 'Plain prose. Lead with "Heading: <3-7 word phrase>. Body: <prose>." so Stage 5 knows what goes where.' },
+      page_slug:   { type: 'string' },
+      page_job:    { type: 'string', description: 'One sentence: what this page accomplishes for the dominant persona.' },
 
-                  // ── Section contract — the "what must be said" half ──
-                  /** Persona labels (from Stage 1) this section addresses.
-                   *  An array because some sections serve multiple personas
-                   *  at once (e.g. a Beliefs section serving both newcomers
-                   *  and skeptics). Empty = serves whoever the page serves. */
-                  serves_personas: { type: 'array', items: { type: 'string' } },
-                  /** Stage 1 strategy goal this section advances. Freeform
-                   *  text referencing one of stage_1.goals (or the broader
-                   *  brand objective when no single goal applies). */
-                  addresses_goal: { type: ['string','null'] },
-                  /** 1-3 concrete claims that MUST appear in the copy.
-                   *  Stage 5 may paraphrase but cannot drop. Stage 7
-                   *  voice pass also cannot rewrite these away. Example:
-                   *  ["Service times are Sundays 9am + 11am",
-                   *   "Childcare is provided through 5th grade",
-                   *   "Coffee is served before each service"]. */
-                  required_messages: { type: 'array', items: { type: 'string' } },
-                  /** When the section's job is to drive a visitor action,
-                   *  declare the CTA here. Stage 5 will look for a button
-                   *  slot in the chosen template and wire this label +
-                   *  destination. Null when no CTA belongs here (e.g.
-                   *  staff bios, photo galleries, content-only sections). */
-                  cta: {
-                    type: ['object','null'],
-                    properties: {
-                      intent:           { type: 'string', enum: CTA_INTENTS },
-                      label:            { type: 'string',
-                        description: 'Button label — short and scannable. Must use any vocabulary_decisions.we_chose values from Stage 2.' },
-                      destination_page: { type: 'string',
-                        description: 'Slug from Stage 2 sitemap (e.g. "/visit" or "/visit#service-times"). Must resolve to a real page.' },
-                    },
-                    required: ['intent','label','destination_page'],
-                  },
-                  /** Which Stage 1 SEO/AEO/GEO phrases this section owns.
-                   *  primary[] must appear in the section's heading slot
-                   *  OR the first sentence of body/description. supporting[]
-                   *  appears naturally in body copy. Distribute Stage 1's
-                   *  phrases across the page — don't repeat the same phrase
-                   *  in multiple sections of the same page. */
-                  keyword_assignments: {
-                    type: ['object','null'],
-                    properties: {
-                      primary:    { type: 'array', items: { type: 'string' } },
-                      supporting: { type: 'array', items: { type: 'string' } },
-                    },
-                  },
-                  // ── End contract ──
-
-                  display_options: {
-                    type: 'array',
-                    items: {
-                      type: 'object',
-                      properties: {
-                        kind:       { type: 'string', enum: DISPLAY_OPTIONS },
-                        rationale:  { type: 'string' },
-                        fits_count: { type: 'number' },
-                      },
-                      required: ['kind','rationale'],
-                    },
-                  },
-                  atoms_used:  { type: 'array', items: { type: 'string' } },
-                  voice_notes: { type: ['string','null'] },
-                },
-                required: [
-                  'section_id','section_job','content_summary','display_options','atoms_used',
-                  'serves_personas','required_messages',
-                ],
-              },
-            },
-            voice_notes: { type: ['string','null'] },
-          },
-          required: ['page_slug','sections'],
+      persona_journey_for_this_page: {
+        type: 'object',
+        description: 'Pulled from site_strategy.persona_journeys for the persona this page primarily serves. The outline must keep the journey intact section-by-section.',
+        required: ['persona_name', 'arrival_context', 'win_state'],
+        properties: {
+          persona_name:    { type: 'string' },
+          arrival_context: { type: 'string', description: 'How the persona arrived at this page — what they\'re carrying.' },
+          win_state:       { type: 'string', description: 'What the persona walks away with if this page succeeds.' },
         },
       },
+
+      sections: {
+        type: 'array',
+        description: 'Section-by-section blueprint, in order. Each section names what it does, which atoms feed it, the treatment per atom, and any CMS-managed flag.',
+        items: {
+          type: 'object',
+          required: ['section_ix', 'archetype', 'section_job', 'atom_assignments', 'flow_role'],
+          properties: {
+            section_ix:  { type: 'number', description: 'Zero-indexed position on the page. Must be unique.' },
+            archetype: {
+              type: 'string',
+              enum: [
+                'hero', 'tagline_band', 'two_up', 'three_up', 'cards_grid',
+                'featured_card', 'image_text_split', 'accordion', 'cta_band',
+                'testimonial_block', 'stat_block', 'steps_row', 'contact_band',
+                'footer_cta', 'intro_paragraph', 'rich_body',
+              ],
+            },
+            section_job: { type: 'string', description: 'What this section does for the persona in their journey through the page (one sentence).' },
+            flow_role: {
+              type: 'string',
+              enum: ['hook', 'orient', 'reassure', 'inform', 'deepen', 'invite', 'close'],
+              description: 'Where this section sits in the page\'s narrative arc.',
+            },
+            atom_assignments: {
+              type: 'array',
+              description: 'Which atoms feed THIS section. Each carries a treatment signal driven by do_not_rewrite + copy_approach. Empty array = section is template-default (e.g., a Plan-a-Visit "What to Expect" section can run on persona reassurance language even if no specific atom maps).',
+              items: {
+                type: 'object',
+                required: ['atom_id', 'treatment'],
+                properties: {
+                  atom_id:   { type: 'string', description: 'Real UUID from content_atoms.id. Never fabricate slugs.' },
+                  treatment: {
+                    type: 'string',
+                    enum: ['verbatim', 'light_edit', 'heavy_edit', 'synthesize'],
+                    description: 'verbatim = quote exactly (do_not_rewrite marks OR copy_approach=do_not_use); light_edit = preserve meaning, polish voice; heavy_edit = restructure freely while staying accurate; synthesize = use as source material to compose new copy.',
+                  },
+                  role_in_section: { type: 'string', description: 'How this atom is used HERE (e.g., "section heading", "card 1 description", "testimonial body").' },
+                },
+              },
+            },
+            cms_managed: {
+              type: 'object',
+              description: 'Set when this section sources from an ACF/CPT (per acf_plan). Page-draft + commit will treat field_values as repeater pulls.',
+              required: ['module'],
+              properties: {
+                module: { type: 'string', description: 'Module from acf_plan.modules (people / sermons / groups / serve_teams / events / stories / jobs).' },
+                query:  { type: 'string', description: 'Plain-English query the dev should implement (e.g., "all person posts with person-type=staff, ordered by sort_order").' },
+              },
+            },
+            primary_cta: {
+              type: 'object',
+              description: 'If this section is the one that owns the page\'s primary CTA, name it here. Most pages have exactly one section that owns the CTA — page-draft enforces this.',
+              required: ['label_hint', 'intent'],
+              properties: {
+                label_hint: { type: 'string', description: 'Suggested label (page-draft writes the final, voice-true version).' },
+                intent:     { type: 'string', description: 'What the click promises (e.g., "Opens prefilled Plan-a-Visit form").' },
+              },
+            },
+            voice_anchor: { type: 'string', description: 'Which voice exemplar (verbatim atom body) this section\'s writing should imitate.' },
+            anti_pattern_to_avoid: { type: 'string', description: 'One thing this section MUST NOT do (driven by anti-exemplars or persona blockers).' },
+            template_guide_section_referenced: { type: 'string', description: 'For traceability: the section heading in the page-outlines-by-ministry-model guide this draws from (e.g., "Set 1 — Attractional / Plan a Visit / What to Expect"). Skip if no template section applies — the outline can deviate.' },
+          },
+        },
+      },
+
+      unresolved_inputs: {
+        type: 'array',
+        description: 'Atoms or sections this page NEEDED but couldn\'t resolve from the partner\'s content. The auto-iterate loop will surface these for backfill BEFORE the page is considered complete. NEVER pass an unresolved section through to the user.',
+        items: {
+          type: 'object',
+          required: ['what', 'why_needed'],
+          properties: {
+            what:        { type: 'string', description: 'What\'s missing (e.g., "no atom describing the partner\'s Starting Point class").' },
+            why_needed: { type: 'string', description: 'Why this page can\'t complete without it.' },
+            section_ix: { type: ['number', 'null'], description: 'If tied to a specific section, name it.' },
+          },
+        },
+      },
+
+      rationale: { type: 'string', description: 'One paragraph: the section sequence + why it lands for this persona on this ministry model. Strategist reads this at Gate 1 if they expand a page.' },
     },
-    required: ['page_outlines'],
   },
 }
+
+// The template guide that informs conventional flow. Loaded once
+// per agent invocation. Treated as a FRAME OF REFERENCE — the
+// guide's "this page tends to have these sections in this order"
+// is a starting point, not a contract.
+function loadTemplateGuide(): string {
+  try {
+    const candidates = [
+      join(process.cwd(), 'cowork-skills', 'page-outlines-by-ministry-model.md'),
+      join(__dirname, '..', '..', '..', 'cowork-skills', 'page-outlines-by-ministry-model.md'),
+    ]
+    for (const path of candidates) {
+      try { return readFileSync(path, 'utf-8') } catch { /* try next */ }
+    }
+    return '(template guide not found at runtime — proceeding with content collection alone)'
+  } catch {
+    return '(template guide load failed — proceeding with content collection alone)'
+  }
+}
+
+const SYSTEM_PROMPT_HEAD = [
+  'You are the Page Outline Agent. You build the section-by-section blueprint for ONE page. The page-draft agent reads this blueprint to write copy — every atom_id you assign + treatment signal you set becomes a hard contract.',
+  '',
+  'CORE RULE: content collection wins, the template guide informs flow.',
+  'You will receive (a) the church\'s actual content via atoms + Content Collection signals, and (b) a template guide that names conventional sections per page-type × ministry model. Lead with (a). Use (b) ONLY to inform the SHAPE of the outline — never to fill sections with content the partner hasn\'t supplied.',
+  '',
+  'Rules:',
+  '1. Every section in your output MUST be backed by atom assignments OR be a defensible structural section (Service Times block, contact form, etc.) the template guide names + the persona journey requires.',
+  '2. Never fabricate atom_ids. Use real UUIDs from the content_atoms input. If you can\'t find an atom for a section the template guide suggests, EITHER drop the section OR add it to unresolved_inputs (don\'t make up content).',
+  '3. Honor do_not_rewrite marks. Atoms marked approved_keep_as_is land with treatment="verbatim".',
+  '4. Honor copy_approach. When copy_approach is "do_not_use" (start from scratch), default treatment to "synthesize". When copy_approach is "polish_existing", default to "light_edit". When copy_approach is "rewrite_freely" or similar, default to "heavy_edit".',
+  '5. Respect the ministry model spine. The dominant model drives section ORDER and CTA emphasis. The secondary_blend can override on specific pages where it fits.',
+  '6. Honor the persona journey from site_strategy.persona_journeys[]. Sections should move the persona through their stated journey arc — hook → orient → reassure → inform → deepen → invite → close.',
+  '7. Mark cms_managed sections explicitly when they pull from a CPT in acf_plan (e.g., a "Meet the Team" section sourcing person posts, an Events grid sourcing tribe_events).',
+  '8. Surface anything UNRESOLVED in unresolved_inputs[]. Do not silently ship a page with missing content — the auto-iterate loop will backfill OR escalate.',
+  '9. Voice anchors per section: pick a specific atom body (voice_sample / voice_rule / ethos) that imitates well for this section\'s job. Quote verbatim.',
+  '10. anti_pattern_to_avoid: name one specific thing this section must NOT do (driven by voice_anti_exemplars or persona blockers).',
+  '',
+  'TEMPLATE GUIDE (frame of reference — read it, then write the outline content-collection-first):',
+  '',
+].join('\n')
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const supabaseUrl     = process.env.VITE_SUPABASE_URL
-  const anonKey         = process.env.VITE_SUPABASE_ANON_KEY
-  const serviceRoleKey  = process.env.SUPABASE_SERVICE_ROLE_KEY
-  const gatewayKey      = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN
+  const supabaseUrl    = process.env.VITE_SUPABASE_URL
+  const anonKey        = process.env.VITE_SUPABASE_ANON_KEY
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const gatewayKey     = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN
   if (!supabaseUrl || !anonKey || !serviceRoleKey || !gatewayKey) {
     return res.status(500).json({ error: 'Missing env vars' })
   }
 
   const jwt = (req.headers['authorization'] as string | undefined)?.replace(/^Bearer /, '') ?? null
   if (!jwt) return res.status(401).json({ error: 'Missing Authorization bearer token' })
-
   const { data: userData, error: userErr } = await createClient(supabaseUrl, anonKey).auth.getUser(jwt)
   if (userErr || !userData?.user) return res.status(401).json({ error: 'Invalid session' })
 
-  const projectId   = typeof req.body?.projectId === 'string' ? req.body.projectId : null
-  const redoContext = typeof req.body?.redoContext === 'string' ? req.body.redoContext.trim() : ''
-  /** Optional scope: when present, the agent processes ONLY these
-   *  page slugs and merges results into roadmap_state.stage_4.page_outlines —
-   *  the other pages' outlines are preserved verbatim. Use for
-   *  iterative testing on a single page without re-burning the whole
-   *  17-page sitemap each pass. */
-  const pageSlugs: string[] | null = Array.isArray(req.body?.pageSlugs) && req.body.pageSlugs.every((s: unknown) => typeof s === 'string')
-    ? req.body.pageSlugs as string[]
-    : null
-  if (!projectId) return res.status(400).json({ error: 'projectId required' })
+  const projectId = typeof req.body?.projectId === 'string' ? req.body.projectId : null
+  const pageSlug  = typeof req.body?.pageSlug  === 'string' ? req.body.pageSlug  : null
+  if (!projectId || !pageSlug) {
+    return res.status(400).json({ error: 'projectId and pageSlug required' })
+  }
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
-  const { data: project, error: projErr } = await sb
-    .from('strategy_web_projects').select('*').eq('id', projectId).maybeSingle()
-  if (projErr || !project) return res.status(404).json({ error: projErr?.message ?? 'Project not found' })
+  const { data: project } = await sb.from('strategy_web_projects')
+    .select('id, member, roadmap_state').eq('id', projectId).maybeSingle()
+  if (!project) return res.status(404).json({ error: 'Project not found' })
 
-  const roadmapState = (project.roadmap_state ?? {}) as Record<string, unknown>
-  const stage1 = roadmapState.stage_1
-  const stage2 = roadmapState.stage_2
-  const stage3 = roadmapState.stage_3
-  if (!stage1 || !stage2 || !stage3) {
+  const state         = (project.roadmap_state ?? {}) as Record<string, any>
+  const sitemap       = state.stage_2 as any
+  const siteStrategy  = state.site_strategy as any
+  const ministryModel = state.ministry_model as any
+  const acfPlan       = state.acf_plan as any
+
+  // Hard pre-flight — page-outlines can't run without these upstream
+  // outputs. If anything's missing, refuse loudly so the cascade
+  // doesn't proceed on broken state.
+  const missing: string[] = []
+  if (!sitemap) missing.push('stage_2 (sitemap)')
+  if (!siteStrategy) missing.push('site_strategy')
+  if (!ministryModel) missing.push('ministry_model')
+  if (missing.length > 0) {
     return res.status(400).json({
-      error: 'Stages 1, 2, 3 must be complete before Stage 4 can run.',
-      missing: [!stage1 && 'stage_1', !stage2 && 'stage_2', !stage3 && 'stage_3'].filter(Boolean),
+      error: 'Required upstream stages missing — cannot draft a page outline without them.',
+      missing,
     })
   }
 
-  const [atomsRes, factsRes] = await Promise.all([
-    sb.from('content_atoms').select('id, topic, body').eq('web_project_id', projectId),
-    sb.from('church_facts').select('id, topic, data').eq('web_project_id', projectId),
-  ])
-
-  const previous = redoContext || pageSlugs ? roadmapState.stage_4 : undefined
-  const resolved = await resolvePromptServer(sb, 'outlines', projectId)
-
-  // Scope filter — when present, narrow Stage 2's page list + Stage 3
-  // placements to just the targeted pages. The model then emits
-  // outlines only for those pages, and we merge with the existing
-  // roadmap_state.stage_4.page_outlines preserving the rest.
-  let scopedStage2 = stage2
-  let scopedStage3 = stage3
-  if (pageSlugs && pageSlugs.length > 0) {
-    const stage2Pages = ((stage2 as any)?.pages ?? []) as Array<{ slug?: string }>
-    const filteredPages = stage2Pages.filter(p => pageSlugs.includes(p.slug ?? ''))
-    scopedStage2 = { ...(stage2 as any), pages: filteredPages }
-    const stage3Placements = ((stage3 as any)?.atom_placements ?? []) as Array<{ primary_page_slug?: string }>
-    const stage3Facts = ((stage3 as any)?.fact_placements ?? []) as Array<{ primary_page_slug?: string }>
-    scopedStage3 = {
-      ...(stage3 as any),
-      atom_placements: stage3Placements.filter(a => pageSlugs.includes(a.primary_page_slug ?? '')),
-      fact_placements: stage3Facts.filter(f => pageSlugs.includes(f.primary_page_slug ?? '')),
-    }
+  // Find this page in the sitemap.
+  const sitemapPage = (sitemap.pages ?? []).find((p: any) => p?.slug === pageSlug)
+  if (!sitemapPage) {
+    return res.status(404).json({ error: `Page "${pageSlug}" not found in sitemap.` })
   }
 
-  const scopeInstruction = pageSlugs && pageSlugs.length > 0
-    ? `# Scope — IMPORTANT\nEmit page_outlines ONLY for these page slugs: ${pageSlugs.join(', ')}. Do not emit outlines for any other page. The other pages' outlines already exist and will be preserved untouched.`
-    : ''
+  const member = project.member as number
+  const [atomsRes, discoveryRes, sessionRes] = await Promise.all([
+    sb.from('content_atoms')
+      .select('id, topic, body, metadata, source_kind, verbatim, confidence')
+      .eq('web_project_id', projectId),
+    sb.from('strategy_discovery_questionnaire')
+      .select('copy_approach, ideal_website_experience, words_tones_to_avoid')
+      .eq('member', member).order('submitted_at', { ascending: false }).limit(1).maybeSingle(),
+    sb.from('strategy_content_collection_sessions')
+      .select('ministries_list_html, discipleship_pathway_html, events_display_preference, sermons_display_preference, groups_display_preference, additional_context')
+      .eq('member', member).order('submitted_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle(),
+  ])
+
+  const atoms     = atomsRes.data ?? []
+  const discovery = discoveryRes.data ?? null
+  const session   = sessionRes.data ?? null
+
+  // Find this page's persona journey from site_strategy.
+  const journeys = Array.isArray(siteStrategy.persona_journeys) ? siteStrategy.persona_journeys : []
+  const pageJourney = journeys.find((j: any) =>
+    Array.isArray(j.entry_points) && j.entry_points.some((s: string) => s === pageSlug)
+  ) ?? journeys[0] ?? null
+
+  // Find this page's elevation + key_info_to_highlight relevant to this page.
+  const elevations = Array.isArray(siteStrategy.page_elevations) ? siteStrategy.page_elevations : []
+  const keyInfo    = Array.isArray(siteStrategy.key_info_to_highlight) ? siteStrategy.key_info_to_highlight : []
+  const pageElevation = elevations.find((e: any) =>
+    typeof e.topic === 'string' && e.topic.toLowerCase().includes(pageSlug.toLowerCase())
+  ) ?? null
+  const relevantKeyInfo = keyInfo.filter((k: any) =>
+    typeof k.where === 'string' && k.where.toLowerCase().includes(pageSlug.toLowerCase())
+  )
+
+  const templateGuide = loadTemplateGuide()
 
   const userText = [
-    `# Stage 1 strategy\n${JSON.stringify(stage1, null, 2)}`,
-    `# Stage 2 sitemap${pageSlugs ? ' (filtered to scope)' : ''}\n${JSON.stringify(scopedStage2, null, 2)}`,
-    `# Stage 3 page inventory (atom placements)\n${JSON.stringify(scopedStage3, null, 2)}`,
-    `# Atoms\n${JSON.stringify(atomsRes.data ?? [], null, 2)}`,
-    `# Facts\n${JSON.stringify(factsRes.data ?? [], null, 2)}`,
-    scopeInstruction,
-    previous && `# Previous draft\n${JSON.stringify(previous, null, 2)}`,
-    redoContext && `# Strategist redo feedback\n${redoContext}`,
-  ].filter(Boolean).join('\n\n')
+    `# Page being outlined`,
+    '```json',
+    JSON.stringify({ slug: pageSlug, sitemap_entry: sitemapPage }, null, 2),
+    '```',
+    '',
+    `# Ministry model (the SPINE — drives section order + CTA emphasis)`,
+    '```json',
+    JSON.stringify({
+      model:           ministryModel.model,
+      confidence:      ministryModel.confidence,
+      secondary_blend: ministryModel.secondary_blend,
+      blend_notes:     ministryModel.blend_notes,
+      cta_default:     ministryModel.cta_default,
+    }, null, 2),
+    '```',
+    '',
+    `# Persona journey for THIS page`,
+    pageJourney ? '```json\n' + JSON.stringify(pageJourney, null, 2) + '\n```' : '(no specific journey — use site-wide journey from site_strategy)',
+    '',
+    `# Page elevation signal`,
+    pageElevation ? '```json\n' + JSON.stringify(pageElevation, null, 2) + '\n```' : '(no specific elevation — default importance)',
+    '',
+    `# Key info that MUST surface on this page`,
+    relevantKeyInfo.length > 0 ? '```json\n' + JSON.stringify(relevantKeyInfo, null, 2) + '\n```' : '(no page-specific key info from site_strategy)',
+    '',
+    `# Discovery — copy_approach + voice register signal`,
+    discovery ? '```json\n' + JSON.stringify(discovery, null, 2) + '\n```' : '(no discovery on file — default treatment to heavy_edit)',
+    '',
+    `# Content Collection session — display preferences + per-page partner-supplied HTML`,
+    session ? '```json\n' + JSON.stringify(session, null, 2) + '\n```' : '(no session on file)',
+    '',
+    `# ACF plan — modules available for cms_managed sections`,
+    acfPlan ? '```json\n' + JSON.stringify({ modules: acfPlan.modules ?? [], taxonomies: acfPlan.taxonomies ?? [] }, null, 2) + '\n```' : '(no ACF plan)',
+    '',
+    `# ALL atoms (${atoms.length}) — pick the ones relevant to this page by topic + body match against page_job`,
+    '```json',
+    JSON.stringify(atoms, null, 2),
+    '```',
+    '',
+    `Build the section-by-section blueprint for "${pageSlug}". Submit via submit_page_outline.`,
+  ].filter(Boolean).join('\n')
 
-  let toolResult: Record<string, unknown> | null = null
+  let toolInput: any | null = null
   let usage: { input_tokens?: number; output_tokens?: number } = {}
   try {
     const result = await generateText({
       model: MODEL,
       maxOutputTokens: MAX_OUTPUT_TOKENS,
-      system: resolved.systemPrompt,
+      system: SYSTEM_PROMPT_HEAD + templateGuide,
       messages: [{ role: 'user', content: userText }],
       tools: {
-        submit_page_outlines: tool({
+        submit_page_outline: tool({
           description: TOOL.description,
           inputSchema: jsonSchema(TOOL.input_schema as any),
         }),
       },
-      toolChoice: { type: 'tool', toolName: 'submit_page_outlines' },
+      toolChoice: { type: 'tool', toolName: 'submit_page_outline' },
     })
     usage = { input_tokens: result.usage?.inputTokens, output_tokens: result.usage?.outputTokens }
     const toolCall = result.toolCalls?.[0]
-    if (!toolCall || toolCall.toolName !== 'submit_page_outlines') {
+    if (!toolCall || toolCall.toolName !== 'submit_page_outline') {
       throw new Error('Model did not return the expected tool call')
     }
-    toolResult = toolCall.input as Record<string, unknown>
+    toolInput = toolCall.input
   } catch (err: any) {
     console.error('[page-outlines] gateway error:', err?.message)
     return res.status(502).json({ error: `AI Gateway error: ${err?.message ?? 'unknown'}` })
   }
 
-  const meta = {
-    status: 'draft',
-    generated_at: new Date().toISOString(),
-    model: MODEL,
-    prompt_source: resolved.globalSource,
-    has_project_addendum: resolved.hasProjectAddendum,
-    scoped_to_page_slugs: pageSlugs ?? null,
-    redo_count: typeof (previous as any)?._meta?.redo_count === 'number'
-      ? (previous as any)._meta.redo_count + (redoContext ? 1 : 0)
-      : 0,
-    usage,
+  // Validate atom_ids exist — fabricated UUIDs are a fail condition.
+  // The auto-iterate loop will catch this and re-run if any section
+  // references a non-existent atom.
+  const realAtomIds = new Set(atoms.map((a: any) => String(a.id)))
+  const sections = Array.isArray(toolInput?.sections) ? toolInput.sections : []
+  const fabricated: Array<{ section_ix: number; atom_id: string }> = []
+  for (const s of sections) {
+    for (const aa of (s.atom_assignments ?? [])) {
+      if (!realAtomIds.has(String(aa.atom_id))) {
+        fabricated.push({ section_ix: s.section_ix, atom_id: aa.atom_id })
+      }
+    }
   }
 
-  // Merge mode when scoped: keep existing outlines for pages NOT in
-  // pageSlugs, and replace the targeted pages with the new output.
-  // Stops the strategist from losing 16 other page outlines when
-  // testing one.
-  let mergedOutlines: any[] = []
-  if (pageSlugs && pageSlugs.length > 0) {
-    const existingOutlines = ((previous as any)?.page_outlines ?? []) as Array<{ page_slug?: string }>
-    const newOutlines = ((toolResult as any)?.page_outlines ?? []) as Array<{ page_slug?: string }>
-    const newSlugs = new Set(newOutlines.map(o => o.page_slug))
-    mergedOutlines = [
-      ...existingOutlines.filter(o => !newSlugs.has(o.page_slug)),
-      ...newOutlines,
-    ]
-  } else {
-    mergedOutlines = ((toolResult as any)?.page_outlines ?? [])
+  const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0
+  const truncationSuspected = outputTokens >= MAX_OUTPUT_TOKENS * 0.9
+
+  const outline = {
+    ...toolInput,
+    _meta: {
+      generated_at:           new Date().toISOString(),
+      model:                  MODEL,
+      usage,
+      truncation_suspected:   truncationSuspected,
+      truncation_pct:         outputTokens > 0 ? Math.round((outputTokens / MAX_OUTPUT_TOKENS) * 100) : 0,
+      fabricated_atom_ids:    fabricated,
+      has_fabricated_atoms:   fabricated.length > 0,
+      unresolved_count:       Array.isArray(toolInput?.unresolved_inputs) ? toolInput.unresolved_inputs.length : 0,
+      inputs_used: {
+        atom_count:        atoms.length,
+        has_journey:       !!pageJourney,
+        has_elevation:     !!pageElevation,
+        relevant_key_info: relevantKeyInfo.length,
+        has_discovery:     !!discovery,
+        has_session:       !!session,
+        has_acf_plan:      !!acfPlan,
+      },
+    },
   }
 
-  const stage4Write = {
-    ...toolResult,
-    page_outlines: mergedOutlines,
-    _meta: meta,
+  const prevOutlines = (state.page_outlines ?? {}) as Record<string, any>
+  const nextState = {
+    ...state,
+    page_outlines: { ...prevOutlines, [pageSlug]: outline },
   }
-
   const { error: writeErr } = await sb.from('strategy_web_projects')
-    .update({
-      roadmap_state: { ...(project.roadmap_state ?? {}), stage_4: stage4Write },
-    })
-    .eq('id', projectId)
+    .update({ roadmap_state: nextState }).eq('id', projectId)
   if (writeErr) return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
 
-  return res.status(200).json({ ok: true, output: stage4Write, usage })
+  return res.status(200).json({
+    ok: true,
+    page_slug: pageSlug,
+    outline,
+    truncation_suspected: truncationSuspected,
+    fabricated_atom_count: fabricated.length,
+    unresolved_count: outline._meta.unresolved_count,
+    inputs_used: outline._meta.inputs_used,
+    usage,
+  })
 }
