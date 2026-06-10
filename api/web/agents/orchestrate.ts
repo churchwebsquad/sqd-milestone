@@ -34,7 +34,7 @@ const PAGE_DRAFT_CONCURRENCY = 4
  *  via manual Revise feedback or by approving with known gaps. */
 const SITEMAP_AUDIT_MAX_LOOPS = 2
 
-type Action = 'run_drafts' | 'run_briefs' | 'draft_one_page' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize' | 'apply_audit_to_nav' | 'rename_sitemap_page' | 'cancel_run' | 'restructure_sections' | 'suggest_bind_for_page' | 'override_bind_template' | 'reorg_section_for_template' | 'list_compatible_templates'
+type Action = 'run_drafts' | 'run_briefs' | 'draft_one_page' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize' | 'apply_audit_to_nav' | 'rename_sitemap_page' | 'cancel_run' | 'restructure_sections' | 'suggest_bind_for_page' | 'override_bind_template' | 'reorg_section_for_template' | 'list_compatible_templates' | 'run_normalize'
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -110,6 +110,18 @@ export default async function handler(req: any, res: any) {
       const result = await callAgent(baseUrl, jwt, 'extract-strategy',
         note ? { projectId, redoContext: note } : { projectId })
       return res.status(200).json({ ok: true, stage_1: result })
+    }
+
+    if (action === 'run_normalize') {
+      // Stage 0 — atomize intake into content_atoms + church_facts.
+      // Same orchestrate-wrapper pattern as run_synthesize so the
+      // Copy Engine workspace can trigger Stage 0 re-runs without
+      // sending the user to the Pipeline tab. Redo notes pass through
+      // to the agent's strategist-redo path.
+      const note = typeof req.body?.note === 'string' ? req.body.note.trim() : ''
+      const result = await callAgent(baseUrl, jwt, 'normalize-intake',
+        note ? { projectId, redoContext: note } : { projectId })
+      return res.status(200).json({ ok: true, stage_0: result })
     }
 
     if (action === 'apply_audit_to_nav') {

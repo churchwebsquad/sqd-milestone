@@ -270,11 +270,64 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   // whether the auto-cascade should kick in.
   const hasStage0 = useMemo(() => {
     const rs = project.roadmap_state as Record<string, unknown> | null
-    return rs?.stage_0 != null
+    const s0 = rs?.stage_0 as Record<string, unknown> | undefined
+    if (!s0) return false
+    // Stage 0 only carries _meta — the actual atoms+facts land in
+    // their own tables. Treat as "done" when there's a populated meta
+    // with atom_count > 0 (the agent stamps this on every successful
+    // run).
+    const meta = s0._meta as { atom_count?: number } | undefined
+    return typeof meta?.atom_count === 'number' && meta.atom_count > 0
   }, [project.roadmap_state])
+  // Stage 0 / Stage 1 health — surfaces silent truncation, source-
+  // coverage gaps, and significant drops vs prior runs so the user
+  // doesn't proceed on a broken extraction. The flags below land
+  // straight into a Setup Health banner above the gates.
+  const stage0Meta = useMemo<{
+    atom_count?: number; fact_count?: number
+    truncation_suspected?: boolean
+    significant_drop_vs_prior?: boolean
+    atoms_delta_vs_prior?: number
+    atoms_by_source?: Record<string, number>
+    sources_loaded?: Record<string, boolean | number>
+  } | null>(() => {
+    const rs = project.roadmap_state as Record<string, unknown> | null
+    const s0 = rs?.stage_0 as Record<string, unknown> | undefined
+    return (s0?._meta as never) ?? null
+  }, [project.roadmap_state])
+  const stage1Meta = useMemo<{
+    truncation_suspected?: boolean
+    looks_empty?: boolean
+    substantive_keys_count?: number
+  } | null>(() => {
+    const rs = project.roadmap_state as Record<string, unknown> | null
+    const s1 = rs?.stage_1 as Record<string, unknown> | undefined
+    return (s1?._meta as never) ?? null
+  }, [project.roadmap_state])
+
   const hasStage1 = useMemo(() => {
     const rs = project.roadmap_state as Record<string, unknown> | null
-    return rs?.stage_1 != null
+    const s1 = rs?.stage_1 as Record<string, unknown> | undefined
+    if (!s1) return false
+    // _meta alone is NOT proof of completion — when extract-strategy's
+    // tool_use response truncates mid-write, the _meta block lands but
+    // every payload key (audience, voice_exemplars, personas, x_factor,
+    // etc.) is missing. Treat as "done" only when at least one
+    // substantive payload key is present. Otherwise the synthesize
+    // button stays visible so the strategist can re-trigger.
+    const SUBSTANTIVE_KEYS = [
+      'audience', 'voice_exemplars', 'voice_anti_exemplars',
+      'voice_characteristics', 'personas', 'x_factor', 'project_goals',
+      'topic_coverage_plan', 'total_page_count',
+    ]
+    return SUBSTANTIVE_KEYS.some(k => {
+      const v = s1[k]
+      if (v == null) return false
+      if (Array.isArray(v)) return v.length > 0
+      if (typeof v === 'object') return Object.keys(v as object).length > 0
+      if (typeof v === 'string') return v.trim().length > 0
+      return true
+    })
   }, [project.roadmap_state])
   const draftSlugs = Object.keys(drafts).filter(k => k !== '_meta')
   const status = engine.status ?? 'idle'
@@ -632,6 +685,22 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         stuck={isEngineStuck(engine, engineRunning || !!running)}
         onReset={() => void callOrchestrate('reset_engine_state')}
         resetBusy={running === 'reset_engine_state'}
+      />
+
+      {/* Setup Health banner — surfaces Stage 0 / Stage 1 issues
+          BEFORE the user wastes a draft cycle on broken upstream
+          data. Shows when the agent flagged truncation, when the
+          atom count fell off vs the prior run, when Stage 1's
+          payload looks empty, or when a source contributed zero
+          atoms. Each row carries a one-click re-run for the
+          affected stage. */}
+      <SetupHealthBanner
+        stage0Meta={stage0Meta}
+        stage1Meta={stage1Meta}
+        hasStage1={hasStage1}
+        onReNormalize={() => void callOrchestrate('run_normalize')}
+        onReSynthesize={() => void callOrchestrate('run_synthesize')}
+        running={running}
       />
 
       {/* In-flight banner — visible whenever any orchestrate action or
@@ -2734,6 +2803,145 @@ function CoverageGate({
           />
         </div>
       )}
+    </div>
+  )
+}
+
+/** Surfaces extraction problems BEFORE Gate 1. Three buckets:
+ *   - Stage 0 (normalize-intake) issues: truncation suspected, big drop
+ *     vs prior run, missing source coverage, file-load failures.
+ *   - Stage 1 (synthesize) issues: empty payload (the 3886 case), few
+ *     substantive keys, truncation suspected.
+ *   - Source-coverage gaps: a source landed in the prompt but
+ *     contributed zero atoms (red flag for silent drops). */
+function SetupHealthBanner({
+  stage0Meta, stage1Meta, hasStage1, onReNormalize, onReSynthesize, running,
+}: {
+  stage0Meta: {
+    atom_count?: number; fact_count?: number
+    truncation_suspected?: boolean
+    significant_drop_vs_prior?: boolean
+    atoms_delta_vs_prior?: number
+    atoms_by_source?: Record<string, number>
+    sources_loaded?: Record<string, boolean | number>
+  } | null
+  stage1Meta: { truncation_suspected?: boolean; looks_empty?: boolean; substantive_keys_count?: number } | null
+  hasStage1: boolean
+  onReNormalize: () => void
+  onReSynthesize: () => void
+  running: string | null
+}) {
+  type Row = { severity: 'critical' | 'warning' | 'info'; title: string; detail: string; cta?: { label: string; on: () => void; busy: boolean } }
+  const rows: Row[] = []
+
+  // Stage 0 truncation
+  if (stage0Meta?.truncation_suspected) {
+    rows.push({
+      severity: 'critical',
+      title: 'Stage 0 (intake normalization) may have truncated.',
+      detail: `Output used 90%+ of the token budget — atoms or facts at the end of the response may be missing. ${
+        typeof stage0Meta.atoms_delta_vs_prior === 'number' && stage0Meta.atoms_delta_vs_prior < 0
+          ? `Atom count dropped by ${Math.abs(stage0Meta.atoms_delta_vs_prior)} vs prior run.` : ''
+      }`,
+      cta: { label: 'Re-extract intake', on: onReNormalize, busy: running === 'run_normalize' },
+    })
+  }
+  // Stage 0 significant-drop without truncation flag (model variance / removed sources)
+  if (stage0Meta?.significant_drop_vs_prior && !stage0Meta?.truncation_suspected) {
+    rows.push({
+      severity: 'warning',
+      title: 'Stage 0 produced significantly fewer atoms than the prior run.',
+      detail: `Atom count fell by ${Math.abs(stage0Meta.atoms_delta_vs_prior ?? 0)} (≥20%). The prior run's atoms are snapshotted on stage_0._prior_runs and can be compared. Re-run if this wasn't intentional.`,
+      cta: { label: 'Re-extract intake', on: onReNormalize, busy: running === 'run_normalize' },
+    })
+  }
+  // Stage 0 source-coverage gap — a source LOADED but contributed 0 atoms.
+  if (stage0Meta?.atoms_by_source && stage0Meta?.sources_loaded) {
+    const noAtomSources: string[] = []
+    const sources = stage0Meta.sources_loaded as Record<string, boolean | number>
+    // Maps loader key → source_kind value the normalize agent stamps on atoms.
+    const map: Array<{ loader: keyof typeof sources; source_kind: string; label: string }> = [
+      { loader: 'strategy_brief',             source_kind: 'strategy_brief',           label: 'Strategy brief' },
+      { loader: 'discovery',                  source_kind: 'discovery_questionnaire',  label: 'Discovery questionnaire' },
+      { loader: 'am_handoff',                 source_kind: 'am_handoff',               label: 'AM handoff' },
+      { loader: 'brand_guide',                source_kind: 'brand_handoff',            label: 'Brand guide' },
+      { loader: 'brand_handoff',              source_kind: 'brand_handoff',            label: 'Brand handoff' },
+      { loader: 'content_collection_session', source_kind: 'content_collection',       label: 'Content Collection session' },
+      { loader: 'crawl_topics',               source_kind: 'site_crawl',               label: 'Site crawl' },
+    ]
+    for (const m of map) {
+      const wasLoaded = sources[m.loader] === true || (typeof sources[m.loader] === 'number' && (sources[m.loader] as number) > 0)
+      const atomCount = (stage0Meta.atoms_by_source as Record<string, number>)[m.source_kind] ?? 0
+      if (wasLoaded && atomCount === 0) noAtomSources.push(m.label)
+    }
+    if (noAtomSources.length > 0) {
+      rows.push({
+        severity: 'warning',
+        title: `Source(s) loaded but contributed 0 atoms: ${noAtomSources.join(', ')}.`,
+        detail: 'These sources reached the normalizer but no atoms came from them. Either the source is genuinely empty (rare for primary intake) OR the normalizer dropped them. Re-run to confirm; if it persists, inspect the source content.',
+        cta: { label: 'Re-extract intake', on: onReNormalize, busy: running === 'run_normalize' },
+      })
+    }
+  }
+
+  // Stage 1 empty / truncated
+  if (hasStage1 === false && stage1Meta) {
+    rows.push({
+      severity: 'critical',
+      title: 'Stage 1 (synthesize) produced no substantive output.',
+      detail: stage1Meta.truncation_suspected
+        ? 'The synthesize call hit the output token cap and the tool_use payload truncated mid-write. The token cap has been raised; re-running should produce a complete extraction.'
+        : 'The synthesize call returned an empty payload. Re-run to retry.',
+      cta: { label: 'Re-run Synthesize', on: onReSynthesize, busy: running === 'run_synthesize' },
+    })
+  } else if (stage1Meta?.truncation_suspected) {
+    rows.push({
+      severity: 'warning',
+      title: 'Stage 1 (synthesize) may have truncated.',
+      detail: 'Output used 90%+ of the token budget. The Stage 1 payload landed, but later keys may be incomplete. Re-run to verify.',
+      cta: { label: 'Re-run Synthesize', on: onReSynthesize, busy: running === 'run_synthesize' },
+    })
+  }
+
+  if (rows.length === 0) return null
+
+  return (
+    <div className="space-y-2">
+      {rows.map((r, i) => (
+        <div key={i} className={[
+          'rounded-md border px-3 py-2 flex items-start gap-3',
+          r.severity === 'critical' ? 'border-wm-danger/40 bg-wm-danger-bg' :
+          r.severity === 'warning'  ? 'border-wm-warning/40 bg-wm-warning-bg' :
+                                       'border-wm-border bg-wm-bg-elevated',
+        ].join(' ')}>
+          <AlertCircle size={14} className={[
+            'shrink-0 mt-0.5',
+            r.severity === 'critical' ? 'text-wm-danger' :
+            r.severity === 'warning'  ? 'text-wm-warning' :
+                                         'text-wm-text-muted',
+          ].join(' ')} />
+          <div className="flex-1 min-w-0">
+            <p className={[
+              'text-[12px] font-semibold',
+              r.severity === 'critical' ? 'text-wm-danger' :
+              r.severity === 'warning'  ? 'text-wm-warning' :
+                                           'text-wm-text',
+            ].join(' ')}>{r.title}</p>
+            <p className="text-[11px] text-wm-text leading-snug mt-0.5">{r.detail}</p>
+          </div>
+          {r.cta && (
+            <button
+              type="button"
+              onClick={r.cta.on}
+              disabled={r.cta.busy || running != null}
+              className="shrink-0 inline-flex items-center gap-1 rounded-full bg-white border border-wm-border hover:bg-wm-accent/5 px-3 py-1 text-[11px] font-semibold text-wm-text disabled:opacity-50"
+            >
+              {r.cta.busy ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+              {r.cta.label}
+            </button>
+          )}
+        </div>
+      ))}
     </div>
   )
 }

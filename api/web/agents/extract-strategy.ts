@@ -372,6 +372,17 @@ export default async function handler(req: any, res: any) {
   }
 
   // ── Persist + advance stage ─────────────────────────────────────────
+  // Truncation guard: if the model used ≥90% of MAX_OUTPUT_TOKENS, the
+  // tool_use payload may have truncated mid-write. Also detect the
+  // specific "empty result" case where toolResult is {} (which is what
+  // happened on 3886 before the cap was raised). Either way, surface
+  // the warning in _meta so the UI can prompt re-run.
+  const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0
+  const truncationSuspected = outputTokens >= MAX_OUTPUT_TOKENS * 0.9
+  const toolResultKeys = toolResult && typeof toolResult === 'object'
+    ? Object.keys(toolResult).filter(k => k !== '_meta').length
+    : 0
+  const looksEmpty = toolResultKeys === 0
   const roadmapStatePatch = {
     stage_1: {
       ...toolResult,
@@ -381,6 +392,10 @@ export default async function handler(req: any, res: any) {
         extracted_at: new Date().toISOString(),
         redo_context: redoContext || null,
         files_loaded: preflight.files_loaded.map(f => ({ category: f.category, filename: f.filename })),
+        truncation_suspected: truncationSuspected,
+        truncation_pct: outputTokens > 0 ? Math.round((outputTokens / MAX_OUTPUT_TOKENS) * 100) : 0,
+        looks_empty: looksEmpty,
+        substantive_keys_count: toolResultKeys,
       },
     },
   }
