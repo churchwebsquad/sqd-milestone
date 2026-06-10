@@ -165,7 +165,23 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
 
   useEffect(() => { void refreshFromDB() }, [refreshFromDB])
 
-  const callOrchestrate = useCallback(async (action: string, extra: Record<string, unknown> = {}): Promise<unknown> => {
+  // Tracks the AbortController for the currently-in-flight orchestrate
+  // request. Stop-button click calls .abort() so the user gets
+  // immediate UI feedback while the server-side cancel_run flag
+  // propagates. cancel_run itself is fired with NO controller stored
+  // here so it can't accidentally cancel itself.
+  const activeAbortRef = useRef<AbortController | null>(null)
+  const callOrchestrate = useCallback(async (
+    action: string,
+    extra: Record<string, unknown> = {},
+    opts: { cancellable?: boolean } = {},
+  ): Promise<unknown> => {
+    // cancel_run + reset_engine_state need to bypass the active
+    // controller so they can run WHILE another long action is in
+    // flight. Default cancellable=true otherwise.
+    const cancellable = opts.cancellable !== false
+    const controller = new AbortController()
+    if (cancellable) activeAbortRef.current = controller
     setRunning(action); setError(null)
     try {
       const { data: { session } } = await supabase.auth.getSession()
@@ -175,6 +191,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
         body: JSON.stringify({ projectId: project.id, action, ...extra }),
+        signal: controller.signal,
       })
       const text = await res.text()
       let json: any = null
@@ -187,12 +204,32 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       await onChange?.()
       return json
     } catch (e) {
+      // AbortError surfaces from a Stop click — render as a quiet
+      // "cancelled" rather than the loud red error banner, since the
+      // user themselves asked for it.
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        setError('Cancelled.')
+        return null
+      }
       setError(e instanceof Error ? e.message : 'Unknown error')
       return null
     } finally {
+      if (activeAbortRef.current === controller) activeAbortRef.current = null
       setRunning(null)
     }
   }, [project.id, refreshFromDB, onChange])
+
+  // Stop = abort the in-flight client fetch + tell the server to
+  // bail at the next sub-step boundary. Sequence matters: fire
+  // cancel_run FIRST (so the server flag is set before any
+  // bail-if-cancelled check), then abort the client fetch.
+  const handleStop = useCallback(async () => {
+    // Fire cancel_run separately so its own fetch isn't bound to
+    // the active controller. Don't await — we want the abort to
+    // happen immediately.
+    void callOrchestrate('cancel_run', {}, { cancellable: false })
+    activeAbortRef.current?.abort()
+  }, [callOrchestrate])
 
   const sitemap = useMemo<SitemapShape | null>(() => {
     const rs = project.roadmap_state as Record<string, unknown> | null
@@ -290,6 +327,11 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     if (cascadeStartedFor.current === project.id) return
     if (!hasStage0) return       // intake/normalization must be done
     if (hasStage2) return        // already past Gate 1's setup
+    // Respect user's explicit Stop. The cancelled state lives in
+    // engine_state until the user authorizes the next run by clicking
+    // a button (or runs a stage manually). Without this guard the
+    // cascade would immediately re-fire and undo their Stop.
+    if (engine.status === 'cancelled') return
     cascadeStartedFor.current = project.id
     void (async () => {
       if (!hasStage1) {
@@ -299,7 +341,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       await callOrchestrate('draft_sitemap_with_audit')
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id, hasStage0, hasStage1, hasStage2])
+  }, [project.id, hasStage0, hasStage1, hasStage2, engine.status])
 
   const submitRoute = useCallback(async () => {
     if (!feedback.trim()) return
@@ -378,6 +420,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     if (draftSlugs.length > 0) return
     if (isEngineStuck(engine, false)) return       // user must hit Reset first
     if (engine.status && ENGINE_IN_PROGRESS_STATUSES.has(engine.status)) return
+    if (engine.status === 'cancelled') return      // respect explicit Stop
     if (downstreamCascadeStartedFor.current === project.id) return
     downstreamCascadeStartedFor.current = project.id
     void runEngine()
@@ -511,6 +554,19 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         stuck={isEngineStuck(engine, engineRunning || !!running)}
         onReset={() => void callOrchestrate('reset_engine_state')}
         resetBusy={running === 'reset_engine_state'}
+      />
+
+      {/* In-flight banner — visible whenever any orchestrate action or
+          the runEngine cascade is mid-flight. Gives the user an
+          always-on Stop affordance, plus visibility into what the
+          engine is doing without hunting for the spinner on a
+          specific button. */}
+      <InFlightBanner
+        running={running}
+        engineRunning={engineRunning}
+        engine={engine}
+        onStop={() => void handleStop()}
+        stopping={running === 'cancel_run'}
       />
 
       {error && (
@@ -2074,6 +2130,74 @@ function CoverageGate({
             sitemapPageCount={sitemapPageCount ?? undefined}
           />
         </div>
+      )}
+    </div>
+  )
+}
+
+/** Sticky in-flight indicator with a single Stop button. Renders only
+ *  when something's actually running so it doesn't take up vertical
+ *  space at idle. The Stop button fires cancel_run server-side AND
+ *  aborts the client fetch — the user gets immediate UI feedback even
+ *  while the cooperative cancellation propagates to the next sub-step
+ *  boundary on the server. */
+function InFlightBanner({
+  running, engineRunning, engine, onStop, stopping,
+}: {
+  running: string | null
+  engineRunning: boolean
+  engine: EngineState
+  onStop: () => void
+  stopping: boolean
+}) {
+  if (!running && !engineRunning) return null
+  // Skip Stop-button render while the cancel is in flight itself —
+  // showing a "Stop" button next to a spinning "cancel_run" reads weird.
+  const isActuallyRunning = running !== null && running !== 'cancel_run' && running !== 'reset_engine_state'
+  const isCascade = engineRunning
+
+  const label = (() => {
+    if (running === 'cancel_run') return 'Cancelling…'
+    if (running === 'run_synthesize') return 'Synthesizing strategy from intake…'
+    if (running === 'draft_sitemap_with_audit') return 'Drafting sitemap + running coverage audit loop…'
+    if (running === 'apply_audit_to_nav') return 'Pushing audit findings into nav…'
+    if (running === 'run_coverage_audit') return 'Running coverage audit…'
+    if (running === 'apply') return 'Re-drafting sitemap with your revisions…'
+    if (running === 'approve_sitemap') return 'Approving sitemap…'
+    if (running === 'run_drafts') return 'Writing page briefs and drafts…'
+    if (running === 'critique') return 'Director critiquing the drafts…'
+    if (running === 'iterate') return 'Applying critique directives…'
+    if (running === 'commit') return 'Committing pages…'
+    if (running === 'rename_sitemap_page') return 'Saving rename…'
+    if (running === 'import_state') return 'Applying imported document…'
+    if (running === 'export_state') return 'Building export document…'
+    if (running) return `Running ${running}…`
+    if (engineRunning) {
+      const phase = engine.current_phase
+      if (phase === 'page_briefs')         return 'Briefing pages…'
+      if (phase === 'page_drafts')         return `Drafting pages · ${engine.pages_drafted ?? 0}/${engine.pages_total ?? '?'}`
+      if (phase === 'director_critique')   return 'Director critiquing the drafts…'
+      if (phase === 'applying_directives') return `Iterating · loop ${engine.loop_count ?? 0}`
+      return 'Engine running…'
+    }
+    return 'Working…'
+  })()
+
+  return (
+    <div className="rounded-md border border-wm-accent/40 bg-wm-accent/5 px-3 py-2 flex items-center gap-3">
+      <Loader2 size={14} className="animate-spin text-wm-accent-strong shrink-0" />
+      <p className="text-[12px] text-wm-text leading-snug flex-1">{label}</p>
+      {(isActuallyRunning || isCascade) && (
+        <button
+          type="button"
+          onClick={onStop}
+          disabled={stopping}
+          className="inline-flex items-center gap-1 rounded-full border border-wm-danger/40 bg-white px-3 py-1 text-[11px] font-semibold text-wm-danger hover:bg-wm-danger/5 disabled:opacity-50"
+          title="Stop the current step at its next safe boundary. Anything already written stays in the DB; the engine just doesn't proceed."
+        >
+          {stopping ? <Loader2 size={11} className="animate-spin" /> : <span className="block w-2.5 h-2.5 bg-wm-danger rounded-sm" />}
+          Stop &amp; revise
+        </button>
       )}
     </div>
   )

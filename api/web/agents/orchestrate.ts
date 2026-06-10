@@ -34,7 +34,7 @@ const PAGE_DRAFT_CONCURRENCY = 4
  *  via manual Revise feedback or by approving with known gaps. */
 const SITEMAP_AUDIT_MAX_LOOPS = 2
 
-type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize' | 'apply_audit_to_nav' | 'rename_sitemap_page'
+type Action = 'run_drafts' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize' | 'apply_audit_to_nav' | 'rename_sitemap_page' | 'cancel_run'
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -123,6 +123,37 @@ export default async function handler(req: any, res: any) {
         roadmap_state: { ...roadmapState, stage_2: result.sitemap },
       }).eq('id', projectId)
       return res.status(200).json({ ok: true, page: result.updatedPage, nav_updates: result.navUpdates })
+    }
+
+    if (action === 'cancel_run') {
+      // Cooperative cancellation. Two effects, written in one update:
+      //   1. cancel_requested = true — observed by in-flight long
+      //      helpers (draftSitemapWithAuditLoop, runDrafts, runIterate,
+      //      runCommit) at their next sub-step boundary; the helper
+      //      throws CancelledError and writes the canonical cancelled
+      //      state on its way out.
+      //   2. status = 'cancelled' (and cancelled_at) — written
+      //      immediately so the workspace's auto-cascade useEffects
+      //      stop re-firing right away, even if no long helper is
+      //      currently running (e.g. user clicked Stop during a
+      //      single-agent call like run_synthesize that can't be
+      //      cancelled mid-call but whose downstream cascade should
+      //      still be blocked).
+      const now = new Date().toISOString()
+      await sb.from('strategy_web_projects').update({
+        roadmap_state: {
+          ...roadmapState,
+          engine_state: {
+            ...engineState,
+            cancel_requested:     true,
+            cancel_requested_at:  now,
+            status:               'cancelled',
+            cancelled_at:         now,
+            last_action_at:       now,
+          },
+        },
+      }).eq('id', projectId)
+      return res.status(200).json({ ok: true, cancel_requested: true })
     }
 
     if (action === 'reset_engine_state') {
@@ -252,55 +283,70 @@ async function runDrafts(ctx: {
   const stage2 = roadmapState.stage_2
   if (!stage1 || !stage2) throw new Error('Synthesize + Sitemap must be complete before run_drafts')
 
-  await writeEngineState(sb, projectId, { ...ctx.engineState, status: 'briefing', current_phase: 'page_briefs', last_action_at: new Date().toISOString() })
+  try {
+    await clearCancelledMarker(sb, projectId)
+    await bailIfCancelled(sb, projectId)
+    await writeEngineState(sb, projectId, { ...ctx.engineState, status: 'briefing', current_phase: 'page_briefs', last_action_at: new Date().toISOString() })
 
-  // Run page_briefs unconditionally on each run_drafts — briefs are
-  // cheap to regenerate and ensure draft inputs are fresh.
-  await callAgent(baseUrl, jwt, 'page-briefs', { projectId })
+    // Run page_briefs unconditionally on each run_drafts — briefs are
+    // cheap to regenerate and ensure draft inputs are fresh.
+    await callAgent(baseUrl, jwt, 'page-briefs', { projectId })
+    await bailIfCancelled(sb, projectId)
 
-  const { data: refreshed } = await sb.from('strategy_web_projects')
-    .select('roadmap_state').eq('id', projectId).maybeSingle()
-  const refreshedState = (refreshed?.roadmap_state ?? {}) as Record<string, any>
-  const briefs = refreshedState.page_briefs ?? {}
-  const slugs = Object.keys(briefs).filter(k => k !== '_meta')
+    const { data: refreshed } = await sb.from('strategy_web_projects')
+      .select('roadmap_state').eq('id', projectId).maybeSingle()
+    const refreshedState = (refreshed?.roadmap_state ?? {}) as Record<string, any>
+    const briefs = refreshedState.page_briefs ?? {}
+    const slugs = Object.keys(briefs).filter(k => k !== '_meta')
 
-  await writeEngineState(sb, projectId, {
-    ...ctx.engineState,
-    status: 'drafting',
-    current_phase: 'page_drafts',
-    pages_total: slugs.length,
-    pages_drafted: 0,
-    last_action_at: new Date().toISOString(),
-  })
-
-  // Drafts in parallel, capped at PAGE_DRAFT_CONCURRENCY.
-  let drafted = 0
-  for (let i = 0; i < slugs.length; i += PAGE_DRAFT_CONCURRENCY) {
-    const chunk = slugs.slice(i, i + PAGE_DRAFT_CONCURRENCY)
-    await Promise.all(chunk.map(async slug => {
-      await callAgent(baseUrl, jwt, 'page-draft', { projectId, pageSlug: slug })
-      drafted += 1
-    }))
     await writeEngineState(sb, projectId, {
       ...ctx.engineState,
       status: 'drafting',
       current_phase: 'page_drafts',
       pages_total: slugs.length,
-      pages_drafted: drafted,
+      pages_drafted: 0,
       last_action_at: new Date().toISOString(),
     })
-  }
 
-  const finalState = {
-    ...ctx.engineState,
-    status: 'drafts_ready',
-    current_phase: 'awaiting_critique',
-    pages_total: slugs.length,
-    pages_drafted: drafted,
-    last_action_at: new Date().toISOString(),
+    // Drafts in parallel, capped at PAGE_DRAFT_CONCURRENCY. Cancellation
+    // checked between chunks — once a chunk starts, its in-flight agent
+    // calls finish (Vercel functions can't be killed mid-call), but the
+    // NEXT chunk won't start.
+    let drafted = 0
+    for (let i = 0; i < slugs.length; i += PAGE_DRAFT_CONCURRENCY) {
+      await bailIfCancelled(sb, projectId)
+      const chunk = slugs.slice(i, i + PAGE_DRAFT_CONCURRENCY)
+      await Promise.all(chunk.map(async slug => {
+        await callAgent(baseUrl, jwt, 'page-draft', { projectId, pageSlug: slug })
+        drafted += 1
+      }))
+      await writeEngineState(sb, projectId, {
+        ...ctx.engineState,
+        status: 'drafting',
+        current_phase: 'page_drafts',
+        pages_total: slugs.length,
+        pages_drafted: drafted,
+        last_action_at: new Date().toISOString(),
+      })
+    }
+
+    const finalState = {
+      ...ctx.engineState,
+      status: 'drafts_ready',
+      current_phase: 'awaiting_critique',
+      pages_total: slugs.length,
+      pages_drafted: drafted,
+      last_action_at: new Date().toISOString(),
+    }
+    await writeEngineState(sb, projectId, finalState)
+    return finalState
+  } catch (e: any) {
+    if (e instanceof CancelledError) {
+      await writeCancelledState(sb, projectId, { current_phase: 'cancelled_during_drafts' })
+      return { status: 'cancelled', cancelled_at: new Date().toISOString() }
+    }
+    throw e
   }
-  await writeEngineState(sb, projectId, finalState)
-  return finalState
 }
 
 async function runCritique(ctx: {
@@ -331,7 +377,10 @@ async function runIterate(ctx: {
 }): Promise<Record<string, any>> {
   const { sb, projectId, jwt, baseUrl, maxLoops } = ctx
 
+  try {
+  await clearCancelledMarker(sb, projectId)
   for (let loop = 0; loop < maxLoops; loop++) {
+    await bailIfCancelled(sb, projectId)
     const { data: current } = await sb.from('strategy_web_projects')
       .select('roadmap_state').eq('id', projectId).maybeSingle()
     const state = (current?.roadmap_state ?? {}) as Record<string, any>
@@ -436,6 +485,13 @@ async function runIterate(ctx: {
   const out = { ...eng, status: 'ready_for_review', current_phase: 'awaiting_final_review', max_loops_hit: true, last_action_at: new Date().toISOString() }
   await writeEngineState(sb, projectId, out)
   return out
+  } catch (e: any) {
+    if (e instanceof CancelledError) {
+      await writeCancelledState(sb, projectId, { current_phase: 'cancelled_during_iterate' })
+      return { status: 'cancelled', cancelled_at: new Date().toISOString() }
+    }
+    throw e
+  }
 }
 
 async function applyDispatch(ctx: {
@@ -504,7 +560,7 @@ async function draftSitemapWithAuditLoop(ctx: {
   sitemap: any
   audit: any
   audit_loop: {
-    status: 'proceeded' | 'needs_human' | 'audit_failed'
+    status: 'proceeded' | 'needs_human' | 'audit_failed' | 'cancelled'
     iterations: Array<{ loop: number; gaps_count: number; recommended_action: string }>
     residual_gap_count: number
     message: string
@@ -515,12 +571,25 @@ async function draftSitemapWithAuditLoop(ctx: {
   let lastSitemap: any = null
   let lastAuditResponse: any = null
   let lastAuditOutput: any = null
+
+  // Outer try wraps the whole loop so a mid-step CancelledError can
+  // exit cleanly with a partial-but-consistent result. Whatever
+  // sub-steps completed (sitemap drafted, audit run) stay in the DB;
+  // we just don't proceed to the next sub-step.
+  try {
+    // Clear any prior cancelled marker so a successful retry doesn't
+    // leave engine_state stuck at 'cancelled'. The auto-cascade
+    // useEffects on the workspace look at this status — leaving it
+    // stale would block legitimate downstream auto-cascades.
+    await clearCancelledMarker(sb, projectId)
   const iterations: Array<{ loop: number; gaps_count: number; recommended_action: string }> = []
 
   for (let loop = 0; loop <= SITEMAP_AUDIT_MAX_LOOPS; loop++) {
+    await bailIfCancelled(sb, projectId)
     lastSitemap = await callAgent(baseUrl, jwt, 'draft-sitemap',
       loopContext ? { projectId, redoContext: loopContext } : { projectId })
 
+    await bailIfCancelled(sb, projectId)
     try {
       lastAuditResponse = await callAgent(baseUrl, jwt, 'sitemap-coverage', { projectId })
       lastAuditOutput = lastAuditResponse?.output ?? lastAuditResponse
@@ -578,6 +647,20 @@ async function draftSitemapWithAuditLoop(ctx: {
   }
   await persistAuditLoopMeta(sb, projectId, fallback)
   return { sitemap: lastSitemap, audit: lastAuditResponse, audit_loop: fallback }
+  } catch (e: any) {
+    if (e instanceof CancelledError) {
+      const cancelled = {
+        status: 'cancelled' as const,
+        iterations: [] as Array<{ loop: number; gaps_count: number; recommended_action: string }>,
+        residual_gap_count: 0,
+        message: 'Sitemap draft cancelled by user. Any sub-step that already completed (a sitemap draft, an audit run) stays in place — re-run when ready.',
+      }
+      await persistAuditLoopMeta(sb, projectId, cancelled)
+      await writeCancelledState(sb, projectId)
+      return { sitemap: lastSitemap, audit: lastAuditResponse, audit_loop: cancelled }
+    }
+    throw e
+  }
 }
 
 /** Format coverage-audit findings as a structured natural-language
@@ -686,21 +769,32 @@ async function runCommit(ctx: {
   const slugs = Object.keys(drafts).filter(k => k !== '_meta')
 
   const engineState = (roadmapState.engine_state ?? {}) as Record<string, any>
-  await writeEngineState(sb, projectId, { ...engineState, status: 'committing', current_phase: 'page_bind', pages_committed: 0, pages_total: slugs.length, last_action_at: new Date().toISOString() })
+  try {
+    await clearCancelledMarker(sb, projectId)
+    await bailIfCancelled(sb, projectId)
+    await writeEngineState(sb, projectId, { ...engineState, status: 'committing', current_phase: 'page_bind', pages_committed: 0, pages_total: slugs.length, last_action_at: new Date().toISOString() })
 
-  let committed = 0
-  for (let i = 0; i < slugs.length; i += PAGE_DRAFT_CONCURRENCY) {
-    const chunk = slugs.slice(i, i + PAGE_DRAFT_CONCURRENCY)
-    await Promise.all(chunk.map(async slug => {
-      await callAgent(baseUrl, jwt, 'page-bind', { projectId, pageSlug: slug })
-      committed += 1
-    }))
-    await writeEngineState(sb, projectId, { ...engineState, status: 'committing', current_phase: 'page_bind', pages_committed: committed, pages_total: slugs.length, last_action_at: new Date().toISOString() })
+    let committed = 0
+    for (let i = 0; i < slugs.length; i += PAGE_DRAFT_CONCURRENCY) {
+      await bailIfCancelled(sb, projectId)
+      const chunk = slugs.slice(i, i + PAGE_DRAFT_CONCURRENCY)
+      await Promise.all(chunk.map(async slug => {
+        await callAgent(baseUrl, jwt, 'page-bind', { projectId, pageSlug: slug })
+        committed += 1
+      }))
+      await writeEngineState(sb, projectId, { ...engineState, status: 'committing', current_phase: 'page_bind', pages_committed: committed, pages_total: slugs.length, last_action_at: new Date().toISOString() })
+    }
+
+    const done = { ...engineState, status: 'committed', current_phase: 'done', pages_committed: committed, pages_total: slugs.length, last_action_at: new Date().toISOString() }
+    await writeEngineState(sb, projectId, done)
+    return done
+  } catch (e: any) {
+    if (e instanceof CancelledError) {
+      await writeCancelledState(sb, projectId, { current_phase: 'cancelled_during_commit' })
+      return { status: 'cancelled', cancelled_at: new Date().toISOString() }
+    }
+    throw e
   }
-
-  const done = { ...engineState, status: 'committed', current_phase: 'done', pages_committed: committed, pages_total: slugs.length, last_action_at: new Date().toISOString() }
-  await writeEngineState(sb, projectId, done)
-  return done
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -719,6 +813,69 @@ async function callAgent(baseUrl: string, jwt: string, agentName: string, body: 
     throw new Error(`agent ${agentName} failed (${r.status}): ${json?.error ?? text}`)
   }
   return json
+}
+
+/** Sentinel thrown by sub-step cancellation checks. Helpers catch it
+ *  at the top of their try blocks and translate it into a clean
+ *  cancelled-state write — no partial-state corruption. Errors that
+ *  are NOT this sentinel keep propagating as normal. */
+class CancelledError extends Error {
+  constructor() { super('Run cancelled by user'); this.name = 'CancelledError' }
+}
+
+/** Re-reads engine_state from the DB and returns whether the user
+ *  set cancel_requested while the current run was in flight. Cheap
+ *  enough to call between sub-steps. Returns false on read error so
+ *  a flaky DB read doesn't accidentally cancel work. */
+async function isCancelRequested(sb: any, projectId: string): Promise<boolean> {
+  try {
+    const { data } = await sb.from('strategy_web_projects')
+      .select('roadmap_state').eq('id', projectId).maybeSingle()
+    return !!(((data?.roadmap_state ?? {}).engine_state ?? {}).cancel_requested)
+  } catch { return false }
+}
+
+/** Throws CancelledError if the cancel_requested flag is set. */
+async function bailIfCancelled(sb: any, projectId: string): Promise<void> {
+  if (await isCancelRequested(sb, projectId)) throw new CancelledError()
+}
+
+/** Clears the cancelled marker from engine_state, if present. Called
+ *  at the start of each long-running helper so a retry-after-cancel
+ *  doesn't leave engine_state.status stuck at 'cancelled' after a
+ *  successful new run. Preserves any other engine telemetry. */
+async function clearCancelledMarker(sb: any, projectId: string): Promise<void> {
+  const { data: current } = await sb.from('strategy_web_projects')
+    .select('roadmap_state').eq('id', projectId).maybeSingle()
+  const state = (current?.roadmap_state ?? {}) as Record<string, any>
+  const eng = (state.engine_state ?? {}) as Record<string, any>
+  if (eng.status !== 'cancelled' && !eng.cancelled_at && !eng.cancel_requested) return
+  delete eng.cancel_requested
+  delete eng.cancel_requested_at
+  delete eng.cancelled_at
+  if (eng.status === 'cancelled') eng.status = 'idle'
+  await sb.from('strategy_web_projects').update({
+    roadmap_state: { ...state, engine_state: eng },
+  }).eq('id', projectId)
+}
+
+/** Write the canonical cancelled engine state. Clears the
+ *  cancel_requested flag so the next action starts from a clean
+ *  slate. Preserves any other engine_state telemetry the helper had
+ *  accumulated (loop counts, pages_drafted, etc.). */
+async function writeCancelledState(sb: any, projectId: string, ctxState: Record<string, any> = {}): Promise<void> {
+  const { data: current } = await sb.from('strategy_web_projects')
+    .select('roadmap_state').eq('id', projectId).maybeSingle()
+  const state = (current?.roadmap_state ?? {}) as Record<string, any>
+  const eng = { ...(state.engine_state ?? {}), ...ctxState }
+  delete eng.cancel_requested
+  delete eng.cancel_requested_at
+  eng.status = 'cancelled'
+  eng.cancelled_at = new Date().toISOString()
+  eng.last_action_at = eng.cancelled_at
+  await sb.from('strategy_web_projects').update({
+    roadmap_state: { ...state, engine_state: eng },
+  }).eq('id', projectId)
 }
 
 async function writeEngineState(sb: any, projectId: string, engineState: Record<string, any>): Promise<void> {
