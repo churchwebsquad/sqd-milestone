@@ -249,6 +249,23 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     return stage2 ?? null
   }, [project.roadmap_state])
   const hasStage2 = sitemap !== null
+  // Pre-bind suggestions, keyed by page slug. Stored by the
+  // suggest_bind_for_page orchestrate action; surfaced in DraftPreview
+  // so the strategist reviews the bound preview at Gate 2, not just
+  // the archetype-shaped draft.
+  const bindSuggestions = useMemo<Record<string, {
+    sections: Array<{
+      section_ix: number; archetype: string
+      chosen_template_id: string | null; chosen_layer_name: string | null
+      candidate_count: number; rationale: string
+    }>
+    generated_at?: string
+    user_overrides?: Record<string, string>
+  }>>(() => {
+    const rs = project.roadmap_state as Record<string, unknown> | null
+    const raw = rs?.page_bind_suggestions
+    return (raw && typeof raw === 'object' ? raw : {}) as never
+  }, [project.roadmap_state])
   // Upstream stages — used to decide which setup CTA to render and
   // whether the auto-cascade should kick in.
   const hasStage0 = useMemo(() => {
@@ -450,6 +467,16 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       if (directiveCount > 0) {
         await callOrchestrate('iterate')
       }
+
+      // Phase 4: pre-bind suggestion per page. Runs BEFORE Gate 2 so
+      // the strategist reviews the bound preview, not just the
+      // archetype-shaped draft. Per-page invocations keep each one
+      // fast and easy to swap individually. Suggestions are stored
+      // in roadmap_state.page_bind_suggestions[slug] — the actual
+      // web_sections rows don't land until Commit.
+      await Promise.allSettled(slugs.map(slug =>
+        callOrchestrate('suggest_bind_for_page', { pageSlug: slug }),
+      ))
     } finally {
       setEngineRunning(false)
     }
@@ -1161,6 +1188,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
                         draft={d}
                         brief={briefs[slug]}
                         critique={critique?.per_page?.find(p => p.page_slug === slug) ?? null}
+                        bindSuggestion={bindSuggestions[slug] ?? null}
                         onEditSlot={(sectionIx, slotKey, instruction) =>
                           void callOrchestrate('apply', {
                             dispatch: { stage_to_rerun: 'single_slot', page_slug: slug, section_ix: sectionIx, slot_key: slotKey, note: instruction },
@@ -1822,7 +1850,7 @@ const ARCHETYPES = [
 ] as const
 
 function DraftPreview({
-  draft, brief, critique, onEditSlot, onRedraftSection, onRestructure, busy,
+  draft, brief, critique, bindSuggestion, onEditSlot, onRedraftSection, onRestructure, busy,
 }: {
   draft: PageDraft
   brief?: PageBrief
@@ -1834,6 +1862,20 @@ function DraftPreview({
     summary?: string
     standout_lines?: string[]
     problem_lines?: string[]
+  } | null
+  /** Pre-bind suggestion for this page. Each entry names the Brixies
+   *  template the engine picked for one section — surfaced inline so
+   *  the strategist reviews the BOUND preview at Gate 2, not just the
+   *  archetype-shaped draft. Swap UI for choosing a different
+   *  template per section ships in Wave B. */
+  bindSuggestion?: {
+    sections: Array<{
+      section_ix: number; archetype: string
+      chosen_template_id: string | null; chosen_layer_name: string | null
+      candidate_count: number; rationale: string
+    }>
+    generated_at?: string
+    user_overrides?: Record<string, string>
   } | null
   /** Per-slot edit. Fires the slot-edit agent via the orchestrate
    *  single_slot dispatch — rewrites ONE slot, preserves everything
@@ -1969,6 +2011,18 @@ function DraftPreview({
         <p className="text-[12px] text-wm-text-muted">No sections in this draft.</p>
       ) : (
         <div className="space-y-3">
+          {bindSuggestion && (
+            <div className="rounded-md border border-wm-accent/30 bg-wm-accent/5 p-2.5 text-[11px] text-wm-text leading-snug">
+              <span className="font-semibold">✓ Brixies preview ready.</span>{' '}
+              The engine matched each section below to a Brixies template variant.
+              Review the picks inline (the template name appears next to each section's archetype) — when you click <strong>Commit</strong>, these picks become real <code>web_sections</code> rows. To swap a template, use the Pages tab after commit (per-section template swap on this screen ships in the next wave).
+              {bindSuggestion.sections.some(s => !s.chosen_template_id) && (
+                <span className="block mt-1 text-wm-warning">
+                  ⚠ {bindSuggestion.sections.filter(s => !s.chosen_template_id).length} section(s) had no compatible template in our library — they'll commit as freehand markdown.
+                </span>
+              )}
+            </div>
+          )}
           {renderDraftSections(sections, {
             onEditSlot, onRedraftSection, busy,
             selectedIxs: onRestructure ? selectedIxs : null,
@@ -1979,6 +2033,9 @@ function DraftPreview({
                 return next
               })
             } : undefined,
+            bindBySectionIx: bindSuggestion
+              ? Object.fromEntries(bindSuggestion.sections.map(s => [s.section_ix, s]))
+              : undefined,
           })}
         </div>
       )}
@@ -1999,9 +2056,17 @@ function renderDraftSections(
      *  zero-indexed section ixs are currently checked. */
     selectedIxs?: Set<number> | null
     toggleSelected?: (sectionIx: number) => void
+    /** Pre-bind suggestion per section_ix — surfaces the chosen
+     *  Brixies template alongside the archetype label. */
+    bindBySectionIx?: Record<number, {
+      chosen_template_id: string | null
+      chosen_layer_name: string | null
+      candidate_count: number
+    }>
   },
 ) {
   return sections.map((s, i: number) => {
+    const bindForThis = actions?.bindBySectionIx?.[i]
         // Section copy is open-shaped (slots vary per archetype). The
         // leaf accesses below already guard with `&&`/`Array.isArray`
         // and wrap text in String(), so an `any` cast here is the
@@ -2029,6 +2094,19 @@ function renderDraftSections(
                 />
               )}
               <span className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">{(s?.archetype as string | undefined) ?? '—'}</span>
+              {bindForThis?.chosen_layer_name && (
+                <span
+                  className="text-[10px] text-wm-accent-strong font-medium"
+                  title={`Engine matched this section to Brixies template "${bindForThis.chosen_layer_name}" (${bindForThis.candidate_count} candidate${bindForThis.candidate_count === 1 ? '' : 's'} considered). Commit binds this template; you can swap it later in the Pages tab.`}
+                >
+                  → {bindForThis.chosen_layer_name}
+                </span>
+              )}
+              {bindForThis && !bindForThis.chosen_template_id && (
+                <span className="text-[10px] text-wm-warning" title="No compatible template found for this archetype — this section will commit as freehand markdown.">
+                  → freehand
+                </span>
+              )}
               <span className="text-[10px] text-wm-text-subtle">#{i + 1}</span>
               {Array.isArray(s?.atoms_used) && s.atoms_used.length > 0 && (
                 <span className="text-[10px] text-wm-text-muted ml-auto">{s.atoms_used.length} atoms</span>

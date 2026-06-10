@@ -34,7 +34,7 @@ const PAGE_DRAFT_CONCURRENCY = 4
  *  via manual Revise feedback or by approving with known gaps. */
 const SITEMAP_AUDIT_MAX_LOOPS = 2
 
-type Action = 'run_drafts' | 'run_briefs' | 'draft_one_page' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize' | 'apply_audit_to_nav' | 'rename_sitemap_page' | 'cancel_run' | 'restructure_sections'
+type Action = 'run_drafts' | 'run_briefs' | 'draft_one_page' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize' | 'apply_audit_to_nav' | 'rename_sitemap_page' | 'cancel_run' | 'restructure_sections' | 'suggest_bind_for_page'
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -304,6 +304,139 @@ export default async function handler(req: any, res: any) {
         }
         throw e
       }
+    }
+
+    if (action === 'suggest_bind_for_page') {
+      // Pre-bind preview step that runs AFTER iterate but BEFORE
+      // Gate 2 lands. For each section in the page draft, picks a
+      // Brixies template by archetype → family mapping. This is
+      // intentionally DETERMINISTIC (no LLM) so the cascade can
+      // afford to run it per-page without hitting Vercel timeouts
+      // or burning tokens. The strategist sees the picks at Gate 2
+      // and can swap any of them; the actual web_sections rows
+      // aren't written until Commit.
+      const pageSlug = typeof req.body?.pageSlug === 'string' ? req.body.pageSlug : null
+      if (!pageSlug) return res.status(400).json({ error: 'pageSlug required for suggest_bind_for_page' })
+      await bailIfCancelled(sb, projectId)
+
+      const draft = (roadmapState.page_drafts ?? {})[pageSlug] as { sections?: any[] } | undefined
+      if (!draft || !Array.isArray(draft.sections)) {
+        return res.status(404).json({ error: `No draft found for page "${pageSlug}".` })
+      }
+
+      // Map page-draft archetypes → Brixies template families. Multiple
+      // archetypes can route to the same family — the bind picks
+      // narrow it further by structure flags downstream (cards count,
+      // has_image, etc.) when we add a smart ranker.
+      const ARCHETYPE_TO_FAMILY: Record<string, string[]> = {
+        hero:                ['Hero Section'],
+        tagline_band:        ['Hero Section', 'Banner Section'],
+        two_up:              ['Feature Section'],
+        three_up:            ['Feature Section'],
+        cards_grid:          ['Feature Section', 'Card'],
+        featured_card:       ['Feature Section'],
+        image_text_split:    ['Feature Section', 'Content Section'],
+        accordion:           ['FAQ Section', 'Content Section'],
+        cta_band:            ['CTA Section'],
+        testimonial_block:   ['Testimonial Section', 'Content Section'],
+        stat_block:          ['Stats Section', 'Content Section'],
+        steps_row:           ['Process Section'],
+        contact_band:        ['CTA Section', 'Footer'],
+        footer_cta:          ['CTA Section'],
+        intro_paragraph:     ['Intro Section', 'Content Section'],
+        rich_body:           ['Content Section'],
+      }
+
+      const sections = draft.sections
+      // Pull every candidate template family in one round-trip.
+      const familiesNeeded = new Set<string>()
+      for (const s of sections) {
+        const arc = String((s as any)?.archetype ?? '')
+        const fams = ARCHETYPE_TO_FAMILY[arc] ?? ['Content Section']
+        for (const f of fams) familiesNeeded.add(f)
+      }
+      const { data: templatesRaw } = await sb.from('web_content_templates')
+        .select('id, layer_name, family')
+        .in('family', [...familiesNeeded])
+      const templatesByFamily = new Map<string, Array<{ id: string; layer_name: string }>>()
+      for (const t of (templatesRaw ?? [])) {
+        const arr = templatesByFamily.get(t.family) ?? []
+        arr.push({ id: t.id, layer_name: t.layer_name })
+        templatesByFamily.set(t.family, arr)
+      }
+
+      // Pick a template per section. Track usage on this page so we
+      // don't pick the same variant twice in a row (cohesion via
+      // rotation — narrow but effective for v1).
+      const usedOnThisPage = new Set<string>()
+      const sectionPicks: Array<{
+        section_ix:           number
+        archetype:            string
+        chosen_template_id:   string | null
+        chosen_layer_name:    string | null
+        candidate_families:   string[]
+        candidate_count:      number
+        rationale:            string
+      }> = []
+      sections.forEach((s, ix) => {
+        const archetype = String((s as any)?.archetype ?? '')
+        const fams = ARCHETYPE_TO_FAMILY[archetype] ?? ['Content Section']
+        let chosen: { id: string; layer_name: string } | null = null
+        for (const fam of fams) {
+          const candidates = (templatesByFamily.get(fam) ?? []).filter(t => !usedOnThisPage.has(t.id))
+          if (candidates.length > 0) {
+            chosen = candidates[0]
+            break
+          }
+        }
+        // Final fallback — accept a re-use rather than emit null.
+        if (!chosen) {
+          for (const fam of fams) {
+            const candidates = templatesByFamily.get(fam) ?? []
+            if (candidates.length > 0) { chosen = candidates[0]; break }
+          }
+        }
+        if (chosen) usedOnThisPage.add(chosen.id)
+        const totalCandidates = fams.reduce((acc, f) => acc + (templatesByFamily.get(f)?.length ?? 0), 0)
+        sectionPicks.push({
+          section_ix:         ix,
+          archetype,
+          chosen_template_id: chosen?.id ?? null,
+          chosen_layer_name:  chosen?.layer_name ?? null,
+          candidate_families: fams,
+          candidate_count:    totalCandidates,
+          rationale: chosen
+            ? `${archetype} → ${chosen.layer_name} (family: ${fams[0]}, ${totalCandidates} candidate${totalCandidates === 1 ? '' : 's'})`
+            : `${archetype} → no compatible template found in family ${fams.join(' / ')}. Strategist will need to pick manually at Gate 2 or expand the template library.`,
+        })
+      })
+
+      // Persist on roadmap_state.page_bind_suggestions[slug]. We DON'T
+      // touch web_pages/web_sections — those land on Commit. This is
+      // purely a preview the user can swap before locking in.
+      const { data: cur } = await sb.from('strategy_web_projects')
+        .select('roadmap_state').eq('id', projectId).maybeSingle()
+      const curState = (cur?.roadmap_state ?? {}) as Record<string, any>
+      const prev = (curState.page_bind_suggestions ?? {}) as Record<string, any>
+      const next = {
+        ...prev,
+        [pageSlug]: {
+          sections: sectionPicks,
+          generated_at: new Date().toISOString(),
+          // Preserve any user_overrides the strategist already set —
+          // those take precedence at commit time.
+          user_overrides: prev[pageSlug]?.user_overrides ?? {},
+        },
+      }
+      await sb.from('strategy_web_projects').update({
+        roadmap_state: { ...curState, page_bind_suggestions: next },
+      }).eq('id', projectId)
+
+      return res.status(200).json({
+        ok: true, page_slug: pageSlug,
+        suggestions: sectionPicks,
+        missing_count: sectionPicks.filter(p => !p.chosen_template_id).length,
+      })
     }
 
     if (action === 'draft_one_page') {
