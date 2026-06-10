@@ -209,7 +209,16 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       let json: any = null
       try { json = JSON.parse(text) } catch { /* non-JSON response */ }
       if (!res.ok) {
-        const detail = json?.error ?? (text ? text.slice(0, 200) : '')
+        // json?.error can be a STRING (most server paths) OR an OBJECT
+        // (some upstream errors propagate a structured payload through
+        // multiple layers of err.message stringification, ending up as
+        // an object in the final JSON). Stringify defensively so the
+        // user sees the real message instead of "[object Object]".
+        const errVal = json?.error
+        let detail: string
+        if (typeof errVal === 'string') detail = errVal
+        else if (errVal != null) { try { detail = JSON.stringify(errVal) } catch { detail = String(errVal) } }
+        else                     detail = text ? text.slice(0, 200) : ''
         throw new Error(`${action} → HTTP ${res.status}${detail ? ` · ${detail}` : ''}`)
       }
       await refreshFromDB()
@@ -636,8 +645,6 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       const slugs = sitemapPages.map(p => p.slug).filter(Boolean) as string[]
       if (slugs.length === 0) return
 
-      const CLIENT_CONCURRENCY = 4
-
       // Read latest state inside the closure — local `drafts` /
       // `roadmap_state.page_outlines` may be stale relative to a
       // sibling cascade or a prior run within this session.
@@ -653,17 +660,29 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       const existingOutlines = (initialState.page_outlines ?? {}) as Record<string, unknown>
       const existingDrafts   = (initialState.page_drafts   ?? {}) as Record<string, unknown>
 
+      // SERIALIZED on purpose — DO NOT re-parallelize without first
+      // landing atomic JSONB updates on the server side.
+      //
+      // Each agent below does a read-modify-write of
+      // `strategy_web_projects.roadmap_state` (a single JSONB column
+      // on a single row). Running these in parallel produces a
+      // last-write-wins race: agent A reads state at T=0, writes back
+      // at T=60s with {page_outlines: {A: ...}}. Agent B read at T=1
+      // (also no outlines), writes at T=61s with {page_outlines:
+      // {B: ...}} — clobbering A. Net effect: only ~1 outline per
+      // chunk lands on the row. We saw this in 3886 — 3 outlines /
+      // 12 drafts persisted of 21 sitemap pages because parallel
+      // chunks kept stepping on each other.
+      //
+      // Real fix is server-side: a Postgres RPC that does jsonb_set
+      // in a single UPDATE, or pg_advisory_xact_lock around the
+      // read-modify-write. Until that exists, serialize here.
+      //
       // Phase 1: page-outlines per slug. Skip slugs that already
-      // have an outline landed (resume semantic). Each call writes
-      // roadmap_state.page_outlines[<slug>] — the contract page-draft
-      // reads. Outlines are independent so we can fully parallelize
-      // (capped client-side).
+      // have an outline landed (resume semantic).
       const slugsNeedingOutlines = slugs.filter(s => existingOutlines[s] == null)
-      for (let i = 0; i < slugsNeedingOutlines.length; i += CLIENT_CONCURRENCY) {
-        const chunk = slugsNeedingOutlines.slice(i, i + CLIENT_CONCURRENCY)
-        await Promise.allSettled(chunk.map(slug =>
-          callOrchestrate('run_page_outline_for_page', { pageSlug: slug }),
-        ))
+      for (const slug of slugsNeedingOutlines) {
+        await callOrchestrate('run_page_outline_for_page', { pageSlug: slug })
       }
 
       // Phase 2: draft each page WITH auto-iterate-until-resolved.
@@ -675,11 +694,8 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       // landed (regardless of flags — that's a separate Iterate
       // concern, not a "page never got written" concern).
       const slugsNeedingDrafts = slugs.filter(s => existingDrafts[s] == null)
-      for (let i = 0; i < slugsNeedingDrafts.length; i += CLIENT_CONCURRENCY) {
-        const chunk = slugsNeedingDrafts.slice(i, i + CLIENT_CONCURRENCY)
-        await Promise.allSettled(chunk.map(slug =>
-          callOrchestrate('draft_page_until_resolved', { pageSlug: slug }),
-        ))
+      for (const slug of slugsNeedingDrafts) {
+        await callOrchestrate('draft_page_until_resolved', { pageSlug: slug })
       }
 
       // Phase 3: Director critique + iterate (kept per user direction).
@@ -699,13 +715,14 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       // section template pick + swap UI lives at Gate 2. Suggestions
       // store on roadmap_state.page_bind_suggestions[slug] — web_sections
       // rows don't land until Commit. Skip slugs that already have a
-      // suggestion landed.
+      // suggestion landed. Same race concern as outlines/drafts above:
+      // serialized until atomic JSONB updates land server-side.
       const postDraftState = await readState()
       const existingSuggestions = (postDraftState.page_bind_suggestions ?? {}) as Record<string, unknown>
       const slugsNeedingBindSuggestions = slugs.filter(s => existingSuggestions[s] == null)
-      await Promise.allSettled(slugsNeedingBindSuggestions.map(slug =>
-        callOrchestrate('suggest_bind_for_page', { pageSlug: slug }),
-      ))
+      for (const slug of slugsNeedingBindSuggestions) {
+        await callOrchestrate('suggest_bind_for_page', { pageSlug: slug })
+      }
     } finally {
       setEngineRunning(false)
     }

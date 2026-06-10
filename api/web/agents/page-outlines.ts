@@ -352,8 +352,18 @@ export default async function handler(req: any, res: any) {
     }
     toolInput = toolCall.input
   } catch (err: any) {
-    console.error('[page-outlines] gateway error:', err?.message)
-    return res.status(502).json({ error: `AI Gateway error: ${err?.message ?? 'unknown'}` })
+    // AI SDK errors can have nested structure — err.message is sometimes
+    // a string, sometimes an object, sometimes wraps a `cause`. Surface
+    // EVERYTHING in the response so the client doesn't end up displaying
+    // "[object Object]" with no signal about what actually broke.
+    const msg = typeof err?.message === 'string' ? err.message : null
+    const causeMsg = typeof err?.cause?.message === 'string' ? err.cause.message : null
+    let serialized: string
+    try { serialized = JSON.stringify(err, Object.getOwnPropertyNames(err ?? {})) }
+    catch { serialized = String(err) }
+    const detail = msg ?? causeMsg ?? serialized ?? 'unknown'
+    console.error('[page-outlines] gateway error:', { msg, causeMsg, serialized, errType: err?.constructor?.name })
+    return res.status(502).json({ error: `AI Gateway error: ${detail}`, detail, error_type: err?.constructor?.name ?? 'Error' })
   }
 
   // Validate atom_ids exist — fabricated UUIDs are a fail condition.
