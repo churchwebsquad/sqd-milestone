@@ -370,12 +370,22 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     setFeedback('')
   }, [routePreview, callOrchestrate])
 
-  // Live engine poller — runs only while engine is in flight. Polls
-  // engine_state every 3s so the workspace shows current_phase +
-  // pages_drafted/total + loop_count without the user refreshing.
+  // Live engine poller. Polls every 3s when EITHER:
+  //   - our own runEngine cascade is in flight (engineRunning=true), OR
+  //   - the DB engine_state says an in-progress status — meaning a
+  //     cascade is running ON THE SERVER even if THIS tab didn't
+  //     initiate it (e.g., user opened the tab mid-run; the orchestrate
+  //     functions on Vercel are still writing pages).
+  //
+  // Without the second condition the user opens the tab during an
+  // active run and the page sits frozen — local state shows whatever
+  // landed at mount, no refresh, no "5 of 21" progress, no clue that
+  // pages 6-21 are still landing every few seconds.
   const [engineRunning, setEngineRunning] = useState(false)
+  const dbEngineInProgress = engine.status != null && ENGINE_IN_PROGRESS_STATUSES.has(engine.status)
+  const shouldPoll = engineRunning || dbEngineInProgress
   useEffect(() => {
-    if (!engineRunning) return
+    if (!shouldPoll) return
     let cancelled = false
     const poll = async () => {
       const { data } = await supabase
@@ -393,7 +403,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     const id = window.setInterval(poll, 3000)
     void poll()
     return () => { cancelled = true; window.clearInterval(id) }
-  }, [engineRunning, project.id])
+  }, [shouldPoll, project.id])
 
   // Chains run_drafts → critique → iterate (if directives). The orchestrator
   // already implements iterate as a self-contained loop server-side; this
@@ -406,9 +416,16 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       if (!draftsResult) return
       const critiqueResult = await callOrchestrate('critique') as { engine_state?: EngineState } | null
       if (!critiqueResult) return
-      const verdict = critiqueResult.engine_state?.last_verdict
       const directiveCount = critiqueResult.engine_state?.last_directive_count ?? 0
-      if (verdict !== 'approved' && directiveCount > 0) {
+      // Senior copy pass — run iterate whenever Director emitted any
+      // directives, regardless of overall_verdict. The old behavior
+      // (verdict !== 'approved') let em-dashes, snippet bypasses, and
+      // other tics through on the model's self-approval. Director is
+      // now instructed to ALWAYS surface problem_lines as directives,
+      // so a non-empty directives list means there's real work for
+      // iterate (slot-edit calls) to clean up — even on an "approved"
+      // verdict.
+      if (directiveCount > 0) {
         await callOrchestrate('iterate')
       }
     } finally {
@@ -1061,10 +1078,40 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       )}
 
       {/* Drafts — expandable per page so the strategist can see the
-          actual copy before approving / committing / giving feedback. */}
-      {draftSlugs.length > 0 && (
+          actual copy before approving / committing / giving feedback.
+          Show the section even when 0 drafts exist IF the engine is
+          mid-cascade, so the strategist sees "writing pages…" rather
+          than nothing. */}
+      {(draftSlugs.length > 0 || dbEngineInProgress) && (
         <section className="rounded-lg border border-wm-border bg-wm-bg-elevated p-4">
-          <h3 className="text-[14px] font-semibold text-wm-text mb-3">Drafted pages ({draftSlugs.length})</h3>
+          <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+            <h3 className="text-[14px] font-semibold text-wm-text">
+              Drafted pages ({draftSlugs.length}
+              {(engine.pages_total ?? 0) > 0 && draftSlugs.length !== (engine.pages_total ?? 0)
+                ? ` of ${engine.pages_total}`
+                : ''})
+            </h3>
+            {dbEngineInProgress && (
+              <div className="flex items-center gap-2 text-[11px] text-wm-accent-strong">
+                <Loader2 size={11} className="animate-spin" />
+                <span>
+                  {engine.current_phase === 'page_briefs' && 'Writing page briefs…'}
+                  {engine.current_phase === 'page_drafts' && `Drafting pages · ${engine.pages_drafted ?? 0}/${engine.pages_total ?? '?'} written so far`}
+                  {engine.current_phase === 'director_critique' && 'Director critiquing the drafts…'}
+                  {engine.current_phase === 'applying_directives' && `Iterating · loop ${engine.loop_count ?? 0}`}
+                  {!['page_briefs','page_drafts','director_critique','applying_directives'].includes(engine.current_phase ?? '') && 'Engine still running…'}
+                </span>
+                <span className="text-wm-text-subtle">(this view auto-refreshes)</span>
+              </div>
+            )}
+          </div>
+          {dbEngineInProgress && draftSlugs.length < (engine.pages_total ?? 0) && (
+            <div className="mb-3 rounded-md border border-wm-accent/30 bg-wm-accent/5 px-3 py-2 text-[11px] text-wm-text leading-snug">
+              The engine has written {engine.pages_drafted ?? draftSlugs.length} of {engine.pages_total} pages so far.
+              {' '}{draftSlugs.length} are visible below; the rest are landing every few seconds as Vercel finishes each chunk.
+              {' '}Nothing is broken — refresh isn't needed.
+            </div>
+          )}
           <div className="space-y-2">
             {draftSlugs.map(slug => {
               const d = drafts[slug]
@@ -1347,20 +1394,34 @@ function EngineStatusCard({ engine, engineRunning, sitemapApproved, draftSlugs, 
   const directiveCount = engine.last_directive_count ?? 0
   const lastError = engine.last_error
 
+  // Detect ANY in-progress engine state — local cascade in flight OR
+  // a server-side cascade we're observing via polling. Either way the
+  // headline should reflect what the engine is doing right now, not
+  // the stale verdict from a prior completed run.
+  const isAnyInProgress = engineRunning || ENGINE_IN_PROGRESS_STATUSES.has(status)
+
   // Single phrase per state so the strategist always knows what's
   // happening without parsing a status banner + 4 buttons.
   const headline = (() => {
     if (lastError) return `Engine errored: ${lastError}`
     if (!sitemapApproved) return 'Waiting on sitemap approval'
-    if (engineRunning) {
-      if (phase === 'page_briefs')        return 'Briefing pages…'
-      if (phase === 'page_drafts')        return `Drafting pages · ${drafted}/${total || '?'}`
-      if (phase === 'director_critique')  return 'Director critiquing the drafts…'
-      if (phase === 'applying_directives') return `Iterating — loop ${loopCount} · re-drafting flagged pages…`
-      if (phase === 'awaiting_critique')  return 'Drafts ready. Critiquing…'
+    if (isAnyInProgress) {
+      // Pick the most specific message we can from phase or status.
+      // Falls through to "Engine running…" for unfamiliar states.
+      if (phase === 'page_briefs' || status === 'briefing')
+        return 'Briefing pages…'
+      if (phase === 'page_drafts' || status === 'drafting')
+        return `Drafting pages · ${drafted}/${total || '?'}`
+      if (phase === 'director_critique' || status === 'critiquing')
+        return 'Director critiquing the drafts…'
+      if (phase === 'applying_directives' || status === 'iterating')
+        return `Iterating — loop ${loopCount} · re-drafting flagged pages…`
+      if (phase === 'awaiting_critique')
+        return 'Drafts ready. Critiquing…'
+      if (status === 'committing')
+        return `Committing · ${committed}/${total}`
       return 'Engine running…'
     }
-    if (status === 'committing')       return `Committing · ${committed}/${total}`
     if (status === 'committed')        return `Committed ${committed} pages.`
     if (status === 'ready_for_review') return verdict === 'approved'
       ? `Engine approved its own drafts. Review and commit when ready.`
@@ -1371,7 +1432,7 @@ function EngineStatusCard({ engine, engineRunning, sitemapApproved, draftSlugs, 
 
   const tone =
     lastError ? 'danger'
-    : engineRunning ? 'running'
+    : isAnyInProgress ? 'running'
     : status === 'committed' ? 'success'
     : status === 'ready_for_review' ? 'ready'
     : 'idle'
@@ -1400,13 +1461,17 @@ function EngineStatusCard({ engine, engineRunning, sitemapApproved, draftSlugs, 
               {loopCount > 0 && <span> · loop {loopCount}/3</span>}
             </p>
           )}
-          {!engineRunning && status === 'ready_for_review' && directiveCount > 0 && (
+          {!isAnyInProgress && status === 'ready_for_review' && directiveCount > 0 && (
             <p className="text-[11px] text-wm-text-muted mt-0.5">
               Director flagged {directiveCount} item{directiveCount === 1 ? '' : 's'} during critique. See below.
             </p>
           )}
         </div>
-        {!engineRunning && sitemapApproved && (
+        {/* Hide Re-run + Commit while the engine is in-progress on the
+            server, regardless of whether THIS tab started the run. Both
+            actions would conflict with the in-flight cascade and the
+            "Engine approved" verdict is stale until critique re-runs. */}
+        {!isAnyInProgress && sitemapApproved && (
           <button
             onClick={onRerun}
             disabled={rerunBusy}
@@ -1415,7 +1480,7 @@ function EngineStatusCard({ engine, engineRunning, sitemapApproved, draftSlugs, 
             <RefreshCw size={12} /> Re-run
           </button>
         )}
-        {!engineRunning && draftSlugs.length > 0 && status !== 'committed' && (
+        {!isAnyInProgress && status === 'ready_for_review' && draftSlugs.length > 0 && (
           <button
             onClick={onCommit}
             disabled={rerunBusy}
@@ -1425,7 +1490,7 @@ function EngineStatusCard({ engine, engineRunning, sitemapApproved, draftSlugs, 
           </button>
         )}
       </div>
-      {engineRunning && total > 0 && phase === 'page_drafts' && (
+      {isAnyInProgress && total > 0 && (phase === 'page_drafts' || status === 'drafting') && (
         <div className="mt-3 w-full bg-wm-border/40 rounded-full h-1.5 overflow-hidden">
           <div
             className="bg-wm-accent h-full transition-all"
@@ -1857,6 +1922,39 @@ function DraftPreview({
           </button>
         </div>
       )}
+      {(() => {
+        // Validation flags + unused atoms — the page-draft agent
+        // self-reports these, and they're the strongest signal that
+        // a page has known issues even when Director's per-page
+        // critique is silent. Surface inline so the strategist sees
+        // them next to the actual copy.
+        const validation = (draft as { validation?: { flags?: unknown[]; unused_atoms?: string[] } } | undefined)?.validation
+        const flags = Array.isArray(validation?.flags) ? validation.flags : []
+        const unusedAtoms = Array.isArray(validation?.unused_atoms) ? validation.unused_atoms : []
+        if (flags.length === 0 && unusedAtoms.length === 0) return null
+        return (
+          <div className="rounded-md border border-wm-warning/40 bg-wm-warning-bg p-3 mb-3 space-y-1.5">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-wm-warning">
+              Draft flags ({flags.length + (unusedAtoms.length > 0 ? 1 : 0)})
+            </p>
+            {flags.length > 0 && (
+              <ul className="space-y-0.5">
+                {flags.map((f, i) => (
+                  <li key={i} className="text-[11px] text-wm-text leading-snug">
+                    · {typeof f === 'string' ? f : JSON.stringify(f)}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {unusedAtoms.length > 0 && (
+              <p className="text-[11px] text-wm-text leading-snug">
+                <span className="font-semibold">Unused atoms ({unusedAtoms.length}):</span>{' '}
+                <span className="font-mono text-wm-text-muted">{unusedAtoms.join(', ')}</span>
+              </p>
+            )}
+          </div>
+        )
+      })()}
       {sections.length === 0 ? (
         <p className="text-[12px] text-wm-text-muted">No sections in this draft.</p>
       ) : (

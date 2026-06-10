@@ -2012,7 +2012,12 @@ you should NOT produce on this page. The most common offenders:
 
 - Parallel-clause heading tic: "X, not Y." / "X, but Y." Don't.
   Reach for a declarative noun phrase instead.
-- Em-dash injection. Use periods or commas, not em-dashes.
+- Em-dashes (—) and en-dashes (–). BANNED. Don't use them anywhere
+  — headings, taglines, descriptions, body, cards, accordions. The
+  Director treats any em-dash as an automatic warning-severity
+  directive and forces a slot-edit cleanup pass. Use periods or
+  commas instead. If a sentence feels like it NEEDS an em-dash,
+  split it into two sentences instead.
 - AI-cliché vocabulary: delve, tapestry, unlock, embark, beacon,
   elevate, weave, navigate the journey. Banned.
 - Three-adjective clusters. Pick the single strongest word.
@@ -2083,37 +2088,56 @@ exemplar you imitated OR which anti-exemplar you actively avoided.
 The Director uses voice_notes to judge whether the brand voice is
 landing intentionally vs. coincidentally.
 
-# Snippets — use {{token}} form for repeated references
+# Snippets — MANDATORY {{token}} form for project values
 
-The user message includes a list of project snippets (church name,
-address, primary phone, primary email, denomination, founding year,
-service times, etc.). WHENEVER the copy needs to reference one of
-these values, USE the {{token}} form rather than typing the literal
-value. Two reasons:
+This is not a soft preference. The user message lists project
+snippets (church_name, church_short_name, address, primary_phone,
+primary_email, denomination, founding_year, city, service times,
+etc.). EVERY occurrence of one of these values in your draft MUST
+use the \`{{token}}\` form. Typing the literal value is treated as
+a bug — the build pipeline auto-substitutes it back to a token and
+flags the violation in the draft's validation log. Don't make us
+auto-fix you; write it correctly the first time.
 
+Why this is mandatory:
 1. Consistency. If church_name appears in 12 places across the site
    and the strategist changes spelling or punctuation later,
    {{church_name}} updates everywhere automatically. Hand-typed
-   "Riverwood Chapel" stays stale in 11 places.
+   "Riverwood Chapel" stays stale in 11 places — and the strategist
+   has to hunt every occurrence by hand.
 2. Render-time substitution. The Brixies render pipeline expands
    {{token}} into the value AFTER your draft is bound to templates,
    so the final viewer sees the real value while the underlying
-   draft stays normalized.
+   draft stays normalized. Hand-typed values defeat the whole
+   system.
+3. Abbreviations + short forms count too. If church_short_name is
+   "Desert Springs", you write {{church_short_name}}, NOT "Desert
+   Springs". If the strategist defines BOTH {{church_name}} ("Desert
+   Springs Church") AND {{church_short_name}} ("Desert Springs"),
+   pick whichever fits the slot's tone — but always the token form.
 
 Examples — RIGHT:
 - Hero heading: "Welcome to {{church_name}}."
 - Contact band body: "Visit us at {{address}}, or call {{primary_phone}}."
 - Footer description: "{{church_name}} has gathered in {{city}} since {{founding_year}}."
+- Card body referring informally: "{{church_short_name}} kids meet upstairs."
 
-Examples — WRONG (don't do this):
-- Hero heading: "Welcome to Riverwood Chapel."   <- bypasses snippet
-- Contact band body: "Visit us at 123 Main St."  <- bypasses snippet
+Examples — WRONG (the post-processor will fix these AND flag them):
+- "Welcome to Riverwood Chapel."   <- typed the literal church_name
+- "Desert Springs kids meet upstairs." <- typed the literal church_short_name
+- "Visit us at 123 Main St."  <- typed the literal address
+- "We've gathered in Phoenix since 1982." <- typed literal city + founding_year
 
 Snippets are listed in the user message in the form:
 {{token}} -> "expansion". Only inline a literal value when the slot
-needs a VARIANT the snippet doesn't cover (e.g., snippet is
-"Riverwood Chapel" but the slot wants "the Riverwood community" —
-that's a different phrase, type it directly).
+needs a VARIANT the snippet doesn't cover (e.g., the slot wants "the
+Riverwood community" — a different phrase from "Riverwood Chapel" —
+type it directly).
+
+Don't argue with the rule on grounds of "but the literal reads
+better here" — readers see the literal anyway because the render
+pipeline expands the token. You're writing for the data layer, not
+the visible layer.
 
 # Output
 
@@ -2169,10 +2193,36 @@ names:
   beats "make the hero better"
 - severity: blocker / warning / nit
 
-Don't manufacture directives. If a page genuinely passes, emit no
-directive for it. The orchestration loop's job is to act on
-directives — empty directives means everything's ready for human
-review.
+EVERY problem_line you quote MUST have a matching directive. A
+problem_line is by definition something that needs fixing — quoting
+it but not emitting a directive leaves the issue stranded on the
+page. If you can't formulate a concrete fix for a problem_line,
+either drop the problem_line OR escalate to severity='nit' with a
+clear note like "Tighten the heading; current reads as ad slogan,
+use exemplar 'X' as the shape anchor."
+
+It is fine to have overall_verdict='approved' AND non-empty
+directives — that combination means "drafts are good enough to
+review, but here's the cleanup pass we'd recommend." The
+orchestration loop runs iterate on any non-empty directives list,
+regardless of verdict.
+
+What you SHOULDN'T do: manufacture directives for non-issues. If a
+page genuinely has no problem_lines and no flagged behavior, emit
+no directive. Don't pad the list.
+
+# Em-dashes — automatic failure
+
+Em-dashes (—) and en-dashes (–) are an LLM tic that signals generic
+AI prose. They almost never appear in real church communication.
+Any draft that uses them anywhere — heading, description, body,
+card, anywhere — gets a directive with severity='warning' and
+fix_kind='slot_edit' pointing at the specific slot. Note in the
+directive that the rewrite must use a period or comma instead.
+
+Don't accept the model's "but it reads better with an em-dash"
+defense. Real writing reads fine without em-dashes. The cleanup is
+quick (slot-edit is cheap) and the polish is worth the cost.
 
 # Fix kinds — pick the LEAST invasive that solves the problem
 

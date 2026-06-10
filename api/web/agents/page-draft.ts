@@ -247,7 +247,20 @@ export default async function handler(req: any, res: any) {
   }
 
   const sections = Array.isArray((toolResult as any)?.sections) ? (toolResult as any).sections : []
+  // Post-write snippet enforcement. The model is instructed to use
+  // {{token}} form for known snippets, but slip-throughs are common
+  // (e.g. writes "Desert Springs" instead of {{church_short_name}}).
+  // We deterministically replace literal expansions with their token
+  // and log each replacement so the strategist can see what happened.
+  const snippetReplacements = enforceSnippets(sections, snippets)
+
   const validation = validatePageDraft(sections, brief)
+  if (snippetReplacements.length > 0) {
+    if (!Array.isArray(validation.flags)) validation.flags = []
+    validation.flags.push(...snippetReplacements.map(r =>
+      `Snippet substitution: "${r.expansion}" → {{${r.token}}} in ${r.where} (${r.count}×). The copywriter wrote the literal value; we replaced it so future snippet edits propagate.`,
+    ))
+  }
 
   const draft = {
     sections,
@@ -324,4 +337,79 @@ function validatePageDraft(sections: any[], brief: any): {
   const unused = assignedAtomIds.filter((aid: string) => !usedAtomIds.has(aid))
 
   return { ok: flags.length === 0, flags, unused_atoms: unused }
+}
+
+/** Walk every text slot in every section and replace literal snippet
+ *  expansions with `{{token}}`. Only triggers for snippet expansions
+ *  that are unambiguous proper-noun-ish strings (length ≥ 3, contains
+ *  a capital letter OR a digit, and is not a common English word).
+ *  This keeps the substitution from over-replacing generic words.
+ *
+ *  Returns the list of substitutions made so the caller can log them
+ *  as validation flags — the strategist sees that the copywriter
+ *  wrote the literal and we cleaned it up. */
+function enforceSnippets(
+  sections: any[],
+  snippets: Array<{ token: string; expansion: string }>,
+): Array<{ token: string; expansion: string; where: string; count: number }> {
+  if (!Array.isArray(sections) || snippets.length === 0) return []
+  // Only replace expansions that LOOK like values worth tokenizing.
+  // Skip generic words and very short strings to avoid over-replacement.
+  const COMMON_WORDS = new Set([
+    'the','and','a','an','our','your','their','of','to','for','in','on','at',
+    'as','by','with','from','is','are','be','we','us','i','you','they',
+    'sunday','monday','tuesday','wednesday','thursday','friday','saturday',
+    'church','god','jesus','christ','bible','faith','community','family',
+    'love','hope','peace','joy','grace','mercy','prayer','worship','service',
+  ])
+  const eligible = snippets
+    .filter(s => typeof s.expansion === 'string' && s.expansion.trim().length >= 3)
+    .filter(s => !COMMON_WORDS.has(s.expansion.trim().toLowerCase()))
+    .filter(s => /[A-Z]|\d/.test(s.expansion))   // proper noun / number / etc.
+    // Sort by expansion length DESC so we replace longer expansions first
+    // (e.g. "Desert Springs Church" before "Desert Springs"), preventing
+    // a shorter match from clobbering a longer one.
+    .sort((a, b) => b.expansion.length - a.expansion.length)
+  if (eligible.length === 0) return []
+
+  const replacements: Array<{ token: string; expansion: string; where: string; count: number }> = []
+
+  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+  const replaceInString = (raw: string, where: string): string => {
+    let next = raw
+    for (const s of eligible) {
+      // Skip if already tokenized form is present — the model already
+      // used the snippet correctly on at least one occurrence.
+      const tokenLit = `{{${s.token}}}`
+      // Use word-boundary regex so "Desert Springs" doesn't match
+      // inside "Desert Springsteen" or similar.
+      const re = new RegExp(`(?<![A-Za-z0-9_{}])${escapeRegex(s.expansion)}(?![A-Za-z0-9_])`, 'g')
+      const matches = next.match(re)
+      if (!matches || matches.length === 0) continue
+      next = next.replace(re, tokenLit)
+      replacements.push({ token: s.token, expansion: s.expansion, where, count: matches.length })
+    }
+    return next
+  }
+
+  const walkValue = (value: unknown, where: string): unknown => {
+    if (typeof value === 'string') return replaceInString(value, where)
+    if (Array.isArray(value)) return value.map((v, i) => walkValue(v, `${where}[${i}]`))
+    if (value && typeof value === 'object') {
+      const out: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(value)) out[k] = walkValue(v, `${where}.${k}`)
+      return out
+    }
+    return value
+  }
+
+  for (let i = 0; i < sections.length; i++) {
+    const s = sections[i]
+    if (!s || typeof s !== 'object') continue
+    if (s.copy && typeof s.copy === 'object') {
+      s.copy = walkValue(s.copy, `section[${i}].copy`)
+    }
+  }
+  return replacements
 }
