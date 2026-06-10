@@ -145,22 +145,49 @@ export default async function handler(req: any, res: any) {
   if (!project) return res.status(404).json({ error: 'Project not found' })
 
   const roadmapState = (project.roadmap_state ?? {}) as Record<string, any>
-  const stage1 = roadmapState.stage_1
-  const stage2 = roadmapState.stage_2
-  const briefs = roadmapState.page_briefs
-  const brief = briefs?.[pageSlug]
-  if (!stage1 || !stage2 || !brief) {
-    return res.status(400).json({ error: 'Synthesize + Sitemap + Page Briefs must all be complete before page-draft.' })
+  const stage1        = roadmapState.stage_1
+  const stage2        = roadmapState.stage_2
+  // Prefer the new page_outlines (rich, atom-UUID keyed) over the
+  // legacy page_briefs (slug-keyed atom refs that didn't resolve).
+  // page_briefs is deleted in the orchestrator-wiring commit; this
+  // dual-read keeps the agent backward-compatible until then.
+  const outline       = roadmapState.page_outlines?.[pageSlug] as any | undefined
+  const briefs        = roadmapState.page_briefs
+  const brief         = briefs?.[pageSlug]
+  const siteStrategy  = roadmapState.site_strategy as any | undefined
+  const ministryModel = roadmapState.ministry_model as any | undefined
+  if (!stage1 || !stage2 || (!outline && !brief)) {
+    return res.status(400).json({
+      error: 'Synthesize + Sitemap + (Page Outline OR Page Brief) must all be complete before page-draft.',
+      hint:  'Prefer running page-outlines (new path). page-briefs is a legacy fallback during the refactor.',
+    })
   }
 
-  const atomIds = [
-    ...(brief.atoms_assigned ?? []).map((a: any) => a.atom_id).filter(Boolean),
-    ...(brief.reference_atoms ?? []).map((a: any) => a.atom_id).filter(Boolean),
-  ]
-  const { data: atoms } = atomIds.length
+  // Atom resolution — new outline path uses real UUIDs in
+  // sections[].atom_assignments[]; legacy brief path uses fabricated
+  // slug strings that never resolved (the bug behind 3886's empty-
+  // atoms problem). When the outline is present, pull EVERY atom
+  // it references; when only the brief is present, fall back to the
+  // legacy attempt (which will likely return 0 — flagged at output).
+  let atomIdsUsed: string[] = []
+  if (outline) {
+    const ids = new Set<string>()
+    for (const s of (outline.sections ?? [])) {
+      for (const aa of (s.atom_assignments ?? [])) {
+        if (typeof aa?.atom_id === 'string' && aa.atom_id) ids.add(aa.atom_id)
+      }
+    }
+    atomIdsUsed = [...ids]
+  } else if (brief) {
+    atomIdsUsed = [
+      ...(brief.atoms_assigned ?? []).map((a: any) => a.atom_id).filter(Boolean),
+      ...(brief.reference_atoms ?? []).map((a: any) => a.atom_id).filter(Boolean),
+    ]
+  }
+  const { data: atoms } = atomIdsUsed.length
     ? await sb.from('content_atoms')
-        .select('id, topic, kind, body, metadata, source, verbatim')
-        .in('id', atomIds)
+        .select('id, topic, body, metadata, source_kind, verbatim')
+        .in('id', atomIdsUsed)
     : { data: [] as any[] }
 
   const previousDraft = roadmapState.page_drafts?.[pageSlug]
@@ -185,15 +212,86 @@ export default async function handler(req: any, res: any) {
     x_factor:             stage1.x_factor,
   }
 
+  // Build a per-section atom lookup so the user message can show
+  // each section's assigned atom BODY + treatment signal inline,
+  // not as a separate atoms[] dump the model has to cross-reference.
+  const atomById = new Map<string, any>()
+  for (const a of (atoms ?? [])) atomById.set(String(a.id), a)
+
+  const outlineSectionsRich = outline
+    ? (outline.sections ?? []).map((s: any) => ({
+        section_ix:  s.section_ix,
+        archetype:   s.archetype,
+        section_job: s.section_job,
+        flow_role:   s.flow_role,
+        primary_cta: s.primary_cta ?? null,
+        cms_managed: s.cms_managed ?? null,
+        voice_anchor:           s.voice_anchor ?? null,
+        anti_pattern_to_avoid:  s.anti_pattern_to_avoid ?? null,
+        atom_assignments: (s.atom_assignments ?? []).map((aa: any) => {
+          const atom = atomById.get(String(aa.atom_id))
+          return {
+            atom_id:       aa.atom_id,
+            treatment:     aa.treatment,
+            role_in_section: aa.role_in_section ?? null,
+            // Inline the source body so the model sees what to imitate /
+            // quote / paraphrase without an extra lookup.
+            source_body:   atom?.body ?? null,
+            source_topic:  atom?.topic ?? null,
+            source_kind:   atom?.source_kind ?? null,
+            verbatim_in_source: atom?.verbatim ?? false,
+          }
+        }),
+      }))
+    : null
+
+  // Ministry model + site strategy are the SPINE — they tell the
+  // writer what register to write in for this church.
+  const ministrySlim = ministryModel ? {
+    model:           ministryModel.model,
+    secondary_blend: ministryModel.secondary_blend,
+    blend_notes:     ministryModel.blend_notes,
+    cta_default:     ministryModel.cta_default,
+  } : null
+
   const userText = [
-    `# Project voice (full Stage 1 slim)`,
+    `# Project voice (full Stage 1 slim — voice exemplars + anti-exemplars + personas + x-factor)`,
     JSON.stringify(stage1Slim, null, 2),
     ``,
-    `# This page's brief`,
-    JSON.stringify(brief, null, 2),
+    ministrySlim ? `# Ministry model (the SPINE — register + CTA defaults flow from here)` : '',
+    ministrySlim ? JSON.stringify(ministrySlim, null, 2) : '',
     ``,
-    `# Atoms available to this page (primary + reference)`,
-    JSON.stringify(atoms ?? [], null, 2),
+    outline ? [
+      `# Page outline — THE CONTRACT.`,
+      `Each section below tells you EXACTLY what to write:`,
+      `  - archetype: the section shape`,
+      `  - section_job: what this section does for the persona`,
+      `  - flow_role: where in the page's narrative this lands`,
+      `  - atom_assignments[]: the source content for this section, each with a TREATMENT signal:`,
+      `      · verbatim     → quote the source_body exactly. No edits.`,
+      `      · light_edit   → preserve meaning, polish voice. Same length range.`,
+      `      · heavy_edit   → restructure freely while staying accurate to the facts.`,
+      `      · synthesize   → use as source material to compose new copy.`,
+      `  - voice_anchor: an example sentence from the voice card to imitate in shape, not content.`,
+      `  - anti_pattern_to_avoid: one thing this section MUST NOT do.`,
+      `  - primary_cta: when set, this section owns the page's main CTA.`,
+      `  - cms_managed: when set, this section sources from a CPT — write copy that frames the dynamic content (the dev will wire the actual repeater).`,
+      ``,
+      `You are the brand voice champion. Atoms are the contract. Voice is the wrapper. Never invent facts.`,
+      `If a section's atom_assignments is empty, the section's job is to provide flow / persona reassurance using voice exemplars only — do not fabricate factual content.`,
+      ``,
+      'Persona journey for this page:',
+      JSON.stringify(outline.persona_journey_for_this_page ?? null, null, 2),
+      ``,
+      'Sections (in order):',
+      JSON.stringify(outlineSectionsRich, null, 2),
+    ].join('\n') : '',
+    ``,
+    !outline && brief ? `# Legacy brief (fallback — page-outlines preferred)\n${JSON.stringify(brief, null, 2)}` : '',
+    ``,
+    !outline ? `# Atoms available to this page (loaded as fallback when no outline exists)\n${JSON.stringify(atoms ?? [], null, 2)}` : '',
+    ``,
+    siteStrategy?.persona_journeys ? `# Site-wide persona journeys (for context — your page is one stop on these journeys)\n${JSON.stringify(siteStrategy.persona_journeys, null, 2)}` : '',
     ``,
     snippets.length > 0
       ? [
@@ -258,6 +356,20 @@ export default async function handler(req: any, res: any) {
     ))
   }
 
+  // Outline coverage telemetry — did every section in the outline
+  // come back with copy? The auto-iterate loop reads this to know
+  // whether to retry per section. No-half-done-pages rule: a page
+  // isn't complete until every outline section has a corresponding
+  // drafted section (or is explicitly flagged unresolved).
+  const outlineSectionsCount = outline ? (outline.sections?.length ?? 0) : 0
+  const draftedSectionsCount = Array.isArray(sections) ? sections.length : 0
+  const sectionsMatch        = outline ? draftedSectionsCount >= outlineSectionsCount : true
+  const atomIdsRequested     = atomIdsUsed.length
+  const atomIdsResolved      = atomById.size
+  const atomResolutionRate   = atomIdsRequested > 0 ? atomIdsResolved / atomIdsRequested : 1
+  const outputTokensCount    = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0
+  const truncationSuspected  = outputTokensCount >= MAX_OUTPUT_TOKENS * 0.9
+
   const draft = {
     sections,
     deviation_note: (toolResult as any)?.deviation_note ?? null,
@@ -272,6 +384,23 @@ export default async function handler(req: any, res: any) {
         ? previousDraft._meta.redo_count + (feedback ? 1 : 0)
         : 0,
       usage,
+      // Resolution telemetry — drives the auto-iterate-until-resolved
+      // logic. A page is "complete" only when:
+      //   - sections_match (output count >= outline expected)
+      //   - atom_resolution_rate is ≥ 0.95 (≥ 95% of requested atoms
+      //     actually loaded from DB; lower = brief had fabricated IDs
+      //     OR atoms were deleted between outline + draft)
+      //   - truncation_suspected is false
+      //   - validation.flags is empty
+      used_outline:         !!outline,
+      outline_sections:     outlineSectionsCount,
+      drafted_sections:     draftedSectionsCount,
+      sections_match:       sectionsMatch,
+      atom_ids_requested:   atomIdsRequested,
+      atom_ids_resolved:    atomIdsResolved,
+      atom_resolution_rate: Math.round(atomResolutionRate * 100) / 100,
+      truncation_suspected: truncationSuspected,
+      truncation_pct:       outputTokensCount > 0 ? Math.round((outputTokensCount / MAX_OUTPUT_TOKENS) * 100) : 0,
     },
   }
 
