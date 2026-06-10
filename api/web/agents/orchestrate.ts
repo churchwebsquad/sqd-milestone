@@ -342,40 +342,15 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({ ok: true, engine_state: updated })
     }
 
-    if (action === 'run_briefs') {
-      // Phase 1 of the split drafting flow. Runs page-briefs only
-      // (fast — single agent call processes all pages at once), then
-      // returns the list of slugs the client should draft per-page.
-      // Each per-page draft is its own Vercel invocation so even a
-      // 30-page sitemap fits comfortably under the timeout.
-      try {
-        await clearCancelledMarker(sb, projectId)
-        await bailIfCancelled(sb, projectId)
-        await writeEngineState(sb, projectId, {
-          ...engineState, status: 'briefing', current_phase: 'page_briefs',
-          last_action_at: new Date().toISOString(),
-        })
-        await callAgent(baseUrl, jwt, 'page-briefs', { projectId })
-        await bailIfCancelled(sb, projectId)
-        const { data: refreshed } = await sb.from('strategy_web_projects')
-          .select('roadmap_state').eq('id', projectId).maybeSingle()
-        const refreshedState = (refreshed?.roadmap_state ?? {}) as Record<string, any>
-        const briefs = refreshedState.page_briefs ?? {}
-        const slugs = Object.keys(briefs).filter(k => k !== '_meta')
-        await writeEngineState(sb, projectId, {
-          ...engineState, status: 'drafting', current_phase: 'page_drafts',
-          pages_total: slugs.length, pages_drafted: 0,
-          last_action_at: new Date().toISOString(),
-        })
-        return res.status(200).json({ ok: true, slugs })
-      } catch (e: any) {
-        if (e instanceof CancelledError) {
-          await writeCancelledState(sb, projectId, { current_phase: 'cancelled_during_briefs' })
-          return res.status(200).json({ ok: true, slugs: [], cancelled: true })
-        }
-        throw e
-      }
-    }
+    // run_briefs removed in the content-collection-first refactor.
+    // The replacement is the page-outlines per-page action
+    // (run_page_outline_for_page) which produces a richer blueprint
+    // (atom UUIDs + treatment signals + flow_role) than the legacy
+    // brief and was the path the user explicitly asked for. The old
+    // run_briefs action called the page-briefs agent file which is
+    // also deleted in this commit — no back-compat shim per user
+    // direction ("No backward compat shim — the existing 3886-style
+    // briefs get rebuilt").
 
     if (action === 'list_compatible_templates') {
       // Returns the candidate Brixies templates for one section's

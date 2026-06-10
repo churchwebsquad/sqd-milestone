@@ -416,10 +416,26 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     if (engine.status === 'cancelled') return
     cascadeStartedFor.current = project.id
     void (async () => {
+      // Pre-Gate-1 cascade — new shape:
+      // synthesize → acf-organizer → ministry-model → strategist → sitemap.
+      // Each step writes to a different roadmap_state key so this is
+      // idempotent — repeated invocations skip work that's already
+      // landed (we read the latest state at each check).
       if (!hasStage1) {
         const ok = await callOrchestrate('run_synthesize')
-        if (!ok) return          // surfaced error in banner; user retries
+        if (!ok) return
       }
+      // Read current state to know what else has already landed.
+      // (project.roadmap_state from the prop is stale within the
+      // async closure — refreshFromDB has updated local state, but
+      // we want to re-check after each step.)
+      const isDone = (key: string) => {
+        const rs = (project.roadmap_state ?? {}) as Record<string, any>
+        return rs?.[key] != null
+      }
+      if (!isDone('acf_plan'))       await callOrchestrate('run_acf_organizer')
+      if (!isDone('ministry_model')) await callOrchestrate('run_ministry_model')
+      if (!isDone('site_strategy'))  await callOrchestrate('run_strategist')
       await callOrchestrate('draft_sitemap_with_audit')
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -482,58 +498,65 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   const runEngine = useCallback(async (): Promise<void> => {
     setEngineRunning(true)
     try {
-      // Phase 1: page-briefs (one fast invocation). Server returns
-      // the list of slugs to draft.
-      const briefsResult = await callOrchestrate('run_briefs') as { slugs?: string[]; cancelled?: boolean } | null
-      if (!briefsResult || briefsResult.cancelled) return
-      const slugs = Array.isArray(briefsResult.slugs) ? briefsResult.slugs : []
+      // Refactor-wave cascade (post-Gate-1). Replaces the old
+      // run_briefs → draft_one_page → critique → iterate → bind chain
+      // with: outlines per page → drafts per page (auto-iterate-
+      // until-resolved) → critique → iterate (Director kept) → bind
+      // suggestions. The page-outlines step is what was missing —
+      // it's the bridge between atom inventory and copy that the
+      // old page-briefs path lost.
+      const sitemapPages = ((sitemap as { pages?: Array<{ slug: string }> } | null)?.pages ?? [])
+      const slugs = sitemapPages.map(p => p.slug).filter(Boolean) as string[]
+      if (slugs.length === 0) return
 
-      // Phase 2: draft each page in its own invocation. This avoids
-      // the Vercel 300s function timeout that bit when run_drafts
-      // tried to handle briefs + N page drafts in one shot. Client-
-      // side concurrency cap keeps the browser from spawning 30
-      // parallel fetches and saturating the gateway.
-      const CLIENT_DRAFT_CONCURRENCY = 4
-      for (let i = 0; i < slugs.length; i += CLIENT_DRAFT_CONCURRENCY) {
-        const chunk = slugs.slice(i, i + CLIENT_DRAFT_CONCURRENCY)
-        // Promise.allSettled so one failed page doesn't abort the
-        // whole batch — the iterate loop will catch under-filled
-        // critique scores and the strategist can re-draft any page
-        // that errored individually.
+      const CLIENT_CONCURRENCY = 4
+
+      // Phase 1: page-outlines per slug. Each call writes
+      // roadmap_state.page_outlines[<slug>] — the contract page-draft
+      // reads. Outlines are independent so we can fully parallelize
+      // (capped client-side).
+      for (let i = 0; i < slugs.length; i += CLIENT_CONCURRENCY) {
+        const chunk = slugs.slice(i, i + CLIENT_CONCURRENCY)
         await Promise.allSettled(chunk.map(slug =>
-          callOrchestrate('draft_one_page', { pageSlug: slug }),
+          callOrchestrate('run_page_outline_for_page', { pageSlug: slug }),
         ))
       }
 
-      // Phase 3: critique + (if directives) iterate.
+      // Phase 2: draft each page WITH auto-iterate-until-resolved.
+      // The server-side helper retries up to 3 times per page on
+      // truncation / atom-resolution failure / validation flags.
+      // Half-done pages never reach Gate 2 — they're either resolved
+      // OR marked blocked_missing_input with the specific gap named.
+      for (let i = 0; i < slugs.length; i += CLIENT_CONCURRENCY) {
+        const chunk = slugs.slice(i, i + CLIENT_CONCURRENCY)
+        await Promise.allSettled(chunk.map(slug =>
+          callOrchestrate('draft_page_until_resolved', { pageSlug: slug }),
+        ))
+      }
+
+      // Phase 3: Director critique + iterate (kept per user direction).
+      // Director still emits per-page scores + directives for the
+      // feedback panel + routing at Gate 2. Iterate runs slot-edits
+      // on any non-empty directives (em-dash cleanup pass, etc.).
       const critiqueResult = await callOrchestrate('critique') as { engine_state?: EngineState } | null
       if (!critiqueResult) return
       const directiveCount = critiqueResult.engine_state?.last_directive_count ?? 0
-      // Senior copy pass — run iterate whenever Director emitted any
-      // directives, regardless of overall_verdict. The old behavior
-      // (verdict !== 'approved') let em-dashes, snippet bypasses, and
-      // other tics through on the model's self-approval. Director is
-      // now instructed to ALWAYS surface problem_lines as directives,
-      // so a non-empty directives list means there's real work for
-      // iterate (slot-edit calls) to clean up — even on an "approved"
-      // verdict.
       if (directiveCount > 0) {
         await callOrchestrate('iterate')
       }
 
-      // Phase 4: pre-bind suggestion per page. Runs BEFORE Gate 2 so
-      // the strategist reviews the bound preview, not just the
-      // archetype-shaped draft. Per-page invocations keep each one
-      // fast and easy to swap individually. Suggestions are stored
-      // in roadmap_state.page_bind_suggestions[slug] — the actual
-      // web_sections rows don't land until Commit.
+      // Phase 4: pre-bind suggestion per page (BEFORE Gate 2). Per-
+      // section template pick + swap UI lives at Gate 2. Suggestions
+      // store on roadmap_state.page_bind_suggestions[slug] — web_sections
+      // rows don't land until Commit.
       await Promise.allSettled(slugs.map(slug =>
         callOrchestrate('suggest_bind_for_page', { pageSlug: slug }),
       ))
     } finally {
       setEngineRunning(false)
     }
-  }, [callOrchestrate])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callOrchestrate, sitemap])
 
   // ── Auto-cascade post-Gate-1 (drafts → critique → iterate) ──────────
   //
