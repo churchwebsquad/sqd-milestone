@@ -616,6 +616,28 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   // landed at mount, no refresh, no "5 of 21" progress, no clue that
   // pages 6-21 are still landing every few seconds.
   const [engineRunning, setEngineRunning] = useState(false)
+
+  // Phase-level progress telemetry for the long-running runEngine
+  // cascade. Outlines + drafts + bind-suggestions each take 30-90s
+  // per page over Anthropic Opus, so a 21-page sitemap is a 10-30
+  // minute window. Without progress signal the user stares at
+  // "Running run_page_outline_for_page…" with no clue whether it's
+  // healthy or hung. This state drives the status banner: phase
+  // label, X-of-Y count, current slug, elapsed time, and a rolling
+  // ETA derived from average per-step duration so far.
+  //
+  // Reset on every runEngine entry; cleared in finally{}.
+  type EnginePhaseLabel = 'outlines' | 'drafts' | 'critique' | 'iterate' | 'bind_suggestions' | 'upstream_heal' | null
+  interface EnginePhaseProgress {
+    label:           EnginePhaseLabel
+    pretty:          string                  // human-readable phase name
+    completed:       number
+    total:           number
+    currentSlug:     string | null
+    startedAt:       number                  // ms epoch when this phase began
+    perStepMs:       number[]                // duration of each completed step (for avg + ETA)
+  }
+  const [enginePhase, setEnginePhase] = useState<EnginePhaseProgress | null>(null)
   const dbEngineInProgress = engine.status != null && ENGINE_IN_PROGRESS_STATUSES.has(engine.status)
   const shouldPoll = engineRunning || dbEngineInProgress
   useEffect(() => {
@@ -695,14 +717,40 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       const needsAcfPlan     = initialState.acf_plan       == null
       const needsMinistry    = initialState.ministry_model == null
       const needsStrategist  = initialState.site_strategy  == null
-      if (needsSynthesize || needsAcfPlan || needsMinistry || needsStrategist) {
-        if (needsSynthesize) {
-          const ok = await callOrchestrate('run_synthesize')
-          if (!ok) return
+      const upstreamSteps =
+        Number(needsSynthesize) + Number(needsAcfPlan) +
+        Number(needsMinistry)   + Number(needsStrategist)
+      if (upstreamSteps > 0) {
+        setEnginePhase({
+          label: 'upstream_heal',
+          pretty: 'Healing strategy foundation',
+          completed: 0,
+          total: upstreamSteps,
+          currentSlug: null,
+          startedAt: Date.now(),
+          perStepMs: [],
+        })
+        const stepDurations: number[] = []
+        const runStep = async (
+          name: string,
+          action: 'run_synthesize' | 'run_acf_organizer' | 'run_ministry_model' | 'run_strategist',
+        ): Promise<boolean> => {
+          setEnginePhase(p => p && ({ ...p, currentSlug: name }))
+          const stepStart = Date.now()
+          const ok = await callOrchestrate(action)
+          stepDurations.push(Date.now() - stepStart)
+          setEnginePhase(p => p && ({
+            ...p,
+            completed: p.completed + 1,
+            currentSlug: null,
+            perStepMs: [...stepDurations],
+          }))
+          return !!ok
         }
-        if (needsAcfPlan)    await callOrchestrate('run_acf_organizer')
-        if (needsMinistry)   await callOrchestrate('run_ministry_model')
-        if (needsStrategist) await callOrchestrate('run_strategist')
+        if (needsSynthesize)  { if (!(await runStep('synthesize',    'run_synthesize')))      return }
+        if (needsAcfPlan)     {       await runStep('acf_plan',      'run_acf_organizer')         }
+        if (needsMinistry)    {       await runStep('ministry_model','run_ministry_model')        }
+        if (needsStrategist)  {       await runStep('site_strategy', 'run_strategist')            }
         // Re-read so the outline / draft / critique phases see what
         // the heal just wrote.
         initialState = await readState()
@@ -723,8 +771,32 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       // Phase 1: page-outlines per slug. Skip slugs that already
       // have an outline landed (resume semantic).
       const slugsNeedingOutlines = slugs.filter(s => existingOutlines[s] == null)
-      for (const slug of slugsNeedingOutlines) {
-        await callOrchestrate('run_page_outline_for_page', { pageSlug: slug })
+      if (slugsNeedingOutlines.length > 0) {
+        setEnginePhase({
+          label: 'outlines',
+          pretty: 'Outlining pages',
+          completed: 0,
+          total: slugsNeedingOutlines.length,
+          currentSlug: slugsNeedingOutlines[0],
+          startedAt: Date.now(),
+          perStepMs: [],
+        })
+        const stepDurations: number[] = []
+        for (let i = 0; i < slugsNeedingOutlines.length; i++) {
+          const slug = slugsNeedingOutlines[i]
+          // Snapshot start BEFORE the network call so the duration
+          // reflects actual server time, not React batching latency.
+          const stepStart = Date.now()
+          setEnginePhase(p => p && ({ ...p, currentSlug: slug }))
+          await callOrchestrate('run_page_outline_for_page', { pageSlug: slug })
+          stepDurations.push(Date.now() - stepStart)
+          setEnginePhase(p => p && ({
+            ...p,
+            completed: i + 1,
+            currentSlug: slugsNeedingOutlines[i + 1] ?? null,
+            perStepMs: [...stepDurations],
+          }))
+        }
       }
 
       // Phase 2: draft each page WITH auto-iterate-until-resolved.
@@ -736,8 +808,30 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       // landed (regardless of flags — that's a separate Iterate
       // concern, not a "page never got written" concern).
       const slugsNeedingDrafts = slugs.filter(s => existingDrafts[s] == null)
-      for (const slug of slugsNeedingDrafts) {
-        await callOrchestrate('draft_page_until_resolved', { pageSlug: slug })
+      if (slugsNeedingDrafts.length > 0) {
+        setEnginePhase({
+          label: 'drafts',
+          pretty: 'Drafting pages',
+          completed: 0,
+          total: slugsNeedingDrafts.length,
+          currentSlug: slugsNeedingDrafts[0],
+          startedAt: Date.now(),
+          perStepMs: [],
+        })
+        const stepDurations: number[] = []
+        for (let i = 0; i < slugsNeedingDrafts.length; i++) {
+          const slug = slugsNeedingDrafts[i]
+          const stepStart = Date.now()
+          setEnginePhase(p => p && ({ ...p, currentSlug: slug }))
+          await callOrchestrate('draft_page_until_resolved', { pageSlug: slug })
+          stepDurations.push(Date.now() - stepStart)
+          setEnginePhase(p => p && ({
+            ...p,
+            completed: i + 1,
+            currentSlug: slugsNeedingDrafts[i + 1] ?? null,
+            perStepMs: [...stepDurations],
+          }))
+        }
       }
 
       // Phase 3: Director critique + iterate (kept per user direction).
@@ -746,10 +840,28 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       // on any non-empty directives (em-dash cleanup pass, etc.).
       // Critique always re-runs on resume — adding pages changes the
       // cross-page picture, so the prior critique is stale.
+      setEnginePhase({
+        label: 'critique',
+        pretty: 'Director critiquing drafts',
+        completed: 0,
+        total: 1,
+        currentSlug: null,
+        startedAt: Date.now(),
+        perStepMs: [],
+      })
       const critiqueResult = await callOrchestrate('critique') as { engine_state?: EngineState } | null
       if (!critiqueResult) return
       const directiveCount = critiqueResult.engine_state?.last_directive_count ?? 0
       if (directiveCount > 0) {
+        setEnginePhase({
+          label: 'iterate',
+          pretty: `Iterating on ${directiveCount} director directive${directiveCount === 1 ? '' : 's'}`,
+          completed: 0,
+          total: 1,
+          currentSlug: null,
+          startedAt: Date.now(),
+          perStepMs: [],
+        })
         await callOrchestrate('iterate')
       }
 
@@ -770,11 +882,34 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       const existingSuggestions = (postDraftState.page_bind_suggestions ?? {}) as Record<string, unknown>
       const slugsWithDrafts = slugs.filter(s => postDraftDrafts[s] != null && s !== '_meta')
       const slugsNeedingBindSuggestions = slugsWithDrafts.filter(s => existingSuggestions[s] == null)
-      for (const slug of slugsNeedingBindSuggestions) {
-        await callOrchestrate('suggest_bind_for_page', { pageSlug: slug })
+      if (slugsNeedingBindSuggestions.length > 0) {
+        setEnginePhase({
+          label: 'bind_suggestions',
+          pretty: 'Suggesting Brixies templates',
+          completed: 0,
+          total: slugsNeedingBindSuggestions.length,
+          currentSlug: slugsNeedingBindSuggestions[0],
+          startedAt: Date.now(),
+          perStepMs: [],
+        })
+        const stepDurations: number[] = []
+        for (let i = 0; i < slugsNeedingBindSuggestions.length; i++) {
+          const slug = slugsNeedingBindSuggestions[i]
+          const stepStart = Date.now()
+          setEnginePhase(p => p && ({ ...p, currentSlug: slug }))
+          await callOrchestrate('suggest_bind_for_page', { pageSlug: slug })
+          stepDurations.push(Date.now() - stepStart)
+          setEnginePhase(p => p && ({
+            ...p,
+            completed: i + 1,
+            currentSlug: slugsNeedingBindSuggestions[i + 1] ?? null,
+            perStepMs: [...stepDurations],
+          }))
+        }
       }
     } finally {
       setEngineRunning(false)
+      setEnginePhase(null)
     }
   }, [callOrchestrate, sitemap, project.id])
 
@@ -1311,6 +1446,18 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
           />
         )}
 
+        {/* Live phase progress — appears under the status card while
+            runEngine is in flight. Shows current phase, X-of-Y count,
+            current slug, elapsed time, and ETA derived from average
+            per-step duration. Without this, the user sees the generic
+            "Running run_page_outline_for_page…" with no clue whether
+            the cascade is healthy or hung. */}
+        {enginePhase && (
+          <div className="mt-3">
+            <PhaseProgressCard progress={enginePhase} />
+          </div>
+        )}
+
         {confirmAction === 'commit' && (
           <div className="mt-3">
             <ConfirmPanel
@@ -1803,6 +1950,101 @@ function GateCard({ number, title, subtitle, status, action }: {
       {action ?? <span className="text-[10px] uppercase tracking-wider font-bold text-wm-text-subtle">{status}</span>}
     </div>
   )
+}
+
+/** Live progress for the runEngine cascade. Shows phase name, X of Y
+ *  count, current slug, elapsed time, and ETA derived from the
+ *  rolling per-step average. Re-renders every 1s while a phase is
+ *  active so the elapsed clock advances even between step bumps
+ *  (page-outlines takes 30-90s per page — without a ticking clock the
+ *  banner LOOKS frozen). */
+function PhaseProgressCard({ progress }: {
+  progress: {
+    label:        string | null
+    pretty:       string
+    completed:    number
+    total:        number
+    currentSlug:  string | null
+    startedAt:    number
+    perStepMs:    number[]
+  }
+}) {
+  // 1Hz tick so the elapsed clock advances. `now` lives in state
+  // (NOT a Date.now() call in render) so the component stays pure
+  // per react-hooks/purity. We only set inside the interval callback,
+  // not synchronously inside the effect body, to avoid the
+  // react-hooks/set-state-in-effect rule firing.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [progress.startedAt])
+
+  const elapsedMs = Math.max(0, now - progress.startedAt)
+  const pct = progress.total > 0
+    ? Math.min(100, Math.round((progress.completed / progress.total) * 100))
+    : 0
+  // Average per completed step. For phases that haven't completed any
+  // step yet, fall back to "elapsed so far" as a rough proxy for the
+  // first step (better than showing no ETA at all).
+  const avgMs = progress.perStepMs.length > 0
+    ? progress.perStepMs.reduce((a, b) => a + b, 0) / progress.perStepMs.length
+    : elapsedMs
+  const remainingSteps = Math.max(0, progress.total - progress.completed)
+  const etaMs = remainingSteps * avgMs
+
+  return (
+    <div className="rounded-lg border border-wm-accent/30 bg-wm-accent/5 px-4 py-3">
+      <div className="flex items-center gap-3 mb-2">
+        <Loader2 size={14} className="text-wm-accent-strong animate-spin shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-semibold text-wm-text">
+            {progress.pretty}
+            {progress.total > 1 && (
+              <span className="font-normal text-wm-text-muted"> · {progress.completed} of {progress.total}</span>
+            )}
+          </p>
+          {progress.currentSlug && (
+            <p className="text-[11px] text-wm-text-muted truncate">
+              Working on <span className="font-mono text-wm-text">{progress.currentSlug}</span>…
+            </p>
+          )}
+        </div>
+        <div className="text-right text-[10px] font-mono text-wm-text-subtle shrink-0 leading-tight">
+          <p>Elapsed {formatDuration(elapsedMs)}</p>
+          {remainingSteps > 0 && progress.perStepMs.length > 0 && (
+            <p>ETA ~{formatDuration(etaMs)}</p>
+          )}
+        </div>
+      </div>
+      {/* Progress bar — only shown for multi-step phases. Single-step
+          phases (critique / iterate) just spin without filling. */}
+      {progress.total > 1 && (
+        <div className="w-full bg-wm-border/40 rounded-full h-1.5 overflow-hidden">
+          <div
+            className="h-full bg-wm-accent transition-all duration-300"
+            style={{ width: `${pct}%` }}
+            role="progressbar"
+            aria-valuenow={pct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Human-readable duration: 45s / 2m 14s / 12m / 1h 3m. */
+function formatDuration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const remS = s % 60
+  if (m < 60) return remS > 0 && m < 10 ? `${m}m ${remS}s` : `${m}m`
+  const h = Math.floor(m / 60)
+  const remM = m % 60
+  return remM > 0 ? `${h}h ${remM}m` : `${h}h`
 }
 
 function EngineStatusCard({ engine, engineRunning, sitemapApproved, draftSlugs, sitemapSlugCount, onRerun, onCommit, rerunBusy }: {
