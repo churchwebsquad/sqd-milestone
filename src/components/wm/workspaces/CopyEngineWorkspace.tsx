@@ -1203,6 +1203,12 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
                             pageSlug: slug, mode, sectionIxs, targetArchetype, instruction,
                           })
                         }
+                        onSwapTemplate={(sectionIx, templateId) =>
+                          void callOrchestrate('override_bind_template', { pageSlug: slug, sectionIx, templateId })
+                        }
+                        onReorgForTemplate={(sectionIx, templateId, instruction) =>
+                          void callOrchestrate('reorg_section_for_template', { pageSlug: slug, sectionIx, templateId, instruction })
+                        }
                         busy={!!running}
                       />
                       <div className="mt-3 flex justify-end">
@@ -1850,7 +1856,8 @@ const ARCHETYPES = [
 ] as const
 
 function DraftPreview({
-  draft, brief, critique, bindSuggestion, onEditSlot, onRedraftSection, onRestructure, busy,
+  draft, brief, critique, bindSuggestion, onEditSlot, onRedraftSection, onRestructure,
+  onSwapTemplate, onReorgForTemplate, busy,
 }: {
   draft: PageDraft
   brief?: PageBrief
@@ -1894,6 +1901,14 @@ function DraftPreview({
     targetArchetype: string
     instruction: string
   }) => void
+  /** Strategist picked a different Brixies template for one section
+   *  at Gate 2. Persists override on roadmap_state.page_bind_
+   *  suggestions; commit honors it. */
+  onSwapTemplate?: (sectionIx: number, templateId: string) => void
+  /** Strategist asked the AI to redistribute the section's copy into
+   *  the new template's slot shape (useful when the new template has
+   *  cards[] but the source was hero-shaped, etc.). */
+  onReorgForTemplate?: (sectionIx: number, templateId: string, instruction: string) => void
   busy?: boolean
 }) {
   // Selection state for multi-section operations. Set of zero-indexed
@@ -2034,8 +2049,19 @@ function DraftPreview({
               })
             } : undefined,
             bindBySectionIx: bindSuggestion
-              ? Object.fromEntries(bindSuggestion.sections.map(s => [s.section_ix, s]))
+              ? Object.fromEntries(bindSuggestion.sections.map(s => {
+                  // user_overrides win over the engine's pick — surface
+                  // the user's pick when present so the inline label
+                  // reflects what'll actually commit.
+                  const override = bindSuggestion.user_overrides?.[String(s.section_ix)]
+                  return [s.section_ix, {
+                    chosen_template_id: override ?? s.chosen_template_id,
+                    chosen_layer_name:  s.chosen_layer_name,
+                    candidate_count:    s.candidate_count,
+                  }]
+                }))
               : undefined,
+            onSwapTemplate, onReorgForTemplate,
           })}
         </div>
       )}
@@ -2063,6 +2089,12 @@ function renderDraftSections(
       chosen_layer_name: string | null
       candidate_count: number
     }>
+    /** Strategist clicked a different template for this section.
+     *  Persists the override; commit will use it. */
+    onSwapTemplate?: (sectionIx: number, templateId: string) => void
+    /** Strategist asked the AI to redistribute copy into the new
+     *  template's slot shape. Optional follow-up to swap. */
+    onReorgForTemplate?: (sectionIx: number, templateId: string, instruction: string) => void
   },
 ) {
   return sections.map((s, i: number) => {
@@ -2094,18 +2126,16 @@ function renderDraftSections(
                 />
               )}
               <span className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">{(s?.archetype as string | undefined) ?? '—'}</span>
-              {bindForThis?.chosen_layer_name && (
-                <span
-                  className="text-[10px] text-wm-accent-strong font-medium"
-                  title={`Engine matched this section to Brixies template "${bindForThis.chosen_layer_name}" (${bindForThis.candidate_count} candidate${bindForThis.candidate_count === 1 ? '' : 's'} considered). Commit binds this template; you can swap it later in the Pages tab.`}
-                >
-                  → {bindForThis.chosen_layer_name}
-                </span>
-              )}
-              {bindForThis && !bindForThis.chosen_template_id && (
-                <span className="text-[10px] text-wm-warning" title="No compatible template found for this archetype — this section will commit as freehand markdown.">
-                  → freehand
-                </span>
+              {bindForThis && (
+                <SectionBindPicker
+                  archetype={String((s?.archetype as string | undefined) ?? '')}
+                  sectionIx={i}
+                  currentTemplateId={bindForThis.chosen_template_id}
+                  currentLayerName={bindForThis.chosen_layer_name}
+                  onSwap={actions?.onSwapTemplate}
+                  onReorg={actions?.onReorgForTemplate}
+                  busy={actions?.busy ?? false}
+                />
               )}
               <span className="text-[10px] text-wm-text-subtle">#{i + 1}</span>
               {Array.isArray(s?.atoms_used) && s.atoms_used.length > 0 && (
@@ -2864,6 +2894,157 @@ function PageRenameRow({
         </p>
       )}
     </li>
+  )
+}
+
+/** Inline per-section template picker rendered next to each section's
+ *  archetype label at Gate 2. Click the current template name to
+ *  expand a dropdown of compatible variants from the same Brixies
+ *  family. Selecting a new variant fires onSwap (persists override)
+ *  and offers an optional "Reorganize content" follow-up that calls
+ *  the AI reorg agent — useful when the new template's slot shape is
+ *  materially different from the section's current copy (e.g. swapping
+ *  hero → cards_grid needs the description split into card bodies). */
+function SectionBindPicker({
+  archetype, sectionIx, currentTemplateId, currentLayerName,
+  onSwap, onReorg, busy,
+}: {
+  archetype: string
+  sectionIx: number
+  currentTemplateId: string | null
+  currentLayerName: string | null
+  onSwap?: (sectionIx: number, templateId: string) => void
+  onReorg?: (sectionIx: number, templateId: string, instruction: string) => void
+  busy: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [options, setOptions] = useState<Array<{ id: string; layer_name: string; family: string }> | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [reorging, setReorging] = useState<string | null>(null)        // templateId being reorged
+  const [reorgFor, setReorgFor] = useState<{ id: string; layer_name: string } | null>(null)
+  const [reorgInstruction, setReorgInstruction] = useState('')
+
+  const loadOptions = async () => {
+    if (options) return
+    setLoading(true); setError(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const jwt = session?.access_token
+      if (!jwt) throw new Error('Not authenticated')
+      const res = await fetch('/api/web/agents/orchestrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ projectId: 'none', action: 'list_compatible_templates', archetype }),
+        // ^ projectId not used by list_compatible_templates but required
+        //   by the orchestrate handler's signature; harmless any-string.
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
+      setOptions(Array.isArray(json.templates) ? json.templates : [])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load templates')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      {currentLayerName ? (
+        <button
+          type="button"
+          onClick={() => { setOpen(o => !o); if (!options) void loadOptions() }}
+          disabled={busy}
+          className="text-[10px] text-wm-accent-strong font-medium underline decoration-dotted underline-offset-2 hover:text-wm-accent disabled:opacity-50"
+          title="Click to swap to a different Brixies template for this section."
+        >
+          → {currentLayerName}
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => { setOpen(o => !o); if (!options) void loadOptions() }}
+          disabled={busy}
+          className="text-[10px] text-wm-warning font-medium underline decoration-dotted underline-offset-2 hover:text-wm-text disabled:opacity-50"
+          title="No template auto-picked — this section will commit as freehand markdown unless you pick one."
+        >
+          → freehand (pick template)
+        </button>
+      )}
+      {open && (
+        <span className="ml-1 inline-flex items-center gap-1">
+          {loading && <Loader2 size={10} className="animate-spin text-wm-text-subtle" />}
+          {error && <span className="text-[10px] text-wm-danger">{error}</span>}
+          {!loading && !error && options && (
+            <select
+              value={currentTemplateId ?? ''}
+              disabled={busy}
+              onChange={e => {
+                const newId = e.target.value
+                if (!newId || newId === currentTemplateId) { setOpen(false); return }
+                const picked = options.find(o => o.id === newId)
+                onSwap?.(sectionIx, newId)
+                // After persisting the swap, prompt the user for an
+                // optional AI reorg — surface as a follow-up panel
+                // rather than auto-running so they can decide.
+                if (picked) setReorgFor({ id: picked.id, layer_name: picked.layer_name })
+                setOpen(false)
+              }}
+              className="rounded border border-wm-border bg-white px-1.5 py-0.5 text-[10px] font-mono disabled:opacity-50"
+            >
+              <option value="">— Pick template —</option>
+              {options.map(o => (
+                <option key={o.id} value={o.id}>{o.layer_name} ({o.family})</option>
+              ))}
+            </select>
+          )}
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            disabled={busy}
+            className="text-[10px] text-wm-text-subtle hover:text-wm-text"
+          >
+            ×
+          </button>
+        </span>
+      )}
+      {reorgFor && onReorg && (
+        <span className="ml-2 inline-flex items-center gap-1 rounded border border-wm-accent/40 bg-wm-accent/5 px-1.5 py-0.5">
+          <span className="text-[10px] text-wm-accent-strong">
+            Swapped → <code className="font-mono">{reorgFor.layer_name}</code>.
+          </span>
+          <input
+            type="text"
+            value={reorgInstruction}
+            onChange={e => setReorgInstruction(e.target.value)}
+            disabled={busy || reorging === reorgFor.id}
+            placeholder="Optional: how to redistribute…"
+            className="rounded border border-wm-border bg-white px-1.5 py-0.5 text-[10px] disabled:opacity-50 w-[180px]"
+          />
+          <button
+            type="button"
+            onClick={async () => {
+              setReorging(reorgFor.id)
+              try { onReorg(sectionIx, reorgFor.id, reorgInstruction.trim()) }
+              finally { setReorging(null); setReorgFor(null); setReorgInstruction('') }
+            }}
+            disabled={busy || reorging === reorgFor.id}
+            className="rounded-full bg-wm-accent px-2 py-0.5 text-[10px] font-semibold text-white disabled:opacity-50"
+          >
+            {reorging === reorgFor.id ? <Loader2 size={10} className="animate-spin inline" /> : '✨ Reorg copy'}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setReorgFor(null); setReorgInstruction('') }}
+            disabled={busy || reorging === reorgFor.id}
+            className="text-[10px] text-wm-text-subtle hover:text-wm-text"
+          >
+            Skip
+          </button>
+        </span>
+      )}
+    </span>
   )
 }
 

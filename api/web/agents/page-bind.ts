@@ -94,19 +94,61 @@ export default async function handler(req: any, res: any) {
     created = true
   }
 
-  // Replace existing sections — freehand only. Template-bound sections
-  // (content_template_id IS NOT NULL) get preserved across bind re-runs
-  // because the strategist may have manually upgraded them.
-  await sb.from('web_sections').delete().eq('web_page_id', pageId).is('content_template_id', null)
+  // Replace ALL existing sections on this page. The bind step now
+  // writes template-bound rows directly (using the picks the engine
+  // surfaced at Gate 2 + the strategist's overrides), so we own the
+  // sections from end to end. Strategists who used to manually
+  // upgrade sections in the Pages tab should make those picks at
+  // Gate 2's swap UI instead — the re-commit flow now reads from
+  // there.
+  await sb.from('web_sections').delete().eq('web_page_id', pageId)
+
+  // Read the pre-bind picks (set by suggest_bind_for_page at Gate 2)
+  // and the strategist's manual overrides — overrides win. For
+  // sections with a template pick, set content_template_id; sections
+  // with no pick fall back to freehand. field_values composition stays
+  // simple (heading/description/body landed into matching slots when
+  // possible, otherwise dumped as a body slot) — the field-shape
+  // resolver in the Pages workspace handles render-time substitution.
+  const bindForPage = (roadmapState.page_bind_suggestions ?? {})[pageSlug] as
+    { sections?: Array<{ section_ix: number; chosen_template_id: string | null }>;
+      user_overrides?: Record<string, string> } | undefined
+  const enginePicks = new Map<number, string>()
+  for (const s of (bindForPage?.sections ?? [])) {
+    if (s.chosen_template_id) enginePicks.set(s.section_ix, s.chosen_template_id)
+  }
+  const userOverrides = new Map<number, string>()
+  for (const [ix, tplId] of Object.entries(bindForPage?.user_overrides ?? {})) {
+    if (typeof tplId === 'string' && tplId) userOverrides.set(Number(ix), tplId)
+  }
+
+  // Load each picked template's field schema so we can compose field_values
+  // matching the template's expected slot shape.
+  const allPickedIds = [
+    ...new Set<string>([...enginePicks.values(), ...userOverrides.values()]),
+  ]
+  const templateById = new Map<string, { id: string; fields: any }>()
+  if (allPickedIds.length > 0) {
+    const { data: tpls } = await sb.from('web_content_templates')
+      .select('id, fields').in('id', allPickedIds)
+    for (const t of (tpls ?? [])) templateById.set(t.id, t)
+  }
 
   const sections = Array.isArray(draft.sections) ? draft.sections : []
-  const rows = sections.map((s: any, ix: number) => ({
-    web_page_id: pageId,
-    content_template_id: null,
-    field_values: { body: renderSection(s) },
-    notes: buildSectionNotes(s),
-    sort_order: ix,
-  }))
+  const rows = sections.map((s: any, ix: number) => {
+    const pickedId = userOverrides.get(ix) ?? enginePicks.get(ix) ?? null
+    const template = pickedId ? templateById.get(pickedId) : undefined
+    const fieldValues = template
+      ? composeFieldValuesForTemplate(s, template)
+      : { body: renderSection(s) }
+    return {
+      web_page_id: pageId,
+      content_template_id: pickedId,
+      field_values: fieldValues,
+      notes: buildSectionNotes(s, pickedId, userOverrides.has(ix)),
+      sort_order: ix,
+    }
+  })
 
   if (rows.length > 0) {
     const { error: insertErr } = await sb.from('web_sections').insert(rows)
@@ -166,14 +208,94 @@ function headingByArchetype(archetype: string, heading: string): string {
   return `## ${heading}`
 }
 
-function buildSectionNotes(s: any): string {
+function buildSectionNotes(s: any, pickedTemplateId?: string | null, isUserOverride?: boolean): string {
   const archetype = String(s?.archetype ?? '')
   const atomsUsed = Array.isArray(s?.atoms_used) ? s.atoms_used.length : 0
   const voiceNotes = s?.voice_notes ? String(s.voice_notes) : ''
   const lines = [
     `Archetype: ${archetype}`,
+    pickedTemplateId
+      ? (isUserOverride ? `Template: ${pickedTemplateId} (user pick)` : `Template: ${pickedTemplateId} (engine pick)`)
+      : 'Template: freehand',
     atomsUsed > 0 ? `Atoms used: ${atomsUsed}` : '',
     voiceNotes ? `Voice: ${voiceNotes}` : '',
   ].filter(Boolean)
   return lines.join(' · ')
+}
+
+/** Deterministic best-effort field_values composition for a draft
+ *  section bound to a specific Brixies template. Walks the template's
+ *  field schema, matches each slot key against the section's copy
+ *  shape (heading → heading, description → description, cards →
+ *  cards[]), and falls back to dumping the rendered markdown into a
+ *  `body` slot when nothing matches. Doesn't try to be clever about
+ *  cross-shape mapping (e.g. splitting a description into cards) —
+ *  that's what reorg-section-for-template handles when the strategist
+ *  asks for an AI redistribution. */
+function composeFieldValuesForTemplate(s: any, template: { fields: any }): Record<string, unknown> {
+  const copy = (s?.copy ?? {}) as Record<string, any>
+  const fields = Array.isArray(template?.fields) ? template.fields : []
+  const out: Record<string, unknown> = {}
+
+  // Build a lookup from each template field key to its kind. We use
+  // this to route a copy value into the matching slot shape (string
+  // value into a 'slot' field, array into a 'group' field).
+  const fieldByKey = new Map<string, { key: string; kind: string; item_schema?: any[] }>()
+  for (const f of fields) {
+    if (f?.key) fieldByKey.set(String(f.key), {
+      key: String(f.key),
+      kind: String(f?.kind ?? 'slot'),
+      item_schema: Array.isArray(f?.item_schema) ? f.item_schema : undefined,
+    })
+  }
+
+  // Direct slot mapping — same-named keys land directly.
+  const directKeys: Array<keyof typeof copy> = ['eyebrow', 'heading', 'tagline', 'description', 'body']
+  for (const k of directKeys) {
+    if (typeof copy[k] === 'string' && copy[k] && fieldByKey.has(String(k))) {
+      out[String(k)] = copy[k]
+    }
+  }
+
+  // CTA — Brixies CTA slots are typically a single text+url pair. We
+  // store as { label, url } when the template has a 'cta' field; the
+  // render pipeline knows to expand into the <a><button>.
+  if (copy.cta?.label && fieldByKey.has('cta')) {
+    out.cta = { label: String(copy.cta.label), url: copy.cta.intent ? `#${String(copy.cta.intent)}` : '#' }
+  }
+
+  // Group slots — cards / items. If the template has a 'cards' field
+  // with kind='group', map copy.cards into it (with whatever item
+  // schema the template declares). Same for items/steps/accordion.
+  for (const groupKey of ['cards', 'items']) {
+    const groupField = fieldByKey.get(groupKey)
+    const sourceArr = Array.isArray(copy[groupKey]) ? copy[groupKey] : null
+    if (!groupField || groupField.kind !== 'group' || !sourceArr) continue
+    out[groupKey] = sourceArr.map((entry: any) => {
+      const entryObj = (entry && typeof entry === 'object') ? entry : {}
+      const item: Record<string, unknown> = {}
+      // Pass through any keys the item_schema declares.
+      const itemKeys = (groupField.item_schema ?? []).map((f: any) => String(f?.key ?? '')).filter(Boolean)
+      for (const ik of itemKeys) {
+        if (entryObj[ik] != null) item[ik] = entryObj[ik]
+      }
+      // Fallback heuristic — common cases:
+      //   - heading + description came through
+      //   - description fields sometimes named 'body' in the template
+      if (entryObj.heading && itemKeys.includes('heading') && !item.heading) item.heading = entryObj.heading
+      if (entryObj.description && itemKeys.includes('description') && !item.description) item.description = entryObj.description
+      if (entryObj.body && itemKeys.includes('body') && !item.body) item.body = entryObj.body
+      if (entryObj.cta_label && itemKeys.includes('cta')) item.cta = { label: entryObj.cta_label, url: '#' }
+      return item
+    })
+  }
+
+  // Always fall back to writing a body slot when the template has one
+  // but we didn't fill it — the freehand markdown is a safety net so
+  // nothing visible disappears post-bind.
+  if (fieldByKey.has('body') && !out.body) {
+    out.body = renderSection(s)
+  }
+
+  return out
 }

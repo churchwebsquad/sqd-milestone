@@ -34,7 +34,7 @@ const PAGE_DRAFT_CONCURRENCY = 4
  *  via manual Revise feedback or by approving with known gaps. */
 const SITEMAP_AUDIT_MAX_LOOPS = 2
 
-type Action = 'run_drafts' | 'run_briefs' | 'draft_one_page' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize' | 'apply_audit_to_nav' | 'rename_sitemap_page' | 'cancel_run' | 'restructure_sections' | 'suggest_bind_for_page'
+type Action = 'run_drafts' | 'run_briefs' | 'draft_one_page' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize' | 'apply_audit_to_nav' | 'rename_sitemap_page' | 'cancel_run' | 'restructure_sections' | 'suggest_bind_for_page' | 'override_bind_template' | 'reorg_section_for_template' | 'list_compatible_templates'
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -304,6 +304,105 @@ export default async function handler(req: any, res: any) {
         }
         throw e
       }
+    }
+
+    if (action === 'list_compatible_templates') {
+      // Returns the candidate Brixies templates for one section's
+      // archetype — used by the per-section swap UI to populate its
+      // dropdown. Matches the same archetype → family map the
+      // suggest_bind_for_page action uses, so the swap picker offers
+      // exactly the variants the engine considered.
+      const archetype = typeof req.body?.archetype === 'string' ? req.body.archetype : null
+      if (!archetype) return res.status(400).json({ error: 'archetype required' })
+      const ARCHETYPE_TO_FAMILY: Record<string, string[]> = {
+        hero:                ['Hero Section'],
+        tagline_band:        ['Hero Section', 'Banner Section'],
+        two_up:              ['Feature Section'],
+        three_up:            ['Feature Section'],
+        cards_grid:          ['Feature Section', 'Card'],
+        featured_card:       ['Feature Section'],
+        image_text_split:    ['Feature Section', 'Content Section'],
+        accordion:           ['FAQ Section', 'Content Section'],
+        cta_band:            ['CTA Section'],
+        testimonial_block:   ['Testimonial Section', 'Content Section'],
+        stat_block:          ['Stats Section', 'Content Section'],
+        steps_row:           ['Process Section'],
+        contact_band:        ['CTA Section', 'Footer'],
+        footer_cta:          ['CTA Section'],
+        intro_paragraph:     ['Intro Section', 'Content Section'],
+        rich_body:           ['Content Section'],
+      }
+      const families = ARCHETYPE_TO_FAMILY[archetype] ?? ['Content Section']
+      const { data: templates } = await sb.from('web_content_templates')
+        .select('id, layer_name, family')
+        .in('family', families)
+        .order('family', { ascending: true })
+        .order('layer_name', { ascending: true })
+      return res.status(200).json({
+        ok: true,
+        archetype,
+        families,
+        templates: templates ?? [],
+      })
+    }
+
+    if (action === 'override_bind_template') {
+      // Strategist picked a different template for a specific section
+      // at Gate 2. Persist the override on roadmap_state.page_bind_
+      // suggestions[slug].user_overrides — keyed by section_ix so a
+      // per-section pick survives across re-runs of suggest_bind_for_
+      // page. The override takes precedence at commit time.
+      const pageSlug  = typeof req.body?.pageSlug   === 'string' ? req.body.pageSlug   : null
+      const sectionIx = typeof req.body?.sectionIx  === 'number' ? req.body.sectionIx  : null
+      const templateId = typeof req.body?.templateId === 'string' ? req.body.templateId.trim() : null
+      if (!pageSlug || sectionIx === null || !templateId) {
+        return res.status(400).json({ error: 'pageSlug, sectionIx, and templateId required' })
+      }
+      // Verify the template actually exists so we don't store dangling refs.
+      const { data: tpl } = await sb.from('web_content_templates')
+        .select('id, layer_name, family').eq('id', templateId).maybeSingle()
+      if (!tpl) return res.status(404).json({ error: `Template "${templateId}" not found` })
+
+      const { data: cur } = await sb.from('strategy_web_projects')
+        .select('roadmap_state').eq('id', projectId).maybeSingle()
+      const curState = (cur?.roadmap_state ?? {}) as Record<string, any>
+      const allSuggestions = (curState.page_bind_suggestions ?? {}) as Record<string, any>
+      const pageSuggestion = allSuggestions[pageSlug] ?? { sections: [], user_overrides: {} }
+      const nextOverrides = { ...(pageSuggestion.user_overrides ?? {}), [String(sectionIx)]: templateId }
+      const nextSuggestion = { ...pageSuggestion, user_overrides: nextOverrides }
+      await sb.from('strategy_web_projects').update({
+        roadmap_state: {
+          ...curState,
+          page_bind_suggestions: { ...allSuggestions, [pageSlug]: nextSuggestion },
+        },
+      }).eq('id', projectId)
+      return res.status(200).json({
+        ok: true,
+        page_slug: pageSlug,
+        section_ix: sectionIx,
+        template: { id: tpl.id, layer_name: tpl.layer_name, family: tpl.family },
+      })
+    }
+
+    if (action === 'reorg_section_for_template') {
+      // AI adapt — when the strategist swaps to a template whose slot
+      // shape is materially different from the section's current
+      // archetype (e.g. heading+description → heading + 4 cards),
+      // call the reorg agent to redistribute copy into the new shape.
+      // Optional step the user invokes from the swap dropdown when
+      // they want the AI to do the heavy lift; deterministic field
+      // mapping handles the easy cases at commit time without it.
+      const pageSlug    = typeof req.body?.pageSlug    === 'string' ? req.body.pageSlug    : null
+      const sectionIx   = typeof req.body?.sectionIx   === 'number' ? req.body.sectionIx   : null
+      const templateId  = typeof req.body?.templateId  === 'string' ? req.body.templateId.trim() : null
+      const instruction = typeof req.body?.instruction === 'string' ? req.body.instruction.trim() : ''
+      if (!pageSlug || sectionIx === null || !templateId) {
+        return res.status(400).json({ error: 'pageSlug, sectionIx, and templateId required' })
+      }
+      const result = await callAgent(baseUrl, jwt, 'reorg-section-for-template', {
+        projectId, pageSlug, sectionIx, templateId, instruction,
+      })
+      return res.status(200).json({ ok: true, result })
     }
 
     if (action === 'suggest_bind_for_page') {
