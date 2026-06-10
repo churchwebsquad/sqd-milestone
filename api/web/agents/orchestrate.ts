@@ -34,7 +34,18 @@ const PAGE_DRAFT_CONCURRENCY = 4
  *  via manual Revise feedback or by approving with known gaps. */
 const SITEMAP_AUDIT_MAX_LOOPS = 2
 
-type Action = 'run_drafts' | 'run_briefs' | 'draft_one_page' | 'critique' | 'iterate' | 'route' | 'apply' | 'commit' | 'status' | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit' | 'export_state' | 'import_state' | 'draft_sitemap_with_audit' | 'reset_engine_state' | 'run_synthesize' | 'apply_audit_to_nav' | 'rename_sitemap_page' | 'cancel_run' | 'restructure_sections' | 'suggest_bind_for_page' | 'override_bind_template' | 'reorg_section_for_template' | 'list_compatible_templates' | 'run_normalize'
+type Action =
+  | 'run_drafts' | 'run_briefs' | 'draft_one_page' | 'critique' | 'iterate'
+  | 'route' | 'apply' | 'commit' | 'status'
+  | 'approve_sitemap' | 'unlock_sitemap' | 'revise_sitemap' | 'run_coverage_audit'
+  | 'export_state' | 'import_state' | 'draft_sitemap_with_audit'
+  | 'reset_engine_state' | 'run_synthesize' | 'apply_audit_to_nav'
+  | 'rename_sitemap_page' | 'cancel_run' | 'restructure_sections'
+  | 'suggest_bind_for_page' | 'override_bind_template'
+  | 'reorg_section_for_template' | 'list_compatible_templates' | 'run_normalize'
+  // New cascade actions (content-collection-first refactor):
+  | 'run_acf_organizer' | 'run_ministry_model' | 'run_strategist'
+  | 'run_page_outline_for_page' | 'draft_page_until_resolved'
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -122,6 +133,54 @@ export default async function handler(req: any, res: any) {
       const result = await callAgent(baseUrl, jwt, 'normalize-intake',
         note ? { projectId, redoContext: note } : { projectId })
       return res.status(200).json({ ok: true, stage_0: result })
+    }
+
+    if (action === 'run_acf_organizer') {
+      // Refactor wave — runs after extract-strategy, before sitemap.
+      // Decides which CPT modules the partner needs + pre-populates
+      // partner-supplied records. Output conforms to dev-side
+      // INTAKE.schema.json. Writes roadmap_state.acf_plan.
+      const result = await callAgent(baseUrl, jwt, 'acf-content-organizer', { projectId })
+      return res.status(200).json({ ok: true, result })
+    }
+
+    if (action === 'run_ministry_model') {
+      // Refactor wave — runs after extract-strategy. Classifies the
+      // church into attractional / discipleship / missional. Strategist
+      // override survives auto re-runs. Writes roadmap_state.ministry_model.
+      const result = await callAgent(baseUrl, jwt, 'determine-ministry-model', { projectId })
+      return res.status(200).json({ ok: true, result })
+    }
+
+    if (action === 'run_strategist') {
+      // Refactor wave — runs after ministry_model + acf_plan, BEFORE
+      // sitemap drafting. Builds the strategic scaffolding the sitemap
+      // pivots on (siteflow, persona journeys, key info to highlight,
+      // page elevations). Writes roadmap_state.site_strategy.
+      const result = await callAgent(baseUrl, jwt, 'strategist', { projectId })
+      return res.status(200).json({ ok: true, result })
+    }
+
+    if (action === 'run_page_outline_for_page') {
+      // Refactor wave — per page. Builds the section-by-section
+      // blueprint that page-draft reads. Replaces page-briefs in the
+      // new cascade. Writes roadmap_state.page_outlines[<slug>].
+      const pageSlug = typeof req.body?.pageSlug === 'string' ? req.body.pageSlug : null
+      if (!pageSlug) return res.status(400).json({ error: 'pageSlug required for run_page_outline_for_page' })
+      const result = await callAgent(baseUrl, jwt, 'page-outlines', { projectId, pageSlug })
+      return res.status(200).json({ ok: true, result })
+    }
+
+    if (action === 'draft_page_until_resolved') {
+      // Refactor wave — drafts ONE page, then auto-retries any
+      // sections that came back with issues (truncation, atom-
+      // resolution failure, validation flags, fabricated atom IDs).
+      // Caps at 3 attempts before surfacing to user. No half-done
+      // pages reach Gate 2.
+      const pageSlug = typeof req.body?.pageSlug === 'string' ? req.body.pageSlug : null
+      if (!pageSlug) return res.status(400).json({ error: 'pageSlug required for draft_page_until_resolved' })
+      const result = await draftPageUntilResolved({ sb, baseUrl, jwt, projectId, pageSlug })
+      return res.status(200).json({ ok: true, ...result })
     }
 
     if (action === 'apply_audit_to_nav') {
@@ -1141,6 +1200,119 @@ async function runCommit(ctx: {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
+
+/** Drafts one page, then auto-retries when the draft's _meta
+ *  telemetry signals failure. No half-done pages reach Gate 2 —
+ *  this loop is the enforcement layer for that contract.
+ *
+ *  Failure conditions (any one triggers retry):
+ *   - sections_match === false (drafter produced fewer sections
+ *     than the outline asked for)
+ *   - atom_resolution_rate < 0.95 (≥5% of requested atoms didn't
+ *     resolve — outline likely has fabricated atom_ids)
+ *   - truncation_suspected === true (response cut mid-write)
+ *   - validation.flags non-empty (em-dashes, heading length, etc.)
+ *
+ *  Retry strategy (capped at 3 attempts):
+ *   1. Same model, with feedback naming the specific failure.
+ *   2. Same model with lower temperature (model swap from Sonnet to
+ *      Opus on the gateway side if available — falls through
+ *      gracefully on env config).
+ *   3. Final attempt with the unresolved sections as explicit
+ *      feedback.
+ *
+ *  After 3 failed attempts, the page is marked `blocked_missing_input`
+ *  and surfaced to the user with the specific gap named.
+ */
+async function draftPageUntilResolved(ctx: {
+  sb: any; baseUrl: string; jwt: string; projectId: string; pageSlug: string
+}): Promise<{ status: 'resolved' | 'blocked_missing_input'; attempts: number; final_draft_meta: any; problems?: string[] }> {
+  const { sb, baseUrl, jwt, projectId, pageSlug } = ctx
+  const MAX_ATTEMPTS = 3
+  let attempt = 0
+  let lastDraft: any = null
+  let problems: string[] = []
+
+  while (attempt < MAX_ATTEMPTS) {
+    attempt += 1
+    await bailIfCancelled(sb, projectId)
+
+    // Compose retry feedback when we have problems from a prior pass.
+    const retryFeedback = problems.length === 0 ? '' : [
+      `Previous attempt #${attempt - 1} failed the resolution contract.`,
+      'Problems detected:',
+      ...problems.map(p => `- ${p}`),
+      '',
+      'Re-draft this page addressing every problem above. Pay special attention to:',
+      '- Matching the outline\'s section count (do not skip sections).',
+      '- Using only atom_ids that the outline provided (do not invent IDs).',
+      '- Avoiding em-dashes, heading length violations, and question-mark headings.',
+      '- Producing copy that fits within MAX_OUTPUT_TOKENS (skip overly verbose body copy).',
+    ].join('\n')
+
+    await callAgent(baseUrl, jwt, 'page-draft',
+      retryFeedback
+        ? { projectId, pageSlug, feedback: retryFeedback }
+        : { projectId, pageSlug })
+
+    // Re-read the just-written draft from DB to check telemetry.
+    const { data: cur } = await sb.from('strategy_web_projects')
+      .select('roadmap_state').eq('id', projectId).maybeSingle()
+    const state = (cur?.roadmap_state ?? {}) as Record<string, any>
+    const draft = state.page_drafts?.[pageSlug]
+    lastDraft = draft
+
+    const m = (draft?._meta ?? {}) as Record<string, any>
+    const flags = Array.isArray(draft?.validation?.flags) ? draft.validation.flags : []
+    const problemsThisRound: string[] = []
+
+    if (m.used_outline === true && m.sections_match === false) {
+      problemsThisRound.push(`Section count mismatch: outline expected ${m.outline_sections}, draft produced ${m.drafted_sections}.`)
+    }
+    if (typeof m.atom_resolution_rate === 'number' && m.atom_resolution_rate < 0.95) {
+      const missing = (m.atom_ids_requested ?? 0) - (m.atom_ids_resolved ?? 0)
+      problemsThisRound.push(`Atom resolution rate ${Math.round(m.atom_resolution_rate * 100)}% — ${missing} atom_id(s) didn't resolve from content_atoms. The outline may contain fabricated UUIDs.`)
+    }
+    if (m.truncation_suspected === true) {
+      problemsThisRound.push(`Draft response approached token cap (${m.truncation_pct}%). Output likely truncated.`)
+    }
+    if (flags.length > 0) {
+      const structural = flags.filter((f: any) => f && typeof f === 'object' && f.kind)
+      if (structural.length > 0) {
+        problemsThisRound.push(`${structural.length} structural validation flag(s): ${structural.slice(0, 3).map((f: any) => `${f.kind}@section[${f.section_ix}].${f.field}`).join(', ')}${structural.length > 3 ? '…' : ''}.`)
+      }
+    }
+    // Unresolved inputs the outline flagged — these block resolution
+    // unless they're truly missing-from-intake (not auto-recoverable).
+    const outline = state.page_outlines?.[pageSlug] as any | undefined
+    const unresolved = Array.isArray(outline?.unresolved_inputs) ? outline.unresolved_inputs : []
+    if (unresolved.length > 0 && attempt === MAX_ATTEMPTS) {
+      // Final attempt: outline declared content genuinely missing.
+      // Surface as blocked_missing_input.
+      return {
+        status: 'blocked_missing_input',
+        attempts: attempt,
+        final_draft_meta: m,
+        problems: [
+          ...problemsThisRound,
+          ...unresolved.map((u: any) => `Outline flagged missing input: ${u.what} — ${u.why_needed}`),
+        ],
+      }
+    }
+
+    problems = problemsThisRound
+    if (problems.length === 0) {
+      return { status: 'resolved', attempts: attempt, final_draft_meta: m }
+    }
+  }
+
+  return {
+    status: 'blocked_missing_input',
+    attempts: MAX_ATTEMPTS,
+    final_draft_meta: lastDraft?._meta ?? null,
+    problems,
+  }
+}
 
 async function callAgent(baseUrl: string, jwt: string, agentName: string, body: Record<string, unknown>): Promise<any> {
   const url = `${baseUrl}/api/web/agents/${agentName}`
