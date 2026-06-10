@@ -465,6 +465,11 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   // change underfoot. They can manually redraft from Gate 1's Revise
   // panel if they want a new sitemap built on the healed upstream.
   const upstreamHealStartedFor = useRef<string | null>(null)
+  // Hoisted ahead of the auto-heal effect so the heal can null it out
+  // when it clears a stale 'error' status — that lets the downstream
+  // cascade fire a fresh attempt on the healed upstream without
+  // requiring a page reload.
+  const downstreamCascadeStartedFor = useRef<string | null>(null)
   useEffect(() => {
     if (running) return
     if (engineRunning) return
@@ -502,6 +507,24 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       // healed strategist output wants a new sitemap, the user can
       // hit Revise on Gate 1 — that runs apply(stage='sitemap')
       // which now uses the fresh upstream context.
+
+      // If a prior cascade attempt left the engine in an error state
+      // because of missing upstream (e.g., page-outlines 400'd while
+      // upstream was still being healed), clear engine_state so the
+      // downstream cascade — newly gated on `upstreamReady` — can
+      // re-fire automatically. Without this, the project lands here
+      // healed but still stuck behind a stale "error" terminal status.
+      const errMsg = String(engine.last_error ?? '').toLowerCase()
+      const isUpstreamError =
+        errMsg.includes('upstream stages missing') ||
+        errMsg.includes('page-outlines failed') ||
+        errMsg.includes('cannot draft a page outline')
+      if (engine.status === 'error' && isUpstreamError) {
+        await callOrchestrate('reset_engine_state')
+        // Allow the downstream cascade to fire a fresh attempt now
+        // that upstream is healed and engine_state is clear.
+        downstreamCascadeStartedFor.current = null
+      }
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id, hasStage0, hasStage1, hasStage2, stage1Meta?.looks_empty, engine.status, running])
@@ -681,11 +704,27 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     return pages.filter(p => Boolean(p?.slug)).length
   }, [sitemap])
   const draftsIncomplete = sitemapSlugCount > 0 && draftSlugs.length < sitemapSlugCount
-  const downstreamCascadeStartedFor = useRef<string | null>(null)
+  // page-outlines (the first phase of runEngine) HARD-REQUIRES
+  // site_strategy + ministry_model + stage_2 in roadmap_state. If
+  // those aren't there, the agent returns 400 "Required upstream
+  // stages missing" and the engine errors. The upstream auto-heal
+  // effect writes those keys, but it runs IN PARALLEL with this
+  // downstream cascade — so without this gate the downstream fires
+  // first, page-outlines 400s, and the engine sits in an error
+  // state until the user clicks something. Gate downstream behind
+  // a fully-healed upstream so the auto-heal pass can land its
+  // writes first. (downstreamCascadeStartedFor ref is hoisted above
+  // the auto-heal effect so the heal can null it out after clearing
+  // a stale error state.)
+  const upstreamReady = useMemo(() => {
+    const rs = (project.roadmap_state ?? {}) as Record<string, unknown>
+    return rs.site_strategy != null && rs.ministry_model != null
+  }, [project.roadmap_state])
   useEffect(() => {
     if (running) return
     if (engineRunning) return
     if (!sitemapApproved) return
+    if (!upstreamReady) return                     // wait for auto-heal to finish writing site_strategy + ministry_model
     if (!draftsIncomplete) return                  // all sitemap pages have drafts — done
     if (isEngineStuck(engine, false)) return       // user must hit Reset first
     if (engine.status && ENGINE_IN_PROGRESS_STATUSES.has(engine.status)) return
@@ -694,7 +733,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     downstreamCascadeStartedFor.current = project.id
     void runEngine()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id, sitemapApproved, draftsIncomplete, engine.status, running, engineRunning])
+  }, [project.id, sitemapApproved, upstreamReady, draftsIncomplete, engine.status, running, engineRunning])
 
   const openDraft = useCallback((slug: string) => {
     if (!slug || slug === '*') return
