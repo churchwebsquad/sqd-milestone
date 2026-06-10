@@ -812,16 +812,24 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
           Re-run (after a sitemap change) and Commit (the destination
           action). Everything between Approve and Final review is the
           engine's job. */}
+      {/* Engine status card only renders once there's a sitemap to act
+          on. Before then the Gate 1 card already carries the only
+          actionable next step (Synthesize → Draft sitemap), and an
+          extra "Waiting on sitemap approval" line just reads as the
+          app blaming the user for not approving something they
+          haven't even seen yet. */}
       <section>
-        <EngineStatusCard
-          engine={engine}
-          engineRunning={engineRunning || !!running}
-          sitemapApproved={sitemapApproved}
-          draftSlugs={draftSlugs}
-          onRerun={() => void runEngine()}
-          onCommit={() => setConfirmAction('commit')}
-          rerunBusy={!!running}
-        />
+        {hasStage2 && (
+          <EngineStatusCard
+            engine={engine}
+            engineRunning={engineRunning || !!running}
+            sitemapApproved={sitemapApproved}
+            draftSlugs={draftSlugs}
+            onRerun={() => void runEngine()}
+            onCommit={() => setConfirmAction('commit')}
+            rerunBusy={!!running}
+          />
+        )}
 
         {confirmAction === 'commit' && (
           <div className="mt-3">
