@@ -430,7 +430,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       // async closure — refreshFromDB has updated local state, but
       // we want to re-check after each step.)
       const isDone = (key: string) => {
-        const rs = (project.roadmap_state ?? {}) as Record<string, any>
+        const rs = (project.roadmap_state ?? {}) as Record<string, unknown>
         return rs?.[key] != null
       }
       if (!isDone('acf_plan'))       await callOrchestrate('run_acf_organizer')
@@ -440,6 +440,71 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id, hasStage0, hasStage1, hasStage2, engine.status])
+
+  // ── Auto-heal upstream cascade ──────────────────────────────────────
+  //
+  // The pre-Gate-1 cascade above only fires when stage_2 is MISSING.
+  // But a project can land in this workspace with stage_2 ALREADY
+  // drafted on top of broken/empty upstream stages — e.g., the 3886
+  // case where extract-strategy truncated to {_meta:{...}} and
+  // downstream stages built on the void. The Setup Health banner
+  // shows the user the failure, but the user shouldn't have to
+  // CLICK to fix it. This effect detects broken upstream stages and
+  // auto-re-cascades silently.
+  //
+  // Detection conditions (any one triggers a heal pass):
+  //   - stage_1 fails the hasStage1 truthiness check (no substantive keys)
+  //   - stage_1._meta.looks_empty === true (recent truncation flag)
+  //   - acf_plan is missing entirely
+  //   - ministry_model is missing entirely
+  //   - site_strategy is missing entirely
+  //
+  // The heal walks the dependency chain and only re-runs what's
+  // actually broken. Sitemap is NEVER auto-re-drafted by the heal —
+  // a strategist who already approved a sitemap shouldn't see it
+  // change underfoot. They can manually redraft from Gate 1's Revise
+  // panel if they want a new sitemap built on the healed upstream.
+  const upstreamHealStartedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (running) return
+    if (engineRunning) return
+    if (upstreamHealStartedFor.current === project.id) return
+    if (!hasStage0) return
+    if (engine.status === 'cancelled') return
+    if (engine.status && ENGINE_IN_PROGRESS_STATUSES.has(engine.status)) return
+
+    const rs = (project.roadmap_state ?? {}) as Record<string, unknown>
+    const stage1Broken =
+      !hasStage1 ||
+      (stage1Meta?.looks_empty === true)
+    const missingAcfPlan       = rs.acf_plan == null
+    const missingMinistryModel = rs.ministry_model == null
+    const missingSiteStrategy  = rs.site_strategy == null
+
+    // Nothing to heal — let the normal cascade / Gate-1 flow proceed.
+    if (!stage1Broken && !missingAcfPlan && !missingMinistryModel && !missingSiteStrategy) return
+
+    // The pre-Gate-1 cascade handles this case too. Don't double-fire.
+    if (!hasStage2) return
+
+    upstreamHealStartedFor.current = project.id
+    void (async () => {
+      // Heal in dependency order, skipping anything that's already healthy.
+      if (stage1Broken) {
+        const ok = await callOrchestrate('run_synthesize')
+        if (!ok) return
+      }
+      if (missingAcfPlan)       await callOrchestrate('run_acf_organizer')
+      if (missingMinistryModel) await callOrchestrate('run_ministry_model')
+      if (missingSiteStrategy)  await callOrchestrate('run_strategist')
+      // NB: deliberately skip sitemap re-draft. Strategist consent
+      // required for that (they may have already approved). If the
+      // healed strategist output wants a new sitemap, the user can
+      // hit Revise on Gate 1 — that runs apply(stage='sitemap')
+      // which now uses the fresh upstream context.
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, hasStage0, hasStage1, hasStage2, stage1Meta?.looks_empty, engine.status, running])
 
   const submitRoute = useCallback(async () => {
     if (!feedback.trim()) return
@@ -505,18 +570,42 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       // suggestions. The page-outlines step is what was missing —
       // it's the bridge between atom inventory and copy that the
       // old page-briefs path lost.
+      //
+      // Idempotent resume: each phase reads CURRENT roadmap_state
+      // and skips slugs whose output already landed. So Re-run after
+      // a partial completion picks up at exactly the missing pages,
+      // not from zero. Server-side draft_page_until_resolved is
+      // expensive (1-3 Anthropic calls per page); we will not pay
+      // that for slugs that already have a passing draft.
       const sitemapPages = ((sitemap as { pages?: Array<{ slug: string }> } | null)?.pages ?? [])
       const slugs = sitemapPages.map(p => p.slug).filter(Boolean) as string[]
       if (slugs.length === 0) return
 
       const CLIENT_CONCURRENCY = 4
 
-      // Phase 1: page-outlines per slug. Each call writes
+      // Read latest state inside the closure — local `drafts` /
+      // `roadmap_state.page_outlines` may be stale relative to a
+      // sibling cascade or a prior run within this session.
+      const readState = async (): Promise<Record<string, unknown>> => {
+        const { data } = await supabase
+          .from('strategy_web_projects')
+          .select('roadmap_state')
+          .eq('id', project.id)
+          .maybeSingle()
+        return ((data?.roadmap_state ?? {}) as Record<string, unknown>) || {}
+      }
+      const initialState = await readState()
+      const existingOutlines = (initialState.page_outlines ?? {}) as Record<string, unknown>
+      const existingDrafts   = (initialState.page_drafts   ?? {}) as Record<string, unknown>
+
+      // Phase 1: page-outlines per slug. Skip slugs that already
+      // have an outline landed (resume semantic). Each call writes
       // roadmap_state.page_outlines[<slug>] — the contract page-draft
       // reads. Outlines are independent so we can fully parallelize
       // (capped client-side).
-      for (let i = 0; i < slugs.length; i += CLIENT_CONCURRENCY) {
-        const chunk = slugs.slice(i, i + CLIENT_CONCURRENCY)
+      const slugsNeedingOutlines = slugs.filter(s => existingOutlines[s] == null)
+      for (let i = 0; i < slugsNeedingOutlines.length; i += CLIENT_CONCURRENCY) {
+        const chunk = slugsNeedingOutlines.slice(i, i + CLIENT_CONCURRENCY)
         await Promise.allSettled(chunk.map(slug =>
           callOrchestrate('run_page_outline_for_page', { pageSlug: slug }),
         ))
@@ -527,8 +616,12 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       // truncation / atom-resolution failure / validation flags.
       // Half-done pages never reach Gate 2 — they're either resolved
       // OR marked blocked_missing_input with the specific gap named.
-      for (let i = 0; i < slugs.length; i += CLIENT_CONCURRENCY) {
-        const chunk = slugs.slice(i, i + CLIENT_CONCURRENCY)
+      // Resume semantic: skip slugs that already have a draft
+      // landed (regardless of flags — that's a separate Iterate
+      // concern, not a "page never got written" concern).
+      const slugsNeedingDrafts = slugs.filter(s => existingDrafts[s] == null)
+      for (let i = 0; i < slugsNeedingDrafts.length; i += CLIENT_CONCURRENCY) {
+        const chunk = slugsNeedingDrafts.slice(i, i + CLIENT_CONCURRENCY)
         await Promise.allSettled(chunk.map(slug =>
           callOrchestrate('draft_page_until_resolved', { pageSlug: slug }),
         ))
@@ -538,6 +631,8 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       // Director still emits per-page scores + directives for the
       // feedback panel + routing at Gate 2. Iterate runs slot-edits
       // on any non-empty directives (em-dash cleanup pass, etc.).
+      // Critique always re-runs on resume — adding pages changes the
+      // cross-page picture, so the prior critique is stale.
       const critiqueResult = await callOrchestrate('critique') as { engine_state?: EngineState } | null
       if (!critiqueResult) return
       const directiveCount = critiqueResult.engine_state?.last_directive_count ?? 0
@@ -548,30 +643,50 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       // Phase 4: pre-bind suggestion per page (BEFORE Gate 2). Per-
       // section template pick + swap UI lives at Gate 2. Suggestions
       // store on roadmap_state.page_bind_suggestions[slug] — web_sections
-      // rows don't land until Commit.
-      await Promise.allSettled(slugs.map(slug =>
+      // rows don't land until Commit. Skip slugs that already have a
+      // suggestion landed.
+      const postDraftState = await readState()
+      const existingSuggestions = (postDraftState.page_bind_suggestions ?? {}) as Record<string, unknown>
+      const slugsNeedingBindSuggestions = slugs.filter(s => existingSuggestions[s] == null)
+      await Promise.allSettled(slugsNeedingBindSuggestions.map(slug =>
         callOrchestrate('suggest_bind_for_page', { pageSlug: slug }),
       ))
     } finally {
       setEngineRunning(false)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [callOrchestrate, sitemap])
+  }, [callOrchestrate, sitemap, project.id])
 
   // ── Auto-cascade post-Gate-1 (drafts → critique → iterate) ──────────
   //
-  // If the strategist approved the sitemap in a previous session (or
-  // approved it just now and the cascade got interrupted), pick up
-  // where they left off. Conditions: sitemap approved + no drafts yet
-  // + engine isn't stuck (8min threshold) + engine isn't actively
-  // running. The downstreamCascadeStartedFor ref guards against re-fire
-  // when state changes mid-run.
+  // Resume semantic: if the strategist approved the sitemap and the
+  // cascade either never ran or ran partially (e.g., 8 of 21 pages
+  // drafted before a Vercel timeout / page reload / context drop),
+  // pick up where they left off. The runEngine implementation is now
+  // idempotent — it reads current roadmap_state and skips outlines /
+  // drafts / bind-suggestions that already landed.
+  //
+  // Fires when:
+  //   - sitemap approved
+  //   - drafts are MISSING for at least one sitemap slug (covers both
+  //     zero-drafts AND partial-drafts cases)
+  //   - engine isn't actively running (server-side or this tab)
+  //   - engine isn't stuck (8min threshold — user must Reset first)
+  //   - engine status isn't terminal (ready_for_review / committed —
+  //     those are user-action states, not "fire automatically" states)
+  //
+  // The downstreamCascadeStartedFor ref prevents re-fire loops when
+  // state updates mid-run.
+  const sitemapSlugCount = useMemo(() => {
+    const pages = (sitemap as { pages?: Array<{ slug: string }> } | null)?.pages ?? []
+    return pages.filter(p => Boolean(p?.slug)).length
+  }, [sitemap])
+  const draftsIncomplete = sitemapSlugCount > 0 && draftSlugs.length < sitemapSlugCount
   const downstreamCascadeStartedFor = useRef<string | null>(null)
   useEffect(() => {
     if (running) return
     if (engineRunning) return
     if (!sitemapApproved) return
-    if (draftSlugs.length > 0) return
+    if (!draftsIncomplete) return                  // all sitemap pages have drafts — done
     if (isEngineStuck(engine, false)) return       // user must hit Reset first
     if (engine.status && ENGINE_IN_PROGRESS_STATUSES.has(engine.status)) return
     if (engine.status && ENGINE_TERMINAL_STATUSES.has(engine.status)) return
@@ -579,7 +694,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     downstreamCascadeStartedFor.current = project.id
     void runEngine()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id, sitemapApproved, draftSlugs.length, engine.status, running, engineRunning])
+  }, [project.id, sitemapApproved, draftsIncomplete, engine.status, running, engineRunning])
 
   const openDraft = useCallback((slug: string) => {
     if (!slug || slug === '*') return
@@ -1051,6 +1166,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
             engineRunning={engineRunning || !!running}
             sitemapApproved={sitemapApproved}
             draftSlugs={draftSlugs}
+            sitemapSlugCount={sitemapSlugCount}
             onRerun={() => void runEngine()}
             onCommit={() => setConfirmAction('commit')}
             rerunBusy={!!running}
@@ -1335,13 +1451,24 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       <GateCard
         number={2}
         title="Final review — copy drafts (pre-bind)"
-        subtitle={
-          status === 'committed'
-            ? 'Committed. The copy is now live in web_pages + web_sections.'
-            : status === 'ready_for_review'
-              ? 'Review the page drafts above (archetype + slot copy). Approve to commit — commit binds each section to a Brixies template, writes web_pages + web_sections, and renders the final bound pages in the Pages tab.'
-              : 'Upstream — drafts are still being written or critiqued.'
-        }
+        subtitle={(() => {
+          if (status === 'committed') return 'Committed. The copy is now live in web_pages + web_sections.'
+          if (status === 'ready_for_review') return 'Review the page drafts above (archetype + slot copy). Approve to commit — commit binds each section to a Brixies template, writes web_pages + web_sections, and renders the final bound pages in the Pages tab.'
+          // Honest "upstream" reasons. Without this, the strategist
+          // sees "still being written" while the engine is plainly
+          // idle — and has no way to know if they need to do anything.
+          if (engine.status && ENGINE_IN_PROGRESS_STATUSES.has(engine.status)) {
+            return 'Upstream — drafts are still being written or critiqued.'
+          }
+          if (draftsIncomplete) {
+            const missing = sitemapSlugCount - draftSlugs.length
+            return `Upstream — ${draftSlugs.length} of ${sitemapSlugCount} pages drafted. Resuming the remaining ${missing} now.`
+          }
+          if (draftSlugs.length > 0) {
+            return 'Upstream — drafts ready, awaiting Director critique.'
+          }
+          return 'Upstream — drafting hasn’t started yet.'
+        })()}
         status={status === 'committed' ? 'passed' : status === 'ready_for_review' ? 'awaiting' : 'upstream'}
       />
 
@@ -1529,11 +1656,12 @@ function GateCard({ number, title, subtitle, status, action }: {
   )
 }
 
-function EngineStatusCard({ engine, engineRunning, sitemapApproved, draftSlugs, onRerun, onCommit, rerunBusy }: {
+function EngineStatusCard({ engine, engineRunning, sitemapApproved, draftSlugs, sitemapSlugCount, onRerun, onCommit, rerunBusy }: {
   engine: EngineState
   engineRunning: boolean
   sitemapApproved: boolean
   draftSlugs: string[]
+  sitemapSlugCount: number
   onRerun: () => void
   onCommit: () => void
   rerunBusy: boolean
@@ -1547,6 +1675,11 @@ function EngineStatusCard({ engine, engineRunning, sitemapApproved, draftSlugs, 
   const verdict = engine.last_verdict
   const directiveCount = engine.last_directive_count ?? 0
   const lastError = engine.last_error
+  // Sitemap-aware partial-completion check. The engine writes
+  // pages_total only while actively running, so we can't rely on
+  // engine.pages_total when status is idle — derive from sitemap.
+  const draftsIncomplete = sitemapSlugCount > 0 && draftSlugs.length < sitemapSlugCount
+  const missingCount = Math.max(0, sitemapSlugCount - draftSlugs.length)
 
   // Detect ANY in-progress engine state — local cascade in flight OR
   // a server-side cascade we're observing via polling. Either way the
@@ -1580,6 +1713,14 @@ function EngineStatusCard({ engine, engineRunning, sitemapApproved, draftSlugs, 
     if (status === 'ready_for_review') return verdict === 'approved'
       ? `Engine approved its own drafts. Review and commit when ready.`
       : `Drafts ready for review. Verdict: ${verdict ?? 'needs_revision'} after ${loopCount} loop${loopCount === 1 ? '' : 's'}.`
+    // Partial completion: be honest about how many pages are missing
+    // so the strategist sees the gap instead of a generic "drafts
+    // exist" line. The auto-cascade is also wired to resume here, so
+    // this state is usually transient — but it persists across reload
+    // / Vercel timeout / context drop, and the user deserves to know.
+    if (draftsIncomplete) {
+      return `${draftSlugs.length} of ${sitemapSlugCount} pages drafted. ${missingCount} remaining — click Continue to resume.`
+    }
     if (draftSlugs.length > 0)         return `Drafts exist (${draftSlugs.length} pages). Re-run to refresh, or review below.`
     return 'Ready to run. Approve the sitemap to start automatically, or re-run manually anytime.'
   })()
@@ -1629,9 +1770,18 @@ function EngineStatusCard({ engine, engineRunning, sitemapApproved, draftSlugs, 
           <button
             onClick={onRerun}
             disabled={rerunBusy}
-            className="inline-flex items-center gap-1.5 rounded-full border border-wm-border bg-wm-bg px-3 py-1.5 text-[12px] text-wm-text hover:bg-wm-accent/5 disabled:opacity-50"
+            className={[
+              'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] disabled:opacity-50',
+              draftsIncomplete
+                ? 'bg-wm-accent text-white hover:bg-wm-accent-strong'
+                : 'border border-wm-border bg-wm-bg text-wm-text hover:bg-wm-accent/5',
+            ].join(' ')}
+            title={draftsIncomplete
+              ? `Resume drafting from where the engine left off. Pages already drafted will be skipped — only the missing ${missingCount} will run.`
+              : 'Re-run the engine. Re-runs are idempotent — pages with existing drafts are skipped.'}
           >
-            <RefreshCw size={12} /> Re-run
+            {draftsIncomplete ? <Play size={12} /> : <RefreshCw size={12} />}
+            {draftsIncomplete ? `Continue (${missingCount} left)` : 'Re-run'}
           </button>
         )}
         {!isAnyInProgress && status === 'ready_for_review' && draftSlugs.length > 0 && (
