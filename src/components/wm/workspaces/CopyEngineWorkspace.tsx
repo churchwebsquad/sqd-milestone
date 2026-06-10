@@ -486,8 +486,23 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     const missingMinistryModel = rs.ministry_model == null
     const missingSiteStrategy  = rs.site_strategy == null
 
-    // Nothing to heal — let the normal cascade / Gate-1 flow proceed.
-    if (!stage1Broken && !missingAcfPlan && !missingMinistryModel && !missingSiteStrategy) return
+    // Also detect projects where upstream is HEALED but engine_state
+    // still carries a stale upstream-missing error from a prior
+    // cascade attempt (e.g., engine.status='ready_for_review' but
+    // last_error='page-outlines failed: upstream missing' and only
+    // 8 of 21 pages got drafted because the other 13 errored out
+    // before upstream was written). In that case there's nothing to
+    // re-synthesize/re-classify, but the cleanup at the end of this
+    // effect MUST still run so the downstream cascade can recover.
+    const errMsg = String(engine.last_error ?? '').toLowerCase()
+    const hasStaleUpstreamError =
+      errMsg.includes('upstream stages missing') ||
+      errMsg.includes('page-outlines failed') ||
+      errMsg.includes('cannot draft a page outline')
+
+    // Nothing to heal AND no stale error to clear — let the normal
+    // cascade / Gate-1 flow proceed.
+    if (!stage1Broken && !missingAcfPlan && !missingMinistryModel && !missingSiteStrategy && !hasStaleUpstreamError) return
 
     // The pre-Gate-1 cascade handles this case too. Don't double-fire.
     if (!hasStage2) return
@@ -508,18 +523,35 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       // hit Revise on Gate 1 — that runs apply(stage='sitemap')
       // which now uses the fresh upstream context.
 
-      // If a prior cascade attempt left the engine in an error state
-      // because of missing upstream (e.g., page-outlines 400'd while
-      // upstream was still being healed), clear engine_state so the
-      // downstream cascade — newly gated on `upstreamReady` — can
-      // re-fire automatically. Without this, the project lands here
-      // healed but still stuck behind a stale "error" terminal status.
+      // If a prior cascade attempt left the engine carrying a stale
+      // upstream-missing error, clear engine_state so the downstream
+      // cascade — newly gated on `upstreamReady` — can re-fire
+      // automatically. We trigger this for ANY engine status that
+      // carries the residual error, not just 'error':
+      //
+      //   - status='error'              → page-outlines 400 was the
+      //                                     last thing that happened
+      //   - status='ready_for_review'   → engine declared "done" on
+      //                                     partial output (8 of 21
+      //                                     drafted) but last_error
+      //                                     still names the missing
+      //                                     upstream that caused the
+      //                                     other 13 to fail
+      //   - status terminal (any other) → same: a stale error from
+      //                                     a prior attempt that's no
+      //                                     longer relevant
+      //
+      // The reset wipes engine_state.{status, last_error, current_phase,
+      // loop_count, pages_*}. It does NOT touch page_outlines /
+      // page_drafts / page_bind_suggestions — those are written under
+      // separate roadmap_state keys, so resume on the next cascade
+      // picks up only the genuinely missing slugs.
       const errMsg = String(engine.last_error ?? '').toLowerCase()
       const isUpstreamError =
         errMsg.includes('upstream stages missing') ||
         errMsg.includes('page-outlines failed') ||
         errMsg.includes('cannot draft a page outline')
-      if (engine.status === 'error' && isUpstreamError) {
+      if (isUpstreamError) {
         await callOrchestrate('reset_engine_state')
         // Allow the downstream cascade to fire a fresh attempt now
         // that upstream is healed and engine_state is clear.
@@ -527,7 +559,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       }
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id, hasStage0, hasStage1, hasStage2, stage1Meta?.looks_empty, engine.status, running])
+  }, [project.id, hasStage0, hasStage1, hasStage2, stage1Meta?.looks_empty, engine.status, engine.last_error, running])
 
   const submitRoute = useCallback(async () => {
     if (!feedback.trim()) return
