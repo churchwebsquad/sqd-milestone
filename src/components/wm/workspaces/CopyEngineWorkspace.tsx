@@ -2312,13 +2312,16 @@ function ExportImportPanel({ projectId, onImported }: {
   return (
     <section className="rounded-lg border border-wm-border bg-wm-bg-elevated p-4 space-y-3">
       <header>
-        <h3 className="text-[14px] font-semibold text-wm-text">Download &amp; refine</h3>
+        <h3 className="text-[14px] font-semibold text-wm-text">Upload or download a sitemap / copy</h3>
         <p className="text-[12px] text-wm-text-muted leading-snug">
-          Pull the project out as markdown to edit elsewhere — paste back to
-          apply. Sitemap download is light (nav + audit only); copy download
+          Works two ways. <strong>Upload</strong> if you've drafted a sitemap or
+          copy outside this tool (in another AI conversation, in a doc, in a
+          spreadsheet you've structured) and want to bring it in to drive
+          downstream stages. <strong>Download</strong> if you want to pull the
+          current project out as markdown, edit it elsewhere, and paste it
+          back. Sitemap download is light (nav + audit only); copy download
           carries the full strategic foundation (voice card, personas, SEO
-          targets, snippets) so an external AI conversation has everything
-          it needs to stay on-voice.
+          targets, snippets) so an external AI conversation stays on-voice.
         </p>
       </header>
 
@@ -2357,10 +2360,11 @@ function ExportImportPanel({ projectId, onImported }: {
           type="button"
           onClick={() => { setImportOpen(o => !o); setImportMsg(null) }}
           disabled={isBusy}
-          className="inline-flex items-center gap-1.5 rounded-full border border-wm-border bg-wm-bg hover:bg-wm-accent/5 px-3 py-1.5 text-[12px] text-wm-text disabled:opacity-50"
+          title="Paste a sitemap or copy document to bring it INTO the engine. Works for first-time uploads (no existing data yet) or for applying edits to existing data — the importer overwrites whatever sections you include."
+          className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent hover:bg-wm-accent/90 px-4 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50"
         >
           {importOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          {importOpen ? 'Hide importer' : 'Upload refinements'}
+          {importOpen ? 'Hide upload' : 'Upload sitemap / copy'}
         </button>
         {exportResult && (
           <span className="text-[11px] text-wm-text-subtle ml-auto">
@@ -2371,16 +2375,44 @@ function ExportImportPanel({ projectId, onImported }: {
 
       {importOpen && (
         <div className="space-y-2">
+          <div className="rounded-md border border-wm-border bg-wm-bg p-3 text-[11px] text-wm-text-muted leading-snug space-y-1.5">
+            <p>
+              <strong className="text-wm-text">Paste a document below.</strong>{' '}
+              The importer reads the <code className="text-[10px]">## Sitemap</code>,{' '}
+              <code className="text-[10px]">## Page Briefs</code>, and{' '}
+              <code className="text-[10px]">## Page Drafts</code> headers and applies whatever{' '}
+              <code className="text-[10px]">```json</code> block is under each one. Missing sections are skipped — you can upload JUST a sitemap if that's all you have.
+            </p>
+            <p>
+              Don't have an export to start from? Download an empty template
+              with the right metadata header + section placeholders, fill in
+              your sitemap (and optionally briefs/drafts), and paste back.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                const template = buildEmptyImportTemplate(projectId)
+                const blob = new Blob([template], { type: 'text/markdown;charset=utf-8' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url; a.download = 'copy-engine-empty-template.md'; a.click()
+                URL.revokeObjectURL(url)
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-wm-border bg-wm-bg-elevated hover:bg-wm-accent/5 px-3 py-1 text-[11px] text-wm-text"
+            >
+              <FileText size={11} /> Download empty template
+            </button>
+          </div>
           <textarea
             value={importText}
             onChange={e => setImportText(e.target.value)}
-            placeholder="Paste the entire exported document here (including the metadata header at top)…"
+            placeholder="Paste a Copy Engine document here — either one you downloaded from this app, or one you've drafted matching the format (use the empty template above as a starting point)…"
             rows={10}
             className="w-full rounded-md border border-wm-border bg-wm-bg px-3 py-2 text-[12px] font-mono focus:outline-none focus:border-wm-accent"
           />
           <div className="flex items-center justify-between">
             <p className="text-[10px] text-wm-text-subtle">
-              {importText.length.toLocaleString()} characters · The importer parses ```json blocks under each section header
+              {importText.length.toLocaleString()} characters
             </p>
             <button
               type="button"
@@ -2389,7 +2421,7 @@ function ExportImportPanel({ projectId, onImported }: {
               className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white font-semibold disabled:opacity-50"
             >
               {busy?.kind === 'import' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-              Apply import
+              Apply upload
             </button>
           </div>
         </div>
@@ -2745,6 +2777,127 @@ function PageRenameRow({
       )}
     </li>
   )
+}
+
+/** Empty starter document the upload drawer offers when the partner
+ *  doesn't have an existing export to base their upload on. Matches
+ *  the format export-state.ts emits, so the importer accepts it
+ *  byte-for-byte. The example pages[] entry illustrates the required
+ *  shape (name / slug / phase / page_type / strategic_purpose /
+ *  rationale / density) — the partner replaces it with their own. */
+function buildEmptyImportTemplate(projectId: string): string {
+  const sampleSitemap = {
+    pages: [
+      {
+        name: '(replace with page name, e.g. "Home")',
+        slug: '(replace with kebab-case slug, e.g. "home")',
+        nav_label: '(optional — defaults to name)',
+        phase: '1',
+        page_type: 'content',
+        strategic_purpose: '(one sentence: what this page does for the visitor)',
+        rationale: '(one sentence: why this page exists)',
+        density: 'medium',
+      },
+    ],
+    header_nav: [
+      { label: '(replace, e.g. "About")', kind: 'page', slug: '(matching slug from pages above)' },
+    ],
+    footer_nav: [
+      { section_label: 'Connect', items: [{ label: 'Contact', slug: 'contact' }] },
+    ],
+  }
+  const sampleBriefs = {
+    'home': {
+      page_job: '(what this page accomplishes for the primary persona)',
+      persona_focus: { primary: '(persona name)', secondary: null, rationale: '' },
+      atoms_assigned: [],
+      reference_atoms: [],
+      voice_exemplars_to_imitate: [],
+      voice_anti_exemplars_to_avoid: [],
+      section_targets: { section_count: 5, archetypes: ['hero', 'two_up', 'cta_band', 'testimonial_block', 'footer_cta'] },
+      aeo_geo_targets: { search_phrases: [], answer_intents: [], geo_anchors: [] },
+    },
+  }
+  const sampleDrafts = {
+    'home': {
+      sections: [
+        {
+          archetype: 'hero',
+          copy: {
+            eyebrow: null,
+            heading: '(replace with section heading)',
+            tagline: null,
+            description: '(replace with description)',
+            cta: { label: 'Plan a visit', intent: 'Open the visit page' },
+          },
+          atoms_used: [],
+          voice_notes: 'Which voice_exemplar this section imitates.',
+        },
+      ],
+    },
+  }
+  return [
+    '# Copy Engine Import Template (empty)',
+    '',
+    `- **Project ID**: \`${projectId}\``,
+    `- **Format**: srp-engine-export-v1`,
+    '',
+    '---',
+    '',
+    '## Instructions',
+    '',
+    'This is a blank starter document. Fill in the JSON blocks below with',
+    'your actual sitemap / briefs / drafts. Sections you don\'t fill (or',
+    'remove entirely) are SKIPPED on import — uploading just the Sitemap',
+    'block is valid. Required field schemas are illustrated by the example',
+    'entries below; replace the placeholders with your data.',
+    '',
+    'When you paste this document back into Copy Engine → Upload, the',
+    'importer applies only the sections you populated.',
+    '',
+    '---',
+    '',
+    '## Sitemap',
+    '',
+    'Required fields per page: name, slug, phase ("1"/"2"/"nav-only"/"global"),',
+    'page_type ("content"/"chrome"/"functional"), strategic_purpose, rationale,',
+    'density ("high"/"medium"/"low"). Header_nav entries are kind="page" (need',
+    'a slug) or kind="group" (need children[] + intent_type + grouping_rationale).',
+    '',
+    '```json',
+    JSON.stringify(sampleSitemap, null, 2),
+    '```',
+    '',
+    '---',
+    '',
+    '## Page Briefs',
+    '',
+    'One brief per page slug. Optional — skip this section if you only have a',
+    'sitemap to upload. If included, slugs must match the sitemap above.',
+    '',
+    '```json',
+    JSON.stringify(sampleBriefs, null, 2),
+    '```',
+    '',
+    '---',
+    '',
+    '## Page Drafts',
+    '',
+    'One draft per page slug. Optional. Each section needs `archetype` (one of:',
+    'hero / tagline_band / two_up / three_up / cards_grid / featured_card /',
+    'image_text_split / accordion / cta_band / testimonial_block / stat_block /',
+    'steps_row / contact_band / footer_cta / intro_paragraph / rich_body) and a',
+    '`copy` object whose keys depend on the archetype.',
+    '',
+    '```json',
+    JSON.stringify(sampleDrafts, null, 2),
+    '```',
+    '',
+    '---',
+    '',
+    '_End of template. Replace placeholders, delete sections you don\'t need, paste the entire document back into Copy Engine → Upload to apply._',
+    '',
+  ].join('\n')
 }
 
 function ScoreChip({ label, value, bold }: { label: string; value: number; bold?: boolean }) {
