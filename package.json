@@ -12,6 +12,8 @@
     "lint": "eslint .",
     "lint:ratchet": "node scripts/lint-ratchet.mjs",
     "lint:ratchet:update": "node scripts/lint-ratchet.mjs --update",
+    "check:canonical-templates": "node scripts/check-canonical-templates.mjs",
+    "check:canonical-templates:write": "node scripts/check-canonical-templates.mjs --write",
     "preview": "vite preview"
   },
   "dependencies": {

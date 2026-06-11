@@ -285,7 +285,7 @@
           "required": false
         },
         "accent_body": {
-          "max_chars": 400,
+          "max_chars": 300,
           "required": false
         }
       },
