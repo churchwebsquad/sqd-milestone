@@ -8,7 +8,7 @@ description: |
   live status to roadmap_state.cowork_progress after every step so the
   in-app workspace shows real progress without polling each worker.
   Entry point for the daily cron AND for a strategist's manual trigger.
-model: anthropic/claude-sonnet-4-6
+model: anthropic/claude-opus-4-7
 allowed-tools: Bash, Read, mcp__claude_ai_Supabase__execute_sql, Agent
 version: '1.0.0'
 ---
@@ -63,7 +63,7 @@ work that already landed.
 | 4 | Classify ministry model | `roadmap_state.ministry_model` exists AND `_meta.generated_at` is after stage_1 | `classify-ministry` |
 | 5 | Organize ACF plan | `roadmap_state.acf_plan` exists AND `_meta.generated_at` is after stage_1 | `organize-acf` |
 | 6 | Plan site strategy | `roadmap_state.site_strategy` exists AND `_meta.generated_at` is after ministry_model | `plan-site-strategy` |
-| **7** | **Plan cross-page allocation** — ONE project-level call that reads truth (crawl + content collection) + pillars + facts + strategic supplements, and decides what content lands on which pages with what treatment + flow_role. Outputs `CoworkPageAllocationPlan` + `source_traces` audit trail. | `roadmap_state.page_allocation_plan` exists AND `_meta.generated_at` is after site_strategy | `plan-cross-page-allocation` |
+| **7** | **Plan cross-page allocation** — ONE project-level call that reads truth (crawl + content collection) + pillars (including `recommended_page` directive pillars) + facts + strategic supplements, and decides (a) what content lands on which pages with what treatment + flow_role, and (b) which `recommended_page` pillars route to the `build_directives[]` bucket (CMS/CPT workflow, redirect maps, seasonal theming, etc. — dev-handoff items, not page copy). Outputs `CoworkPageAllocationPlan` with `allocations` + `source_traces` + `unresolved_sources` + `build_directives`. The downstream importer surfaces `build_directives` on the project's dev handoff. | `roadmap_state.page_allocation_plan` exists AND `_meta.generated_at` is after site_strategy | `plan-cross-page-allocation` |
 | 8 | Outline each sitemap page (consumes that page's allocation slice + the ministry-model templates) | For slug X: `roadmap_state.page_outlines[X]` exists AND `_meta.generated_at` is after the allocation plan | `outline-page` (per slug) |
 | 9 | Draft each outlined page (reads outline + the actual source content via source_ref lookups — pulls crawl passages, content_collection fields, atoms by UUID) | For slug X: `roadmap_state.page_drafts[X]` exists AND `_meta.generated_at` is after that page's outline | `draft-page` (per slug) |
 | 10 | Critique each drafted page (5-axis: dignity floor 70 / voice_character / persona_fit / atom_coverage / claim_plausibility) | For slug X: a `page_critique` artifact exists AND `_meta.generated_at` is after that page's draft | `critique-page` (per slug) |

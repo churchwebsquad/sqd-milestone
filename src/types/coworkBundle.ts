@@ -110,8 +110,11 @@ export interface CoworkStrategicPillarsResult {
   source_kind:      AtomSourceKind
   source_filename?: string             // for display only
   /** Maps 1:1 to content_atoms rows. The "Strategic Pillars" the
-   *  user-facing UI shows. Targeted topics only (see TOPICS_IN_PILLARS
-   *  below) — no prose_snippet, no recommended_page. */
+   *  user-facing UI shows. Includes the 11 content/voice topics in
+   *  TOPICS_IN_PILLARS plus `recommended_page` (TOPICS_FOR_DIRECTIVES)
+   *  which routes to `build_directives` in the allocation plan instead
+   *  of into a page section. NEVER emits `prose_snippet` (legacy
+   *  carry-only — see TOPICS_LEGACY). */
   pillars:          CoworkAtomRow[]
   report: {
     /** Every taxonomy category this skill SCANNED for in this source.
@@ -125,9 +128,10 @@ export interface CoworkStrategicPillarsResult {
   _meta: ArtifactMeta
 }
 
-/** Topics the extract-strategic-pillars skill is allowed to produce.
- *  Everything else (program data, staff, service times, etc.) belongs
- *  in church_facts via deterministic parsing OR stays in source. */
+/** Content/voice topics extract-strategic-pillars produces that get
+ *  placed on a page section by plan-cross-page-allocation. Everything
+ *  else (program data, staff, service times, etc.) belongs in
+ *  church_facts via deterministic parsing OR stays in source. */
 export const TOPICS_IN_PILLARS: readonly AtomTopic[] = [
   'mission_statement',
   'vision_statement',
@@ -142,12 +146,24 @@ export const TOPICS_IN_PILLARS: readonly AtomTopic[] = [
   'denominational_signal',
 ] as const
 
+/** Topics extract-strategic-pillars ALSO produces that route to
+ *  build_directives in the allocation plan output instead of landing
+ *  on a page section. Partner-suggested pages, CPT/workflow
+ *  requirements, redirect maps, seasonal theming, guide
+ *  consolidation, page-priority directives — anything the dev/designer
+ *  needs to know about that isn't page copy. The validator's
+ *  `directive_dropped` check enforces routing. */
+export const TOPICS_FOR_DIRECTIVES: readonly AtomTopic[] = [
+  'recommended_page',
+] as const
+
 /** Topics the type union still allows for back-compat with rows
  *  written by the previous (overscoped) atomize-doc design. The new
- *  extract-strategic-pillars skill must NOT emit these. */
+ *  extract-strategic-pillars skill must NOT emit these — page content
+ *  stays in source (crawl + content_collection) per the user's
+ *  data-truth model. */
 export const TOPICS_LEGACY: readonly AtomTopic[] = [
   'prose_snippet',
-  'recommended_page',
 ] as const
 
 /** Shape that maps 1:1 to content_atoms columns. Importer can spread it
@@ -276,10 +292,40 @@ export interface CoworkPageAllocationPlan {
     /** Sources that DIDN'T land anywhere — surfaced for strategist review. */
     source_kind: string
     source_ref:  string
-    reason:      string
+    reason:      CoworkUnresolvedReason
+    /** Actionable specifics: what's noisy, what consent is missing, which
+     *  template gapped. Required by the skill; optional here so older
+     *  plans still parse. */
+    detail?:     string
+    /** Present only when reason === 'required_slots_unfilled'. */
+    slot_gap?:   { template_id: string; slot_key: string; why: string }
+  }>
+  /** Build/workflow requirements that are NOT page copy (atoms with topic
+   *  'recommended_page': staff CPT, redirect map, seasonal theming, guide
+   *  consolidation, …). Neither placements nor unresolved — routed to dev
+   *  handoff. Optional: plans generated before skill v1.1 won't have it. */
+  build_directives?: Array<{
+    source_kind: string
+    source_ref:  string
+    applies_to:  string                                // page slug or 'site_wide'
+    directive:   string                                // 1-line restatement for dev handoff
   }>
   _meta: ArtifactMeta
 }
+
+/** Closed vocabulary for unresolved_sources.reason. Keep in sync with
+ *  plan-cross-page-allocation/SKILL.md. The (string & {}) escape hatch
+ *  keeps pre-v1.1 plans parseable; new plans must use the enum. */
+export type CoworkUnresolvedReason =
+  | 'crawl_noise_parking_lot'
+  | 'csv_routed_elsewhere'
+  | 'structured_data_routed_to_facts'
+  | 'insufficient_items_for_template'
+  | 'required_slots_unfilled'
+  | 'duplicate_of_placed_source'
+  | 'internal_admin_contact_not_for_publication'
+  | 'insufficient_source_content'
+  | (string & {})
 
 export interface CoworkPageAllocation {
   page_slug:           string

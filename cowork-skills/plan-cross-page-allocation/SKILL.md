@@ -8,7 +8,7 @@ description: |
   intelligent cross-page sorter — informed by church-website patterns
   (ministry-model templates) AND the partner's actual content + goals
   + persona journeys, NOT just the existing site's structure.
-model: anthropic/claude-opus-4-7
+model: anthropic/claude-fable-5
 allowed-tools: Read
 version: '1.0.0'
 ---
@@ -75,6 +75,29 @@ Load them BEFORE looking at the project sources.
 }
 ```
 
+### Director input contract
+
+cowork-director MUST prepare the payload like this — it keeps the call
+affordable and removes the biggest hallucination surfaces:
+
+- **Handles, not bare UUIDs.** Give every pillar and fact a short stable
+  handle (`pillar:voice_rule/money_once_weekly`, `fact:staff/craig`)
+  alongside its UUID. The model allocates by handle; the importer expands
+  handles back to UUIDs and REJECTS any handle not in the input.
+- **Cap crawl items.** Send at most ~8 sample items per topic plus the
+  total count. Allocation needs the shape and density of a topic, not all
+  89 sermon rows.
+- **Quarantine noise before sending.** Topics that are dominated by
+  platform boilerplate, 404 placeholders, or duplicates (commonly the
+  `other` topic) should be pre-filtered or sent as counts + a one-line
+  characterization. Don't pay tokens for Squarespace template text.
+- **Send facts compactly.** id/handle + topic + a ≤200-char preview of
+  `data`. Full payloads resolve at bind time, not here.
+- **Mark duplicates.** If two atoms carry identical bodies from different
+  sources (e.g., the mission captured from both strategy brief and
+  discovery questionnaire), tag the non-canonical one `duplicate_of` so
+  this skill doesn't have to guess.
+
 ## What you output
 
 `CoworkPageAllocationPlan` (see `src/types/coworkBundle.ts`). Three
@@ -96,7 +119,24 @@ parts:
    a reason. Don't pad this list; if a source is genuinely irrelevant
    (e.g., a CSV of inactive volunteers from 2019), mark it
    unresolved. But every active piece of content should land
-   somewhere.
+   somewhere. `reason` MUST come from this closed vocabulary, and every
+   entry MUST carry a `detail` string specific enough to act on:
+   `crawl_noise_parking_lot` · `csv_routed_elsewhere` ·
+   `structured_data_routed_to_facts` · `insufficient_items_for_template` ·
+   `required_slots_unfilled` (include `slot_gap`) ·
+   `duplicate_of_placed_source` ·
+   `internal_admin_contact_not_for_publication` ·
+   `insufficient_source_content`.
+
+4. **`build_directives`** — build/workflow requirements that are NOT
+   page copy and must not be forced into either bucket above. Pillars
+   with topic `recommended_page` (staff CPT, redirect map, seasonal
+   theming, guide consolidation, page-priority directives) land here
+   with `applies_to` (a page slug or `site_wide`) and a one-line
+   `directive` for the dev handoff. Where a directive shapes copy
+   posture (e.g., "affirming language must read as natural expression"),
+   ALSO encode it into the relevant `section_job` text — the directive
+   entry is the audit trail, the section_job is the enforcement.
 
 ## Decision rubric per source
 
@@ -168,11 +208,19 @@ catch here than to fail at bind time after 8 expensive LLM calls.
   unless the partner's wording is also the literal headline copy.
   Without this distinction the model would force voice rules into
   inform sections where they don't belong.
-- **Verbatim pillars MUST get `lift_verbatim` treatment.** If
-  `atom.verbatim === true`, the only valid treatment is
+- **Verbatim CONTENT pillars MUST get `lift_verbatim` treatment.** For
+  pillars in the content-topic set above (plus `prose_snippet`), if
+  `atom.verbatim === true` the only valid content treatment is
   `lift_verbatim`. Never `weave_into_paragraph`, never
   `reframe_for_persona`. The verbatim flag means the partner's
   exact wording IS the value — losing it loses the signal.
+  **Scope note:** this rule does NOT convert voice pillars into page
+  copy. A verbatim `voice_rule` ("we don't use sacrificial atonement
+  language") is an instruction, not copy — it gets `voice_anchor`, and
+  the verbatim flag means downstream must receive the rule text
+  unparaphrased. A verbatim `voice_sample` gets `voice_anchor` by
+  default and `lift_verbatim` ONLY where its wording is literally the
+  page copy (e.g., crawled copy on a carry-forward page).
 - **Pillars (`content_atoms`) reference by UUID.** Never re-state
   pillar text in your output — just the atom_id + treatment.
 - **Crawl topics reference by `topic_key`.** Never re-state passages.
@@ -190,8 +238,26 @@ catch here than to fail at bind time after 8 expensive LLM calls.
 - **Section count per page is up to you.** Match the ministry-model
   template's range (~3-7 sections for most pages) but adjust to the
   partner's actual content density. Don't pad to hit a template.
+- **Crawl coverage_status values are `rich` / `covered` / `sparse`.**
+  `rich` and `covered` topics MUST be placed. `sparse` topics may be
+  placed (often absorbed into a parent page's section) or unresolved
+  with reason `insufficient_source_content` — never silently dropped.
+- **Honor Stage 1's `topic_coverage_plan` as your routing prior.** It
+  already decided own_page / absorbed_into / parking_lot per crawl
+  topic. Your job is the SECTION-level placement and cross-page reuse,
+  not re-litigating page destinations. Deviate only when the actual
+  content density demands it, and say why in the trace rationale.
+- **Duplicate atoms:** place every duplicate at the same target with a
+  `note` naming the canonical atom (or unresolve the duplicate with
+  reason `duplicate_of_placed_source`). Never place identical bodies at
+  different targets as if they were two ideas.
 
 ## Quality bar before returning
+
+Every item below is mechanically checkable. The runtime runs
+`validate_allocation_plan.py` (in this skill folder) against your output
+and may return the failure list for ONE repair pass — fix only the named
+gaps, don't regenerate the whole plan.
 
 Before emitting, re-read your output:
 

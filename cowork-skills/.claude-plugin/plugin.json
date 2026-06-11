@@ -1,0 +1,16 @@
+{
+  "name": "web-copywriter-suite",
+  "version": "0.2.0",
+  "description": "Church Media Squad's autonomous website copywriting chain. Three components: a pure creative copywriter (Sonnet), a deterministic Brixies-field formatter with snippets tokenization, and a fresh-eyes compliance reviewer (Haiku) with snippet-consistency audit + proposed_snippets surfacing.",
+  "author": {
+    "name": "Church Media Squad"
+  },
+  "keywords": [
+    "church-media-squad",
+    "copywriting",
+    "website",
+    "brixies",
+    "autonomous-pipeline",
+    "snippets"
+  ]
+}

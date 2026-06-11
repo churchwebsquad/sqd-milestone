@@ -86,11 +86,21 @@ You produce `content_atoms` rows with topics from this exact list:
 | `persona` | A named audience archetype with need + barrier | "Maria — 34, two young kids, hurt by a previous church. Needs to know she can ask hard questions without being rushed." |
 | `story` | An anecdote, testimonial, or vignette that carries voice + values | "Last Easter a guy showed up in pajama pants. Three of our deacons sat with him and didn't make a thing of it." |
 | `denominational_signal` | Theological tradition markers | "Reformed soteriology, charismatic in worship." |
+| `recommended_page` | A build/workflow directive the partner asked for that is NOT page copy: a page they want the sitemap to include (e.g. "we need a Staff page"), a CMS/CPT workflow requirement (e.g. "blog posts auto-publish from a Notion source"), a redirect map for migration, seasonal theming, guide-library consolidation, page-priority instructions. Downstream, plan-cross-page-allocation routes these to `build_directives[]` for dev handoff — NOT into a page section. | "We need a Staff CPT so the team can edit bios via the CMS without touching templates." · "Seasonal Christmas theming on /events and the home hero from Nov 15 – Jan 6." |
 
 Anything that doesn't fit one of these topics: **do NOT invent a new
 topic. Skip it.** If the source has program data, staff, or service
 times, leave them — they'll be handled by `parse-facts-csv` or stay
 in source for `outline-page` to read directly.
+
+**About `recommended_page`:** these are STRATEGIC signals, not page
+copy. Emit them as pillars (one row each) when the source contains an
+explicit build/workflow ask. Examples: AM-handoff "they want a Staff
+page", brand guide "their blog cadence is weekly with a Notion source",
+discovery questionnaire "they need to redirect their old Squarespace
+URLs". The body should be a one-line directive a dev/designer can act
+on — not a full page brief. Verbatim flag is normally false (these are
+your re-statement of the partner's ask, not their exact words).
 
 ## Coverage discipline
 
