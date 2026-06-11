@@ -85,26 +85,70 @@ export type FlowRole =
 
 // ── Artifacts ────────────────────────────────────────────────────────────
 
-/** What atomize-doc emits per source. atoms[] + facts[] go into Supabase
- *  tables; the report goes into roadmap_state for telemetry / audit. */
-export interface CoworkAtomizeDocResult {
-  source_id:        string             // web_intake_documents.id / web_project_topics.id / content_collection_session field key
+/** RENAMED + RESCOPED. Originally I designed this as a comprehensive
+ *  per-doc atomizer that tried to extract every kind of atom from every
+ *  source. After review the user pointed out that this duplicates work
+ *  the crawl already does (web_project_topics is already a content
+ *  inventory) and risks dropping info when the LLM compresses content
+ *  into typed rows.
+ *
+ *  The new scope: content_atoms is ONLY the strategic-interpretation
+ *  layer — voice samples, persona definitions, mission/vision/x_factor
+ *  distillations, ethos statements, denominational signals, stories.
+ *  The actual page content stays in source tables (crawl topics,
+ *  content collection, intake docs) and downstream page-draft reads
+ *  source directly when it needs body text.
+ *
+ *  User-facing label for content_atoms is "Strategic Pillars."
+ *
+ *  extract-strategic-pillars only mines: strategy_brief, discovery
+ *  questionnaire, brand guide, handoff form, and any prose intake doc
+ *  containing identity statements. CSVs go to a separate deterministic
+ *  facts-parsing step; not all sources go through this skill. */
+export interface CoworkStrategicPillarsResult {
+  source_id:        string             // web_intake_documents.id / discovery row id / brand_guide id / etc.
   source_kind:      AtomSourceKind
   source_filename?: string             // for display only
-  atoms:            CoworkAtomRow[]    // ready to INSERT into content_atoms
-  facts:            CoworkFactRow[]    // ready to INSERT into church_facts
+  /** Maps 1:1 to content_atoms rows. The "Strategic Pillars" the
+   *  user-facing UI shows. Targeted topics only (see TOPICS_IN_PILLARS
+   *  below) — no prose_snippet, no recommended_page. */
+  pillars:          CoworkAtomRow[]
   report: {
     /** Every taxonomy category this skill SCANNED for in this source.
      *  Importer cross-checks to catch coverage gaps (e.g., "you scanned
      *  this strategy brief but didn't look for voice_sample"). */
     scanned_atom_topics: AtomTopic[]
-    scanned_fact_topics: FactTopic[]
     /** Free-text notes the skill wants to surface (e.g., "Source has
-     *  no service times — likely needs partner follow-up"). */
+     *  no x_factor declaration — likely needs partner follow-up"). */
     notes: string[]
   }
   _meta: ArtifactMeta
 }
+
+/** Topics the extract-strategic-pillars skill is allowed to produce.
+ *  Everything else (program data, staff, service times, etc.) belongs
+ *  in church_facts via deterministic parsing OR stays in source. */
+export const TOPICS_IN_PILLARS: readonly AtomTopic[] = [
+  'mission_statement',
+  'vision_statement',
+  'x_factor',
+  'ethos',
+  'value_statement',
+  'voice_rule',
+  'voice_sample',
+  'tone_descriptor',
+  'persona',
+  'story',
+  'denominational_signal',
+] as const
+
+/** Topics the type union still allows for back-compat with rows
+ *  written by the previous (overscoped) atomize-doc design. The new
+ *  extract-strategic-pillars skill must NOT emit these. */
+export const TOPICS_LEGACY: readonly AtomTopic[] = [
+  'prose_snippet',
+  'recommended_page',
+] as const
 
 /** Shape that maps 1:1 to content_atoms columns. Importer can spread it
  *  into `.insert(row)`. */
