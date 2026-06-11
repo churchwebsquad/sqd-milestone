@@ -700,26 +700,46 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       let initialState = await readState()
 
       // PHASE 0 — UPSTREAM HEAL. Page-outlines + page-draft + director
-      // all reject with 400 if site_strategy / ministry_model / stage_1
-      // is missing. The auto-heal effect on the workspace handles this
-      // when the user lands on the project, but the Approve & Run
-      // button calls runEngine() DIRECTLY without going through the
-      // heal effect — so an imported project whose upstream chain was
-      // never run (e.g., user uploaded a sitemap doc that only had
-      // stage_2) blows up on the first page-outlines call.
+      // all reject (or fail silently with garbage output) if the
+      // upstream chain is incomplete. The auto-heal effect on the
+      // workspace handles this on mount, but the Approve & Run button
+      // calls runEngine() DIRECTLY without going through the heal
+      // effect — so an imported project whose upstream was never run
+      // blows up on the first page-outlines call.
       //
-      // Inline the heal here so runEngine is self-contained: if the
-      // upstream chain isn't complete, run it before any page work.
-      // Each agent is idempotent (returns 200 with cached state if its
-      // slot already exists), and the atomic JSONB writes in v68 mean
-      // these calls can no longer race each other into oblivion.
+      // The heal chain in dependency order:
+      //   normalize-intake  → atomizes web_intake_documents into
+      //                       content_atoms + church_facts. REQUIRED
+      //                       for page-outlines to work (we saw 3734
+      //                       fail with 0 atoms because every uploaded
+      //                       content_collection CSV was ignored).
+      //   extract-strategy  → stage_1 (voice, personas, x-factor)
+      //   acf-content-organizer → acf_plan (modules / settings)
+      //   determine-ministry-model → ministry_model (atomic spine)
+      //   strategist        → site_strategy (siteflow, persona journeys)
+      //
+      // Each agent is idempotent (returns cached state if its slot is
+      // already populated) and the v68 atomic JSONB writes mean these
+      // calls can no longer race each other into oblivion.
+
+      // Check atom count BEFORE running normalize-intake. content_atoms
+      // is a SEPARATE table from roadmap_state — we have to query it
+      // directly. If 0 atoms exist AND any intake docs are uploaded,
+      // run normalize-intake first so the downstream chain has data
+      // to chew on.
+      const [{ count: atomsCount }, { count: intakeDocsCount }] = await Promise.all([
+        supabase.from('content_atoms').select('*', { count: 'exact', head: true }).eq('web_project_id', project.id),
+        supabase.from('web_intake_documents').select('*', { count: 'exact', head: true }).eq('web_project_id', project.id).eq('archived', false),
+      ])
+      const needsNormalize = (atomsCount ?? 0) === 0 && (intakeDocsCount ?? 0) > 0
+
       const needsSynthesize  = initialState.stage_1        == null
       const needsAcfPlan     = initialState.acf_plan       == null
       const needsMinistry    = initialState.ministry_model == null
       const needsStrategist  = initialState.site_strategy  == null
       const upstreamSteps =
-        Number(needsSynthesize) + Number(needsAcfPlan) +
-        Number(needsMinistry)   + Number(needsStrategist)
+        Number(needsNormalize) + Number(needsSynthesize) + Number(needsAcfPlan) +
+        Number(needsMinistry)  + Number(needsStrategist)
       if (upstreamSteps > 0) {
         setEnginePhase({
           label: 'upstream_heal',
@@ -733,7 +753,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         const stepDurations: number[] = []
         const runStep = async (
           name: string,
-          action: 'run_synthesize' | 'run_acf_organizer' | 'run_ministry_model' | 'run_strategist',
+          action: 'run_normalize' | 'run_synthesize' | 'run_acf_organizer' | 'run_ministry_model' | 'run_strategist',
         ): Promise<boolean> => {
           setEnginePhase(p => p && ({ ...p, currentSlug: name }))
           const stepStart = Date.now()
@@ -747,10 +767,16 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
           }))
           return !!ok
         }
-        if (needsSynthesize)  { if (!(await runStep('synthesize',    'run_synthesize')))      return }
-        if (needsAcfPlan)     {       await runStep('acf_plan',      'run_acf_organizer')         }
-        if (needsMinistry)    {       await runStep('ministry_model','run_ministry_model')        }
-        if (needsStrategist)  {       await runStep('site_strategy', 'run_strategist')            }
+        // normalize-intake must run FIRST — page-outlines, page-draft,
+        // strategist, and ministry-model all read content_atoms +
+        // church_facts. If atoms is empty, every downstream step does
+        // garbage work (or 502s when the LLM can't produce a valid
+        // outline tool call against an empty input).
+        if (needsNormalize)   { if (!(await runStep('normalize_intake', 'run_normalize')))     return }
+        if (needsSynthesize)  { if (!(await runStep('synthesize',       'run_synthesize')))    return }
+        if (needsAcfPlan)     {       await runStep('acf_plan',         'run_acf_organizer')         }
+        if (needsMinistry)    {       await runStep('ministry_model',   'run_ministry_model')        }
+        if (needsStrategist)  {       await runStep('site_strategy',    'run_strategist')            }
         // Re-read so the outline / draft / critique phases see what
         // the heal just wrote.
         initialState = await readState()
@@ -796,6 +822,27 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
             currentSlug: slugsNeedingOutlines[i + 1] ?? null,
             perStepMs: [...stepDurations],
           }))
+        }
+
+        // SYSTEMIC FAILURE GUARD. If we tried to write N outlines and
+        // ZERO landed, the cascade has no chance of producing drafts /
+        // critique / bind suggestions. Halt here rather than march
+        // forward and stamp engine_state with a misleading
+        // "page-draft 400" / "page-briefs 404" / "no draft found"
+        // error that hides the real root cause (which is upstream).
+        //
+        // callOrchestrate caches errors in `setError`; the surfaced
+        // banner above the workspace shows the actual page-outlines
+        // failure to the user. This guard just stops the doomed march.
+        const postOutlineState = await readState()
+        const outlinesAfter   = (postOutlineState.page_outlines ?? {}) as Record<string, unknown>
+        const outlinesLanded  = Object.keys(outlinesAfter).filter(k => k !== '_meta' && outlinesAfter[k] != null).length
+        if (outlinesLanded === 0) {
+          setError(
+            'Outlines failed for every page. Cascade halted — check the page-outlines errors above. ' +
+            'Likely causes: empty content_atoms (run normalize-intake), missing upstream stages, or AI Gateway outage.',
+          )
+          return
         }
       }
 
