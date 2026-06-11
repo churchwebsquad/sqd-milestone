@@ -1,0 +1,700 @@
+{
+  "version": "1.0.0",
+  "source": "Paradox Church (TEST) curated_library (project 15394f01-b371-415e-9bae-5d6e7d50c58a)",
+  "doc": {
+    "purpose": "Single source-of-truth that the cowork pipeline reads when picking templates + populating slots. Bind-time translation between this uniform vocabulary and Brixies field names lives in the app-side import endpoint, NOT in cowork.",
+    "cowork_vocabulary": {
+      "tagline": "text, optional, eyebrow above primary_heading",
+      "primary_heading": "text, REQUIRED, page-section title (Brixies h1/h2 depending on template)",
+      "body": "richtext, optional, descriptive prose under the heading",
+      "accent_body": "richtext, optional, secondary descriptive prose. Only on templates that have a SECOND visible richtext block.",
+      "buttons": "array of { label, url } CTAs. max_items varies per template.",
+      "items": "array of { item_heading, item_body, item_meta? }. Used by accordion, cards, tabs, timeline, team, etc. max_items + palette ref vary per template; the importer figures out the visual layout."
+    },
+    "designer_slots": "Every image slot in the underlying Brixies template is designer-populated (not by cowork). The total per template is recorded as design_handoff_image_count for the design handoff checklist.",
+    "importer_responsibilities": [
+      "Translate uniform_to_brixies field names for the picked template",
+      "For multi-group templates (accordion_faq, content_image_text_b, contact_section): split items[] across the visual groups per layout-specific rule",
+      "For palette-ref groups (feature_team, content_featured_a): look up the project curated_library.card_* binding to resolve the actual Card variant + write item fields against that variant",
+      "Validate every required uniform slot is populated before INSERT into web_sections",
+      "Leave all image fields empty (placeholders render until designer fills via design handoff)"
+    ],
+    "empty_slot_prevention": {
+      "philosophy": "Required slots empty at bind time = preventable upstream. Every layer validates against this manifest BEFORE handing off.",
+      "layers": [
+        "plan-cross-page-allocation: for each section_intent, check that allocated sources contain content sufficient to fill the picked template required slots. Gaps land in unresolved_sources with exact slot named.",
+        "outline-page: declares atom_assignments covering all required uniform slots before returning. Self-validates against the manifest.",
+        "draft-page: validates its own draft output before returning. Every required slot has non-empty content. One retry on gap. Else returns validation.unresolved_required_slots[].",
+        "importer (app-side): last line of defense. Refuses INSERT if any required slot empty. Returns structured error pointing at page + section + slot + missing atom + suggested fix.",
+        "Strategist UI: surfaces unresolved gaps with context. Strategist sees exactly which page/section/slot needs input, what was missing, what to do."
+      ]
+    }
+  },
+  "page_section_templates": {
+    "hero_homepage": {
+      "template_id": "hero-section-102",
+      "concept": "hero_homepage",
+      "family": "Hero Section",
+      "variant": "102",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "item_subfields": {
+            "label": {
+              "max_chars": 30
+            },
+            "url": {
+              "type": "url"
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 0
+    },
+    "hero_inner": {
+      "template_id": "hero-section-1",
+      "concept": "hero_inner",
+      "family": "Hero Section",
+      "variant": "1",
+      "cowork_writable_slots": {
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "item_subfields": {
+            "label": {
+              "max_chars": 30
+            },
+            "url": {
+              "type": "url"
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 1
+    },
+    "hero_featured": {
+      "template_id": "hero-section-43",
+      "concept": "hero_featured",
+      "family": "Hero Section",
+      "variant": "43",
+      "cowork_writable_slots": {
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "item_subfields": {
+            "label": {
+              "max_chars": 30
+            },
+            "url": {
+              "type": "url"
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 1
+    },
+    "cta_simple": {
+      "template_id": "cta-section-20",
+      "concept": "cta_simple",
+      "family": "CTA Section",
+      "variant": "20",
+      "cowork_writable_slots": {
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "item_subfields": {
+            "label": {
+              "max_chars": 30
+            },
+            "url": {
+              "type": "url"
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 1
+    },
+    "cta_callout": {
+      "template_id": "cta-section-52",
+      "concept": "cta_callout",
+      "family": "CTA Section",
+      "variant": "52",
+      "cowork_writable_slots": {
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 1,
+          "item_subfields": {
+            "label": {
+              "max_chars": 30
+            },
+            "url": {
+              "type": "url"
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 0
+    },
+    "accordion_faq": {
+      "template_id": "faq-section-10",
+      "concept": "accordion_faq",
+      "family": "FAQ Section",
+      "variant": "10",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 5,
+          "uses_palette": null,
+          "item_subfields": {
+            "item_heading": {
+              "max_chars": 100
+            },
+            "item_body": {
+              "max_chars": 400
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 0
+    },
+    "content_image_text_a": {
+      "template_id": "content-section-45",
+      "concept": "content_image_text_a",
+      "family": "Content Section",
+      "variant": "45",
+      "cowork_writable_slots": {
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 3,
+          "uses_palette": null,
+          "item_subfields": {
+            "item_heading": {
+              "max_chars": 100
+            },
+            "item_body": {
+              "max_chars": 400
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 1
+    },
+    "content_image_text_b": {
+      "template_id": "content-section-16",
+      "concept": "content_image_text_b",
+      "family": "Content Section",
+      "variant": "16",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 2,
+          "uses_palette": null,
+          "item_subfields": {
+            "item_heading": {
+              "max_chars": 100
+            },
+            "item_body": {
+              "max_chars": 400
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 1
+    },
+    "content_video": {
+      "template_id": "content-section-25",
+      "concept": "content_video",
+      "family": "Content Section",
+      "variant": "25",
+      "cowork_writable_slots": {
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "accent_body": {
+          "max_chars": 400,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 1
+    },
+    "content_featured_a": {
+      "template_id": "content-section-89",
+      "concept": "content_featured_a",
+      "family": "Content Section",
+      "variant": "89",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 3,
+          "uses_palette": "Card",
+          "item_subfields": {
+            "item_heading": {
+              "max_chars": 100
+            },
+            "item_body": {
+              "max_chars": 400
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 3
+    },
+    "content_featured_b": {
+      "template_id": "content-section-91",
+      "concept": "content_featured_b",
+      "family": "Content Section",
+      "variant": "91",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "item_subfields": {
+            "label": {
+              "max_chars": 30
+            },
+            "url": {
+              "type": "url"
+            }
+          }
+        },
+        "items": {
+          "max_items": 1,
+          "uses_palette": null,
+          "item_subfields": {
+            "item_heading": {
+              "max_chars": 100
+            },
+            "item_body": {
+              "max_chars": 400
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 1
+    },
+    "contact_section": {
+      "template_id": "content-section-96",
+      "concept": "contact_section",
+      "family": "Content Section",
+      "variant": "96",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "item_subfields": {
+            "label": {
+              "max_chars": 30
+            },
+            "url": {
+              "type": "url"
+            }
+          }
+        },
+        "items": {
+          "max_items": 3,
+          "uses_palette": null,
+          "item_subfields": {
+            "item_heading": {
+              "max_chars": 100
+            },
+            "item_body": {
+              "max_chars": 400
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 1
+    },
+    "feature_team": {
+      "template_id": "team-section-14",
+      "concept": "feature_team",
+      "family": "Team Section",
+      "variant": "14",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 2,
+          "uses_palette": "Card",
+          "item_subfields": {
+            "item_heading": {
+              "max_chars": 100
+            },
+            "item_body": {
+              "max_chars": 400
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 0
+    },
+    "feature_tabbed": {
+      "template_id": "feature-section-66",
+      "concept": "feature_tabbed",
+      "family": "Feature Section",
+      "variant": "66",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 4,
+          "uses_palette": null,
+          "item_subfields": {
+            "item_heading": {
+              "max_chars": 100
+            },
+            "item_body": {
+              "max_chars": 400
+            },
+            "item_meta": {
+              "max_chars": 60,
+              "required": false
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 4
+    },
+    "feature_unique": {
+      "template_id": "feature-section-103",
+      "concept": "feature_unique",
+      "family": "Feature Section",
+      "variant": "103",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 2,
+          "uses_palette": null,
+          "item_subfields": {
+            "item_heading": {
+              "max_chars": 100
+            },
+            "item_body": {
+              "max_chars": 400
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 0
+    },
+    "feature_card_carousel_proxy": {
+      "template_id": "feature-section-6",
+      "concept": "feature_card_carousel_proxy",
+      "family": "Feature Section",
+      "variant": "6",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "item_subfields": {
+            "label": {
+              "max_chars": 30
+            },
+            "url": {
+              "type": "url"
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 0
+    },
+    "testimonial_written": {
+      "template_id": "feature-section-19",
+      "concept": "testimonial_written",
+      "family": "Feature Section",
+      "variant": "19",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 2,
+          "uses_palette": null,
+          "item_subfields": {
+            "item_heading": {
+              "max_chars": 100
+            },
+            "item_body": {
+              "max_chars": 400
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 2
+    },
+    "testimonial_video": {
+      "template_id": "feature-section-77",
+      "concept": "testimonial_video",
+      "family": "Feature Section",
+      "variant": "77",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 1,
+          "uses_palette": null,
+          "item_subfields": {
+            "item_heading": {
+              "max_chars": 100
+            },
+            "item_body": {
+              "max_chars": 400
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 0
+    },
+    "timeline_story": {
+      "template_id": "timeline-section-6",
+      "concept": "timeline_story",
+      "family": "Timeline Section",
+      "variant": "6",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "item_subfields": {
+            "label": {
+              "max_chars": 30
+            },
+            "url": {
+              "type": "url"
+            }
+          }
+        },
+        "items": {
+          "max_items": 5,
+          "uses_palette": null,
+          "item_subfields": {
+            "item_heading": {
+              "max_chars": 100
+            },
+            "item_body": {
+              "max_chars": 400
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 1
+    },
+    "career_section": {
+      "template_id": "career-section-3",
+      "concept": "career_section",
+      "family": "Career Section",
+      "variant": "3",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 3,
+          "uses_palette": null,
+          "item_subfields": {
+            "item_heading": {
+              "max_chars": 100
+            },
+            "item_body": {
+              "max_chars": 400
+            }
+          }
+        }
+      },
+      "design_handoff_image_count": 0
+    }
+  },
+  "post_and_listing_templates_for_design_handoff": {
+    "single_blog": "single-post-section-8",
+    "single_event_or_sermon": "single-event-section-4",
+    "single_staff": "single-team-section-6",
+    "archive_filter": "category-filter-6"
+  }
+}

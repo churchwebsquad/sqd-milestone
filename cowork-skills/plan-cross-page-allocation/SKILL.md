@@ -117,10 +117,62 @@ For every source, ask the journey questions in order:
    `weave_into_paragraph`. A voice sample from a sermon isn't a
    feature card — it's a `voice_anchor` for the section.
 
+## Empty-slot prevention (read before allocating)
+
+Before picking a canonical template for a section, load
+`../canonical-templates.json` and inspect its
+`page_section_templates[concept].cowork_writable_slots`. Note which
+slots are `required: true`.
+
+For EVERY section you allocate sources to, check: do the allocated
+sources contain enough content to populate all required slots of the
+picked template? Specifically:
+
+- `primary_heading` (always required) — at least one source must
+  contain a short, lift-able phrase (≤100 chars) that works as a
+  heading. A 600-word prose paragraph isn't a heading; flag it.
+- `items` array with `max_items >= 3` (e.g., accordion_faq) — count
+  the distinct items you're allocating. If fewer than the required
+  minimum, that section can't be filled. Drop the section OR
+  surface in `unresolved_sources` with reason `insufficient_items_for_template`.
+- For palette-ref groups (items with `uses_palette: Card`), the
+  bind-time importer resolves to the project's actual Card variant
+  via `project.curated_library.card_*`. You don't need to verify
+  the Card schema, but you DO need to ensure each item has the
+  uniform sub-content (item_heading, item_body, item_meta if
+  applicable).
+
+If a section's required slots can't be filled, do NOT silently drop
+the section. Either:
+- Pick a DIFFERENT template within the family (e.g., hero_homepage
+  → hero_inner if you don't have tagline), OR
+- Mark in `unresolved_sources` with `reason: required_slots_unfilled`
+  and `slot_gap: { template_id, slot_key, why }`
+
+This surfaces the gap BEFORE outline-page even runs. Cheaper to
+catch here than to fail at bind time after 8 expensive LLM calls.
+
 ## Hard rules
 
-- **Every active source gets placed or explicitly unresolved.**
-  Silent drops fail the content coverage check.
+- **Every active CONTENT source gets placed or explicitly unresolved.**
+  This applies to: pillars with topic in {`mission_statement`,
+  `vision_statement`, `x_factor`, `ethos`, `value_statement`,
+  `persona`, `story`, `denominational_signal`}; all crawl topics;
+  all content_collection prose fields; all facts. Silent drops fail
+  the content coverage check.
+- **Voice pillars (topic in {`voice_rule`, `voice_sample`,
+  `tone_descriptor`}) do NOT need a content placement.** Instead,
+  they get placed via `voice_anchor` treatment on the sections of
+  primary pages (home, visit, about, give) where the voice should
+  imprint. A voice_sample pillar is NOT placed as section content
+  unless the partner's wording is also the literal headline copy.
+  Without this distinction the model would force voice rules into
+  inform sections where they don't belong.
+- **Verbatim pillars MUST get `lift_verbatim` treatment.** If
+  `atom.verbatim === true`, the only valid treatment is
+  `lift_verbatim`. Never `weave_into_paragraph`, never
+  `reframe_for_persona`. The verbatim flag means the partner's
+  exact wording IS the value — losing it loses the signal.
 - **Pillars (`content_atoms`) reference by UUID.** Never re-state
   pillar text in your output — just the atom_id + treatment.
 - **Crawl topics reference by `topic_key`.** Never re-state passages.
