@@ -733,10 +733,18 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       ])
       const needsNormalize = (atomsCount ?? 0) === 0 && (intakeDocsCount ?? 0) > 0
 
-      const needsSynthesize  = initialState.stage_1        == null
-      const needsAcfPlan     = initialState.acf_plan       == null
-      const needsMinistry    = initialState.ministry_model == null
-      const needsStrategist  = initialState.site_strategy  == null
+      // When normalize-intake needs to run, the existing stage_1 /
+      // acf_plan / ministry_model / site_strategy were generated
+      // atom-blind (3734's stage_1 was extracted from discovery + brief
+      // only, with 0 content_atoms in the prompt). Re-run the whole
+      // upstream chain after normalize lands so every layer sees fresh
+      // atom data. Without this, the cascade proceeds to outlines
+      // using stale "atom-blind" foundations and the user has no UI
+      // path to refresh them — the heal skips them because they exist.
+      const needsSynthesize  = initialState.stage_1        == null || needsNormalize
+      const needsAcfPlan     = initialState.acf_plan       == null || needsNormalize
+      const needsMinistry    = initialState.ministry_model == null || needsNormalize
+      const needsStrategist  = initialState.site_strategy  == null || needsNormalize
       const upstreamSteps =
         Number(needsNormalize) + Number(needsSynthesize) + Number(needsAcfPlan) +
         Number(needsMinistry)  + Number(needsStrategist)

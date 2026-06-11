@@ -16,7 +16,14 @@ import { createClient } from '@supabase/supabase-js'
 import { generateText, jsonSchema, tool } from 'ai'
 import { resolvePromptServer } from './_lib/resolvePrompt.js'
 
-export const maxDuration = 300
+// 800s = max Vercel allows on the Fluid Compute Pro tier. normalize-intake
+// fetches every web_intake_documents file (4-5 docs on a typical project),
+// dumps them all into an Opus prompt for atomization, and writes hundreds
+// of atoms + facts + topics back to Supabase. Total wall-clock with a
+// content_collection-heavy project (4 CSVs + 1 markdown brief) sits in
+// the 4-7 minute range. The previous 300s ceiling was hitting
+// FUNCTION_INVOCATION_TIMEOUT on real projects (3734 hit 504 today).
+export const maxDuration = 800
 const MODEL = 'anthropic/claude-opus-4-7'
 const MAX_OUTPUT_TOKENS = 32000  // bumped from 24k after Stage 0 truncated facts when ingesting full crawl topics
 

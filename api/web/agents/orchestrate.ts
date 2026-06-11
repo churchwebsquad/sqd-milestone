@@ -26,7 +26,13 @@
 import { createClient } from '@supabase/supabase-js'
 import { setRoadmapStateAtomic } from './_lib/roadmapStateMerge.js'
 
-export const maxDuration = 300
+// 800s max — orchestrate is a wrapper around per-agent callAgent
+// fetches. If the underlying agent (e.g., normalize-intake at 800s)
+// takes longer than orchestrate's own ceiling, orchestrate times out
+// at 504 even when the inner agent is still healthy. Match the
+// highest inner-agent ceiling so the wrapper never strangles a
+// running call.
+export const maxDuration = 800
 
 const MAX_LOOPS = 3
 const PAGE_DRAFT_CONCURRENCY = 4
