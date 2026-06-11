@@ -43,16 +43,31 @@ The cowork-director hands you one source. Inputs:
 ```ts
 {
   project_id:     string         // for stamping atom rows
-  source_id:      string         // e.g. web_intake_documents.id, or 'discovery', 'brand_guide', 'handoff_brand_form'
-  source_kind:    'intake_doc' | 'discovery_questionnaire' | 'brand_guide' | 'account_handoff'
+  source_id:      string         // e.g. web_intake_documents.id, 'discovery', 'brand_guide', 'handoff_brand_form', or 'content_collection.<field_key>'
+  source_kind:    'intake_doc' | 'discovery_questionnaire' | 'brand_guide' | 'account_handoff' | 'content_collection'
   source_filename?: string       // for telemetry
-  source_text:    string         // full text loaded by director from storage; you DON'T fetch URLs
+  source_text:    string         // full text loaded by director from storage / DB; you DON'T fetch URLs
 }
 ```
+
+Sources can include `content_collection` because partners often write
+voice samples, value statements, and persona descriptions DIRECTLY in
+their content-collection answers — not just in the strategist's brief.
+Per the user's data model: **truth (crawl + content collection) is the
+source of absolute truth**, so strategic signals lifted from there are
+exactly as valid as those lifted from the strategist's editorial
+sources.
 
 If `source_kind` is `'intake_doc'` but the underlying file is a CSV
 (check filename), refuse with `{ skipped: true, reason: 'csv_routed_elsewhere' }`.
 CSVs go to `parse-facts-csv`, not you.
+
+If `source_kind` is `'content_collection'` and the field's value is
+structured (an array of objects, a CSV-like payload), refuse with
+`{ skipped: true, reason: 'structured_data_routed_to_facts' }`. Those
+go to `parse-facts-csv` (treats them like an inline CSV) or to facts
+extraction. You only handle PROSE fields — paragraphs of free-form
+text from the partner.
 
 ## Topics you produce (closed enum)
 

@@ -260,6 +260,84 @@ export interface CoworkSiteStrategy {
   _meta:     ArtifactMeta
 }
 
+/** Output of plan-cross-page-allocation. Runs ONCE per project. Decides
+ *  which sources land on which pages with what intent + treatment. The
+ *  source_traces array is the auditable trail strategists can review in
+ *  the workspace "content coverage" view — every source can be looked
+ *  up to see where it ended up and how it gets used.
+ *
+ *  outline-page consumes one entry from allocations[] (the one matching
+ *  its page_slug) plus the relevant source_traces, and turns it into the
+ *  formal CoworkPageOutline below. */
+export interface CoworkPageAllocationPlan {
+  allocations: CoworkPageAllocation[]                  // one entry per sitemap page
+  source_traces: CoworkSourceTrace[]                   // every source that landed somewhere
+  unresolved_sources: Array<{
+    /** Sources that DIDN'T land anywhere — surfaced for strategist review. */
+    source_kind: string
+    source_ref:  string
+    reason:      string
+  }>
+  _meta: ArtifactMeta
+}
+
+export interface CoworkPageAllocation {
+  page_slug:           string
+  page_job:            string                          // one sentence: what this page does for its primary persona
+  primary_persona:     string | null                   // name of the persona this page is anchored to
+  ministry_model_alignment: MinistryModel | 'mixed'
+  /** Ordered list of section intents — the journey down the page. Each
+   *  entry is just an INTENT + flow_role + treatment hints; outline-page
+   *  turns this into archetype + slot bindings + atom_assignments. */
+  section_intents: Array<{
+    flow_role:        FlowRole
+    section_job:      string                           // one sentence
+    /** Sources targeted at this section. Each source has a treatment
+     *  hint. outline-page resolves these to slot-level assignments. */
+    sources: Array<{
+      kind:        SourceKindForAllocation
+      ref:         string                              // atom UUID / crawl_topic key / content_collection field / fact ID
+      treatment:   AllocationTreatment
+      note?:       string                              // free-text guidance for outline-page / draft-page
+    }>
+    suggested_archetype?: string                       // hint, outline-page may override
+  }>
+}
+
+export type SourceKindForAllocation =
+  | 'pillar'                                           // content_atoms row by ID
+  | 'fact'                                             // church_facts row by ID
+  | 'crawl_topic'                                      // web_project_topics by topic_key
+  | 'content_collection'                               // strategy_content_collection_sessions field key
+
+/** The treatment vocabulary plan-cross-page-allocation uses. Richer than
+ *  the per-atom TreatmentSignal because this skill decides STRUCTURAL
+ *  shape, not just word-level rewriting. */
+export type AllocationTreatment =
+  | 'lift_verbatim'           // use the source phrase exactly (voice samples, partner-stated mission)
+  | 'weave_into_paragraph'    // source is structured/list-like but should become prose here
+  | 'card_per_row'            // CSV/list source → one card per row
+  | 'summarize'               // distill from a longer source — orienting line
+  | 'surface_as_faq'          // inform-style content clearer as Q&A than narrative
+  | 'reframe_for_persona'     // reframe source through the persona's barrier
+  | 'cta_attach'              // use source as the close/invite for this section
+  | 'voice_anchor'            // don't lift content — use as the voice exemplar to imitate
+
+/** One row per source that landed somewhere. The strategist's audit
+ *  trail. The "content coverage" view in the workspace reads these. */
+export interface CoworkSourceTrace {
+  source_kind: SourceKindForAllocation
+  source_ref:  string
+  /** Where this source ended up. A source can land in MULTIPLE places
+   *  (e.g., kids info as hook on home + full inform section on kids). */
+  placements: Array<{
+    page_slug:    string
+    section_ix:   number                               // index into the page's section_intents
+    treatment:    AllocationTreatment
+    rationale:    string                               // 1-line: why this source belongs here
+  }>
+}
+
 export interface CoworkPageOutline {
   page_slug:                string
   ministry_model_alignment: MinistryModel | 'mixed'

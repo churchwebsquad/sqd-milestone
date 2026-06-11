@@ -55,18 +55,19 @@ the step if its resume condition says "needs work."** This makes runs
 idempotent — strategists can re-trigger a project without paying for
 work that already landed.
 
-| Step (in dependency order) | Resume condition (skip if true) | Worker skill |
-|---|---|---|
-| 1. Extract pillars from prose sources | A `content_atoms` row exists whose `source_ref` matches THIS source's id | `extract-strategic-pillars` |
-| 2. Parse facts from CSV intake docs | A `church_facts` row exists whose `source_ref` matches the CSV's id | `parse-facts-csv` |
-| 3. Synthesize stage_1 | `roadmap_state.stage_1` exists AND its `_meta.generated_at` is AFTER the latest `content_atoms.created_at` for this project | `synthesize-strategy` |
-| 4. Classify ministry model | `roadmap_state.ministry_model` exists AND `_meta.generated_at` is after stage_1 | `classify-ministry` |
-| 5. Organize ACF plan | `roadmap_state.acf_plan` exists AND `_meta.generated_at` is after stage_1 | `organize-acf` |
-| 6. Plan site strategy | `roadmap_state.site_strategy` exists AND `_meta.generated_at` is after ministry_model | `plan-site-strategy` |
-| 7. Outline each sitemap page | For slug X: `roadmap_state.page_outlines[X]` exists AND `_meta.generated_at` is after site_strategy | `outline-page` (per slug) |
-| 8. Draft each outlined page | For slug X: `roadmap_state.page_drafts[X]` exists AND `_meta.generated_at` is after that page's outline | `draft-page` (per slug) |
-| 9. Critique each drafted page | For slug X: a `page_critique` artifact exists AND `_meta.generated_at` is after that page's draft | `critique-page` (per slug) |
-| 10. Roll up cross-page critique | `roadmap_state.director_critique` exists AND `_meta.generated_at` is after the last per-page critique | `synthesize-critique` |
+| # | Step (in dependency order) | Resume condition (skip if true) | Worker skill |
+|---|---|---|---|
+| 1 | Extract pillars from each prose source (strategy_brief / discovery / brand_guide / handoff / content_collection prose fields) | A `content_atoms` row exists whose `source_ref` matches THIS source's id | `extract-strategic-pillars` |
+| 2 | Parse facts from each CSV intake doc + each structured content_collection field | A `church_facts` row exists whose `source_ref` matches the CSV's id | `parse-facts-csv` |
+| 3 | Synthesize stage_1 | `roadmap_state.stage_1` exists AND its `_meta.generated_at` is AFTER the latest `content_atoms.created_at` for this project | `synthesize-strategy` |
+| 4 | Classify ministry model | `roadmap_state.ministry_model` exists AND `_meta.generated_at` is after stage_1 | `classify-ministry` |
+| 5 | Organize ACF plan | `roadmap_state.acf_plan` exists AND `_meta.generated_at` is after stage_1 | `organize-acf` |
+| 6 | Plan site strategy | `roadmap_state.site_strategy` exists AND `_meta.generated_at` is after ministry_model | `plan-site-strategy` |
+| **7** | **Plan cross-page allocation** — ONE project-level call that reads truth (crawl + content collection) + pillars + facts + strategic supplements, and decides what content lands on which pages with what treatment + flow_role. Outputs `CoworkPageAllocationPlan` + `source_traces` audit trail. | `roadmap_state.page_allocation_plan` exists AND `_meta.generated_at` is after site_strategy | `plan-cross-page-allocation` |
+| 8 | Outline each sitemap page (consumes that page's allocation slice + the ministry-model templates) | For slug X: `roadmap_state.page_outlines[X]` exists AND `_meta.generated_at` is after the allocation plan | `outline-page` (per slug) |
+| 9 | Draft each outlined page (reads outline + the actual source content via source_ref lookups — pulls crawl passages, content_collection fields, atoms by UUID) | For slug X: `roadmap_state.page_drafts[X]` exists AND `_meta.generated_at` is after that page's outline | `draft-page` (per slug) |
+| 10 | Critique each drafted page (5-axis: dignity floor 70 / voice_character / persona_fit / atom_coverage / claim_plausibility) | For slug X: a `page_critique` artifact exists AND `_meta.generated_at` is after that page's draft | `critique-page` (per slug) |
+| 11 | Roll up cross-page critique | `roadmap_state.director_critique` exists AND `_meta.generated_at` is after the last per-page critique | `synthesize-critique` |
 
 The dependency rule above isn't "if it exists, skip" — it's "if it
 exists AND is fresh enough relative to upstream, skip." This avoids
