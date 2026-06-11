@@ -1,90 +1,28 @@
 /**
  * Vercel Serverless Function — /api/srp/start-transcription
  *
- * Kicks off transcription by firing the n8n webhook. The webhook
- * dispatches to whatever transcription engine the n8n workflow is
- * configured to use (Deepgram, Whisper, etc.) and calls back into
- * /api/srp/transcription-callback when done.
+ * Creates a transcript_jobs row in srp_pipeline, then fires the n8n
+ * webhook with the job ID. The Phase 3 UI subscribes to that row via
+ * Supabase Realtime to track progress without polling.
  *
- * Required env vars:
+ * Env:
  *   SRP_N8N_TRANSCRIPTION_WEBHOOK_URL — full https URL to the n8n trigger
- *   SRP_N8N_CALLBACK_SECRET           — shared secret n8n sends back in the callback
+ *   SRP_N8N_CALLBACK_SECRET           — shared secret n8n echoes in the callback
  *
- * IMPORTANT: the n8n webhook MUST be configured to "Respond Immediately"
- * (i.e. the Webhook node returns 200 the moment the workflow is queued).
- * Vercel Node functions can't fire-and-forget the way Supabase Edge can
- * with waitUntil; if n8n blocks for the full workflow duration we'll
- * either time out at 300s or kill the outbound request when the
- * function ends.
+ * The n8n webhook node MUST be set to "Respond Immediately" — we fire
+ * the webhook then return so the UI can subscribe to the Realtime stream.
+ * Long-running transcription happens in n8n; the callback updates the
+ * transcript_jobs row when done.
+ *
+ *   POST { session_id, source_url, source_type? }
+ *   → 200 { job_id, status: "pending", normalized_url, source_type, webhook_status }
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { createClient } from '@supabase/supabase-js'
+import { validateMediaUrl } from './_lib/mediaUrl.js'
 
 export const maxDuration = 30
-
-// Inline media URL validator — keep in sync with src/lib/mediaUrlValidator.ts
-const ARCHIVE_EXTS = ['.zip', '.rar', '.7z', '.tar', '.tar.gz', '.tgz', '.gz']
-const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.gif', '.heic', '.heif', '.webp', '.bmp', '.tiff', '.tif', '.svg']
-const DOC_EXTS = ['.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.txt', '.rtf']
-const MEDIA_EXTS = ['.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi', '.mp3', '.m4a', '.wav', '.ogg', '.flac', '.opus']
-const endsWithAny = (s: string, list: string[]) => list.some(ext => s.endsWith(ext))
-
-interface ValidResult { ok: true; sourceType: string; normalizedUrl: string }
-interface InvalidResult { ok: false; errorCode: string; userMessage: string }
-type ValidationResult = ValidResult | InvalidResult
-
-function validateMediaUrl(input: unknown): ValidationResult {
-  if (typeof input !== 'string' || input.trim() === '') return { ok: false, errorCode: 'EMPTY_URL', userMessage: 'Please paste a link.' }
-  const trimmed = input.trim()
-  if (/^(file|about|chrome|chrome-extension|data|blob|javascript):/i.test(trimmed)) return { ok: false, errorCode: 'LOCAL_URL', userMessage: "Local file paths can't be processed." }
-  let url: URL
-  try { url = new URL(trimmed) } catch { return { ok: false, errorCode: 'INVALID_URL', userMessage: "That doesn't look like a valid link." } }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return { ok: false, errorCode: 'NON_HTTP_PROTOCOL', userMessage: 'Only https:// links are supported.' }
-  const host = url.hostname.toLowerCase()
-  if (host === 'localhost' || host.startsWith('127.') || host === '0.0.0.0' || host === '::1') return { ok: false, errorCode: 'LOCAL_URL', userMessage: "Local file paths can't be processed." }
-  if (host === 'wetransfer.com' || host === 'www.wetransfer.com' || host === 'we.tl') return { ok: false, errorCode: 'EXPIRING_HOST', userMessage: "WeTransfer links expire and can't be processed reliably." }
-  if (host === 'loom.com' || host === 'www.loom.com') return { ok: false, errorCode: 'UNSUPPORTED_HOST', userMessage: "Loom isn't currently supported." }
-  const path = url.pathname.toLowerCase()
-  const isDropbox = host === 'dropbox.com' || host === 'www.dropbox.com' || host.endsWith('.dropbox.com')
-  if (isDropbox) {
-    if (path.startsWith('/scl/fo/') || (path.startsWith('/sh/') && !path.includes('/file/'))) return { ok: false, errorCode: 'DROPBOX_FOLDER_URL', userMessage: 'This is a Dropbox folder link. Right-click the specific video file and choose Share → Copy link.' }
-    if (path.startsWith('/scl/fi/') || path.startsWith('/s/') || (path.startsWith('/sh/') && path.includes('/file/'))) {
-      url.searchParams.delete('st'); url.searchParams.set('dl', '1')
-      if (endsWithAny(path, ARCHIVE_EXTS)) return { ok: false, errorCode: 'ARCHIVE_FILE', userMessage: "ZIP/archive files aren't supported." }
-      if (endsWithAny(path, IMAGE_EXTS)) return { ok: false, errorCode: 'IMAGE_FILE', userMessage: 'This is an image, not a video.' }
-      if (endsWithAny(path, DOC_EXTS)) return { ok: false, errorCode: 'DOCUMENT_FILE', userMessage: 'This is a document, not a video.' }
-      return { ok: true, sourceType: 'dropbox', normalizedUrl: url.toString() }
-    }
-  }
-  const isYouTube = host === 'youtube.com' || host === 'www.youtube.com' || host === 'm.youtube.com' || host === 'youtu.be'
-  if (isYouTube) {
-    const v = url.searchParams.get('v')
-    const list = url.searchParams.get('list')
-    const isShorts = path.startsWith('/shorts/')
-    const isLive = path.startsWith('/live/')
-    const isWatch = path === '/watch'
-    const isPlaylistPage = path === '/playlist'
-    const isShortLink = host === 'youtu.be' && path.length > 1
-    if ((isPlaylistPage || (isWatch && !v)) && list) return { ok: false, errorCode: 'YOUTUBE_PLAYLIST', userMessage: 'This is a YouTube playlist, not a single video.' }
-    if ((isWatch && v) || isShorts || isLive || isShortLink) {
-      if (list) { url.searchParams.delete('list'); url.searchParams.delete('index'); url.searchParams.delete('pp'); url.searchParams.delete('t') }
-      return { ok: true, sourceType: 'youtube', normalizedUrl: url.toString() }
-    }
-  }
-  if ((host === 'vimeo.com' || host === 'www.vimeo.com' || host === 'player.vimeo.com') && /^\/(?:video\/|channels\/[^/]+\/)?\d+/.test(url.pathname)) {
-    return { ok: true, sourceType: 'vimeo', normalizedUrl: url.toString() }
-  }
-  if (host === 'drive.google.com' || host === 'docs.google.com') {
-    if (/^\/file\/d\//.test(url.pathname) || (url.pathname === '/open' && url.searchParams.get('id'))) return { ok: true, sourceType: 'google_drive', normalizedUrl: url.toString() }
-    if (/^\/drive\/folders\//.test(url.pathname)) return { ok: false, errorCode: 'GOOGLE_DRIVE_FOLDER', userMessage: 'This is a Google Drive folder. Share a link to the specific file.' }
-  }
-  if (endsWithAny(path, MEDIA_EXTS)) return { ok: true, sourceType: 'direct', normalizedUrl: url.toString() }
-  if (endsWithAny(path, ARCHIVE_EXTS)) return { ok: false, errorCode: 'ARCHIVE_FILE', userMessage: "ZIP/archive files aren't supported." }
-  if (endsWithAny(path, IMAGE_EXTS)) return { ok: false, errorCode: 'IMAGE_FILE', userMessage: 'This is an image, not a video.' }
-  if (endsWithAny(path, DOC_EXTS)) return { ok: false, errorCode: 'DOCUMENT_FILE', userMessage: 'This is a document, not a video.' }
-  return { ok: true, sourceType: 'unknown', normalizedUrl: url.toString() }
-}
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -97,10 +35,13 @@ export default async function handler(req: any, res: any) {
   if (!webhookUrl)     return res.status(500).json({ error: 'SRP_N8N_TRANSCRIPTION_WEBHOOK_URL not configured' })
   if (!callbackSecret) return res.status(500).json({ error: 'SRP_N8N_CALLBACK_SECRET not configured' })
 
-  const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : null
-  const sourceUrl = typeof req.body?.sourceUrl === 'string' ? req.body.sourceUrl : null
-  if (!sessionId) return res.status(400).json({ error: 'sessionId required' })
-  if (!sourceUrl) return res.status(400).json({ error: 'sourceUrl required' })
+  // Accept either camelCase (legacy client) or snake_case (srp-generator-main convention).
+  const sessionId = typeof req.body?.session_id === 'string' ? req.body.session_id
+                  : typeof req.body?.sessionId  === 'string' ? req.body.sessionId : null
+  const sourceUrl = typeof req.body?.source_url === 'string' ? req.body.source_url
+                  : typeof req.body?.sourceUrl  === 'string' ? req.body.sourceUrl : null
+  if (!sessionId) return res.status(400).json({ error: 'session_id required' })
+  if (!sourceUrl) return res.status(400).json({ error: 'source_url required' })
 
   const validation = validateMediaUrl(sourceUrl)
   if (!validation.ok) {
@@ -109,75 +50,102 @@ export default async function handler(req: any, res: any) {
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
-  // Generate a job_id so the callback can audit which trigger produced
-  // which result. session_id alone is enough to route, but a job_id
-  // lets us reject stale callbacks if the user re-triggered.
-  const job_id = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
-    ? (crypto as any).randomUUID()
-    : `${sessionId}_${Date.now()}`
+  // Insert transcript_jobs row. Its UUID becomes the job_id n8n echoes
+  // back in the callback. status='pending' lets the UI's Realtime
+  // subscription render a "preparing" state immediately.
+  const { data: job, error: jobErr } = await sb
+    .schema('srp_pipeline')
+    .from('transcript_jobs')
+    .insert({
+      session_id: sessionId,
+      source_url: validation.normalizedUrl,
+      source_type: validation.sourceType,
+      status: 'pending',
+      progress_percent: 0,
+    })
+    .select('id')
+    .single()
+  if (jobErr || !job) {
+    return res.status(500).json({ error: `Failed to create transcript job: ${jobErr?.message ?? 'unknown'}` })
+  }
+  const jobId = job.id as string
 
-  // Save the video URL + clear any prior transcript so the polling UI
-  // can detect when the new transcript lands.
-  await sb.from('sms_srp_generation')
+  // Stamp the parent session with the job id + normalized video info so
+  // the UI can read it back from sessions even if Realtime isn't connected.
+  await sb
+    .schema('srp_pipeline')
+    .from('sessions')
     .update({
-      video_url: validation.normalizedUrl,
-      transcript: null,
-      updated_at: new Date().toISOString(),
+      transcript_job_id: jobId,
+      video_url:         validation.normalizedUrl,
+      video_source_type: validation.sourceType,
+      transcript:        null,  // clear stale transcript on re-run
     })
     .eq('session_id', sessionId)
 
-  // Build the host's own base URL for the callback. The n8n workflow
-  // will POST results back to this URL with the callback_secret.
+  // Build callback URL from the request's host. Lets the same code
+  // serve prod, preview, and localhost without env config.
   const proto = (req.headers['x-forwarded-proto'] as string) || 'https'
   const host = (req.headers['x-forwarded-host'] as string) || (req.headers.host as string)
-  const baseUrl = host ? `${proto}://${host}` : (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
+  const baseUrl = host
+    ? `${proto}://${host}`
+    : (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
 
   const payload = {
-    job_id,
-    session_id: sessionId,
-    source_url: validation.normalizedUrl,
-    source_type: validation.sourceType,
-    callback_url: `${baseUrl}/api/srp/transcription-callback`,
+    job_id:          jobId,
+    session_id:      sessionId,
+    source_url:      validation.normalizedUrl,
+    source_type:     validation.sourceType,
+    callback_url:    `${baseUrl}/api/srp/transcription-callback`,
     callback_secret: callbackSecret,
   }
 
-  // Fire the webhook. Await intentionally so we surface any auth /
-  // network errors to the user. If the n8n webhook is configured to
-  // respond immediately (recommended), this returns within a second
-  // or two; if it blocks for the full workflow, we time out at 30s
-  // but n8n still runs and the callback will still arrive.
   let webhookOk = false
   try {
     const r = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      // 25s — gives n8n 5s of headroom before our 30s maxDuration.
       signal: AbortSignal.timeout(25_000),
     })
     webhookOk = r.ok
     if (!r.ok) {
       const text = await r.text()
       console.error(`[start-transcription] n8n webhook returned ${r.status}: ${text.slice(0, 300)}`)
+      // Mark the job failed so the UI can surface it. n8n won't be
+      // calling back since the trigger didn't take.
+      await sb
+        .schema('srp_pipeline')
+        .from('transcript_jobs')
+        .update({
+          status: 'failed',
+          error_message: `n8n webhook returned ${r.status}: ${text.slice(0, 300)}`,
+        })
+        .eq('id', jobId)
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'unknown'
     if (msg.includes('aborted') || msg.includes('TimeoutError')) {
-      // Timeout means n8n is processing but didn't respond fast enough.
-      // The job is still in flight; the callback will fire when done.
+      // n8n acknowledged but didn't respond fast enough — workflow is
+      // still queued and will call us back. Treat as accepted.
       webhookOk = true
       console.warn(`[start-transcription] webhook timed out (n8n still running)`)
     } else {
-      return res.status(502).json({ error: `n8n webhook failed: ${msg}` })
+      await sb
+        .schema('srp_pipeline')
+        .from('transcript_jobs')
+        .update({ status: 'failed', error_message: `webhook fetch failed: ${msg}` })
+        .eq('id', jobId)
+      return res.status(502).json({ error: `n8n webhook failed: ${msg}`, job_id: jobId })
     }
   }
 
   return res.status(200).json({
-    ok: true,
-    job_id,
-    session_id: sessionId,
-    source_type: validation.sourceType,
+    job_id:         jobId,
+    session_id:     sessionId,
+    source_type:    validation.sourceType,
     normalized_url: validation.normalizedUrl,
+    status:         'pending',
     webhook_status: webhookOk ? 'accepted' : 'failed',
   })
 }

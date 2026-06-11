@@ -1,31 +1,29 @@
 /**
- * Realtime subscription to a single sms_srp_generation row.
+ * Realtime subscription to a single srp_pipeline.sessions row.
  *
- * Replaces the 5-second polling pattern with Supabase postgres_changes.
- * When the row updates (transcript landing, clip render finishing,
- * deliverable saved), subscribers get the fresh row pushed instead of
- * waiting on the next poll tick.
+ * Replaces 5-second polling with Supabase postgres_changes. When the
+ * row updates (transcript landing, clipcutter rendering, autosave),
+ * subscribers get the fresh row pushed instead of waiting on a poll.
  *
- * Falls back gracefully: if the realtime channel fails to subscribe
- * within 5 seconds (firewall, project misconfig, etc.), callers can
- * detect via the `connected` state and fall back to polling.
+ * Falls back gracefully: if the realtime channel fails to subscribe,
+ * callers can detect via `connected` and fall back to manual refresh.
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from './supabase'
-import { getSession } from './srpSessions'
-import type { SmsSrpGeneration } from '../types/database'
+import { getSessionBySlug, srpPipeline } from './srpSessions'
+import type { SrpPipelineSession } from '../types/database'
 
 export interface UseSrpSessionResult {
-  session: SmsSrpGeneration | null
+  session: SrpPipelineSession | null
   loading: boolean
   error: string | null
-  connected: boolean        // realtime channel is live
-  refresh: () => Promise<void>  // manual re-fetch (poll fallback)
+  connected: boolean
+  refresh: () => Promise<void>
 }
 
 export function useSrpSession(sessionId: string | null | undefined): UseSrpSessionResult {
-  const [session, setSession] = useState<SmsSrpGeneration | null>(null)
+  const [session, setSession] = useState<SrpPipelineSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
@@ -34,7 +32,7 @@ export function useSrpSession(sessionId: string | null | undefined): UseSrpSessi
   const reload = async () => {
     if (!sessionId) return
     try {
-      const fresh = await getSession(sessionId)
+      const fresh = await getSessionBySlug(sessionId)
       if (cancelledRef.current) return
       setSession(fresh)
       setError(fresh ? null : `Session ${sessionId} not found`)
@@ -53,15 +51,20 @@ export function useSrpSession(sessionId: string | null | undefined): UseSrpSessi
 
     void reload()
 
-    // Subscribe to UPDATE events on this row. Filter is server-side so
-    // we don't see updates from other sessions.
+    // Subscribe to UPDATE events on this row. Server-side filter scopes
+    // by session_id so we don't see updates from other sessions.
+    // Note: srp_pipeline.sessions isn't in the supabase_realtime publication
+    // by default — we publish transcript_jobs + clipcutter_jobs instead.
+    // The session row gets refresh()ed from those job updates downstream,
+    // but for the row itself we rely on manual reload() after our own writes.
     const channel = supabase
-      .channel(`sms_srp_generation:${sessionId}`)
+      .channel(`srp_pipeline_sessions:${sessionId}`)
       .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'sms_srp_generation', filter: `session_id=eq.${sessionId}` },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        'postgres_changes' as any,
+        { event: 'UPDATE', schema: 'srp_pipeline', table: 'sessions', filter: `session_id=eq.${sessionId}` },
         payload => {
-          const fresh = payload?.new as SmsSrpGeneration | undefined
+          const fresh = (payload as { new: SrpPipelineSession })?.new
           if (cancelledRef.current || !fresh) return
           setSession(fresh)
         },
@@ -72,19 +75,136 @@ export function useSrpSession(sessionId: string | null | undefined): UseSrpSessi
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') setConnected(false)
       })
 
-    // Safety net: if the channel doesn't connect within 5s, surface
-    // disconnected so callers can fall back to polling.
-    const watchdog = window.setTimeout(() => {
-      if (!cancelledRef.current && !connected) setConnected(false)
-    }, 5000)
-
     return () => {
       cancelledRef.current = true
-      window.clearTimeout(watchdog)
       void supabase.removeChannel(channel)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId])
 
   return { session, loading, error, connected, refresh: reload }
+}
+
+/**
+ * Realtime subscription to a single srp_pipeline.transcript_jobs row.
+ *
+ * The transcript_jobs table IS in the supabase_realtime publication
+ * (per v69 migration), so this fires push updates as n8n progresses
+ * through pending → in_progress → completed/failed.
+ */
+export function useTranscriptJob(jobId: string | null | undefined) {
+  const [job, setJob] = useState<{
+    id: string
+    status: string
+    status_message: string | null
+    progress_percent: number | null
+    error_message: string | null
+    transcript: string | null
+    words: unknown[] | null
+    duration_seconds: number | null
+    transcription_engine: string | null
+    completed_at: string | null
+  } | null>(null)
+  const [connected, setConnected] = useState(false)
+
+  useEffect(() => {
+    if (!jobId) { setJob(null); return }
+
+    let cancelled = false
+
+    void (async () => {
+      const { data } = await srpPipeline
+        .from('transcript_jobs')
+        .select('*')
+        .eq('id', jobId)
+        .maybeSingle()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!cancelled && data) setJob(data as any)
+    })()
+
+    const channel = supabase
+      .channel(`srp_pipeline_transcript_jobs:${jobId}`)
+      .on(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        'postgres_changes' as any,
+        { event: 'UPDATE', schema: 'srp_pipeline', table: 'transcript_jobs', filter: `id=eq.${jobId}` },
+        payload => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const fresh = (payload as any)?.new
+          if (cancelled || !fresh) return
+          setJob(fresh)
+        },
+      )
+      .subscribe(status => {
+        if (cancelled) return
+        if (status === 'SUBSCRIBED') setConnected(true)
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') setConnected(false)
+      })
+
+    return () => {
+      cancelled = true
+      void supabase.removeChannel(channel)
+    }
+  }, [jobId])
+
+  return { job, connected }
+}
+
+/**
+ * Realtime subscription to a single srp_pipeline.clipcutter_jobs row.
+ * Same pattern as useTranscriptJob — the table is realtime-published.
+ */
+export function useClipcutterJob(jobId: string | null | undefined) {
+  const [job, setJob] = useState<{
+    id: string
+    status: string
+    status_message: string | null
+    progress_percent: number | null
+    error_message: string | null
+    clips: unknown[] | null
+    clip_results: unknown[] | null
+    completed_at: string | null
+  } | null>(null)
+  const [connected, setConnected] = useState(false)
+
+  useEffect(() => {
+    if (!jobId) { setJob(null); return }
+    let cancelled = false
+
+    void (async () => {
+      const { data } = await srpPipeline
+        .from('clipcutter_jobs')
+        .select('*')
+        .eq('id', jobId)
+        .maybeSingle()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!cancelled && data) setJob(data as any)
+    })()
+
+    const channel = supabase
+      .channel(`srp_pipeline_clipcutter_jobs:${jobId}`)
+      .on(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        'postgres_changes' as any,
+        { event: 'UPDATE', schema: 'srp_pipeline', table: 'clipcutter_jobs', filter: `id=eq.${jobId}` },
+        payload => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const fresh = (payload as any)?.new
+          if (cancelled || !fresh) return
+          setJob(fresh)
+        },
+      )
+      .subscribe(status => {
+        if (cancelled) return
+        if (status === 'SUBSCRIBED') setConnected(true)
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') setConnected(false)
+      })
+
+    return () => {
+      cancelled = true
+      void supabase.removeChannel(channel)
+    }
+  }, [jobId])
+
+  return { job, connected }
 }

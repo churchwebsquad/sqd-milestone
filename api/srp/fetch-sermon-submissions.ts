@@ -1,0 +1,153 @@
+/**
+ * Vercel Serverless Function — /api/srp/fetch-sermon-submissions
+ *
+ * Powers the "Recent Submissions" popup on AccountSelection + the
+ * "Pair by ClickUp Task ID" search. Read-only against the public
+ * strategy_sermon_data + sf-srp-uploads tables (no writes — per
+ * CLAUDE.md these are existing tables we only READ from).
+ *
+ * Two modes branched on body.clickup_task_id:
+ *
+ *   1. Default (no clickup_task_id): returns this week's submissions
+ *      (Friday-Thursday UTC window) where srp_info_selection is set,
+ *      ordered by created_at desc, capped at 200.
+ *
+ *   2. Search (clickup_task_id provided): returns exactly the one
+ *      matching submission, regardless of date.
+ *
+ * Both modes join sf-srp-uploads by task_id = clickup_task_id and
+ * include video_url / external_link if a matching upload exists, plus
+ * an is_this_week boolean (computed against the same Friday-Thursday
+ * window) so the UI can badge cross-week submissions.
+ *
+ *   POST { clickup_task_id?: string }
+ *   → 200 { submissions, weekStart, searched? }
+ */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+import { createClient } from '@supabase/supabase-js'
+
+export const maxDuration = 15
+
+interface SermonRow {
+  account:             number | null
+  created_at:          string
+  series_title:        string | null
+  series_description:  string | null
+  sermon_title:        string | null
+  sermon_description:  string | null
+  srp_info_selection:  string | null
+  clickup_task_id:     string | null
+}
+
+interface UploadRow {
+  task_id:       string | null
+  supabase_url:  string | null
+  external_link: string | null
+}
+
+const SERMON_COLUMNS =
+  'account, created_at, series_title, series_description, sermon_title, sermon_description, srp_info_selection, clickup_task_id'
+
+/**
+ * Most recent Friday at 00:00 UTC. Day-of-week numbering: Sun=0 ... Sat=6.
+ *   Friday (day=5): daysSinceFriday = 0 → today's 00:00
+ *   Saturday (day=6): daysSinceFriday = 1 → yesterday's 00:00
+ *   Sunday (day=0): daysSinceFriday = 2 → two days ago
+ *   ... Thursday (day=4): daysSinceFriday = 6 → six days ago
+ */
+function computeWeekStart(now: Date): Date {
+  const day = now.getUTCDay()
+  const daysSinceFriday = (day + 2) % 7
+  const weekStart = new Date(now)
+  weekStart.setUTCDate(now.getUTCDate() - daysSinceFriday)
+  weekStart.setUTCHours(0, 0, 0, 0)
+  return weekStart
+}
+
+export default async function handler(req: any, res: any) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+
+  const supabaseUrl    = process.env.VITE_SUPABASE_URL
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!supabaseUrl || !serviceRoleKey) return res.status(500).json({ error: 'Missing Supabase env vars' })
+
+  const searchTaskIdRaw = typeof req.body?.clickup_task_id === 'string' ? req.body.clickup_task_id.trim() : ''
+  const searchTaskId    = searchTaskIdRaw.length > 0 ? searchTaskIdRaw : null
+
+  const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
+
+  const weekStart = computeWeekStart(new Date())
+  const weekStartIso = weekStart.toISOString()
+
+  // ── Search-by-task-id mode ─────────────────────────────────────────
+  if (searchTaskId) {
+    const { data: searchData, error: searchError } = await sb
+      .from('strategy_sermon_data')
+      .select(SERMON_COLUMNS)
+      .eq('clickup_task_id', searchTaskId)
+      .limit(1)
+    if (searchError) return res.status(500).json({ error: `Search failed: ${searchError.message}` })
+
+    const rows = (searchData ?? []) as SermonRow[]
+    if (rows.length === 0) {
+      return res.status(200).json({ submissions: [], searched: true, weekStart: weekStartIso })
+    }
+
+    const { data: uploads } = await sb
+      .from('sf-srp-uploads')
+      .select('task_id, supabase_url, external_link')
+      .eq('task_id', searchTaskId)
+      .limit(1)
+    const upload = (uploads as UploadRow[] | null)?.[0]
+    const row = rows[0]
+    const submission = {
+      ...row,
+      video_url:     upload?.supabase_url ?? null,
+      external_link: upload?.external_link ?? null,
+      is_this_week:  new Date(row.created_at) >= weekStart,
+    }
+    return res.status(200).json({ submissions: [submission], searched: true, weekStart: weekStartIso })
+  }
+
+  // ── Weekly-fetch mode ──────────────────────────────────────────────
+  const { data: submissionData, error: subError } = await sb
+    .from('strategy_sermon_data')
+    .select(SERMON_COLUMNS)
+    .order('created_at', { ascending: false })
+    .not('srp_info_selection', 'is', null)
+    .gte('created_at', weekStartIso)
+    .limit(200)
+  if (subError) return res.status(500).json({ error: `Weekly fetch failed: ${subError.message}` })
+
+  const rows = (submissionData ?? []) as SermonRow[]
+  const taskIds = rows.map(r => r.clickup_task_id).filter((id): id is string => Boolean(id))
+
+  const uploadsMap = new Map<string, UploadRow>()
+  if (taskIds.length > 0) {
+    const { data: uploads, error: uploadError } = await sb
+      .from('sf-srp-uploads')
+      .select('task_id, supabase_url, external_link')
+      .in('task_id', taskIds)
+    if (uploadError) {
+      // Non-fatal — the submissions still surface, just without video URLs.
+      console.warn(`[fetch-sermon-submissions] sf-srp-uploads lookup failed: ${uploadError.message}`)
+    } else {
+      for (const u of (uploads as UploadRow[] | null) ?? []) {
+        if (u.task_id) uploadsMap.set(u.task_id, u)
+      }
+    }
+  }
+
+  const submissions = rows.map(row => {
+    const upload = row.clickup_task_id ? uploadsMap.get(row.clickup_task_id) : null
+    return {
+      ...row,
+      video_url:     upload?.supabase_url ?? null,
+      external_link: upload?.external_link ?? null,
+      is_this_week:  new Date(row.created_at) >= weekStart,
+    }
+  })
+
+  return res.status(200).json({ submissions, weekStart: weekStartIso })
+}

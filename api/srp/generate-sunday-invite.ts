@@ -1,47 +1,60 @@
 /**
  * Vercel Serverless Function — /api/srp/generate-sunday-invite
  *
- * 3 invite variants per call (warm, energetic, topical). Church name
- * and service times go at the BOTTOM of every variant — the previous
- * version put them at the top and the team has called this out
- * repeatedly.
+ * Generates 3 Sunday service invite options in distinct tones:
+ *   1. Warm & welcoming — generic, no sermon reference.
+ *   2. Energetic & compelling — generic, no sermon reference.
+ *   3. Topical — short tease tied to the upcoming sermon.
+ *
+ *   POST { transcript, brandVoice?, accountContext?, userGuidance? }
+ *   → 200 { invites: [{ tone, text, citation, brandVoiceTags }, ...] }
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { createClient } from '@supabase/supabase-js'
-import { callAnthropic, resolvePromptOverride } from './_lib/anthropic.js'
+import {
+  callGateway,
+  resolvePrompt,
+  BRAND_VOICE_TAGS_BLOCK,
+  GatewayRateLimitError,
+  GatewayTransientError,
+  type ToolSchema,
+} from './_lib/aiGateway.js'
 
-export const maxDuration = 60
+export const maxDuration = 45
 
-const SYSTEM_DEFAULT = `You are a social media copywriter for churches. Write Sunday service invite posts that focus on inviting people to attend this upcoming Sunday's service. The primary goal is to make someone feel welcomed and excited to visit or return.
+const DEFAULT_SYSTEM_PROMPT = `You are a social media copywriter for churches. Write Sunday service invite posts that focus on inviting people to attend this upcoming Sunday's service. The primary goal is to make someone feel welcomed and excited to visit or return. Keep each invite to 2-4 sentences. Include placeholders [Church Name] and [Service Times] for the user to fill in. Avoid em dashes. Use periods, commas, or line breaks instead.`
 
-FORMATTING RULES:
-- Each invite is 2-4 sentences.
-- Place the church name and service times AT THE BOTTOM of each variant, not the top. Like a sign-off, not a headline.
-- Avoid em dashes. Use periods, commas, or line breaks instead.
-
-Use the placeholders [Church Name] and [Service Times] verbatim — the team fills those in after generation.
-
-Return JSON with this exact shape:
-{
-  "invites": [
-    { "tone": "warm",      "post": "...", "citation": "..." },
-    { "tone": "energetic", "post": "...", "citation": "..." },
-    { "tone": "topical",   "post": "...", "citation": "..." }
-  ]
-}
-
-Return ONLY valid JSON. No preamble.`
-
-const USER_DEFAULT = `Write 3 Sunday service invite posts with different tones:
-
-1. WARM: A welcoming generic invitation. Do NOT reference the sermon topic. Focus purely on community, belonging, and showing up.
-2. ENERGETIC: A compelling generic invitation. Do NOT reference the sermon topic. Focus on excitement, energy, and what it feels like to be part of this church.
-3. TOPICAL: An invitation that briefly teases what will be discussed this Sunday based on the sermon context. Keep the sermon reference to one short phrase, not a summary.
+const DEFAULT_USER_PROMPT = `Write 3 Sunday service invite posts with different tones:
+1. A warm & welcoming generic invitation. Do NOT reference the sermon topic at all. Focus purely on community, belonging, and showing up.
+2. An energetic & compelling generic invitation. Do NOT reference the sermon topic at all. Focus on excitement, energy, and what it feels like to be part of this church.
+3. A topical invitation that briefly teases what will be discussed this Sunday based on the sermon context below. Keep the sermon reference to one short phrase, not a summary.
 
 For each invite, provide a "citation" field. For options 1 and 2, use a short general quote from the transcript about community or faith. For option 3, use a verbatim quote related to the topic teaser.
 
-End EVERY invite with [Church Name] · [Service Times] as a sign-off line.`
+Sermon context (for option 3 only):`
+
+const TOOL_SCHEMA: ToolSchema = {
+  type: 'object',
+  properties: {
+    invites: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          tone:           { type: 'string', description: 'Short label for this option\'s tone (e.g. "warm", "energetic", "topical").' },
+          text:           { type: 'string', description: 'The invite text. 2-4 sentences.' },
+          citation:       { type: 'string', description: 'A short verbatim quote from the transcript that supports or inspired this invite.' },
+          brandVoiceTags: { type: 'array', items: { type: 'string' }, description: 'Short tags quoting the exact source phrases (Guidelines:, Speaks as:, Bible:, Notes:).' },
+        },
+        required: ['tone', 'text', 'citation', 'brandVoiceTags'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['invites'],
+  additionalProperties: false,
+}
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -50,60 +63,46 @@ export default async function handler(req: any, res: any) {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!supabaseUrl || !serviceRoleKey) return res.status(500).json({ error: 'Missing Supabase env vars' })
 
-  const sessionId  = typeof req.body?.sessionId === 'string' ? req.body.sessionId : null
-  const transcript = typeof req.body?.transcript === 'string' ? req.body.transcript : ''
-  const sermonTitle = typeof req.body?.sermonTitle === 'string' ? req.body.sermonTitle : ''
-  const churchName = typeof req.body?.churchName === 'string' ? req.body.churchName : ''
-  if (!sessionId) return res.status(400).json({ error: 'sessionId required' })
+  const transcript     = typeof req.body?.transcript === 'string' ? req.body.transcript : ''
+  const brandVoice     = typeof req.body?.brandVoice === 'string' ? req.body.brandVoice : ''
+  const accountContext = (req.body?.accountContext ?? {}) as Record<string, any>
+  const userGuidance   = typeof req.body?.userGuidance === 'string' ? req.body.userGuidance : ''
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
-  const sysOverride = await resolvePromptOverride(sb, 'sunday_invite_system')
-  const usrOverride = await resolvePromptOverride(sb, 'sunday_invite_user')
-  const systemPrompt = sysOverride ?? SYSTEM_DEFAULT
-  const userBody = usrOverride ?? USER_DEFAULT
+  const ctxParts: string[] = []
+  if (brandVoice)                       ctxParts.push(`Manually pasted brand voice guidelines: ${brandVoice}`)
+  if (accountContext?.speakAs)          ctxParts.push(`Speak to the audience as: ${accountContext.speakAs}`)
+  if (accountContext?.churchName)       ctxParts.push(`Church name: ${accountContext.churchName}`)
+  if (accountContext?.smsNotes)         ctxParts.push(`Important notes: ${accountContext.smsNotes}`)
+  const ctx = ctxParts.join('\n')
 
-  const userPrompt = [
-    churchName ? `Church: ${churchName}` : '',
-    sermonTitle ? `Sermon title: ${sermonTitle}` : '',
-    transcript ? `Sermon context (use only for the TOPICAL variant):\n${transcript.slice(0, 12000)}` : '',
-    '',
-    userBody,
-  ].filter(Boolean).join('\n\n')
+  const [sysBase, userBase] = await Promise.all([
+    resolvePrompt(sb, 'sunday_invite_system'),
+    resolvePrompt(sb, 'sunday_invite_user'),
+  ])
 
-  let result
+  const systemPrompt = [sysBase ?? DEFAULT_SYSTEM_PROMPT, ctx, BRAND_VOICE_TAGS_BLOCK].filter(Boolean).join('\n\n')
+  const userPrompt =
+    `${userBase ?? DEFAULT_USER_PROMPT}\n${transcript?.slice(0, 4000) || 'General church service'}` +
+    (userGuidance ? `\n\nAdditional guidance from the user: "${userGuidance}"` : '')
+
   try {
-    result = await callAnthropic({
-      systemPrompt,
-      userPrompt,
-      prefill: '{',
+    const result = await callGateway<{ invites: any[] }>({
+      system: systemPrompt,
+      user:   userPrompt,
+      toolName: 'suggest_invites',
+      toolDescription: 'Return 3 Sunday invite options with tone, text, citation, and brand voice tags.',
+      toolSchema: TOOL_SCHEMA,
       maxTokens: 1500,
     })
+    return res.status(200).json({
+      invites: result.args.invites ?? [],
+      usage: { input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens },
+    })
   } catch (e) {
-    return res.status(502).json({ error: e instanceof Error ? e.message : 'Anthropic call failed' })
+    if (e instanceof GatewayRateLimitError)  return res.status(429).json({ error: 'Rate limit exceeded.' })
+    if (e instanceof GatewayTransientError)  return res.status(502).json({ error: e.message })
+    return res.status(502).json({ error: e instanceof Error ? e.message : 'Sunday invite generation failed' })
   }
-
-  let parsed: { invites?: Array<{ tone: string; post: string; citation: string }> } | null = null
-  try { parsed = JSON.parse(result.text) }
-  catch { return res.status(502).json({ error: 'Model returned non-JSON output' }) }
-
-  const invites = Array.isArray(parsed?.invites) ? parsed.invites : []
-  // Store the formatted text for the DB column (text, not JSON). The
-  // UI renders all three variants from this single string for now;
-  // future Phase 2 enhancement: split out into individual fields if
-  // the team needs per-variant editing.
-  const formatted = invites.map(i => `[${(i.tone ?? '').toUpperCase()}]\n${i.post ?? ''}${i.citation ? `\n\n(citation: ${i.citation})` : ''}`).join('\n\n---\n\n')
-
-  const { error: writeErr } = await sb
-    .from('sms_srp_generation')
-    .update({ sunday_invite: formatted, updated_at: new Date().toISOString() })
-    .eq('session_id', sessionId)
-  if (writeErr) return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
-
-  return res.status(200).json({
-    ok: true,
-    sunday_invite: formatted,
-    invites,
-    usage: { input_tokens: result.inputTokens, output_tokens: result.outputTokens },
-  })
 }

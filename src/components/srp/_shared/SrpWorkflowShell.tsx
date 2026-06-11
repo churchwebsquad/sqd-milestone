@@ -10,14 +10,16 @@
  */
 
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Wifi, WifiOff } from 'lucide-react'
-import type { SrpStep } from '../../../types/database'
+import { ArrowLeft, Wifi, WifiOff, ExternalLink } from 'lucide-react'
+import type { SrpWorkflowStep } from '../../../types/database'
 import { SrpSidebarStepper, type SrpSidebarStepperItem } from './SrpSidebarStepper'
 
 export function SrpWorkflowShell({
   backHref, backLabel,
   kicker, title, connected,
   stepItems, currentStep, onJump,
+  sidebarFooter,
+  clickupTaskId,
   children,
 }: {
   backHref:    string
@@ -28,8 +30,12 @@ export function SrpWorkflowShell({
   /** Realtime connection indicator — green dot when live, muted when polling. */
   connected:   boolean
   stepItems:   SrpSidebarStepperItem[]
-  currentStep: SrpStep
-  onJump:      (s: SrpStep) => void
+  currentStep: SrpWorkflowStep
+  onJump:      (s: SrpWorkflowStep) => void
+  /** Quick Links + Account Info Panel render here, below the stepper. */
+  sidebarFooter?: React.ReactNode
+  /** When set, renders a "View in ClickUp" pill below the stepper. */
+  clickupTaskId?: string | null
   children:    React.ReactNode
 }) {
   return (
@@ -66,8 +72,25 @@ export function SrpWorkflowShell({
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-6 items-start">
-          <aside className="lg:sticky lg:top-6">
+          <aside className="lg:sticky lg:top-6 space-y-3">
             <SrpSidebarStepper items={stepItems} currentStep={currentStep} onJump={onJump} />
+            {clickupTaskId && (
+              <a
+                href={`https://app.clickup.com/t/${clickupTaskId}`}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="block w-full rounded-lg border border-[var(--color-lavender)] bg-white px-3 py-2.5 hover:bg-[var(--color-lavender-tint)]/60 transition-colors"
+              >
+                <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
+                  ClickUp task
+                </p>
+                <p className="mt-0.5 flex items-center gap-1.5 text-[12px] font-mono text-[var(--color-deep-plum)] truncate">
+                  {clickupTaskId}
+                  <ExternalLink size={10} className="text-[var(--color-purple-gray)]" />
+                </p>
+              </a>
+            )}
+            {sidebarFooter}
           </aside>
           <main className="min-w-0">{children}</main>
         </div>

@@ -1,17 +1,18 @@
 /**
  * Vercel Serverless Function — /api/srp/start-clipcutter
  *
- * Fires the n8n clipcutter webhook with the session's video_url + the
- * picked clips. n8n renders each clip into an MP4 (and optional SRT)
- * and POSTs results back to /api/srp/clipcutter-callback.
+ * Creates a clipcutter_jobs row in srp_pipeline, then fires the n8n
+ * clipcutter webhook. n8n renders each clip into an MP4 (and optional
+ * SRT) and POSTs results back to /api/srp/clipcutter-callback.
  *
- * Required env vars:
+ * Env:
  *   SRP_N8N_CLIPCUTTER_WEBHOOK_URL
- *   SRP_N8N_CALLBACK_SECRET           — same secret transcription uses
+ *   SRP_N8N_CALLBACK_SECRET
  *
- * Clip array stored on sms_srp_generation.clip_selections gains
- * processing_status='queued' on each picked clip; the callback fills
- * in video_url + srt_url + processing_status='done' / 'failed'.
+ *   POST { session_id, clips, creative_direction? }
+ *     clips: [{ clip_id, clip_name, in_point_ms, out_point_ms, duration_ms, quote, category, caption_text?, caption_srt? }]
+ *     creative_direction: { srp_template?, background_music?, designer_notes? }
+ *   → 200 { job_id, status: "pending", clip_count, webhook_status }
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -30,72 +31,76 @@ export default async function handler(req: any, res: any) {
   if (!webhookUrl)     return res.status(500).json({ error: 'SRP_N8N_CLIPCUTTER_WEBHOOK_URL not configured' })
   if (!callbackSecret) return res.status(500).json({ error: 'SRP_N8N_CALLBACK_SECRET not configured' })
 
-  const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : null
-  const pickedClipIds = Array.isArray(req.body?.pickedClipIds) ? req.body.pickedClipIds.map(String) : []
-  const creativeDirection = typeof req.body?.creativeDirection === 'object' ? req.body.creativeDirection : null
-  if (!sessionId) return res.status(400).json({ error: 'sessionId required' })
-  if (pickedClipIds.length === 0) return res.status(400).json({ error: 'pickedClipIds required (non-empty)' })
+  const sessionId = typeof req.body?.session_id === 'string' ? req.body.session_id
+                  : typeof req.body?.sessionId  === 'string' ? req.body.sessionId : null
+  const clips    = Array.isArray(req.body?.clips) ? req.body.clips : []
+  const creative = req.body?.creative_direction && typeof req.body.creative_direction === 'object'
+                  ? req.body.creative_direction
+                  : null
+  if (!sessionId) return res.status(400).json({ error: 'session_id required' })
+  if (clips.length === 0) return res.status(400).json({ error: 'clips required (non-empty array)' })
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
+  // Read source_url + source_type from the parent session — n8n needs both.
   const { data: session, error: sessErr } = await sb
-    .from('sms_srp_generation')
-    .select('clip_selections, video_url, church_name')
+    .schema('srp_pipeline')
+    .from('sessions')
+    .select('video_url, video_source_type')
     .eq('session_id', sessionId)
     .maybeSingle()
   if (sessErr || !session) return res.status(404).json({ error: sessErr?.message ?? 'Session not found' })
 
-  const videoUrl = session.video_url as string | null
+  const videoUrl    = session.video_url as string | null
+  const sourceType  = (session.video_source_type as string | null) ?? 'unknown'
   if (!videoUrl) return res.status(400).json({ error: 'No video_url on session — transcribe first or paste a URL' })
 
-  // Parse clip_selections JSON, filter to picked, mark queued.
-  let allClips: any[] = []
-  try { allClips = JSON.parse(String(session.clip_selections ?? '[]')) ?? [] }
-  catch { return res.status(500).json({ error: 'clip_selections is not valid JSON' }) }
+  // Create clipcutter_jobs row. Its UUID is the n8n job_id.
+  const { data: job, error: jobErr } = await sb
+    .schema('srp_pipeline')
+    .from('clipcutter_jobs')
+    .insert({
+      session_id:        sessionId,
+      source_url:        videoUrl,
+      source_type:       sourceType,
+      clips,
+      creative_direction: creative,
+      status:            'pending',
+      progress_percent:  0,
+    })
+    .select('id')
+    .single()
+  if (jobErr || !job) {
+    return res.status(500).json({ error: `Failed to create clipcutter job: ${jobErr?.message ?? 'unknown'}` })
+  }
+  const jobId = job.id as string
 
-  const pickedSet = new Set(pickedClipIds)
-  const picked = allClips.filter(c => pickedSet.has(String(c.clip_id)))
-  if (picked.length === 0) return res.status(400).json({ error: 'No picked clips matched current clip_selections — re-pick.' })
-
-  // Build n8n payload: one entry per clip with the timing info it needs.
-  const clipsPayload = picked.map((c, i) => ({
-    clip_id:       String(c.clip_id ?? `${i + 1}`),
-    clip_name:     String(c.label ?? c.category ?? `Clip ${i + 1}`),
-    in_point_ms:   Math.round(((c.startTime ?? 0) as number) * 1000),
-    out_point_ms:  Math.round(((c.endTime ?? 0) as number) * 1000),
-    duration_ms:   Math.max(0, Math.round((((c.endTime ?? 0) - (c.startTime ?? 0)) as number) * 1000)),
-    quote:         c.quote,
-    category:      c.category,
-  }))
-
-  // Stamp processing_status='queued' on the picked clips so the UI can
-  // show progress; non-picked clips keep their previous state.
-  const queuedClips = allClips.map(c => {
-    if (pickedSet.has(String(c.clip_id))) {
-      return { ...c, processing_status: 'queued', processing_queued_at: new Date().toISOString() }
-    }
-    return c
-  })
-  await sb.from('sms_srp_generation')
-    .update({ clip_selections: JSON.stringify(queuedClips), updated_at: new Date().toISOString() })
+  // Stamp the parent session with the job id + processing status so the
+  // UI knows clipping started even if Realtime hasn't connected yet.
+  await sb
+    .schema('srp_pipeline')
+    .from('sessions')
+    .update({
+      clipcutter_job_id:      jobId,
+      clip_processing_status: 'pending',
+    })
     .eq('session_id', sessionId)
 
   const proto = (req.headers['x-forwarded-proto'] as string) || 'https'
   const host = (req.headers['x-forwarded-host'] as string) || (req.headers.host as string)
-  const baseUrl = host ? `${proto}://${host}` : (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
-
-  const job_id = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
-    ? (crypto as any).randomUUID()
-    : `${sessionId}_${Date.now()}`
+  const baseUrl = host
+    ? `${proto}://${host}`
+    : (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
 
   const payload = {
-    job_id,
-    session_id: sessionId,
-    source_url: videoUrl,
-    clips: clipsPayload,
-    creative_direction: creativeDirection,
-    callback_url: `${baseUrl}/api/srp/clipcutter-callback`,
-    callback_secret: callbackSecret,
+    job_id:             jobId,
+    session_id:         sessionId,
+    source_url:         videoUrl,
+    source_type:        sourceType,
+    clips,
+    creative_direction: creative,
+    callback_url:       `${baseUrl}/api/srp/clipcutter-callback`,
+    callback_secret:    callbackSecret,
   }
 
   let webhookOk = false
@@ -110,6 +115,14 @@ export default async function handler(req: any, res: any) {
     if (!r.ok) {
       const text = await r.text()
       console.error(`[start-clipcutter] n8n webhook ${r.status}: ${text.slice(0, 300)}`)
+      await sb
+        .schema('srp_pipeline')
+        .from('clipcutter_jobs')
+        .update({
+          status: 'failed',
+          error_message: `n8n webhook returned ${r.status}: ${text.slice(0, 300)}`,
+        })
+        .eq('id', jobId)
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'unknown'
@@ -117,14 +130,20 @@ export default async function handler(req: any, res: any) {
       webhookOk = true
       console.warn(`[start-clipcutter] webhook timed out (n8n still running)`)
     } else {
-      return res.status(502).json({ error: `n8n webhook failed: ${msg}` })
+      await sb
+        .schema('srp_pipeline')
+        .from('clipcutter_jobs')
+        .update({ status: 'failed', error_message: `webhook fetch failed: ${msg}` })
+        .eq('id', jobId)
+      return res.status(502).json({ error: `n8n webhook failed: ${msg}`, job_id: jobId })
     }
   }
 
   return res.status(200).json({
-    ok: true,
-    job_id,
-    queued_clips: clipsPayload.length,
+    job_id:         jobId,
+    session_id:     sessionId,
+    clip_count:     clips.length,
+    status:         'pending',
     webhook_status: webhookOk ? 'accepted' : 'failed',
   })
 }

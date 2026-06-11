@@ -20,6 +20,9 @@ dist-ssr
 # Supabase CLI transient state
 supabase/.temp/
 
+# Working copy of external SRP reference apps (not for commit)
+tmp-srp-reference/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

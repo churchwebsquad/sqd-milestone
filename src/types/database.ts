@@ -1829,6 +1829,8 @@ export interface SmsSrpGeneration {
   clickup_url: string | null
 }
 
+/** Legacy 4-step model — `sms_srp_generation` still uses these. Kept so
+ *  existing rows + the dashboard read path don't blow up while we port. */
 export type SrpStep =
   | 'account'
   | 'deliverables'
@@ -1837,12 +1839,223 @@ export type SrpStep =
   | 'approved'
   | 'reelCaptions'                       // legacy step name from older rows
 
+/** Legacy deliverable model. */
 export type SrpDeliverableKey =
   | 'facebook_post'
   | 'sunday_invite'
   | 'photo_recap'
   | 'carousel_slides'
   | 'reel_captions'                      // deferred (Phase 3)
+
+// ============================================================================
+// SRP Pipeline (new — srp_pipeline.* schema, 12-step workflow)
+// Replaces sms_srp_generation. See docs/SRP_PORT_PLAN.md.
+// ============================================================================
+
+/** 12-step workflow. Conditional visibility based on selectedDeliverables —
+ *  see visibleSteps in src/contexts/SrpWorkflowContext.tsx. */
+export type SrpWorkflowStep =
+  | 'account'
+  | 'deliverables'
+  | 'sermon'
+  | 'clips'
+  | 'reelCaptions'
+  | 'carousel'
+  | 'facebook'
+  | 'sundayInvite'
+  | 'photoRecap'
+  | 'creativeDirection'
+  | 'clipProcessing'
+  | 'approved'
+
+/** Individual deliverable. Reels are split into 8 numbered slots so the
+ *  coach can pick "Sermon Reels × N" (1-8). */
+export type SrpDeliverable =
+  | 'reel1' | 'reel2' | 'reel3' | 'reel4'
+  | 'reel5' | 'reel6' | 'reel7' | 'reel8'
+  | 'facebook' | 'carousel' | 'sundayInvite' | 'photoRecap'
+
+/** v1 caps at 2 reels because srp_pipeline.sessions only persists
+ *  reel1_caption / reel2_caption columns. To raise the cap, add
+ *  reel3..reelN columns (or a JSONB bag) and bump SRP_MAX_REELS here. */
+export const SRP_REEL_DELIVERABLES: SrpDeliverable[] = ['reel1', 'reel2']
+export const SRP_MAX_REELS = 2
+export const isSrpReelDeliverable = (d: string): d is SrpDeliverable => /^reel[1-8]$/.test(d)
+
+export interface SrpClipCut {
+  start_ms: number
+  end_ms: number
+}
+
+export interface SrpClipSelection {
+  /** clip_id is added when persisted to clipcutter_jobs; suggestions have no id. */
+  clip_id?: string
+  clip_name?: string
+  startTime?: string
+  endTime?: string
+  quote?: string
+  category?: string
+  wordCount?: number
+  estimatedSeconds?: number
+  /** Optional regions to cut out of the middle of this clip. Times are
+   *  clip-local ms (0 = clip start). The clipcutter joins kept segments
+   *  on output; if absent, the clip cuts as a single range. */
+  cuts?: SrpClipCut[]
+  /** Populated by the clipcutter callback. */
+  video_url?: string | null
+  srt_url?: string | null
+  processing_status?: 'queued' | 'done' | 'failed' | null
+}
+
+export interface SrpCarouselSlide {
+  slide_number: number
+  /** kind is free-form because the AI returns slot-style strings like
+   *  "hook" / "verse" / "quote" / "application" / "cta". */
+  kind?: string
+  text: string
+}
+
+/** Per-step input bundles persisted to JSONB columns on srp_pipeline.sessions. */
+export interface SrpReelGuidanceMap { [reelIdx: number]: string }
+export interface SrpSundayInviteInput {
+  guidance?: string
+  selectedIdx?: number | null
+  selectedCitation?: string
+  selectedTags?: string[]
+}
+export interface SrpFacebookInput {
+  guidance?: string
+  selectedIdx?: number | null
+  selectedCitation?: string
+  selectedTags?: string[]
+}
+export interface SrpCarouselInput {
+  slidesGuidance?: string
+  captionGuidance?: string
+  selectedIdx?: number | null
+  selectedCitations?: string[]
+  selectedTags?: string[]
+}
+export interface SrpPhotoRecapInput {
+  category?: 'serviceHighlights' | 'weekendTeaching' | 'seriesStartEnd' | 'generalCelebration'
+  guidance?: string
+  selectedIdx?: number | null
+  selectedTags?: string[]
+}
+
+/** Row shape for srp_pipeline.sessions. Matches the schema applied in v69
+ *  (sessions table is fully realized — see schema/v69_srp_pipeline.sql for
+ *  the column list). Fields stored as JSONB are typed as the parsed shape. */
+export interface SrpPipelineSession {
+  id: string                            // UUID
+  session_id: string                    // human-readable slug
+  member: number | null
+  church_name: string | null
+  user_email: string | null
+  current_step: SrpWorkflowStep | null
+  status: 'in_progress' | 'submitting' | 'completed' | 'submit_failed' | 'archived' | null
+  created_at: string | null
+  updated_at: string | null
+
+  selected_deliverables: SrpDeliverable[] | null
+
+  video_url: string | null
+  video_source_type: 'youtube' | 'dropbox' | 'vimeo' | 'google_drive' | 'direct' | 'unknown' | null
+  transcript_job_id: string | null      // UUID
+  transcript: string | null
+  transcript_words: unknown[] | null
+  has_timecodes: boolean | null
+
+  clip_suggestions: SrpClipSelection[] | null
+  clip_selections:  SrpClipSelection[] | null
+
+  reel1_caption: string | null
+  reel1_clip:    SrpClipSelection | null
+  reel2_caption: string | null
+  reel2_clip:    SrpClipSelection | null
+
+  carousel_slides:    SrpCarouselSlide[] | null
+  carousel_caption:   string | null
+  facebook_post:      string | null
+  sunday_invite:      string | null
+  photo_recap_caption: string | null
+
+  // Creative Direction
+  srp_template:     string | null
+  background_music: boolean | null
+  designer_notes:   string | null
+
+  // Clip processing
+  clipcutter_job_id:      string | null   // UUID
+  clip_processing_status: string | null
+
+  // ClickUp
+  clickup_task_id:       string | null
+  clickup_url:           string | null
+  srp_task_id_override:  string | null
+
+  // Sermon metadata (mirrored from strategy_sermon_data when paired)
+  series_title:        string | null
+  series_description:  string | null
+  sermon_title:        string | null
+  sermon_description:  string | null
+
+  // Per-step input persistence
+  reel_guidance:       SrpReelGuidanceMap | null
+  sunday_invite_input: SrpSundayInviteInput | null
+  facebook_input:      SrpFacebookInput | null
+  carousel_input:      SrpCarouselInput | null
+  photo_recap_input:   SrpPhotoRecapInput | null
+}
+
+/** SquadAccount aggregates strategy_account_progress + prf_brand_guides
+ *  for an account. Read-only. Powers the AccountInfoPanel, Quick Links,
+ *  and accountContext used by every generate-* endpoint. */
+export interface SquadAccount {
+  member:                              number
+  church_name:                         string
+  // links the sidebar Quick Links panel surfaces
+  instagram:                           string | null
+  instagram_link:                      string | null
+  facebook:                            string | null
+  facebook_link:                       string | null
+  youtube:                             string | null
+  church_website:                      string | null
+  strategy_brief:                      string | null
+  photos_link:                         string | null
+  photos_from_all_in_discovery_form:   string | null
+  custom_gpt:                          string | null
+  brand_guide_url:                     string | null
+  carousel_templates:                  string | null
+  // detail rows shown on the AccountInfoPanel
+  speak_to_audience_as_from_discovery: string | null
+  preferred_bible_translation:         string | null
+  which_social_media_platforms_do_you_want_us_to_post_to_from_all: string | null
+  sms_notes:                           string | null
+  plan:                                string | null
+  time_zone:                           string | null
+  recent_series_srp:                   string | null
+  notion_dashboard:                    string | null
+  /** Per-account brand voice. Stored in srp_pipeline.clip_templates by
+   *  the new save-brand-voice endpoint, NOT in strategy_account_progress
+   *  (CLAUDE.md forbids us from writing to that table). */
+  brand_voice_guidelines:              string | null
+}
+
+/** Sermon submission row paired via clickup_task_id. */
+export interface SrpSermonSubmission {
+  account:             number
+  created_at:          string
+  series_title:        string | null
+  series_description:  string | null
+  sermon_title:        string | null
+  sermon_description:  string | null
+  srp_info_selection:  string | null
+  clickup_task_id:     string | null
+  video_url:           string | null
+  external_link:       string | null
+  is_this_week?:       boolean
+}
 
 export interface SmsPromptSetting {
   id: string

@@ -2,19 +2,20 @@
  * Vercel Serverless Function — /api/srp/push-to-vista
  *
  * Scaffold for direct push to Vista Social. Requires three env vars
- * not yet configured anywhere in the Squad infra (these are placeholders;
- * the team will fill them in once Vista's API contract is settled):
+ * that aren't configured yet — until they're set, returns a structured
+ * 503 telling the UI to fall back to the CSV download.
  *
- *   VISTA_API_BASE_URL    — Vista's REST root, e.g. https://api.vistasocial.com/v1
- *   VISTA_API_TOKEN       — bearer token for Vista
- *   VISTA_TEAM_ID         — team identifier (some Vista APIs require it)
+ *   VISTA_API_BASE_URL    — Vista's REST root
+ *   VISTA_API_TOKEN       — bearer token
+ *   VISTA_TEAM_ID         — team identifier (may be required)
  *
- * Until those are set, the endpoint returns a structured 503 telling
- * the UI to fall back to the existing CSV download.
+ * Once configured, pushes each approved deliverable as a draft post to
+ * the church's connected Vista profile (one profile per platform from
+ * public.sms_vista_social, keyed by `account` = member number).
  *
- * Once configured, the endpoint pushes each deliverable as a separate
- * "draft" post to the church's connected Vista profile (one profile per
- * platform from sms_vista_social).
+ *   POST { session_id }
+ *   → 200 { ok, pushed, failed, results }
+ *   → 503 { error, fallback: "use CSV download" }
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -24,10 +25,8 @@ export const maxDuration = 60
 
 interface DeliverableJob {
   kind: 'facebook_post' | 'sunday_invite' | 'photo_recap' | 'carousel_caption' | 'reel1_caption' | 'reel2_caption'
-  /** Vista profile platform to target. Some deliverables map to multiple. */
   platforms: Array<'facebook' | 'instagram' | 'tiktok' | 'youtube' | 'linkedin' | 'twitter'>
   text: string
-  /** For reels — the rendered MP4 url comes from clip_selections. */
   media_urls?: string[]
 }
 
@@ -54,23 +53,26 @@ export default async function handler(req: any, res: any) {
     })
   }
 
-  const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : null
-  if (!sessionId) return res.status(400).json({ error: 'sessionId required' })
+  const sessionId = typeof req.body?.session_id === 'string' ? req.body.session_id
+                  : typeof req.body?.sessionId  === 'string' ? req.body.sessionId : null
+  if (!sessionId) return res.status(400).json({ error: 'session_id required' })
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
+
   const { data: session, error: sessErr } = await sb
-    .from('sms_srp_generation')
+    .schema('srp_pipeline')
+    .from('sessions')
     .select('*')
     .eq('session_id', sessionId)
     .maybeSingle()
   if (sessErr || !session) return res.status(404).json({ error: sessErr?.message ?? 'Session not found' })
 
-  // Look up the church's connected Vista profiles. sms_vista_social
-  // is keyed by `account` (bigint) — same as strategy_account_progress.
   const memberNum = parseInt(String(session.member ?? ''), 10)
   if (!Number.isFinite(memberNum)) {
     return res.status(400).json({ error: 'Session has no member — cannot route to Vista profile.' })
   }
+
+  // Look up connected Vista profiles for this church.
   const { data: profiles } = await sb
     .from('sms_vista_social')
     .select('platform, username, status, link')
@@ -84,32 +86,39 @@ export default async function handler(req: any, res: any) {
     })
   }
 
-  // Build the per-deliverable job list.
+  // Build per-deliverable job list.
   const jobs: DeliverableJob[] = []
-  if (session.facebook_post) jobs.push({ kind: 'facebook_post', platforms: ['facebook'], text: session.facebook_post })
-  if (session.sunday_invite) jobs.push({ kind: 'sunday_invite', platforms: ['facebook', 'instagram'], text: session.sunday_invite })
-  if (session.photo_recap_caption) jobs.push({ kind: 'photo_recap', platforms: ['instagram', 'facebook'], text: session.photo_recap_caption })
-  if (session.carousel_caption) jobs.push({ kind: 'carousel_caption', platforms: ['instagram'], text: session.carousel_caption })
+  if (session.facebook_post)       jobs.push({ kind: 'facebook_post',    platforms: ['facebook'],                text: session.facebook_post })
+  if (session.sunday_invite)       jobs.push({ kind: 'sunday_invite',    platforms: ['facebook', 'instagram'],   text: session.sunday_invite })
+  if (session.photo_recap_caption) jobs.push({ kind: 'photo_recap',      platforms: ['instagram', 'facebook'],   text: session.photo_recap_caption })
+  if (session.carousel_caption)    jobs.push({ kind: 'carousel_caption', platforms: ['instagram'],               text: session.carousel_caption })
 
-  // Reels — attach rendered MP4 URLs if clipcutter has run.
-  let clips: any[] = []
-  try { clips = JSON.parse(String(session.clip_selections ?? '[]')) ?? [] } catch { /* leave empty */ }
+  // Reels — pull rendered MP4 URLs from clipcutter_jobs.clip_results if available.
+  let renderedUrls: string[] = []
+  if (session.clipcutter_job_id) {
+    const { data: clipJob } = await sb
+      .schema('srp_pipeline')
+      .from('clipcutter_jobs')
+      .select('clip_results')
+      .eq('id', session.clipcutter_job_id)
+      .maybeSingle()
+    const results = Array.isArray(clipJob?.clip_results) ? clipJob.clip_results as any[] : []
+    renderedUrls = results.map((r: any) => r?.video_url).filter(Boolean)
+  }
   if (session.reel1_caption) {
-    const clip = clips[0]
     jobs.push({
       kind: 'reel1_caption',
       platforms: ['instagram', 'tiktok'],
       text: session.reel1_caption,
-      media_urls: clip?.video_url ? [clip.video_url] : undefined,
+      media_urls: renderedUrls[0] ? [renderedUrls[0]] : undefined,
     })
   }
   if (session.reel2_caption) {
-    const clip = clips[1]
     jobs.push({
       kind: 'reel2_caption',
       platforms: ['instagram', 'tiktok'],
       text: session.reel2_caption,
-      media_urls: clip?.video_url ? [clip.video_url] : undefined,
+      media_urls: renderedUrls[1] ? [renderedUrls[1]] : undefined,
     })
   }
 
@@ -117,13 +126,10 @@ export default async function handler(req: any, res: any) {
     return res.status(400).json({ error: 'No deliverables to push.' })
   }
 
-  // ── Vista API call ───────────────────────────────────────────────────
-  //
-  // PLACEHOLDER: the exact endpoint + payload shape needs to be confirmed
-  // against Vista Social's API docs. The team has not yet shared the
-  // contract; this scaffold uses a reasonable default and will need
-  // updating once docs are in hand. Failures here surface to the user
-  // with the raw error so the contract issue is debuggable.
+  // ── Vista API call ─────────────────────────────────────────────────
+  // PLACEHOLDER: exact endpoint + payload shape must be confirmed against
+  // Vista Social's API docs. Failures surface verbatim so the contract
+  // issue is debuggable.
   const results: Array<{ kind: string; platform: string; ok: boolean; detail?: any }> = []
   for (const job of jobs) {
     for (const platform of job.platforms) {
@@ -134,14 +140,14 @@ export default async function handler(req: any, res: any) {
       }
       try {
         const payload = {
-          team_id:     vistaTeam,
-          profile_id:  profile.username,   // TODO: confirm Vista's profile identifier — may be ID not username
-          status:      'draft',            // ship as draft so the team reviews before publishing
-          text:        job.text,
-          media_urls:  job.media_urls ?? [],
+          team_id:    vistaTeam,
+          profile_id: profile.username,   // TODO: confirm Vista's profile identifier (id vs username)
+          status:     'draft',            // ship as draft so the team reviews before publishing
+          text:       job.text,
+          media_urls: job.media_urls ?? [],
           platform,
-          source:      'srp_generator',
-          session_id:  sessionId,
+          source:     'srp_generator',
+          session_id: sessionId,
         }
         const r = await fetch(`${vistaBase.replace(/\/$/, '')}/posts`, {
           method: 'POST',

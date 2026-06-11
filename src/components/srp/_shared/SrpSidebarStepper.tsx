@@ -11,12 +11,12 @@
  */
 
 import { Check } from 'lucide-react'
-import type { SrpStep } from '../../../types/database'
+import type { SrpWorkflowStep } from '../../../types/database'
 import { STEP_LABELS } from '../../../lib/srpSessions'
 import type { LucideIcon } from 'lucide-react'
 
 export interface SrpSidebarStepperItem {
-  step:        SrpStep
+  step:        SrpWorkflowStep
   icon?:       LucideIcon
   description?: string
 }
@@ -25,8 +25,8 @@ export function SrpSidebarStepper({
   items, currentStep, onJump,
 }: {
   items:       SrpSidebarStepperItem[]
-  currentStep: SrpStep
-  onJump:      (s: SrpStep) => void
+  currentStep: SrpWorkflowStep
+  onJump:      (s: SrpWorkflowStep) => void
 }) {
   const currentIx = items.findIndex(it => it.step === currentStep)
 

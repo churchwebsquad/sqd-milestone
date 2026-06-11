@@ -20,7 +20,7 @@ import { useAuth } from '../contexts/AuthContext'
 import {
   createSession,
   listSessions,
-  type SessionListRow,
+  type SrpSessionListRow as SessionListRow,
   STEP_LABELS,
 } from '../lib/srpSessions'
 import { SrpHeroHeading } from '../components/srp/_shared/SrpHeading'
@@ -67,13 +67,13 @@ export default function SrpDashboardPage() {
     if (!userEmail) return
     setCreating(true)
     try {
-      const sessionId = await createSession({
+      const { session_id } = await createSession({
         member: account.member,
         churchName: account.church_name,
         userEmail,
       })
       setPickerOpen(false)
-      navigate(`/social/srp/${encodeURIComponent(sessionId)}`)
+      navigate(`/social/srp/${encodeURIComponent(session_id)}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create session')
     } finally {

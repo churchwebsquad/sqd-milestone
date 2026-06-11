@@ -1,18 +1,21 @@
 /**
  * Vercel Serverless Function — /api/srp/clipcutter-callback
  *
- * Receives clip rendering results from the n8n clipcutter workflow.
- * Merges video_url + srt_url into the matching entries inside
- * sms_srp_generation.clip_selections, keyed by clip_id.
+ * Receives status updates and final clip results from the n8n clipcutter
+ * workflow. Updates srp_pipeline.clipcutter_jobs by job_id. On terminal
+ * status, mirrors clip_processing_status onto srp_pipeline.sessions.
+ *
+ * Auth: callback_secret in Authorization: Bearer header OR body field.
  *
  * Expected body:
  *   {
- *     job_id, session_id, callback_secret,
- *     status: 'completed' | 'failed' | 'partial',
- *     clip_results: [
- *       { clip_id, video_url, srt_url?, status: 'done' | 'failed', error_message? }
- *     ],
- *     error_message?: string
+ *     job_id,             (UUID of clipcutter_jobs row — REQUIRED)
+ *     callback_secret,
+ *     status,             ('pending'|'in_progress'|'completed'|'failed'|'partial')
+ *     status_message?,
+ *     progress_percent?,
+ *     clip_results?,      [{ clip_id, video_url, srt_url?, status, error_message? }]
+ *     error_message?
  *   }
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -33,64 +36,59 @@ export default async function handler(req: any, res: any) {
   const authHeader = (req.headers.authorization ?? req.headers.Authorization ?? '') as string
   const bearerSecret = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
   const bodySecret = typeof req.body?.callback_secret === 'string' ? req.body.callback_secret : ''
-  const providedSecret = bearerSecret || bodySecret
-  if (providedSecret !== expectedSecret) return res.status(401).json({ error: 'Unauthorized' })
+  if ((bearerSecret || bodySecret) !== expectedSecret) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
 
-  const sessionId = typeof req.body?.session_id === 'string' ? req.body.session_id : null
-  const clipResults = Array.isArray(req.body?.clip_results) ? req.body.clip_results : []
-  const status = typeof req.body?.status === 'string' ? req.body.status : 'completed'
-  const errorMessage = typeof req.body?.error_message === 'string' ? req.body.error_message : null
-
-  if (!sessionId) return res.status(400).json({ error: 'session_id required' })
+  const jobId  = typeof req.body?.job_id === 'string' ? req.body.job_id : null
+  const status = typeof req.body?.status === 'string' ? req.body.status : null
+  if (!jobId)  return res.status(400).json({ error: 'job_id required' })
+  if (!status) return res.status(400).json({ error: 'status required' })
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
-  const { data: session, error: sessErr } = await sb
-    .from('sms_srp_generation')
-    .select('clip_selections')
-    .eq('session_id', sessionId)
+  // Look up the job.
+  const { data: job, error: lookupErr } = await sb
+    .schema('srp_pipeline')
+    .from('clipcutter_jobs')
+    .select('id, session_id, status')
+    .eq('id', jobId)
     .maybeSingle()
-  if (sessErr || !session) return res.status(404).json({ error: sessErr?.message ?? 'Session not found' })
+  if (lookupErr) return res.status(500).json({ error: `Lookup failed: ${lookupErr.message}` })
+  if (!job)      return res.status(404).json({ error: `Job not found: ${jobId}` })
 
-  let allClips: any[] = []
-  try { allClips = JSON.parse(String(session.clip_selections ?? '[]')) ?? [] }
-  catch { return res.status(500).json({ error: 'clip_selections not valid JSON' }) }
+  const jobUpdate: Record<string, unknown> = { status }
+  if (req.body?.status_message   !== undefined) jobUpdate.status_message   = req.body.status_message
+  if (req.body?.progress_percent !== undefined) jobUpdate.progress_percent = req.body.progress_percent
+  if (req.body?.clip_results     !== undefined) jobUpdate.clip_results     = req.body.clip_results
+  if (req.body?.error_message    !== undefined) jobUpdate.error_message    = req.body.error_message
 
-  const resultsByClipId = new Map<string, any>()
-  for (const r of clipResults) {
-    if (r?.clip_id != null) resultsByClipId.set(String(r.clip_id), r)
+  const isTerminal = status === 'completed' || status === 'failed' || status === 'partial'
+  if (isTerminal) {
+    jobUpdate.completed_at = new Date().toISOString()
+    jobUpdate.progress_percent = status === 'completed' ? 100 : (jobUpdate.progress_percent ?? 0)
   }
 
-  const merged = allClips.map(c => {
-    const result = resultsByClipId.get(String(c.clip_id))
-    if (!result) return c
-    return {
-      ...c,
-      video_url:          result.video_url ?? null,
-      srt_url:            result.srt_url ?? null,
-      processing_status:  result.status === 'failed' ? 'failed' : (result.video_url ? 'done' : 'queued'),
-      processing_error:   result.error_message ?? null,
-      processed_at:       new Date().toISOString(),
-    }
-  })
+  const { error: updateErr } = await sb
+    .schema('srp_pipeline')
+    .from('clipcutter_jobs')
+    .update(jobUpdate)
+    .eq('id', jobId)
+  if (updateErr) return res.status(500).json({ error: `Failed to update job: ${updateErr.message}` })
 
-  // If the overall job failed and no per-clip results came back, mark
-  // every queued clip as failed so the UI doesn't spin forever.
-  const finalMerged = (status === 'failed' && clipResults.length === 0)
-    ? merged.map(c => c.processing_status === 'queued'
-        ? { ...c, processing_status: 'failed', processing_error: errorMessage ?? 'job failed' }
-        : c)
-    : merged
-
-  const { error: writeErr } = await sb.from('sms_srp_generation')
-    .update({ clip_selections: JSON.stringify(finalMerged), updated_at: new Date().toISOString() })
-    .eq('session_id', sessionId)
-  if (writeErr) return res.status(500).json({ error: `DB write failed: ${writeErr.message}` })
+  // Mirror terminal status onto the parent session.
+  if (isTerminal && job.session_id) {
+    await sb
+      .schema('srp_pipeline')
+      .from('sessions')
+      .update({ clip_processing_status: status })
+      .eq('session_id', job.session_id)
+  }
 
   return res.status(200).json({
     ok: true,
+    job_id: jobId,
     status,
-    processed: clipResults.length,
-    session_id: sessionId,
+    processed: Array.isArray(req.body?.clip_results) ? req.body.clip_results.length : 0,
   })
 }
