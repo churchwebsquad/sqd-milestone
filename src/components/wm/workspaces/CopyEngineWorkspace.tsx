@@ -1119,13 +1119,21 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
           always-on Stop affordance, plus visibility into what the
           engine is doing without hunting for the spinner on a
           specific button. */}
-      <InFlightBanner
-        running={running}
-        engineRunning={engineRunning}
-        engine={engine}
-        onStop={() => void handleStop()}
-        stopping={running === 'cancel_run'}
-      />
+      {/* Top banner suppressed while a runEngine PHASE is active —
+          PhaseProgressCard (rendered further down) is the richer source
+          of truth and gets the Stop button when a phase is in flight.
+          For one-shot actions (synthesize, sitemap draft, commit, etc.)
+          that AREN'T part of the runEngine cascade, this banner still
+          appears with its action-specific label + Stop button. */}
+      {!enginePhase && (
+        <InFlightBanner
+          running={running}
+          engineRunning={engineRunning}
+          engine={engine}
+          onStop={() => void handleStop()}
+          stopping={running === 'cancel_run'}
+        />
+      )}
 
       {error && (
         <div className="rounded-md border border-wm-danger/30 bg-wm-danger-bg px-3 py-2 text-[13px] text-wm-danger">
@@ -1433,7 +1441,12 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
           app blaming the user for not approving something they
           haven't even seen yet. */}
       <section>
-        {hasStage2 && (
+        {/* Hide the EngineStatusCard entirely while a runEngine phase
+            is active — its "Engine running…" headline is redundant
+            with the PhaseProgressCard below. When the cascade ends and
+            the project goes idle / ready_for_review / committed, the
+            status card returns to show Re-run / Commit buttons. */}
+        {hasStage2 && !enginePhase && (
           <EngineStatusCard
             engine={engine}
             engineRunning={engineRunning || !!running}
@@ -1446,16 +1459,19 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
           />
         )}
 
-        {/* Live phase progress — appears under the status card while
-            runEngine is in flight. Shows current phase, X-of-Y count,
-            current slug, elapsed time, and ETA derived from average
-            per-step duration. Without this, the user sees the generic
-            "Running run_page_outline_for_page…" with no clue whether
-            the cascade is healthy or hung. */}
+        {/* Live phase progress — the SINGLE source of truth while the
+            runEngine cascade is in flight. Replaces both the top
+            InFlightBanner (suppressed above) and the EngineStatusCard's
+            generic "Engine running…" headline (suppressed below). Shows
+            phase, X-of-Y, current slug, elapsed, ETA, and the Stop
+            button — so the user has ONE clear status row instead of
+            three redundant ones stacked. */}
         {enginePhase && (
-          <div className="mt-3">
-            <PhaseProgressCard progress={enginePhase} />
-          </div>
+          <PhaseProgressCard
+            progress={enginePhase}
+            onStop={() => void handleStop()}
+            stopping={running === 'cancel_run'}
+          />
         )}
 
         {confirmAction === 'commit' && (
@@ -1958,7 +1974,7 @@ function GateCard({ number, title, subtitle, status, action }: {
  *  active so the elapsed clock advances even between step bumps
  *  (page-outlines takes 30-90s per page — without a ticking clock the
  *  banner LOOKS frozen). */
-function PhaseProgressCard({ progress }: {
+function PhaseProgressCard({ progress, onStop, stopping }: {
   progress: {
     label:        string | null
     pretty:       string
@@ -1968,6 +1984,9 @@ function PhaseProgressCard({ progress }: {
     startedAt:    number
     perStepMs:    number[]
   }
+  /** Cancel handler — fires cancel_run on the orchestrate side. */
+  onStop:   () => void
+  stopping: boolean
 }) {
   // 1Hz tick so the elapsed clock advances. `now` lives in state
   // (NOT a Date.now() call in render) so the component stays pure
@@ -2016,6 +2035,16 @@ function PhaseProgressCard({ progress }: {
             <p>ETA ~{formatDuration(etaMs)}</p>
           )}
         </div>
+        <button
+          type="button"
+          onClick={onStop}
+          disabled={stopping}
+          className="shrink-0 inline-flex items-center gap-1 rounded-full border border-wm-danger/40 bg-white px-3 py-1 text-[11px] font-semibold text-wm-danger hover:bg-wm-danger/5 disabled:opacity-50"
+          title="Stop the current step at its next safe boundary. Anything already written stays in the DB; the cascade just doesn't proceed."
+        >
+          {stopping ? <Loader2 size={11} className="animate-spin" /> : <span className="block w-2.5 h-2.5 bg-wm-danger rounded-sm" />}
+          Stop &amp; revise
+        </button>
       </div>
       {/* Progress bar — only shown for multi-step phases. Single-step
           phases (critique / iterate) just spin without filling. */}
