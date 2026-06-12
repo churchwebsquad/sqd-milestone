@@ -11,11 +11,11 @@
 # new tools inside their lane without extra permission. They only hit Ashley's
 # review when a change reaches OUTSIDE their domain (e.g. a route in App.tsx).
 #
-# PLACEHOLDERS: swap @SPENCER_GH / @AMBER_GH for real GitHub usernames once the
-# directors accept their repo invites. Until then the catch-all `*` line routes
-# everything to @churchwebsquad — safe by default.
-#   @SPENCER_GH = Branding Director (spencer@churchmediasquad.com)
-#   @AMBER_GH   = Social Media Director (amber@churchmediasquad.com)
+# PLACEHOLDERS: swap @SPENCER_GH for the real GitHub username once Spencer
+# accepts the repo invite. Until then the catch-all `*` line routes anything
+# Spencer touches to @churchwebsquad — safe by default.
+#   @SPENCER_GH     = Branding Director (spencer@churchmediasquad.com) — placeholder
+#   @amberpankey    = Social Media Director (amber@churchmediasquad.com) — resolved 2026-06-12
 #   @churchwebsquad = Ashley (VP, owns foundations + catch-all)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -23,19 +23,19 @@
 # (Listed first; later, more-specific matches win in CODEOWNERS.)
 *                                                  @churchwebsquad
 
-# ── Social Media Squad — @AMBER_GH (amber@churchmediasquad.com) ──
-/src/components/srp/                               @AMBER_GH
-/src/components/intel/                             @AMBER_GH
-/src/pages/SrpDashboardPage.tsx                    @AMBER_GH
-/src/pages/SrpWorkflowPage.tsx                     @AMBER_GH
-/src/pages/SrpPromptSettingsPage.tsx               @AMBER_GH
-/src/pages/IntelAuditToolPage.tsx                  @AMBER_GH
-/api/srp/                                          @AMBER_GH
-/api/church-intel/                                 @AMBER_GH
+# ── Social Media Squad — @amberpankey (amber@churchmediasquad.com) ──
+/src/components/srp/                               @amberpankey
+/src/components/intel/                             @amberpankey
+/src/pages/SrpDashboardPage.tsx                    @amberpankey
+/src/pages/SrpWorkflowPage.tsx                     @amberpankey
+/src/pages/SrpPromptSettingsPage.tsx               @amberpankey
+/src/pages/IntelAuditToolPage.tsx                  @amberpankey
+/api/srp/                                          @amberpankey
+/api/church-intel/                                 @amberpankey
 # Social section of the Churches Dashboard
-/src/components/churches/SocialMediaSection.tsx    @AMBER_GH
+/src/components/churches/SocialMediaSection.tsx    @amberpankey
 # Reserved home for net-new social tools (create when the first one lands)
-/src/pages/social/                                 @AMBER_GH
+/src/pages/social/                                 @amberpankey
 
 # ── Branding Squad — @SPENCER_GH (spencer@churchmediasquad.com) ──
 /src/components/brand/                             @SPENCER_GH

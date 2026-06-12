@@ -140,20 +140,20 @@ registering a new route in `App.tsx`), which lands in your review queue
 automatically, or when it needs a new table (issue request).
 
 ```
-# ── Social Media Squad — @AMBER_GH (amber@churchmediasquad.com) ──
-/src/components/srp/                       @AMBER_GH
-/src/components/srp/**                      @AMBER_GH
-/src/components/intel/                      @AMBER_GH
-/src/pages/SrpDashboardPage.tsx             @AMBER_GH
-/src/pages/SrpWorkflowPage.tsx              @AMBER_GH
-/src/pages/SrpPromptSettingsPage.tsx        @AMBER_GH
-/src/pages/IntelAuditToolPage.tsx           @AMBER_GH
-/api/srp/                                   @AMBER_GH
-/api/church-intel/                          @AMBER_GH
+# ── Social Media Squad — @amberpankey (amber@churchmediasquad.com) — social squad lead ──
+/src/components/srp/                       @amberpankey
+/src/components/srp/**                      @amberpankey
+/src/components/intel/                      @amberpankey
+/src/pages/SrpDashboardPage.tsx             @amberpankey
+/src/pages/SrpWorkflowPage.tsx              @amberpankey
+/src/pages/SrpPromptSettingsPage.tsx        @amberpankey
+/src/pages/IntelAuditToolPage.tsx           @amberpankey
+/api/srp/                                   @amberpankey
+/api/church-intel/                          @amberpankey
 # Social section of the Churches Dashboard
-/src/components/churches/SocialMediaSection.tsx   @AMBER_GH
+/src/components/churches/SocialMediaSection.tsx   @amberpankey
 # New social pages/tools live here and are auto-owned:
-/src/pages/social/                          @AMBER_GH
+/src/pages/social/                          @amberpankey
 
 # ── Branding Squad — @SPENCER_GH (spencer@churchmediasquad.com) ──
 /src/components/brand/                       @SPENCER_GH
@@ -192,12 +192,12 @@ automatically, or when it needs a new table (issue request).
 # ── Catch-all — Ashley owns anything not claimed above ──
 *                                            @churchwebsquad
 ```
-> **Placeholders:** `@AMBER_GH` = social (amber@churchmediasquad.com),
-> `@SPENCER_GH` = branding (spencer@churchmediasquad.com). Swap in their real
-> GitHub usernames once they accept the repo invite (see §3.0). Ashley =
-> `@churchwebsquad`. The catch-all `*` line means: until the placeholders are
-> real handles, anything they touch still requires Ashley's review — safe by
-> default.
+> **Placeholders:** `@amberpankey` = social (amber@churchmediasquad.com) —
+> swapped in 2026-06-12. `@SPENCER_GH` = branding
+> (spencer@churchmediasquad.com), still placeholder until he accepts the repo
+> invite (see §3.0). Ashley = `@churchwebsquad`. The catch-all `*` line means:
+> anything an unresolved placeholder touches still requires Ashley's review —
+> safe by default.
 >
 > **New-tool note:** the `/src/pages/social/` and `/src/pages/brand/` lines
 > reserve a home for net-new tools so a director can scaffold one entirely
