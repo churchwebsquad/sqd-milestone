@@ -143,6 +143,7 @@ schema/           # SQL files for Supabase table creation
 ## Important Rules
 - NEVER hardcode Supabase credentials or ClickUp API tokens. Use .env files.
 - NEVER modify existing Supabase tables (strategy_account_progress, clickup_chat_channels, clickup_users, prf_brand_guides). Only READ from them.
+- **Before creating a NEW table, first respond with an analysis of whether existing tables could be extended via new columns.** New tables ARE permitted, but the schema has grown large enough that net-new tables need deliberation, not assumption. Format: name the table you'd create + its purpose, then name 1-2 existing tables that could absorb the data via ADD COLUMN, with the trade-offs. Wait for explicit approval before applying CREATE TABLE.
 - All new tables use the `strategy_` prefix.
 - Follow existing Supabase patterns: uuid PKs, created_at/updated_at timestamps, is_active soft deletes.
 - The client portal must be accessible without staff login (public shareable link with a token/member ID).
