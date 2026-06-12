@@ -41,6 +41,10 @@ import {
   type PageOutlineValidationManifest,
   type CanonicalTemplateManifest,
 } from '../../../src/lib/cowork/validatePageOutline.js'
+import {
+  validateDraftPage,
+  type DraftPageValidationManifest,
+} from '../../../src/lib/cowork/validateDraftPage.js'
 
 export const maxDuration = 30
 
@@ -286,10 +290,136 @@ export default async function handler(req: any, res: any) {
     })
   }
 
+  if (bundleKind === 'page_draft') {
+    const pageSlug = typeof req.body?.page_slug === 'string' ? req.body.page_slug : null
+    if (!pageSlug) return res.status(400).json({ error: 'page_slug required for bundle_kind=page_draft' })
+
+    let manifest: DraftPageValidationManifest
+    try {
+      manifest = await buildDraftPageManifestFromProject(sb, projectId, pageSlug)
+    } catch (e) {
+      return res.status(500).json({ error: e instanceof Error ? e.message : 'page-draft manifest build failed' })
+    }
+
+    const result = validateDraftPage(bundle, manifest)
+    if (!result.ok) {
+      return res.status(422).json({
+        error:    'validation_failed',
+        summary:  result.summary,
+        byCheck:  result.byCheck,
+        failures: result.failures,
+      })
+    }
+
+    try {
+      await setRoadmapStateAtomic(sb, projectId, ['page_drafts', pageSlug], bundle)
+      await setRoadmapStateAtomic(sb, projectId, ['cowork_progress', 'draft_page', pageSlug], {
+        status:               'completed',
+        completed_at:         new Date().toISOString(),
+        sections:             Array.isArray(bundle.sections) ? bundle.sections.length : 0,
+        atom_resolution_rate: bundle?._meta?.atom_resolution_rate ?? null,
+        truncation_suspected: bundle?._meta?.truncation_suspected ?? false,
+        prompt_hash:          bundle?._meta?.prompt_hash ?? null,
+      })
+    } catch (e) {
+      return res.status(500).json({ error: e instanceof Error ? e.message : 'roadmap_state write failed' })
+    }
+
+    return res.status(200).json({
+      ok:          true,
+      bundle_kind: 'page_draft',
+      page_slug:   pageSlug,
+      counts: {
+        sections:           Array.isArray(bundle.sections) ? bundle.sections.length : 0,
+        atoms_used:         Array.isArray(bundle.sections)
+          ? new Set(bundle.sections.flatMap((s: any) => Array.isArray(s.atoms_used) ? s.atoms_used : [])).size
+          : 0,
+        flags:              Array.isArray(bundle?.validation?.flags) ? bundle.validation.flags.length : 0,
+        unused_atoms:       Array.isArray(bundle?.validation?.unused_atoms) ? bundle.validation.unused_atoms.length : 0,
+      },
+    })
+  }
+
   return res.status(400).json({
     error: `Unknown bundle_kind: ${bundleKind}`,
-    supported: ['page_allocation_plan', 'page_outline'],
+    supported: ['page_allocation_plan', 'page_outline', 'page_draft'],
   })
+}
+
+/**
+ * Builds the draft-validation manifest from live Supabase inventory +
+ * the project's persisted outline for this slug. Inputs the validator
+ * needs:
+ *   - atom_ids: every active+draft content_atom for the project.
+ *   - verbatim_atoms: atom_id -> body for atoms flagged verbatim=true,
+ *     keyed for substring-presence check in section copy.
+ *   - outline_section_count + outline_sections: from
+ *     roadmap_state.page_outlines[<slug>], so the validator can verify
+ *     sections_match and per-section archetype agreement.
+ *   - canonical_templates: archetype -> cowork_writable_slots map.
+ *   - expected_page_slug: confirms the draft targets the right page.
+ *
+ * If the outline doesn't exist yet, the draft has nothing to render
+ * against — fail loudly with a clear message rather than building an
+ * empty manifest that mis-validates.
+ */
+async function buildDraftPageManifestFromProject(
+  sb:        any,
+  projectId: string,
+  pageSlug:  string,
+): Promise<DraftPageValidationManifest> {
+  const [atomsRes, projectRes] = await Promise.all([
+    sb.from('content_atoms')
+      .select('id, body, verbatim')
+      .eq('web_project_id', projectId)
+      .in('status', ['active', 'draft']),
+    sb.from('strategy_web_projects')
+      .select('roadmap_state')
+      .eq('id', projectId)
+      .maybeSingle(),
+  ])
+  if (atomsRes.error) throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  if (projectRes.error) throw new Error(`project load failed: ${projectRes.error.message}`)
+
+  const roadmap = (projectRes.data?.roadmap_state ?? {}) as Record<string, any>
+  const outline = roadmap?.page_outlines?.[pageSlug]
+  if (!outline) {
+    throw new Error(
+      `roadmap_state.page_outlines.${pageSlug} not found — draft-page cannot render against a missing outline. ` +
+      `Run /api/web/agents/run-outline-page for this slug first.`,
+    )
+  }
+
+  const outlineSections: Array<{ section_index: number; archetype: string; atom_ids: string[] }> = []
+  if (Array.isArray(outline.sections)) {
+    for (const [ix, s] of outline.sections.entries() as IterableIterator<[number, any]>) {
+      outlineSections.push({
+        section_index: ix,
+        archetype:     typeof s?.archetype === 'string' ? s.archetype : '',
+        atom_ids:      Array.isArray(s?.atom_assignments)
+          ? s.atom_assignments.map((a: any) => String(a?.atom_id ?? '')).filter(Boolean)
+          : [],
+      })
+    }
+  }
+
+  const verbatim_atoms: Record<string, string> = {}
+  const atom_ids: string[] = []
+  for (const row of (atomsRes.data ?? [])) {
+    atom_ids.push(String(row.id))
+    if (row.verbatim && typeof row.body === 'string') {
+      verbatim_atoms[String(row.id)] = row.body
+    }
+  }
+
+  return {
+    atom_ids,
+    verbatim_atoms,
+    outline_section_count: outlineSections.length,
+    outline_sections:      outlineSections,
+    canonical_templates:   loadCanonicalTemplates(),
+    expected_page_slug:    pageSlug,
+  }
 }
 
 /**
