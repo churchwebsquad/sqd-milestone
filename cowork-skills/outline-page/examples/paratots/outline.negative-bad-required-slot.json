@@ -8,27 +8,45 @@
       "section_job": "Lead with the line that melts a parent: before you were even born, God loved you first.",
       "flow_role": "hook",
       "voice_anchor": "before you were even born, god loved you first",
-      "anti_pattern_to_avoid": "Do not over-explain or theologize the hero line. Let it land. No forced enthusiasm, no exclamation marks, no 'welcome to ParaTots!' cheer.",
+      "anti_pattern_to_avoid": "Forced enthusiasm or saccharine kid-ministry cliches ('Your kids will LOVE it!'). Keep it quiet, true, and tender.",
       "atom_assignments": []
     },
     {
       "section_ix": 1,
       "archetype": "content_image_text_a",
-      "section_job": "Reassure parents: the room is safe, the day is gentle, and there is a Parents Room where they can breathe.",
+      "section_job": "Reassure parents the room is safe, the rhythm is loving, and they are not alone — including a Parents Room to breathe.",
       "flow_role": "reassure",
       "voice_anchor": "Let delight show up in the details. Do not force enthusiasm.",
-      "anti_pattern_to_avoid": "Do not perform safety with bullet-point compliance language (ratios, badges). Reassure in plain, parent-to-parent voice.",
+      "anti_pattern_to_avoid": "Don't oversell safety with security-theater language; don't perform warmth. Let the details (stories, songs, play, the Parents Room) carry it.",
       "atom_assignments": [
         {
           "atom_id": "73a9658c-2a73-472f-aeed-f9b21cb70532",
           "treatment": "use_as_is",
-          "slot_hint": "primary_heading"
+          "slot_hint": "body"
         },
         {
           "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
           "treatment": "lift_phrase",
-          "slot_hint": "body",
-          "drafter_hint": "Voice anchor — write the body in this register; do not quote the rule itself."
+          "slot_hint": "primary_heading",
+          "drafter_hint": "Use the 'delight shows up in the details' voice rule as the heading's tonal anchor; do not quote the rule itself."
+        },
+        {
+          "atom_id": "73a9658c-2a73-472f-aeed-f9b21cb70532",
+          "treatment": "expand",
+          "slot_hint": "items[0].item_heading",
+          "drafter_hint": "Stories + songs item — one card on the rhythm of the room."
+        },
+        {
+          "atom_id": "73a9658c-2a73-472f-aeed-f9b21cb70532",
+          "treatment": "expand",
+          "slot_hint": "items[1].item_heading",
+          "drafter_hint": "Play + belonging item — second card."
+        },
+        {
+          "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
+          "treatment": "expand",
+          "slot_hint": "items[2].item_heading",
+          "drafter_hint": "Parents Room card — 'somewhere to breathe' framing."
         }
       ]
     },
@@ -38,17 +56,67 @@
       "section_job": "Logistics: ages 0-4, Saturdays 9:15, Teacher Donna coordinating.",
       "flow_role": "inform",
       "voice_anchor": "Saturday evenings in Redlands",
-      "anti_pattern_to_avoid": "Do not bury the time + audience in prose. The when/who/where should be findable in two seconds.",
-      "atom_assignments": []
+      "anti_pattern_to_avoid": "Don't bury the time/age/coordinator in prose. Parents scan this section — make the facts findable.",
+      "atom_assignments": [
+        {
+          "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
+          "treatment": "lift_phrase",
+          "slot_hint": "primary_heading",
+          "drafter_hint": "Short logistics heading; tone-anchored, not flat 'Details'."
+        },
+        {
+          "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
+          "treatment": "lift_phrase",
+          "slot_hint": "body",
+          "drafter_hint": "Weave service time (Saturdays 9:15, ages 0-4, 51 W Olive) into one warm paragraph — pull from facts: 631e87bd, e3a0634e."
+        },
+        {
+          "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
+          "treatment": "lift_phrase",
+          "slot_hint": "items[0].item_heading",
+          "drafter_hint": "When + Where item — use fact 631e87bd (Saturday 9:15 AM, 51 W Olive)."
+        },
+        {
+          "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
+          "treatment": "lift_phrase",
+          "slot_hint": "items[1].item_heading",
+          "drafter_hint": "Who it's for + Teacher Donna item — use fact 1ac6eab1 (Donna Hadley, founding member, mother of Pastor Craig); include info@paradoxredlands.com."
+        }
+      ]
     },
     {
       "section_ix": 3,
       "archetype": "cta_simple",
-      "section_job": "Join us at 9:15, then stay for the 10:00 gathering together.",
+      "section_job": "Invite: come at 9:15, then stay for the 10:00 gathering together.",
       "flow_role": "invite",
       "voice_anchor": "Come as you are",
-      "anti_pattern_to_avoid": "Do not say 'don't miss it' or use urgency. Invitation, not pressure.",
-      "atom_assignments": []
+      "anti_pattern_to_avoid": "Don't pressure or over-promise. One clear action; no 'don't miss out' language.",
+      "atom_assignments": [
+        {
+          "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
+          "treatment": "lift_phrase",
+          "slot_hint": "primary_heading",
+          "drafter_hint": "Warm invite heading — 'Come at 9:15. Stay for 10:00.' or similar."
+        },
+        {
+          "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
+          "treatment": "lift_phrase",
+          "slot_hint": "body",
+          "drafter_hint": "Two-sentence body: ParaTots starts at 9:15, then the whole family gathers at 10:00. Reference fact 631e87bd for time/location."
+        },
+        {
+          "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
+          "treatment": "lift_phrase",
+          "slot_hint": "buttons[0].label",
+          "drafter_hint": "Primary CTA label: 'Plan a Visit' or 'Bring Your Kids Saturday'."
+        },
+        {
+          "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
+          "treatment": "lift_phrase",
+          "slot_hint": "buttons[0].url",
+          "drafter_hint": "Link to /plan-a-visit"
+        }
+      ]
     },
     {
       "section_ix": 4,
@@ -56,8 +124,27 @@
       "section_job": "Close on solidarity: we are all in this mystery of parenting together.",
       "flow_role": "close",
       "voice_anchor": "Kids are loud in the lobby and welcome to be.",
-      "anti_pattern_to_avoid": "Do not end on a sales CTA or another logistics block. End on the human note — parents alongside parents.",
-      "atom_assignments": []
+      "anti_pattern_to_avoid": "Don't moralize parenting or use performative 'village' cliches. Quiet solidarity, not slogans.",
+      "atom_assignments": [
+        {
+          "atom_id": "73a9658c-2a73-472f-aeed-f9b21cb70532",
+          "treatment": "lift_phrase",
+          "slot_hint": "primary_heading",
+          "drafter_hint": "Solidarity close — 'We're in this together' tone, anchored by the generous/inclusive/affirming line."
+        },
+        {
+          "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
+          "treatment": "lift_phrase",
+          "slot_hint": "body",
+          "drafter_hint": "Honest, unsentimental body: parenting under-5s is a mystery; you don't have to do it alone; questions welcome."
+        },
+        {
+          "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
+          "treatment": "lift_phrase",
+          "slot_hint": "buttons[0].label",
+          "drafter_hint": "CTA label: 'Email Teacher Donna' — pull email from fact 1ac6eab1 (info@paradoxredlands.com)."
+        }
+      ]
     }
   ],
   "unresolved_inputs": [],
@@ -65,20 +152,20 @@
     "bundle_version": "1.0.0",
     "skill_name": "outline-page",
     "skill_version": "1.0.0",
-    "generated_at": "2026-06-12T21:46:14.850Z",
+    "generated_at": "2026-06-12T22:07:32.270Z",
     "model": "anthropic/claude-opus-4.7",
-    "prompt_hash": "9271ace78afa8629",
+    "prompt_hash": "c0d743c7e3c7478f",
     "usage": {
-      "input_tokens": 62873,
-      "output_tokens": 5924
+      "input_tokens": 64459,
+      "output_tokens": 6049
     },
     "atom_count_used": 4,
     "sections_count": 5,
     "repaired": true,
     "first_pass_failures": {
-      "count": 15,
+      "count": 13,
       "by_check": {
-        "unknown_atom_ref": 15
+        "unknown_atom_ref": 13
       }
     }
   }
