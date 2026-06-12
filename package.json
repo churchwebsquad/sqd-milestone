@@ -17,6 +17,7 @@
     "check:allocation-validator": "tsx scripts/check-allocation-validator.ts",
     "check:page-outline-validator": "tsx scripts/check-page-outline-validator.ts",
     "check:draft-page-validator": "tsx scripts/check-draft-page-validator.ts",
+    "check:critique-page-regression": "tsx scripts/check-critique-page-regression.ts",
     "check:skill-prompts": "node scripts/generate-skill-prompts.mjs --check",
     "check:skill-prompts:write": "node scripts/generate-skill-prompts.mjs",
     "smoke:outline": "tsx scripts/cowork-smoke-outline.ts",

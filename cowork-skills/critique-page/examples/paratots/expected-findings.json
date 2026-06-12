@@ -1,0 +1,45 @@
+{
+  "_meta": {
+    "fixture_version":  "1.0.0",
+    "applies_to_draft": "cowork-skills/draft-page/examples/paratots/draft.positive.json",
+    "source":           "Human review of the persisted paratots draft, 2026-06-12. The fact-check thread read the draft and named two defects + two partner-sacred lines that look like defects to a naive critic. This fixture captures the ground truth so every future critique-page SKILL edit is judged against the same known answers.",
+    "doctrine_note":    "False-positive guard matters as much as catches. A critic that red-flags partner-sacred language burns strategist trust faster than one that misses a claim. The must_not_flag arm of this fixture is the trust guard."
+  },
+
+  "must_flag": [
+    {
+      "id":              "ungrounded_check_in_claim",
+      "summary":         "The draft section 3 invents a check-in workflow + teacher-walks-to-room procedure; no atom or fact in the project's inventory carries either fact.",
+      "verbatim_substring": "check-in is inside the lobby, and a teacher will walk you to the room",
+      "expected_axis":   "claim_plausibility",
+      "expected_severity_at_least": "warning",
+      "expected_fix_kind": ["slot_edit", "page_redraft"],
+      "rationale":       "A partner-facing logistic claim that isn't grounded in any source is a content-truthfulness defect. claim_plausibility per the SKILL's axis-1 rubric: 'Every concrete claim traces to atom / fact / stage_1 / merge. No invented programs, no invented people, no invented services.' Procedure section names this exact pattern in its worked example."
+    },
+    {
+      "id":              "section_3_intra_section_redundancy",
+      "summary":         "Section 3's heading + tagline + items repeat the same logistics (Saturday 9:15 AM time, location, or program name) multiple times within the SAME section. Cross-section repetition is fine; intra-section is a coherence defect.",
+      "expected_axis":   "voice_character",
+      "expected_severity_at_least": "warning",
+      "expected_fix_kind": ["slot_edit"],
+      "rationale":       "The voice_character procedure under 'Procedural decomposition — intra-section coherence' calls this out exactly. Even if voice is otherwise clean, redundancy within one section = ≤80 score per the rubric."
+    }
+  ],
+
+  "must_not_flag": [
+    {
+      "id":              "lowercase_verbatim_hero_lift",
+      "summary":         "The lowercase 'before you were even born, god loved you first' is a VERBATIM lift from a prose_snippet atom (94df26ac-175e-45d7-b447-29a2ebbd91d2). The lowercase 'god' is preserved per the partner's intentional casing.",
+      "verbatim_substring": "before you were even born, god loved you first",
+      "rationale":       "A naive critic would flag the lowercase 'god' as a capitalization error. It is the partner's INTENTIONAL writing, preserved verbatim per the SKILL's hard rule on verbatim atoms. Flagging this would burn strategist trust faster than missing a real claim.",
+      "fail_if_appears_in": ["problem_lines", "directive_notes_at_severity_warning_or_higher"]
+    },
+    {
+      "id":              "generous_inclusive_affirming_triad",
+      "summary":         "'Generous, Inclusive, Affirming Love' is a triad heading that LOOKS like the filler-triad pattern audit-criteria flags. It is in fact a verbatim lift from voice_sample atom 73a9658c — the partner's intentional theological language naming three distinct attributes of divine love.",
+      "verbatim_substring": "Generous, Inclusive, Affirming",
+      "rationale":       "Naive triad-pattern matching would flag this. The audit-criteria 'Filler adjective triads' rule explicitly says distinguish filler from intentional ('safe, known, and loved' — distinct semantic weight). This triad lifts from a voice_sample atom — three distinct theological propositions, partner-sacred. The first critique fire DID flag this and then defended it (nit/voice_character that argues it passes); the correct behavior is to NOT flag it at all.",
+      "fail_if_appears_in": ["problem_lines", "directive_notes_at_severity_warning_or_higher"]
+    }
+  ]
+}

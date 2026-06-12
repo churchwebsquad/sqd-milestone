@@ -372,9 +372,9 @@ Final status write: \`{ status: "done" }\` OR \`{ status: "failed", last_error }
     name:         'critique-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  '231de651638e5d04',
+    contentHash:  'b1cf267906073086',
     references:   [
-      'cowork-skills/skills/web-page-reviewer/references/audit-criteria.md',
+      'cowork-skills/critique-page/references/audit-criteria.md',
     ],
     systemPrompt: `# Critique Page
 
@@ -592,6 +592,136 @@ hits. The verdict's \`confidence_band\` is computed from the 5 axes.
 40: Generic warm-fuzzy that any church could've written.
 0:  Demeaning framing of visitor / outsider / non-Christian.
 
+## Procedural decomposition — checkable rules per axis
+
+The rubrics above describe **when** scores apply. The procedures
+below describe **how** to detect specific defect classes. Banked
+2026-06-12 after a known-answer fire showed abstract axis names
+alone don't teach judgment — prose teaches judgment only when
+decomposed into checkable procedure (extraction + lookup +
+comparison). Apply these procedures BEFORE scoring; the rubric is
+the rollup, the procedures are the work.
+
+### claim_plausibility — the source-grounding procedure
+
+For every concrete logistic claim in the draft's \`copy\` (across all
+sections, all slot values), follow this loop:
+
+1. **Extract.** Identify each statement that asserts a logistic
+   fact about the partner. Logistic-fact categories to scan for:
+   - **Location**: address, room name, building name, "in the lobby,"
+     "in the foyer," "in the back room"
+   - **Time**: service times, meeting times, "every Sunday at,"
+     "Wednesdays at 7"
+   - **People + roles**: named staff, "Pastor X," "Teacher Y,"
+     "a teacher will," "our director"
+   - **Process**: "check-in is," "you walk in and," "first you,"
+     "we'll greet you at"
+   - **Numbers + ratios**: ages, capacity, "ages 0 to 4,"
+     "1:5 teacher-child ratio," "30-minute service"
+   - **Named programs**: program names, ministry names,
+     branded class names
+   - **Partner organizations**: named third-party orgs the church
+     references
+
+2. **Lookup.** For each extracted claim, search the inputs:
+   - The \`Atoms allocated to this page\` list (full bodies): does
+     any atom contain this claim?
+   - The facts inputs: does any fact's \`data\` contain this claim?
+   - The persisted outline's atom_assignments: was an atom_id
+     assigned to a slot that should carry this claim?
+
+3. **Decide.** Three outcomes:
+   - **Grounded** in an atom or fact → no action; the draft is
+     honoring the source.
+   - **Implied** by stage_1 or partner context but not in a specific
+     atom/fact → soft signal; mention in summary if it's a stretch.
+   - **Ungrounded** — claim appears in the draft, doesn't appear in
+     any provided atom OR fact → **lift the verbatim line into
+     \`problem_lines\` AND emit a \`claim_plausibility/slot_edit\`
+     directive** with \`note\` naming the specific atom or fact that
+     would be needed (or "no source — drafter invented; needs
+     content collection or atom").
+
+**Worked example** (paratots, 2026-06-12):
+
+  The draft contains: "check-in is inside the lobby, and a teacher
+  will walk you to the room"
+
+  - Extract: location ("inside the lobby"), process ("check-in is"),
+    role + process ("a teacher will walk you to the room")
+  - Lookup: scan atoms_for_page bodies + facts for any of these
+    claims. None found.
+  - Decide: ungrounded → lift to problem_lines + emit
+    \`claim_plausibility/slot_edit\` directive: "Section 3 body
+    invents check-in workflow + teacher-walks-to-room procedure;
+    no atom or fact carries this. Either route to content
+    collection for the partner's actual check-in process or drop
+    the invented logistics."
+
+  Score impact: even ONE ungrounded logistic claim drops
+  claim_plausibility to ≤60 per the rubric ("3+ ungrounded claims
+  OR 1 invented specific"). A draft with ONE ungrounded claim that
+  the critic missed = the critic missed the score.
+
+### voice_character — intra-section coherence procedure
+
+Same-information repetition WITHIN a single section is a defect.
+Cross-section repetition is fine — the same theme echoing is voice.
+The defect is when one section's heading + tagline + multiple items
+all carry the SAME literal logistic in different words; the visitor
+reads the same fact three times in 200 words.
+
+Procedure:
+
+1. For each section in the draft:
+2. Concatenate all text values inside that section's \`copy\`
+   (heading, tagline, body, all items, button labels).
+3. For each logistic-fact category in the claim_plausibility
+   extraction (location, time, people, process, numbers, programs):
+   - Does the SAME logistic appear more than once within this
+     section's concatenation? Same time? Same location? Same
+     teacher name? Same "ages 0 to 4"?
+4. **If yes** → that's an intra-section redundancy defect. Lift
+   one of the repeated lines into \`problem_lines\` AND emit a
+   \`voice_character/slot_edit\` directive citing the section:
+   \`"Section N repeats <fact> across <slot_a> + <slot_b> + …;
+   pick the slot where it lands best and drop the others."\`
+
+**Worked example** (paratots section 3, 2026-06-12):
+
+  Within ONE section, the draft has:
+  - heading: "ParaTots — Saturdays at 9:15 AM"
+  - tagline: "Kids 0-4 meet Saturdays at 9:15 AM"
+  - items[0]: "9:15 AM on Saturday is when ParaTots gathers…"
+  - items[1]: "Saturday morning at 9:15…"
+
+  The time (Saturday 9:15 AM) is repeated 4 times within one
+  section. Cross-section repetition (same time mentioned on home,
+  plan-visit, paratots) is fine — that's reinforcement. Within ONE
+  section is redundancy.
+
+  Lift one repeated line to problem_lines. Emit
+  \`voice_character/slot_edit\` directive: "Section 3 repeats
+  Saturday 9:15 AM across heading + tagline + items[0] + items[1].
+  Pick the slot that lands best (probably tagline as the factual
+  qualifier) and drop the others."
+
+  Score impact: rubric drops voice_character to ≤80 ("Rhythm close,
+  1-2 exemplars echoed") if intra-section redundancy is the only
+  defect; ≤60 if multiple sections have it.
+
+### Apply the procedures BEFORE the rubric
+
+A draft with the two known defects above (ungrounded check-in +
+section 3 redundancy) should score:
+  claim_plausibility: ≤60 (one ungrounded logistic)
+  voice_character:    ≤80 (one section's redundancy)
+
+If your scores are higher AND you emitted no directive for either
+class, you skipped the procedure — re-read the draft section by
+section with the procedure in mind before finalizing scores.
+
 ## Mechanical-scan nuance
 
 - **Triads** — \`\\b\\w+, \\w+,? and \\w+\\b\` is the pattern. Distinguish:
@@ -652,7 +782,7 @@ hits. The verdict's \`confidence_band\` is computed from the 5 axes.
 
 ---
 
-## Reference: cowork-skills/skills/web-page-reviewer/references/audit-criteria.md
+## Reference: cowork-skills/critique-page/references/audit-criteria.md
 
 # Audit Criteria — Global Mechanical Rules
 
