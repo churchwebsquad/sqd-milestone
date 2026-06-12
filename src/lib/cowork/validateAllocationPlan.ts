@@ -17,6 +17,7 @@
  *  - `result.summary` → human-readable multi-line block for logs/UI
  */
 
+import { FLOW_ROLES } from '../../types/coworkBundle'
 import type {
   AtomTopic,
   AllocationTreatment,
@@ -253,9 +254,16 @@ export function validateAllocationPlan(
     }
     const inviteCount = flows.filter(f => f === 'invite').length
     if (inviteCount !== 1)                                  fail('invite_count',       `${pg}: ${inviteCount} invite sections (need exactly 1)`)
+    // Per-section flow_role membership. Previously the only flow_role
+    // checks were hook-first / invite-count / ending — a middle section
+    // with `flow_role: 'commitx'` (or any typo / hallucinated role)
+    // passed silently. Catches that class outright.
     for (const [ix, s] of (a.section_intents ?? []).entries()) {
       if (!s.section_job)                                   fail('missing_section_job',`${pg}[${ix}]`)
       if (!s.sources || s.sources.length === 0)             fail('empty_section',      `${pg}[${ix}] (${s.flow_role}) has no sources`)
+      if (!(FLOW_ROLES as readonly string[]).includes(s.flow_role)) {
+                                                            fail('bad_flow_role',      `${pg}[${ix}] flow_role='${s.flow_role}' not in ${FLOW_ROLES.join('|')}`)
+      }
     }
   }
 

@@ -103,6 +103,44 @@ const results: CaseResult[] = []
   })
 }
 
+// ─── NEGATIVE: middle-section flow_role typo MUST trip bad_flow_role ──────
+// Regression for the Round-N defect: per-section flow_role membership
+// was unchecked. A middle section with 'commitx' / 'evidence' / any
+// typo passed silently. This guards both validators (TS + Python) from
+// drifting back.
+{
+  const manifest = loadJson<AllocationPlanManifest>('manifest.json')
+  const plan     = loadJson<Record<string, unknown>>('paradox-allocation-plan.fable5.json')
+
+  const allocs = (plan.allocations as Array<Record<string, unknown>> | undefined) ?? []
+  // Find a MIDDLE section (not first → not hook, not last → not invite/close)
+  // and replace its flow_role with a value that's NOT in FLOW_ROLES.
+  let mutated = false
+  outer: for (const a of allocs) {
+    const sections = (a.section_intents as Array<Record<string, unknown>> | undefined) ?? []
+    if (sections.length < 3) continue
+    for (let ix = 1; ix < sections.length - 1; ix++) {
+      sections[ix].flow_role = 'commitx'
+      mutated = true
+      break outer
+    }
+  }
+  if (!mutated) {
+    console.error('Could not find a middle section in any allocation to mutate; fixture changed shape.')
+    process.exit(1)
+  }
+
+  const r = validateAllocationPlan(plan, manifest)
+  results.push({
+    name:                 'mutated fixture (middle section flow_role=commitx) fails with bad_flow_role',
+    expected:             'fail',
+    actual:               r.ok ? 'pass' : 'fail',
+    summary:              r.summary,
+    required_checks:      ['bad_flow_role'],
+    required_checks_seen: Object.keys(r.byCheck ?? {}),
+  })
+}
+
 // ─── Report ───────────────────────────────────────────────────────────────
 let exitCode = 0
 for (const c of results) {

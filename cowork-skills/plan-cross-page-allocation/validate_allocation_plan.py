@@ -37,6 +37,10 @@ UNRESOLVED_REASONS = {'crawl_noise_parking_lot','csv_routed_elsewhere',
     'structured_data_routed_to_facts','insufficient_items_for_template',
     'required_slots_unfilled','duplicate_of_placed_source',
     'internal_admin_contact_not_for_publication','insufficient_source_content'}
+# Mirrors FLOW_ROLES in src/types/coworkBundle.ts. Both validators must
+# accept identical vocabularies; the cross-vocab drift check enforces the
+# same membership on the SKILL.md prose side.
+FLOW_ROLES = {'hook','orient','reassure','inform','deepen','invite','close'}
 
 
 def validate(plan, mf):
@@ -140,6 +144,11 @@ def validate(plan, mf):
         for ix, s in enumerate(a.get('section_intents', [])):
             if not s.get('section_job'): fail('missing_section_job', f"{pg}[{ix}]")
             if not s.get('sources'): fail('empty_section', f"{pg}[{ix}] ({s['flow_role']}) has no sources")
+            # Per-section flow_role membership: previously only hook-first /
+            # invite-count / ending were checked, so a middle section with
+            # 'commitx' / 'evidence' / any typo passed silently.
+            if s.get('flow_role') not in FLOW_ROLES:
+                fail('bad_flow_role', f"{pg}[{ix}] flow_role='{s.get('flow_role')}' not in {'|'.join(sorted(FLOW_ROLES))}")
 
     # --- persona entry hooks
     flows_by_slug = {a['page_slug']: [s['flow_role'] for s in a['section_intents']] for a in allocs}
