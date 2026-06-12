@@ -10,6 +10,9 @@ description: |
 model: anthropic/claude-opus-4-7
 allowed-tools: Read
 version: '1.0.0'
+references:
+  - ../canonical-templates.json
+  - ../page-outlines-by-ministry-model.md
 ---
 
 # Outline Page

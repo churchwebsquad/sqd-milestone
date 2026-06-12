@@ -15,6 +15,8 @@
     "check:canonical-templates": "node scripts/check-canonical-templates.mjs",
     "check:canonical-templates:write": "node scripts/check-canonical-templates.mjs --write",
     "check:allocation-validator": "tsx scripts/check-allocation-validator.ts",
+    "check:skill-prompts": "node scripts/generate-skill-prompts.mjs --check",
+    "check:skill-prompts:write": "node scripts/generate-skill-prompts.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -11,6 +11,10 @@ description: |
 model: anthropic/claude-fable-5
 allowed-tools: Read
 version: '1.0.0'
+references:
+  - ../page-outlines-by-ministry-model.md
+  - ../canonical-templates.json
+  - references/storybrand-and-flow.md
 ---
 
 # Plan Cross-Page Allocation

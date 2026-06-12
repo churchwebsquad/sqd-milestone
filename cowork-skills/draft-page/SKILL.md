@@ -9,6 +9,8 @@ description: |
 model: anthropic/claude-fable-5
 allowed-tools: Read
 version: '1.0.0'
+references:
+  - ../canonical-templates.json
 ---
 
 # Draft Page
