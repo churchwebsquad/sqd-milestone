@@ -338,12 +338,18 @@ export default async function handler(req: any, res: any) {
   return res.status(200).json({
     ok:           true,
     page_slug:    pageSlug,
+    outline:      outlineWithMeta,
     skill_meta:   outlineWithMeta._meta,
     importer:     importerJson,
     prompt_resolution: {
       global_source:        resolved.globalSource,
       has_project_addendum: resolved.hasProjectAddendum,
     },
+    /** Validation manifest the endpoint used. Returned so smoke /
+     *  regression scripts can persist it alongside the outline as the
+     *  reproducible fixture-pair — check:page-outline-validator
+     *  re-validates without a Supabase connection. */
+    validation_manifest: localManifest,
   })
 }
 
