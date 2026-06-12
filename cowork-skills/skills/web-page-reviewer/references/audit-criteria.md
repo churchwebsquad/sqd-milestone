@@ -1,6 +1,31 @@
-# Audit Criteria — Detailed
+# Audit Criteria — Global Mechanical Rules
 
-Detailed scan patterns and judgment heuristics for the web-page-reviewer skill.
+> **version:** 1.0.0
+> **scope:** GLOBAL mechanical rules ONLY. Partner-specific
+> configuration (banned_terms, branded_vocabulary, sample_sentences_in_voice,
+> example_phrases_bad, syntax_rules, persuasive_posture_by_persona) is
+> loaded from the partner's `voice_card` at audit time — **never**
+> transcribed into this file or the SKILL.md prose.
+>
+> **What lives here:** craft rules that apply across every partner
+> (no em-dashes, no filler triads, no AI clichés, no self-promoting
+> We/Our, heading-is-a-clean-label, hero-description-invites,
+> visitor-as-hero, primary-CTA-specific, etc.). These rules don't
+> change between churches; they encode Church Media Squad's house
+> craft standard.
+>
+> **What does NOT live here:** anything one specific church bans or
+> brands. Those go in that partner's voice_card. If you find yourself
+> typing a partner's name into this file, stop — that's drift, and
+> P4 from the engineering backlog exists exactly to prevent it.
+>
+> **When to bump version:** any time the craft standard changes
+> (new AI cliché added, new church cliché bumped from yellow to red,
+> CTA rule tightened). Bump the minor for additive checks, major for
+> changes that flip a previously-passing page to fail.
+
+Detailed scan patterns and judgment heuristics for the web-page-reviewer
+skill, applied to every partner equally.
 
 ## Negative-check scan patterns
 

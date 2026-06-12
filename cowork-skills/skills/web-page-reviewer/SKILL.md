@@ -12,11 +12,22 @@ You have fresh eyes. You did not write this copy. You are not invested in the wo
 ## Inputs
 
 - The formatted JSON output from `/format-page` (sections, field_values, alternatives_considered, voice_notes_from_copywriter, mechanical_scan_log, gaps_flagged)
-- The voice card v2 (full — including signature_moves, sample_sentences_in_voice, persuasive_posture_by_persona, banned_terms, branded_vocabulary, syntax_rules, example_phrases_bad)
-- The cross-cutting persuasive patterns reference (loadable from `references/audit-criteria.md` in this skill)
+- The partner's compiled **voice card** (full — including signature_moves, sample_sentences_in_voice, persuasive_posture_by_persona, **banned_terms**, **branded_vocabulary**, syntax_rules, example_phrases_bad)
+- The **global mechanical rules** at `references/audit-criteria.md` (versioned; partner-agnostic — em-dashes, filler triads, AI/church clichés, heading-is-clean-label, hero-description-invites, etc.)
 - (Optional) The original brief, for cross-checking section_jobs were addressed
 
 If any of these are missing, ask the user to provide them before producing a verdict.
+
+### Where rules come from (load order)
+
+This skill's audit is the COMBINATION of two distinct rulesets, loaded at audit time:
+
+| Source | Scope | Versioned at | Examples |
+|---|---|---|---|
+| `references/audit-criteria.md` | **Global** — every partner | File header (v1.0.0) | em-dashes, AI clichés, contrastive reframes, heading-is-clean-label, primary-CTA-specific |
+| Partner's `voice_card` | **Partner-specific** | voice_card._meta.version | banned_terms, branded_vocabulary, sample_sentences_in_voice, example_phrases_bad |
+
+**Never transcribe partner-specific values into this skill's text.** If a church bans the word "casual", that goes into `voice_card.banned_terms`, NOT into SKILL.md or audit-criteria.md. The reviewer always loads the live voice_card; transcribing would create a stale copy that drifts.
 
 ## What you audit
 
