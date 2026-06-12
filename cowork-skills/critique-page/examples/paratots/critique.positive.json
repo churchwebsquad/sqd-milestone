@@ -1,0 +1,66 @@
+{
+  "page_slug": "paratots",
+  "dignity": 92,
+  "voice_character": 90,
+  "persona_fit": 86,
+  "atom_coverage": 96,
+  "claim_plausibility": 90,
+  "standout_lines": [
+    "Raising kids under five is a mystery, and nobody here pretends otherwise. Kids are loud in the lobby and welcome to be. If you have questions about any of it, Teacher Donna reads every email.",
+    "A quiet room off the gathering space with somewhere to sit, feed a baby, or settle a fussy one. If you need a minute to breathe, take it. Nobody is counting.",
+    "Blocks, crayons, and floor time with teachers who know your kid by name. Belonging starts here, before any of it has words.",
+    "before you were even born, god loved you first",
+    "BEGINNING WITH A STRONG SENSE OF BELONGING"
+  ],
+  "problem_lines": [
+    "We want all of our kids to grow up with a sense that God's love is generous, inclusive, and affirming of all human beings.",
+    "Generous, Inclusive, Affirming Love",
+    "ParaTots meets Saturdays at 9:15 AM at 51 W Olive in Redlands, for kids ages 0 to 4. Teacher Donna coordinates the room each week. The whole gathering follows at 10:00, so drop-off and pick-up stay simple."
+  ],
+  "directives": [
+    {
+      "fix_kind": "slot_edit",
+      "page_slug": "paratots",
+      "section_ix": 2,
+      "slot_key": "body",
+      "axis": "claim_plausibility",
+      "severity": "warning",
+      "note": "The body uses '51 W Olive in Redlands' and '9:15 AM' as literal globals/facts. Per snippets consistency rule 13, recurring globals (address, primary_service_time) should be tokenized rather than hardcoded in body slots. Same untokenized literals recur in section 3 body and section 2 items. Confirm whether these should be replaced with snippet tokens (e.g., {{address}}, {{paratots_service_time}}) or accepted as informational logistics."
+    },
+    {
+      "fix_kind": "slot_edit",
+      "page_slug": "paratots",
+      "section_ix": 4,
+      "slot_key": "primary_heading",
+      "axis": "voice_character",
+      "severity": "nit",
+      "note": "'Generous, Inclusive, Affirming Love' is a triad heading. Drafter's voice_notes correctly argue the triad is the church's own intentional language (lifted verbatim from atom 73a9658c), so this passes the triad test — but as a standalone heading without the 'God's love is' lead-in, it reads slightly closer to a marketing tagline than the atom's full sentence does. Consider whether the heading lands as a clean label or if strategist wants it tightened to a shorter cadence."
+    },
+    {
+      "fix_kind": "slot_edit",
+      "page_slug": "paratots",
+      "section_ix": 2,
+      "slot_key": "voice_anchor_resolution",
+      "axis": "voice_character",
+      "severity": "nit",
+      "note": "Outline voice_anchor was 'Saturday evenings in Redlands' but draft correctly used Saturday 9:15 AM per the fact row. Drafter flagged this honestly in validation.flags. No change needed to copy; strategist should confirm the outline anchor was a stale pattern reference, not a service-time error."
+    }
+  ],
+  "summary": "Strong, dignified ParaTots draft that honors the Paradox voice — quiet, unsentimental, parent-respecting. All four atoms land: both verbatim prose snippets (94df26ac, 2528ca66) preserved exactly with casing intact; the voice_sample atom (73a9658c) appears verbatim in section 1 body; the voice_rule atom (be43f59d) is used as tonal anchor without being quoted, which is correct per the lift_phrase treatment. Mechanical scan is clean: no em-dashes, no AI clichés, no banned church clichés ('come as you are' was honored in posture but not quoted, per drafter's deviation_note). The 'generous, inclusive, and affirming' triad is the church's own intentional vocabulary, not filler — passes the triad test. Hero is appropriately quiet (no buttons, no enthusiasm). Section 4 close is a standout: 'Raising kids under five is a mystery, and nobody here pretends otherwise' + verbatim exemplar 'Kids are loud in the lobby and welcome to be.' Persona fit: Lena and Jordan are well-served by the 'generous, inclusive, affirming' framing and the non-performative tone; Marcus is implicit but the no-sell posture serves him. Headings are clean labels. Primary CTA is specific ('Plan a Visit', 'Email Teacher Donna'). Minor concern: globals (address, service time, email) appear as literal strings in body slots — flag for snippets-consistency review, but informational tagline + logistics-section exceptions likely apply. Recommend ship with one strategist skim on the section 2 voice_anchor drift and section 4 heading cadence.\"",
+  "_meta": {
+    "bundle_version": "1.0.0",
+    "skill_name": "critique-page",
+    "skill_version": "1.0.0",
+    "generated_at": "2026-06-12T23:19:12.252Z",
+    "model": "anthropic/claude-opus-4.7",
+    "prompt_hash": "231de651638e5d04",
+    "usage": {
+      "input_tokens": 19577,
+      "output_tokens": 1831,
+      "initial_pass_output_tokens": 1831,
+      "repair_pass_output_tokens": null
+    },
+    "repaired": false,
+    "first_pass_failures": null
+  }
+}
