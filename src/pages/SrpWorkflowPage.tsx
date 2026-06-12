@@ -15,7 +15,7 @@
  * Batches 2-4. See docs/SRP_PORT_PLAN.md.
  */
 
-import { useEffect } from 'react'
+import { useEffect, type ReactElement } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   Building2, ListChecks, FileVideo, Scissors, Film,
@@ -62,7 +62,7 @@ const STEP_ICONS: Record<SrpWorkflowStep, SrpSidebarStepperItem['icon']> = {
   approved:          Sparkles,
 }
 
-const STEP_COMPONENTS: Record<SrpWorkflowStep, () => JSX.Element> = {
+const STEP_COMPONENTS: Record<SrpWorkflowStep, () => ReactElement> = {
   account:           AccountSelectionStep,
   deliverables:      DeliverableSelectionStep,
   sermon:            SermonInputStep,

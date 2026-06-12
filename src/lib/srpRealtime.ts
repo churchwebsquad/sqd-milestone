@@ -64,7 +64,7 @@ export function useSrpSession(sessionId: string | null | undefined): UseSrpSessi
         'postgres_changes' as any,
         { event: 'UPDATE', schema: 'srp_pipeline', table: 'sessions', filter: `session_id=eq.${sessionId}` },
         payload => {
-          const fresh = (payload as { new: SrpPipelineSession })?.new
+          const fresh = (payload as unknown as { new: SrpPipelineSession })?.new
           if (cancelledRef.current || !fresh) return
           setSession(fresh)
         },

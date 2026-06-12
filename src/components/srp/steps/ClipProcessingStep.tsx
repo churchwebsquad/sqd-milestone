@@ -20,7 +20,6 @@ import { useClipcutterJob } from '../../../lib/srpRealtime'
 import { SrpButton } from '../_shared/SrpButton'
 import { callSrpApi } from '../../../lib/srpApi'
 import { STEP_LABELS, STEP_DESCRIPTIONS } from '../../../lib/srpSessions'
-import type { SrpClipSelection } from '../../../types/database'
 
 interface StartClipcutterResponse {
   job_id:         string

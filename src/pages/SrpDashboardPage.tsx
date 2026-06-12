@@ -186,7 +186,7 @@ export default function SrpDashboardPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 font-mono text-[12px] text-[var(--color-purple-gray)]">{s.member ?? '—'}</td>
-                    <td className="px-4 py-3 text-[var(--color-purple-gray)]">{STEP_LABELS[s.current_step ?? ''] ?? s.current_step ?? '—'}</td>
+                    <td className="px-4 py-3 text-[var(--color-purple-gray)]">{s.current_step ? STEP_LABELS[s.current_step] : '—'}</td>
                     <td className="px-4 py-3">
                       <StatusPill status={s.status} />
                     </td>
@@ -242,16 +242,26 @@ function AccountPickerModal({ onCancel, onPick, busy }: {
     setSearching(true)
     const handle = setTimeout(async () => {
       const isNumeric = /^\d+$/.test(q)
-      let req = supabase
+      // Build a single chain rather than reassigning `req` — Supabase's
+      // PostgrestFilterBuilder generics collapse to `never` after the
+      // ternary-then-reassign pattern, hiding row column types.
+      type AccountRow = { member: number | null; church_name: string | null; css_rep: string | null }
+      const baseQuery = supabase
         .from('strategy_account_progress')
         .select('member, church_name, css_rep')
         .limit(20)
-      req = isNumeric ? req.eq('member', Number(q)) : req.ilike('church_name', `%${q}%`)
-      const { data } = await req
+      const res = isNumeric
+        ? await baseQuery.eq('member', Number(q))
+        : await baseQuery.ilike('church_name', `%${q}%`)
+      // PostgrestFilterBuilder generics collapse to `never` under the
+      // .eq() / .ilike() union (different filter-applied generic args),
+      // erasing the column shape we selected. Cast to the concrete row
+      // shape we just selected for.
+      const data = res.data as AccountRow[] | null
       const rows = (data ?? []).map(r => ({
         member: String(r.member ?? ''),
         church_name: String(r.church_name ?? ''),
-        css_rep: r.css_rep as string | null,
+        css_rep: r.css_rep,
       })).filter(r => r.member && r.church_name)
       setResults(rows)
       setSearching(false)
