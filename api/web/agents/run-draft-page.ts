@@ -45,47 +45,69 @@ const TOOL_DESCRIPTION =
   'Emit the page draft conforming to the CoworkPageDraft contract — one section per outline section, ' +
   'each carrying the archetype + voice_notes + copy slot map + atoms_used.'
 
-/** Strict JSON Schema for the forced tool call. `copy` is intentionally
- *  open-shape (additionalProperties: true) — drafter freely populates
- *  slot keys per archetype; the local validator + importer trust-boundary
- *  validate the keys against canonical_templates after the call returns. */
-const TOOL_SCHEMA: ToolSchema = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['page_slug', 'sections', 'deviation_note', 'validation'],
-  properties: {
-    page_slug: { type: 'string' },
-    sections: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['archetype', 'voice_notes', 'copy', 'atoms_used'],
-        properties: {
-          archetype:   { type: 'string' },
-          voice_notes: { type: 'string' },
-          copy:        {
-            type: 'object',
-            additionalProperties: true,
-          },
-          atoms_used:  {
-            type: 'array',
-            items: { type: 'string' },
+/**
+ * Build the JSON Schema for the forced tool call.
+ *
+ * `atoms_used[]` items are enum-constrained to the literal atom_ids
+ * from the outline's atom_assignments (same projection the user
+ * message receives). Implements the three-layer doctrine: schema
+ * enforces IDENTITY for open-vocabulary UUID fields where prose hit
+ * a ceiling (proved on outline-page tune v2: prose only moved
+ * unknown_atom_ref 15 -> 13 on a single sample, sampling noise).
+ *
+ * `copy` stays open-shape (additionalProperties: true) — drafter
+ * freely populates slot keys per archetype; validator + importer
+ * check copy keys against canonical_templates after the call returns.
+ * That's slot-name enforcement; atom_id enforcement is here.
+ *
+ * Build the enum from the SAME projection the user message reads, so
+ * the two can never disagree about what's in scope. atomIdsInScope
+ * MUST come from inputs.atomsForPage (which is queried by
+ * outline.sections[*].atom_assignments[].atom_id and returned in the
+ * user message's "Atoms allocated by the outline" section).
+ */
+function buildToolSchema(atomIdsInScope: string[]): ToolSchema {
+  const atomIdSchema: Record<string, unknown> = atomIdsInScope.length > 0
+    ? { type: 'string', enum: atomIdsInScope }
+    : { type: 'string' }
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['page_slug', 'sections', 'deviation_note', 'validation'],
+    properties: {
+      page_slug: { type: 'string' },
+      sections: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['archetype', 'voice_notes', 'copy', 'atoms_used'],
+          properties: {
+            archetype:   { type: 'string' },
+            voice_notes: { type: 'string' },
+            copy:        {
+              type: 'object',
+              additionalProperties: true,
+            },
+            atoms_used:  {
+              type: 'array',
+              items: atomIdSchema,
+            },
           },
         },
       },
-    },
-    deviation_note: { type: ['string', 'null'] },
-    validation: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['flags', 'unused_atoms'],
-      properties: {
-        flags:        { type: 'array', items: { type: 'string' } },
-        unused_atoms: { type: 'array', items: { type: 'string' } },
+      deviation_note: { type: ['string', 'null'] },
+      validation: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['flags', 'unused_atoms'],
+        properties: {
+          flags:        { type: 'array', items: { type: 'string' } },
+          unused_atoms: { type: 'array', items: { type: 'string' } },
+        },
       },
     },
-  },
+  }
 }
 
 export default async function handler(req: any, res: any) {
@@ -132,6 +154,14 @@ export default async function handler(req: any, res: any) {
     return res.status(500).json({ error: e instanceof Error ? e.message : 'prompt resolve failed' })
   }
 
+  // Build the tool schema per-request — atoms_used items are
+  // enum-constrained to the literal atom_ids from inputs.atomsForPage
+  // (same projection the user message reads — both are derived from
+  // outline.sections[*].atom_assignments[].atom_id). The gateway
+  // physically cannot emit an invalid UUID. See buildToolSchema for
+  // the three-layer doctrine.
+  const toolSchema = buildToolSchema(inputs.atomsForPage.map(a => a.id))
+
   // 4. Call gateway → local validate → repair-on-422 → re-validate.
   const baseUserMessage = buildUserMessage(pageSlug, inputs)
   let gatewayResult: Awaited<ReturnType<typeof callGateway>>
@@ -145,7 +175,7 @@ export default async function handler(req: any, res: any) {
       user:            baseUserMessage,
       toolName:        TOOL_NAME,
       toolDescription: TOOL_DESCRIPTION,
-      toolSchema:      TOOL_SCHEMA,
+      toolSchema,
       // draft-page output is the densest of the cowork artifacts —
       // every slot of every section. Fable 5 on a page with ~6 sections
       // × ~5 slots can hit the default 1500 ceiling.
@@ -186,7 +216,7 @@ export default async function handler(req: any, res: any) {
         user:            repairMessage,
         toolName:        TOOL_NAME,
         toolDescription: TOOL_DESCRIPTION,
-        toolSchema:      TOOL_SCHEMA,
+        toolSchema,
         maxTokens:       16000,
       })
     } catch (e) {

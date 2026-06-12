@@ -66,63 +66,98 @@ const TOOL_DESCRIPTION =
   'with archetype + section_job + flow_role + atom_assignments referencing real atom_ids ' +
   'from the project inventory.'
 
-/** JSON Schema for the forced tool call. Strict — every load-bearing
- *  field is required + additionalProperties:false so the gateway
- *  refuses malformed outputs at the wire. */
-const TOOL_SCHEMA: ToolSchema = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['page_slug', 'ministry_model_alignment', 'sections', 'unresolved_inputs'],
-  properties: {
-    page_slug: { type: 'string' },
-    ministry_model_alignment: {
-      type: 'string',
-      enum: ['attractional', 'discipleship', 'missional', 'mixed'],
-    },
-    sections: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['section_ix', 'archetype', 'section_job', 'flow_role',
-                   'voice_anchor', 'anti_pattern_to_avoid', 'atom_assignments'],
-        properties: {
-          section_ix:        { type: 'integer', minimum: 0 },
-          archetype:         { type: 'string' },
-          section_job:       { type: 'string' },
-          flow_role:         { type: 'string', enum: [...FLOW_ROLES] },
-          voice_anchor:      { type: 'string' },
-          anti_pattern_to_avoid: { type: 'string' },
-          cms_managed:       { type: 'boolean' },
-          atom_assignments:  {
-            type: 'array',
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              required: ['atom_id', 'treatment', 'slot_hint'],
-              properties: {
-                atom_id:    { type: 'string' },
-                treatment:  { type: 'string', enum: ['use_as_is', 'lift_phrase', 'compress', 'expand', 'reorder', 'omit'] },
-                slot_hint:  { type: 'string' },
+/**
+ * Build the JSON Schema for the forced tool call, with `atom_id`
+ * enum-constrained to the literal atom_ids from the user message's
+ * atoms-for-this-page projection.
+ *
+ * THE THREE-LAYER DOCTRINE (banked from the SKILL tune v2 experiment
+ * on 2026-06-12):
+ *   1. Prose teaches SHAPE — deterministic for structural rules
+ *      (slot_hint format, escape-hatch usage). v1 tune got both to
+ *      exact zero on first fire.
+ *   2. Schema enforces IDENTITY — open-vocabulary fields (UUIDs,
+ *      registries, anything beyond a closed enum) hit a prose
+ *      ceiling and need tool-schema-level enforcement. v2 prose
+ *      tune on atom_id only moved unknown_atom_ref 15 -> 13
+ *      (sampling noise). Schema-enum makes invalid IDs impossible
+ *      by construction.
+ *   3. Importer is the TRUST BOUNDARY — defense in depth. Validators
+ *      stay even when schema enforces, because schema enforcement
+ *      depends on the gateway honoring strict tool schemas. Free
+ *      check, real safety.
+ *
+ * Build the enum from the SAME projection the user message receives
+ * so the two can never disagree about what's in scope. (atomIdsInScope
+ * here MUST come from inputs.atomsForPage.map(a => a.id) — the same
+ * source `buildUserMessage` reads.)
+ *
+ * Edge case: empty atomIdsInScope. If a page has zero allocated atoms,
+ * an empty `enum: []` would make the schema invalid (no value can
+ * satisfy it). We instead drop the enum and allow any string — but
+ * then there's also no valid atom_assignments to emit, so this case
+ * should round-trip with sections.atom_assignments = []. The
+ * validator will catch any drift.
+ */
+function buildToolSchema(atomIdsInScope: string[]): ToolSchema {
+  const atomIdSchema: Record<string, unknown> = atomIdsInScope.length > 0
+    ? { type: 'string', enum: atomIdsInScope }
+    : { type: 'string' }
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['page_slug', 'ministry_model_alignment', 'sections', 'unresolved_inputs'],
+    properties: {
+      page_slug: { type: 'string' },
+      ministry_model_alignment: {
+        type: 'string',
+        enum: ['attractional', 'discipleship', 'missional', 'mixed'],
+      },
+      sections: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['section_ix', 'archetype', 'section_job', 'flow_role',
+                     'voice_anchor', 'anti_pattern_to_avoid', 'atom_assignments'],
+          properties: {
+            section_ix:        { type: 'integer', minimum: 0 },
+            archetype:         { type: 'string' },
+            section_job:       { type: 'string' },
+            flow_role:         { type: 'string', enum: [...FLOW_ROLES] },
+            voice_anchor:      { type: 'string' },
+            anti_pattern_to_avoid: { type: 'string' },
+            cms_managed:       { type: 'boolean' },
+            atom_assignments:  {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['atom_id', 'treatment', 'slot_hint'],
+                properties: {
+                  atom_id:    atomIdSchema,
+                  treatment:  { type: 'string', enum: ['use_as_is', 'lift_phrase', 'compress', 'expand', 'reorder', 'omit'] },
+                  slot_hint:  { type: 'string' },
+                },
               },
             },
           },
         },
       },
-    },
-    unresolved_inputs: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['what', 'where'],
-        properties: {
-          what:  { type: 'string' },
-          where: { type: 'string' },
+      unresolved_inputs: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['what', 'where'],
+          properties: {
+            what:  { type: 'string' },
+            where: { type: 'string' },
+          },
         },
       },
     },
-  },
+  }
 }
 
 export default async function handler(req: any, res: any) {
@@ -172,6 +207,13 @@ export default async function handler(req: any, res: any) {
     return res.status(500).json({ error: e instanceof Error ? e.message : 'manifest build failed' })
   }
 
+  // Build the tool schema per-request — atom_id is enum-constrained
+  // to the literal atom_ids from inputs.atomsForPage (same projection
+  // the user message reads). Makes invalid UUIDs structurally
+  // impossible at the gateway layer. See buildToolSchema comment for
+  // the three-layer doctrine this implements.
+  const toolSchema = buildToolSchema(inputs.atomsForPage.map(a => a.id))
+
   // 3-4. Call gateway → validate locally → repair-on-422 → re-validate.
   // The repair loop runs LOCALLY before the importer ever sees the
   // outline. Importer still re-validates as the trust boundary; this
@@ -189,7 +231,7 @@ export default async function handler(req: any, res: any) {
       user:            baseUserMessage,
       toolName:        TOOL_NAME,
       toolDescription: TOOL_DESCRIPTION,
-      toolSchema:      TOOL_SCHEMA,
+      toolSchema,
       maxTokens:       12000,
     })
   } catch (e) {
@@ -233,7 +275,7 @@ export default async function handler(req: any, res: any) {
         user:            repairMessage,
         toolName:        TOOL_NAME,
         toolDescription: TOOL_DESCRIPTION,
-        toolSchema:      TOOL_SCHEMA,
+        toolSchema,
         maxTokens:       12000,
       })
     } catch (e) {
