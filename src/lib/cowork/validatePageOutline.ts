@@ -28,20 +28,23 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import type { CoworkPageOutline } from '../../types/coworkBundle.js'
+import { FLOW_ROLES, type CoworkPageOutline } from '../../types/coworkBundle.js'
 
 export interface PageOutlineValidationManifest {
   /** active+draft atom_ids the project has. */
   atom_ids: string[]
-  /** active+draft fact_ids the project has. */
-  fact_ids: string[]
-  /** canonical-templates.json under the project's manifest version. The
-   *  keys of `concepts` are the valid archetype names. */
+  /** canonical-templates.json under the project's manifest version.
+   *  The keys of `page_section_templates` are the valid archetype
+   *  names. */
   canonical_templates: CanonicalTemplateManifest
   /** The page_slug this outline is FOR — used to confirm the outline
    *  emits the right slug. */
   expected_page_slug: string
 }
+// NOTE: fact_ids removed. CoworkPageOutline.sections[].atom_assignments
+// is the only binding shape today — facts arrive on the page via the
+// allocation slice but are referenced at draft time by id-lookup, not
+// from outline output. Re-add when outline-page output grows fact bindings.
 
 export interface CanonicalTemplateManifest {
   version: string
@@ -183,11 +186,11 @@ export function validatePageOutline(
         `${sectionLabel} section_job='${job}' is missing or trivially short — every section must declare its job`)
     }
 
-    // flow_role must be one of the known flow roles
-    const VALID_FLOW_ROLES = new Set(['hook', 'orient', 'commit', 'reassure', 'evidence', 'invite'])
-    if (!VALID_FLOW_ROLES.has(s.flow_role as string)) {
+    // flow_role must be one of FLOW_ROLES (sourced from coworkBundle.ts;
+    // any drift trips check:skill-prompts before this code ever runs).
+    if (!(FLOW_ROLES as readonly string[]).includes(s.flow_role)) {
       fail('bad_flow_role',
-        `${sectionLabel} flow_role='${s.flow_role}' not in valid set ${[...VALID_FLOW_ROLES].join('|')}`)
+        `${sectionLabel} flow_role='${s.flow_role}' not in valid set ${FLOW_ROLES.join('|')}`)
     }
 
     // voice_anchor + anti_pattern_to_avoid must be non-empty (they feed

@@ -152,7 +152,7 @@ export default async function handler(req: any, res: any) {
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
   if (bundleKind === 'page_allocation_plan') {
-    // Build or use provided manifest
+      // Build or use provided manifest
     let manifest: AllocationPlanManifest
     try {
       manifest = manifestIn ?? (await buildManifestFromProject(sb, projectId))
@@ -272,35 +272,29 @@ export default async function handler(req: any, res: any) {
  *   - atom_ids: every active+draft content_atom for the project (the
  *     outline's atom_assignments MUST reference one of these — catches
  *     hallucinated UUIDs).
- *   - fact_ids: same for church_facts (held for future expansion when
- *     outline-page binds fact rows directly).
- *   - canonical_templates: the concept→slots map; archetype/slot_hint
- *     checks resolve against this.
+ *   - canonical_templates: archetype → cowork_writable_slots map;
+ *     archetype/slot_hint checks resolve against this.
  *   - expected_page_slug: confirms the outline targets the right page.
+ *
+ * NOTE: church_facts are NOT loaded — the current CoworkPageOutline
+ * shape only carries atom_assignments. When outline-page grows fact
+ * bindings, add fact_ids to the manifest + validator together.
  */
 async function buildPageOutlineManifestFromProject(
   sb:        any,
   projectId: string,
   pageSlug:  string,
 ): Promise<PageOutlineValidationManifest> {
-  const [atomsRes, factsRes] = await Promise.all([
-    sb.from('content_atoms')
-      .select('id')
-      .eq('web_project_id', projectId)
-      .in('status', ['active', 'draft']),
-    sb.from('church_facts')
-      .select('id')
-      .eq('web_project_id', projectId)
-      .in('status', ['active', 'draft']),
-  ])
+  const atomsRes = await sb.from('content_atoms')
+    .select('id')
+    .eq('web_project_id', projectId)
+    .in('status', ['active', 'draft'])
   if (atomsRes.error) throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
-  if (factsRes.error) throw new Error(`church_facts load failed: ${factsRes.error.message}`)
 
   const canonical_templates = loadCanonicalTemplates()
 
   return {
     atom_ids: (atomsRes.data ?? []).map((r: any) => String(r.id)),
-    fact_ids: (factsRes.data ?? []).map((r: any) => String(r.id)),
     canonical_templates,
     expected_page_slug: pageSlug,
   }

@@ -43,7 +43,7 @@ import { createClient } from '@supabase/supabase-js'
 
 import { callGateway, type ToolSchema } from '../../srp/_lib/aiGateway.js'
 import { resolveCoworkSkill } from './_lib/resolveCoworkSkill.js'
-import { BUNDLE_VERSION } from '../../../src/types/coworkBundle.js'
+import { BUNDLE_VERSION, FLOW_ROLES } from '../../../src/types/coworkBundle.js'
 
 // Cowork outline calls are model-driven on Opus 4.7 with sizable
 // inputs (allocation slice + atoms + facts + stage_1). Opt into the
@@ -80,7 +80,7 @@ const TOOL_SCHEMA: ToolSchema = {
           section_ix:        { type: 'integer', minimum: 0 },
           archetype:         { type: 'string' },
           section_job:       { type: 'string' },
-          flow_role:         { type: 'string', enum: ['hook', 'orient', 'commit', 'reassure', 'evidence', 'invite'] },
+          flow_role:         { type: 'string', enum: [...FLOW_ROLES] },
           voice_anchor:      { type: 'string' },
           anti_pattern_to_avoid: { type: 'string' },
           cms_managed:       { type: 'boolean' },

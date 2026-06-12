@@ -73,15 +73,25 @@ export type MinistryModel = 'attractional' | 'discipleship' | 'missional'
  *  - synthesize   = combine with other atoms or invent fresh prose informed by atom */
 export type TreatmentSignal = 'verbatim' | 'light_edit' | 'heavy_edit' | 'synthesize'
 
-/** Per-section narrative role. Borrowed from in-app site_strategy work. */
-export type FlowRole =
-  | 'hook'      // grab attention
-  | 'orient'    // establish what this is / where we are
-  | 'reassure'  // address the specific barrier the persona carries
-  | 'inform'    // deliver the facts
-  | 'deepen'    // add texture / show character
-  | 'invite'    // offer the next step
-  | 'close'     // close the page with intent
+/** Per-section narrative role. Borrowed from in-app site_strategy work.
+ *
+ * IMPORTANT: This tuple is THE single source for the flow_role enum.
+ * Validator sets, JSON-schema enums, prose tables in SKILL.md — every
+ * one of them imports from here (or is checked against here by
+ * check:skill-prompts). Adding a token here is the ONLY way to extend
+ * the vocabulary; spelling a new value in a downstream consumer trips
+ * the drift check. */
+export const FLOW_ROLES = [
+  'hook',      // grab attention
+  'orient',    // establish what this is / where we are
+  'reassure',  // address the specific barrier the persona carries
+  'inform',    // deliver the facts
+  'deepen',    // add texture / show character
+  'invite',    // offer the next step
+  'close',     // close the page with intent
+] as const
+
+export type FlowRole = typeof FLOW_ROLES[number]
 
 // ── Artifacts ────────────────────────────────────────────────────────────
 

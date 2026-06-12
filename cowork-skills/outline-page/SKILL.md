@@ -86,8 +86,10 @@ can't use it.
   sections: Array<{
     /** From the allocation's section_intent. Preserve verbatim. */
     section_intent_id: string
-    /** Closed enum — must match the allocation's flow_role. */
-    flow_role:        'hook' | 'orient' | 'commit' | 'reassure' | 'evidence' | 'invite'
+    /** Closed enum — must match the allocation's flow_role. Sourced
+     *  from FLOW_ROLES in src/types/coworkBundle.ts: 'hook' | 'orient' |
+     *  'reassure' | 'inform' | 'deepen' | 'invite' | 'close'. */
+    flow_role:        'hook' | 'orient' | 'reassure' | 'inform' | 'deepen' | 'invite' | 'close'
     /** Canonical template KEY from canonical_templates. NEVER a raw
      *  Brixies slug. */
     template_key:     string

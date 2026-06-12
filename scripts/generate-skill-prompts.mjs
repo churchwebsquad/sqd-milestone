@@ -121,6 +121,21 @@ function toIdentifier(skillName) {
   return skillName.replace(/-/g, '_')
 }
 
+/**
+ * Read a `const X = [ 'a', 'b', ... ] as const` tuple out of a TS file
+ * and return the string members. Cheap regex parser — works for our
+ * declarations (always literal string tuples on contiguous lines).
+ * Returns null if not found.
+ */
+function readTsConstTuple(relPath, name) {
+  const abs = resolve(REPO_ROOT, relPath)
+  if (!existsSync(abs)) return null
+  const raw = readFileSync(abs, 'utf8')
+  const m = raw.match(new RegExp(`export\\s+const\\s+${name}\\s*=\\s*\\[([\\s\\S]*?)\\]\\s*as\\s+const`))
+  if (!m) return null
+  return [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1])
+}
+
 const skills = []
 
 for (const entry of readdirSync(SKILLS_DIR)) {
@@ -182,6 +197,75 @@ skills.sort((a, b) => a.name.localeCompare(b.name))
 if (skills.length === 0) {
   console.error('no SKILL.md files found under cowork-skills/*/')
   process.exit(1)
+}
+
+// ─── Cross-vocab assertion ─────────────────────────────────────────────────
+// Prose enum lists in SKILL bodies drift silently from TS type unions; the
+// flow_role fork (Round N) is the proof. For each TS-canonical enum we care
+// about, scan every SKILL body for a TypeScript-union-shaped line on the
+// same field name + assert every token is in the canonical set. Two-way:
+// extra tokens in prose (e.g. 'commit'/'evidence') fail loudly; missing
+// tokens only warn (a skill may legitimately omit some). Add new vocab
+// dimensions here as they appear.
+
+const VOCAB_DIMENSIONS = [
+  {
+    field:     'flow_role',
+    canonical: readTsConstTuple('src/types/coworkBundle.ts', 'FLOW_ROLES'),
+  },
+  // Add more as new TS-anchored vocabularies surface (e.g. TREATMENTS,
+  // CONTENT_TOPICS, UNRESOLVED_REASONS). Pattern is identical.
+]
+
+const vocabDrift = []
+for (const skill of skills) {
+  // Concatenate body + each reference (already in systemPrompt), but
+  // re-read SKILL.md raw so the prose lives in its source location for
+  // accurate reporting — references are loose docs, drift in them is
+  // less load-bearing than in the SKILL itself.
+  const skillFile = join(SKILLS_DIR, skill.name, 'SKILL.md')
+  const raw = readFileSync(skillFile, 'utf8')
+
+  for (const dim of VOCAB_DIMENSIONS) {
+    if (!dim.canonical) continue   // couldn't parse TS — skip dimension
+    // Match a TypeScript-union-typed line: `  field: 'a' | 'b' | 'c' …`
+    // (and the same pattern inside JSDoc / interface bodies).
+    const linePattern = new RegExp(`\\b${dim.field}\\s*[:?]\\s*((?:'[^']+'\\s*\\|\\s*)+'[^']+')`, 'g')
+    for (const m of raw.matchAll(linePattern)) {
+      const tokens = [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1])
+      const unknown = tokens.filter(t => !dim.canonical.includes(t))
+      const missing = dim.canonical.filter(t => !tokens.includes(t))
+      if (unknown.length || missing.length) {
+        vocabDrift.push({
+          skill:     skill.name,
+          field:     dim.field,
+          canonical: dim.canonical,
+          observed:  tokens,
+          unknown,
+          missing,
+        })
+      }
+    }
+  }
+}
+
+if (vocabDrift.length > 0) {
+  console.error(`✗ cowork enum drift: ${vocabDrift.length} prose enum(s) disagree with the TS canonical`)
+  for (const d of vocabDrift) {
+    console.error(`  ${d.skill} :: ${d.field}`)
+    console.error(`    canonical: ${d.canonical.join(' | ')}`)
+    console.error(`    in SKILL:  ${d.observed.join(' | ')}`)
+    if (d.unknown.length) console.error(`    UNKNOWN (in prose, not in type): ${d.unknown.join(', ')}`)
+    if (d.missing.length) console.error(`    MISSING (in type, not in prose): ${d.missing.join(', ')}`)
+  }
+  if (CHECK_ONLY) {
+    process.exit(1)
+  } else {
+    // In --write mode, still fail. The generator is for refreshing the
+    // bundle, not papering over drift — fix the SKILL.md by hand.
+    console.error('\nFix the SKILL.md prose to match the TS canonical, then re-run.')
+    process.exit(1)
+  }
 }
 
 // Build the TS module text.

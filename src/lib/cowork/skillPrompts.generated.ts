@@ -2231,7 +2231,7 @@ personas; use the names exactly as stage_1 emitted them.
     name:         'outline-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  '04ca7f3f29b0f043',
+    contentHash:  'fb5f867ff872149b',
     references:   [
       'cowork-skills/canonical-templates.json',
       'cowork-skills/page-outlines-by-ministry-model.md',
@@ -2307,8 +2307,10 @@ can't use it.
   sections: Array<{
     /** From the allocation's section_intent. Preserve verbatim. */
     section_intent_id: string
-    /** Closed enum — must match the allocation's flow_role. */
-    flow_role:        'hook' | 'orient' | 'commit' | 'reassure' | 'evidence' | 'invite'
+    /** Closed enum — must match the allocation's flow_role. Sourced
+     *  from FLOW_ROLES in src/types/coworkBundle.ts: 'hook' | 'orient' |
+     *  'reassure' | 'inform' | 'deepen' | 'invite' | 'close'. */
+    flow_role:        'hook' | 'orient' | 'reassure' | 'inform' | 'deepen' | 'invite' | 'close'
     /** Canonical template KEY from canonical_templates. NEVER a raw
      *  Brixies slug. */
     template_key:     string
