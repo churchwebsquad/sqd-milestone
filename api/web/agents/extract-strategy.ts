@@ -113,7 +113,10 @@ export default async function handler(req: any, res: any) {
     : null
   if (!jwt) return res.status(401).json({ error: 'Missing Authorization bearer token' })
 
-  const authClient = createClient(supabaseUrl, anonKey)
+  // Non-null assertions: the early-return guard above already verified all
+  // three are present (returns 500 with the missing list); TS just can't
+  // narrow across the array-collect pattern.
+  const authClient = createClient(supabaseUrl!, anonKey!)
   const { data: userData, error: userErr } = await authClient.auth.getUser(jwt)
   if (userErr || !userData?.user) return res.status(401).json({ error: 'Invalid session' })
 
@@ -123,7 +126,7 @@ export default async function handler(req: any, res: any) {
   const mock = req.body?.mock === true
   if (!projectId) return res.status(400).json({ error: 'projectId required' })
 
-  const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
+  const sb = createClient(supabaseUrl!, serviceRoleKey!, { auth: { persistSession: false } })
 
   // ── Load project ────────────────────────────────────────────────────
   const { data: project, error: projErr } = await sb

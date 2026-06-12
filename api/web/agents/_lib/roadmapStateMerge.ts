@@ -22,8 +22,13 @@
 // banned. Search the repo for `roadmap_state:` in `.update(` and
 // migrate any straggler.
 
+/** Minimal client shape this module needs — just `.rpc(name, args)` that
+ *  returns a thenable yielding `{data, error}`. PromiseLike (not Promise)
+ *  so the supabase-js PostgrestFilterBuilder — which is awaitable but
+ *  carries extra builder methods — assigns structurally. Lets all
+ *  callers pass their full `createClient(...)` result without a cast. */
 export type SupabaseClientLike = {
-  rpc(name: string, args: Record<string, unknown>): Promise<{ data: unknown; error: { message: string } | null }>
+  rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: { message: string } | null }>
 }
 
 /** Atomically set a slot in roadmap_state. The path is a JSON path

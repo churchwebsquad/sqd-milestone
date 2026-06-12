@@ -22,6 +22,7 @@ import {
   validateAllocationPlan,
   type AllocationPlanManifest,
 } from '../src/lib/cowork/validateAllocationPlan.ts'
+import type { CoworkPageAllocationPlan } from '../src/types/coworkBundle.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FIXTURE_DIR = join(
@@ -55,7 +56,7 @@ const results: CaseResult[] = []
   const manifest = loadJson<AllocationPlanManifest>('manifest.json')
   const plan     = loadJson<Record<string, unknown>>('paradox-allocation-plan.fable5.json')
 
-  const r = validateAllocationPlan(plan, manifest)
+  const r = validateAllocationPlan(plan as unknown as CoworkPageAllocationPlan, manifest)
   results.push({
     name:     'paradox-99005 fixture passes',
     expected: 'pass',
@@ -92,7 +93,7 @@ const results: CaseResult[] = []
     }
   }
 
-  const r = validateAllocationPlan(plan, manifest)
+  const r = validateAllocationPlan(plan as unknown as CoworkPageAllocationPlan, manifest)
   results.push({
     name:                 'mutated fixture (hallucinated atom_ref) fails with unknown_ref',
     expected:             'fail',
@@ -130,7 +131,7 @@ const results: CaseResult[] = []
     process.exit(1)
   }
 
-  const r = validateAllocationPlan(plan, manifest)
+  const r = validateAllocationPlan(plan as unknown as CoworkPageAllocationPlan, manifest)
   results.push({
     name:                 'mutated fixture (middle section flow_role=commitx) fails with bad_flow_role',
     expected:             'fail',
