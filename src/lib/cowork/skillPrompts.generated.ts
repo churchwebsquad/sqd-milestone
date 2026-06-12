@@ -2231,7 +2231,7 @@ personas; use the names exactly as stage_1 emitted them.
     name:         'outline-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  'fb5f867ff872149b',
+    contentHash:  '9271ace78afa8629',
     references:   [
       'cowork-skills/canonical-templates.json',
       'cowork-skills/page-outlines-by-ministry-model.md',
@@ -2419,6 +2419,75 @@ For each required slot:
 
 **Verbatim atoms (\`verbatim: true\`) MUST be bound \`use_as_is\`.** The
 allocation passes the atom's treatment through; preserve.
+
+## slot_hint format — the literal shape that lands
+
+Every \`atom_assignments[].slot_hint\` is a string keyed against
+\`canonical_templates.page_section_templates[<archetype>].cowork_writable_slots\`.
+Two shapes only:
+
+| Form | When | Literal examples |
+|---|---|---|
+| \`'<slot_name>'\` | Top-level scalar slot on the archetype | \`'primary_heading'\`, \`'body'\`, \`'tagline'\`, \`'accent_body'\` |
+| \`'<slot_name>[N].<sub_field>'\` | One element of an array-shaped slot (\`items\`, \`buttons\`, etc.). N is 0-indexed. | \`'items[0].item_heading'\`, \`'items[2].item_body'\`, \`'buttons[0].label'\`, \`'buttons[1].url'\` |
+
+**The validator strips \`[N].<sub_field>\` and checks the remaining
+top-level slot exists on the archetype.** So \`'items[7].item_body'\`
+validates against the archetype's \`items\` slot — the \`[7]\` index is
+where draft-page reads from later (it doesn't bind cardinality here;
+that's bound by the archetype's \`max_items\`).
+
+**Concrete walk-through.** Archetype \`hero_homepage\` declares
+\`cowork_writable_slots: { tagline, primary_heading, body, buttons }\`.
+Valid \`slot_hint\` values for it: \`'tagline'\`, \`'primary_heading'\`,
+\`'body'\`, \`'buttons[0].label'\`, \`'buttons[0].url'\`,
+\`'buttons[1].label'\`, \`'buttons[1].url'\`. **Invalid (the validator
+will trip \`bad_slot_hint\`):** \`'hero_tagline'\` (no such slot),
+\`'heading'\` (no such slot — the slot is \`primary_heading\`),
+\`'cta_label'\` (wrong vocabulary — buttons live in \`buttons[N].label\`),
+\`'tagline.eyebrow'\` (tagline is scalar, no sub-field).
+
+The vocabulary is whatever the archetype's \`cowork_writable_slots\`
+dictionary literally names. Never invent slot names; never reuse a
+slot name from a different archetype. The canonical-templates manifest
+is concatenated into this skill's system prompt — read it.
+
+## Unresolved inputs — the escape hatch when no atom fits
+
+If a required slot has NO allocated atom that fits + no fact + no
+merge token + no directive you can write honestly, declare the gap in
+\`unresolved_inputs[]\` and move on. **Never invent content. Never leave
+a required slot silently empty.** The validator honors this escape
+hatch: a required slot uncovered by \`atom_assignments\` AND named
+clearly in \`unresolved_inputs\` is accepted (the strategist sees the
+gap and decides whether to route back to content collection, lower
+the archetype's required-slot count, or accept it).
+
+Format:
+
+\`\`\`json
+"unresolved_inputs": [
+  {
+    "what":  "no atom fits primary_heading for section 'hero' — allocation gave only descriptive prose, no headline-length phrase",
+    "where": "sections[0] (hero, hero_homepage) — slot 'primary_heading'"
+  },
+  {
+    "what":  "no service-time fact for the 'sundays' section's items[0]",
+    "where": "sections[2] (sundays, content_image_text_a) — slot 'items[0].item_body'"
+  }
+]
+\`\`\`
+
+**Both fields required.** \`what\` names the GAP (what's missing and
+why); \`where\` names the section + archetype + slot the gap is in.
+Always include the slot name in \`where\` — the validator does a
+substring match on the slot name to verify the gap is named, not just
+hand-waved.
+
+**Use sparingly.** > 1 unresolved per section is a structural smell;
+the allocation probably wasn't tight enough. Surface in
+\`report.notes\` if you find yourself declaring 2+ unresolved on the
+same section.
 
 ## Per-page section count
 
