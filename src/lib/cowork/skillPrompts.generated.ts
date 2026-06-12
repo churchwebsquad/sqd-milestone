@@ -2231,7 +2231,7 @@ personas; use the names exactly as stage_1 emitted them.
     name:         'outline-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  '9271ace78afa8629',
+    contentHash:  'c0d743c7e3c7478f',
     references:   [
       'cowork-skills/canonical-templates.json',
       'cowork-skills/page-outlines-by-ministry-model.md',
@@ -2488,6 +2488,48 @@ hand-waved.
 the allocation probably wasn't tight enough. Surface in
 \`report.notes\` if you find yourself declaring 2+ unresolved on the
 same section.
+
+## atom_id discipline — never invent
+
+Every \`atom_assignments[].atom_id\` MUST be a verbatim copy of an
+atom_id from the user message's "Atoms allocated to this page" list.
+The atom IDs are UUIDs (\`a1b2c3d4-...\`); they're meaningless to a
+reader; the validator does an exact-string lookup against the
+project's live \`content_atoms\` rows.
+
+**The rules:**
+
+- Copy each \`atom_id\` **character-for-character** from the user
+  message. Do not abbreviate. Do not synthesize. Do not generate a
+  UUID that "looks right." Do not write \`null\` or a placeholder.
+- If you want to reference content that isn't in the user message's
+  atoms list, declare the gap in \`unresolved_inputs\` instead (the
+  escape hatch covers atoms, not just slots — \`what: "no atom in the
+  allocation for X concept", where: "sections[2] section_job"\`).
+- If you find yourself starting to write an atom_id you can't
+  literally see in the user message, stop. That's the moment to add
+  an \`unresolved_inputs\` entry, not invent.
+
+**Why this matters at the metric layer:** the validator rejects
+\`atom_assignments[]\` with atom_id values that aren't in the project's
+inventory (\`unknown_atom_ref\` check). If you guess, the validator
+catches it AND the repair loop has to re-call you to fix it — extra
+latency, extra tokens. The first-pass \`unknown_atom_ref\` count in
+\`_meta.first_pass_failures.by_check\` is the telemetry that proves
+you're following this rule. **Target: 0 every fire.**
+
+**Worked example.** User message includes:
+\`\`\`json
+[
+  {"id": "7c1a82ee-9f33-4b1c-a3fd-1ed2b9c5740a", "topic": "value_statement", "body": "...", "verbatim": true},
+  {"id": "b8e44210-c0d9-4e57-9281-7ad4f0b69e8b", "topic": "ministry",        "body": "...", "verbatim": false},
+  {"id": "2f9a51c7-3e8b-49d2-8fc3-50a6b1d8e9cc", "topic": "service_time",    "body": "...", "verbatim": false}
+]
+\`\`\`
+Valid \`atom_assignments[].atom_id\` values: exactly those three UUIDs,
+character-for-character. **Invalid (every one of these trips
+unknown_atom_ref):** \`'7c1a82ee'\` (truncated), \`'00000000-0000-0000-
+0000-000000000000'\` (placeholder), any UUID not in that exact list.
 
 ## Per-page section count
 

@@ -16,9 +16,11 @@
     "check:canonical-templates:write": "node scripts/check-canonical-templates.mjs --write",
     "check:allocation-validator": "tsx scripts/check-allocation-validator.ts",
     "check:page-outline-validator": "tsx scripts/check-page-outline-validator.ts",
+    "check:draft-page-validator": "tsx scripts/check-draft-page-validator.ts",
     "check:skill-prompts": "node scripts/generate-skill-prompts.mjs --check",
     "check:skill-prompts:write": "node scripts/generate-skill-prompts.mjs",
     "smoke:outline": "tsx scripts/cowork-smoke-outline.ts",
+    "smoke:draft": "tsx scripts/cowork-smoke-draft.ts",
     "preview": "vite preview"
   },
   "dependencies": {
