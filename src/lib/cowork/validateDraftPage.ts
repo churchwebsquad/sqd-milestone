@@ -43,13 +43,38 @@ import type {
   CanonicalTemplateManifest,
 } from './validatePageOutline.js'
 
+/** Topics whose atoms are STYLISTIC GUIDANCE, not slot content. A
+ *  voice_rule says "don't write 'walk with God' — write 'walk
+ *  alongside'." A voice_sample is an exemplar sentence to imitate.
+ *  A tone_descriptor is a posture adjective. None of these belong as
+ *  literal text in a slot (a `primary_heading: "don't write 'walk
+ *  with God'"` is nonsensical). The drafter IMITATES these; the
+ *  verbatim-substring rule does not apply.
+ *
+ *  Surfaced 2026-06-12 during the first Fable 5 smoke fire: outline
+ *  assigned voice_rule atoms to 4 sections × ~3 slots each; Fable 5
+ *  correctly imitated the style instead of pasting the rule text;
+ *  the validator wrongly tripped verbatim_atom_dropped. Reframed:
+ *  Fable 5 was right, the rule was overreaching.
+ *
+ *  The upstream fix (outline-page + allocation should not place
+ *  voice_* atoms in atom_assignments to begin with) is a separate
+ *  architectural change; for now, this skip keeps the validator
+ *  semantics correct without requiring upstream changes.
+ */
+const VOICE_TOPICS_SKIP_VERBATIM = new Set([
+  'voice_rule',
+  'voice_sample',
+  'tone_descriptor',
+])
+
 export interface DraftPageValidationManifest {
   /** active+draft atom_ids the project has. */
   atom_ids: string[]
-  /** subset of atom_ids that are flagged verbatim=true; draft MUST
-   *  preserve these exactly somewhere in the section that was outlined
-   *  to receive them. */
-  verbatim_atoms: Record<string, string>          // atom_id → body
+  /** subset of atom_ids that are flagged verbatim=true. Draft MUST
+   *  preserve the body exactly somewhere in the assigned section
+   *  UNLESS the atom's topic is in VOICE_TOPICS_SKIP_VERBATIM. */
+  verbatim_atoms: Record<string, { body: string; topic: string }>
   /** From outline-page output that draft-page is rendering. Used to
    *  cross-foot section count + verify draft didn't silently drop. */
   outline_section_count: number
@@ -229,18 +254,27 @@ export function validateDraftPage(
   // the atom's body MUST appear as a substring somewhere in that
   // section's copy. (Drafter chooses which slot; validator just checks
   // it landed somewhere in the same section.)
+  //
+  // De-dup atom_ids per section before iterating — the outline may
+  // assign the same atom to multiple slot_hints within one section,
+  // which would otherwise produce N duplicate failure messages for
+  // the same underlying miss. Surfaced 2026-06-12 during the first
+  // Fable 5 / Brixies smoke fire (13 raw failures collapsed to 2
+  // unique once de-duped).
   for (const os of mf.outline_sections) {
     const draftSection = sections[os.section_index]
     if (!draftSection) continue   // already caught via section_count_mismatch
     const sectionStringsArr: Array<{ path: string; value: string }> = []
     walkCopyForStrings(draftSection.copy, '', sectionStringsArr)
     const concat = sectionStringsArr.map(s => s.value).join('\n')
-    for (const aid of os.atom_ids) {
-      const verbatimBody = mf.verbatim_atoms[aid]
-      if (!verbatimBody) continue   // not a verbatim atom; non-verbatim atoms are free to be compressed
-      if (!concat.includes(verbatimBody)) {
+    const uniqueAtomIds = Array.from(new Set(os.atom_ids))
+    for (const aid of uniqueAtomIds) {
+      const entry = mf.verbatim_atoms[aid]
+      if (!entry) continue                                       // not verbatim
+      if (VOICE_TOPICS_SKIP_VERBATIM.has(entry.topic)) continue   // voice atoms are imitated, not literal
+      if (!concat.includes(entry.body)) {
         fail('verbatim_atom_dropped',
-          `draft[${os.section_index}]: verbatim atom ${aid} body not present in section copy — verbatim atoms MUST appear exactly (no compression, no rewording)`)
+          `draft[${os.section_index}]: verbatim atom ${aid} (topic=${entry.topic}) body not present in section copy — verbatim atoms MUST appear exactly (no compression, no rewording)`)
       }
     }
   }

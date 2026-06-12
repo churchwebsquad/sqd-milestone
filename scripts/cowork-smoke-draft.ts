@@ -90,6 +90,24 @@ if (!r.ok) {
   console.error(`    detail:   ${(body as any).detail ?? '(none)'}`)
   console.error(`    summary:  ${(body as any).summary ?? '(none)'}`)
   console.error(`    byCheck:  ${JSON.stringify((body as any).byCheck ?? {}, null, 2)}`)
+  // Persist the failure payload anyway — the endpoint includes the
+  // draft under `draft_for_inspection` on 422 + the full response body
+  // is useful for debugging Fable 5's actual output, not just the
+  // validator's complaints. Same fixture dir as success runs; the
+  // filename `endpoint-response.json` is the canonical inspection
+  // artifact regardless of outcome.
+  const failureDir = join(REPO_ROOT, 'cowork-skills', 'draft-page', 'examples', pageSlug)
+  try {
+    mkdirSync(failureDir, { recursive: true })
+    writeFileSync(
+      join(failureDir, 'endpoint-response.json'),
+      JSON.stringify(body, null, 2),
+      'utf8',
+    )
+    console.error(`    persisted failure payload to ${failureDir.replace(REPO_ROOT + '/', '')}/endpoint-response.json`)
+  } catch (e) {
+    console.error(`    (could not persist failure payload: ${e instanceof Error ? e.message : 'unknown'})`)
+  }
   process.exit(1)
 }
 

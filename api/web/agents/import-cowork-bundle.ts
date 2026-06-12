@@ -370,7 +370,7 @@ async function buildDraftPageManifestFromProject(
 ): Promise<DraftPageValidationManifest> {
   const [atomsRes, projectRes] = await Promise.all([
     sb.from('content_atoms')
-      .select('id, body, verbatim')
+      .select('id, body, verbatim, topic')
       .eq('web_project_id', projectId)
       .in('status', ['active', 'draft']),
     sb.from('strategy_web_projects')
@@ -403,12 +403,15 @@ async function buildDraftPageManifestFromProject(
     }
   }
 
-  const verbatim_atoms: Record<string, string> = {}
+  // verbatim_atoms now carries topic alongside body so the validator
+  // can skip the substring check for voice_*/tone_descriptor atoms
+  // (which are imitation material, not literal slot content).
+  const verbatim_atoms: Record<string, { body: string; topic: string }> = {}
   const atom_ids: string[] = []
   for (const row of (atomsRes.data ?? [])) {
     atom_ids.push(String(row.id))
     if (row.verbatim && typeof row.body === 'string') {
-      verbatim_atoms[String(row.id)] = row.body
+      verbatim_atoms[String(row.id)] = { body: row.body, topic: String(row.topic ?? '') }
     }
   }
 

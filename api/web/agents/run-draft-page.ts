@@ -416,6 +416,19 @@ async function assembleEndpointInputs(
 
 function buildUserMessage(pageSlug: string, inputs: AssembledInputs): string {
   return [
+    // ── Strong, leading tool-call instruction ─────────────────────────
+    // Fable 5 via Vercel AI Gateway rejects forced tool_choice
+    // ("tool_choice forces tool use is not compatible with this
+    // model"). Helper uses tool_choice: 'auto' for fable-* models and
+    // relies on this prompt-level instruction to force the tool. The
+    // tools[] array carries only one tool — `emit_page_draft` — so
+    // "use the tool" is unambiguous.
+    `**You MUST respond by calling the \`${TOOL_NAME}\` tool with the page draft.**`,
+    `Do not respond with prose or text. Do not summarize. Do not ask`,
+    `clarifying questions. The only valid response is a tool call with`,
+    `the structured page draft. The tools[] array contains exactly one`,
+    `tool — call it.`,
+    ``,
     `Draft the page with slug \`${pageSlug}\` per the SKILL above.`,
     ``,
     `## Page outline (what to draft against)`,
@@ -433,9 +446,9 @@ function buildUserMessage(pageSlug: string, inputs: AssembledInputs): string {
     JSON.stringify(inputs.atomsForPage, null, 2),
     '```',
     ``,
-    `Emit the draft now via the \`${TOOL_NAME}\` tool call.`,
+    `Now call \`${TOOL_NAME}\` with the page draft.`,
     `Every atoms_used entry MUST be an atom_id from the list above —`,
-    `hallucinated UUIDs trip the importer's validator.`,
+    `the JSON schema enums these and the gateway will reject invalid UUIDs.`,
     `Verbatim atoms (verbatim=true) MUST appear EXACTLY as a substring`,
     `of the section's copy — no compression, no rewording. The validator`,
     `does a substring check.`,
@@ -449,7 +462,7 @@ async function buildLocalValidationManifest(
 ): Promise<DraftPageValidationManifest> {
   const [atomsRes, projectRes] = await Promise.all([
     sb.from('content_atoms')
-      .select('id, body, verbatim')
+      .select('id, body, verbatim, topic')
       .eq('web_project_id', projectId)
       .in('status', ['active', 'draft']),
     sb.from('strategy_web_projects')
@@ -479,11 +492,16 @@ async function buildLocalValidationManifest(
     }
   }
 
+  // verbatim_atoms now carries topic alongside body so the validator
+  // can skip the substring check for voice_*/tone_descriptor atoms
+  // (which are imitation material, not literal slot content).
   const atom_ids: string[] = []
-  const verbatim_atoms: Record<string, string> = {}
+  const verbatim_atoms: Record<string, { body: string; topic: string }> = {}
   for (const row of (atomsRes.data ?? [])) {
     atom_ids.push(String(row.id))
-    if (row.verbatim && typeof row.body === 'string') verbatim_atoms[String(row.id)] = row.body
+    if (row.verbatim && typeof row.body === 'string') {
+      verbatim_atoms[String(row.id)] = { body: row.body, topic: String(row.topic ?? '') }
+    }
   }
 
   return {

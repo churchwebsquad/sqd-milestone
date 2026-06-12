@@ -120,6 +120,26 @@ export async function callGateway<T extends Record<string, any> = Record<string,
   const model = input.model ?? MODEL_CONTENT
   const maxTokens = input.maxTokens ?? 1500
 
+  // tool_choice handling per model (gateway behavior, discovered
+  // 2026-06-12 firing cowork draft-page smoke):
+  //
+  //   anthropic/claude-fable-5 — gateway REJECTS any forced tool_choice
+  //     with "tool_choice forces tool use is not compatible with this
+  //     model." Both { type: 'function', function: { name } } and the
+  //     cross-provider 'required' shorthand fail the same way. Likely
+  //     interaction with Fable 5's mandatory adaptive thinking. Use
+  //     'auto' + a strong prompt-level "you MUST call the tool"
+  //     instruction in the user message. With a single tool in the
+  //     tools[] array, the model picks it reliably.
+  //
+  //   All other models (OpenAI / Google / Anthropic Opus + Sonnet +
+  //   Haiku): forced specific function works via gateway translation.
+  //
+  // If this list grows beyond Fable 5, fold into a Set.
+  const tool_choice = model.includes('fable')
+    ? 'auto'
+    : { type: 'function', function: { name: input.toolName } }
+
   const body = {
     model,
     max_tokens: maxTokens,
@@ -137,10 +157,7 @@ export async function callGateway<T extends Record<string, any> = Record<string,
         },
       },
     ],
-    tool_choice: {
-      type: 'function',
-      function: { name: input.toolName },
-    },
+    tool_choice,
   }
 
   let r: Response

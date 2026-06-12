@@ -1,0 +1,141 @@
+{
+  "page_slug": "paratots",
+  "sections": [
+    {
+      "archetype": "hero_inner",
+      "voice_notes": "primary_heading: verbatim atom 94df26ac used exactly, lowercase preserved as written. body: verbatim atom 2528ca66 used exactly, casing preserved. No buttons added; the hero stays quiet per the anti-pattern note (no saccharine kid-ministry enthusiasm). Tender, not loud.",
+      "copy": {
+        "primary_heading": "before you were even born, god loved you first",
+        "body": "BEGINNING WITH A STRONG SENSE OF BELONGING"
+      },
+      "atoms_used": [
+        "94df26ac-175e-45d7-b447-29a2ebbd91d2",
+        "2528ca66-ceca-47ee-80ff-a3d06bb58fb9"
+      ]
+    },
+    {
+      "archetype": "content_image_text_a",
+      "voice_notes": "primary_heading: tonal anchor from voice_rule atom be43f59d ('delight shows up in the details') without quoting the rule; plain label, no sell. body: verbatim atom 73a9658c used exactly. items[0]: stories + songs, rhythm of the room, expanded from the atom's claim that kids grow up sensing God's love. items[1]: play + belonging, concrete nouns (blocks, crayons, floor time), no performed warmth. items[2]: Parents Room with 'somewhere to breathe' framing, permission-giving rather than security-theater.",
+      "copy": {
+        "primary_heading": "Inside the ParaTots Room",
+        "body": "We want all of our kids to grow up with a sense that God's love is generous, inclusive, and affirming of all human beings.",
+        "items": [
+          {
+            "item_heading": "Stories and Songs",
+            "item_body": "Every Saturday starts with a story from scripture and songs little voices can carry. The rhythm stays the same week to week, so even the youngest kids know what comes next."
+          },
+          {
+            "item_heading": "Play and Belonging",
+            "item_body": "Blocks, crayons, and floor time with teachers who know your kid by name. Belonging starts here, before any of it has words."
+          },
+          {
+            "item_heading": "The Parents Room",
+            "item_body": "A quiet room off the gathering space with somewhere to sit, feed a baby, or settle a fussy one. If you need a minute to breathe, take it. Nobody is counting."
+          }
+        ]
+      },
+      "atoms_used": [
+        "73a9658c-2a73-472f-aeed-f9b21cb70532",
+        "be43f59d-8138-4b35-9c6d-81006776d0ad"
+      ]
+    },
+    {
+      "archetype": "content_image_text_b",
+      "voice_notes": "Fact values woven directly per outline unresolved_inputs (facts 631e87bd, e3a0634e, 1ac6eab1 are not atoms): Saturdays 9:15 AM, ages 0 to 4, 51 W Olive Redlands, Donna Hadley / Teacher Donna, info@paradoxredlands.com. primary_heading: logistics as a label echoing the 'Saturday evenings in Redlands' exemplar cadence. items keep time/age/coordinator scannable per the anti-pattern note; nothing buried in prose. Tone anchored by the be43f59d voice rule: delight in details, no forced enthusiasm.",
+      "copy": {
+        "tagline": "AGES 0 TO 4, SATURDAYS AT 9:15",
+        "primary_heading": "Saturdays at 9:15 in Redlands",
+        "body": "ParaTots meets Saturdays at 9:15 AM at 51 W Olive in Redlands, for kids ages 0 to 4. Teacher Donna coordinates the room each week. The whole gathering follows at 10:00, so drop-off and pick-up stay simple.",
+        "items": [
+          {
+            "item_heading": "When and Where",
+            "item_body": "Saturdays at 9:15 AM at 51 W Olive, Redlands. Check-in is inside the lobby, and a teacher will walk you and your kid to the room."
+          },
+          {
+            "item_heading": "Ages 0 to 4, with Teacher Donna",
+            "item_body": "Donna Hadley, a founding member of Paradox and Pastor Craig's mother, coordinates ParaTots. Questions before you come? Write her at info@paradoxredlands.com."
+          }
+        ]
+      },
+      "atoms_used": [
+        "be43f59d-8138-4b35-9c6d-81006776d0ad"
+      ]
+    },
+    {
+      "archetype": "cta_simple",
+      "voice_notes": "primary_heading: per drafter_hint, the 9:15 then 10:00 pairing as a label (commas, no terminal punctuation, so it stays a label rather than a sentence). body: two sentences, facts from 631e87bd woven directly. One clear action, no urgency language per the anti-pattern note. CTA label is verb-led. Avoided the 'Come as you are' anchor phrase verbatim since it sits on the church-cliche ban list; kept its posture instead.",
+      "copy": {
+        "primary_heading": "Come at 9:15, Stay for 10:00",
+        "body": "ParaTots starts Saturdays at 9:15. At 10:00 the whole church gathers at 51 W Olive, kids and parents in the same room.",
+        "buttons": [
+          {
+            "label": "Plan a Visit",
+            "url": "/plan-a-visit"
+          }
+        ]
+      },
+      "atoms_used": [
+        "be43f59d-8138-4b35-9c6d-81006776d0ad"
+      ]
+    },
+    {
+      "archetype": "cta_callout",
+      "voice_notes": "primary_heading: lifts 'generous, inclusive, affirming' directly from atom 73a9658c; the triad is the church's own intentional language, not interchangeable filler. body: quiet solidarity, no village cliches, no moralizing; echoes the voice exemplar 'Kids are loud in the lobby and welcome to be.' verbatim. CTA: 'Email Teacher Donna' with mailto from fact 1ac6eab1, woven directly per unresolved_inputs.",
+      "copy": {
+        "primary_heading": "Generous, Inclusive, Affirming Love",
+        "body": "Raising kids under five is a mystery, and nobody here pretends otherwise. Kids are loud in the lobby and welcome to be. If you have questions about any of it, Teacher Donna reads every email.",
+        "buttons": [
+          {
+            "label": "Email Teacher Donna",
+            "url": "mailto:info@paradoxredlands.com"
+          }
+        ]
+      },
+      "atoms_used": [
+        "73a9658c-2a73-472f-aeed-f9b21cb70532",
+        "be43f59d-8138-4b35-9c6d-81006776d0ad"
+      ]
+    }
+  ],
+  "deviation_note": "Repair pass: removed the 'voice_notes_by_slot' key from every section's copy object (it is not a declared slot on any archetype); per-slot drafter notes now live in each section's voice_notes string. No copy text changed. As flagged in the outline's unresolved_inputs, fact values (Saturdays 9:15 AM, ages 0-4, 51 W Olive Redlands, Donna Hadley / Teacher Donna, info@paradoxredlands.com) are woven directly into sections 2, 3, and 4 rather than referenced as atoms. The 'Come as you are' voice anchor for section 3 was honored in posture but not quoted verbatim because the phrase appears on the mechanical church-cliche ban list.",
+  "validation": {
+    "flags": [
+      "Section 0 body is the verbatim all-caps atom 'BEGINNING WITH A STRONG SENSE OF BELONGING'; casing preserved per the verbatim rule. Designer may want to treat it as a styled kicker.",
+      "Outline section 2 voice anchor says 'Saturday evenings' but the service_time fact says 9:15 AM; drafted to the fact (9:15 AM). Strategist should confirm.",
+      "Exemplars echoed: 'Kids are loud in the lobby and welcome to be.' (verbatim, section 4); 'Saturdays at 9:15 in Redlands' imitates the 'Saturday evenings in Redlands' cadence (section 2).",
+      "All slot values pre-checked against max_chars; no em-dashes, filler intensifiers, AI cliches, or church cliches in concatenated copy."
+    ],
+    "unused_atoms": []
+  },
+  "_meta": {
+    "bundle_version": "1.0.0",
+    "skill_name": "draft-page",
+    "skill_version": "1.0.0",
+    "generated_at": "2026-06-12T22:50:13.617Z",
+    "model": "anthropic/claude-fable-5",
+    "prompt_hash": "bd13466006959d46",
+    "usage": {
+      "input_tokens": 34324,
+      "output_tokens": 16025
+    },
+    "used_outline": true,
+    "outline_sections": 5,
+    "drafted_sections": 5,
+    "sections_match": true,
+    "atom_ids_requested": 4,
+    "atom_ids_resolved": 4,
+    "atom_resolution_rate": 1,
+    "truncation_suspected": true,
+    "dash_strip": {
+      "count": 0,
+      "samples": []
+    },
+    "repaired": true,
+    "first_pass_failures": {
+      "count": 5,
+      "by_check": {
+        "unknown_slot_in_copy": 5
+      }
+    }
+  }
+}
