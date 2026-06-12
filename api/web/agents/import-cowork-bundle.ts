@@ -45,6 +45,10 @@ import {
   validateDraftPage,
   type DraftPageValidationManifest,
 } from '../../../src/lib/cowork/validateDraftPage.js'
+import {
+  validateCritiquePage,
+  type CritiquePageValidationManifest,
+} from '../../../src/lib/cowork/validateCritiquePage.js'
 
 export const maxDuration = 30
 
@@ -340,9 +344,66 @@ export default async function handler(req: any, res: any) {
     })
   }
 
+  if (bundleKind === 'page_critique') {
+    const pageSlug = typeof req.body?.page_slug === 'string' ? req.body.page_slug : null
+    if (!pageSlug) return res.status(400).json({ error: 'page_slug required for bundle_kind=page_critique' })
+
+    const manifest: CritiquePageValidationManifest = { expected_page_slug: pageSlug }
+    const result = validateCritiquePage(bundle, manifest)
+    if (!result.ok) {
+      return res.status(422).json({
+        error:    'validation_failed',
+        summary:  result.summary,
+        byCheck:  result.byCheck,
+        failures: result.failures,
+      })
+    }
+
+    try {
+      await setRoadmapStateAtomic(sb, projectId, ['page_critiques', pageSlug], bundle)
+      await setRoadmapStateAtomic(sb, projectId, ['cowork_progress', 'critique_page', pageSlug], {
+        status:           'completed',
+        completed_at:     new Date().toISOString(),
+        dignity:          bundle?.dignity ?? null,
+        voice_character:  bundle?.voice_character ?? null,
+        persona_fit:      bundle?.persona_fit ?? null,
+        atom_coverage:    bundle?.atom_coverage ?? null,
+        claim_plausibility: bundle?.claim_plausibility ?? null,
+        directives_count: Array.isArray(bundle?.directives) ? bundle.directives.length : 0,
+        blocker_count:    Array.isArray(bundle?.directives)
+          ? bundle.directives.filter((d: any) => d?.severity === 'blocker').length
+          : 0,
+        prompt_hash:      bundle?._meta?.prompt_hash ?? null,
+      })
+    } catch (e) {
+      return res.status(500).json({ error: e instanceof Error ? e.message : 'roadmap_state write failed' })
+    }
+
+    return res.status(200).json({
+      ok:          true,
+      bundle_kind: 'page_critique',
+      page_slug:   pageSlug,
+      counts: {
+        standout_lines:  Array.isArray(bundle.standout_lines) ? bundle.standout_lines.length : 0,
+        problem_lines:   Array.isArray(bundle.problem_lines)  ? bundle.problem_lines.length  : 0,
+        directives:      Array.isArray(bundle.directives)     ? bundle.directives.length    : 0,
+        blockers:        Array.isArray(bundle.directives)
+          ? bundle.directives.filter((d: any) => d?.severity === 'blocker').length
+          : 0,
+      },
+      scores: {
+        dignity:            bundle.dignity,
+        voice_character:    bundle.voice_character,
+        persona_fit:        bundle.persona_fit,
+        atom_coverage:      bundle.atom_coverage,
+        claim_plausibility: bundle.claim_plausibility,
+      },
+    })
+  }
+
   return res.status(400).json({
     error: `Unknown bundle_kind: ${bundleKind}`,
-    supported: ['page_allocation_plan', 'page_outline', 'page_draft'],
+    supported: ['page_allocation_plan', 'page_outline', 'page_draft', 'page_critique'],
   })
 }
 

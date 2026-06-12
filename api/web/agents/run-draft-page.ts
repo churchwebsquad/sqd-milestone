@@ -84,7 +84,15 @@ function buildToolSchema(atomIdsInScope: string[]): ToolSchema {
           required: ['archetype', 'voice_notes', 'copy', 'atoms_used'],
           properties: {
             archetype:   { type: 'string' },
-            voice_notes: { type: 'string' },
+            // voice_notes is critique-page's per-section receipt of
+            // which exemplar/rule the drafter imitated. Bounded to 240
+            // chars to keep token spend on the copy itself, not on
+            // narrating the writing decisions. Surfaced 2026-06-12 —
+            // first Fable 5 fire's voice_notes were ~40% of total
+            // output_tokens (the truncation source). 240 leaves room
+            // to cite an exemplar phrase + name an atom_id + one
+            // sentence of reasoning.
+            voice_notes: { type: 'string', maxLength: 240 },
             copy:        {
               type: 'object',
               additionalProperties: true,
@@ -167,6 +175,14 @@ export default async function handler(req: any, res: any) {
   let gatewayResult: Awaited<ReturnType<typeof callGateway>>
   let firstPass: DraftPageValidationResult | null = null
   let repaired = false
+  // Track per-call output_tokens so we can detect truncation per-pass
+  // rather than via a summed total. Surfaced 2026-06-12: the previous
+  // implementation summed initial + repair output_tokens, then
+  // checked >= 15500 against the sum — which fires true even when
+  // neither individual call truncated (e.g. two ~8k passes summing to
+  // 16k). The per-pass max is the right signal.
+  let initialPassOutputTokens = 0
+  let repairPassOutputTokens  = 0
 
   try {
     gatewayResult = await callGateway({
@@ -184,6 +200,7 @@ export default async function handler(req: any, res: any) {
   } catch (e) {
     return mapGatewayError(res, e)
   }
+  initialPassOutputTokens = gatewayResult.usage.outputTokens
 
   let validation = validateDraftPage(gatewayResult.args as any, localManifest)
   if (!validation.ok) {
@@ -223,6 +240,7 @@ export default async function handler(req: any, res: any) {
       return mapGatewayError(res, e)
     }
     repaired = true
+    repairPassOutputTokens = repairResult.usage.outputTokens
     gatewayResult = {
       args:   repairResult.args,
       model:  repairResult.model,
@@ -264,8 +282,15 @@ export default async function handler(req: any, res: any) {
       model:          gatewayResult.model,
       prompt_hash:    resolved.promptHash,
       usage: {
+        // Combined totals for cost accounting.
         input_tokens:  gatewayResult.usage.inputTokens,
         output_tokens: gatewayResult.usage.outputTokens,
+        // Per-pass output_tokens so truncation_suspected (below) can
+        // be computed against the right scope and downstream tooling
+        // can distinguish "two small passes" from "one big near-cap
+        // pass."
+        initial_pass_output_tokens: initialPassOutputTokens,
+        repair_pass_output_tokens:  repaired ? repairPassOutputTokens : null,
       },
       used_outline:         true,
       outline_sections:     outlineSectionCount,
@@ -276,7 +301,11 @@ export default async function handler(req: any, res: any) {
       atom_resolution_rate: atomIdsRequested.size > 0
         ? Math.round((atomIdsResolved.size / atomIdsRequested.size) * 100) / 100
         : 1.0,
-      truncation_suspected: gatewayResult.usage.outputTokens >= 15500,
+      // Truncation is now per-pass max, not sum. A single call hitting
+      // 15500+ tokens (out of 16000 cap) likely truncated; two ~8k
+      // passes summing to 16k did not. The previous sum-based check
+      // false-fired on the first Fable 5 fire — caught 2026-06-12.
+      truncation_suspected: Math.max(initialPassOutputTokens, repairPassOutputTokens) >= 15500,
       // dash_strip is the drafter's own telemetry per SKILL.md. The
       // endpoint doesn't post-process to strip dashes (that's the
       // SKILL's hard rule for the drafter). We initialize empty here;
