@@ -9,8 +9,8 @@
   "must_flag": [
     {
       "id":              "ungrounded_check_in_claim",
-      "summary":         "The draft section 3 invents a check-in workflow + teacher-walks-to-room procedure; no atom or fact in the project's inventory carries either fact.",
-      "verbatim_substring": "check-in is inside the lobby, and a teacher will walk you to the room",
+      "summary":         "The draft invents a check-in workflow + teacher-walks-to-room procedure; no atom or fact in the project's inventory carries either fact. (Actual draft phrasing: '…walk you and your kid to the room.' Fixture substring shortened 2026-06-12 to a more stable prefix that survives minor wording variation.)",
+      "verbatim_substring": "Check-in is inside the lobby",
       "expected_axis":   "claim_plausibility",
       "expected_severity_at_least": "warning",
       "expected_fix_kind": ["slot_edit", "page_redraft"],
