@@ -258,12 +258,22 @@ if (negBadArchetype.sections?.[0]) {
   writeFileSync(join(fixtureDir, 'outline.negative-bad-archetype.json'), JSON.stringify(negBadArchetype, null, 2), 'utf8')
 }
 
-// 3) Required slot uncovered — find the first non-cms_managed section
-//    and remove ALL its atom_assignments. The validator's
-//    required_slot_uncovered check trips for every required slot on
-//    that section's archetype.
+// 3) Required slot uncovered — find the first non-cms_managed section,
+//    remove ALL its atom_assignments, AND scrub any unresolved_inputs
+//    entries that name slots in that section. The validator's
+//    required_slot_uncovered check honors unresolved_inputs as an
+//    escape hatch; the mutation needs to clear BOTH to actually create
+//    an uncovered required slot. (Surfaced when the outline-page SKILL
+//    tune started producing unresolved_inputs comprehensively — the
+//    deterministic experiment that ran 2026-06-12 with the new SKILL
+//    showed required_slot_uncovered = 0, which made the mechanical
+//    "empty atom_assignments" mutation insufficient.)
 const negBadSlot = deepClone(outline)
 {
+  // Drop unresolved_inputs entirely so no escape hatch remains. This
+  // is the cleanest way to ensure required_slot_uncovered trips for
+  // any required slot that isn't covered by atom_assignments.
+  negBadSlot.unresolved_inputs = []
   for (const s of negBadSlot.sections ?? []) {
     if (s.cms_managed) continue
     if (Array.isArray(s.atom_assignments) && s.atom_assignments.length > 0) {
