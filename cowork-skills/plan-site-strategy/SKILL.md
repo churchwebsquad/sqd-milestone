@@ -10,6 +10,8 @@ description: |
 model: anthropic/claude-opus-4-7
 allowed-tools: Read
 version: '1.0.0'
+references:
+  - ../page-outlines-by-ministry-model.md
 ---
 
 # Plan Site Strategy

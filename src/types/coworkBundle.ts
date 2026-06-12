@@ -523,6 +523,12 @@ export interface ArtifactMeta {
   skill_version:  string                         // semver of the SKILL.md
   generated_at:   string                         // ISO
   model:          string                         // e.g. 'claude-opus-4-7'
+  /** First 16 hex chars of sha256(systemPrompt) from the skill bundle
+   *  the endpoint actually used. Lets approval snapshots trace which
+   *  prompt version produced this artifact — if the SKILL.md or any of
+   *  its references changes, downstream tooling sees a new hash and
+   *  can decide whether to re-run. */
+  prompt_hash?:   string
   /** Optional cost/usage telemetry the import endpoint can ignore safely. */
   usage?: {
     input_tokens?:  number

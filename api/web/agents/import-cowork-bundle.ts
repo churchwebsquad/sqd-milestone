@@ -26,12 +26,21 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { createClient } from '@supabase/supabase-js'
 import { setRoadmapStateAtomic } from './_lib/roadmapStateMerge.js'
 import {
   validateAllocationPlan,
   type AllocationPlanManifest,
 } from '../../../src/lib/cowork/validateAllocationPlan.js'
+import {
+  validatePageOutline,
+  type PageOutlineValidationManifest,
+  type CanonicalTemplateManifest,
+} from '../../../src/lib/cowork/validatePageOutline.js'
 
 export const maxDuration = 30
 
@@ -197,8 +206,113 @@ export default async function handler(req: any, res: any) {
     })
   }
 
+  if (bundleKind === 'page_outline') {
+    // The endpoint that calls this for page_outline MUST also supply
+    // page_slug — outlines are slug-scoped, the importer needs to know
+    // which key under roadmap_state.page_outlines to write to.
+    const pageSlug = typeof req.body?.page_slug === 'string' ? req.body.page_slug : null
+    if (!pageSlug) return res.status(400).json({ error: 'page_slug required for bundle_kind=page_outline' })
+
+    // Build the outline-specific manifest from live inventory.
+    let manifest: PageOutlineValidationManifest
+    try {
+      manifest = await buildPageOutlineManifestFromProject(sb, projectId, pageSlug)
+    } catch (e) {
+      return res.status(500).json({ error: e instanceof Error ? e.message : 'page-outline manifest build failed' })
+    }
+
+    const result = validatePageOutline(bundle, manifest)
+    if (!result.ok) {
+      return res.status(422).json({
+        error:    'validation_failed',
+        summary:  result.summary,
+        byCheck:  result.byCheck,
+        failures: result.failures,
+      })
+    }
+
+    // Write the outline into roadmap_state.page_outlines[slug].
+    try {
+      await setRoadmapStateAtomic(sb, projectId, ['page_outlines', pageSlug], bundle)
+      await setRoadmapStateAtomic(sb, projectId, ['cowork_progress', 'outline_page', pageSlug], {
+        status:       'completed',
+        completed_at: new Date().toISOString(),
+        sections:     Array.isArray(bundle.sections) ? bundle.sections.length : 0,
+        atom_count:   bundle?._meta?.atom_count_used ?? null,
+        prompt_hash:  bundle?._meta?.prompt_hash ?? null,
+      })
+    } catch (e) {
+      return res.status(500).json({ error: e instanceof Error ? e.message : 'roadmap_state write failed' })
+    }
+
+    return res.status(200).json({
+      ok:          true,
+      bundle_kind: 'page_outline',
+      page_slug:   pageSlug,
+      counts: {
+        sections:           Array.isArray(bundle.sections) ? bundle.sections.length : 0,
+        atom_assignments:   Array.isArray(bundle.sections)
+          ? bundle.sections.reduce((n: number, s: any) => n + (Array.isArray(s.atom_assignments) ? s.atom_assignments.length : 0), 0)
+          : 0,
+        unresolved_inputs:  Array.isArray(bundle.unresolved_inputs) ? bundle.unresolved_inputs.length : 0,
+      },
+    })
+  }
+
   return res.status(400).json({
     error: `Unknown bundle_kind: ${bundleKind}`,
-    supported: ['page_allocation_plan'],
+    supported: ['page_allocation_plan', 'page_outline'],
   })
+}
+
+/**
+ * Builds the per-page outline validation manifest from live Supabase
+ * inventory + the checked-in canonical-templates.json. Inputs the
+ * validator needs:
+ *   - atom_ids: every active+draft content_atom for the project (the
+ *     outline's atom_assignments MUST reference one of these — catches
+ *     hallucinated UUIDs).
+ *   - fact_ids: same for church_facts (held for future expansion when
+ *     outline-page binds fact rows directly).
+ *   - canonical_templates: the concept→slots map; archetype/slot_hint
+ *     checks resolve against this.
+ *   - expected_page_slug: confirms the outline targets the right page.
+ */
+async function buildPageOutlineManifestFromProject(
+  sb:        any,
+  projectId: string,
+  pageSlug:  string,
+): Promise<PageOutlineValidationManifest> {
+  const [atomsRes, factsRes] = await Promise.all([
+    sb.from('content_atoms')
+      .select('id')
+      .eq('web_project_id', projectId)
+      .in('status', ['active', 'draft']),
+    sb.from('church_facts')
+      .select('id')
+      .eq('web_project_id', projectId)
+      .in('status', ['active', 'draft']),
+  ])
+  if (atomsRes.error) throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  if (factsRes.error) throw new Error(`church_facts load failed: ${factsRes.error.message}`)
+
+  const canonical_templates = loadCanonicalTemplates()
+
+  return {
+    atom_ids: (atomsRes.data ?? []).map((r: any) => String(r.id)),
+    fact_ids: (factsRes.data ?? []).map((r: any) => String(r.id)),
+    canonical_templates,
+    expected_page_slug: pageSlug,
+  }
+}
+
+let _canonicalTemplatesCache: CanonicalTemplateManifest | null = null
+function loadCanonicalTemplates(): CanonicalTemplateManifest {
+  if (_canonicalTemplatesCache) return _canonicalTemplatesCache
+  const __dirname = dirname(fileURLToPath(import.meta.url))
+  // api/web/agents/import-cowork-bundle.ts → repo root → cowork-skills/canonical-templates.json
+  const path = resolve(__dirname, '..', '..', '..', 'cowork-skills', 'canonical-templates.json')
+  const raw = readFileSync(path, 'utf8')
+  _canonicalTemplatesCache = JSON.parse(raw) as CanonicalTemplateManifest
+  return _canonicalTemplatesCache
 }
