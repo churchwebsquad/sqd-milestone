@@ -2,7 +2,7 @@
   "allocations": [
     {
       "page_slug": "home",
-      "page_job": "Tell Lena within five seconds that this is an affirming, intellectually honest, non-denominational church in Redlands that will not ask her family to perform belief \u2014 then route each persona to their on-ramp.",
+      "page_job": "Tell Lena within five seconds that this is an affirming, intellectually honest, non-denominational church in Redlands that will not ask her family to perform belief — then route each persona to their on-ramp.",
       "primary_persona": "Lena, the Faithful Exile",
       "ministry_model_alignment": "discipleship",
       "section_intents": [
@@ -65,7 +65,7 @@
         },
         {
           "flow_role": "orient",
-          "section_job": "A visitor knows what they're being invited to \u2014 an hour thinking about something that matters, Saturdays 10:00 AM at 51 W Olive \u2014 before they scroll further.",
+          "section_job": "A visitor knows what they're being invited to — an hour thinking about something that matters, Saturdays 10:00 AM at 51 W Olive — before they scroll further.",
           "sources": [
             {
               "kind": "fact",
@@ -107,7 +107,7 @@
         },
         {
           "flow_role": "reassure",
-          "section_job": "The deconstructor, the LGBTQ+ family, the mixed household, and the questioner each see themselves named as the reason Paradox is built this way \u2014 architecture, not asterisk.",
+          "section_job": "The deconstructor, the LGBTQ+ family, the mixed household, and the questioner each see themselves named as the reason Paradox is built this way — architecture, not asterisk.",
           "sources": [
             {
               "kind": "pillar",
@@ -241,7 +241,7 @@
         },
         {
           "flow_role": "inform",
-          "section_job": "Every persona sees a legible next move at their stage: visit, join a discussion group, check the kids' pages, grab coffee with the pastor \u2014 a pathway, never a funnel.",
+          "section_job": "Every persona sees a legible next move at their stage: visit, join a discussion group, check the kids' pages, grab coffee with the pastor — a pathway, never a funnel.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -293,7 +293,7 @@
         },
         {
           "flow_role": "deepen",
-          "section_job": "A visitor learns Paradox exists for a Redlands where more people are becoming more loving \u2014 with Hunger Walk, Food Drive, and Shoe Drive as proof, not aspiration.",
+          "section_job": "A visitor learns Paradox exists for a Redlands where more people are becoming more loving — with Hunger Walk, Food Drive, and Shoe Drive as proof, not aspiration.",
           "sources": [
             {
               "kind": "pillar",
@@ -345,7 +345,7 @@
         },
         {
           "flow_role": "invite",
-          "section_job": "Lena leaves with one specific, low-friction action: plan a visit for a Saturday \u2014 and she can tell us she's coming.",
+          "section_job": "Lena leaves with one specific, low-friction action: plan a visit for a Saturday — and she can tell us she's coming.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -416,7 +416,7 @@
     },
     {
       "page_slug": "plan-a-visit",
-      "page_job": "Answer every unasked first-timer question \u2014 what the service is actually like, what time, where to park, what happens with the kids, and 'is this really a safe place for my family?' \u2014 before anyone has to ask.",
+      "page_job": "Answer every unasked first-timer question — what the service is actually like, what time, where to park, what happens with the kids, and 'is this really a safe place for my family?' — before anyone has to ask.",
       "primary_persona": "Spiritually Mixed Young Family",
       "ministry_model_alignment": "discipleship",
       "section_intents": [
@@ -659,7 +659,7 @@
         },
         {
           "flow_role": "invite",
-          "section_job": "The family commits: 'let us know you're coming' \u2014 one form, kids pre-noted, questions welcome.",
+          "section_job": "The family commits: 'let us know you're coming' — one form, kids pre-noted, questions welcome.",
           "sources": [
             {
               "kind": "fact",
@@ -681,7 +681,7 @@
         },
         {
           "flow_role": "close",
-          "section_job": "'We'll be looking for you' \u2014 a warm, specific send-off with the address and time once more.",
+          "section_job": "'We'll be looking for you' — a warm, specific send-off with the address and time once more.",
           "sources": [
             {
               "kind": "fact",
@@ -700,7 +700,7 @@
     },
     {
       "page_slug": "sermons",
-      "page_job": "Give Marcus long-form, intellectually serious teaching he can sample immediately \u2014 and make the 89-sermon archive browsable, filterable, and SEO-strong.",
+      "page_job": "Give Marcus long-form, intellectually serious teaching he can sample immediately — and make the 89-sermon archive browsable, filterable, and SEO-strong.",
       "primary_persona": "Marcus, the Skeptic Who Came Back Twice",
       "ministry_model_alignment": "discipleship",
       "section_intents": [
@@ -728,7 +728,7 @@
         },
         {
           "flow_role": "orient",
-          "section_job": "The visitor grasps the spine: a nine-year journey through every book of the Bible, completed once, begun again \u2014 currently the Gospel of Matthew.",
+          "section_job": "The visitor grasps the spine: a nine-year journey through every book of the Bible, completed once, begun again — currently the Gospel of Matthew.",
           "sources": [
             {
               "kind": "pillar",
@@ -760,7 +760,7 @@
         },
         {
           "flow_role": "inform",
-          "section_job": "The archive itself: 89 sermons with series taxonomy, discussion guides, notes, audio \u2014 plus watch-live and podcast for the online audience.",
+          "section_job": "The archive itself: 89 sermons with series taxonomy, discussion guides, notes, audio — plus watch-live and podcast for the online audience.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -852,13 +852,13 @@
     },
     {
       "page_slug": "about",
-      "page_job": "Let Jordan and Marcus read the whole story end-to-end \u2014 origin, name, mission, vision, milestones, testimonies, leadership \u2014 and find the welcome structurally consistent at every layer.",
+      "page_job": "Let Jordan and Marcus read the whole story end-to-end — origin, name, mission, vision, milestones, testimonies, leadership — and find the welcome structurally consistent at every layer.",
       "primary_persona": "Jordan, the Exile Coming Home Slowly",
       "ministry_model_alignment": "mixed",
       "section_intents": [
         {
           "flow_role": "hook",
-          "section_job": "Open with the 2016 origin moment \u2014 friends in a living room building a church with arms, minds, and hearts wide open \u2014 not a generic welcome.",
+          "section_job": "Open with the 2016 origin moment — friends in a living room building a church with arms, minds, and hearts wide open — not a generic welcome.",
           "sources": [
             {
               "kind": "pillar",
@@ -932,7 +932,7 @@
         },
         {
           "flow_role": "deepen",
-          "section_job": "Mission and vision in their exact words: see and embrace Jesus Christ in all \u2014 all 168 hours \u2014 toward a Redlands where more people are becoming more loving.",
+          "section_job": "Mission and vision in their exact words: see and embrace Jesus Christ in all — all 168 hours — toward a Redlands where more people are becoming more loving.",
           "sources": [
             {
               "kind": "pillar",
@@ -1014,7 +1014,7 @@
         },
         {
           "flow_role": "deepen",
-          "section_job": "Ten years of receipts: a milestone timeline from the living room to the 10-Year Celebration \u2014 including the 2018 affirming commitment, women's empowerment, and anti-racism.",
+          "section_job": "Ten years of receipts: a milestone timeline from the living room to the 10-Year Celebration — including the 2018 affirming commitment, women's empowerment, and anti-racism.",
           "sources": [
             {
               "kind": "fact",
@@ -1162,14 +1162,14 @@
               "kind": "fact",
               "ref": "afda15c9-7c8c-4289-bb97-8181d1435319",
               "treatment": "card_per_row",
-              "note": "9 testimonials exceed testimonial_video max_items 1 \u2014 render as cms_managed carousel/grid, not static slots."
+              "note": "9 testimonials exceed testimonial_video max_items 1 — render as cms_managed carousel/grid, not static slots."
             }
           ],
           "suggested_archetype": "testimonial_video"
         },
         {
           "flow_role": "inform",
-          "section_job": "A snapshot of who carries the church \u2014 lead pastor, staff, and an elder board that is half female \u2014 with the full directory one click away.",
+          "section_job": "A snapshot of who carries the church — lead pastor, staff, and an elder board that is half female — with the full directory one click away.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -1247,13 +1247,13 @@
     },
     {
       "page_slug": "beliefs",
-      "page_job": "Give Marcus and Lena the theological honesty they need before trusting anything else: what Paradox actually believes, what it refuses to claim, and the five values \u2014 in carefully tended language.",
+      "page_job": "Give Marcus and Lena the theological honesty they need before trusting anything else: what Paradox actually believes, what it refuses to claim, and the five values — in carefully tended language.",
       "primary_persona": "Marcus, the Skeptic Who Came Back Twice",
       "ministry_model_alignment": "discipleship",
       "section_intents": [
         {
           "flow_role": "hook",
-          "section_job": "One line of distinctive POV: you don't have to choose between your intellect and your faith \u2014 and nothing here is watered down.",
+          "section_job": "One line of distinctive POV: you don't have to choose between your intellect and your faith — and nothing here is watered down.",
           "sources": [
             {
               "kind": "pillar",
@@ -1339,7 +1339,7 @@
         },
         {
           "flow_role": "inform",
-          "section_job": "The five named values, in the partner's exact words \u2014 the standard, not the slogan.",
+          "section_job": "The five named values, in the partner's exact words — the standard, not the slogan.",
           "sources": [
             {
               "kind": "pillar",
@@ -1365,7 +1365,7 @@
               "kind": "pillar",
               "ref": "5748d66d-9cc5-45c0-8ab5-38e04d6f8da6",
               "treatment": "lift_verbatim",
-              "note": "5 values exceed feature_tabbed max_items 4 \u2014 outline-page should split 3+2 across paired sections or pick a 5-slot pattern; flagged so bind doesn't fail."
+              "note": "5 values exceed feature_tabbed max_items 4 — outline-page should split 3+2 across paired sections or pick a 5-slot pattern; flagged so bind doesn't fail."
             }
           ],
           "suggested_archetype": "feature_tabbed"
@@ -1470,7 +1470,7 @@
     },
     {
       "page_slug": "affirming",
-      "page_job": "Give the affirming identity its own searchable home so 'affirming church Redlands' lands here and Jordan or Lena can verify \u2014 structurally, not decoratively \u2014 before ever visiting.",
+      "page_job": "Give the affirming identity its own searchable home so 'affirming church Redlands' lands here and Jordan or Lena can verify — structurally, not decoratively — before ever visiting.",
       "primary_persona": "Jordan, the Exile Coming Home Slowly",
       "ministry_model_alignment": "mixed",
       "section_intents": [
@@ -1499,7 +1499,7 @@
         },
         {
           "flow_role": "orient",
-          "section_job": "The reader learns this wasn't an amendment: 2018 commitment, queer speakers since 2017, weddings since 2019 \u2014 built that way.",
+          "section_job": "The reader learns this wasn't an amendment: 2018 commitment, queer speakers since 2017, weddings since 2019 — built that way.",
           "sources": [
             {
               "kind": "pillar",
@@ -1616,7 +1616,7 @@
     },
     {
       "page_slug": "staff",
-      "page_job": "Show Marcus the real people \u2014 pastor, staff, elders, trustees \u2014 through a CMS-managed grid that also kills the hand-placed-image workflow pain.",
+      "page_job": "Show Marcus the real people — pastor, staff, elders, trustees — through a CMS-managed grid that also kills the hand-placed-image workflow pain.",
       "primary_persona": "Marcus, the Skeptic Who Came Back Twice",
       "ministry_model_alignment": "discipleship",
       "section_intents": [
@@ -1644,7 +1644,7 @@
         },
         {
           "flow_role": "inform",
-          "section_job": "The staff, with faces, roles, pronouns, and direct emails \u2014 managed in WordPress, not hand-placed images.",
+          "section_job": "The staff, with faces, roles, pronouns, and direct emails — managed in WordPress, not hand-placed images.",
           "sources": [
             {
               "kind": "fact",
@@ -1800,7 +1800,7 @@
         },
         {
           "flow_role": "invite",
-          "section_job": "Say hello to a real person \u2014 no funnel, just a reply.",
+          "section_job": "Say hello to a real person — no funnel, just a reply.",
           "sources": [
             {
               "kind": "fact",
@@ -1854,7 +1854,7 @@
         },
         {
           "flow_role": "inform",
-          "section_job": "The post archive \u2014 weekly, sermon-based, filterable \u2014 rendered from WordPress.",
+          "section_job": "The post archive — weekly, sermon-based, filterable — rendered from WordPress.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -1867,7 +1867,7 @@
         },
         {
           "flow_role": "deepen",
-          "section_job": "Each post is the sermon continued \u2014 same conversation, new medium \u2014 pointing back to the archive and forward to a group.",
+          "section_job": "Each post is the sermon continued — same conversation, new medium — pointing back to the archive and forward to a group.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -1915,13 +1915,13 @@
     },
     {
       "page_slug": "discussion-groups",
-      "page_job": "Turn Jordan's 'find my people' need into one concrete move: pick a group, starting with Pastor Craig's \u2014 honest conversation, not small-group curriculum.",
+      "page_job": "Turn Jordan's 'find my people' need into one concrete move: pick a group, starting with Pastor Craig's — honest conversation, not small-group curriculum.",
       "primary_persona": "Jordan, the Exile Coming Home Slowly",
       "ministry_model_alignment": "discipleship",
       "section_intents": [
         {
           "flow_role": "hook",
-          "section_job": "Sermons start conversations, not end them \u2014 groups are where the conversation actually happens.",
+          "section_job": "Sermons start conversations, not end them — groups are where the conversation actually happens.",
           "sources": [
             {
               "kind": "pillar",
@@ -1960,7 +1960,7 @@
         },
         {
           "flow_role": "inform",
-          "section_job": "The groups themselves: Tuesdays, Wednesdays, every-other-Friday, and the drop-in after-service circle \u2014 with leaders named.",
+          "section_job": "The groups themselves: Tuesdays, Wednesdays, every-other-Friday, and the drop-in after-service circle — with leaders named.",
           "sources": [
             {
               "kind": "fact",
@@ -1988,7 +1988,7 @@
         },
         {
           "flow_role": "inform",
-          "section_job": "The discussion-guide library, finally in one place \u2014 this week's guide and the archive.",
+          "section_job": "The discussion-guide library, finally in one place — this week's guide and the archive.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -2006,7 +2006,7 @@
         },
         {
           "flow_role": "deepen",
-          "section_job": "What a group is actually like: processing, questioning, growing \u2014 no answers required to belong.",
+          "section_job": "What a group is actually like: processing, questioning, growing — no answers required to belong.",
           "sources": [
             {
               "kind": "pillar",
@@ -2054,7 +2054,7 @@
     },
     {
       "page_slug": "paradox-kids",
-      "page_job": "Reassure Lena that ages 5-9 get curiosity-first formation \u2014 what's taught, who teaches, and how kids actually lead \u2014 written for the skeptical-partner read.",
+      "page_job": "Reassure Lena that ages 5-9 get curiosity-first formation — what's taught, who teaches, and how kids actually lead — written for the skeptical-partner read.",
       "primary_persona": "Lena, the Faithful Exile",
       "ministry_model_alignment": "discipleship",
       "section_intents": [
@@ -2077,7 +2077,7 @@
         },
         {
           "flow_role": "reassure",
-          "section_job": "Parents see what's actually taught and by whom: same Bible books as the main service, parent-teachers, age-appropriate framing \u2014 no conformity pressure.",
+          "section_job": "Parents see what's actually taught and by whom: same Bible books as the main service, parent-teachers, age-appropriate framing — no conformity pressure.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -2136,7 +2136,7 @@
         },
         {
           "flow_role": "deepen",
-          "section_job": "Kids don't just attend \u2014 they lead: liturgists, communion helpers, singers \u2014 plus the events they talk about all year.",
+          "section_job": "Kids don't just attend — they lead: liturgists, communion helpers, singers — plus the events they talk about all year.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -2173,7 +2173,7 @@
         },
         {
           "flow_role": "invite",
-          "section_job": "Join Saturday at 9:15 \u2014 and stick around for the main service at 10:00.",
+          "section_job": "Join Saturday at 9:15 — and stick around for the main service at 10:00.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -2232,7 +2232,7 @@
         },
         {
           "flow_role": "reassure",
-          "section_job": "The room is safe and the parents aren't alone: stories, songs, play \u2014 and a Parents Room where you can breathe.",
+          "section_job": "The room is safe and the parents aren't alone: stories, songs, play — and a Parents Room where you can breathe.",
           "sources": [
             {
               "kind": "pillar",
@@ -2307,7 +2307,7 @@
     },
     {
       "page_slug": "paradox-youth",
-      "page_job": "Show parents of 10-14s a space that feels like their kid's own \u2014 honest talk, real participation, background-checked leaders.",
+      "page_job": "Show parents of 10-14s a space that feels like their kid's own — honest talk, real participation, background-checked leaders.",
       "primary_persona": "Spiritually Mixed Young Family",
       "ministry_model_alignment": "discipleship",
       "section_intents": [
@@ -2374,7 +2374,7 @@
         },
         {
           "flow_role": "deepen",
-          "section_job": "Adults who love this age group make it work \u2014 and there's room for parents' gifts on the team.",
+          "section_job": "Adults who love this age group make it work — and there's room for parents' gifts on the team.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -2391,7 +2391,7 @@
         },
         {
           "flow_role": "invite",
-          "section_job": "Bring them Saturday at 9:15 \u2014 they'll tell you about it all week.",
+          "section_job": "Bring them Saturday at 9:15 — they'll tell you about it all week.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -2417,13 +2417,13 @@
     },
     {
       "page_slug": "paradox-young-adults",
-      "page_job": "Reach University of Redlands students and young professionals who are re-examining everything \u2014 and tell them no answers are required to belong.",
+      "page_job": "Reach University of Redlands students and young professionals who are re-examining everything — and tell them no answers are required to belong.",
       "primary_persona": "Jordan, the Exile Coming Home Slowly",
       "ministry_model_alignment": "discipleship",
       "section_intents": [
         {
           "flow_role": "hook",
-          "section_job": "Making sense of faith in the modern world \u2014 for the young professionals and students of Paradox.",
+          "section_job": "Making sense of faith in the modern world — for the young professionals and students of Paradox.",
           "sources": [
             {
               "kind": "pillar",
@@ -2440,7 +2440,7 @@
         },
         {
           "flow_role": "reassure",
-          "section_job": "Deconstruction is normal here: walk through what still feels true, what no longer fits \u2014 with people doing the same.",
+          "section_job": "Deconstruction is normal here: walk through what still feels true, what no longer fits — with people doing the same.",
           "sources": [
             {
               "kind": "pillar",
@@ -2484,7 +2484,7 @@
         },
         {
           "flow_role": "invite",
-          "section_job": "Come to one midweek gathering \u2014 curiosity is the only prerequisite.",
+          "section_job": "Come to one midweek gathering — curiosity is the only prerequisite.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -2516,7 +2516,7 @@
       "section_intents": [
         {
           "flow_role": "hook",
-          "section_job": "Actions speak louder than words \u2014 make a tangible difference in the here and now.",
+          "section_job": "Actions speak louder than words — make a tangible difference in the here and now.",
           "sources": [
             {
               "kind": "pillar",
@@ -2549,7 +2549,7 @@
               "kind": "fact",
               "ref": "2946c65f-f1a7-4a93-b2af-65c6bb1d683d",
               "treatment": "weave_into_paragraph",
-              "note": "Sub-brand flagged 'needs development' in brand handoff \u2014 copy should not over-promise a developed program."
+              "note": "Sub-brand flagged 'needs development' in brand handoff — copy should not over-promise a developed program."
             },
             {
               "kind": "pillar",
@@ -2587,7 +2587,7 @@
               "kind": "fact",
               "ref": "136abba0-d390-469e-b91b-b04bfd3f0cc5",
               "treatment": "card_per_row",
-              "note": "5 partners exceed content_featured_a max_items 3 \u2014 outline-page should split across two rows or use career_section(3)+pair; flagged for bind."
+              "note": "5 partners exceed content_featured_a max_items 3 — outline-page should split across two rows or use career_section(3)+pair; flagged for bind."
             }
           ],
           "suggested_archetype": "content_featured_a"
@@ -2626,7 +2626,7 @@
         },
         {
           "flow_role": "invite",
-          "section_job": "Join the next outreach event \u2014 we would love to have you with us.",
+          "section_job": "Join the next outreach event — we would love to have you with us.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -2658,7 +2658,7 @@
       "section_intents": [
         {
           "flow_role": "hook",
-          "section_job": "Your presence and participation make Paradox work \u2014 on stage or behind the scenes.",
+          "section_job": "Your presence and participation make Paradox work — on stage or behind the scenes.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -2670,7 +2670,7 @@
         },
         {
           "flow_role": "orient",
-          "section_job": "New or long-time, your gifts \u2014 whatever they are \u2014 have a place here.",
+          "section_job": "New or long-time, your gifts — whatever they are — have a place here.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -2728,14 +2728,14 @@
               "kind": "fact",
               "ref": "3069d111-9b5a-4c57-83d2-62b458f0988a",
               "treatment": "card_per_row",
-              "note": "8 teams \u2014 cms_managed 'volunteers' type per content collection; exceeds static slot counts by design."
+              "note": "8 teams — cms_managed 'volunteers' type per content collection; exceeds static slot counts by design."
             }
           ],
           "suggested_archetype": "content_featured_a"
         },
         {
           "flow_role": "invite",
-          "section_job": "Pick a team and raise your hand \u2014 one form.",
+          "section_job": "Pick a team and raise your hand — one form.",
           "sources": [
             {
               "kind": "fact",
@@ -2761,7 +2761,7 @@
     },
     {
       "page_slug": "next-steps",
-      "page_job": "Give the post-visit reader a pathway sized to their readiness: coffee, membership, baptism \u2014 present for the ready, never pushed on the unready.",
+      "page_job": "Give the post-visit reader a pathway sized to their readiness: coffee, membership, baptism — present for the ready, never pushed on the unready.",
       "primary_persona": "Lena, the Faithful Exile",
       "ministry_model_alignment": "discipleship",
       "section_intents": [
@@ -2784,7 +2784,7 @@
         },
         {
           "flow_role": "orient",
-          "section_job": "The pathway at a glance: coffee with the pastor \u2192 membership \u2192 baptism \u2014 steps, not a funnel.",
+          "section_job": "The pathway at a glance: coffee with the pastor → membership → baptism — steps, not a funnel.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -2828,7 +2828,7 @@
         },
         {
           "flow_role": "inform",
-          "section_job": "For the ready: membership (vote, serve on boards) and baptism \u2014 with real forms and zero countdown clocks.",
+          "section_job": "For the ready: membership (vote, serve on boards) and baptism — with real forms and zero countdown clocks.",
           "sources": [
             {
               "kind": "fact",
@@ -2881,13 +2881,13 @@
     },
     {
       "page_slug": "events",
-      "page_job": "Surface the weekly rhythm and the seasonal moments \u2014 WordPress-managed so the team can keep it alive, with Christmas theming ready.",
+      "page_job": "Surface the weekly rhythm and the seasonal moments — WordPress-managed so the team can keep it alive, with Christmas theming ready.",
       "primary_persona": null,
       "ministry_model_alignment": "discipleship",
       "section_intents": [
         {
           "flow_role": "hook",
-          "section_job": "Here's what's happening at Paradox \u2014 and you're invited to all of it.",
+          "section_job": "Here's what's happening at Paradox — and you're invited to all of it.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -2899,7 +2899,7 @@
         },
         {
           "flow_role": "inform",
-          "section_job": "Upcoming events, rendered live from WordPress \u2014 outreach days, socials, special services.",
+          "section_job": "Upcoming events, rendered live from WordPress — outreach days, socials, special services.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -2912,7 +2912,7 @@
         },
         {
           "flow_role": "inform",
-          "section_job": "The annual rhythm worth planning around: Easter Sunrise at Appleton Ranch, Women's Empowerment Service, Kids Takeover, Mom's/Dad's Day Out, Fall Social, Coffee & Canvas \u2014 and the 10-Year Celebration.",
+          "section_job": "The annual rhythm worth planning around: Easter Sunrise at Appleton Ranch, Women's Empowerment Service, Kids Takeover, Mom's/Dad's Day Out, Fall Social, Coffee & Canvas — and the 10-Year Celebration.",
           "sources": [
             {
               "kind": "fact",
@@ -2958,14 +2958,14 @@
               "kind": "fact",
               "ref": "65458b52-e1f4-4495-a1ba-059916542b2e",
               "treatment": "weave_into_paragraph",
-              "note": "Sub-brand flagged 'needs development' \u2014 name it lightly, don't build a program page around it."
+              "note": "Sub-brand flagged 'needs development' — name it lightly, don't build a program page around it."
             }
           ],
           "suggested_archetype": "career_section"
         },
         {
           "flow_role": "invite",
-          "section_job": "Pick one and come \u2014 most events need nothing from you but showing up.",
+          "section_job": "Pick one and come — most events need nothing from you but showing up.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -2991,13 +2991,13 @@
     },
     {
       "page_slug": "contact",
-      "page_job": "Make reaching a real person effortless: address, parking, hours, forms, socials \u2014 with NAP consistency for local SEO.",
+      "page_job": "Make reaching a real person effortless: address, parking, hours, forms, socials — with NAP consistency for local SEO.",
       "primary_persona": null,
       "ministry_model_alignment": "discipleship",
       "section_intents": [
         {
           "flow_role": "hook",
-          "section_job": "We'd love to connect \u2014 real people answer these.",
+          "section_job": "We'd love to connect — real people answer these.",
           "sources": [
             {
               "kind": "crawl_topic",
@@ -3105,7 +3105,7 @@
         },
         {
           "flow_role": "invite",
-          "section_job": "Send the note \u2014 someone will actually reply.",
+          "section_job": "Send the note — someone will actually reply.",
           "sources": [
             {
               "kind": "fact",
@@ -3137,7 +3137,7 @@
       "section_intents": [
         {
           "flow_role": "hook",
-          "section_job": "Share the gift of paradox \u2014 your donations make Paradox possible.",
+          "section_job": "Share the gift of paradox — your donations make Paradox possible.",
           "sources": [
             {
               "kind": "pillar",
@@ -3181,7 +3181,7 @@
         },
         {
           "flow_role": "inform",
-          "section_job": "Ways to give, all effortless: online via Church Center, Venmo, or in person on Saturday \u2014 with annual statements each January.",
+          "section_job": "Ways to give, all effortless: online via Church Center, Venmo, or in person on Saturday — with annual statements each January.",
           "sources": [
             {
               "kind": "fact",
@@ -3203,7 +3203,7 @@
         },
         {
           "flow_role": "invite",
-          "section_job": "Give once or set it and forget it \u2014 either way, thank you.",
+          "section_job": "Give once or set it and forget it — either way, thank you.",
           "sources": [
             {
               "kind": "fact",
@@ -3242,7 +3242,7 @@
           "page_slug": "sermons",
           "section_ix": 2,
           "treatment": "summarize",
-          "rationale": "Site-wide CMS scope (sermons, events, groups, staff, blog, testimonials, volunteers) \u2014 recorded here where the largest CPT lives."
+          "rationale": "Site-wide CMS scope (sermons, events, groups, staff, blog, testimonials, volunteers) — recorded here where the largest CPT lives."
         }
       ]
     },
@@ -3380,7 +3380,7 @@
           "page_slug": "sermons",
           "section_ix": 3,
           "treatment": "cta_attach",
-          "rationale": "Discussion groups are the designed next step after a sermon \u2014 the core pathway edge."
+          "rationale": "Discussion groups are the designed next step after a sermon — the core pathway edge."
         },
         {
           "page_slug": "blog",
@@ -3410,7 +3410,7 @@
           "page_slug": "serve-redlands",
           "section_ix": 3,
           "treatment": "cta_attach",
-          "rationale": "Upcoming Events page lists the next outreach date \u2014 the live edge of this page."
+          "rationale": "Upcoming Events page lists the next outreach date — the live edge of this page."
         },
         {
           "page_slug": "events",
@@ -3440,7 +3440,7 @@
           "page_slug": "affirming",
           "section_ix": 0,
           "treatment": "summarize",
-          "rationale": "Crawl passage 'one of three affirming churches\u2026 only one within 30 miles with affirming theology and contemporary worship' (captured under giving) is the differentiating proof line."
+          "rationale": "Crawl passage 'one of three affirming churches… only one within 30 miles with affirming theology and contemporary worship' (captured under giving) is the differentiating proof line."
         },
         {
           "page_slug": "donate",
@@ -3476,13 +3476,13 @@
           "page_slug": "plan-a-visit",
           "section_ix": 3,
           "treatment": "summarize",
-          "rationale": "Kids/ParaTots passages cover drop-off rhythm, Parents Room, and what's taught \u2014 condensed teaser that links to the three audience pages."
+          "rationale": "Kids/ParaTots passages cover drop-off rhythm, Parents Room, and what's taught — condensed teaser that links to the three audience pages."
         },
         {
           "page_slug": "paradox-kids",
           "section_ix": 1,
           "treatment": "weave_into_paragraph",
-          "rationale": "Crawl passages detail the curriculum link to the main service and the parent-teacher model \u2014 the transparency Lena requires."
+          "rationale": "Crawl passages detail the curriculum link to the main service and the parent-teacher model — the transparency Lena requires."
         },
         {
           "page_slug": "paradox-kids",
@@ -3494,7 +3494,7 @@
           "page_slug": "paradox-kids",
           "section_ix": 4,
           "treatment": "cta_attach",
-          "rationale": "The crawl's own invite line ('join us\u2026 then stick around') is the CTA."
+          "rationale": "The crawl's own invite line ('join us… then stick around') is the CTA."
         },
         {
           "page_slug": "paratots",
@@ -3608,7 +3608,7 @@
           "page_slug": "home",
           "section_ix": 4,
           "treatment": "summarize",
-          "rationale": "Coffee \u2192 membership \u2192 baptism on-ramp, summarized as one gateway card."
+          "rationale": "Coffee → membership → baptism on-ramp, summarized as one gateway card."
         },
         {
           "page_slug": "about",
@@ -3722,7 +3722,7 @@
           "page_slug": "volunteer",
           "section_ix": 1,
           "treatment": "weave_into_paragraph",
-          "rationale": "'Whether you are brand new\u2026 or have been coming for years' passage frames the invitation."
+          "rationale": "'Whether you are brand new… or have been coming for years' passage frames the invitation."
         }
       ]
     },
@@ -3734,7 +3734,7 @@
           "page_slug": "paradox-youth",
           "section_ix": 1,
           "treatment": "weave_into_paragraph",
-          "rationale": "'Not on the sidelines\u2026 active contributors' passages answer the what-are-they-taught question."
+          "rationale": "'Not on the sidelines… active contributors' passages answer the what-are-they-taught question."
         },
         {
           "page_slug": "paradox-youth",
@@ -3848,7 +3848,7 @@
           "page_slug": "paradox-youth",
           "section_ix": 1,
           "treatment": "weave_into_paragraph",
-          "rationale": "Program fact carries the background-check field \u2014 surface it plainly for parents."
+          "rationale": "Program fact carries the background-check field — surface it plainly for parents."
         }
       ]
     },
@@ -3860,7 +3860,7 @@
           "page_slug": "serve-redlands",
           "section_ix": 0,
           "treatment": "weave_into_paragraph",
-          "rationale": "'Serve Redlands' is the owned umbrella term \u2014 never substitute 'Missions'."
+          "rationale": "'Serve Redlands' is the owned umbrella term — never substitute 'Missions'."
         }
       ]
     },
@@ -3908,7 +3908,7 @@
           "page_slug": "serve-redlands",
           "section_ix": 2,
           "treatment": "card_per_row",
-          "rationale": "Seven-church Good Friday partnership since 2020 \u2014 ecumenical proof."
+          "rationale": "Seven-church Good Friday partnership since 2020 — ecumenical proof."
         }
       ]
     },
@@ -4034,7 +4034,7 @@
           "page_slug": "staff",
           "section_ix": 0,
           "treatment": "weave_into_paragraph",
-          "rationale": "'Pastor Craig Hadley' is the partner's naming convention \u2014 use it."
+          "rationale": "'Pastor Craig Hadley' is the partner's naming convention — use it."
         }
       ]
     },
@@ -4178,7 +4178,7 @@
           "page_slug": "affirming",
           "section_ix": 3,
           "treatment": "reframe_for_persona",
-          "rationale": "LGBTQ+ individuals and families wanting genuine celebration \u2014 say so plainly."
+          "rationale": "LGBTQ+ individuals and families wanting genuine celebration — say so plainly."
         }
       ]
     },
@@ -4244,7 +4244,7 @@
           "page_slug": "about",
           "section_ix": 3,
           "treatment": "card_per_row",
-          "rationale": "Return after 60 virtual weeks \u2014 community resilience."
+          "rationale": "Return after 60 virtual weeks — community resilience."
         }
       ]
     },
@@ -4274,7 +4274,7 @@
           "page_slug": "staff",
           "section_ix": 2,
           "treatment": "card_per_row",
-          "rationale": "Head Elder (She/Her) \u2014 structural women's-empowerment proof."
+          "rationale": "Head Elder (She/Her) — structural women's-empowerment proof."
         }
       ]
     },
@@ -4322,7 +4322,7 @@
           "page_slug": "discussion-groups",
           "section_ix": 1,
           "treatment": "weave_into_paragraph",
-          "rationale": "Recommended starting point for new attendees \u2014 hybrid, explicitly newcomer-shaped."
+          "rationale": "Recommended starting point for new attendees — hybrid, explicitly newcomer-shaped."
         }
       ]
     },
@@ -4352,7 +4352,7 @@
           "page_slug": "affirming",
           "section_ix": 1,
           "treatment": "weave_into_paragraph",
-          "rationale": "First queer wedding 2019 \u2014 practice, not posture."
+          "rationale": "First queer wedding 2019 — practice, not posture."
         }
       ]
     },
@@ -4472,7 +4472,7 @@
           "page_slug": "about",
           "section_ix": 1,
           "treatment": "weave_into_paragraph",
-          "rationale": "~100 on a weekend \u2014 honest scale."
+          "rationale": "~100 on a weekend — honest scale."
         }
       ]
     },
@@ -4532,7 +4532,7 @@
           "page_slug": "plan-a-visit",
           "section_ix": 3,
           "treatment": "weave_into_paragraph",
-          "rationale": "ParaTots 9:15 AM ages 0-4 \u2014 concrete logistics parents scan for."
+          "rationale": "ParaTots 9:15 AM ages 0-4 — concrete logistics parents scan for."
         },
         {
           "page_slug": "paratots",
@@ -4592,7 +4592,7 @@
           "page_slug": "paradox-kids",
           "section_ix": 2,
           "treatment": "weave_into_paragraph",
-          "rationale": "9:15 AM ages 5-9 \u2014 the fact parents scan for."
+          "rationale": "9:15 AM ages 5-9 — the fact parents scan for."
         }
       ]
     },
@@ -4640,7 +4640,7 @@
           "page_slug": "about",
           "section_ix": 3,
           "treatment": "card_per_row",
-          "rationale": "First female speaker 2016 \u2014 receipts for women's empowerment."
+          "rationale": "First female speaker 2016 — receipts for women's empowerment."
         }
       ]
     },
@@ -4700,7 +4700,7 @@
           "page_slug": "about",
           "section_ix": 3,
           "treatment": "card_per_row",
-          "rationale": "First Easter Sunrise at Appleton Ranch (annual since) \u2014 timeline entry."
+          "rationale": "First Easter Sunrise at Appleton Ranch (annual since) — timeline entry."
         }
       ]
     },
@@ -4748,7 +4748,7 @@
           "page_slug": "staff",
           "section_ix": 1,
           "treatment": "card_per_row",
-          "rationale": "Children's Ministry Director card (since Spring 2026 \u2014 staff transitions are why this is a CPT)."
+          "rationale": "Children's Ministry Director card (since Spring 2026 — staff transitions are why this is a CPT)."
         },
         {
           "page_slug": "paradox-kids",
@@ -4766,7 +4766,7 @@
           "page_slug": "home",
           "section_ix": 4,
           "treatment": "card_per_row",
-          "rationale": "Young Adults sub-brand card \u2014 University of Redlands audience entry."
+          "rationale": "Young Adults sub-brand card — University of Redlands audience entry."
         },
         {
           "page_slug": "paradox-young-adults",
@@ -4796,7 +4796,7 @@
           "page_slug": "paradox-youth",
           "section_ix": 2,
           "treatment": "weave_into_paragraph",
-          "rationale": "Scavenger Hunt \u2192 sermon discussion 'just like the adults do'."
+          "rationale": "Scavenger Hunt → sermon discussion 'just like the adults do'."
         }
       ]
     },
@@ -4808,7 +4808,7 @@
           "page_slug": "plan-a-visit",
           "section_ix": 1,
           "treatment": "weave_into_paragraph",
-          "rationale": "Use the partner's vocabulary \u2014 'worship services / gatherings / time together'."
+          "rationale": "Use the partner's vocabulary — 'worship services / gatherings / time together'."
         }
       ]
     },
@@ -4880,7 +4880,7 @@
           "page_slug": "beliefs",
           "section_ix": 5,
           "treatment": "cta_attach",
-          "rationale": "Coffee form is the right invite for a beliefs reader \u2014 dialogue, not signup."
+          "rationale": "Coffee form is the right invite for a beliefs reader — dialogue, not signup."
         },
         {
           "page_slug": "affirming",
@@ -4898,7 +4898,7 @@
           "page_slug": "next-steps",
           "section_ix": 4,
           "treatment": "cta_attach",
-          "rationale": "Single primary invite \u2014 the lowest-stakes human step."
+          "rationale": "Single primary invite — the lowest-stakes human step."
         },
         {
           "page_slug": "contact",
@@ -4916,7 +4916,7 @@
           "page_slug": "discussion-groups",
           "section_ix": 2,
           "treatment": "card_per_row",
-          "rationale": "After-service drop-in card (Kim Krogstad & Thomas Jacques) \u2014 the zero-commitment on-ramp."
+          "rationale": "After-service drop-in card (Kim Krogstad & Thomas Jacques) — the zero-commitment on-ramp."
         }
       ]
     },
@@ -5096,7 +5096,7 @@
           "page_slug": "paradox-kids",
           "section_ix": 3,
           "treatment": "card_per_row",
-          "rationale": "Kids Takeover Service card \u2014 kids lead the whole church."
+          "rationale": "Kids Takeover Service card — kids lead the whole church."
         },
         {
           "page_slug": "events",
@@ -5126,7 +5126,7 @@
           "page_slug": "about",
           "section_ix": 0,
           "treatment": "weave_into_paragraph",
-          "rationale": "Incorporated in the Scofields' living room \u2014 the detail that makes it real."
+          "rationale": "Incorporated in the Scofields' living room — the detail that makes it real."
         }
       ]
     },
@@ -5138,7 +5138,7 @@
           "page_slug": "next-steps",
           "section_ix": 3,
           "treatment": "weave_into_paragraph",
-          "rationale": "Baptism as sacrament \u2014 meaning first, signup second."
+          "rationale": "Baptism as sacrament — meaning first, signup second."
         }
       ]
     },
@@ -5162,13 +5162,13 @@
           "page_slug": "about",
           "section_ix": 3,
           "treatment": "card_per_row",
-          "rationale": "First openly queer speaker 2017 \u2014 affirming receipts predate the 2018 commitment."
+          "rationale": "First openly queer speaker 2017 — affirming receipts predate the 2018 commitment."
         },
         {
           "page_slug": "affirming",
           "section_ix": 1,
           "treatment": "weave_into_paragraph",
-          "rationale": "First openly queer speaker 2017 \u2014 predates the formal commitment."
+          "rationale": "First openly queer speaker 2017 — predates the formal commitment."
         }
       ]
     },
@@ -5288,7 +5288,7 @@
           "page_slug": "about",
           "section_ix": 3,
           "treatment": "card_per_row",
-          "rationale": "First service at Mission Gables Bowl House \u2014 timeline entry."
+          "rationale": "First service at Mission Gables Bowl House — timeline entry."
         }
       ]
     },
@@ -5384,7 +5384,7 @@
           "page_slug": "affirming",
           "section_ix": 2,
           "treatment": "weave_into_paragraph",
-          "rationale": "2025 elders-approved sexual ethics statement \u2014 linkable governance proof."
+          "rationale": "2025 elders-approved sexual ethics statement — linkable governance proof."
         }
       ]
     },
@@ -5468,7 +5468,7 @@
           "page_slug": "paradox-kids",
           "section_ix": 3,
           "treatment": "card_per_row",
-          "rationale": "Variety Show card \u2014 kids performing for the congregation."
+          "rationale": "Variety Show card — kids performing for the congregation."
         }
       ]
     },
@@ -5498,13 +5498,13 @@
           "page_slug": "about",
           "section_ix": 3,
           "treatment": "card_per_row",
-          "rationale": "2018 elders' affirming commitment \u2014 the hinge milestone."
+          "rationale": "2018 elders' affirming commitment — the hinge milestone."
         },
         {
           "page_slug": "affirming",
           "section_ix": 1,
           "treatment": "weave_into_paragraph",
-          "rationale": "Elders' 2018 commitment date \u2014 receipts."
+          "rationale": "Elders' 2018 commitment date — receipts."
         }
       ]
     },
@@ -5516,7 +5516,7 @@
           "page_slug": "home",
           "section_ix": 5,
           "treatment": "weave_into_paragraph",
-          "rationale": "Thanksgiving Food Drive since 2016 \u2014 longevity proof."
+          "rationale": "Thanksgiving Food Drive since 2016 — longevity proof."
         },
         {
           "page_slug": "serve-redlands",
@@ -5624,7 +5624,7 @@
           "page_slug": "beliefs",
           "section_ix": 1,
           "treatment": "card_per_row",
-          "rationale": "One Core Belief: Jesus Christ \u2014 the partner's own framework."
+          "rationale": "One Core Belief: Jesus Christ — the partner's own framework."
         }
       ]
     },
@@ -5720,7 +5720,7 @@
           "page_slug": "contact",
           "section_ix": 2,
           "treatment": "cta_attach",
-          "rationale": "Prayer request form \u2014 pastoral care entry point."
+          "rationale": "Prayer request form — pastoral care entry point."
         }
       ]
     },
@@ -5798,7 +5798,7 @@
           "page_slug": "about",
           "section_ix": 3,
           "treatment": "card_per_row",
-          "rationale": "Biblical Contradictions film series 2022 \u2014 intellectual honesty receipts."
+          "rationale": "Biblical Contradictions film series 2022 — intellectual honesty receipts."
         }
       ]
     },
@@ -5888,7 +5888,7 @@
           "page_slug": "home",
           "section_ix": 7,
           "treatment": "voice_anchor",
-          "rationale": "'We are still figuring this out' is an asset \u2014 the close leans on it."
+          "rationale": "'We are still figuring this out' is an asset — the close leans on it."
         },
         {
           "page_slug": "about",
@@ -5900,7 +5900,7 @@
           "page_slug": "beliefs",
           "section_ix": 2,
           "treatment": "voice_anchor",
-          "rationale": "Name the hard thing and let it sit \u2014 beliefs page must not over-resolve."
+          "rationale": "Name the hard thing and let it sit — beliefs page must not over-resolve."
         },
         {
           "page_slug": "discussion-groups",
@@ -5942,7 +5942,7 @@
           "page_slug": "volunteer",
           "section_ix": 4,
           "treatment": "voice_anchor",
-          "rationale": "Gracious close \u2014 service as gift, not obligation."
+          "rationale": "Gracious close — service as gift, not obligation."
         },
         {
           "page_slug": "contact",
@@ -5966,13 +5966,13 @@
           "page_slug": "home",
           "section_ix": 3,
           "treatment": "lift_verbatim",
-          "rationale": "The signature ethos line IS the section heading material \u2014 partner's verbatim identity phrase."
+          "rationale": "The signature ethos line IS the section heading material — partner's verbatim identity phrase."
         },
         {
           "page_slug": "discussion-groups",
           "section_ix": 0,
           "treatment": "lift_verbatim",
-          "rationale": "Signature ethos line reused \u2014 here it is the page thesis rather than a homepage teaser."
+          "rationale": "Signature ethos line reused — here it is the page thesis rather than a homepage teaser."
         }
       ]
     },
@@ -6038,7 +6038,7 @@
           "page_slug": "paradox-young-adults",
           "section_ix": 0,
           "treatment": "lift_verbatim",
-          "rationale": "Existing YA tagline, verbatim \u2014 also the SEO geo-anchor section for University of Redlands."
+          "rationale": "Existing YA tagline, verbatim — also the SEO geo-anchor section for University of Redlands."
         }
       ]
     },
@@ -6062,7 +6062,7 @@
           "page_slug": "sermons",
           "section_ix": 1,
           "treatment": "lift_verbatim",
-          "rationale": "Nine-year/66-part series in the partner's exact words \u2014 the teaching program's signature fact."
+          "rationale": "Nine-year/66-part series in the partner's exact words — the teaching program's signature fact."
         }
       ]
     },
@@ -6146,7 +6146,7 @@
           "page_slug": "plan-a-visit",
           "section_ix": 1,
           "treatment": "lift_verbatim",
-          "rationale": "The 75-minute what-to-expect paragraph is literal page copy in the partner's voice \u2014 exactly the orient beat."
+          "rationale": "The 75-minute what-to-expect paragraph is literal page copy in the partner's voice — exactly the orient beat."
         }
       ]
     },
@@ -6206,7 +6206,7 @@
           "page_slug": "plan-a-visit",
           "section_ix": 2,
           "treatment": "lift_verbatim",
-          "rationale": "Music is invitational, not required \u2014 removes the participation fear."
+          "rationale": "Music is invitational, not required — removes the participation fear."
         }
       ]
     },
@@ -6344,7 +6344,7 @@
           "page_slug": "home",
           "section_ix": 4,
           "treatment": "voice_anchor",
-          "rationale": "'Start conversations, not end them \u2192 groups' is the connective tissue for the pathway band."
+          "rationale": "'Start conversations, not end them → groups' is the connective tissue for the pathway band."
         },
         {
           "page_slug": "discussion-groups",
@@ -6392,13 +6392,13 @@
           "page_slug": "home",
           "section_ix": 5,
           "treatment": "voice_anchor",
-          "rationale": "No confident declarations about what God is doing \u2014 the vision stays humble."
+          "rationale": "No confident declarations about what God is doing — the vision stays humble."
         },
         {
           "page_slug": "sermons",
           "section_ix": 5,
           "treatment": "voice_anchor",
-          "rationale": "Humble, curious closing register \u2014 no certainty performance."
+          "rationale": "Humble, curious closing register — no certainty performance."
         },
         {
           "page_slug": "beliefs",
@@ -6410,7 +6410,7 @@
           "page_slug": "beliefs",
           "section_ix": 6,
           "treatment": "voice_anchor",
-          "rationale": "The close must not perform certainty \u2014 it earns trust by withholding it."
+          "rationale": "The close must not perform certainty — it earns trust by withholding it."
         },
         {
           "page_slug": "serve-redlands",
@@ -6452,7 +6452,7 @@
           "page_slug": "discussion-groups",
           "section_ix": 4,
           "treatment": "lift_verbatim",
-          "rationale": "'You don't need answers to belong here \u2014 just curiosity' is the exact reassurance Jordan needs (literal site copy)."
+          "rationale": "'You don't need answers to belong here — just curiosity' is the exact reassurance Jordan needs (literal site copy)."
         },
         {
           "page_slug": "paradox-young-adults",
@@ -6494,7 +6494,7 @@
           "page_slug": "home",
           "section_ix": 2,
           "treatment": "reframe_for_persona",
-          "rationale": "Persona source \u2014 the skeptic must read zero recruitment pressure in this band."
+          "rationale": "Persona source — the skeptic must read zero recruitment pressure in this band."
         }
       ]
     },
@@ -6518,7 +6518,7 @@
           "page_slug": "paratots",
           "section_ix": 1,
           "treatment": "lift_verbatim",
-          "rationale": "'Generous, inclusive, and affirming of all human beings' \u2014 the formation promise in literal page copy."
+          "rationale": "'Generous, inclusive, and affirming of all human beings' — the formation promise in literal page copy."
         }
       ]
     },
@@ -6596,7 +6596,7 @@
           "page_slug": "home",
           "section_ix": 0,
           "treatment": "voice_anchor",
-          "rationale": "Say what you mean \u2014 keeps the hero from hedging."
+          "rationale": "Say what you mean — keeps the hero from hedging."
         }
       ]
     },
@@ -6638,7 +6638,7 @@
           "page_slug": "about",
           "section_ix": 3,
           "treatment": "lift_verbatim",
-          "rationale": "Holy Saturday service description, exact words \u2014 texture for how Paradox marks time."
+          "rationale": "Holy Saturday service description, exact words — texture for how Paradox marks time."
         }
       ]
     },
@@ -6674,13 +6674,13 @@
           "page_slug": "beliefs",
           "section_ix": 4,
           "treatment": "lift_verbatim",
-          "rationale": "The affirming statement in full, exact words \u2014 weddings, ordination, baptism, leadership."
+          "rationale": "The affirming statement in full, exact words — weddings, ordination, baptism, leadership."
         },
         {
           "page_slug": "affirming",
           "section_ix": 0,
           "treatment": "lift_verbatim",
-          "rationale": "The full affirming statement leads the page \u2014 exact words, no disclaimer framing."
+          "rationale": "The full affirming statement leads the page — exact words, no disclaimer framing."
         }
       ]
     },
@@ -6710,7 +6710,7 @@
           "page_slug": "home",
           "section_ix": 2,
           "treatment": "reframe_for_persona",
-          "rationale": "Persona source \u2014 aims the named welcome at the exile with a skeptical spouse; never name the persona on-page."
+          "rationale": "Persona source — aims the named welcome at the exile with a skeptical spouse; never name the persona on-page."
         },
         {
           "page_slug": "plan-a-visit",
@@ -6728,7 +6728,7 @@
           "page_slug": "paradox-kids",
           "section_ix": 5,
           "treatment": "reframe_for_persona",
-          "rationale": "Lena's deepest motivation shapes the final line \u2014 faith that holds up to hard questions."
+          "rationale": "Lena's deepest motivation shapes the final line — faith that holds up to hard questions."
         },
         {
           "page_slug": "paradox-youth",
@@ -6752,7 +6752,7 @@
           "page_slug": "beliefs",
           "section_ix": 4,
           "treatment": "voice_anchor",
-          "rationale": "No 'Our God' / 'true religion' \u2014 God is God of all."
+          "rationale": "No 'Our God' / 'true religion' — God is God of all."
         }
       ]
     },
@@ -6764,7 +6764,7 @@
           "page_slug": "donate",
           "section_ix": 1,
           "treatment": "voice_anchor",
-          "rationale": "'We only ask once a week because money is of little importance to us' governs the entire page's posture \u2014 do not paraphrase into a pitch."
+          "rationale": "'We only ask once a week because money is of little importance to us' governs the entire page's posture — do not paraphrase into a pitch."
         }
       ]
     },
@@ -6788,7 +6788,7 @@
           "page_slug": "sermons",
           "section_ix": 0,
           "treatment": "lift_verbatim",
-          "rationale": "'Full stories with character arcs \u2014 our sermons are longer for this reason' tells Marcus this is serious teaching."
+          "rationale": "'Full stories with character arcs — our sermons are longer for this reason' tells Marcus this is serious teaching."
         },
         {
           "page_slug": "blog",
@@ -6866,13 +6866,13 @@
           "page_slug": "plan-a-visit",
           "section_ix": 4,
           "treatment": "surface_as_faq",
-          "rationale": "Non-denominational, elder-accountable \u2014 Marcus checks this before trusting anything."
+          "rationale": "Non-denominational, elder-accountable — Marcus checks this before trusting anything."
         },
         {
           "page_slug": "about",
           "section_ix": 1,
           "treatment": "weave_into_paragraph",
-          "rationale": "Stand-alone, elder-accountable \u2014 institutional honesty Marcus needs."
+          "rationale": "Stand-alone, elder-accountable — institutional honesty Marcus needs."
         },
         {
           "page_slug": "affirming",
@@ -6902,7 +6902,7 @@
           "page_slug": "plan-a-visit",
           "section_ix": 4,
           "treatment": "lift_verbatim",
-          "rationale": "Open-table communion answer \u2014 'no matter who you voted for or who you love' \u2014 lifted exactly."
+          "rationale": "Open-table communion answer — 'no matter who you voted for or who you love' — lifted exactly."
         }
       ]
     },
@@ -6920,7 +6920,7 @@
           "page_slug": "home",
           "section_ix": 6,
           "treatment": "voice_anchor",
-          "rationale": "Invitation must be specific \u2014 to a conversation, not a service."
+          "rationale": "Invitation must be specific — to a conversation, not a service."
         },
         {
           "page_slug": "plan-a-visit",
@@ -7004,7 +7004,7 @@
           "page_slug": "next-steps",
           "section_ix": 0,
           "treatment": "lift_verbatim",
-          "rationale": "'New to church, deconstructing, or reconstructing \u2014 you can find a spiritual home here' names the reader, literal page copy."
+          "rationale": "'New to church, deconstructing, or reconstructing — you can find a spiritual home here' names the reader, literal page copy."
         }
       ]
     },
@@ -7064,7 +7064,7 @@
           "page_slug": "about",
           "section_ix": 3,
           "treatment": "lift_verbatim",
-          "rationale": "'Tradition and transformation\u2026 one of the reasons we call ourselves Paradox' closes the timeline in literal site copy."
+          "rationale": "'Tradition and transformation… one of the reasons we call ourselves Paradox' closes the timeline in literal site copy."
         },
         {
           "page_slug": "about",
@@ -7112,7 +7112,7 @@
           "page_slug": "affirming",
           "section_ix": 1,
           "treatment": "weave_into_paragraph",
-          "rationale": "Second affirming congregation in Redlands, 2018 \u2014 the headline fact for SEO and trust."
+          "rationale": "Second affirming congregation in Redlands, 2018 — the headline fact for SEO and trust."
         }
       ]
     },
@@ -7130,7 +7130,7 @@
           "page_slug": "plan-a-visit",
           "section_ix": 2,
           "treatment": "lift_verbatim",
-          "rationale": "'We are certain you will disagree with something Pastor Craig says \u2014 that is encouraged' is the single most disarming line on the live site."
+          "rationale": "'We are certain you will disagree with something Pastor Craig says — that is encouraged' is the single most disarming line on the live site."
         }
       ]
     },
@@ -7190,7 +7190,7 @@
           "page_slug": "home",
           "section_ix": 2,
           "treatment": "reframe_for_persona",
-          "rationale": "Persona source \u2014 built-for-not-amended-for is Jordan's exact blocker; this band answers it."
+          "rationale": "Persona source — built-for-not-amended-for is Jordan's exact blocker; this band answers it."
         },
         {
           "page_slug": "affirming",
@@ -7220,7 +7220,7 @@
           "page_slug": "beliefs",
           "section_ix": 2,
           "treatment": "lift_verbatim",
-          "rationale": "Embrace-the-paradoxes ethos, verbatim \u2014 the theological heart of the name."
+          "rationale": "Embrace-the-paradoxes ethos, verbatim — the theological heart of the name."
         }
       ]
     },
@@ -7262,13 +7262,13 @@
           "page_slug": "plan-a-visit",
           "section_ix": 4,
           "treatment": "lift_verbatim",
-          "rationale": "Why-Saturday FAQ in the partner's exact words (SDA roots, founding community) \u2014 verbatim flag honored."
+          "rationale": "Why-Saturday FAQ in the partner's exact words (SDA roots, founding community) — verbatim flag honored."
         },
         {
           "page_slug": "about",
           "section_ix": 1,
           "treatment": "lift_verbatim",
-          "rationale": "Adventist-roots explanation reused from the visit FAQ \u2014 same verbatim wording, identity context here."
+          "rationale": "Adventist-roots explanation reused from the visit FAQ — same verbatim wording, identity context here."
         }
       ]
     },
@@ -7394,7 +7394,7 @@
           "page_slug": "sermons",
           "section_ix": 1,
           "treatment": "lift_verbatim",
-          "rationale": "'Historical context, academic research, scientific method, literary analysis' \u2014 verbatim ethos that frames the archive."
+          "rationale": "'Historical context, academic research, scientific method, literary analysis' — verbatim ethos that frames the archive."
         },
         {
           "page_slug": "beliefs",
@@ -7412,7 +7412,7 @@
           "page_slug": "about",
           "section_ix": 2,
           "treatment": "lift_verbatim",
-          "rationale": "Duplicate capture of the same mission line (DQ source); honor verbatim \u2014 outline-page dedupes."
+          "rationale": "Duplicate capture of the same mission line (DQ source); honor verbatim — outline-page dedupes."
         }
       ]
     },
@@ -7442,13 +7442,13 @@
           "page_slug": "home",
           "section_ix": 0,
           "treatment": "voice_anchor",
-          "rationale": "No press-release/hype register \u2014 the exact failure mode for this hero."
+          "rationale": "No press-release/hype register — the exact failure mode for this hero."
         },
         {
           "page_slug": "affirming",
           "section_ix": 2,
           "treatment": "voice_anchor",
-          "rationale": "Must read as natural expression, never PR \u2014 the AM handoff's exact concern."
+          "rationale": "Must read as natural expression, never PR — the AM handoff's exact concern."
         },
         {
           "page_slug": "next-steps",
@@ -7472,7 +7472,7 @@
           "page_slug": "beliefs",
           "section_ix": 4,
           "treatment": "lift_verbatim",
-          "rationale": "Women-empowerment paragraph including feminine pronouns for the Creator \u2014 exact words, no softening."
+          "rationale": "Women-empowerment paragraph including feminine pronouns for the Creator — exact words, no softening."
         },
         {
           "page_slug": "staff",
@@ -7518,13 +7518,13 @@
       "source_kind": "crawl_topic",
       "source_ref": "other",
       "reason": "crawl_noise_parking_lot",
-      "detail": "148 items dominated by Squarespace template boilerplate ('Imagine having a website\u2026'), 404 placeholders, and duplicates; genuine content within it (testimony videos, orphan staff pages, social links) is already captured under the testimonies/leadership topics and church_facts. Stage 1 explicitly parked this topic for build-time audit."
+      "detail": "148 items dominated by Squarespace template boilerplate ('Imagine having a website…'), 404 placeholders, and duplicates; genuine content within it (testimony videos, orphan staff pages, social links) is already captured under the testimonies/leadership topics and church_facts. Stage 1 explicitly parked this topic for build-time audit."
     },
     {
       "source_kind": "fact",
       "source_ref": "9253eb5c-2731-409b-ad8f-dec819203ca3",
       "reason": "internal_admin_contact_not_for_publication",
-      "detail": "Craig's personal cell from the AM handoff; publishing requires explicit partner consent \u2014 main line (909) 255-6065 is placed instead."
+      "detail": "Craig's personal cell from the AM handoff; publishing requires explicit partner consent — main line (909) 255-6065 is placed instead."
     }
   ],
   "_meta": {
@@ -7546,7 +7546,7 @@
       "source_kind": "pillar",
       "source_ref": "aa44b643-23de-4507-895a-04a137940d65",
       "applies_to": "site_wide",
-      "directive": "SEO redirect-map requirement for the Squarespace\u2192WordPress migration; dev-task, no copy slot."
+      "directive": "SEO redirect-map requirement for the Squarespace→WordPress migration; dev-task, no copy slot."
     },
     {
       "source_kind": "pillar",

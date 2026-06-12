@@ -1,0 +1,128 @@
+{
+  "page_slug": "paratots",
+  "ministry_model_alignment": "discipleship",
+  "sections": [
+    {
+      "section_ix": 0,
+      "archetype": "hero_inner",
+      "section_job": "Lead with the line that melts a parent: before you were even born, God loved you first.",
+      "flow_role": "hook",
+      "voice_anchor": "Real, unforced warmth. Lowercase tenderness of the verbatim line is the whole vibe — do not punch it up.",
+      "anti_pattern_to_avoid": "Do not turn this hero into a peppy kids-ministry pitch. No exclamation points, no 'fun-filled,' no forced enthusiasm.",
+      "atom_assignments": [
+        {
+          "atom_id": "00000000-0000-0000-0000-000000badbad",
+          "treatment": "use_as_is",
+          "slot_hint": "primary_heading"
+        },
+        {
+          "atom_id": "2528ca66-ceca-47ee-80ff-a3d06bb58fb9",
+          "treatment": "use_as_is",
+          "slot_hint": "body"
+        }
+      ]
+    },
+    {
+      "section_ix": 1,
+      "archetype": "content_image_text_a",
+      "section_job": "Reassure parents: stories, songs, play, generous love — plus a Parents Room where you can breathe.",
+      "flow_role": "reassure",
+      "voice_anchor": "Let delight show up in the details. Do not force enthusiasm. Kids are loud in the lobby and welcome to be.",
+      "anti_pattern_to_avoid": "Do not promise polish or performance. No 'state-of-the-art,' no 'world-class.' Solidarity, not salesmanship.",
+      "atom_assignments": [
+        {
+          "atom_id": "73a9658c-2a73-472f-aeed-f9b21cb70532",
+          "treatment": "use_as_is",
+          "slot_hint": "body"
+        },
+        {
+          "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
+          "treatment": "use_as_is",
+          "slot_hint": "primary_heading"
+        }
+      ]
+    },
+    {
+      "section_ix": 2,
+      "archetype": "content_image_text_b",
+      "section_job": "Logistics woven warmly: ages 0-4, Saturdays 9:15, Teacher Donna coordinating.",
+      "flow_role": "inform",
+      "voice_anchor": "Logistics are content. Plain, specific, parent-friendly. Teacher Donna is a person, not a title.",
+      "anti_pattern_to_avoid": "Do not list times like a bulletin board. Do not bury Donna's name in a footer.",
+      "atom_assignments": [
+        {
+          "atom_id": "73a9658c-2a73-472f-aeed-f9b21cb70532",
+          "treatment": "lift_phrase",
+          "slot_hint": "primary_heading"
+        }
+      ]
+    },
+    {
+      "section_ix": 3,
+      "archetype": "cta_simple",
+      "section_job": "Invite: join us at 9:15, then stay for the 10:00 gathering together.",
+      "flow_role": "invite",
+      "voice_anchor": "Warm, plain invitation. 'Come as you are.' No pressure.",
+      "anti_pattern_to_avoid": "No 'don't miss out.' No countdown urgency. This is an open door, not a sales pitch.",
+      "atom_assignments": [
+        {
+          "atom_id": "2528ca66-ceca-47ee-80ff-a3d06bb58fb9",
+          "treatment": "lift_phrase",
+          "slot_hint": "primary_heading"
+        }
+      ]
+    },
+    {
+      "section_ix": 4,
+      "archetype": "cta_callout",
+      "section_job": "Close on solidarity: we are all in this mystery of parenting together.",
+      "flow_role": "close",
+      "voice_anchor": "Real, unforced warmth. Solidarity over sentiment. Doubt is welcome here.",
+      "anti_pattern_to_avoid": "Do not moralize parenting. No 'raise the next generation of leaders.' This is companionship, not commissioning.",
+      "atom_assignments": [
+        {
+          "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
+          "treatment": "lift_phrase",
+          "slot_hint": "primary_heading"
+        }
+      ]
+    }
+  ],
+  "unresolved_inputs": [
+    {
+      "what": "Logistics facts (service_time 631e87bd, program e3a0634e, staff 1ac6eab1, ministry b6dc9d7d) were allocated to section 2 but are not in the atoms inventory available to outline-page; drafter must pull from facts_for_page directly when composing body + items.",
+      "where": "paratots[2] content_image_text_b body + items slots"
+    },
+    {
+      "what": "Section 3 (cta_simple) needs the Saturday 9:15 / 10:00 rhythm from service_time fact 631e87bd-8366-45f1-9e69-70a595d6284d to anchor the invite body; fact is not bindable as an atom_ref here.",
+      "where": "paratots[3] cta_simple body slot"
+    },
+    {
+      "what": "Parents Room reassurance language referenced in section_intent has no dedicated atom; drafter should weave it into section 1 body from the section_job directive.",
+      "where": "paratots[1] content_image_text_a body slot"
+    }
+  ],
+  "_meta": {
+    "bundle_version": "1.0.0",
+    "skill_name": "outline-page",
+    "skill_version": "1.0.0",
+    "generated_at": "2026-06-12T21:25:21.612Z",
+    "model": "anthropic/claude-opus-4.7",
+    "prompt_hash": "fb5f867ff872149b",
+    "usage": {
+      "input_tokens": 62338,
+      "output_tokens": 4538
+    },
+    "atom_count_used": 4,
+    "sections_count": 5,
+    "repaired": true,
+    "first_pass_failures": {
+      "count": 20,
+      "by_check": {
+        "bad_slot_hint": 10,
+        "required_slot_uncovered": 5,
+        "unknown_atom_ref": 5
+      }
+    }
+  }
+}

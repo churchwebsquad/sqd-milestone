@@ -402,7 +402,7 @@ interface AssembledInputs {
   allocation:     any           // the allocation slice for this page
   stage1Brief:    any           // ethos + personas + voice exemplars + anti-exemplars
   ministryModel:  any           // { dominant_model, secondary_blend }
-  atomsForPage:   Array<{ id: string; topic: string; body: string; verbatim: boolean; content_quality?: string }>
+  atomsForPage:   Array<{ id: string; topic: string; body: string; verbatim: boolean }>
   factsForPage:   Array<{ id: string; topic: string; data: Record<string, unknown> }>
 }
 
@@ -439,8 +439,13 @@ async function assembleEndpointInputs(
 
   const [atomsRes, factsRes] = await Promise.all([
     atomIds.size > 0
+      // content_quality is referenced by the outline-page SKILL prompt
+      // (atoms_for_page[].content_quality) but the live content_atoms
+      // table doesn't carry that column today — the SKILL describes a
+      // future-shape field. Drop from select; drafter sees undefined.
+      // Re-add when v71+ migration adds content_quality on content_atoms.
       ? sb.from('content_atoms')
-          .select('id, topic, body, verbatim, content_quality')
+          .select('id, topic, body, verbatim')
           .in('id', Array.from(atomIds))
       : Promise.resolve({ data: [] as any[], error: null }),
     factIds.size > 0

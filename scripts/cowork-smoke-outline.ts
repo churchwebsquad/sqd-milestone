@@ -161,10 +161,21 @@ assertions.push({
 })
 assertions.push({
   name:   'model matches frontmatter (not hardcoded in endpoint)',
-  ok:     skillMeta?.model === expectedBundle.model
-          // Gateway may echo the model with a provider tag; tolerate exact OR suffix-match.
-          || (typeof skillMeta?.model === 'string' && skillMeta.model.endsWith(expectedBundle.model.split('/').pop() ?? '')),
-  detail: `got '${skillMeta?.model}', expected '${expectedBundle.model}' (suffix tolerated)`,
+  ok:     (() => {
+    // Vercel AI Gateway normalizes the version separator: we send
+    // `anthropic/claude-opus-4-7` (hyphen, the Anthropic API form) and the
+    // gateway echoes `anthropic/claude-opus-4.7` (period, the marketing form).
+    // Treat them as equivalent. Normalize both sides to lowercase + replace
+    // every `.` with `-` before comparing exact OR suffix-match (suffix
+    // covers the case where the gateway prepends a provider segment that
+    // differs from the frontmatter's).
+    const norm = (s: string) => s.toLowerCase().replace(/\./g, '-')
+    const got   = norm(typeof skillMeta?.model === 'string' ? skillMeta.model : '')
+    const want  = norm(expectedBundle.model)
+    const tail  = norm(expectedBundle.model.split('/').pop() ?? '')
+    return got === want || got.endsWith(tail)
+  })(),
+  detail: `got '${skillMeta?.model}', expected '${expectedBundle.model}' (tolerates suffix-match + ./- normalization)`,
 })
 assertions.push({
   name:   'repaired field present on _meta',

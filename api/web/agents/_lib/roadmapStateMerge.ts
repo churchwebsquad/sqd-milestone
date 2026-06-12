@@ -26,7 +26,11 @@
  *  returns a thenable yielding `{data, error}`. PromiseLike (not Promise)
  *  so the supabase-js PostgrestFilterBuilder — which is awaitable but
  *  carries extra builder methods — assigns structurally. Lets all
- *  callers pass their full `createClient(...)` result without a cast. */
+ *  callers pass their full `createClient(...)` result without a cast.
+ *
+ *  `data` is `unknown` because the RPC returns jsonb — the caller's
+ *  responsibility to type-narrow before reading. setRoadmapStateAtomic
+ *  walks the path on `data` to assert the write actually landed. */
 export type SupabaseClientLike = {
   rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: { message: string } | null }>
 }
@@ -50,7 +54,7 @@ export async function setRoadmapStateAtomic(
   if (!path || path.length === 0) {
     throw new Error('setRoadmapStateAtomic: path must be a non-empty array')
   }
-  const { error } = await sb.rpc('roadmap_state_set', {
+  const { data, error } = await sb.rpc('roadmap_state_set', {
     p_project_id: projectId,
     p_path:       path,
     // supabase-js accepts plain JS objects and serializes them as
@@ -59,6 +63,36 @@ export async function setRoadmapStateAtomic(
   })
   if (error) {
     throw new Error(`roadmap_state_set RPC failed for path [${path.join('.')}]: ${error.message}`)
+  }
+
+  // Persistence assertion. The RPC returns the new roadmap_state; walk
+  // the path on it and confirm the value we just wrote actually landed.
+  //
+  // History: v68's RPC silently no-op'd on nested writes when an
+  // intermediate key didn't exist (jsonb_set's `create_missing` only
+  // creates the LAST element). The importer 200'd, the smoke printed
+  // green, and the row was unchanged. v70 fixes the RPC, but the
+  // contract "write succeeded ⇒ data is present" is too important to
+  // rely on the RPC alone. This walk is the second layer of defense
+  // and means a future silent-no-op class (e.g. transaction rolled
+  // back, missing RLS bypass, type-cast surprise) can't ship green.
+  let cursor: unknown = data
+  for (const key of path) {
+    if (cursor == null || typeof cursor !== 'object' || Array.isArray(cursor)) {
+      throw new Error(
+        `roadmap_state_set: persistence assertion failed — intermediate at path ` +
+        `[${path.slice(0, path.indexOf(key)).join('.')}] is not an object (got ` +
+        `${cursor === null ? 'null' : Array.isArray(cursor) ? 'array' : typeof cursor})`,
+      )
+    }
+    cursor = (cursor as Record<string, unknown>)[key]
+  }
+  if (cursor === undefined) {
+    throw new Error(
+      `roadmap_state_set: persistence assertion failed — leaf at path ` +
+      `[${path.join('.')}] is undefined after RPC returned. The write did ` +
+      `not land. Check RPC version (expected v70+) + project_id is correct.`,
+    )
   }
 }
 

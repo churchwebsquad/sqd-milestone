@@ -44,8 +44,35 @@ import {
 
 export const maxDuration = 30
 
+/**
+ * Columns on `strategy_content_collection_sessions` that are NOT
+ * content-collection data (no copy ever lives there). They're row
+ * identity, timestamps, workflow flags, and operational metadata.
+ * Excluded from the validator's content_collection_fields manifest so
+ * a cowork allocation isn't forced to "place or unresolve" them — the
+ * validator's cc_field_dropped check is about CONTENT fields, not
+ * workflow state.
+ *
+ * Layer reasoning: these were originally surfaced by the smoke run as
+ * "drifted into live since the fixture was generated" and patched in
+ * the fixture's unresolved_sources. That was the wrong layer — fixing
+ * it there means every project + every future allocation re-encodes
+ * the same opt-outs forever. Excluding here is once, for the whole
+ * pipeline. Per the 2026-06-12 fact-check.
+ */
 const META_COLUMNS_CONTENT_COLLECTION = new Set([
+  // Row identity + timestamps
   'id', 'web_project_id', 'created_at', 'updated_at', 'submitted_at', 'member', 'status',
+  // Workflow / dev-handoff state (timestamps, boolean checkboxes, JSON snapshots)
+  'due_at',
+  'inventory_snapshot',
+  'domain_invite_confirmed',
+  'hosting_approved',
+  'events_wordpress_source_of_truth',
+  // External URLs to partner's CURRENT pages (embed/iframe/rebuild
+  // decisions made at build time, not draft-page material)
+  'events_external_url',
+  'groups_external_url',
 ])
 
 const DEFAULT_PRIMARY_PAGES = ['home', 'plan-a-visit', 'about', 'donate']

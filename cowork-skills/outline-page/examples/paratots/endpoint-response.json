@@ -1,0 +1,974 @@
+{
+  "ok": true,
+  "page_slug": "paratots",
+  "outline": {
+    "page_slug": "paratots",
+    "ministry_model_alignment": "discipleship",
+    "sections": [
+      {
+        "section_ix": 0,
+        "archetype": "hero_inner",
+        "section_job": "Lead with the line that melts a parent: before you were even born, God loved you first.",
+        "flow_role": "hook",
+        "voice_anchor": "Real, unforced warmth. Lowercase tenderness of the verbatim line is the whole vibe — do not punch it up.",
+        "anti_pattern_to_avoid": "Do not turn this hero into a peppy kids-ministry pitch. No exclamation points, no 'fun-filled,' no forced enthusiasm.",
+        "atom_assignments": [
+          {
+            "atom_id": "94df26ac-175e-45d7-b447-29a2ebbd91d2",
+            "treatment": "use_as_is",
+            "slot_hint": "primary_heading"
+          },
+          {
+            "atom_id": "2528ca66-ceca-47ee-80ff-a3d06bb58fb9",
+            "treatment": "use_as_is",
+            "slot_hint": "body"
+          }
+        ]
+      },
+      {
+        "section_ix": 1,
+        "archetype": "content_image_text_a",
+        "section_job": "Reassure parents: stories, songs, play, generous love — plus a Parents Room where you can breathe.",
+        "flow_role": "reassure",
+        "voice_anchor": "Let delight show up in the details. Do not force enthusiasm. Kids are loud in the lobby and welcome to be.",
+        "anti_pattern_to_avoid": "Do not promise polish or performance. No 'state-of-the-art,' no 'world-class.' Solidarity, not salesmanship.",
+        "atom_assignments": [
+          {
+            "atom_id": "73a9658c-2a73-472f-aeed-f9b21cb70532",
+            "treatment": "use_as_is",
+            "slot_hint": "body"
+          },
+          {
+            "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
+            "treatment": "use_as_is",
+            "slot_hint": "primary_heading"
+          }
+        ]
+      },
+      {
+        "section_ix": 2,
+        "archetype": "content_image_text_b",
+        "section_job": "Logistics woven warmly: ages 0-4, Saturdays 9:15, Teacher Donna coordinating.",
+        "flow_role": "inform",
+        "voice_anchor": "Logistics are content. Plain, specific, parent-friendly. Teacher Donna is a person, not a title.",
+        "anti_pattern_to_avoid": "Do not list times like a bulletin board. Do not bury Donna's name in a footer.",
+        "atom_assignments": [
+          {
+            "atom_id": "73a9658c-2a73-472f-aeed-f9b21cb70532",
+            "treatment": "lift_phrase",
+            "slot_hint": "primary_heading"
+          }
+        ]
+      },
+      {
+        "section_ix": 3,
+        "archetype": "cta_simple",
+        "section_job": "Invite: join us at 9:15, then stay for the 10:00 gathering together.",
+        "flow_role": "invite",
+        "voice_anchor": "Warm, plain invitation. 'Come as you are.' No pressure.",
+        "anti_pattern_to_avoid": "No 'don't miss out.' No countdown urgency. This is an open door, not a sales pitch.",
+        "atom_assignments": [
+          {
+            "atom_id": "2528ca66-ceca-47ee-80ff-a3d06bb58fb9",
+            "treatment": "lift_phrase",
+            "slot_hint": "primary_heading"
+          }
+        ]
+      },
+      {
+        "section_ix": 4,
+        "archetype": "cta_callout",
+        "section_job": "Close on solidarity: we are all in this mystery of parenting together.",
+        "flow_role": "close",
+        "voice_anchor": "Real, unforced warmth. Solidarity over sentiment. Doubt is welcome here.",
+        "anti_pattern_to_avoid": "Do not moralize parenting. No 'raise the next generation of leaders.' This is companionship, not commissioning.",
+        "atom_assignments": [
+          {
+            "atom_id": "be43f59d-8138-4b35-9c6d-81006776d0ad",
+            "treatment": "lift_phrase",
+            "slot_hint": "primary_heading"
+          }
+        ]
+      }
+    ],
+    "unresolved_inputs": [
+      {
+        "what": "Logistics facts (service_time 631e87bd, program e3a0634e, staff 1ac6eab1, ministry b6dc9d7d) were allocated to section 2 but are not in the atoms inventory available to outline-page; drafter must pull from facts_for_page directly when composing body + items.",
+        "where": "paratots[2] content_image_text_b body + items slots"
+      },
+      {
+        "what": "Section 3 (cta_simple) needs the Saturday 9:15 / 10:00 rhythm from service_time fact 631e87bd-8366-45f1-9e69-70a595d6284d to anchor the invite body; fact is not bindable as an atom_ref here.",
+        "where": "paratots[3] cta_simple body slot"
+      },
+      {
+        "what": "Parents Room reassurance language referenced in section_intent has no dedicated atom; drafter should weave it into section 1 body from the section_job directive.",
+        "where": "paratots[1] content_image_text_a body slot"
+      }
+    ],
+    "_meta": {
+      "bundle_version": "1.0.0",
+      "skill_name": "outline-page",
+      "skill_version": "1.0.0",
+      "generated_at": "2026-06-12T21:25:21.612Z",
+      "model": "anthropic/claude-opus-4.7",
+      "prompt_hash": "fb5f867ff872149b",
+      "usage": {
+        "input_tokens": 62338,
+        "output_tokens": 4538
+      },
+      "atom_count_used": 4,
+      "sections_count": 5,
+      "repaired": true,
+      "first_pass_failures": {
+        "count": 20,
+        "by_check": {
+          "bad_slot_hint": 10,
+          "required_slot_uncovered": 5,
+          "unknown_atom_ref": 5
+        }
+      }
+    }
+  },
+  "skill_meta": {
+    "bundle_version": "1.0.0",
+    "skill_name": "outline-page",
+    "skill_version": "1.0.0",
+    "generated_at": "2026-06-12T21:25:21.612Z",
+    "model": "anthropic/claude-opus-4.7",
+    "prompt_hash": "fb5f867ff872149b",
+    "usage": {
+      "input_tokens": 62338,
+      "output_tokens": 4538
+    },
+    "atom_count_used": 4,
+    "sections_count": 5,
+    "repaired": true,
+    "first_pass_failures": {
+      "count": 20,
+      "by_check": {
+        "bad_slot_hint": 10,
+        "required_slot_uncovered": 5,
+        "unknown_atom_ref": 5
+      }
+    }
+  },
+  "importer": {
+    "ok": true,
+    "bundle_kind": "page_outline",
+    "page_slug": "paratots",
+    "counts": {
+      "sections": 5,
+      "atom_assignments": 7,
+      "unresolved_inputs": 3
+    }
+  },
+  "prompt_resolution": {
+    "global_source": "fallback",
+    "has_project_addendum": false
+  },
+  "validation_manifest": {
+    "atom_ids": [
+      "9b7473cf-54b1-447a-80af-b680329329ef",
+      "f227a626-0a7b-46f2-9bf7-4e57fc4a4b1c",
+      "0e9255eb-7143-46c5-8723-0085c4d9fa5f",
+      "ca9878c1-989f-4417-a3ee-a8256fffbb77",
+      "e6b77a08-ec2f-434d-aa40-ae5009fef3da",
+      "7a71fb94-177a-4d7f-8571-03555e97590e",
+      "62f1e457-294f-4c16-b3d3-5cf1551ca414",
+      "1af5bda6-3941-48f6-9499-6df472646943",
+      "5748d66d-9cc5-45c0-8ab5-38e04d6f8da6",
+      "7dc9144e-e70d-4d18-bbb2-fd95b4a185e3",
+      "12366154-df87-4ed2-a1dc-a17ab9906e45",
+      "beb52b25-2f03-4a91-b0cb-d5667caad76f",
+      "4f113570-37f3-4436-aa05-c481d9d24777",
+      "96869154-f04a-4d11-b5a7-a05e2494eb42",
+      "e3ee03ae-972f-4115-9a5b-5528b6f86039",
+      "c27c9b51-731f-4e67-bfaa-e1c1cdbe0383",
+      "9d21e5ab-032d-47ec-a677-e39c11fe322e",
+      "1d764d16-2cf0-4afd-933c-ddc2f93099c0",
+      "b9cdfd0e-67a1-412d-9787-237d512efada",
+      "91782a73-ab95-4624-a929-00515b77a790",
+      "cc47d307-545e-4d09-942c-43a78b287754",
+      "8e9a08b8-7030-40a2-a478-dbb3eb6430da",
+      "83a89d7d-2e77-4b9e-9ca7-942b6b9b40a9",
+      "fbf07064-bf3a-4cfb-b42e-d911e731aade",
+      "4a67d00b-bdca-459e-90ab-7aed77ddd42e",
+      "67b2a05b-25a2-4b25-ad38-43b37b54b551",
+      "7a884751-1e81-48ad-a98a-517ad86c9790",
+      "7ab6319d-7950-48da-a571-25a789fabf58",
+      "be43f59d-8138-4b35-9c6d-81006776d0ad",
+      "0796049f-290c-4920-b6c4-eecacb9f746e",
+      "c023336f-6ff2-471c-b6ca-a287baf557b3",
+      "0bbb24ed-aa89-4c18-801b-0625f2abd77d",
+      "9d8abec5-d910-417b-b516-173c32c043d2",
+      "f524c653-8c9e-4929-9fa1-26565cc24874",
+      "762b4cf0-8dbb-48f0-a0ec-24fceddc8828",
+      "138b4066-4ca4-4455-999a-896fcd96b655",
+      "ea5ae651-5164-4ea9-a3b3-526e7028894b",
+      "a867fd6b-66dd-4826-857a-3319ac061954",
+      "a16101e9-9d81-415a-a25e-64f2a1487c8e",
+      "10001c0f-5b08-4827-869e-83aa2d60ce13",
+      "3a51b669-0afe-4e00-93c9-6e175ec7a5ac",
+      "8953be02-ac44-493d-86d8-8a7378f1c92d",
+      "b783c4ea-c63c-4c07-9f4c-84b631453645",
+      "f4df97d8-8174-43f6-ae69-847ff9a20353",
+      "392296a7-f9df-4504-9863-d352da819ee3",
+      "72aabd1a-1445-4bcf-accc-b07d3b044a98",
+      "34073465-f3de-4130-9555-5d2aebd1b97d",
+      "ba1ecfda-801b-43f0-9a1e-7d7d3687175c",
+      "3f0e799b-6c45-4197-86ab-7c77218f641d",
+      "9d24a2a6-2c1e-4308-af8a-f995ca9bec0f",
+      "bca6893b-119e-4374-a589-6160ce3cbcd4",
+      "84b45df8-b909-4d3f-9cd3-8c489b1bea3e",
+      "362ce76f-f310-45e6-b7db-259276b3f3e1",
+      "f6d58578-573f-4f14-ba3b-99d8e1c1e17e",
+      "5fb61cf1-51f9-447d-982f-3b105ee6a44a",
+      "b41e2aae-8632-44cf-90db-e36ad2c8880e",
+      "6abeb149-b07b-4272-8a32-554b39286e67",
+      "7ca8aa39-6aa7-494b-baf7-58bfa8e3afb1",
+      "71c671e2-2a57-4bb4-b4d5-49d4429b813f",
+      "5de183e1-846f-4a65-b587-a6a531b1b2d8",
+      "a5ad009b-6b64-4c39-85e2-6ec4567756b1",
+      "bf6099bc-7675-4048-96b0-8ee1c3ed0e39",
+      "73a9658c-2a73-472f-aeed-f9b21cb70532",
+      "5b6ad9e0-afd7-406c-a8de-2bb6921a9a12",
+      "090ac567-db38-4665-998e-e2e1cde28644",
+      "570d09e1-9b3a-496b-9e2e-95ad3d8866dd",
+      "ae548f15-382a-4d6a-8b89-be3fe9d2065b",
+      "36077469-3697-4796-93bf-34f53e0905e9",
+      "364c0a50-c290-4dfa-83f6-92a9018932c4",
+      "e4cb2c24-3bce-4311-b82e-e56c34ceb165",
+      "94df26ac-175e-45d7-b447-29a2ebbd91d2",
+      "2528ca66-ceca-47ee-80ff-a3d06bb58fb9",
+      "5270d801-8318-408e-8b41-4938baf554a0",
+      "1f1a49b9-2e13-4cab-8b3a-897c78e23e7c",
+      "08607926-9493-4987-91f7-dda9d7d2f387",
+      "9f2abd91-7c95-41e8-a45a-032707805ab0",
+      "9f09f0d9-e4e0-419d-a4a7-8ea82fbbc36b",
+      "a832e5c8-351a-48a1-8871-7a3fbdc2d4a4",
+      "32f9abe8-a64a-4a55-b7ed-6617be944086",
+      "81aee0e3-74d2-4f12-a405-d305e1a373d4",
+      "17cecd6a-0ab4-4b29-afcf-70e6890abfed",
+      "9cdda142-528a-4a64-947d-b665a3a22f51",
+      "89979366-4f54-40dc-be18-28d381024a44",
+      "7356fed4-9354-4fee-a6f9-d5bc9d2d581f",
+      "be687548-126a-4057-a183-128f1375c310",
+      "521fcdf9-931b-4065-a4c2-f0bb19147b87",
+      "91d1ed0e-2e05-42a9-b9cc-5747d220ebe1",
+      "0f5dfda6-7212-44f8-8904-516baac48de3",
+      "62acff61-7fda-412f-831a-f12783b2fd18",
+      "effe4be8-632e-4c01-873c-6388bb7d6c14",
+      "2c6fd4eb-8556-4d7d-855a-ed7a19394593",
+      "915b041c-cc29-4830-8cf8-bf661ef72c1e",
+      "aa44b643-23de-4507-895a-04a137940d65",
+      "39e1c4ae-aff8-403a-ad77-b05f55257d83",
+      "95d826c0-49ed-4c2a-8c25-9784a9cd2168",
+      "eafa7caa-1c8a-4ca3-baa6-7f9f08617daa",
+      "e4b7e885-9b08-4b32-9a03-6d2f02e237a3",
+      "5b28d703-de9e-4794-92ee-ba605ad97877",
+      "09cc46e9-5156-48a7-a869-cbea3019d747",
+      "9bc2c1cc-d4c8-4146-be72-9f3a44d80c25"
+    ],
+    "canonical_templates": {
+      "version": "1.0.0",
+      "source": "Paradox Church (TEST) curated_library (project 15394f01-b371-415e-9bae-5d6e7d50c58a)",
+      "doc": {
+        "purpose": "Single source-of-truth that the cowork pipeline reads when picking templates + populating slots. Bind-time translation between this uniform vocabulary and Brixies field names lives in the app-side import endpoint, NOT in cowork.",
+        "cowork_vocabulary": {
+          "tagline": "text, optional, eyebrow above primary_heading",
+          "primary_heading": "text, REQUIRED, page-section title (Brixies h1/h2 depending on template)",
+          "body": "richtext, optional, descriptive prose under the heading",
+          "accent_body": "richtext, optional, secondary descriptive prose. Only on templates that have a SECOND visible richtext block.",
+          "buttons": "array of { label, url } CTAs. max_items varies per template.",
+          "items": "array of { item_heading, item_body, item_meta? }. Used by accordion, cards, tabs, timeline, team, etc. max_items + palette ref vary per template; the importer figures out the visual layout."
+        },
+        "designer_slots": "Every image slot in the underlying Brixies template is designer-populated (not by cowork). The total per template is recorded as design_handoff_image_count for the design handoff checklist.",
+        "importer_responsibilities": [
+          "Translate uniform_to_brixies field names for the picked template",
+          "For multi-group templates (accordion_faq, content_image_text_b, contact_section): split items[] across the visual groups per layout-specific rule",
+          "For palette-ref groups (feature_team, content_featured_a): look up the project curated_library.card_* binding to resolve the actual Card variant + write item fields against that variant",
+          "Validate every required uniform slot is populated before INSERT into web_sections",
+          "Leave all image fields empty (placeholders render until designer fills via design handoff)"
+        ],
+        "empty_slot_prevention": {
+          "philosophy": "Required slots empty at bind time = preventable upstream. Every layer validates against this manifest BEFORE handing off.",
+          "layers": [
+            "plan-cross-page-allocation: for each section_intent, check that allocated sources contain content sufficient to fill the picked template required slots. Gaps land in unresolved_sources with exact slot named.",
+            "outline-page: declares atom_assignments covering all required uniform slots before returning. Self-validates against the manifest.",
+            "draft-page: validates its own draft output before returning. Every required slot has non-empty content. One retry on gap. Else returns validation.unresolved_required_slots[].",
+            "importer (app-side): last line of defense. Refuses INSERT if any required slot empty. Returns structured error pointing at page + section + slot + missing atom + suggested fix.",
+            "Strategist UI: surfaces unresolved gaps with context. Strategist sees exactly which page/section/slot needs input, what was missing, what to do."
+          ]
+        }
+      },
+      "page_section_templates": {
+        "hero_homepage": {
+          "template_id": "hero-section-102",
+          "concept": "hero_homepage",
+          "family": "Hero Section",
+          "variant": "102",
+          "cowork_writable_slots": {
+            "tagline": {
+              "max_chars": 60,
+              "required": false
+            },
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "buttons": {
+              "max_items": 2,
+              "item_subfields": {
+                "label": {
+                  "max_chars": 30
+                },
+                "url": {
+                  "type": "url"
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 0
+        },
+        "hero_inner": {
+          "template_id": "hero-section-1",
+          "concept": "hero_inner",
+          "family": "Hero Section",
+          "variant": "1",
+          "cowork_writable_slots": {
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "buttons": {
+              "max_items": 2,
+              "item_subfields": {
+                "label": {
+                  "max_chars": 30
+                },
+                "url": {
+                  "type": "url"
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 1
+        },
+        "hero_featured": {
+          "template_id": "hero-section-43",
+          "concept": "hero_featured",
+          "family": "Hero Section",
+          "variant": "43",
+          "cowork_writable_slots": {
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "buttons": {
+              "max_items": 2,
+              "item_subfields": {
+                "label": {
+                  "max_chars": 30
+                },
+                "url": {
+                  "type": "url"
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 1
+        },
+        "cta_simple": {
+          "template_id": "cta-section-20",
+          "concept": "cta_simple",
+          "family": "CTA Section",
+          "variant": "20",
+          "cowork_writable_slots": {
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "buttons": {
+              "max_items": 2,
+              "item_subfields": {
+                "label": {
+                  "max_chars": 30
+                },
+                "url": {
+                  "type": "url"
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 1
+        },
+        "cta_callout": {
+          "template_id": "cta-section-52",
+          "concept": "cta_callout",
+          "family": "CTA Section",
+          "variant": "52",
+          "cowork_writable_slots": {
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "buttons": {
+              "max_items": 1,
+              "item_subfields": {
+                "label": {
+                  "max_chars": 30
+                },
+                "url": {
+                  "type": "url"
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 0
+        },
+        "accordion_faq": {
+          "template_id": "faq-section-10",
+          "concept": "accordion_faq",
+          "family": "FAQ Section",
+          "variant": "10",
+          "cowork_writable_slots": {
+            "tagline": {
+              "max_chars": 60,
+              "required": false
+            },
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "items": {
+              "max_items": 5,
+              "uses_palette": null,
+              "item_subfields": {
+                "item_heading": {
+                  "max_chars": 100
+                },
+                "item_body": {
+                  "max_chars": 400
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 0
+        },
+        "content_image_text_a": {
+          "template_id": "content-section-45",
+          "concept": "content_image_text_a",
+          "family": "Content Section",
+          "variant": "45",
+          "cowork_writable_slots": {
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "items": {
+              "max_items": 3,
+              "uses_palette": null,
+              "item_subfields": {
+                "item_heading": {
+                  "max_chars": 100
+                },
+                "item_body": {
+                  "max_chars": 400
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 1
+        },
+        "content_image_text_b": {
+          "template_id": "content-section-16",
+          "concept": "content_image_text_b",
+          "family": "Content Section",
+          "variant": "16",
+          "cowork_writable_slots": {
+            "tagline": {
+              "max_chars": 60,
+              "required": false
+            },
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "items": {
+              "max_items": 2,
+              "uses_palette": null,
+              "item_subfields": {
+                "item_heading": {
+                  "max_chars": 100
+                },
+                "item_body": {
+                  "max_chars": 400
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 1
+        },
+        "content_video": {
+          "template_id": "content-section-25",
+          "concept": "content_video",
+          "family": "Content Section",
+          "variant": "25",
+          "cowork_writable_slots": {
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "accent_body": {
+              "max_chars": 300,
+              "required": false
+            }
+          },
+          "design_handoff_image_count": 1
+        },
+        "content_featured_a": {
+          "template_id": "content-section-89",
+          "concept": "content_featured_a",
+          "family": "Content Section",
+          "variant": "89",
+          "cowork_writable_slots": {
+            "tagline": {
+              "max_chars": 60,
+              "required": false
+            },
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "items": {
+              "max_items": 3,
+              "uses_palette": "Card",
+              "item_subfields": {
+                "item_heading": {
+                  "max_chars": 100
+                },
+                "item_body": {
+                  "max_chars": 400
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 3
+        },
+        "content_featured_b": {
+          "template_id": "content-section-91",
+          "concept": "content_featured_b",
+          "family": "Content Section",
+          "variant": "91",
+          "cowork_writable_slots": {
+            "tagline": {
+              "max_chars": 60,
+              "required": false
+            },
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "buttons": {
+              "max_items": 2,
+              "item_subfields": {
+                "label": {
+                  "max_chars": 30
+                },
+                "url": {
+                  "type": "url"
+                }
+              }
+            },
+            "items": {
+              "max_items": 1,
+              "uses_palette": null,
+              "item_subfields": {
+                "item_heading": {
+                  "max_chars": 100
+                },
+                "item_body": {
+                  "max_chars": 400
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 1
+        },
+        "contact_section": {
+          "template_id": "content-section-96",
+          "concept": "contact_section",
+          "family": "Content Section",
+          "variant": "96",
+          "cowork_writable_slots": {
+            "tagline": {
+              "max_chars": 60,
+              "required": false
+            },
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "buttons": {
+              "max_items": 2,
+              "item_subfields": {
+                "label": {
+                  "max_chars": 30
+                },
+                "url": {
+                  "type": "url"
+                }
+              }
+            },
+            "items": {
+              "max_items": 3,
+              "uses_palette": null,
+              "item_subfields": {
+                "item_heading": {
+                  "max_chars": 100
+                },
+                "item_body": {
+                  "max_chars": 400
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 1
+        },
+        "feature_team": {
+          "template_id": "team-section-14",
+          "concept": "feature_team",
+          "family": "Team Section",
+          "variant": "14",
+          "cowork_writable_slots": {
+            "tagline": {
+              "max_chars": 60,
+              "required": false
+            },
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "items": {
+              "max_items": 2,
+              "uses_palette": "Card",
+              "item_subfields": {
+                "item_heading": {
+                  "max_chars": 100
+                },
+                "item_body": {
+                  "max_chars": 400
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 0
+        },
+        "feature_tabbed": {
+          "template_id": "feature-section-66",
+          "concept": "feature_tabbed",
+          "family": "Feature Section",
+          "variant": "66",
+          "cowork_writable_slots": {
+            "tagline": {
+              "max_chars": 60,
+              "required": false
+            },
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "items": {
+              "max_items": 4,
+              "uses_palette": null,
+              "item_subfields": {
+                "item_heading": {
+                  "max_chars": 100
+                },
+                "item_body": {
+                  "max_chars": 400
+                },
+                "item_meta": {
+                  "max_chars": 60,
+                  "required": false
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 4
+        },
+        "feature_unique": {
+          "template_id": "feature-section-103",
+          "concept": "feature_unique",
+          "family": "Feature Section",
+          "variant": "103",
+          "cowork_writable_slots": {
+            "tagline": {
+              "max_chars": 60,
+              "required": false
+            },
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "items": {
+              "max_items": 2,
+              "uses_palette": null,
+              "item_subfields": {
+                "item_heading": {
+                  "max_chars": 100
+                },
+                "item_body": {
+                  "max_chars": 400
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 0
+        },
+        "feature_card_carousel_proxy": {
+          "template_id": "feature-section-6",
+          "concept": "feature_card_carousel_proxy",
+          "family": "Feature Section",
+          "variant": "6",
+          "cowork_writable_slots": {
+            "tagline": {
+              "max_chars": 60,
+              "required": false
+            },
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "buttons": {
+              "max_items": 2,
+              "item_subfields": {
+                "label": {
+                  "max_chars": 30
+                },
+                "url": {
+                  "type": "url"
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 0
+        },
+        "testimonial_written": {
+          "template_id": "feature-section-19",
+          "concept": "testimonial_written",
+          "family": "Feature Section",
+          "variant": "19",
+          "cowork_writable_slots": {
+            "tagline": {
+              "max_chars": 60,
+              "required": false
+            },
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "items": {
+              "max_items": 2,
+              "uses_palette": null,
+              "item_subfields": {
+                "item_heading": {
+                  "max_chars": 100
+                },
+                "item_body": {
+                  "max_chars": 400
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 2
+        },
+        "testimonial_video": {
+          "template_id": "feature-section-77",
+          "concept": "testimonial_video",
+          "family": "Feature Section",
+          "variant": "77",
+          "cowork_writable_slots": {
+            "tagline": {
+              "max_chars": 60,
+              "required": false
+            },
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "items": {
+              "max_items": 1,
+              "uses_palette": null,
+              "item_subfields": {
+                "item_heading": {
+                  "max_chars": 100
+                },
+                "item_body": {
+                  "max_chars": 400
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 0
+        },
+        "timeline_story": {
+          "template_id": "timeline-section-6",
+          "concept": "timeline_story",
+          "family": "Timeline Section",
+          "variant": "6",
+          "cowork_writable_slots": {
+            "tagline": {
+              "max_chars": 60,
+              "required": false
+            },
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "buttons": {
+              "max_items": 2,
+              "item_subfields": {
+                "label": {
+                  "max_chars": 30
+                },
+                "url": {
+                  "type": "url"
+                }
+              }
+            },
+            "items": {
+              "max_items": 5,
+              "uses_palette": null,
+              "item_subfields": {
+                "item_heading": {
+                  "max_chars": 100
+                },
+                "item_body": {
+                  "max_chars": 400
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 1
+        },
+        "career_section": {
+          "template_id": "career-section-3",
+          "concept": "career_section",
+          "family": "Career Section",
+          "variant": "3",
+          "cowork_writable_slots": {
+            "tagline": {
+              "max_chars": 60,
+              "required": false
+            },
+            "primary_heading": {
+              "max_chars": 100,
+              "required": true
+            },
+            "body": {
+              "max_chars": 400,
+              "required": false
+            },
+            "items": {
+              "max_items": 3,
+              "uses_palette": null,
+              "item_subfields": {
+                "item_heading": {
+                  "max_chars": 100
+                },
+                "item_body": {
+                  "max_chars": 400
+                }
+              }
+            }
+          },
+          "design_handoff_image_count": 0
+        }
+      },
+      "post_and_listing_templates_for_design_handoff": {
+        "single_blog": "single-post-section-8",
+        "single_event_or_sermon": "single-event-section-4",
+        "single_staff": "single-team-section-6",
+        "archive_filter": "category-filter-6"
+      }
+    },
+    "expected_page_slug": "paratots"
+  }
+}
