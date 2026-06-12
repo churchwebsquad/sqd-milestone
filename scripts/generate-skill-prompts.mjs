@@ -133,8 +133,13 @@ function readTsConstTuple(relPath, name) {
   const raw = readFileSync(abs, 'utf8')
   const m = raw.match(new RegExp(`export\\s+const\\s+${name}\\s*=\\s*\\[([\\s\\S]*?)\\]\\s*as\\s+const`))
   if (!m) return null
-  return [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1])
+  // Strip JS line comments BEFORE pulling string literals — otherwise
+  // apostrophe-s in trailing comments ("persona's barrier") leaks into
+  // the token list as `'s barrier'`.
+  const cleaned = m[1].replace(/\/\/[^\n]*/g, '')
+  return [...cleaned.matchAll(/'([^']+)'/g)].map(x => x[1])
 }
+
 
 const skills = []
 
@@ -208,13 +213,50 @@ if (skills.length === 0) {
 // tokens only warn (a skill may legitimately omit some). Add new vocab
 // dimensions here as they appear.
 
+// Matcher modes (one mode today, room to add more honestly later):
+//   'union' — find TypeScript-union-shaped lines like
+//             `field: 'a' | 'b' | 'c' …` and cross-check every
+//             token against the canonical. Catches the flow_role-style
+//             fork: a literal type union pasted into SKILL.md prose
+//             that drifts from the TS source.
+//
+// A first attempt at 'mention' mode (scan backticked snake_case tokens
+// near the field name, flag tokens that look like the dimension but
+// aren't in it) generated multiple false positives on the first run
+// (binding-kind names like `lift_phrase` near the word "treatment").
+// The honest move: register dimensions with `union` matcher even when
+// no current SKILL has a TS-union surface. The dimension is a no-op
+// today (matcher finds nothing) but the registration is a tripwire:
+// the FIRST SKILL that ever copies a treatment / reason vocabulary as
+// a TS union will be caught. The runtime validators
+// (`bad_treatment` in validateAllocationPlan, `bad_unresolved_reason`
+// likewise) remain the trust boundary for usage drift in model
+// outputs — different defense layer for a different threat.
 const VOCAB_DIMENSIONS = [
   {
     field:     'flow_role',
+    matcher:   'union',
     canonical: readTsConstTuple('src/types/coworkBundle.ts', 'FLOW_ROLES'),
   },
-  // Add more as new TS-anchored vocabularies surface (e.g. TREATMENTS,
-  // CONTENT_TOPICS, UNRESOLVED_REASONS). Pattern is identical.
+  {
+    // ALLOCATION_TREATMENTS doesn't appear as a TS union in any
+    // current SKILL — only as inline backticked mentions. Registered
+    // for future-proofing: if someone copies the vocabulary as a type
+    // union, drift is caught at that moment.
+    field:     'treatment',
+    matcher:   'union',
+    canonical: readTsConstTuple('src/types/coworkBundle.ts', 'ALLOCATION_TREATMENTS'),
+  },
+  // NOT REGISTERED: `reason` for UNRESOLVED_REASONS_LIST. The field name
+  // `reason` is overloaded across the cowork contract — `unresolved_sources
+  // [].reason` (the closed vocabulary) AND `binding.kind: 'deferred';
+  // reason: …` (open string in outline-page). Bare-field matching would
+  // false-flag the deferred-reason inline union as drift against the
+  // unresolved-sources vocabulary. The matcher would need field-path
+  // qualification to disambiguate; until then, runtime validator's
+  // `bad_unresolved_reason` check is the trust boundary. Add this back
+  // with namespaced field paths (e.g. `unresolved_sources[].reason`)
+  // if/when the matcher learns that shape.
 ]
 
 const vocabDrift = []
@@ -228,8 +270,7 @@ for (const skill of skills) {
 
   for (const dim of VOCAB_DIMENSIONS) {
     if (!dim.canonical) continue   // couldn't parse TS — skip dimension
-    // Match a TypeScript-union-typed line: `  field: 'a' | 'b' | 'c' …`
-    // (and the same pattern inside JSDoc / interface bodies).
+    // union mode only (mention mode tried + reverted; see comment above).
     const linePattern = new RegExp(`\\b${dim.field}\\s*[:?]\\s*((?:'[^']+'\\s*\\|\\s*)+'[^']+')`, 'g')
     for (const m of raw.matchAll(linePattern)) {
       const tokens = [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1])
@@ -237,12 +278,10 @@ for (const skill of skills) {
       const missing = dim.canonical.filter(t => !tokens.includes(t))
       if (unknown.length || missing.length) {
         vocabDrift.push({
-          skill:     skill.name,
-          field:     dim.field,
+          skill: skill.name, field: dim.field,
           canonical: dim.canonical,
           observed:  tokens,
-          unknown,
-          missing,
+          unknown, missing,
         })
       }
     }

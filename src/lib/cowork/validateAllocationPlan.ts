@@ -17,7 +17,11 @@
  *  - `result.summary` → human-readable multi-line block for logs/UI
  */
 
-import { FLOW_ROLES } from '../../types/coworkBundle'
+import {
+  FLOW_ROLES,
+  ALLOCATION_TREATMENTS,
+  UNRESOLVED_REASONS_LIST,
+} from '../../types/coworkBundle'
 import type {
   AtomTopic,
   AllocationTreatment,
@@ -45,21 +49,11 @@ const VOICE_TOPICS = new Set<AtomTopic>([
 
 const DIRECTIVE_TOPICS = new Set<AtomTopic>(['recommended_page'])
 
-const TREATMENTS = new Set<AllocationTreatment>([
-  'lift_verbatim', 'weave_into_paragraph', 'card_per_row', 'summarize',
-  'surface_as_faq', 'reframe_for_persona', 'cta_attach', 'voice_anchor',
-])
-
-const UNRESOLVED_REASONS = new Set<CoworkUnresolvedReason>([
-  'crawl_noise_parking_lot',
-  'csv_routed_elsewhere',
-  'structured_data_routed_to_facts',
-  'insufficient_items_for_template',
-  'required_slots_unfilled',
-  'duplicate_of_placed_source',
-  'internal_admin_contact_not_for_publication',
-  'insufficient_source_content',
-])
+// Wrap the canonical const tuples (sourced from coworkBundle.ts) in
+// Sets for O(1) membership. Single source of truth — the tuples are the
+// values; adding a treatment / reason there propagates here automatically.
+const TREATMENTS = new Set<AllocationTreatment>(ALLOCATION_TREATMENTS)
+const UNRESOLVED_REASONS = new Set<CoworkUnresolvedReason>(UNRESOLVED_REASONS_LIST)
 
 const DEFAULT_PRIMARY_PAGES = ['home', 'plan-a-visit', 'about', 'donate'] as const
 

@@ -324,17 +324,23 @@ export interface CoworkPageAllocationPlan {
 }
 
 /** Closed vocabulary for unresolved_sources.reason. Keep in sync with
- *  plan-cross-page-allocation/SKILL.md. The (string & {}) escape hatch
- *  keeps pre-v1.1 plans parseable; new plans must use the enum. */
+ *  plan-cross-page-allocation/SKILL.md. Const tuple so VOCAB_DIMENSIONS
+ *  + the runtime validator import the same list. */
+export const UNRESOLVED_REASONS_LIST = [
+  'crawl_noise_parking_lot',
+  'csv_routed_elsewhere',
+  'structured_data_routed_to_facts',
+  'insufficient_items_for_template',
+  'required_slots_unfilled',
+  'duplicate_of_placed_source',
+  'internal_admin_contact_not_for_publication',
+  'insufficient_source_content',
+] as const
+
+/** The (string & {}) escape hatch keeps pre-v1.1 plans parseable; new
+ *  plans must use a value from UNRESOLVED_REASONS_LIST. */
 export type CoworkUnresolvedReason =
-  | 'crawl_noise_parking_lot'
-  | 'csv_routed_elsewhere'
-  | 'structured_data_routed_to_facts'
-  | 'insufficient_items_for_template'
-  | 'required_slots_unfilled'
-  | 'duplicate_of_placed_source'
-  | 'internal_admin_contact_not_for_publication'
-  | 'insufficient_source_content'
+  | typeof UNRESOLVED_REASONS_LIST[number]
   | (string & {})
 
 export interface CoworkPageAllocation {
@@ -369,15 +375,20 @@ export type SourceKindForAllocation =
 /** The treatment vocabulary plan-cross-page-allocation uses. Richer than
  *  the per-atom TreatmentSignal because this skill decides STRUCTURAL
  *  shape, not just word-level rewriting. */
-export type AllocationTreatment =
-  | 'lift_verbatim'           // use the source phrase exactly (voice samples, partner-stated mission)
-  | 'weave_into_paragraph'    // source is structured/list-like but should become prose here
-  | 'card_per_row'            // CSV/list source → one card per row
-  | 'summarize'               // distill from a longer source — orienting line
-  | 'surface_as_faq'          // inform-style content clearer as Q&A than narrative
-  | 'reframe_for_persona'     // reframe source through the persona's barrier
-  | 'cta_attach'              // use source as the close/invite for this section
-  | 'voice_anchor'            // don't lift content — use as the voice exemplar to imitate
+/** Promoted to const tuple (same pattern as FLOW_ROLES) so validators
+ *  and VOCAB_DIMENSIONS drift checks can import the canonical list. */
+export const ALLOCATION_TREATMENTS = [
+  'lift_verbatim',           // use the source phrase exactly (voice samples, partner-stated mission)
+  'weave_into_paragraph',    // source is structured/list-like but should become prose here
+  'card_per_row',            // CSV/list source → one card per row
+  'summarize',               // distill from a longer source — orienting line
+  'surface_as_faq',          // inform-style content clearer as Q&A than narrative
+  'reframe_for_persona',     // reframe source through the persona's barrier
+  'cta_attach',              // use source as the close/invite for this section
+  'voice_anchor',            // don't lift content — use as the voice exemplar to imitate
+] as const
+
+export type AllocationTreatment = typeof ALLOCATION_TREATMENTS[number]
 
 /** One row per source that landed somewhere. The strategist's audit
  *  trail. The "content coverage" view in the workspace reads these. */
@@ -546,4 +557,18 @@ export interface ArtifactMeta {
     cache_read_tokens?:  number
     cache_write_tokens?: number
   }
+  /** True if the endpoint ran a repair pass before this artifact landed
+   *  (deterministic validator tripped on first-pass output; a single
+   *  repair call corrected the named gaps). Strategist UI can surface
+   *  the badge; prompt-tuning watches the rate. */
+  repaired?:      boolean
+  /** Only set when repaired=true. Counts of which checks failed on the
+   *  FIRST pass (before repair). High counts on a specific check
+   *  across many runs = prompt or input projection isn't conveying
+   *  that constraint. P7 telemetry seed; reviewer telemetry table
+   *  reads this when it lands. */
+  first_pass_failures?: {
+    count:    number
+    by_check: Record<string, number>
+  } | null
 }

@@ -41,9 +41,19 @@
 
 import { createClient } from '@supabase/supabase-js'
 
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { callGateway, type ToolSchema } from '../../srp/_lib/aiGateway.js'
 import { resolveCoworkSkill } from './_lib/resolveCoworkSkill.js'
 import { BUNDLE_VERSION, FLOW_ROLES } from '../../../src/types/coworkBundle.js'
+import {
+  validatePageOutline,
+  type CanonicalTemplateManifest,
+  type PageOutlineValidationManifest,
+  type PageOutlineValidationResult,
+} from '../../../src/lib/cowork/validatePageOutline.js'
 
 // Cowork outline calls are model-driven on Opus 4.7 with sizable
 // inputs (allocation slice + atoms + facts + stage_1). Opt into the
@@ -151,28 +161,99 @@ export default async function handler(req: any, res: any) {
     return res.status(500).json({ error: e instanceof Error ? e.message : 'prompt resolve failed' })
   }
 
-  // 3. Call gateway with forced tool call.
-  const userMessage = buildUserMessage(pageSlug, inputs)
+  // Build the validation manifest ONCE — repair loop re-uses it so the
+  // model is repaired against the same atom inventory + canonical
+  // templates the importer will check it against. Catches drift before
+  // it hits the trust boundary.
+  let localManifest: PageOutlineValidationManifest
+  try {
+    localManifest = await buildLocalValidationManifest(sb, projectId, pageSlug)
+  } catch (e) {
+    return res.status(500).json({ error: e instanceof Error ? e.message : 'manifest build failed' })
+  }
+
+  // 3-4. Call gateway → validate locally → repair-on-422 → re-validate.
+  // The repair loop runs LOCALLY before the importer ever sees the
+  // outline. Importer still re-validates as the trust boundary; this
+  // pre-validation just avoids ping-ponging 422s through the HTTP layer
+  // and gives us per-run telemetry on whether the loop earns its keep.
+  const baseUserMessage = buildUserMessage(pageSlug, inputs)
   let gatewayResult: Awaited<ReturnType<typeof callGateway>>
+  let firstPass: PageOutlineValidationResult | null = null
+  let repaired = false
+
   try {
     gatewayResult = await callGateway({
       model:           resolved.model,
       system:          resolved.systemPrompt,
-      user:            userMessage,
+      user:            baseUserMessage,
       toolName:        TOOL_NAME,
       toolDescription: TOOL_DESCRIPTION,
       toolSchema:      TOOL_SCHEMA,
       maxTokens:       12000,
     })
   } catch (e) {
-    const name = (e as Error)?.name ?? 'Error'
-    const message = e instanceof Error ? e.message : 'gateway call failed'
-    if (name === 'GatewayRateLimitError') return res.status(429).json({ error: 'gateway_rate_limited', detail: message })
-    if (name === 'GatewayTransientError') return res.status(502).json({ error: 'gateway_transient',     detail: message })
-    return res.status(500).json({ error: 'gateway_failure', detail: message })
+    return mapGatewayError(res, e)
   }
 
-  // 4. Stamp _meta into the outline.
+  let validation = validatePageOutline(gatewayResult.args as any, localManifest)
+  if (!validation.ok) {
+    firstPass = validation
+    // ONE repair attempt. Append the failure list to the user message —
+    // the model sees exactly which checks tripped and which sections /
+    // atom_ids / archetypes triggered them. Resist multi-shot retries:
+    // if one targeted repair doesn't land, the prompt or input
+    // projection is the real bug and we want the strategist to see it,
+    // not hide it behind retry-until-it-works.
+    const repairMessage = [
+      baseUserMessage,
+      ``,
+      `## Validation feedback — repair this outline`,
+      ``,
+      `The outline you produced did not pass deterministic validation`,
+      `against the project inventory + canonical templates. Fix ONLY the`,
+      `named gaps below; do not regenerate the rest. Emit a corrected`,
+      `outline via the same \`${TOOL_NAME}\` tool call.`,
+      ``,
+      '```',
+      validation.summary,
+      '```',
+      ``,
+      `Failures by check (machine-readable):`,
+      '```json',
+      JSON.stringify(validation.byCheck, null, 2),
+      '```',
+    ].join('\n')
+
+    let repairResult: Awaited<ReturnType<typeof callGateway>>
+    try {
+      repairResult = await callGateway({
+        model:           resolved.model,
+        system:          resolved.systemPrompt,
+        user:            repairMessage,
+        toolName:        TOOL_NAME,
+        toolDescription: TOOL_DESCRIPTION,
+        toolSchema:      TOOL_SCHEMA,
+        maxTokens:       12000,
+      })
+    } catch (e) {
+      return mapGatewayError(res, e)
+    }
+    repaired = true
+    // Combine usage from both calls — the telemetry accounting needs
+    // to reflect what the run actually cost.
+    gatewayResult = {
+      args:   repairResult.args,
+      model:  repairResult.model,
+      usage: {
+        inputTokens:  gatewayResult.usage.inputTokens  + repairResult.usage.inputTokens,
+        outputTokens: gatewayResult.usage.outputTokens + repairResult.usage.outputTokens,
+      },
+    }
+    validation = validatePageOutline(repairResult.args as any, localManifest)
+  }
+
+  // Stamp _meta — including the repair telemetry. P7 seed.
   const now = new Date().toISOString()
   const outlineWithMeta = {
     ...gatewayResult.args,
@@ -189,10 +270,42 @@ export default async function handler(req: any, res: any) {
       },
       atom_count_used: countUniqueAtomIds(gatewayResult.args),
       sections_count:  Array.isArray(gatewayResult.args.sections) ? gatewayResult.args.sections.length : 0,
+      // Repair-loop telemetry — set on every artifact so the strategist
+      // UI can surface which outlines self-healed vs. landed clean,
+      // and so prompt-tuning has a signal to chase: a high repair rate
+      // for a specific check (e.g. always trips `unknown_archetype`
+      // first pass, repairs on second) means the prompt or input
+      // projection isn't conveying the constraint.
+      repaired,
+      first_pass_failures: firstPass
+        ? {
+            count:   firstPass.failures.length,
+            by_check: Object.fromEntries(Object.entries(firstPass.byCheck).map(([k, v]) => [k, v.length])),
+          }
+        : null,
     },
   }
 
-  // 5. POST to import endpoint (validates + lands).
+  if (!validation.ok) {
+    // Even after one repair pass, validation still fails. Surface the
+    // diagnostic to the caller WITHOUT calling the importer — there's
+    // no point ping-ponging a known-bad outline through the trust
+    // boundary just to get the same failure list back over HTTP.
+    return res.status(422).json({
+      stage:        'local_validate',
+      error:        'validation_failed_after_repair',
+      summary:      validation.summary,
+      byCheck:      validation.byCheck,
+      failures:     validation.failures,
+      first_pass_failures: firstPass ? {
+        count:   firstPass.failures.length,
+        by_check: Object.fromEntries(Object.entries(firstPass.byCheck).map(([k, v]) => [k, v.length])),
+      } : null,
+      outline_for_inspection: outlineWithMeta,
+    })
+  }
+
+  // POST to import endpoint (the trust boundary re-validates + lands).
   const importerUrl = inferImporterUrl(req)
   const importerRes = await fetch(importerUrl, {
     method: 'POST',
@@ -207,7 +320,11 @@ export default async function handler(req: any, res: any) {
   const importerJson = await importerRes.json().catch(() => ({}))
 
   if (!importerRes.ok) {
-    // Importer returns the structured failure list on 422; pass through.
+    // Local validation passed but importer rejected — unusual; means
+    // the trust-boundary validator caught something the local copy
+    // missed (e.g. atom_id raced an atom-status change between the
+    // manifest build and the import). Surface the importer's
+    // structured failure list verbatim.
     return res.status(importerRes.status).json({
       stage:        'import',
       error:        importerJson?.error ?? 'import_failed',
@@ -228,6 +345,49 @@ export default async function handler(req: any, res: any) {
       has_project_addendum: resolved.hasProjectAddendum,
     },
   })
+}
+
+function mapGatewayError(res: any, e: unknown) {
+  const name = (e as Error)?.name ?? 'Error'
+  const message = e instanceof Error ? e.message : 'gateway call failed'
+  if (name === 'GatewayRateLimitError') return res.status(429).json({ error: 'gateway_rate_limited', detail: message })
+  if (name === 'GatewayTransientError') return res.status(502).json({ error: 'gateway_transient',     detail: message })
+  return res.status(500).json({ error: 'gateway_failure', detail: message })
+}
+
+/**
+ * Build the validation manifest the endpoint will use to pre-validate
+ * the outline before sending to the importer. Identical shape to the
+ * one the importer builds — we deliberately duplicate the build here
+ * (rather than calling the importer for it) so the repair loop has
+ * the same view of "what counts as valid" as the trust boundary.
+ *
+ * Canonical-templates cached at module scope, same as the importer.
+ */
+async function buildLocalValidationManifest(
+  sb:        any,
+  projectId: string,
+  pageSlug:  string,
+): Promise<PageOutlineValidationManifest> {
+  const atomsRes = await sb.from('content_atoms')
+    .select('id')
+    .eq('web_project_id', projectId)
+    .in('status', ['active', 'draft'])
+  if (atomsRes.error) throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  return {
+    atom_ids: (atomsRes.data ?? []).map((r: any) => String(r.id)),
+    canonical_templates: loadCanonicalTemplates(),
+    expected_page_slug:  pageSlug,
+  }
+}
+
+let _canonicalTemplatesCache: CanonicalTemplateManifest | null = null
+function loadCanonicalTemplates(): CanonicalTemplateManifest {
+  if (_canonicalTemplatesCache) return _canonicalTemplatesCache
+  const __dirname = dirname(fileURLToPath(import.meta.url))
+  const path = resolve(__dirname, '..', '..', '..', 'cowork-skills', 'canonical-templates.json')
+  _canonicalTemplatesCache = JSON.parse(readFileSync(path, 'utf8')) as CanonicalTemplateManifest
+  return _canonicalTemplatesCache
 }
 
 // ──────────────────────────────────────────────────────────────────────────
