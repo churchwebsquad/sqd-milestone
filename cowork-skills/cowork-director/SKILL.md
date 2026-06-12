@@ -67,7 +67,7 @@ work that already landed.
 | 8 | Outline each sitemap page (consumes that page's allocation slice + the ministry-model templates) | For slug X: `roadmap_state.page_outlines[X]` exists AND `_meta.generated_at` is after the allocation plan | `outline-page` (per slug) |
 | 9 | Draft each outlined page (reads outline + the actual source content via source_ref lookups — pulls crawl passages, content_collection fields, atoms by UUID) | For slug X: `roadmap_state.page_drafts[X]` exists AND `_meta.generated_at` is after that page's outline | `draft-page` (per slug) |
 | 10 | Critique each drafted page (5-axis: dignity floor 70 / voice_character / persona_fit / atom_coverage / claim_plausibility) | For slug X: a `page_critique` artifact exists AND `_meta.generated_at` is after that page's draft | `critique-page` (per slug) |
-| 11 | Roll up cross-page critique | `roadmap_state.director_critique` exists AND `_meta.generated_at` is after the last per-page critique | `synthesize-critique` |
+| 11 | Roll up cross-page critique | `roadmap_state.critique_rollup` exists AND `_meta.generated_at` is after the last per-page critique | `synthesize-critique` |
 
 The dependency rule above isn't "if it exists, skip" — it's "if it
 exists AND is fresh enough relative to upstream, skip." This avoids

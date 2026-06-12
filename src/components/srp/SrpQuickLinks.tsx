@@ -6,7 +6,10 @@
  * Rendered in the SrpWorkflowShell sidebar footer.
  */
 
-import { ExternalLink, Instagram, Facebook, Youtube, Globe, FileText, Image, MessageSquare, Palette } from 'lucide-react'
+// lucide-react v1.x dropped branded icons (Instagram / Facebook / Youtube) for
+// trademark reasons. Use generic stroke icons; the label next to each tile is
+// the actual identifier, the glyph is decorative.
+import { ExternalLink, Camera, Users, MonitorPlay, Globe, FileText, Image, MessageSquare, Palette } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { SquadAccount } from '../../types/database'
 
@@ -31,11 +34,11 @@ export function SrpQuickLinks({ account }: { account: SquadAccount | null }) {
 
   const tiles: LinkTile[] = []
   const ig = ensureUrl(account.instagram_link ?? account.instagram)
-  if (ig) tiles.push({ label: 'Instagram', href: ig, icon: Instagram })
+  if (ig) tiles.push({ label: 'Instagram', href: ig, icon: Camera })
   const fb = ensureUrl(account.facebook_link ?? account.facebook)
-  if (fb) tiles.push({ label: 'Facebook', href: fb, icon: Facebook })
+  if (fb) tiles.push({ label: 'Facebook', href: fb, icon: Users })
   const yt = ensureUrl(account.youtube)
-  if (yt) tiles.push({ label: 'YouTube', href: yt, icon: Youtube })
+  if (yt) tiles.push({ label: 'YouTube', href: yt, icon: MonitorPlay })
   const site = ensureUrl(account.church_website)
   if (site) tiles.push({ label: 'Website', href: site, icon: Globe })
   const brief = ensureUrl(account.strategy_brief)

@@ -36,7 +36,15 @@ This is the last skill the strategist reads before approving the build.
 }
 ```
 
-## What you produce (CoworkProjectCritique)
+## What you produce (`CoworkCritiqueRollup`)
+
+> **Canonical naming** (locked, used everywhere): TS type
+> `CoworkCritiqueRollup` (src/types/coworkBundle.ts) ·
+> `bundle_kind: 'critique_rollup'` (importer dispatch) ·
+> persisted at `roadmap_state.critique_rollup` (cowork-director writes).
+> Never `CoworkProjectCritique` (former draft name) or
+> `director_critique` (former roadmap path).
+
 
 ```ts
 {

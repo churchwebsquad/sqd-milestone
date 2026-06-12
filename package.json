@@ -14,6 +14,7 @@
     "lint:ratchet:update": "node scripts/lint-ratchet.mjs --update",
     "check:canonical-templates": "node scripts/check-canonical-templates.mjs",
     "check:canonical-templates:write": "node scripts/check-canonical-templates.mjs --write",
+    "check:allocation-validator": "tsx scripts/check-allocation-validator.ts",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -44,6 +45,7 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
     "node-html-parser": "^7.1.0",
+    "tsx": "^4.21.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.0",
     "vite": "^8.0.4"
