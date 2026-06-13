@@ -45,9 +45,11 @@ const DEFAULT_SLUG      = 'paratots'
 const flags = new Map<string, string>()
 let skipOutline = false
 let skipDraft   = false
+let onlyOutline = false
 for (const arg of process.argv.slice(2)) {
   if (arg === '--skip-outline') { skipOutline = true; continue }
   if (arg === '--skip-draft')   { skipDraft   = true; continue }
+  if (arg === '--only-outline') { onlyOutline = true; continue }
   const m = arg.match(/^--([\w-]+)=(.+)$/)
   if (m) flags.set(m[1], m[2])
 }
@@ -114,11 +116,17 @@ if (!skipOutline) {
     console.error(`✗ outline prompt_hash mismatch: got ${meta.prompt_hash}, expected ${expected.contentHash}`)
     process.exit(1)
   }
-  console.log(`  ✓ 200 in ${elapsedMs}ms  sections=${body.outline?.sections?.length}  atoms=${meta.atom_count_used}  repaired=${meta.repaired}  fpf=${JSON.stringify(meta.first_pass_failures)}`)
+  console.log(`  ✓ 200 in ${elapsedMs}ms  sections=${body.outline?.sections?.length}  atoms=${meta.atom_count_used}  facts=${meta.fact_count_used ?? 0}  crawl=${meta.crawl_topic_count_used ?? 0}  repaired=${meta.repaired}  fpf=${JSON.stringify(meta.first_pass_failures)}`)
   console.log()
 } else {
   console.log(`Step 1 — SKIPPED (--skip-outline; assumes roadmap_state.page_outlines.${pageSlug} already exists)`)
   console.log()
+}
+
+if (onlyOutline) {
+  console.log(`✓ Outline-only mode (--only-outline) — exiting before draft + critique.`)
+  console.log(`  Outline fixture landed at cowork-skills/outline-page/examples/${pageSlug}/`)
+  process.exit(0)
 }
 
 // ─── Step 2: draft ────────────────────────────────────────────────────────

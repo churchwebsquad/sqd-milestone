@@ -2413,7 +2413,7 @@ personas; use the names exactly as stage_1 emitted them.
     name:         'outline-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  '36136cf34300afb8',
+    contentHash:  'f43bb225994ec600',
     references:   [
       'cowork-skills/canonical-templates.json',
       'cowork-skills/page-outlines-by-ministry-model.md',
@@ -2610,6 +2610,16 @@ content. Putting them in \`atom_assignments\` drives them into the
 draft's \`atoms_used\` + the verbatim-substring check, which then fails
 when the drafter (correctly) imitates style instead of pasting the
 rule text into a primary_heading.
+
+**The user message separates these atoms into TWO buckets** —
+"Content atoms allocated to this page" and "Voice atoms allocated to
+this page" — so the routing decision is structural in your input.
+The two lists never overlap. Treat them like two source kinds:
+content atoms → \`atom_assignments[]\`, voice atoms → \`voice_anchor\`.
+A voice_sample atom's body can read like a great hero line; that's
+*because* it IS the partner's intentional voice. Don't paste it into
+a slot — point at it via \`voice_anchor\` so the drafter imitates the
+move with copy that fits the slot.
 
 **The routing rule:**
 

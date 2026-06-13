@@ -531,7 +531,18 @@ interface AssembledInputs {
   allocation:        any           // the allocation slice for this page
   stage1Brief:       any           // ethos + personas + voice exemplars + anti-exemplars
   ministryModel:     any           // { dominant_model, secondary_blend }
-  atomsForPage:      Array<{ id: string; topic: string; body: string; verbatim: boolean }>
+  /** Atoms allocated to this page WITH voice-topic atoms separated.
+   *  contentAtomsForPage feeds atom_assignments; voiceAtomsForPage
+   *  feeds section.voice_anchor only. Split in the user message so
+   *  the routing decision is structural — the model can't accidentally
+   *  lump them under one "atoms" header and rationalize using a
+   *  voice_sample body as hero body content. Surfaced 2026-06-12
+   *  during the home fire: SKILL prose taught the rule, but with both
+   *  kinds in one bucket the model still misrouted (1 fire after the
+   *  voice-atom validator landed). */
+  atomsForPage:        Array<{ id: string; topic: string; body: string; verbatim: boolean }>
+  contentAtomsForPage: Array<{ id: string; topic: string; body: string; verbatim: boolean }>
+  voiceAtomsForPage:   Array<{ id: string; topic: string; body: string; verbatim: boolean }>
   factsForPage:      Array<{ id: string; topic: string; data: Record<string, unknown> }>
   crawlTopicsForPage: Array<{
     topic_key:        string
@@ -542,6 +553,8 @@ interface AssembledInputs {
     items:            unknown
   }>
 }
+
+const VOICE_TOPICS = new Set(['voice_rule', 'voice_sample', 'tone_descriptor'])
 
 async function assembleEndpointInputs(
   sb:        any,
@@ -617,11 +630,17 @@ async function assembleEndpointInputs(
     persuasive_posture_by_persona: stage_1.persuasive_posture_by_persona,
   } : null
 
+  const allAtoms = (atomsRes.data ?? []) as AssembledInputs['atomsForPage']
+  const contentAtomsForPage = allAtoms.filter(a => !VOICE_TOPICS.has(String(a.topic ?? '')))
+  const voiceAtomsForPage   = allAtoms.filter(a =>  VOICE_TOPICS.has(String(a.topic ?? '')))
+
   return {
     allocation,
     stage1Brief,
     ministryModel:       ministry_model,
-    atomsForPage:        (atomsRes.data  ?? []) as AssembledInputs['atomsForPage'],
+    atomsForPage:        allAtoms,             // kept for the schema-enum (all atoms remain valid ids)
+    contentAtomsForPage,
+    voiceAtomsForPage,
     factsForPage:        (factsRes.data  ?? []) as AssembledInputs['factsForPage'],
     crawlTopicsForPage:  (topicsRes.data ?? []) as AssembledInputs['crawlTopicsForPage'],
   }
@@ -655,10 +674,21 @@ function buildUserMessage(pageSlug: string, inputs: AssembledInputs): string {
     JSON.stringify(inputs.ministryModel, null, 2),
     '```',
     ``,
-    `## Atoms allocated to this page → route via \`atom_assignments[].atom_id\``,
-    `(full bodies; these are the ONLY ids that may appear in atom_assignments)`,
+    `## Content atoms allocated to this page → route via \`atom_assignments[].atom_id\``,
+    `(content-bearing atoms — value statements, prose snippets, service-time mentions,`,
+    `ministry descriptions. These are the atoms whose bodies appear LITERALLY in slot copy.`,
+    `Treatment vocab: use_as_is / lift_phrase / compress / expand / reorder / omit.)`,
     '```json',
-    JSON.stringify(inputs.atomsForPage, null, 2),
+    JSON.stringify(inputs.contentAtomsForPage, null, 2),
+    '```',
+    ``,
+    `## Voice atoms allocated to this page → route via \`section.voice_anchor\` (NEVER atom_assignments)`,
+    `(voice_rule / voice_sample / tone_descriptor atoms — these are IMITATION MATERIAL, not slot content.`,
+    `Lift ONE atom's body verbatim into the section's voice_anchor field (the per-section exemplar pointer)`,
+    `to tell draft-page which voice to imitate. Their bodies are PROHIBITED from atom_assignments — the`,
+    `validator trips voice_atom_in_assignments on any UUID from this list appearing there.)`,
+    '```json',
+    JSON.stringify(inputs.voiceAtomsForPage, null, 2),
     '```',
     ``,
     `## Facts allocated to this page → route via \`fact_assignments[].fact_id\``,
@@ -677,12 +707,17 @@ function buildUserMessage(pageSlug: string, inputs: AssembledInputs): string {
     JSON.stringify(compactCrawlTopics(inputs.crawlTopicsForPage as Record<string, unknown>[]), null, 2),
     '```',
     ``,
-    `Emit the outline now via the \`${TOOL_NAME}\` tool call. Routing rule:`,
-    `each source from the allocation lands in EXACTLY ONE of the three`,
-    `arrays based on its kind — pillar→atom_assignments, fact→fact_assignments,`,
-    `crawl_topic→crawl_topic_assignments. Cross-routing (e.g. putting a`,
-    `fact_id into atom_assignments[].atom_id) trips the validator. Every`,
-    `section may emit empty arrays for kinds it doesn't consume.`,
+    `Emit the outline now via the \`${TOOL_NAME}\` tool call. Routing rules:`,
+    `  1. Content atoms (top section above) → \`atom_assignments[].atom_id\`.`,
+    `  2. Voice atoms (the SEPARATE list above) → \`section.voice_anchor\` ONLY.`,
+    `     Never atom_assignments — even if a voice_sample atom's body would`,
+    `     "read well" as a hero body, it is imitation material, not slot copy.`,
+    `     A voice_sample body in atom_assignments trips voice_atom_in_assignments.`,
+    `  3. Facts → \`fact_assignments[].fact_id\`.`,
+    `  4. Crawl topics → \`crawl_topic_assignments[].topic_key\`.`,
+    `Cross-routing (e.g. putting a fact_id into atom_assignments[].atom_id, or`,
+    `a voice_sample atom_id into atom_assignments) trips the validator.`,
+    `Every section may emit empty arrays for kinds it doesn't consume.`,
   ].join('\n')
 }
 

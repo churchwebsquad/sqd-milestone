@@ -208,6 +208,16 @@ draft's `atoms_used` + the verbatim-substring check, which then fails
 when the drafter (correctly) imitates style instead of pasting the
 rule text into a primary_heading.
 
+**The user message separates these atoms into TWO buckets** —
+"Content atoms allocated to this page" and "Voice atoms allocated to
+this page" — so the routing decision is structural in your input.
+The two lists never overlap. Treat them like two source kinds:
+content atoms → `atom_assignments[]`, voice atoms → `voice_anchor`.
+A voice_sample atom's body can read like a great hero line; that's
+*because* it IS the partner's intentional voice. Don't paste it into
+a slot — point at it via `voice_anchor` so the drafter imitates the
+move with copy that fits the slot.
+
 **The routing rule:**
 
 - A voice-topic atom appearing in the allocation's `section_intents
