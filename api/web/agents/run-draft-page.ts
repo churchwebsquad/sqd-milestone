@@ -48,28 +48,46 @@ const TOOL_DESCRIPTION =
 /**
  * Build the JSON Schema for the forced tool call.
  *
- * `atoms_used[]` items are enum-constrained to the literal atom_ids
- * from the outline's atom_assignments (same projection the user
- * message receives). Implements the three-layer doctrine: schema
- * enforces IDENTITY for open-vocabulary UUID fields where prose hit
- * a ceiling (proved on outline-page tune v2: prose only moved
- * unknown_atom_ref 15 -> 13 on a single sample, sampling noise).
+ * Two enum-constraints, both built per-request from the outline:
  *
- * `copy` stays open-shape (additionalProperties: true) — drafter
- * freely populates slot keys per archetype; validator + importer
- * check copy keys against canonical_templates after the call returns.
- * That's slot-name enforcement; atom_id enforcement is here.
+ *   1. atoms_used[] items are enum-constrained to the literal
+ *      atom_ids the outline assigned to this page. Closes
+ *      unknown_atom_ref at the gateway layer.
+ *   2. copy keys are constrained via propertyNames.enum to the UNION
+ *      of slot names across all archetypes the outline picked.
+ *      Closes the majority of unknown_slot_in_copy first-pass
+ *      failures (Fable 5's first fire tripped 5 on invented slot
+ *      names; this prevents the gateway from accepting any slot
+ *      name not declared on at least one referenced archetype).
+ *      Per-archetype-precision is still the validator's job: a slot
+ *      name valid for archetype A but used in a section bound to
+ *      archetype B will pass the gateway and trip the validator's
+ *      unknown_slot_in_copy check (defense in depth).
  *
- * Build the enum from the SAME projection the user message reads, so
- * the two can never disagree about what's in scope. atomIdsInScope
- * MUST come from inputs.atomsForPage (which is queried by
- * outline.sections[*].atom_assignments[].atom_id and returned in the
- * user message's "Atoms allocated by the outline" section).
+ * "Same trick as the atom enum" per 2026-06-12 amendment: the
+ * endpoint already holds the outline, build the enum per-request.
+ *
+ * Build both enums from the SAME projections the user message reads,
+ * so the schema + prompt cannot disagree about scope.
  */
-function buildToolSchema(atomIdsInScope: string[]): ToolSchema {
+function buildToolSchema(
+  atomIdsInScope:        string[],
+  allowedSlotNames:      string[],
+): ToolSchema {
   const atomIdSchema: Record<string, unknown> = atomIdsInScope.length > 0
     ? { type: 'string', enum: atomIdsInScope }
     : { type: 'string' }
+  // Constrain copy's KEY names via propertyNames; values stay flexible
+  // (additionalProperties: true). Drafter still picks values; the
+  // model just can't invent slot names beyond the outline's archetype
+  // union.
+  const copySchema: Record<string, unknown> = {
+    type: 'object',
+    additionalProperties: true,
+  }
+  if (allowedSlotNames.length > 0) {
+    copySchema.propertyNames = { enum: allowedSlotNames }
+  }
   return {
     type: 'object',
     additionalProperties: false,
@@ -93,10 +111,7 @@ function buildToolSchema(atomIdsInScope: string[]): ToolSchema {
             // to cite an exemplar phrase + name an atom_id + one
             // sentence of reasoning.
             voice_notes: { type: 'string', maxLength: 240 },
-            copy:        {
-              type: 'object',
-              additionalProperties: true,
-            },
+            copy:        copySchema,
             atoms_used:  {
               type: 'array',
               items: atomIdSchema,
@@ -163,12 +178,17 @@ export default async function handler(req: any, res: any) {
   }
 
   // Build the tool schema per-request — atoms_used items are
-  // enum-constrained to the literal atom_ids from inputs.atomsForPage
-  // (same projection the user message reads — both are derived from
-  // outline.sections[*].atom_assignments[].atom_id). The gateway
-  // physically cannot emit an invalid UUID. See buildToolSchema for
-  // the three-layer doctrine.
-  const toolSchema = buildToolSchema(inputs.atomsForPage.map(a => a.id))
+  // enum-constrained to the literal atom_ids from inputs.atomsForPage,
+  // AND copy keys are constrained (via propertyNames) to the union of
+  // slot names across the outline's chosen archetypes. Both enums
+  // built from inputs.outline (same source the user message reads).
+  // The gateway cannot emit an invalid UUID OR an invented slot name.
+  // See buildToolSchema for the three-layer doctrine.
+  const allowedSlotNames = collectAllowedSlotNames(inputs.outline, localManifest)
+  const toolSchema = buildToolSchema(
+    inputs.atomsForPage.map(a => a.id),
+    allowedSlotNames,
+  )
 
   // 4. Call gateway → local validate → repair-on-422 → re-validate.
   const baseUserMessage = buildUserMessage(pageSlug, inputs)
@@ -556,4 +576,31 @@ function inferImporterUrl(req: any): string {
   const proto = req.headers['x-forwarded-proto'] ?? 'https'
   const host  = req.headers['x-forwarded-host'] ?? req.headers.host
   return `${proto}://${host}/api/web/agents/import-cowork-bundle`
+}
+
+/**
+ * Collect the union of slot names across all archetypes referenced
+ * by the outline's sections. The model's `copy` keys are restricted
+ * (via propertyNames.enum on the tool schema) to this union — gateway
+ * rejects keys the union doesn't contain. Per-archetype-precision
+ * (a slot valid for archetype A used in a section bound to archetype
+ * B) stays the validator's job, defense in depth.
+ *
+ * Skips archetypes not present in canonical_templates (validator
+ * will already trip unknown_archetype for those).
+ */
+function collectAllowedSlotNames(
+  outline:  any,
+  manifest: DraftPageValidationManifest,
+): string[] {
+  const set = new Set<string>()
+  const archetypes = manifest.canonical_templates?.page_section_templates ?? {}
+  for (const s of (outline?.sections ?? [])) {
+    const archetypeDef = archetypes[s?.archetype]
+    if (!archetypeDef) continue
+    for (const slotKey of Object.keys(archetypeDef.cowork_writable_slots ?? {})) {
+      set.add(slotKey)
+    }
+  }
+  return Array.from(set)
 }

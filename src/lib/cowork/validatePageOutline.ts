@@ -33,6 +33,18 @@ import { FLOW_ROLES, type CoworkPageOutline } from '../../types/coworkBundle.js'
 export interface PageOutlineValidationManifest {
   /** active+draft atom_ids the project has. */
   atom_ids: string[]
+  /** atom_id → topic mapping for active+draft atoms. Used to detect
+   *  voice-topic atoms (voice_rule / voice_sample / tone_descriptor)
+   *  appearing in atom_assignments — those belong on
+   *  section.voice_anchor (the imitation pointer), not in
+   *  atom_assignments (which drives literal slot binding via the
+   *  draft). Surfaced 2026-06-12 during the paratots draft fire: the
+   *  outline assigned voice_rule + voice_sample atoms to ~12 slots
+   *  × 4 sections, causing Fable 5 to (correctly) imitate instead
+   *  of paste, which the verbatim validator (also correctly)
+   *  flagged. Topic-aware skip in the draft validator is the permissive
+   *  fix; this check is the architectural fix. */
+  atom_topics: Record<string, string>
   /** canonical-templates.json under the project's manifest version.
    *  The keys of `page_section_templates` are the valid archetype
    *  names. */
@@ -41,6 +53,16 @@ export interface PageOutlineValidationManifest {
    *  emits the right slug. */
   expected_page_slug: string
 }
+
+/** Topics whose atoms are stylistic guidance for the drafter to
+ *  imitate, never literal slot content. Mirrors the same set used by
+ *  validateDraftPage's verbatim-skip rule (single source for the
+ *  semantic). */
+export const VOICE_TOPICS_NOT_FOR_ASSIGNMENTS = new Set([
+  'voice_rule',
+  'voice_sample',
+  'tone_descriptor',
+])
 // NOTE: fact_ids removed. CoworkPageOutline.sections[].atom_assignments
 // is the only binding shape today — facts arrive on the page via the
 // allocation slice but are referenced at draft time by id-lookup, not
@@ -138,6 +160,24 @@ export function validatePageOutline(
       if (!a.atom_id || !atomSet.has(a.atom_id)) {
         fail('unknown_atom_ref',
           `${assignLabel} references atom_id='${a.atom_id ?? '(missing)'}' not present in project's content_atoms (hallucinated UUID?)`)
+      } else {
+        // Voice atoms must NOT appear in atom_assignments. They're
+        // stylistic guidance the drafter imitates via the section's
+        // voice_anchor field. Putting them in atom_assignments drives
+        // them into the draft's atoms_used + the verbatim check,
+        // which then trips on every section that "should" carry them
+        // (paratots fire showed 12 trips × 4 sections). The
+        // architectural fix.
+        // Defensive: fixtures persisted before atom_topics existed
+        // may not include the field. Older fixtures skip this check
+        // (topic comes back undefined → no fail). The runtime
+        // importer + endpoint builders populate it; only old test
+        // fixtures lack it.
+        const topic = mf.atom_topics?.[a.atom_id]
+        if (topic && VOICE_TOPICS_NOT_FOR_ASSIGNMENTS.has(topic)) {
+          fail('voice_atom_in_assignments',
+            `${assignLabel} references atom_id='${a.atom_id}' with topic='${topic}'. Voice-topic atoms (voice_rule, voice_sample, tone_descriptor) are imitation material — route them to section.voice_anchor (the exemplar pointer), never atom_assignments.`)
+        }
       }
 
       // slot_hint must point at a real slot OR a known group_dot pattern

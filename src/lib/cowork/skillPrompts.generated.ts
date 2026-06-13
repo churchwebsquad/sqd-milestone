@@ -2361,7 +2361,7 @@ personas; use the names exactly as stage_1 emitted them.
     name:         'outline-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  'c0d743c7e3c7478f',
+    contentHash:  '364adec8c96410a5',
     references:   [
       'cowork-skills/canonical-templates.json',
       'cowork-skills/page-outlines-by-ministry-model.md',
@@ -2549,6 +2549,54 @@ For each required slot:
 
 **Verbatim atoms (\`verbatim: true\`) MUST be bound \`use_as_is\`.** The
 allocation passes the atom's treatment through; preserve.
+
+## Voice atoms route to voice_anchor, NEVER atom_assignments
+
+Atoms with \`topic\` in \`{voice_rule, voice_sample, tone_descriptor}\`
+are **stylistic guidance** the drafter IMITATES. They are not slot
+content. Putting them in \`atom_assignments\` drives them into the
+draft's \`atoms_used\` + the verbatim-substring check, which then fails
+when the drafter (correctly) imitates style instead of pasting the
+rule text into a primary_heading.
+
+**The routing rule:**
+
+- A voice-topic atom appearing in the allocation's \`section_intents
+  [].sources[]\` with \`treatment: 'voice_anchor'\` is the allocation's
+  signal to YOU. It does NOT become an \`atom_assignment\`.
+- Instead, lift the voice-topic atom's body verbatim into the
+  section's **\`voice_anchor\`** field (the per-section string that
+  tells draft-page which exemplar to imitate).
+- A single section's \`voice_anchor\` is ONE exemplar phrase. If the
+  allocation provides multiple voice atoms for a section, pick the
+  one closest to the section_intent's job and put it there; mention
+  others (with their atom_ids) in \`report.notes\`.
+
+**The validator enforces this.** Any \`atom_assignments[].atom_id\`
+whose topic is in \`VOICE_TOPICS_NOT_FOR_ASSIGNMENTS\` trips the
+\`voice_atom_in_assignments\` check. The pattern is parallel to
+\`unknown_atom_ref\`: a structural rule that ends in a failure list,
+not a judgment call.
+
+**Worked example.** Allocation gives section 2 these sources:
+
+\`\`\`json
+[
+  {"kind": "pillar", "ref": "be43f59d-…", "treatment": "voice_anchor", "topic": "voice_rule"},
+  {"kind": "pillar", "ref": "94df26ac-…", "treatment": "lift_verbatim", "topic": "prose_snippet"},
+  {"kind": "fact",   "ref": "service_time-fact-…"}
+]
+\`\`\`
+
+CORRECT outline output for section 2:
+- \`voice_anchor\`: "Don't write 'walk with God' — write 'walk
+  alongside'" (the body of be43f59d, lifted)
+- \`atom_assignments\`: ONE entry for 94df26ac (the prose_snippet) +
+  ZERO entries for be43f59d.
+
+INCORRECT outline output (will trip \`voice_atom_in_assignments\`):
+- \`atom_assignments\` includes \`{atom_id: 'be43f59d-…',
+  slot_hint: 'primary_heading'}\` — voice atom in assignments = fail.
 
 ## slot_hint format — the literal shape that lands
 

@@ -506,16 +506,29 @@ async function buildPageOutlineManifestFromProject(
   projectId: string,
   pageSlug:  string,
 ): Promise<PageOutlineValidationManifest> {
+  // Also select topic so the validator can detect voice_*/tone_*
+  // atoms in atom_assignments (voice atoms belong in voice_anchor,
+  // not as literal slot bindings; see VOICE_TOPICS_NOT_FOR_ASSIGNMENTS
+  // in validatePageOutline).
   const atomsRes = await sb.from('content_atoms')
-    .select('id')
+    .select('id, topic')
     .eq('web_project_id', projectId)
     .in('status', ['active', 'draft'])
   if (atomsRes.error) throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
 
   const canonical_templates = loadCanonicalTemplates()
 
+  const atom_ids: string[] = []
+  const atom_topics: Record<string, string> = {}
+  for (const row of (atomsRes.data ?? [])) {
+    const id = String(row.id)
+    atom_ids.push(id)
+    atom_topics[id] = String(row.topic ?? '')
+  }
+
   return {
-    atom_ids: (atomsRes.data ?? []).map((r: any) => String(r.id)),
+    atom_ids,
+    atom_topics,
     canonical_templates,
     expected_page_slug: pageSlug,
   }

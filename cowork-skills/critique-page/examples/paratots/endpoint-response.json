@@ -1,7 +1,7 @@
 {
-  "ok": true,
-  "page_slug": "paratots",
-  "critique": {
+  "stage": "import",
+  "error": "import_failed",
+  "critique_for_inspection": {
     "atom_coverage": 95,
     "claim_plausibility": 55,
     "dignity": 88,
@@ -11,7 +11,7 @@
         "page_slug": "paratots",
         "section_ix": 2,
         "slot_key": "items[0].item_body",
-        "note": "Ungrounded check-in process: 'Check-in is inside the lobby, and a teacher will walk you and your kid to the room.' No atom or fact in the allocation describes Paradox's actual check-in workflow or that a teacher escorts parent+child to the ParaTots room. Either route to content collection for the partner's real check-in process or drop the invented logistics — keep only the time/address which are grounded in fact 631e87bd.",
+        "note": "Section 2 items[0] invents check-in workflow: 'Check-in is inside the lobby, and a teacher will walk you and your kid to the room.' No atom or fact carries this check-in procedure or teacher-walks-to-room handoff. Either route to content collection for Paradox's actual check-in process or drop the invented logistics and let the When/Where item carry just the time + address.",
         "severity": "blocker",
         "axis": "claim_plausibility"
       },
@@ -20,101 +20,59 @@
         "page_slug": "paratots",
         "section_ix": 2,
         "slot_key": "body",
-        "note": "Section 2 repeats 'Saturdays at 9:15 AM' across primary_heading ('Saturdays at 9:15 in Redlands') + tagline ('AGES 0 TO 4, SATURDAYS AT 9:15') + body ('Saturdays at 9:15 AM at 51 W Olive') + items[0].item_body ('Saturdays at 9:15 AM at 51 W Olive'). The address ('51 W Olive') also appears 3x in the section. Pick the slot where each fact lands best (tagline for time/age; items[0] for address) and drop the others. Intra-section redundancy — the visitor reads the same logistic 4 times in ~80 words.",
+        "note": "Section 2 repeats Saturday 9:15 AM + 51 W Olive + ages 0 to 4 across tagline + primary_heading + body + items[0].item_heading + items[0].item_body + items[1].item_heading. Within ONE section, the time appears 4x and the address 2x. Pick the slot each fact lands best (tagline for ages+time; items[0] for time+address) and drop the duplicates from body and primary_heading. The 'whole gathering follows at 10:00' belongs in section 3, not here.",
         "severity": "warning",
         "axis": "voice_character"
       },
       {
         "fix_kind": "slot_edit",
         "page_slug": "paratots",
-        "section_ix": 3,
+        "section_ix": 2,
         "slot_key": "body",
-        "note": "Section 3 body repeats Section 2's logistics nearly verbatim ('ParaTots starts Saturdays at 9:15. At 10:00 the whole church gathers at 51 W Olive'). The 9:15 + 10:00 pairing already lives in the heading 'Come at 9:15, Stay for 10:00'. Tighten the body so it carries the invitation, not a third restatement of the time and address.",
-        "severity": "nit",
-        "axis": "voice_character"
+        "note": "Body claim 'The whole gathering follows at 10:00, so drop-off and pick-up stay simple' invents a drop-off/pick-up framing not present in any atom or fact. The 10:00 service time may be supported by fact 631e87bd, but the drop-off/pick-up workflow phrasing is unsourced. Trim to just the time fact or drop.",
+        "severity": "warning",
+        "axis": "claim_plausibility"
       },
       {
         "fix_kind": "slot_edit",
         "page_slug": "paratots",
         "section_ix": 0,
         "slot_key": "body",
-        "note": "Verbatim atom 2528ca66 ('BEGINNING WITH A STRONG SENSE OF BELONGING') is placed in the hero 'body' slot rather than a tagline/kicker slot. Casing is preserved correctly, but designer treatment is at risk — the all-caps line will render as a paragraph body, not a styled kicker. Confirm hero_inner has no tagline/kicker slot available; if it does, move it there. Flagged in draft validation already.",
+        "note": "Validation flag is correct to surface: the hero body 'BEGINNING WITH A STRONG SENSE OF BELONGING' is verbatim atom 2528ca66 in all-caps, which renders as shouting in a hero body slot. Verbatim casing is preserved (correct), but strategist should confirm designer treats this as a styled kicker label, not body prose. Consider whether the atom is better bound to a 'tagline' or 'kicker' slot than 'body'.",
         "severity": "nit",
-        "axis": "atom_coverage"
+        "axis": "voice_character"
       }
     ],
     "page_slug": "paratots",
     "persona_fit": 86,
     "problem_lines": [
+      "ParaTots meets Saturdays at 9:15 AM at 51 W Olive in Redlands, for kids ages 0 to 4. Teacher Donna coordinates the room each week. The whole gathering follows at 10:00, so drop-off and pick-up stay simple.",
       "Saturdays at 9:15 AM at 51 W Olive, Redlands. Check-in is inside the lobby, and a teacher will walk you and your kid to the room.",
-      "ParaTots meets Saturdays at 9:15 AM at 51 W Olive in Redlands, for kids ages 0 to 4.",
-      "ParaTots starts Saturdays at 9:15. At 10:00 the whole church gathers at 51 W Olive, kids and parents in the same room.",
-      "AGES 0 TO 4, SATURDAYS AT 9:15"
+      "BEGINNING WITH A STRONG SENSE OF BELONGING"
     ],
     "standout_lines": [
       "before you were even born, god loved you first",
       "A quiet room off the gathering space with somewhere to sit, feed a baby, or settle a fussy one. If you need a minute to breathe, take it. Nobody is counting.",
-      "Raising kids under five is a mystery, and nobody here pretends otherwise. Kids are loud in the lobby and welcome to be.",
+      "Raising kids under five is a mystery, and nobody here pretends otherwise. Kids are loud in the lobby and welcome to be. If you have questions about any of it, Teacher Donna reads every email.",
       "Blocks, crayons, and floor time with teachers who know your kid by name. Belonging starts here, before any of it has words."
     ],
-    "summary": "Tonally this draft is one of the cleanest Paradox pages I've seen — the hero is quiet, section 1 carries delight in the details without performing warmth, and section 4's 'Raising kids under five is a mystery, and nobody here pretends otherwise' lands the solidarity close exactly as outlined. All four verbatim atoms preserved exact. Two real defects gate it from green: (1) Section 2 invents a check-in workflow ('Check-in is inside the lobby, and a teacher will walk you and your kid to the room') — no atom or fact carries this; classic logistic invention that drops claim_plausibility to ~55. (2) Section 2 is internally redundant — Saturdays/9:15/51 W Olive each appear 3-4 times within ~80 words (heading + tagline + body + items[0]), and Section 3's body re-states the same pair a third time. Hero body slot also carries an all-caps atom that's structurally a kicker; designer-treatment risk, drafter already flagged. Recommend minor_edits with a slot_edit pass on section 2 to drop the invented check-in line and de-duplicate the logistics across heading/tagline/body/items.",
-    "voice_character": 78,
+    "summary": "Voice is largely on — the hero, the Parents Room item, and the closing CTA echo the stage_1 exemplars cleanly (the 'Kids are loud in the lobby' line lands verbatim; 'Nobody is counting' is the right rhythm for this church). Verbatim atoms preserved exactly, including the all-caps belonging atom (validation flag is appropriate). Dignity floor is strong: no performed warmth, no village cliches, quiet solidarity in the close. Two real defects: (1) Section 2 items[0] invents a check-in workflow ('Check-in is inside the lobby, and a teacher will walk you and your kid to the room') with no source in atoms or facts — this is a logistic invention and drops claim_plausibility per the source-grounding procedure. (2) Section 2 repeats Saturday 9:15 + 51 W Olive across tagline + heading + body + two items — intra-section redundancy per the voice_character procedure; parents read the same fact four times in 200 words. Recommend kickback to drafter for surgical fixes on section 2. Personas (Lena/Marcus/Jordan) addressed indirectly through the 'generous, inclusive, affirming' triad and the no-performance posture — fits.",
+    "voice_character": 76,
     "_meta": {
       "bundle_version": "1.0.0",
       "skill_name": "critique-page",
       "skill_version": "1.0.0",
-      "generated_at": "2026-06-12T23:50:46.447Z",
+      "generated_at": "2026-06-13T00:13:31.785Z",
       "model": "anthropic/claude-opus-4.7",
       "prompt_hash": "b1cf267906073086",
       "usage": {
         "input_tokens": 21778,
-        "output_tokens": 2029,
-        "initial_pass_output_tokens": 2029,
+        "output_tokens": 1978,
+        "initial_pass_output_tokens": 1978,
         "repair_pass_output_tokens": null
       },
       "repaired": false,
       "first_pass_failures": null
     }
-  },
-  "skill_meta": {
-    "bundle_version": "1.0.0",
-    "skill_name": "critique-page",
-    "skill_version": "1.0.0",
-    "generated_at": "2026-06-12T23:50:46.447Z",
-    "model": "anthropic/claude-opus-4.7",
-    "prompt_hash": "b1cf267906073086",
-    "usage": {
-      "input_tokens": 21778,
-      "output_tokens": 2029,
-      "initial_pass_output_tokens": 2029,
-      "repair_pass_output_tokens": null
-    },
-    "repaired": false,
-    "first_pass_failures": null
-  },
-  "importer": {
-    "ok": true,
-    "bundle_kind": "page_critique",
-    "page_slug": "paratots",
-    "counts": {
-      "standout_lines": 4,
-      "problem_lines": 4,
-      "directives": 4,
-      "blockers": 1
-    },
-    "scores": {
-      "dignity": 88,
-      "voice_character": 78,
-      "persona_fit": 86,
-      "atom_coverage": 95,
-      "claim_plausibility": 55
-    }
-  },
-  "prompt_resolution": {
-    "global_source": "fallback",
-    "has_project_addendum": false
-  },
-  "validation_manifest": {
-    "expected_page_slug": "paratots"
   }
 }

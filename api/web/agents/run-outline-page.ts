@@ -417,13 +417,22 @@ async function buildLocalValidationManifest(
   projectId: string,
   pageSlug:  string,
 ): Promise<PageOutlineValidationManifest> {
+  // Also select topic — feeds the voice_atom_in_assignments check.
   const atomsRes = await sb.from('content_atoms')
-    .select('id')
+    .select('id, topic')
     .eq('web_project_id', projectId)
     .in('status', ['active', 'draft'])
   if (atomsRes.error) throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  const atom_ids: string[] = []
+  const atom_topics: Record<string, string> = {}
+  for (const row of (atomsRes.data ?? [])) {
+    const id = String(row.id)
+    atom_ids.push(id)
+    atom_topics[id] = String(row.topic ?? '')
+  }
   return {
-    atom_ids: (atomsRes.data ?? []).map((r: any) => String(r.id)),
+    atom_ids,
+    atom_topics,
     canonical_templates: loadCanonicalTemplates(),
     expected_page_slug:  pageSlug,
   }

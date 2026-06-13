@@ -23,6 +23,7 @@
     "smoke:outline": "tsx scripts/cowork-smoke-outline.ts",
     "smoke:draft": "tsx scripts/cowork-smoke-draft.ts",
     "smoke:critique": "tsx scripts/cowork-smoke-critique.ts",
+    "smoke:page": "tsx scripts/cowork-smoke-page.ts",
     "preview": "vite preview"
   },
   "dependencies": {
