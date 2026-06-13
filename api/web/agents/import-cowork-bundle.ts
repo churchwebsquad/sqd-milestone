@@ -429,17 +429,25 @@ async function buildDraftPageManifestFromProject(
   projectId: string,
   pageSlug:  string,
 ): Promise<DraftPageValidationManifest> {
-  const [atomsRes, projectRes] = await Promise.all([
+  const [atomsRes, factsRes, topicsRes, projectRes] = await Promise.all([
     sb.from('content_atoms')
       .select('id, body, verbatim, topic')
       .eq('web_project_id', projectId)
       .in('status', ['active', 'draft']),
+    sb.from('church_facts')
+      .select('id')
+      .eq('web_project_id', projectId),
+    sb.from('web_project_topics')
+      .select('topic_key')
+      .eq('web_project_id', projectId),
     sb.from('strategy_web_projects')
       .select('roadmap_state')
       .eq('id', projectId)
       .maybeSingle(),
   ])
-  if (atomsRes.error) throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  if (atomsRes.error)  throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  if (factsRes.error)  throw new Error(`church_facts load failed: ${factsRes.error.message}`)
+  if (topicsRes.error) throw new Error(`web_project_topics load failed: ${topicsRes.error.message}`)
   if (projectRes.error) throw new Error(`project load failed: ${projectRes.error.message}`)
 
   const roadmap = (projectRes.data?.roadmap_state ?? {}) as Record<string, any>
@@ -451,14 +459,24 @@ async function buildDraftPageManifestFromProject(
     )
   }
 
-  const outlineSections: Array<{ section_index: number; archetype: string; atom_ids: string[] }> = []
+  // Per-section: pull ids from each of the three assignment arrays. The
+  // validator needs to know which atoms/facts/crawl topics the OUTLINE
+  // routed to which section so it can cross-check the draft's usage
+  // tracking (atoms_used / facts_used / crawl_topics_used).
+  const outlineSections: DraftPageValidationManifest['outline_sections'] = []
   if (Array.isArray(outline.sections)) {
     for (const [ix, s] of outline.sections.entries() as IterableIterator<[number, any]>) {
       outlineSections.push({
         section_index: ix,
         archetype:     typeof s?.archetype === 'string' ? s.archetype : '',
-        atom_ids:      Array.isArray(s?.atom_assignments)
+        atom_ids: Array.isArray(s?.atom_assignments)
           ? s.atom_assignments.map((a: any) => String(a?.atom_id ?? '')).filter(Boolean)
+          : [],
+        fact_ids: Array.isArray(s?.fact_assignments)
+          ? s.fact_assignments.map((f: any) => String(f?.fact_id ?? '')).filter(Boolean)
+          : [],
+        crawl_topic_keys: Array.isArray(s?.crawl_topic_assignments)
+          ? s.crawl_topic_assignments.map((c: any) => String(c?.topic_key ?? '')).filter(Boolean)
           : [],
       })
     }
@@ -475,9 +493,13 @@ async function buildDraftPageManifestFromProject(
       verbatim_atoms[String(row.id)] = { body: row.body, topic: String(row.topic ?? '') }
     }
   }
+  const fact_ids: string[]         = (factsRes.data  ?? []).map((r: any) => String(r.id))
+  const crawl_topic_keys: string[] = (topicsRes.data ?? []).map((r: any) => String(r.topic_key))
 
   return {
     atom_ids,
+    fact_ids,
+    crawl_topic_keys,
     verbatim_atoms,
     outline_section_count: outlineSections.length,
     outline_sections:      outlineSections,
@@ -497,9 +519,12 @@ async function buildDraftPageManifestFromProject(
  *     archetype/slot_hint checks resolve against this.
  *   - expected_page_slug: confirms the outline targets the right page.
  *
- * NOTE: church_facts are NOT loaded — the current CoworkPageOutline
- * shape only carries atom_assignments. When outline-page grows fact
- * bindings, add fact_ids to the manifest + validator together.
+ * As of 2026-06-12, manifest carries all three source kinds — atoms,
+ * facts, crawl topics — so the validator can check each kind's
+ * assignment array against real project inventory. Restored fact_ids
+ * (previously dropped as "declared but never read") after home failed:
+ * the outline contract grew fact_assignments + crawl_topic_assignments,
+ * and validator + manifest had to widen with it.
  */
 async function buildPageOutlineManifestFromProject(
   sb:        any,
@@ -510,11 +535,21 @@ async function buildPageOutlineManifestFromProject(
   // atoms in atom_assignments (voice atoms belong in voice_anchor,
   // not as literal slot bindings; see VOICE_TOPICS_NOT_FOR_ASSIGNMENTS
   // in validatePageOutline).
-  const atomsRes = await sb.from('content_atoms')
-    .select('id, topic')
-    .eq('web_project_id', projectId)
-    .in('status', ['active', 'draft'])
-  if (atomsRes.error) throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  const [atomsRes, factsRes, topicsRes] = await Promise.all([
+    sb.from('content_atoms')
+      .select('id, topic')
+      .eq('web_project_id', projectId)
+      .in('status', ['active', 'draft']),
+    sb.from('church_facts')
+      .select('id')
+      .eq('web_project_id', projectId),
+    sb.from('web_project_topics')
+      .select('topic_key')
+      .eq('web_project_id', projectId),
+  ])
+  if (atomsRes.error)  throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  if (factsRes.error)  throw new Error(`church_facts load failed: ${factsRes.error.message}`)
+  if (topicsRes.error) throw new Error(`web_project_topics load failed: ${topicsRes.error.message}`)
 
   const canonical_templates = loadCanonicalTemplates()
 
@@ -525,10 +560,14 @@ async function buildPageOutlineManifestFromProject(
     atom_ids.push(id)
     atom_topics[id] = String(row.topic ?? '')
   }
+  const fact_ids: string[]         = (factsRes.data  ?? []).map((r: any) => String(r.id))
+  const crawl_topic_keys: string[] = (topicsRes.data ?? []).map((r: any) => String(r.topic_key))
 
   return {
     atom_ids,
     atom_topics,
+    fact_ids,
+    crawl_topic_keys,
     canonical_templates,
     expected_page_slug: pageSlug,
   }

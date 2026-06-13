@@ -415,10 +415,30 @@ export interface CoworkPageOutline {
     flow_role:         FlowRole
     voice_anchor:      string              // which voice_exemplar to imitate
     anti_pattern_to_avoid: string          // specific shape NOT to produce here
+    /** Pillar atom bindings (content_atoms rows). word-level treatment vocab. */
     atom_assignments: Array<{
       atom_id:    string                   // REAL UUID from content_atoms — importer validates
       treatment:  TreatmentSignal
       slot_hint:  string                   // 'heading' | 'description' | 'cards[0].body' | etc.
+    }>
+    /** Church-fact bindings (church_facts rows). Structured-data treatment
+     *  vocab (card_per_row / embed_field / list_items / summarize). The
+     *  allocation routes facts to sections; the outline pins each one to
+     *  a slot via slot_hint. Added 2026-06-12 after home[4]/home[5]
+     *  failed validation because facts had no expressible binding.
+     *  Defaults to [] when the page has no fact sources. */
+    fact_assignments: Array<{
+      fact_id:    string                   // REAL UUID from church_facts — importer validates
+      treatment:  SourceTreatment
+      slot_hint:  string                   // same slot_hint vocabulary as atom_assignments
+    }>
+    /** Crawl-topic bindings (web_project_topics rows). Excerpt / rewrite /
+     *  paraphrase from existing crawled site content. Same 2026-06-12
+     *  contract widening. Defaults to []. */
+    crawl_topic_assignments: Array<{
+      topic_key:  string                   // REAL key from web_project_topics — importer validates
+      treatment:  SourceTreatment
+      slot_hint:  string
     }>
     cms_managed?:     boolean              // true = section reads from ACF module at render, not from copy
   }>
@@ -427,18 +447,51 @@ export interface CoworkPageOutline {
     where: string                          // which atom/source should have it
   }>
   _meta: ArtifactMeta & {
-    atom_count_used: number
-    sections_count:  number
+    atom_count_used:        number
+    /** Counts of the other two source kinds. Added with the 2026-06-12
+     *  contract widening so artifacts trace what each page consumed. */
+    fact_count_used:        number
+    crawl_topic_count_used: number
+    sections_count:         number
   }
 }
+
+/** Treatment vocabulary for non-atom source bindings (facts, crawl
+ *  topics). Subset of AllocationTreatment, narrowed to the treatments
+ *  the outline-page skill actually emits at slot resolution. Kept
+ *  separate from TreatmentSignal (atom-word-level rewrite vocab) so
+ *  schema enums can validate per-kind. */
+export const SOURCE_TREATMENTS = [
+  'card_per_row',           // each row of fact.data (or each fact in a list) → one card
+  'embed_field',            // pull a specific field from fact.data into a slot
+  'list_items',             // turn structured data into a bullet list
+  'summarize',              // distill multi-row data or long crawl text into a sentence
+  'lift_verbatim',          // use the source phrase exactly (mostly atoms; rare for facts)
+  'weave_into_paragraph',   // source is structured but rendering as prose here
+  'excerpt',                // pull a verbatim quote from a crawl topic
+  'rewrite',                // rewrite crawl content in brand voice
+  'paraphrase',             // restate the gist of a crawl topic
+] as const
+
+export type SourceTreatment = typeof SOURCE_TREATMENTS[number]
 
 export interface CoworkPageDraft {
   page_slug: string
   sections: Array<{
-    archetype:    string
-    voice_notes:  string                   // 1-line: which exemplar this section imitates
-    copy:         Record<string, unknown>  // slot map — keys match the archetype's slot shape
-    atoms_used:   string[]                 // atom IDs actually consumed in this section
+    archetype:           string
+    voice_notes:         string                   // 1-line: which exemplar this section imitates
+    copy:                Record<string, unknown>  // slot map — keys match the archetype's slot shape
+    atoms_used:          string[]                 // atom IDs actually consumed in this section
+    /** Facts whose data the drafter wove into copy this section.
+     *  Sourced from the outline's fact_assignments. Validator checks
+     *  each id is a real church_facts.id for the project. Defaults to
+     *  []. Added 2026-06-12 with the three-source contract widening. */
+    facts_used:          string[]
+    /** Crawl-topic keys whose content the drafter referenced this
+     *  section. Sourced from the outline's crawl_topic_assignments.
+     *  Validator checks each key against web_project_topics.topic_key.
+     *  Defaults to []. */
+    crawl_topics_used:   string[]
   }>
   deviation_note: string | null            // if structure differs from the outline, explain
   validation: {

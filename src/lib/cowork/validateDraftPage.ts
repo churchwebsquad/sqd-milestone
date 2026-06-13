@@ -71,6 +71,13 @@ const VOICE_TOPICS_SKIP_VERBATIM = new Set([
 export interface DraftPageValidationManifest {
   /** active+draft atom_ids the project has. */
   atom_ids: string[]
+  /** church_facts.id values the project has. Added 2026-06-12 with the
+   *  three-source contract widening — facts_used is now part of
+   *  CoworkPageDraft and the validator checks each id against this set. */
+  fact_ids: string[]
+  /** web_project_topics.topic_key values the project has. Same 2026-06-12
+   *  contract widening — crawl_topics_used membership check. */
+  crawl_topic_keys: string[]
   /** subset of atom_ids that are flagged verbatim=true. Draft MUST
    *  preserve the body exactly somewhere in the assigned section
    *  UNLESS the atom's topic is in VOICE_TOPICS_SKIP_VERBATIM. */
@@ -78,14 +85,17 @@ export interface DraftPageValidationManifest {
   /** From outline-page output that draft-page is rendering. Used to
    *  cross-foot section count + verify draft didn't silently drop. */
   outline_section_count: number
-  /** Per-section: archetype the outline picked + atom_ids the outline
-   *  assigned. validator uses these to (a) confirm draft kept the
-   *  archetype, (b) verify verbatim atoms landed in the section that
-   *  was outlined to receive them. */
+  /** Per-section: archetype the outline picked + ids the outline
+   *  assigned for each kind. validator uses these to (a) confirm
+   *  draft kept the archetype, (b) verify verbatim atoms landed,
+   *  (c) catch drift between outline-assigned sources and
+   *  drafter-tracked sources. */
   outline_sections: Array<{
-    section_index: number
-    archetype:     string
-    atom_ids:      string[]   // all atom_ids the outline assigned to this section
+    section_index:    number
+    archetype:        string
+    atom_ids:         string[]   // outline's atom_assignments
+    fact_ids:         string[]   // outline's fact_assignments
+    crawl_topic_keys: string[]   // outline's crawl_topic_assignments
   }>
   canonical_templates: CanonicalTemplateManifest
   expected_page_slug:  string
@@ -136,8 +146,10 @@ export function validateDraftPage(
     failures.push({ check, detail })
   }
 
-  const atomSet = new Set(mf.atom_ids)
-  const archetypes = mf.canonical_templates?.page_section_templates ?? {}
+  const atomSet     = new Set(mf.atom_ids)
+  const factSet     = new Set(mf.fact_ids ?? [])
+  const crawlKeySet = new Set(mf.crawl_topic_keys ?? [])
+  const archetypes  = mf.canonical_templates?.page_section_templates ?? {}
 
   // — Top-level —
   if (draft.page_slug !== mf.expected_page_slug) {
@@ -238,6 +250,25 @@ export function validateDraftPage(
           `${label} atoms_used references atom_id='${aid}' not present in project's content_atoms`)
       }
       allDraftedAtomIds.add(aid)
+    }
+
+    // facts_used UUID existence (parallel to atoms_used). Default to []
+    // when missing so pre-2026-06-12 fixtures still validate.
+    const factsUsed = Array.isArray((s as any).facts_used) ? (s as any).facts_used as string[] : []
+    for (const fid of factsUsed) {
+      if (!factSet.has(fid)) {
+        fail('unknown_fact_ref',
+          `${label} facts_used references fact_id='${fid}' not present in project's church_facts`)
+      }
+    }
+
+    // crawl_topics_used key existence (parallel to atoms_used).
+    const crawlTopicsUsed = Array.isArray((s as any).crawl_topics_used) ? (s as any).crawl_topics_used as string[] : []
+    for (const k of crawlTopicsUsed) {
+      if (!crawlKeySet.has(k)) {
+        fail('unknown_crawl_topic_ref',
+          `${label} crawl_topics_used references topic_key='${k}' not present in project's web_project_topics`)
+      }
     }
 
     // voice_notes presence (≥10 chars, drafter MUST name the imitation

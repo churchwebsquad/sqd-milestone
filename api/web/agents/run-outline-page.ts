@@ -47,7 +47,7 @@ import { fileURLToPath } from 'node:url'
 
 import { callGateway, type ToolSchema } from '../../srp/_lib/aiGateway.js'
 import { resolveCoworkSkill } from './_lib/resolveCoworkSkill.js'
-import { BUNDLE_VERSION, FLOW_ROLES } from '../../../src/types/coworkBundle.js'
+import { BUNDLE_VERSION, FLOW_ROLES, SOURCE_TREATMENTS } from '../../../src/types/coworkBundle.js'
 import {
   validatePageOutline,
   type CanonicalTemplateManifest,
@@ -99,10 +99,24 @@ const TOOL_DESCRIPTION =
  * should round-trip with sections.atom_assignments = []. The
  * validator will catch any drift.
  */
-function buildToolSchema(atomIdsInScope: string[]): ToolSchema {
-  const atomIdSchema: Record<string, unknown> = atomIdsInScope.length > 0
-    ? { type: 'string', enum: atomIdsInScope }
-    : { type: 'string' }
+function buildToolSchema(
+  atomIdsInScope:   string[],
+  factIdsInScope:   string[],
+  crawlKeysInScope: string[],
+): ToolSchema {
+  // Empty-enum edge case (same logic for all three kinds): if zero
+  // refs are in scope for a kind, fall back to open string. The model
+  // shouldn't emit any assignments of that kind anyway (the user
+  // message won't list any sources to bind), and an empty enum
+  // would make the schema invalid.
+  const idSchemaFor = (refs: string[]): Record<string, unknown> =>
+    refs.length > 0 ? { type: 'string', enum: refs } : { type: 'string' }
+
+  const atomIdSchema   = idSchemaFor(atomIdsInScope)
+  const factIdSchema   = idSchemaFor(factIdsInScope)
+  const crawlKeySchema = idSchemaFor(crawlKeysInScope)
+  const sourceTreatmentSchema = { type: 'string' as const, enum: [...SOURCE_TREATMENTS] }
+
   return {
     type: 'object',
     additionalProperties: false,
@@ -119,7 +133,8 @@ function buildToolSchema(atomIdsInScope: string[]): ToolSchema {
           type: 'object',
           additionalProperties: false,
           required: ['section_ix', 'archetype', 'section_job', 'flow_role',
-                     'voice_anchor', 'anti_pattern_to_avoid', 'atom_assignments'],
+                     'voice_anchor', 'anti_pattern_to_avoid',
+                     'atom_assignments', 'fact_assignments', 'crawl_topic_assignments'],
           properties: {
             section_ix:        { type: 'integer', minimum: 0 },
             archetype:         { type: 'string' },
@@ -137,6 +152,32 @@ function buildToolSchema(atomIdsInScope: string[]): ToolSchema {
                 properties: {
                   atom_id:    atomIdSchema,
                   treatment:  { type: 'string', enum: ['use_as_is', 'lift_phrase', 'compress', 'expand', 'reorder', 'omit'] },
+                  slot_hint:  { type: 'string' },
+                },
+              },
+            },
+            fact_assignments: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['fact_id', 'treatment', 'slot_hint'],
+                properties: {
+                  fact_id:    factIdSchema,
+                  treatment:  sourceTreatmentSchema,
+                  slot_hint:  { type: 'string' },
+                },
+              },
+            },
+            crawl_topic_assignments: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['topic_key', 'treatment', 'slot_hint'],
+                properties: {
+                  topic_key:  crawlKeySchema,
+                  treatment:  sourceTreatmentSchema,
                   slot_hint:  { type: 'string' },
                 },
               },
@@ -207,12 +248,18 @@ export default async function handler(req: any, res: any) {
     return res.status(500).json({ error: e instanceof Error ? e.message : 'manifest build failed' })
   }
 
-  // Build the tool schema per-request — atom_id is enum-constrained
-  // to the literal atom_ids from inputs.atomsForPage (same projection
-  // the user message reads). Makes invalid UUIDs structurally
-  // impossible at the gateway layer. See buildToolSchema comment for
-  // the three-layer doctrine this implements.
-  const toolSchema = buildToolSchema(inputs.atomsForPage.map(a => a.id))
+  // Build the tool schema per-request — atom_id / fact_id / topic_key
+  // are each enum-constrained to the literal refs from inputs (the
+  // same projections the user message reads). Same source for the
+  // model + the validator: the two views of "what's in scope" can
+  // never disagree. (Enum enforcement is provider-conditional via the
+  // gateway; the validator + repair-on-422 backstop is the trust
+  // boundary.)
+  const toolSchema = buildToolSchema(
+    inputs.atomsForPage.map(a => a.id),
+    inputs.factsForPage.map(f => f.id),
+    inputs.crawlTopicsForPage.map(t => t.topic_key),
+  )
 
   // 3-4. Call gateway → validate locally → repair-on-422 → re-validate.
   // The repair loop runs LOCALLY before the importer ever sees the
@@ -297,6 +344,7 @@ export default async function handler(req: any, res: any) {
 
   // Stamp _meta — including the repair telemetry. P7 seed.
   const now = new Date().toISOString()
+  const sourceCounts = countUniqueSourceIds(gatewayResult.args)
   const outlineWithMeta = {
     ...gatewayResult.args,
     _meta: {
@@ -310,7 +358,9 @@ export default async function handler(req: any, res: any) {
         input_tokens:  gatewayResult.usage.inputTokens,
         output_tokens: gatewayResult.usage.outputTokens,
       },
-      atom_count_used: countUniqueAtomIds(gatewayResult.args),
+      atom_count_used:        sourceCounts.atoms,
+      fact_count_used:        sourceCounts.facts,
+      crawl_topic_count_used: sourceCounts.crawlTopics,
       sections_count:  Array.isArray(gatewayResult.args.sections) ? gatewayResult.args.sections.length : 0,
       // Repair-loop telemetry — set on every artifact so the strategist
       // UI can surface which outlines self-healed vs. landed clean,
@@ -417,12 +467,26 @@ async function buildLocalValidationManifest(
   projectId: string,
   pageSlug:  string,
 ): Promise<PageOutlineValidationManifest> {
-  // Also select topic — feeds the voice_atom_in_assignments check.
-  const atomsRes = await sb.from('content_atoms')
-    .select('id, topic')
-    .eq('web_project_id', projectId)
-    .in('status', ['active', 'draft'])
-  if (atomsRes.error) throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  // Three parallel loads — atoms (with topic for the voice-atom check),
+  // facts, crawl topics. Same shape the importer's buildPageOutlineManifest-
+  // FromProject loads, deliberately duplicated so the local repair loop
+  // has the exact same view as the trust boundary.
+  const [atomsRes, factsRes, topicsRes] = await Promise.all([
+    sb.from('content_atoms')
+      .select('id, topic')
+      .eq('web_project_id', projectId)
+      .in('status', ['active', 'draft']),
+    sb.from('church_facts')
+      .select('id')
+      .eq('web_project_id', projectId),
+    sb.from('web_project_topics')
+      .select('topic_key')
+      .eq('web_project_id', projectId),
+  ])
+  if (atomsRes.error)  throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  if (factsRes.error)  throw new Error(`church_facts load failed: ${factsRes.error.message}`)
+  if (topicsRes.error) throw new Error(`web_project_topics load failed: ${topicsRes.error.message}`)
+
   const atom_ids: string[] = []
   const atom_topics: Record<string, string> = {}
   for (const row of (atomsRes.data ?? [])) {
@@ -430,9 +494,14 @@ async function buildLocalValidationManifest(
     atom_ids.push(id)
     atom_topics[id] = String(row.topic ?? '')
   }
+  const fact_ids: string[]         = (factsRes.data  ?? []).map((r: any) => String(r.id))
+  const crawl_topic_keys: string[] = (topicsRes.data ?? []).map((r: any) => String(r.topic_key))
+
   return {
     atom_ids,
     atom_topics,
+    fact_ids,
+    crawl_topic_keys,
     canonical_templates: loadCanonicalTemplates(),
     expected_page_slug:  pageSlug,
   }
@@ -450,11 +519,19 @@ function loadCanonicalTemplates(): CanonicalTemplateManifest {
 // ──────────────────────────────────────────────────────────────────────────
 
 interface AssembledInputs {
-  allocation:     any           // the allocation slice for this page
-  stage1Brief:    any           // ethos + personas + voice exemplars + anti-exemplars
-  ministryModel:  any           // { dominant_model, secondary_blend }
-  atomsForPage:   Array<{ id: string; topic: string; body: string; verbatim: boolean }>
-  factsForPage:   Array<{ id: string; topic: string; data: Record<string, unknown> }>
+  allocation:        any           // the allocation slice for this page
+  stage1Brief:       any           // ethos + personas + voice exemplars + anti-exemplars
+  ministryModel:     any           // { dominant_model, secondary_blend }
+  atomsForPage:      Array<{ id: string; topic: string; body: string; verbatim: boolean }>
+  factsForPage:      Array<{ id: string; topic: string; data: Record<string, unknown> }>
+  crawlTopicsForPage: Array<{
+    topic_key:        string
+    topic_label:      string | null
+    topic_group:      string | null
+    coverage_status:  string | null
+    passages:         unknown
+    items:            unknown
+  }>
 }
 
 async function assembleEndpointInputs(
@@ -476,19 +553,26 @@ async function assembleEndpointInputs(
   const stage_1        = roadmap?.stage_1        ?? null
   const ministry_model = roadmap?.ministry_model ?? null
 
-  // Collect atom_ids + fact_ids referenced by this allocation's section_intents.
-  const atomIds = new Set<string>()
-  const factIds = new Set<string>()
+  // Collect atom_ids + fact_ids + crawl_topic_keys referenced by this
+  // allocation's section_intents. Each source.kind routes to its own
+  // load — the projections the model receives ARE the projections the
+  // schema enums constrain, and ARE the projections the validator
+  // checks. Three views, one source-of-truth (allocation.section_intents).
+  const atomIds       = new Set<string>()
+  const factIds       = new Set<string>()
+  const crawlTopicKeys = new Set<string>()
   if (allocation && Array.isArray(allocation.section_intents)) {
     for (const s of allocation.section_intents) {
       for (const src of (s.sources ?? [])) {
-        if (src?.kind === 'pillar' && src?.ref) atomIds.add(String(src.ref))
-        if (src?.kind === 'fact'   && src?.ref) factIds.add(String(src.ref))
+        if (!src?.ref) continue
+        if (src.kind === 'pillar')      atomIds.add(String(src.ref))
+        if (src.kind === 'fact')        factIds.add(String(src.ref))
+        if (src.kind === 'crawl_topic') crawlTopicKeys.add(String(src.ref))
       }
     }
   }
 
-  const [atomsRes, factsRes] = await Promise.all([
+  const [atomsRes, factsRes, topicsRes] = await Promise.all([
     atomIds.size > 0
       // content_quality is referenced by the outline-page SKILL prompt
       // (atoms_for_page[].content_quality) but the live content_atoms
@@ -504,9 +588,16 @@ async function assembleEndpointInputs(
           .select('id, topic, data')
           .in('id', Array.from(factIds))
       : Promise.resolve({ data: [] as any[], error: null }),
+    crawlTopicKeys.size > 0
+      ? sb.from('web_project_topics')
+          .select('topic_key, topic_label, topic_group, coverage_status, passages, items')
+          .eq('web_project_id', projectId)
+          .in('topic_key', Array.from(crawlTopicKeys))
+      : Promise.resolve({ data: [] as any[], error: null }),
   ])
-  if (atomsRes.error) throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
-  if (factsRes.error) throw new Error(`church_facts load failed: ${factsRes.error.message}`)
+  if (atomsRes.error)  throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  if (factsRes.error)  throw new Error(`church_facts load failed: ${factsRes.error.message}`)
+  if (topicsRes.error) throw new Error(`web_project_topics load failed: ${topicsRes.error.message}`)
 
   // Compact stage_1 — only fields outline-page reads.
   const stage1Brief = stage_1 ? {
@@ -520,9 +611,10 @@ async function assembleEndpointInputs(
   return {
     allocation,
     stage1Brief,
-    ministryModel:  ministry_model,
-    atomsForPage:   (atomsRes.data ?? []) as AssembledInputs['atomsForPage'],
-    factsForPage:   (factsRes.data ?? []) as AssembledInputs['factsForPage'],
+    ministryModel:       ministry_model,
+    atomsForPage:        (atomsRes.data  ?? []) as AssembledInputs['atomsForPage'],
+    factsForPage:        (factsRes.data  ?? []) as AssembledInputs['factsForPage'],
+    crawlTopicsForPage:  (topicsRes.data ?? []) as AssembledInputs['crawlTopicsForPage'],
   }
 }
 
@@ -530,6 +622,12 @@ function buildUserMessage(pageSlug: string, inputs: AssembledInputs): string {
   // The systemPrompt already contains the SKILL.md body + the canonical-
   // templates + page-outlines-by-ministry-model concatenated references.
   // The user message just supplies the per-call data.
+  //
+  // Three source kinds in three separate buckets, with a routing rule
+  // at the close. Each section may bind any combination of the three;
+  // the model must NOT cross-route (no fact UUID in atom_assignments,
+  // no atom UUID in fact_assignments). That mirrors the schema enum
+  // constraints and the validator's three unknown_*_ref checks.
   return [
     `Outline the page with slug \`${pageSlug}\` per the SKILL above.`,
     ``,
@@ -548,30 +646,49 @@ function buildUserMessage(pageSlug: string, inputs: AssembledInputs): string {
     JSON.stringify(inputs.ministryModel, null, 2),
     '```',
     ``,
-    `## Atoms allocated to this page (full bodies — these are the ONLY atom_ids you may reference)`,
+    `## Atoms allocated to this page → route via \`atom_assignments[].atom_id\``,
+    `(full bodies; these are the ONLY ids that may appear in atom_assignments)`,
     '```json',
     JSON.stringify(inputs.atomsForPage, null, 2),
     '```',
     ``,
-    `## Facts allocated to this page`,
+    `## Facts allocated to this page → route via \`fact_assignments[].fact_id\``,
+    `(church_facts rows; treatment vocab: card_per_row / embed_field / list_items / summarize / lift_verbatim / weave_into_paragraph)`,
     '```json',
     JSON.stringify(inputs.factsForPage, null, 2),
     '```',
     ``,
-    `Emit the outline now via the \`${TOOL_NAME}\` tool call. Every`,
-    `atom_assignments[].atom_id MUST appear in the atoms list above —`,
-    `hallucinated UUIDs trip the importer's validator and reject the run.`,
+    `## Crawl topics allocated to this page → route via \`crawl_topic_assignments[].topic_key\``,
+    `(existing site content from web_project_topics; treatment vocab: excerpt / rewrite / paraphrase / summarize)`,
+    '```json',
+    JSON.stringify(inputs.crawlTopicsForPage, null, 2),
+    '```',
+    ``,
+    `Emit the outline now via the \`${TOOL_NAME}\` tool call. Routing rule:`,
+    `each source from the allocation lands in EXACTLY ONE of the three`,
+    `arrays based on its kind — pillar→atom_assignments, fact→fact_assignments,`,
+    `crawl_topic→crawl_topic_assignments. Cross-routing (e.g. putting a`,
+    `fact_id into atom_assignments[].atom_id) trips the validator. Every`,
+    `section may emit empty arrays for kinds it doesn't consume.`,
   ].join('\n')
 }
 
-function countUniqueAtomIds(outline: any): number {
-  const set = new Set<string>()
+function countUniqueSourceIds(outline: any): { atoms: number; facts: number; crawlTopics: number } {
+  const atomSet  = new Set<string>()
+  const factSet  = new Set<string>()
+  const crawlSet = new Set<string>()
   for (const s of (outline?.sections ?? [])) {
     for (const a of (s?.atom_assignments ?? [])) {
-      if (a?.atom_id) set.add(String(a.atom_id))
+      if (a?.atom_id) atomSet.add(String(a.atom_id))
+    }
+    for (const f of (s?.fact_assignments ?? [])) {
+      if (f?.fact_id) factSet.add(String(f.fact_id))
+    }
+    for (const c of (s?.crawl_topic_assignments ?? [])) {
+      if (c?.topic_key) crawlSet.add(String(c.topic_key))
     }
   }
-  return set.size
+  return { atoms: atomSet.size, facts: factSet.size, crawlTopics: crawlSet.size }
 }
 
 function inferImporterUrl(req: any): string {

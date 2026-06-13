@@ -72,11 +72,17 @@ const TOOL_DESCRIPTION =
  */
 function buildToolSchema(
   atomIdsInScope:        string[],
+  factIdsInScope:        string[],
+  crawlKeysInScope:      string[],
   allowedSlotNames:      string[],
 ): ToolSchema {
-  const atomIdSchema: Record<string, unknown> = atomIdsInScope.length > 0
-    ? { type: 'string', enum: atomIdsInScope }
-    : { type: 'string' }
+  const idSchemaFor = (refs: string[]): Record<string, unknown> =>
+    refs.length > 0 ? { type: 'string', enum: refs } : { type: 'string' }
+
+  const atomIdSchema  = idSchemaFor(atomIdsInScope)
+  const factIdSchema  = idSchemaFor(factIdsInScope)
+  const crawlKeySchema = idSchemaFor(crawlKeysInScope)
+
   // Constrain copy's KEY names via propertyNames; values stay flexible
   // (additionalProperties: true). Drafter still picks values; the
   // model just can't invent slot names beyond the outline's archetype
@@ -99,7 +105,8 @@ function buildToolSchema(
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['archetype', 'voice_notes', 'copy', 'atoms_used'],
+          required: ['archetype', 'voice_notes', 'copy',
+                     'atoms_used', 'facts_used', 'crawl_topics_used'],
           properties: {
             archetype:   { type: 'string' },
             // voice_notes is critique-page's per-section receipt of
@@ -112,10 +119,14 @@ function buildToolSchema(
             // sentence of reasoning.
             voice_notes: { type: 'string', maxLength: 240 },
             copy:        copySchema,
-            atoms_used:  {
-              type: 'array',
-              items: atomIdSchema,
-            },
+            atoms_used:  { type: 'array', items: atomIdSchema },
+            // Parallel to atoms_used. The outline's fact_assignments
+            // direct the drafter to weave fact rows into copy; the
+            // drafter tracks which facts it consumed here so the
+            // critique-page can grade coverage and so the strategist's
+            // audit trail traces what each section pulled from.
+            facts_used:        { type: 'array', items: factIdSchema },
+            crawl_topics_used: { type: 'array', items: crawlKeySchema },
           },
         },
       },
@@ -187,6 +198,8 @@ export default async function handler(req: any, res: any) {
   const allowedSlotNames = collectAllowedSlotNames(inputs.outline, localManifest)
   const toolSchema = buildToolSchema(
     inputs.atomsForPage.map(a => a.id),
+    inputs.factsForPage.map(f => f.id),
+    inputs.crawlTopicsForPage.map(t => t.topic_key),
     allowedSlotNames,
   )
 
@@ -412,6 +425,14 @@ interface AssembledInputs {
   stage1Brief:    any           // voice_exemplars + anti_exemplars + ethos + persona for THIS page
   atomsForPage:   Array<{ id: string; topic: string; body: string; verbatim: boolean }>
   factsForPage:   Array<{ id: string; topic: string; data: Record<string, unknown> }>
+  crawlTopicsForPage: Array<{
+    topic_key:       string
+    topic_label:     string | null
+    topic_group:     string | null
+    coverage_status: string | null
+    passages:        unknown
+    items:           unknown
+  }>
 }
 
 async function assembleEndpointInputs(
@@ -430,21 +451,49 @@ async function assembleEndpointInputs(
   const outline = roadmap?.page_outlines?.[pageSlug] ?? null
   const stage_1 = roadmap?.stage_1 ?? null
 
-  const atomIds = new Set<string>()
+  // Walk all three assignment arrays on the outline's sections to
+  // collect referenced ids per kind. Same source-of-truth pattern as
+  // run-outline-page: the projections the model receives ARE the
+  // projections the schema enums constrain, and ARE the projections
+  // the validator checks.
+  const atomIds        = new Set<string>()
+  const factIds        = new Set<string>()
+  const crawlTopicKeys = new Set<string>()
   if (outline?.sections) {
     for (const s of outline.sections) {
       for (const a of (s?.atom_assignments ?? [])) {
         if (a?.atom_id) atomIds.add(String(a.atom_id))
       }
+      for (const f of (s?.fact_assignments ?? [])) {
+        if (f?.fact_id) factIds.add(String(f.fact_id))
+      }
+      for (const c of (s?.crawl_topic_assignments ?? [])) {
+        if (c?.topic_key) crawlTopicKeys.add(String(c.topic_key))
+      }
     }
   }
 
-  const atomsRes = atomIds.size > 0
-    ? await sb.from('content_atoms')
-        .select('id, topic, body, verbatim')
-        .in('id', Array.from(atomIds))
-    : { data: [] as any[], error: null }
-  if (atomsRes.error) throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  const [atomsRes, factsRes, topicsRes] = await Promise.all([
+    atomIds.size > 0
+      ? sb.from('content_atoms')
+          .select('id, topic, body, verbatim')
+          .in('id', Array.from(atomIds))
+      : Promise.resolve({ data: [] as any[], error: null }),
+    factIds.size > 0
+      ? sb.from('church_facts')
+          .select('id, topic, data')
+          .in('id', Array.from(factIds))
+      : Promise.resolve({ data: [] as any[], error: null }),
+    crawlTopicKeys.size > 0
+      ? sb.from('web_project_topics')
+          .select('topic_key, topic_label, topic_group, coverage_status, passages, items')
+          .eq('web_project_id', projectId)
+          .in('topic_key', Array.from(crawlTopicKeys))
+      : Promise.resolve({ data: [] as any[], error: null }),
+  ])
+  if (atomsRes.error)  throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  if (factsRes.error)  throw new Error(`church_facts load failed: ${factsRes.error.message}`)
+  if (topicsRes.error) throw new Error(`web_project_topics load failed: ${topicsRes.error.message}`)
 
   // Compact stage_1 — only fields draft-page reads.
   const stage1Brief = stage_1 ? {
@@ -458,8 +507,9 @@ async function assembleEndpointInputs(
   return {
     outline,
     stage1Brief,
-    atomsForPage: (atomsRes.data ?? []) as AssembledInputs['atomsForPage'],
-    factsForPage: [],   // outline doesn't currently route facts; expand when outline grows fact_assignments
+    atomsForPage:       (atomsRes.data  ?? []) as AssembledInputs['atomsForPage'],
+    factsForPage:       (factsRes.data  ?? []) as AssembledInputs['factsForPage'],
+    crawlTopicsForPage: (topicsRes.data ?? []) as AssembledInputs['crawlTopicsForPage'],
   }
 }
 
@@ -490,14 +540,32 @@ function buildUserMessage(pageSlug: string, inputs: AssembledInputs): string {
     JSON.stringify(inputs.stage1Brief, null, 2),
     '```',
     ``,
-    `## Atoms allocated by the outline (full bodies — these are the ONLY atom_ids you may reference in atoms_used)`,
+    `## Atoms allocated by the outline → track in atoms_used`,
+    `(full bodies; these are the ONLY ids that may appear in atoms_used)`,
     '```json',
     JSON.stringify(inputs.atomsForPage, null, 2),
     '```',
     ``,
+    `## Facts allocated by the outline → track in facts_used`,
+    `(church_facts rows; weave fact.data fields into copy per the outline's`,
+    `fact_assignments treatment vocab — card_per_row, embed_field, etc.)`,
+    '```json',
+    JSON.stringify(inputs.factsForPage, null, 2),
+    '```',
+    ``,
+    `## Crawl topics allocated by the outline → track in crawl_topics_used`,
+    `(existing site content; excerpt / rewrite / paraphrase per the outline's`,
+    `crawl_topic_assignments treatment)`,
+    '```json',
+    JSON.stringify(inputs.crawlTopicsForPage, null, 2),
+    '```',
+    ``,
     `Now call \`${TOOL_NAME}\` with the page draft.`,
-    `Every atoms_used entry MUST be an atom_id from the list above —`,
-    `the JSON schema enums these and the gateway will reject invalid UUIDs.`,
+    `Tracking rule: every section emits three arrays — atoms_used, facts_used,`,
+    `crawl_topics_used — each listing exactly the ids/keys whose content`,
+    `you wove into that section's copy. Empty array is fine for a kind`,
+    `you didn't consume in a section; missing array fails the schema.`,
+    `Cross-routing ids (atom UUID in facts_used, etc.) trips the validator.`,
     `Verbatim atoms (verbatim=true) MUST appear EXACTLY as a substring`,
     `of the section's copy — no compression, no rewording. The validator`,
     `does a substring check.`,
@@ -509,17 +577,25 @@ async function buildLocalValidationManifest(
   projectId: string,
   pageSlug:  string,
 ): Promise<DraftPageValidationManifest> {
-  const [atomsRes, projectRes] = await Promise.all([
+  const [atomsRes, factsRes, topicsRes, projectRes] = await Promise.all([
     sb.from('content_atoms')
       .select('id, body, verbatim, topic')
       .eq('web_project_id', projectId)
       .in('status', ['active', 'draft']),
+    sb.from('church_facts')
+      .select('id')
+      .eq('web_project_id', projectId),
+    sb.from('web_project_topics')
+      .select('topic_key')
+      .eq('web_project_id', projectId),
     sb.from('strategy_web_projects')
       .select('roadmap_state')
       .eq('id', projectId)
       .maybeSingle(),
   ])
-  if (atomsRes.error) throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  if (atomsRes.error)  throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  if (factsRes.error)  throw new Error(`church_facts load failed: ${factsRes.error.message}`)
+  if (topicsRes.error) throw new Error(`web_project_topics load failed: ${topicsRes.error.message}`)
   if (projectRes.error) throw new Error(`project load failed: ${projectRes.error.message}`)
 
   const roadmap = (projectRes.data?.roadmap_state ?? {}) as Record<string, any>
@@ -528,14 +604,20 @@ async function buildLocalValidationManifest(
     throw new Error(`page_outlines.${pageSlug} not found — run-outline-page first`)
   }
 
-  const outline_sections: Array<{ section_index: number; archetype: string; atom_ids: string[] }> = []
+  const outline_sections: DraftPageValidationManifest['outline_sections'] = []
   if (Array.isArray(outline.sections)) {
     for (const [ix, s] of (outline.sections.entries() as IterableIterator<[number, any]>)) {
       outline_sections.push({
         section_index: ix,
         archetype:     typeof s?.archetype === 'string' ? s.archetype : '',
-        atom_ids:      Array.isArray(s?.atom_assignments)
+        atom_ids: Array.isArray(s?.atom_assignments)
           ? s.atom_assignments.map((a: any) => String(a?.atom_id ?? '')).filter(Boolean)
+          : [],
+        fact_ids: Array.isArray(s?.fact_assignments)
+          ? s.fact_assignments.map((f: any) => String(f?.fact_id ?? '')).filter(Boolean)
+          : [],
+        crawl_topic_keys: Array.isArray(s?.crawl_topic_assignments)
+          ? s.crawl_topic_assignments.map((c: any) => String(c?.topic_key ?? '')).filter(Boolean)
           : [],
       })
     }
@@ -552,9 +634,13 @@ async function buildLocalValidationManifest(
       verbatim_atoms[String(row.id)] = { body: row.body, topic: String(row.topic ?? '') }
     }
   }
+  const fact_ids: string[]         = (factsRes.data  ?? []).map((r: any) => String(r.id))
+  const crawl_topic_keys: string[] = (topicsRes.data ?? []).map((r: any) => String(r.topic_key))
 
   return {
     atom_ids,
+    fact_ids,
+    crawl_topic_keys,
     verbatim_atoms,
     outline_section_count: outline_sections.length,
     outline_sections,

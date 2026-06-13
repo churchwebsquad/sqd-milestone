@@ -1035,7 +1035,7 @@ For each candidate, include \`occurrences\` and \`sections\` arrays in the propo
     name:         'draft-page',
     model:        'anthropic/claude-fable-5',
     version:      '1.0.0',
-    contentHash:  'bd13466006959d46',
+    contentHash:  'a0526dcf12d93b9a',
     references:   [
       'cowork-skills/canonical-templates.json',
     ],
@@ -1230,6 +1230,46 @@ for opportunities to land:
 If the atom/fact doesn't HAVE specifics, surface in
 \`voice_signal_report.notes\`. Strategist routes back to content
 collection.
+
+## Three source kinds, three usage arrays — track what you weave
+
+The outline routes three kinds of source per section: \`atom_assignments\`
+(pillar atoms from content_atoms), \`fact_assignments\` (church_facts
+rows), \`crawl_topic_assignments\` (web_project_topics keys). Your job
+is to weave each kind into the section's \`copy\` according to its
+treatment, AND to track what you consumed in the parallel \`*_used\`
+arrays:
+
+| Outline source | Where to track usage | What "used" means |
+|---|---|---|
+| \`atom_assignments[].atom_id\`         | \`atoms_used: string[]\`         | The atom's body landed somewhere in this section's copy (verbatim if verbatim=true; treatment-shaped otherwise). |
+| \`fact_assignments[].fact_id\`         | \`facts_used: string[]\`         | A field of \`fact.data\` was rendered into a slot value (e.g. a campus address became \`items[0].item_body\`). |
+| \`crawl_topic_assignments[].topic_key\` | \`crawl_topics_used: string[]\` | Content from the crawl topic was excerpted/rewritten/paraphrased into a slot value per the assignment's treatment. |
+
+**Routing rules (the failure modes — these trip the validator):**
+
+- Every id you list in a \`*_used\` array MUST be a real id from the
+  corresponding source list in the user message. The schema enums
+  these per-kind; the validator double-checks against live project
+  inventory. \`unknown_atom_ref\` / \`unknown_fact_ref\` /
+  \`unknown_crawl_topic_ref\` are the three checks.
+- **Never cross-route an id.** An atom UUID does NOT go in \`facts_used\`
+  even if it visually looks like a fact UUID. The outline tells you
+  which kind each id is; preserve it.
+- **Empty array is fine** when a section doesn't consume that kind.
+  \`atoms_used: [], facts_used: ['…'], crawl_topics_used: []\` for a
+  fact-led section that uses no atoms — perfectly valid. Missing
+  array (omitting the key) trips the schema.
+- **Treatment per kind** comes from the outline's assignment:
+  - For facts: \`card_per_row\` (one row → one card heading + supporting
+    fields), \`embed_field\` (pull one field into one slot), \`list_items\`
+    (rows → bulleted list inside a slot), \`summarize\` (distill into
+    prose), \`lift_verbatim\` (rare; rendering the raw data).
+  - For crawl topics: \`excerpt\` (verbatim from passages[]), \`rewrite\`
+    (full brand-voice rewrite), \`paraphrase\` (restate the gist),
+    \`summarize\` (distill).
+  Atom treatments stay as before (use_as_is, lift_phrase, compress,
+  expand, reorder, omit).
 
 ## Hard rules
 
@@ -2361,7 +2401,7 @@ personas; use the names exactly as stage_1 emitted them.
     name:         'outline-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  '364adec8c96410a5',
+    contentHash:  '2f731e59bfc0bd04',
     references:   [
       'cowork-skills/canonical-templates.json',
       'cowork-skills/page-outlines-by-ministry-model.md',
@@ -2598,6 +2638,78 @@ INCORRECT outline output (will trip \`voice_atom_in_assignments\`):
 - \`atom_assignments\` includes \`{atom_id: 'be43f59d-…',
   slot_hint: 'primary_heading'}\` — voice atom in assignments = fail.
 
+## Three source kinds, three assignment arrays — route by kind, never cross-route
+
+The allocation routes three kinds of source to each section:
+\`kind: 'pillar'\` (a content_atoms row), \`kind: 'fact'\` (a church_facts
+row), \`kind: 'crawl_topic'\` (a web_project_topics row). Each section's
+output has THREE parallel arrays — one per kind:
+
+| Allocation \`source.kind\` | Outline array | Field on each item | What it is |
+|---|---|---|---|
+| \`pillar\`      | \`atom_assignments\`         | \`atom_id\` (UUID) | A normalized content snippet — header, paragraph, quote, statistic. |
+| \`fact\`        | \`fact_assignments\`         | \`fact_id\` (UUID) | A structured-data row — staff member, service time, address, ministry block. Drafter weaves the row's \`data\` into the slot. |
+| \`crawl_topic\` | \`crawl_topic_assignments\`  | \`topic_key\` (string) | Existing site content already crawled — passages + items from the partner's current site. Drafter excerpts / rewrites / paraphrases. |
+
+**Each source from the allocation lands in EXACTLY ONE array, based on
+its \`kind\`.** Cross-routing is the failure mode: putting a \`fact_id\`
+into \`atom_assignments[].atom_id\`, or a \`topic_key\` into
+\`fact_assignments[].fact_id\`, fails the validator with
+\`unknown_atom_ref\` / \`unknown_fact_ref\` / \`unknown_crawl_topic_ref\`
+(an id of one kind isn't in the other kind's inventory).
+
+**Treatment vocabularies differ per kind** because what you do to a
+source depends on its shape:
+
+| Array | Treatment vocabulary |
+|---|---|
+| \`atom_assignments\`        | \`use_as_is\` / \`lift_phrase\` / \`compress\` / \`expand\` / \`reorder\` / \`omit\` (word-level rewrite of an existing phrase) |
+| \`fact_assignments\`        | \`card_per_row\` (one card per fact row) / \`embed_field\` (one field of \`fact.data\` → one slot) / \`list_items\` (rows → bullet list) / \`summarize\` / \`lift_verbatim\` / \`weave_into_paragraph\` |
+| \`crawl_topic_assignments\` | \`excerpt\` (verbatim quote from the crawl) / \`rewrite\` (rewrite in brand voice) / \`paraphrase\` / \`summarize\` |
+
+**Section may emit empty arrays for kinds it doesn't consume.** A
+hero section with one pillar atom and no facts/crawl topics:
+\`atom_assignments: [{...}]\`, \`fact_assignments: []\`,
+\`crawl_topic_assignments: []\`. Empty array is fine; missing array
+trips schema validation.
+
+**Slot coverage is summed across all three arrays.** A section
+archetype that requires slot \`items\` is COVERED if any of the three
+arrays has a \`slot_hint\` pointing at \`items[N].<subfield>\` — atom OR
+fact OR crawl topic, the slot is filled.
+
+**Worked example.** Allocation gives section 4 (\`flow_role: inform\`,
+archetype \`content_featured_a\`) these sources:
+\`\`\`json
+[
+  {"kind": "pillar", "ref": "0d4d9d…", "treatment": "summarize",     "topic": "kids_ministry_pitch"},
+  {"kind": "fact",   "ref": "21097c1d-…", "treatment": "card_per_row"},   // ParaTots ministry row
+  {"kind": "fact",   "ref": "b6dc9d7d-…", "treatment": "card_per_row"},   // Paradox Kids ministry row
+  {"kind": "fact",   "ref": "d9cc0d1b-…", "treatment": "card_per_row"}    // Paradox Youth ministry row
+]
+\`\`\`
+
+The \`content_featured_a\` archetype has slots \`eyebrow\`, \`heading\`,
+\`body\`, \`items[].item_heading\`, \`items[].item_body\`.
+
+CORRECT outline output for section 4:
+- \`atom_assignments\`: one entry for the pillar \`0d4d9d…\` with
+  \`slot_hint: 'body'\` and \`treatment: 'compress'\` (the kids-ministry
+  pitch becomes the section body).
+- \`fact_assignments\`: three entries, one per ministry fact:
+  \`{fact_id: '21097c1d-…', treatment: 'card_per_row', slot_hint: 'items[0].item_heading'}\`,
+  \`{fact_id: 'b6dc9d7d-…', treatment: 'card_per_row', slot_hint: 'items[1].item_heading'}\`,
+  \`{fact_id: 'd9cc0d1b-…', treatment: 'card_per_row', slot_hint: 'items[2].item_heading'}\`.
+  Drafter will pull the fact's \`data.name\` field into each item heading
+  + lay out the rest.
+- \`crawl_topic_assignments\`: \`[]\` — no crawl topics for this section.
+
+INCORRECT (this is exactly the home-page failure on 2026-06-11 that
+forced this contract: model put fact UUIDs into atom_assignments
+because that was the only field with a slot_hint):
+- \`atom_assignments\` includes the three fact UUIDs as \`atom_id\` values.
+  Trips \`unknown_atom_ref\` — those UUIDs aren't in content_atoms.
+
 ## slot_hint format — the literal shape that lands
 
 Every \`atom_assignments[].slot_hint\` is a string keyed against
@@ -2667,47 +2779,76 @@ the allocation probably wasn't tight enough. Surface in
 \`report.notes\` if you find yourself declaring 2+ unresolved on the
 same section.
 
-## atom_id discipline — never invent
+## Source-id discipline — never invent
 
-Every \`atom_assignments[].atom_id\` MUST be a verbatim copy of an
-atom_id from the user message's "Atoms allocated to this page" list.
-The atom IDs are UUIDs (\`a1b2c3d4-...\`); they're meaningless to a
-reader; the validator does an exact-string lookup against the
-project's live \`content_atoms\` rows.
+Every \`atom_id\`, \`fact_id\`, and \`topic_key\` in an assignment array
+MUST be a verbatim copy of an id from the user message's
+corresponding list:
 
-**The rules:**
+- \`atom_assignments[].atom_id\` → must be in **"Atoms allocated to
+  this page"** (UUIDs).
+- \`fact_assignments[].fact_id\` → must be in **"Facts allocated to
+  this page"** (UUIDs).
+- \`crawl_topic_assignments[].topic_key\` → must be in **"Crawl topics
+  allocated to this page"** (string keys, not UUIDs).
 
-- Copy each \`atom_id\` **character-for-character** from the user
-  message. Do not abbreviate. Do not synthesize. Do not generate a
-  UUID that "looks right." Do not write \`null\` or a placeholder.
+The validator does an exact-string lookup against the project's
+live tables (\`content_atoms\`, \`church_facts\`, \`web_project_topics\`).
+A miss in any kind trips its own check (\`unknown_atom_ref\`,
+\`unknown_fact_ref\`, \`unknown_crawl_topic_ref\`).
+
+**The rules (apply to all three kinds):**
+
+- Copy each id **character-for-character** from the user message. Do
+  not abbreviate. Do not synthesize. Do not generate a UUID that
+  "looks right." Do not write \`null\` or a placeholder.
 - If you want to reference content that isn't in the user message's
-  atoms list, declare the gap in \`unresolved_inputs\` instead (the
-  escape hatch covers atoms, not just slots — \`what: "no atom in the
-  allocation for X concept", where: "sections[2] section_job"\`).
-- If you find yourself starting to write an atom_id you can't
-  literally see in the user message, stop. That's the moment to add
-  an \`unresolved_inputs\` entry, not invent.
+  three lists, declare the gap in \`unresolved_inputs\` instead.
+- If you find yourself starting to write an id you can't literally
+  see in the user message, stop. That's the moment to add an
+  \`unresolved_inputs\` entry, not invent.
+- **Don't cross-route an id between arrays.** A fact UUID looks like
+  an atom UUID; the only thing distinguishing them is which list it
+  appeared in upstream. The allocation's \`source.kind\` is the
+  authoritative routing signal — preserve it. A fact_id placed in
+  \`atom_assignments[].atom_id\` will trip \`unknown_atom_ref\` because
+  fact UUIDs aren't in content_atoms.
 
 **Why this matters at the metric layer:** the validator rejects
-\`atom_assignments[]\` with atom_id values that aren't in the project's
-inventory (\`unknown_atom_ref\` check). If you guess, the validator
-catches it AND the repair loop has to re-call you to fix it — extra
-latency, extra tokens. The first-pass \`unknown_atom_ref\` count in
-\`_meta.first_pass_failures.by_check\` is the telemetry that proves
-you're following this rule. **Target: 0 every fire.**
+each kind's array independently. If you guess, the validator catches
+it AND the repair loop has to re-call you to fix it — extra latency,
+extra tokens. The first-pass \`unknown_atom_ref\` / \`unknown_fact_ref\`
+/ \`unknown_crawl_topic_ref\` counts in \`_meta.first_pass_failures.by_check\`
+are the telemetry. **Target: 0 every fire on all three.**
 
 **Worked example.** User message includes:
 \`\`\`json
+// Atoms allocated to this page
 [
-  {"id": "7c1a82ee-9f33-4b1c-a3fd-1ed2b9c5740a", "topic": "value_statement", "body": "...", "verbatim": true},
-  {"id": "b8e44210-c0d9-4e57-9281-7ad4f0b69e8b", "topic": "ministry",        "body": "...", "verbatim": false},
-  {"id": "2f9a51c7-3e8b-49d2-8fc3-50a6b1d8e9cc", "topic": "service_time",    "body": "...", "verbatim": false}
+  {"id": "7c1a82ee-9f33-4b1c-a3fd-1ed2b9c5740a", "topic": "value_statement", ...},
+  {"id": "b8e44210-c0d9-4e57-9281-7ad4f0b69e8b", "topic": "ministry",        ...}
+]
+// Facts allocated to this page
+[
+  {"id": "21097c1d-c909-457b-9fb3-b89351eb33c6", "topic": "ministry", "data": {...}}
+]
+// Crawl topics allocated to this page
+[
+  {"topic_key": "service_times_passage", "passages": [...]}
 ]
 \`\`\`
-Valid \`atom_assignments[].atom_id\` values: exactly those three UUIDs,
-character-for-character. **Invalid (every one of these trips
-unknown_atom_ref):** \`'7c1a82ee'\` (truncated), \`'00000000-0000-0000-
-0000-000000000000'\` (placeholder), any UUID not in that exact list.
+
+Valid:
+- \`atom_assignments[]\`: only \`7c1a82ee-…\` or \`b8e44210-…\`.
+- \`fact_assignments[]\`: only \`21097c1d-…\`.
+- \`crawl_topic_assignments[]\`: only \`service_times_passage\`.
+
+Invalid (trip the matching \`unknown_*_ref\` check):
+- \`atom_assignments[].atom_id = '21097c1d-…'\` — that UUID is in the
+  facts list, not the atoms list (the home-page bug exactly).
+- \`fact_assignments[].fact_id = '7c1a82ee-…'\` — atom UUID in fact array.
+- \`crawl_topic_assignments[].topic_key = 'sundays'\` — not in the
+  crawl topics list.
 
 ## Per-page section count
 

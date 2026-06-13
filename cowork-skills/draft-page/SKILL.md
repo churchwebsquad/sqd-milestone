@@ -205,6 +205,46 @@ If the atom/fact doesn't HAVE specifics, surface in
 `voice_signal_report.notes`. Strategist routes back to content
 collection.
 
+## Three source kinds, three usage arrays — track what you weave
+
+The outline routes three kinds of source per section: `atom_assignments`
+(pillar atoms from content_atoms), `fact_assignments` (church_facts
+rows), `crawl_topic_assignments` (web_project_topics keys). Your job
+is to weave each kind into the section's `copy` according to its
+treatment, AND to track what you consumed in the parallel `*_used`
+arrays:
+
+| Outline source | Where to track usage | What "used" means |
+|---|---|---|
+| `atom_assignments[].atom_id`         | `atoms_used: string[]`         | The atom's body landed somewhere in this section's copy (verbatim if verbatim=true; treatment-shaped otherwise). |
+| `fact_assignments[].fact_id`         | `facts_used: string[]`         | A field of `fact.data` was rendered into a slot value (e.g. a campus address became `items[0].item_body`). |
+| `crawl_topic_assignments[].topic_key` | `crawl_topics_used: string[]` | Content from the crawl topic was excerpted/rewritten/paraphrased into a slot value per the assignment's treatment. |
+
+**Routing rules (the failure modes — these trip the validator):**
+
+- Every id you list in a `*_used` array MUST be a real id from the
+  corresponding source list in the user message. The schema enums
+  these per-kind; the validator double-checks against live project
+  inventory. `unknown_atom_ref` / `unknown_fact_ref` /
+  `unknown_crawl_topic_ref` are the three checks.
+- **Never cross-route an id.** An atom UUID does NOT go in `facts_used`
+  even if it visually looks like a fact UUID. The outline tells you
+  which kind each id is; preserve it.
+- **Empty array is fine** when a section doesn't consume that kind.
+  `atoms_used: [], facts_used: ['…'], crawl_topics_used: []` for a
+  fact-led section that uses no atoms — perfectly valid. Missing
+  array (omitting the key) trips the schema.
+- **Treatment per kind** comes from the outline's assignment:
+  - For facts: `card_per_row` (one row → one card heading + supporting
+    fields), `embed_field` (pull one field into one slot), `list_items`
+    (rows → bulleted list inside a slot), `summarize` (distill into
+    prose), `lift_verbatim` (rare; rendering the raw data).
+  - For crawl topics: `excerpt` (verbatim from passages[]), `rewrite`
+    (full brand-voice rewrite), `paraphrase` (restate the gist),
+    `summarize` (distill).
+  Atom treatments stay as before (use_as_is, lift_phrase, compress,
+  expand, reorder, omit).
+
 ## Hard rules
 
 - **EVERY required slot in every section's template MUST have a
