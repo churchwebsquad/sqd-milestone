@@ -164,13 +164,19 @@ const STEPS: PipelineStep[] = [
     last_model:     s => s.page_allocation_plan?._meta?.model ?? null,
   },
   {
+    // Per-page steps 8-10 happen in Claude Desktop cowork sessions, not
+    // via web UI Run buttons. The web UI's job here is status display
+    // only — surface progress + signal where the work happens. The
+    // outline-page / draft-page / critique-page Vercel endpoints
+    // still exist (smoke tests, batch automation, scripted re-runs)
+    // but they're infrastructure, not strategist UX.
     key:         'outline-page',
     step_number: 8,
     label:       'Outline each page',
     skill_name:  'outline-page',
-    endpoint:    '/api/web/agents/run-outline-page',
-    aggregate:   true,
-    compute_status: () => 'aggregate',
+    endpoint:    '',   // intentionally empty — no Run button
+    compute_status: s => s.page_outlines_count > 0 && s.page_outlines_count === s.sitemap_slugs.length ? 'done' : 'cowork_session',
+    last_run_at: () => null,
     aggregate_summary: s => `${s.page_outlines_count} of ${s.sitemap_slugs.length || '?'} page${s.sitemap_slugs.length === 1 ? '' : 's'} outlined`,
   },
   {
@@ -178,9 +184,9 @@ const STEPS: PipelineStep[] = [
     step_number: 9,
     label:       'Draft each page',
     skill_name:  'draft-page',
-    endpoint:    '/api/web/agents/run-draft-page',
-    aggregate:   true,
-    compute_status: () => 'aggregate',
+    endpoint:    '',
+    compute_status: s => s.page_drafts_count > 0 && s.page_drafts_count === s.page_outlines_count ? 'done' : 'cowork_session',
+    last_run_at: () => null,
     aggregate_summary: s => `${s.page_drafts_count} of ${s.page_outlines_count} outlined page${s.page_outlines_count === 1 ? '' : 's'} drafted`,
   },
   {
@@ -188,9 +194,9 @@ const STEPS: PipelineStep[] = [
     step_number: 10,
     label:       'Critique each page',
     skill_name:  'critique-page',
-    endpoint:    '/api/web/agents/run-critique-page',
-    aggregate:   true,
-    compute_status: () => 'aggregate',
+    endpoint:    '',
+    compute_status: s => s.page_critiques_count > 0 && s.page_critiques_count === s.page_drafts_count ? 'done' : 'cowork_session',
+    last_run_at: () => null,
     aggregate_summary: s => `${s.page_critiques_count} of ${s.page_drafts_count} drafted page${s.page_drafts_count === 1 ? '' : 's'} critiqued`,
   },
   {
@@ -343,6 +349,27 @@ export function CoworkWorkspace({ project, onChange }: Props) {
   // Initial load + reload on project change.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void loadProjectState(); void loadReadiness() }, [project.id])
+
+  // Auto-refresh when the strategist returns to the tab. The primary
+  // way state changes from outside this surface is a cowork desktop
+  // session writing to Supabase (steps 7, 8, 9, 10). Without this
+  // refresh, the status board lies about state until the strategist
+  // hits the Refresh button manually.
+  // Listens to `visibilitychange` rather than `focus` because
+  // strategist switching tabs or alt-tabbing doesn't count — only
+  // returning to the browser tab after it was hidden does. Avoids
+  // refresh-spam on every click in the same tab.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void loadProjectState()
+        void loadReadiness()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [project.id])
 
   // Run a step — calls the endpoint, refreshes state on success.
   const runStep = async (step: PipelineStep, force: boolean) => {
