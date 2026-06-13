@@ -201,7 +201,7 @@ These are the signals to look for. Not rules — priors. Combine them.
     name:         'cowork-director',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  'ab9fb2bd2dd2fe2e',
+    contentHash:  '799f1149402188f2',
     references:   [],
     systemPrompt: `# Cowork Director
 
@@ -256,7 +256,7 @@ work that already landed.
 | **7** | **Plan cross-page allocation** — ONE project-level call that reads truth (crawl + content collection) + pillars (including \`recommended_page\` directive pillars) + facts + strategic supplements, and decides (a) what content lands on which pages with what treatment + flow_role, and (b) which \`recommended_page\` pillars route to the \`build_directives[]\` bucket (CMS/CPT workflow, redirect maps, seasonal theming, etc. — dev-handoff items, not page copy). Outputs \`CoworkPageAllocationPlan\` with \`allocations\` + \`source_traces\` + \`unresolved_sources\` + \`build_directives\`. The downstream importer surfaces \`build_directives\` on the project's dev handoff. | \`roadmap_state.page_allocation_plan\` exists AND \`_meta.generated_at\` is after site_strategy | \`plan-cross-page-allocation\` |
 | 8 | Outline each sitemap page (consumes that page's allocation slice + the ministry-model templates) | For slug X: \`roadmap_state.page_outlines[X]\` exists AND \`_meta.generated_at\` is after the allocation plan | \`outline-page\` (per slug) |
 | 9 | Draft each outlined page (reads outline + the actual source content via source_ref lookups — pulls crawl passages, content_collection fields, atoms by UUID) | For slug X: \`roadmap_state.page_drafts[X]\` exists AND \`_meta.generated_at\` is after that page's outline | \`draft-page\` (per slug) |
-| 10 | Critique each drafted page (5-axis: dignity floor 70 / voice_character / persona_fit / atom_coverage / claim_plausibility) | For slug X: a \`page_critique\` artifact exists AND \`_meta.generated_at\` is after that page's draft | \`critique-page\` (per slug) |
+| 10 | Critique each drafted page (5-axis: dignity floor 70 / voice_character / persona_fit / source_coverage / claim_plausibility) | For slug X: a \`page_critique\` artifact exists AND \`_meta.generated_at\` is after that page's draft | \`critique-page\` (per slug) |
 | 11 | Roll up cross-page critique | \`roadmap_state.critique_rollup\` exists AND \`_meta.generated_at\` is after the last per-page critique | \`synthesize-critique\` |
 
 The dependency rule above isn't "if it exists, skip" — it's "if it
@@ -372,7 +372,7 @@ Final status write: \`{ status: "done" }\` OR \`{ status: "failed", last_error }
     name:         'critique-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  'b1cf267906073086',
+    contentHash:  'f4c174be3740873c',
     references:   [
       'cowork-skills/critique-page/references/audit-criteria.md',
     ],
@@ -444,13 +444,25 @@ hits. The verdict's \`confidence_band\` is computed from the 5 axes.
     barrier_misses:       Array<{ section_intent_id: string; persona: string; missing: string }>
   }
 
-  /** AXIS 3: Atom coverage — did every atom outline allocated to
-   *  this page actually land in the copy? */
-  atom_coverage: {
+  /** AXIS 3: Source coverage — did every source the outline allocated
+   *  to this page (atoms + facts + crawl topics) actually land in the
+   *  copy? Renamed from atom_coverage 2026-06-12 with the three-source
+   *  contract widening. The score scale is unchanged (0-100), and a
+   *  number from one fire is comparable to a number from a prior fire
+   *  on the same draft — telemetry is portable across the rename. The
+   *  axis assessment is BROADER though: a fact-led section that uses
+   *  facts heavily and atoms barely is NOT a coverage failure. */
+  source_coverage: {
     score:                number
     passed:               boolean
-    atoms_landed:         string[]         // atom_ids that appear bound + drafted
-    atoms_orphaned:       Array<{ atom_id: string; reason: string }>
+    /** ids / keys that landed somewhere in the section's copy. */
+    atoms_landed:         string[]
+    facts_landed:         string[]                 // ← added with rename
+    crawl_topics_landed:  string[]                 // ← added with rename
+    /** Sources outline assigned but the draft didn't consume. */
+    atoms_orphaned:        Array<{ atom_id: string;  reason: string }>
+    facts_orphaned:        Array<{ fact_id: string;  reason: string }>
+    crawl_topics_orphaned: Array<{ topic_key: string; reason: string }>
     /** Verbatim atoms verified EXACT in their bound slot. */
     verbatim_preserved:   boolean
     verbatim_violations:  Array<{ atom_id: string; slot: string; diff: string }>
@@ -773,8 +785,8 @@ section with the procedure in mind before finalizing scores.
 4. If recommended_action === 'send_back_to_drafter',
    kickbacks_to_drafter has at least 1 entry referencing a specific
    slot.
-5. atom_coverage.atoms_landed.length +
-   atom_coverage.atoms_orphaned.length === atoms in
+5. source_coverage.atoms_landed.length +
+   source_coverage.atoms_orphaned.length === atoms in
    \`atoms_for_page\`. Cross-foot.
 6. score on each axis matches the rubric anchor for that band — if
    voice_character.score = 85 but the assessment notes 3
@@ -2401,7 +2413,7 @@ personas; use the names exactly as stage_1 emitted them.
     name:         'outline-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  '2f731e59bfc0bd04',
+    contentHash:  '36136cf34300afb8',
     references:   [
       'cowork-skills/canonical-templates.json',
       'cowork-skills/page-outlines-by-ministry-model.md',
@@ -2617,6 +2629,18 @@ whose topic is in \`VOICE_TOPICS_NOT_FOR_ASSIGNMENTS\` trips the
 \`voice_atom_in_assignments\` check. The pattern is parallel to
 \`unknown_atom_ref\`: a structural rule that ends in a failure list,
 not a judgment call.
+
+**When voice-atom removal leaves a slot gap, that gap is an
+\`unresolved_inputs\` entry — never an invention.** If a voice-topic
+atom was originally going to fill a required slot and now can't
+(because it must route to \`voice_anchor\` instead), the slot is
+genuinely uncovered. Name it in \`unresolved_inputs\` with the gap and
+the section/slot. Do not synthesize a UUID, do not copy from the
+voice atom's body, do not borrow an atom_id from another section.
+The failure mode is the home-page repair pass: voice atoms got
+correctly removed from atom_assignments and the model invented UUIDs
+to keep the slot filled. Always: removed voice atom → unresolved_input
+naming the slot.
 
 **Worked example.** Allocation gives section 2 these sources:
 
@@ -6472,7 +6496,7 @@ About ▾        : Vision & Strategy · Beliefs · Leadership · Locations · In
     name:         'synthesize-critique',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  'f21d15a8c2e8332e',
+    contentHash:  '44d1238147584786',
     references:   [],
     systemPrompt: `# Synthesize Critique
 
@@ -6551,9 +6575,9 @@ This is the last skill the strategist reads before approving the build.
 
   /** Atom coverage at the project level — every active atom landed
    *  on at least one page? */
-  atom_coverage: {
+  source_coverage: {
     band:                'green' | 'yellow' | 'red'
-    /** Atoms that NEVER appear in any page's atom_coverage.atoms_landed.
+    /** Atoms that NEVER appear in any page's source_coverage.atoms_landed.
      *  Strategist demotes OR routes back to outline. */
     project_orphans:     Array<{ atom_id: string; topic: AtomTopic; pages_attempted: string[] }>
     /** Atoms whose body appears on >3 pages (likely over-routed —
@@ -6682,7 +6706,7 @@ If an atom appears (by id) on >3 pages, that's a smell. Either:
 \`overall_band\` is the lowest band the four axes support:
 
 - **green** — voice_consistency tight or close; persona_coverage
-  green; structural_parity green; atom_coverage green. Every page's
+  green; structural_parity green; source_coverage green. Every page's
   critique band ≥ green. Safe to ship.
 - **yellow** — One axis yellow, others green. Per-page bands mostly
   green with 1-2 yellow. Strategist review recommended; can advance

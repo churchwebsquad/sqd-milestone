@@ -54,6 +54,7 @@ import {
   type PageOutlineValidationManifest,
   type PageOutlineValidationResult,
 } from '../../../src/lib/cowork/validatePageOutline.js'
+import { compactCrawlTopics } from '../../../src/lib/cowork/compactCrawlTopic.js'
 
 // Cowork outline calls are model-driven on Opus 4.7 with sizable
 // inputs (allocation slice + atoms + facts + stage_1). Opt into the
@@ -303,6 +304,14 @@ export default async function handler(req: any, res: any) {
       `against the project inventory + canonical templates. Fix ONLY the`,
       `named gaps below; do not regenerate the rest. Emit a corrected`,
       `outline via the same \`${TOOL_NAME}\` tool call.`,
+      ``,
+      `**Repair rule (the failure mode you must avoid):** if a fix`,
+      `requires REMOVING a source from an assignment array (voice atom`,
+      `routed to voice_anchor, atom that doesn't fit, fact whose data`,
+      `doesn't match the slot), and removing it leaves a required slot`,
+      `uncovered, name the gap in \`unresolved_inputs\` with a what+where`,
+      `pair. Never invent a UUID. Never borrow an id from another`,
+      `section. Never cross-route an id between assignment arrays.`,
       ``,
       '```',
       validation.summary,
@@ -659,9 +668,13 @@ function buildUserMessage(pageSlug: string, inputs: AssembledInputs): string {
     '```',
     ``,
     `## Crawl topics allocated to this page → route via \`crawl_topic_assignments[].topic_key\``,
-    `(existing site content from web_project_topics; treatment vocab: excerpt / rewrite / paraphrase / summarize)`,
+    `(existing site content from web_project_topics; treatment vocab: excerpt / rewrite / paraphrase / summarize.`,
+    `Each topic carries a sample + total + a \`*_truncated\` boolean. If \`passages_truncated: true\` or`,
+    `\`items_truncated: true\`, the sample is NOT the complete inventory — write only from what you can see,`,
+    `and if you need a passage/item not in the sample, declare \`unresolved_inputs\` naming the topic_key`,
+    `+ what's missing. Treating the sample as the whole is a false-certainty failure mode.)`,
     '```json',
-    JSON.stringify(inputs.crawlTopicsForPage, null, 2),
+    JSON.stringify(compactCrawlTopics(inputs.crawlTopicsForPage as Record<string, unknown>[]), null, 2),
     '```',
     ``,
     `Emit the outline now via the \`${TOOL_NAME}\` tool call. Routing rule:`,

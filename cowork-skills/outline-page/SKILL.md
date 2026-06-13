@@ -227,6 +227,18 @@ whose topic is in `VOICE_TOPICS_NOT_FOR_ASSIGNMENTS` trips the
 `unknown_atom_ref`: a structural rule that ends in a failure list,
 not a judgment call.
 
+**When voice-atom removal leaves a slot gap, that gap is an
+`unresolved_inputs` entry — never an invention.** If a voice-topic
+atom was originally going to fill a required slot and now can't
+(because it must route to `voice_anchor` instead), the slot is
+genuinely uncovered. Name it in `unresolved_inputs` with the gap and
+the section/slot. Do not synthesize a UUID, do not copy from the
+voice atom's body, do not borrow an atom_id from another section.
+The failure mode is the home-page repair pass: voice atoms got
+correctly removed from atom_assignments and the model invented UUIDs
+to keep the slot filled. Always: removed voice atom → unresolved_input
+naming the slot.
+
 **Worked example.** Allocation gives section 2 these sources:
 
 ```json

@@ -173,7 +173,7 @@ const warnings = directives.filter((d: any) => d?.severity === 'warning').length
 const nits     = directives.filter((d: any) => d?.severity === 'nit').length
 
 console.log(`  ✓ 200 in ${elapsedMs}ms`)
-console.log(`     AXIS SCORES: dignity=${critique.dignity} voice=${critique.voice_character} persona=${critique.persona_fit} atom_cov=${critique.atom_coverage} claim_plaus=${critique.claim_plausibility}`)
+console.log(`     AXIS SCORES: dignity=${critique.dignity} voice=${critique.voice_character} persona=${critique.persona_fit} source_cov=${critique.source_coverage} claim_plaus=${critique.claim_plausibility}`)
 console.log(`     DIRECTIVES:  ${directives.length} total (${blockers} blockers / ${warnings} warnings / ${nits} nits)`)
 console.log(`     PROBLEM LINES: ${(critique.problem_lines ?? []).length}    STANDOUT LINES: ${(critique.standout_lines ?? []).length}`)
 console.log(`     repaired=${meta.repaired}  fpf=${JSON.stringify(meta.first_pass_failures)}`)

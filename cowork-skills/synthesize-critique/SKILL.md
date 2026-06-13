@@ -88,9 +88,9 @@ This is the last skill the strategist reads before approving the build.
 
   /** Atom coverage at the project level — every active atom landed
    *  on at least one page? */
-  atom_coverage: {
+  source_coverage: {
     band:                'green' | 'yellow' | 'red'
-    /** Atoms that NEVER appear in any page's atom_coverage.atoms_landed.
+    /** Atoms that NEVER appear in any page's source_coverage.atoms_landed.
      *  Strategist demotes OR routes back to outline. */
     project_orphans:     Array<{ atom_id: string; topic: AtomTopic; pages_attempted: string[] }>
     /** Atoms whose body appears on >3 pages (likely over-routed —
@@ -219,7 +219,7 @@ If an atom appears (by id) on >3 pages, that's a smell. Either:
 `overall_band` is the lowest band the four axes support:
 
 - **green** — voice_consistency tight or close; persona_coverage
-  green; structural_parity green; atom_coverage green. Every page's
+  green; structural_parity green; source_coverage green. Every page's
   critique band ≥ green. Safe to ship.
 - **yellow** — One axis yellow, others green. Per-page bands mostly
   green with 1-2 yellow. Strategist review recommended; can advance

@@ -367,7 +367,7 @@ export default async function handler(req: any, res: any) {
         dignity:          bundle?.dignity ?? null,
         voice_character:  bundle?.voice_character ?? null,
         persona_fit:      bundle?.persona_fit ?? null,
-        atom_coverage:    bundle?.atom_coverage ?? null,
+        source_coverage:    bundle?.source_coverage ?? null,
         claim_plausibility: bundle?.claim_plausibility ?? null,
         directives_count: Array.isArray(bundle?.directives) ? bundle.directives.length : 0,
         blocker_count:    Array.isArray(bundle?.directives)
@@ -395,7 +395,7 @@ export default async function handler(req: any, res: any) {
         dignity:            bundle.dignity,
         voice_character:    bundle.voice_character,
         persona_fit:        bundle.persona_fit,
-        atom_coverage:      bundle.atom_coverage,
+        source_coverage:      bundle.source_coverage,
         claim_plausibility: bundle.claim_plausibility,
       },
     })

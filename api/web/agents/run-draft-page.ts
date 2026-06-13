@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url'
 import { createClient } from '@supabase/supabase-js'
 
 import { callGateway, type ToolSchema } from '../../srp/_lib/aiGateway.js'
+import { compactCrawlTopics } from '../../../src/lib/cowork/compactCrawlTopic.js'
 import { resolveCoworkSkill } from './_lib/resolveCoworkSkill.js'
 import { BUNDLE_VERSION } from '../../../src/types/coworkBundle.js'
 import {
@@ -555,9 +556,13 @@ function buildUserMessage(pageSlug: string, inputs: AssembledInputs): string {
     ``,
     `## Crawl topics allocated by the outline → track in crawl_topics_used`,
     `(existing site content; excerpt / rewrite / paraphrase per the outline's`,
-    `crawl_topic_assignments treatment)`,
+    `crawl_topic_assignments treatment. Each topic carries a sample + total +`,
+    `\`*_truncated\` booleans. If \`passages_truncated: true\` or \`items_truncated: true\`,`,
+    `write from what you see — and if a needed item/passage isn't in the sample,`,
+    `surface in \`validation.flags\` ("topic X items_truncated: need item matching Y").`,
+    `Treating the sample as the whole is a false-certainty failure mode.)`,
     '```json',
-    JSON.stringify(inputs.crawlTopicsForPage, null, 2),
+    JSON.stringify(compactCrawlTopics(inputs.crawlTopicsForPage as Record<string, unknown>[]), null, 2),
     '```',
     ``,
     `Now call \`${TOOL_NAME}\` with the page draft.`,

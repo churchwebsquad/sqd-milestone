@@ -65,7 +65,7 @@ interface DirectorCritique {
     dignity?: number
     voice_character?: number
     persona_fit: number
-    atom_coverage: number
+    source_coverage: number
     claim_plausibility?: number
     // Legacy 4-axis fields kept for back-compat with critiques written
     // before the Director prompt overhaul. Read the new field first
@@ -92,7 +92,7 @@ interface DirectorCritique {
     // Legacy 4-axis (kept for back-compat)
     voice_consistency?: number
     persona_coverage?: number
-    atom_coverage?: number
+    source_coverage?: number
     slot_health?: number
     overall?: number
   }
@@ -1583,7 +1583,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
               />
               <ScoreChip label="Voice"   value={critique.scores.voice_character ?? critique.scores.voice_consistency ?? 0} />
               <ScoreChip label="Persona" value={critique.scores.persona_fit ?? critique.scores.persona_coverage ?? 0} />
-              <ScoreChip label="Atoms"   value={critique.scores.atom_coverage ?? 0} />
+              <ScoreChip label="Atoms"   value={critique.scores.source_coverage ?? 0} />
               <ScoreChip label="Claims"  value={critique.scores.claim_plausibility ?? 0} />
               <ScoreChip label="Overall" value={critique.scores.overall ?? 0} bold />
             </div>
@@ -1649,7 +1649,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
                         )}
                         <span className="text-[10px] text-wm-text-muted">
                           {/* 5-axis (new) when available, falls back to legacy 4-axis for pre-overhaul critiques. */}
-                          d {p.dignity ?? '—'} · v {p.voice_character ?? p.voice_match ?? '—'} · p {p.persona_fit} · a {p.atom_coverage} · c {p.claim_plausibility ?? '—'}
+                          d {p.dignity ?? '—'} · v {p.voice_character ?? p.voice_match ?? '—'} · p {p.persona_fit} · a {p.source_coverage} · c {p.claim_plausibility ?? '—'}
                         </span>
                       </div>
                       {p.summary && <p className="text-[12px] text-wm-text-muted leading-snug">{p.summary}</p>}
@@ -2585,7 +2585,7 @@ function DraftPreview({
     // New 5-axis
     dignity?: number; voice_character?: number; claim_plausibility?: number
     // Common
-    persona_fit?: number; atom_coverage?: number
+    persona_fit?: number; source_coverage?: number
     // Legacy 4-axis (back-compat)
     voice_match?: number; slot_health?: number
     summary?: string
@@ -2652,7 +2652,7 @@ function DraftPreview({
               <span className={(critique.dignity != null && critique.dignity < 70) ? 'text-wm-danger font-semibold' : ''}>dignity {critique.dignity ?? '—'}</span>
               {' · '}voice {critique.voice_character ?? critique.voice_match ?? '—'}
               {' · '}persona {critique.persona_fit ?? '—'}
-              {' · '}atoms {critique.atom_coverage ?? '—'}
+              {' · '}atoms {critique.source_coverage ?? '—'}
               {' · '}claims {critique.claim_plausibility ?? '—'}
             </span>
           </div>

@@ -49,13 +49,13 @@ const CRITIQUE_TOOL = {
         description: 'One entry per page with a draft. Pages without drafts get skipped (not emitted here).',
         items: {
           type: 'object',
-          required: ['page_slug','dignity','voice_character','persona_fit','atom_coverage','claim_plausibility','summary'],
+          required: ['page_slug','dignity','voice_character','persona_fit','source_coverage','claim_plausibility','summary'],
           properties: {
             page_slug:           { type: 'string' },
             dignity:             { type: 'number', description: '0-100. NON-NEGOTIABLE FLOOR AT 70. Treats people with respect — no commodification ("We Send People"), no othering ("the lost"), no pity-bait, no superiority signaling, no gendered defaults. ≤40 = blocker.' },
             voice_character:     { type: 'number', description: '0-100. Reads like a real person from THIS church — concrete details, matches discovery-Q voice samples, NOT swappable with another church name.' },
             persona_fit:         { type: 'number', description: '0-100. Addresses brief.persona_focus.primary by specific need/posture, not generic "we welcome everyone".' },
-            atom_coverage:       { type: 'number', description: '0-100. Share of brief.atoms_assigned that landed in a section.' },
+            source_coverage:       { type: 'number', description: '0-100. Share of brief.atoms_assigned + facts_assigned + crawl_topics_assigned that landed somewhere in a section. Renamed from atom_coverage 2026-06-12 with the three-source contract widening; scale is comparable across the rename. A fact-led section using facts heavily and atoms barely is NOT a coverage failure.' },
             claim_plausibility:  { type: 'number', description: '0-100. Every assertion about the church is backed by atoms / discovery / content-collection. No unsourced numbers, no invented awards, no theological claims that don\'t appear in the church\'s own voice.' },
             standout_lines:      { type: 'array', items: { type: 'string' }, description: 'Up to 3 lines you\'d show the strategist as proof of voice fit + dignity intact.' },
             problem_lines:       { type: 'array', items: { type: 'string' }, description: 'Up to 3 lines that violate one of the five axes. Quote verbatim. Each MUST have a matching directive.' },
@@ -111,14 +111,14 @@ const CRITIQUE_TOOL = {
       },
       scores: {
         type: 'object',
-        required: ['dignity','voice_character','persona_fit','atom_coverage','claim_plausibility','overall'],
+        required: ['dignity','voice_character','persona_fit','source_coverage','claim_plausibility','overall'],
         properties: {
           dignity:             { type: 'number', description: 'Cross-page minimum, not average. If ANY page scored ≤40 on dignity, this score must reflect that.' },
           voice_character:     { type: 'number', description: 'Cross-page voice consistency + distinctiveness from generic church copy.' },
           persona_fit:         { type: 'number', description: 'Cross-page persona coverage — does each defined persona have at least one page that serves them?' },
-          atom_coverage:       { type: 'number', description: 'Site-wide atom landing rate.' },
+          source_coverage:     { type: 'number', description: 'Site-wide landing rate across all three source kinds (atoms + facts + crawl topics).' },
           claim_plausibility:  { type: 'number', description: 'Cross-page count of unsupported assertions.' },
-          overall:             { type: 'number', description: 'Weighted: dignity * 0.30 + voice_character * 0.25 + persona_fit * 0.20 + atom_coverage * 0.15 + claim_plausibility * 0.10. If dignity is ≤40, overall is also ≤40 (floor).' },
+          overall:             { type: 'number', description: 'Weighted: dignity * 0.30 + voice_character * 0.25 + persona_fit * 0.20 + source_coverage * 0.15 + claim_plausibility * 0.10. If dignity is ≤40, overall is also ≤40 (floor).' },
         },
       },
       overall_verdict: {

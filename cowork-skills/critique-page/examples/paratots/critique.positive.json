@@ -1,5 +1,5 @@
 {
-  "atom_coverage": 95,
+  "source_coverage": 95,
   "claim_plausibility": 55,
   "dignity": 88,
   "directives": [
@@ -37,7 +37,7 @@
       "slot_key": "body",
       "note": "Verbatim atom 2528ca66 ('BEGINNING WITH A STRONG SENSE OF BELONGING') is placed in the hero 'body' slot rather than a tagline/kicker slot. Casing is preserved correctly, but designer treatment is at risk — the all-caps line will render as a paragraph body, not a styled kicker. Confirm hero_inner has no tagline/kicker slot available; if it does, move it there. Flagged in draft validation already.",
       "severity": "nit",
-      "axis": "atom_coverage"
+      "axis": "source_coverage"
     }
   ],
   "page_slug": "paratots",

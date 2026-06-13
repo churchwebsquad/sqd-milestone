@@ -2,7 +2,7 @@
   "stage": "import",
   "error": "import_failed",
   "critique_for_inspection": {
-    "atom_coverage": 95,
+    "source_coverage": 95,
     "claim_plausibility": 55,
     "dignity": 88,
     "directives": [

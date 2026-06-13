@@ -3,7 +3,7 @@ name: critique-page
 description: |
   ONE call per page. Reads the page draft + the canonical template
   contract + the partner voice_card + the global audit-criteria.md, and
-  produces a 5-axis verdict (voice / persona / atom_coverage /
+  produces a 5-axis verdict (voice / persona / source_coverage /
   claim_plausibility / dignity). Mechanical scan + positive checks.
   Returns confidence_band (green/yellow/red) + kickbacks_to_drafter on
   red. Independent — does NOT also rewrite copy.
@@ -82,13 +82,25 @@ hits. The verdict's `confidence_band` is computed from the 5 axes.
     barrier_misses:       Array<{ section_intent_id: string; persona: string; missing: string }>
   }
 
-  /** AXIS 3: Atom coverage — did every atom outline allocated to
-   *  this page actually land in the copy? */
-  atom_coverage: {
+  /** AXIS 3: Source coverage — did every source the outline allocated
+   *  to this page (atoms + facts + crawl topics) actually land in the
+   *  copy? Renamed from atom_coverage 2026-06-12 with the three-source
+   *  contract widening. The score scale is unchanged (0-100), and a
+   *  number from one fire is comparable to a number from a prior fire
+   *  on the same draft — telemetry is portable across the rename. The
+   *  axis assessment is BROADER though: a fact-led section that uses
+   *  facts heavily and atoms barely is NOT a coverage failure. */
+  source_coverage: {
     score:                number
     passed:               boolean
-    atoms_landed:         string[]         // atom_ids that appear bound + drafted
-    atoms_orphaned:       Array<{ atom_id: string; reason: string }>
+    /** ids / keys that landed somewhere in the section's copy. */
+    atoms_landed:         string[]
+    facts_landed:         string[]                 // ← added with rename
+    crawl_topics_landed:  string[]                 // ← added with rename
+    /** Sources outline assigned but the draft didn't consume. */
+    atoms_orphaned:        Array<{ atom_id: string;  reason: string }>
+    facts_orphaned:        Array<{ fact_id: string;  reason: string }>
+    crawl_topics_orphaned: Array<{ topic_key: string; reason: string }>
     /** Verbatim atoms verified EXACT in their bound slot. */
     verbatim_preserved:   boolean
     verbatim_violations:  Array<{ atom_id: string; slot: string; diff: string }>
@@ -411,8 +423,8 @@ section with the procedure in mind before finalizing scores.
 4. If recommended_action === 'send_back_to_drafter',
    kickbacks_to_drafter has at least 1 entry referencing a specific
    slot.
-5. atom_coverage.atoms_landed.length +
-   atom_coverage.atoms_orphaned.length === atoms in
+5. source_coverage.atoms_landed.length +
+   source_coverage.atoms_orphaned.length === atoms in
    `atoms_for_page`. Cross-foot.
 6. score on each axis matches the rubric anchor for that band — if
    voice_character.score = 85 but the assessment notes 3

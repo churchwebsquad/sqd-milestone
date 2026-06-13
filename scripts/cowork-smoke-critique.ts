@@ -103,7 +103,7 @@ console.log(`  AXIS SCORES (0-100; dignity ≤ 40 = blocker):`)
 console.log(`    dignity:            ${critique?.dignity}`)
 console.log(`    voice_character:    ${critique?.voice_character}`)
 console.log(`    persona_fit:        ${critique?.persona_fit}`)
-console.log(`    atom_coverage:      ${critique?.atom_coverage}`)
+console.log(`    source_coverage:      ${critique?.source_coverage}`)
 console.log(`    claim_plausibility: ${critique?.claim_plausibility}`)
 console.log()
 console.log(`  DIRECTIVES: ${directives.length} total (${blockers} blockers / ${warnings} warnings / ${nits} nits)`)
@@ -158,7 +158,7 @@ assertions.push({
 })
 assertions.push({
   name:   'all 5 axis scores present + in range',
-  ok:     ['dignity', 'voice_character', 'persona_fit', 'atom_coverage', 'claim_plausibility'].every(a => {
+  ok:     ['dignity', 'voice_character', 'persona_fit', 'source_coverage', 'claim_plausibility'].every(a => {
     const v = (critique as any)[a]
     return typeof v === 'number' && v >= 0 && v <= 100 && Number.isInteger(v)
   }),

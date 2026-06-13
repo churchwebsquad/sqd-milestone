@@ -20,7 +20,7 @@
  *
  * No atom_id schema-enum on this endpoint: critique-page doesn't emit
  * atom UUIDs (it cites standout/problem LINES, free-form strings).
- * The atom_coverage axis is the model's judgment, not a UUID list.
+ * The source_coverage axis is the model's judgment, not a UUID list.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -34,27 +34,28 @@ import {
   type CritiquePageValidationManifest,
   type CritiquePageValidationResult,
 } from '../../../src/lib/cowork/validateCritiquePage.js'
+import { compactCrawlTopics } from '../../../src/lib/cowork/compactCrawlTopic.js'
 
 export const maxDuration = 300
 
 const TOOL_NAME = 'emit_page_critique'
 const TOOL_DESCRIPTION =
   'Emit the per-page critique conforming to the CoworkPageCritique contract — 5-axis scores ' +
-  '(dignity, voice_character, persona_fit, atom_coverage, claim_plausibility), standout_lines + ' +
+  '(dignity, voice_character, persona_fit, source_coverage, claim_plausibility), standout_lines + ' +
   'problem_lines (verbatim quotes from the draft), directives (with fix_kind + severity + axis), ' +
   'and a strategist-facing summary.'
 
 const TOOL_SCHEMA: ToolSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['page_slug', 'dignity', 'voice_character', 'persona_fit', 'atom_coverage',
+  required: ['page_slug', 'dignity', 'voice_character', 'persona_fit', 'source_coverage',
              'claim_plausibility', 'standout_lines', 'problem_lines', 'directives', 'summary'],
   properties: {
     page_slug:          { type: 'string' },
     dignity:            { type: 'integer', minimum: 0, maximum: 100 },
     voice_character:    { type: 'integer', minimum: 0, maximum: 100 },
     persona_fit:        { type: 'integer', minimum: 0, maximum: 100 },
-    atom_coverage:      { type: 'integer', minimum: 0, maximum: 100 },
+    source_coverage:      { type: 'integer', minimum: 0, maximum: 100 },
     claim_plausibility: { type: 'integer', minimum: 0, maximum: 100 },
     standout_lines: {
       type: 'array',
@@ -77,7 +78,7 @@ const TOOL_SCHEMA: ToolSchema = {
           slot_key:   { type: 'string' },
           note:       { type: 'string', minLength: 10, maxLength: 600 },
           severity:   { type: 'string', enum: ['blocker', 'warning', 'nit'] },
-          axis:       { type: 'string', enum: ['dignity', 'voice_character', 'persona_fit', 'atom_coverage', 'claim_plausibility'] },
+          axis:       { type: 'string', enum: ['dignity', 'voice_character', 'persona_fit', 'source_coverage', 'claim_plausibility'] },
         },
       },
     },
@@ -292,6 +293,8 @@ interface AssembledInputs {
   outline:        any           // outline the draft was built from (atom expectations, archetypes)
   stage1Brief:    any           // voice exemplars, anti-exemplars, ethos, personas
   atomsForPage:   Array<{ id: string; topic: string; body: string; verbatim: boolean }>
+  factsForPage:   Array<{ id: string; topic: string; data: Record<string, unknown> }>
+  crawlTopicsForPage: Array<Record<string, unknown>>
 }
 
 async function assembleEndpointInputs(
@@ -311,22 +314,49 @@ async function assembleEndpointInputs(
   const outline = roadmap?.page_outlines?.[pageSlug] ?? null
   const stage_1 = roadmap?.stage_1 ?? null
 
-  // Collect atoms the outline assigned (same set the draft was told
-  // about). Lets critique evaluate atom_coverage honestly.
-  const atomIds = new Set<string>()
+  // Collect all three source-kind ids the outline assigned. Same set
+  // the draft saw. Lets critique evaluate source_coverage honestly
+  // across atoms + facts + crawl topics — 2026-06-12 widening: the
+  // axis renamed from atom_coverage but the assessment now spans all
+  // three kinds.
+  const atomIds        = new Set<string>()
+  const factIds        = new Set<string>()
+  const crawlTopicKeys = new Set<string>()
   if (outline?.sections) {
     for (const s of outline.sections) {
       for (const a of (s?.atom_assignments ?? [])) {
         if (a?.atom_id) atomIds.add(String(a.atom_id))
       }
+      for (const f of (s?.fact_assignments ?? [])) {
+        if (f?.fact_id) factIds.add(String(f.fact_id))
+      }
+      for (const c of (s?.crawl_topic_assignments ?? [])) {
+        if (c?.topic_key) crawlTopicKeys.add(String(c.topic_key))
+      }
     }
   }
-  const atomsRes = atomIds.size > 0
-    ? await sb.from('content_atoms')
-        .select('id, topic, body, verbatim')
-        .in('id', Array.from(atomIds))
-    : { data: [] as any[], error: null }
-  if (atomsRes.error) throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+
+  const [atomsRes, factsRes, topicsRes] = await Promise.all([
+    atomIds.size > 0
+      ? sb.from('content_atoms')
+          .select('id, topic, body, verbatim')
+          .in('id', Array.from(atomIds))
+      : Promise.resolve({ data: [] as any[], error: null }),
+    factIds.size > 0
+      ? sb.from('church_facts')
+          .select('id, topic, data')
+          .in('id', Array.from(factIds))
+      : Promise.resolve({ data: [] as any[], error: null }),
+    crawlTopicKeys.size > 0
+      ? sb.from('web_project_topics')
+          .select('topic_key, topic_label, topic_group, coverage_status, passages, items')
+          .eq('web_project_id', projectId)
+          .in('topic_key', Array.from(crawlTopicKeys))
+      : Promise.resolve({ data: [] as any[], error: null }),
+  ])
+  if (atomsRes.error)  throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
+  if (factsRes.error)  throw new Error(`church_facts load failed: ${factsRes.error.message}`)
+  if (topicsRes.error) throw new Error(`web_project_topics load failed: ${topicsRes.error.message}`)
 
   const stage1Brief = stage_1 ? {
     ethos_summary:        stage_1.ethos_summary,
@@ -340,7 +370,9 @@ async function assembleEndpointInputs(
     draft,
     outline,
     stage1Brief,
-    atomsForPage: (atomsRes.data ?? []) as AssembledInputs['atomsForPage'],
+    atomsForPage:       (atomsRes.data  ?? []) as AssembledInputs['atomsForPage'],
+    factsForPage:       (factsRes.data  ?? []) as AssembledInputs['factsForPage'],
+    crawlTopicsForPage: (topicsRes.data ?? []) as AssembledInputs['crawlTopicsForPage'],
   }
 }
 
@@ -353,7 +385,7 @@ function buildUserMessage(pageSlug: string, inputs: AssembledInputs): string {
     JSON.stringify(inputs.draft, null, 2),
     '```',
     ``,
-    `## The outline (what the draft was rendering against — for atom_coverage assessment)`,
+    `## The outline (what the draft was rendering against — for source_coverage assessment)`,
     '```json',
     JSON.stringify(inputs.outline, null, 2),
     '```',
@@ -363,13 +395,28 @@ function buildUserMessage(pageSlug: string, inputs: AssembledInputs): string {
     JSON.stringify(inputs.stage1Brief, null, 2),
     '```',
     ``,
-    `## Atoms available to the drafter (for atom_coverage + claim_plausibility)`,
+    `## Atoms available to the drafter (for source_coverage + claim_plausibility)`,
     '```json',
     JSON.stringify(inputs.atomsForPage, null, 2),
     '```',
     ``,
+    `## Facts available to the drafter (also counts toward source_coverage; weave into copy via fact_assignments)`,
+    '```json',
+    JSON.stringify(inputs.factsForPage, null, 2),
+    '```',
+    ``,
+    `## Crawl topics available to the drafter (also counts toward source_coverage; excerpt/rewrite/paraphrase via crawl_topic_assignments. Each topic carries a sample + total + truncation booleans — when judging coverage, treat truncated topics as "partial inventory visible," not "this is everything.")`,
+    '```json',
+    JSON.stringify(compactCrawlTopics(inputs.crawlTopicsForPage), null, 2),
+    '```',
+    ``,
     `Score each of the 5 axes (dignity, voice_character, persona_fit,`,
-    `atom_coverage, claim_plausibility) on a 0-100 scale.`,
+    `source_coverage, claim_plausibility) on a 0-100 scale.`,
+    `**source_coverage is the share of ALL THREE source kinds (atoms +`,
+    `facts + crawl topics) the outline routed to a section that the`,
+    `draft actually consumed (atoms_used + facts_used + crawl_topics_used).`,
+    `A fact-led section using facts heavily and atoms barely is NOT a`,
+    `coverage failure — it's a coverage success against a different kind.**`,
     `**dignity ≤ 40 is a blocker** — if you score it that low, you MUST`,
     `emit a directive with severity='blocker' axis='dignity'.`,
     `**Any axis ≤ 40** requires at least one directive citing that axis.`,

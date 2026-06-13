@@ -511,14 +511,27 @@ export interface CoworkPageDraft {
   }
 }
 
-/** Per-page critique — critique-page emits one of these per drafted page. */
+/** Per-page critique — critique-page emits one of these per drafted page.
+ *
+ *  Axis rename 2026-06-12: `atom_coverage` → `source_coverage`. Same
+ *  axis, same 0-100 scoring scale (telemetry is comparable across the
+ *  rename), but the assessment now spans all three source kinds —
+ *  atoms, facts, crawl topics — instead of only atoms. A fact-led
+ *  section that uses facts_used heavily and atoms_used barely is no
+ *  longer a coverage failure; it's a coverage success against a
+ *  different source kind. Driven by the home-page outline contract
+ *  widening: same class of bug (consumer hardcoded the old width)
+ *  would have fired one layer downstream if the axis stayed
+ *  atom-only. */
 export interface CoworkPageCritique {
   page_slug:           string
   // 5-axis scoring per CLAUDE.md / Director prompt. 0-100 each.
   dignity:             number                 // FLOOR 70 — ≤40 = blocker
   voice_character:     number
   persona_fit:         number
-  atom_coverage:       number
+  /** How completely the section's bound sources (atoms + facts + crawl
+   *  topics) landed in copy. Renamed from atom_coverage. */
+  source_coverage:     number
   claim_plausibility:  number
   standout_lines:      string[]               // verbatim proof of voice + dignity intact
   problem_lines:       string[]               // verbatim quotes that violate an axis
@@ -529,7 +542,7 @@ export interface CoworkPageCritique {
     slot_key?:   string
     note:        string                     // CONCRETE instruction the re-runner can act on
     severity:    'blocker' | 'warning' | 'nit'
-    axis:        'dignity' | 'voice_character' | 'persona_fit' | 'atom_coverage' | 'claim_plausibility'
+    axis:        'dignity' | 'voice_character' | 'persona_fit' | 'source_coverage' | 'claim_plausibility'
   }>
   summary: string
   _meta: ArtifactMeta
@@ -542,7 +555,9 @@ export interface CoworkCritiqueRollup {
     dignity:            number     // SITE-WIDE MIN (not avg) — if any page ≤40, this reflects it
     voice_character:    number
     persona_fit:        number
-    atom_coverage:      number
+    /** Renamed from atom_coverage 2026-06-12 — same scale, now spans
+     *  all three source kinds (atoms + facts + crawl topics). */
+    source_coverage:    number
     claim_plausibility: number
     overall:            number
   }

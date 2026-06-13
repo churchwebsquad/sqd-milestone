@@ -49,7 +49,7 @@ export interface CritiquePageValidationResult {
   summary:   string
 }
 
-const AXES = ['dignity', 'voice_character', 'persona_fit', 'atom_coverage', 'claim_plausibility'] as const
+const AXES = ['dignity', 'voice_character', 'persona_fit', 'source_coverage', 'claim_plausibility'] as const
 const FIX_KINDS = new Set(['slot_edit', 'page_redraft', 'sitemap_redraft', 'synthesize_rework'])
 const SEVERITIES = new Set(['blocker', 'warning', 'nit'])
 const AXES_SET = new Set<string>(AXES)
