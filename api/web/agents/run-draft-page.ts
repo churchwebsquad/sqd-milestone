@@ -36,6 +36,7 @@ import { createClient } from '@supabase/supabase-js'
 
 import { callGateway, type ToolSchema } from '../../srp/_lib/aiGateway.js'
 import { compactCrawlTopics } from '../../../src/lib/cowork/compactCrawlTopic.js'
+import { normalizeStage1ForCowork } from '../../../src/lib/cowork/normalizeStage1.js'
 import { DEFERRED_ATOM_REASONS } from '../../../src/types/coworkBundle.js'
 import { resolveCoworkSkill } from './_lib/resolveCoworkSkill.js'
 import { BUNDLE_VERSION } from '../../../src/types/coworkBundle.js'
@@ -493,7 +494,9 @@ async function assembleEndpointInputs(
 
   const roadmap = (project?.roadmap_state ?? {}) as Record<string, any>
   const outline = roadmap?.page_outlines?.[pageSlug] ?? null
-  const stage_1 = roadmap?.stage_1 ?? null
+  // Normalize stage_1 at read time — same rationale as run-outline-page.
+  // See src/lib/cowork/normalizeStage1.ts.
+  const stage_1 = normalizeStage1ForCowork(roadmap?.stage_1)
 
   // Walk all three assignment arrays on the outline's sections to
   // collect referenced ids per kind. Same source-of-truth pattern as

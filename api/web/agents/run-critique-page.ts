@@ -35,6 +35,7 @@ import {
   type CritiquePageValidationResult,
 } from '../../../src/lib/cowork/validateCritiquePage.js'
 import { compactCrawlTopics } from '../../../src/lib/cowork/compactCrawlTopic.js'
+import { normalizeStage1ForCowork } from '../../../src/lib/cowork/normalizeStage1.js'
 
 export const maxDuration = 300
 
@@ -312,7 +313,9 @@ async function assembleEndpointInputs(
   const roadmap = (project?.roadmap_state ?? {}) as Record<string, any>
   const draft   = roadmap?.page_drafts?.[pageSlug] ?? null
   const outline = roadmap?.page_outlines?.[pageSlug] ?? null
-  const stage_1 = roadmap?.stage_1 ?? null
+  // Normalize stage_1 at read time — same rationale as the other
+  // per-slug cowork endpoints. See src/lib/cowork/normalizeStage1.ts.
+  const stage_1 = normalizeStage1ForCowork(roadmap?.stage_1)
 
   // Collect all three source-kind ids the outline assigned. Same set
   // the draft saw. Lets critique evaluate source_coverage honestly

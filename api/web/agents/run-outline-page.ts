@@ -55,6 +55,7 @@ import {
   type PageOutlineValidationResult,
 } from '../../../src/lib/cowork/validatePageOutline.js'
 import { compactCrawlTopics } from '../../../src/lib/cowork/compactCrawlTopic.js'
+import { normalizeStage1ForCowork } from '../../../src/lib/cowork/normalizeStage1.js'
 
 // Cowork outline calls are model-driven on Opus 4.7 with sizable
 // inputs (allocation slice + atoms + facts + stage_1). Opt into the
@@ -578,7 +579,13 @@ async function assembleEndpointInputs(
   const allocations: any[] = roadmap?.page_allocation_plan?.allocations ?? []
   const allocation = allocations.find((a: any) => a?.page_slug === pageSlug) ?? null
 
-  const stage_1        = roadmap?.stage_1        ?? null
+  // Normalize stage_1 at read time so legacy-pipeline projects (DS,
+  // every pre-cowork account) and cowork-pipeline projects both
+  // project the same 5 fields into the user message. The normalizer
+  // preserves every legacy key + ADDS cowork-shape keys derived from
+  // legacy data. No SQL mutation; no provenance pollution.
+  // See src/lib/cowork/normalizeStage1.ts for the mapping table.
+  const stage_1        = normalizeStage1ForCowork(roadmap?.stage_1)
   const ministry_model = roadmap?.ministry_model ?? null
 
   // Collect atom_ids + fact_ids + crawl_topic_keys referenced by this
