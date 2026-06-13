@@ -120,25 +120,20 @@ export async function callGateway<T extends Record<string, any> = Record<string,
   const model = input.model ?? MODEL_CONTENT
   const maxTokens = input.maxTokens ?? 1500
 
-  // tool_choice handling per model (gateway behavior, discovered
-  // 2026-06-12 firing cowork draft-page smoke):
+  // Forced tool_choice — the gateway translates this to the underlying
+  // provider's strict-tool mode where supported. Worked on every model
+  // we ship against today (Opus 4.6/4.7/4.8, Sonnet 4.5/4.6, Haiku 4.5).
   //
-  //   anthropic/claude-fable-5 — gateway REJECTS any forced tool_choice
-  //     with "tool_choice forces tool use is not compatible with this
-  //     model." Both { type: 'function', function: { name } } and the
-  //     cross-provider 'required' shorthand fail the same way. Likely
-  //     interaction with Fable 5's mandatory adaptive thinking. Use
-  //     'auto' + a strong prompt-level "you MUST call the tool"
-  //     instruction in the user message. With a single tool in the
-  //     tools[] array, the model picks it reliably.
-  //
-  //   All other models (OpenAI / Google / Anthropic Opus + Sonnet +
-  //   Haiku): forced specific function works via gateway translation.
-  //
-  // If this list grows beyond Fable 5, fold into a Set.
-  const tool_choice = model.includes('fable')
-    ? 'auto'
-    : { type: 'function', function: { name: input.toolName } }
+  // Historical note (2026-06-12 → 2026-06-12): claude-fable-5 briefly
+  // required tool_choice='auto' + a prompt-level "you MUST call the
+  // tool" workaround because its gateway entry rejected forced
+  // tool_choice. Fable 5 was subsequently removed from Vercel AI
+  // Gateway's catalog (12 Anthropic entries listed; zero "fable"
+  // matches). With Fable gone from this path, the workaround branch
+  // was dead scaffolding — the kind of prompt-embedded drift the
+  // vocab checker can't see. Removed in the same commit that swapped
+  // draft-page to claude-opus-4-8.
+  const tool_choice = { type: 'function' as const, function: { name: input.toolName } }
 
   const body = {
     model,

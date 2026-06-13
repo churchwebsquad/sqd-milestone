@@ -6,7 +6,7 @@ description: |
   WRITES the copy — every text/richtext slot, respecting each slot's
   max_chars + shape constraint. Imitates voice_exemplars verbatim where
   possible. Pure draft — does NOT self-audit (critique-page does that).
-model: anthropic/claude-fable-5
+model: anthropic/claude-opus-4-8
 allowed-tools: Read
 version: '1.0.0'
 references:

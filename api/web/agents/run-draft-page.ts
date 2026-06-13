@@ -10,8 +10,14 @@
  * checked: resolver → hash → repair → validate → import → walk.
  *
  * The difference from run-outline-page:
- *   - Model is anthropic/claude-fable-5 (per draft-page SKILL frontmatter
- *     — voice is the lever; Fable 5 is the lever-puller).
+ *   - Model was claude-fable-5 through 2026-06-12 (voice is the lever;
+ *     Fable 5 was the lever-puller, validated empirically on the
+ *     paratots draft). Fable 5 was removed from Vercel AI Gateway's
+ *     catalog (12 Anthropic entries listed; zero "fable" matches),
+ *     so this endpoint swapped to claude-opus-4-8 in the same commit
+ *     that removed the Fable-5 tool_choice workaround. plan-cross-page-
+ *     allocation still uses Fable 5 — it executes via cowork sessions,
+ *     not the Vercel gateway, so the catalog removal doesn't reach it.
  *   - Input is the persisted outline at roadmap_state.page_outlines[<slug>]
  *     plus atom bodies (full, not previews) for atoms the outline assigned.
  *   - Output is CoworkPageDraft: archetype + voice_notes + copy slot map
@@ -227,9 +233,15 @@ export default async function handler(req: any, res: any) {
       toolDescription: TOOL_DESCRIPTION,
       toolSchema,
       // draft-page output is the densest of the cowork artifacts —
-      // every slot of every section. Fable 5 on a page with ~6 sections
-      // × ~5 slots can hit the default 1500 ceiling.
-      maxTokens:       16000,
+      // every slot of every section. Empirical: paratots (5 sections,
+      // 18 atom_assignments) hit 16025 output_tokens on Fable 5 with
+      // truncation_suspected=true. Home (8 dense sections, 14 atoms +
+      // 14 facts + 9 crawl topics = 37 sources) will scale roughly
+      // linearly with section + slot count. 32k gives ~2× headroom
+      // over paratots' empirical hit; Fable 5's max output cap is
+      // 128k so this is well within model limits. Bumped from 16k →
+      // 32k on 2026-06-12 before chaining home draft.
+      maxTokens:       32000,
     })
   } catch (e) {
     return mapGatewayError(res, e)
@@ -268,7 +280,9 @@ export default async function handler(req: any, res: any) {
         toolName:        TOOL_NAME,
         toolDescription: TOOL_DESCRIPTION,
         toolSchema,
-        maxTokens:       16000,
+        // Match initial-pass cap (32k). The repair pass re-emits the
+        // full draft, not a diff — same budget needed.
+        maxTokens:       32000,
       })
     } catch (e) {
       return mapGatewayError(res, e)
@@ -335,11 +349,13 @@ export default async function handler(req: any, res: any) {
       atom_resolution_rate: atomIdsRequested.size > 0
         ? Math.round((atomIdsResolved.size / atomIdsRequested.size) * 100) / 100
         : 1.0,
-      // Truncation is now per-pass max, not sum. A single call hitting
-      // 15500+ tokens (out of 16000 cap) likely truncated; two ~8k
-      // passes summing to 16k did not. The previous sum-based check
-      // false-fired on the first Fable 5 fire — caught 2026-06-12.
-      truncation_suspected: Math.max(initialPassOutputTokens, repairPassOutputTokens) >= 15500,
+      // Truncation is per-pass max, not sum (a single call hitting the
+      // cap likely truncated; two passes summing to it did not — the
+      // previous sum-based check false-fired on the first Fable 5 fire,
+      // caught 2026-06-12). Threshold = 97% of maxTokens. Bumped from
+      // 15500 (97% of old 16k cap) to 31000 (97% of new 32k cap) when
+      // the cap raised for home's 8-section density.
+      truncation_suspected: Math.max(initialPassOutputTokens, repairPassOutputTokens) >= 31000,
       // dash_strip is the drafter's own telemetry per SKILL.md. The
       // endpoint doesn't post-process to strip dashes (that's the
       // SKILL's hard rule for the drafter). We initialize empty here;
@@ -516,19 +532,11 @@ async function assembleEndpointInputs(
 
 function buildUserMessage(pageSlug: string, inputs: AssembledInputs): string {
   return [
-    // ── Strong, leading tool-call instruction ─────────────────────────
-    // Fable 5 via Vercel AI Gateway rejects forced tool_choice
-    // ("tool_choice forces tool use is not compatible with this
-    // model"). Helper uses tool_choice: 'auto' for fable-* models and
-    // relies on this prompt-level instruction to force the tool. The
-    // tools[] array carries only one tool — `emit_page_draft` — so
-    // "use the tool" is unambiguous.
-    `**You MUST respond by calling the \`${TOOL_NAME}\` tool with the page draft.**`,
-    `Do not respond with prose or text. Do not summarize. Do not ask`,
-    `clarifying questions. The only valid response is a tool call with`,
-    `the structured page draft. The tools[] array contains exactly one`,
-    `tool — call it.`,
-    ``,
+    // Forced tool_choice is back (claude-fable-5 was removed from the
+    // gateway catalog 2026-06-12; we swapped to claude-opus-4-8, which
+    // supports forced tool_choice without the prompt-level scaffolding
+    // Fable required). The dead scaffolding lived right here as 5
+    // "**You MUST call the tool**" lines — removed in the swap commit.
     `Draft the page with slug \`${pageSlug}\` per the SKILL above.`,
     ``,
     `## Page outline (what to draft against)`,

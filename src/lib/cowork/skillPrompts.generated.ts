@@ -1045,7 +1045,7 @@ For each candidate, include \`occurrences\` and \`sections\` arrays in the propo
   },
   'draft-page': {
     name:         'draft-page',
-    model:        'anthropic/claude-fable-5',
+    model:        'anthropic/claude-opus-4-8',
     version:      '1.0.0',
     contentHash:  'a0526dcf12d93b9a',
     references:   [

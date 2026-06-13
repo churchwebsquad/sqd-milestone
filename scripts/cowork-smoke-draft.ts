@@ -140,8 +140,9 @@ assertions.push({
 assertions.push({
   name:   'model matches frontmatter (not hardcoded in endpoint)',
   ok:     (() => {
-    // Vercel AI Gateway normalizes the version separator: `claude-fable-5`
-    // is unlikely to differ but apply the same tolerance as outline smoke.
+    // Vercel AI Gateway normalizes the version separator: gateway returns
+    // `claude-opus-4.8` (dot) for our `claude-opus-4-8` (dash) frontmatter.
+    // Apply the same tolerance as outline smoke.
     const norm = (s: string) => s.toLowerCase().replace(/\./g, '-')
     const got   = norm(typeof skillMeta?.model === 'string' ? skillMeta.model : '')
     const want  = norm(expectedBundle.model)
