@@ -97,11 +97,11 @@ async function buildManifestFromProject(sb: any, projectId: string): Promise<All
     sb.from('content_atoms')
       .select('id, topic, verbatim')
       .eq('web_project_id', projectId)
-      .in('status', ['active', 'draft']),
+      .in('status', ['approved', 'draft']),
     sb.from('church_facts')
       .select('id')
       .eq('web_project_id', projectId)
-      .in('status', ['active', 'draft']),
+      .in('status', ['approved', 'draft']),
     sb.from('web_project_topics')
       .select('topic_key, coverage_status')
       .eq('web_project_id', projectId),
@@ -433,7 +433,7 @@ async function buildDraftPageManifestFromProject(
     sb.from('content_atoms')
       .select('id, body, verbatim, topic')
       .eq('web_project_id', projectId)
-      .in('status', ['active', 'draft']),
+      .in('status', ['approved', 'draft']),
     sb.from('church_facts')
       .select('id')
       .eq('web_project_id', projectId),
@@ -539,7 +539,7 @@ async function buildPageOutlineManifestFromProject(
     sb.from('content_atoms')
       .select('id, topic, body, verbatim')
       .eq('web_project_id', projectId)
-      .in('status', ['active', 'draft']),
+      .in('status', ['approved', 'draft']),
     sb.from('church_facts')
       .select('id')
       .eq('web_project_id', projectId),

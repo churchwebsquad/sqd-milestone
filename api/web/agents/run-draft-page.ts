@@ -637,7 +637,7 @@ async function buildLocalValidationManifest(
     sb.from('content_atoms')
       .select('id, body, verbatim, topic')
       .eq('web_project_id', projectId)
-      .in('status', ['active', 'draft']),
+      .in('status', ['approved', 'draft']),
     sb.from('church_facts')
       .select('id')
       .eq('web_project_id', projectId),
