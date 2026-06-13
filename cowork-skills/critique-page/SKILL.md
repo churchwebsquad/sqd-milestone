@@ -82,6 +82,16 @@ hits. The verdict's `confidence_band` is computed from the 5 axes.
     barrier_misses:       Array<{ section_intent_id: string; persona: string; missing: string }>
   }
 
+  /** Deferred atoms — the drafter's structured "I couldn't use this"
+   *  signal. Every entry in `draft.sections[*].deferred_atoms[]` MUST
+   *  surface in your `directives[]` at severity ≥ warning. The note
+   *  cites the atom_id + reason; the strategist sees what was lost
+   *  and decides whether to add a template variant + re-fire or
+   *  accept the deferral. Escape hatches without visibility become
+   *  silent drops; this rule is what gives the deferral channel a
+   *  visibility cost. Added 2026-06-13 with the deferred-verbatim
+   *  contract fix. */
+
   /** AXIS 3: Source coverage — did every source the outline allocated
    *  to this page (atoms + facts + crawl topics) actually land in the
    *  copy? Renamed from atom_coverage 2026-06-12 with the three-source

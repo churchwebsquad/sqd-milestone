@@ -475,6 +475,34 @@ export const SOURCE_TREATMENTS = [
 
 export type SourceTreatment = typeof SOURCE_TREATMENTS[number]
 
+/** Why a drafter can refuse to use an outline-allocated atom in copy.
+ *  Closed enum to keep the deferral signal machine-readable and to
+ *  prevent the channel from absorbing every kind of model unease into
+ *  free-text rationalization. New reasons added here, not invented
+ *  per-call. */
+export const DEFERRED_ATOM_REASONS = [
+  /** atom.verbatim=true AND atom.body.length > slot.max_chars (or the
+   *  sub-field's max_chars for array slots). The most common case —
+   *  partner-sacred verbatim line that physically doesn't fit the slot
+   *  the outline picked. */
+  'exceeds_slot_cap',
+  /** Atom doesn't structurally fit ANY slot on the chosen archetype
+   *  (e.g. a multi-paragraph atom on an archetype with only one-line
+   *  slots). Different from exceeds_slot_cap — that's about length;
+   *  this is about shape. */
+  'no_compatible_slot',
+  /** Outline assigned a treatment incompatible with the atom's
+   *  verbatim flag (e.g. atom.verbatim=true with treatment='compress').
+   *  Drafter refuses to compress verbatim content. */
+  'treatment_conflicts_with_verbatim',
+  /** Atom's body is already covered verbatim by another atom in this
+   *  section — using both would create literal duplication. Drafter
+   *  uses one, defers the redundant one. */
+  'duplicate_content',
+] as const
+
+export type CoworkDeferredAtomReason = typeof DEFERRED_ATOM_REASONS[number]
+
 export interface CoworkPageDraft {
   page_slug: string
   sections: Array<{
@@ -492,6 +520,38 @@ export interface CoworkPageDraft {
      *  Validator checks each key against web_project_topics.topic_key.
      *  Defaults to []. */
     crawl_topics_used:   string[]
+    /** Atoms the outline routed to this section that the drafter
+     *  explicitly chose NOT to use, with a structured reason.
+     *  Mirrors the unresolved_inputs escape hatch from outline-page +
+     *  unresolved_sources from allocation: when the model can't
+     *  comply, give it a legal way to say so or it lies (the home-
+     *  draft fire of 2026-06-13 showed the model keeping atoms in
+     *  atoms_used while voice_notes confessed the deferral).
+     *
+     *  Three contract guarantees the validator enforces:
+     *    1. Entries carry STRUCTURED fields, never free text alone —
+     *       atom_id, slot_hint where it was supposed to land, a
+     *       reason from CoworkDeferredAtomReason, and a
+     *       proposed_resolution the strategist can act on.
+     *    2. `deferred_atoms[].atom_id` and `atoms_used[]` are
+     *       MUTUALLY EXCLUSIVE per section — deferred means actually
+     *       not in copy. (validator: atom_in_both_used_and_deferred)
+     *    3. Deferred atoms surface in the critique verdict — every
+     *       escape hatch we've added works because it has a
+     *       visibility cost; a deferral channel without one becomes
+     *       the new silent drop. The critique-page SKILL teaches
+     *       "every deferred atom needs a directive citing it." */
+    deferred_atoms:      Array<{
+      atom_id:             string
+      /** The slot the outline tried to land this in. */
+      slot_hint:           string
+      /** Why the drafter couldn't use the atom in copy. Closed enum. */
+      reason:              CoworkDeferredAtomReason
+      /** Concrete next action the strategist can take. ≤200 chars.
+       *  Required (not optional) — escape hatches without an
+       *  actionable resolution turn into silent drops. */
+      proposed_resolution: string
+    }>
   }>
   deviation_note: string | null            // if structure differs from the outline, explain
   validation: {

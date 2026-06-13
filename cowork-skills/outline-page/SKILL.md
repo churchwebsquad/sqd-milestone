@@ -269,6 +269,43 @@ INCORRECT outline output (will trip `voice_atom_in_assignments`):
 - `atom_assignments` includes `{atom_id: 'be43f59d-…',
   slot_hint: 'primary_heading'}` — voice atom in assignments = fail.
 
+## Verbatim atoms — pick a slot that can hold the body, or surface it
+
+Verbatim atoms (`verbatim: true`) MUST be routed to a slot whose
+`max_chars` can hold the body length. The validator checks
+`atom.body.length <= slot.max_chars` at outline time and fails
+`verbatim_atom_exceeds_slot_cap` on any binding where the verbatim
+body wouldn't fit. This regresses a rule the allocation SKILL already
+states ("a heading source must be a short, lift-able phrase — flag
+if not"): the outline layer is where the rule has to be enforced as
+code because outline is where slot-binding happens.
+
+**The decision tree:**
+
+1. Can ANY slot on the chosen archetype hold the verbatim body?
+   - YES → assign it there. Don't squeeze it into a slot whose
+     max_chars is too small in the hope the drafter can compress —
+     verbatim means verbatim, the drafter can't.
+2. Can a DIFFERENT archetype on this section's flow_role hold it?
+   - YES → switch archetype. The flow_role is the constraint;
+     the archetype is the lever.
+3. None of the above?
+   - Declare in `unresolved_inputs[]` with `what: "verbatim atom
+     <id> body (N chars) won't fit any slot on archetype <X> — needs
+     a long-heading template variant OR route to body/quote slot
+     with a derived short heading", where: "sections[ix] slot
+     <slot_name>"`. The strategist sees this and decides between
+     adding a template variant + re-firing, OR splitting the verbatim
+     into a derived short heading + the full body in a quote slot.
+
+**The home failure of 2026-06-13.** The outline routed Paradox's
+verbatim x_factor and a 121-char prose_snippet to `primary_heading`
+(max 100). The drafter had no legal way out — verbatim discipline
+forbids compression, and the contract didn't yet have a
+`deferred_atoms` channel. So the model paraphrased + confessed in
+voice_notes. The validator caught the paraphrase. Fixing the assignment
+at outline time prevents this whole class of downstream lie.
+
 ## Three source kinds, three assignment arrays — route by kind, never cross-route
 
 The allocation routes three kinds of source to each section:

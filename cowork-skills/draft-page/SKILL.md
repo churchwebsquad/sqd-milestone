@@ -245,6 +245,47 @@ arrays:
   Atom treatments stay as before (use_as_is, lift_phrase, compress,
   expand, reorder, omit).
 
+## Deferred atoms — the structured escape hatch (never rewrite verbatim)
+
+Sometimes the outline routes an atom you can't legally use in copy.
+The most common case: a verbatim atom (`verbatim: true`) whose body is
+longer than the slot's `max_chars`. You CANNOT compress it (verbatim
+means verbatim). You also cannot drop it silently (verbatim atoms in
+the outline's `atom_assignments` are checked by the validator).
+
+The contract gives you a structured way to say "I couldn't use this":
+`section.deferred_atoms[]`. Each entry has four required fields:
+
+| Field | What it carries |
+|---|---|
+| `atom_id` | The atom that couldn't land (real UUID from inputs). |
+| `slot_hint` | The slot the outline assigned it to (e.g. `primary_heading`). |
+| `reason` | Closed enum — `exceeds_slot_cap` / `no_compatible_slot` / `treatment_conflicts_with_verbatim` / `duplicate_content`. |
+| `proposed_resolution` | 10-200 chars. CONCRETE next step the strategist can act on. |
+
+**Three iron rules:**
+
+1. `deferred_atoms[].atom_id` and `atoms_used[]` are MUTUALLY
+   EXCLUSIVE per section. Deferred = NOT in copy. Claiming the atom
+   is in BOTH is exactly the lie this channel exists to prevent.
+2. `proposed_resolution` is required and ≥ 10 chars. An escape hatch
+   without an actionable next step turns into a silent drop — the
+   strategist would never know what to do. Examples:
+   - "Needs long-heading template variant on canonical-templates."
+   - "Split into derived short heading + full body in quote slot."
+   - "Route the atom to body slot via outline re-fire; current
+     heading slot can't hold 121 chars."
+3. Use this channel ONLY for the four enum reasons. Don't dump every
+   model unease into it. If you're tempted to defer because the atom
+   "doesn't feel right for this section" — that's a critique
+   judgment, not a deferral; write the slot anyway with what you can,
+   and let critique-page flag it.
+
+**Pattern:** verbatim atom won't fit slot → defer + write a placeholder
+or derived heading from voice anchor → strategist sees both the
+deferral AND your fallback. They decide whether to add a template
+variant + re-fire, or accept the derived heading.
+
 ## Hard rules
 
 - **EVERY required slot in every section's template MUST have a

@@ -11,7 +11,8 @@
       "atoms_used": [
         "00000000-0000-0000-0000-000000badbad",
         "2528ca66-ceca-47ee-80ff-a3d06bb58fb9"
-      ]
+      ],
+      "deferred_atoms": []
     },
     {
       "archetype": "content_image_text_a",
@@ -37,7 +38,8 @@
       "atoms_used": [
         "73a9658c-2a73-472f-aeed-f9b21cb70532",
         "be43f59d-8138-4b35-9c6d-81006776d0ad"
-      ]
+      ],
+      "deferred_atoms": []
     },
     {
       "archetype": "content_image_text_b",
@@ -59,7 +61,8 @@
       },
       "atoms_used": [
         "be43f59d-8138-4b35-9c6d-81006776d0ad"
-      ]
+      ],
+      "deferred_atoms": []
     },
     {
       "archetype": "cta_simple",
@@ -76,7 +79,8 @@
       },
       "atoms_used": [
         "be43f59d-8138-4b35-9c6d-81006776d0ad"
-      ]
+      ],
+      "deferred_atoms": []
     },
     {
       "archetype": "cta_callout",
@@ -94,7 +98,8 @@
       "atoms_used": [
         "73a9658c-2a73-472f-aeed-f9b21cb70532",
         "be43f59d-8138-4b35-9c6d-81006776d0ad"
-      ]
+      ],
+      "deferred_atoms": []
     }
   ],
   "deviation_note": "Repair pass: removed the 'voice_notes_by_slot' key from every section's copy object (it is not a declared slot on any archetype); per-slot drafter notes now live in each section's voice_notes string. No copy text changed. As flagged in the outline's unresolved_inputs, fact values (Saturdays 9:15 AM, ages 0-4, 51 W Olive Redlands, Donna Hadley / Teacher Donna, info@paradoxredlands.com) are woven directly into sections 2, 3, and 4 rather than referenced as atoms. The 'Come as you are' voice anchor for section 3 was honored in posture but not quoted verbatim because the phrase appears on the mechanical church-cliche ban list.",

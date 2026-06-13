@@ -537,7 +537,7 @@ async function buildPageOutlineManifestFromProject(
   // in validatePageOutline).
   const [atomsRes, factsRes, topicsRes] = await Promise.all([
     sb.from('content_atoms')
-      .select('id, topic')
+      .select('id, topic, body, verbatim')
       .eq('web_project_id', projectId)
       .in('status', ['active', 'draft']),
     sb.from('church_facts')
@@ -555,10 +555,15 @@ async function buildPageOutlineManifestFromProject(
 
   const atom_ids: string[] = []
   const atom_topics: Record<string, string> = {}
+  const atom_bodies: Record<string, { body: string; verbatim: boolean }> = {}
   for (const row of (atomsRes.data ?? [])) {
     const id = String(row.id)
     atom_ids.push(id)
     atom_topics[id] = String(row.topic ?? '')
+    atom_bodies[id] = {
+      body:     String(row.body ?? ''),
+      verbatim: Boolean(row.verbatim),
+    }
   }
   const fact_ids: string[]         = (factsRes.data  ?? []).map((r: any) => String(r.id))
   const crawl_topic_keys: string[] = (topicsRes.data ?? []).map((r: any) => String(r.topic_key))
@@ -566,6 +571,7 @@ async function buildPageOutlineManifestFromProject(
   return {
     atom_ids,
     atom_topics,
+    atom_bodies,
     fact_ids,
     crawl_topic_keys,
     canonical_templates,

@@ -38,10 +38,12 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import type { CoworkPageDraft } from '../../types/coworkBundle.js'
+import { DEFERRED_ATOM_REASONS, type CoworkPageDraft } from '../../types/coworkBundle.js'
 import type {
   CanonicalTemplateManifest,
 } from './validatePageOutline.js'
+
+const DEFERRED_ATOM_REASONS_SET = new Set<string>(DEFERRED_ATOM_REASONS)
 
 /** Topics whose atoms are STYLISTIC GUIDANCE, not slot content. A
  *  voice_rule says "don't write 'walk with God' — write 'walk
@@ -271,6 +273,66 @@ export function validateDraftPage(
       }
     }
 
+    // deferred_atoms — the drafter's structured escape hatch when an
+    // outline-allocated atom can't be used in copy. Three contract
+    // guarantees enforced here:
+    //   1. STRUCTURED entries: each item has atom_id + slot_hint +
+    //      reason (closed enum) + proposed_resolution (non-empty). The
+    //      schema enforces shape; the validator enforces semantics.
+    //   2. MUTUAL EXCLUSION with atoms_used. Deferred means not in
+    //      copy — claiming both is a lie. Fails atom_in_both_used_and_
+    //      deferred.
+    //   3. REAL atom_id (validator's standard membership check).
+    //
+    // Default to [] when missing so pre-2026-06-13 fixtures still
+    // validate without erroring.
+    const deferredAtoms = Array.isArray((s as any).deferred_atoms) ? (s as any).deferred_atoms as Array<any> : []
+    const deferredAtomIds = new Set<string>()
+    for (const [dix, de] of deferredAtoms.entries()) {
+      const dLabel = `${label}.deferred_atoms[${dix}]`
+      const did = String(de?.atom_id ?? '').trim()
+      if (!did) {
+        fail('deferred_atom_missing_id', `${dLabel} missing atom_id`)
+        continue
+      }
+      if (!atomSet.has(did)) {
+        fail('unknown_atom_ref',
+          `${dLabel} references atom_id='${did}' not present in project's content_atoms`)
+      }
+      const reason = String(de?.reason ?? '')
+      if (!DEFERRED_ATOM_REASONS_SET.has(reason)) {
+        fail('bad_deferred_atom_reason',
+          `${dLabel} reason='${reason}' not in DEFERRED_ATOM_REASONS (${DEFERRED_ATOM_REASONS.join('|')})`)
+      }
+      const slotHint = String(de?.slot_hint ?? '').trim()
+      if (!slotHint) {
+        fail('deferred_atom_missing_slot_hint',
+          `${dLabel} slot_hint required — names which outline-assigned slot was being filled when the deferral happened`)
+      }
+      const resolution = String(de?.proposed_resolution ?? '').trim()
+      if (resolution.length < 10) {
+        fail('deferred_atom_missing_resolution',
+          `${dLabel} proposed_resolution required (≥10 chars) — escape hatches without an actionable next step turn into silent drops`)
+      }
+      if (resolution.length > 200) {
+        fail('deferred_atom_resolution_too_long',
+          `${dLabel} proposed_resolution is ${resolution.length} chars > 200 cap`)
+      }
+      deferredAtomIds.add(did)
+    }
+
+    // Mutual exclusion: deferred ∩ used = ∅
+    const usedSet = new Set(atomsUsed)
+    for (const did of deferredAtomIds) {
+      if (usedSet.has(did)) {
+        fail('atom_in_both_used_and_deferred',
+          `${label} atom_id='${did}' appears in BOTH atoms_used and deferred_atoms — deferred means actually NOT in copy; claiming both is the lie this channel exists to prevent`)
+      }
+    }
+    // Stash for the verbatim check below — it skips atoms the section
+    // explicitly deferred.
+    ;(s as any).__deferredAtomIds = deferredAtomIds
+
     // voice_notes presence (≥10 chars, drafter MUST name the imitation
     // anchor or the section's voice is untraceable)
     const vn = String(s.voice_notes ?? '').trim()
@@ -299,13 +361,21 @@ export function validateDraftPage(
     walkCopyForStrings(draftSection.copy, '', sectionStringsArr)
     const concat = sectionStringsArr.map(s => s.value).join('\n')
     const uniqueAtomIds = Array.from(new Set(os.atom_ids))
+    // Atoms this section declared as deferred — the drafter's
+    // structured "I couldn't use this, here's why" signal. Skipping
+    // the verbatim-substring check for these closes the contract gap
+    // the home-draft fire of 2026-06-13 exposed: previously the
+    // validator iterated the outline's atom_ids and demanded literal
+    // presence regardless of the drafter's explicit deferral.
+    const deferredAtomIds: Set<string> = (draftSection as any).__deferredAtomIds ?? new Set<string>()
     for (const aid of uniqueAtomIds) {
       const entry = mf.verbatim_atoms[aid]
       if (!entry) continue                                       // not verbatim
       if (VOICE_TOPICS_SKIP_VERBATIM.has(entry.topic)) continue   // voice atoms are imitated, not literal
+      if (deferredAtomIds.has(aid)) continue                      // drafter explicitly deferred via deferred_atoms[]
       if (!concat.includes(entry.body)) {
         fail('verbatim_atom_dropped',
-          `draft[${os.section_index}]: verbatim atom ${aid} (topic=${entry.topic}) body not present in section copy — verbatim atoms MUST appear exactly (no compression, no rewording)`)
+          `draft[${os.section_index}]: verbatim atom ${aid} (topic=${entry.topic}) body not present in section copy — verbatim atoms MUST appear exactly (no compression, no rewording). If the atom can't fit any slot, declare it in deferred_atoms[] with reason='exceeds_slot_cap' (or 'no_compatible_slot') and a proposed_resolution.`)
       }
     }
   }

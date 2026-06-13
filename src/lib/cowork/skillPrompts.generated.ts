@@ -372,7 +372,7 @@ Final status write: \`{ status: "done" }\` OR \`{ status: "failed", last_error }
     name:         'critique-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  'f4c174be3740873c',
+    contentHash:  '687c8b7862fa9cb9',
     references:   [
       'cowork-skills/critique-page/references/audit-criteria.md',
     ],
@@ -443,6 +443,16 @@ hits. The verdict's \`confidence_band\` is computed from the 5 axes.
     /** Sections where the persona's barrier was NOT addressed. */
     barrier_misses:       Array<{ section_intent_id: string; persona: string; missing: string }>
   }
+
+  /** Deferred atoms — the drafter's structured "I couldn't use this"
+   *  signal. Every entry in \`draft.sections[*].deferred_atoms[]\` MUST
+   *  surface in your \`directives[]\` at severity ≥ warning. The note
+   *  cites the atom_id + reason; the strategist sees what was lost
+   *  and decides whether to add a template variant + re-fire or
+   *  accept the deferral. Escape hatches without visibility become
+   *  silent drops; this rule is what gives the deferral channel a
+   *  visibility cost. Added 2026-06-13 with the deferred-verbatim
+   *  contract fix. */
 
   /** AXIS 3: Source coverage — did every source the outline allocated
    *  to this page (atoms + facts + crawl topics) actually land in the
@@ -1047,7 +1057,7 @@ For each candidate, include \`occurrences\` and \`sections\` arrays in the propo
     name:         'draft-page',
     model:        'anthropic/claude-opus-4-8',
     version:      '1.0.0',
-    contentHash:  'a0526dcf12d93b9a',
+    contentHash:  'a4f833d65375f7f1',
     references:   [
       'cowork-skills/canonical-templates.json',
     ],
@@ -1282,6 +1292,47 @@ arrays:
     \`summarize\` (distill).
   Atom treatments stay as before (use_as_is, lift_phrase, compress,
   expand, reorder, omit).
+
+## Deferred atoms — the structured escape hatch (never rewrite verbatim)
+
+Sometimes the outline routes an atom you can't legally use in copy.
+The most common case: a verbatim atom (\`verbatim: true\`) whose body is
+longer than the slot's \`max_chars\`. You CANNOT compress it (verbatim
+means verbatim). You also cannot drop it silently (verbatim atoms in
+the outline's \`atom_assignments\` are checked by the validator).
+
+The contract gives you a structured way to say "I couldn't use this":
+\`section.deferred_atoms[]\`. Each entry has four required fields:
+
+| Field | What it carries |
+|---|---|
+| \`atom_id\` | The atom that couldn't land (real UUID from inputs). |
+| \`slot_hint\` | The slot the outline assigned it to (e.g. \`primary_heading\`). |
+| \`reason\` | Closed enum — \`exceeds_slot_cap\` / \`no_compatible_slot\` / \`treatment_conflicts_with_verbatim\` / \`duplicate_content\`. |
+| \`proposed_resolution\` | 10-200 chars. CONCRETE next step the strategist can act on. |
+
+**Three iron rules:**
+
+1. \`deferred_atoms[].atom_id\` and \`atoms_used[]\` are MUTUALLY
+   EXCLUSIVE per section. Deferred = NOT in copy. Claiming the atom
+   is in BOTH is exactly the lie this channel exists to prevent.
+2. \`proposed_resolution\` is required and ≥ 10 chars. An escape hatch
+   without an actionable next step turns into a silent drop — the
+   strategist would never know what to do. Examples:
+   - "Needs long-heading template variant on canonical-templates."
+   - "Split into derived short heading + full body in quote slot."
+   - "Route the atom to body slot via outline re-fire; current
+     heading slot can't hold 121 chars."
+3. Use this channel ONLY for the four enum reasons. Don't dump every
+   model unease into it. If you're tempted to defer because the atom
+   "doesn't feel right for this section" — that's a critique
+   judgment, not a deferral; write the slot anyway with what you can,
+   and let critique-page flag it.
+
+**Pattern:** verbatim atom won't fit slot → defer + write a placeholder
+or derived heading from voice anchor → strategist sees both the
+deferral AND your fallback. They decide whether to add a template
+variant + re-fire, or accept the derived heading.
 
 ## Hard rules
 
@@ -2413,7 +2464,7 @@ personas; use the names exactly as stage_1 emitted them.
     name:         'outline-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  'f43bb225994ec600',
+    contentHash:  '9dd9d53582ec959f',
     references:   [
       'cowork-skills/canonical-templates.json',
       'cowork-skills/page-outlines-by-ministry-model.md',
@@ -2671,6 +2722,43 @@ CORRECT outline output for section 2:
 INCORRECT outline output (will trip \`voice_atom_in_assignments\`):
 - \`atom_assignments\` includes \`{atom_id: 'be43f59d-…',
   slot_hint: 'primary_heading'}\` — voice atom in assignments = fail.
+
+## Verbatim atoms — pick a slot that can hold the body, or surface it
+
+Verbatim atoms (\`verbatim: true\`) MUST be routed to a slot whose
+\`max_chars\` can hold the body length. The validator checks
+\`atom.body.length <= slot.max_chars\` at outline time and fails
+\`verbatim_atom_exceeds_slot_cap\` on any binding where the verbatim
+body wouldn't fit. This regresses a rule the allocation SKILL already
+states ("a heading source must be a short, lift-able phrase — flag
+if not"): the outline layer is where the rule has to be enforced as
+code because outline is where slot-binding happens.
+
+**The decision tree:**
+
+1. Can ANY slot on the chosen archetype hold the verbatim body?
+   - YES → assign it there. Don't squeeze it into a slot whose
+     max_chars is too small in the hope the drafter can compress —
+     verbatim means verbatim, the drafter can't.
+2. Can a DIFFERENT archetype on this section's flow_role hold it?
+   - YES → switch archetype. The flow_role is the constraint;
+     the archetype is the lever.
+3. None of the above?
+   - Declare in \`unresolved_inputs[]\` with \`what: "verbatim atom
+     <id> body (N chars) won't fit any slot on archetype <X> — needs
+     a long-heading template variant OR route to body/quote slot
+     with a derived short heading", where: "sections[ix] slot
+     <slot_name>"\`. The strategist sees this and decides between
+     adding a template variant + re-firing, OR splitting the verbatim
+     into a derived short heading + the full body in a quote slot.
+
+**The home failure of 2026-06-13.** The outline routed Paradox's
+verbatim x_factor and a 121-char prose_snippet to \`primary_heading\`
+(max 100). The drafter had no legal way out — verbatim discipline
+forbids compression, and the contract didn't yet have a
+\`deferred_atoms\` channel. So the model paraphrased + confessed in
+voice_notes. The validator caught the paraphrase. Fixing the assignment
+at outline time prevents this whole class of downstream lie.
 
 ## Three source kinds, three assignment arrays — route by kind, never cross-route
 

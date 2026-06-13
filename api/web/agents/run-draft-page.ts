@@ -36,6 +36,7 @@ import { createClient } from '@supabase/supabase-js'
 
 import { callGateway, type ToolSchema } from '../../srp/_lib/aiGateway.js'
 import { compactCrawlTopics } from '../../../src/lib/cowork/compactCrawlTopic.js'
+import { DEFERRED_ATOM_REASONS } from '../../../src/types/coworkBundle.js'
 import { resolveCoworkSkill } from './_lib/resolveCoworkSkill.js'
 import { BUNDLE_VERSION } from '../../../src/types/coworkBundle.js'
 import {
@@ -113,7 +114,7 @@ function buildToolSchema(
           type: 'object',
           additionalProperties: false,
           required: ['archetype', 'voice_notes', 'copy',
-                     'atoms_used', 'facts_used', 'crawl_topics_used'],
+                     'atoms_used', 'facts_used', 'crawl_topics_used', 'deferred_atoms'],
           properties: {
             archetype:   { type: 'string' },
             // voice_notes is critique-page's per-section receipt of
@@ -134,6 +135,26 @@ function buildToolSchema(
             // audit trail traces what each section pulled from.
             facts_used:        { type: 'array', items: factIdSchema },
             crawl_topics_used: { type: 'array', items: crawlKeySchema },
+            // deferred_atoms — the structured escape hatch when the
+            // outline assigns an atom the drafter can't legally use in
+            // copy (verbatim too long, no compatible slot, treatment
+            // conflict). Closed enum on reason; non-empty proposed_-
+            // resolution; mutually exclusive with atoms_used. Added
+            // 2026-06-13 to close the home-draft contract gap.
+            deferred_atoms: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['atom_id', 'slot_hint', 'reason', 'proposed_resolution'],
+                properties: {
+                  atom_id:             atomIdSchema,
+                  slot_hint:           { type: 'string', minLength: 1, maxLength: 80 },
+                  reason:              { type: 'string', enum: [...DEFERRED_ATOM_REASONS] },
+                  proposed_resolution: { type: 'string', minLength: 10, maxLength: 200 },
+                },
+              },
+            },
           },
         },
       },
@@ -314,10 +335,12 @@ export default async function handler(req: any, res: any) {
     }
   }
   const atomIdsResolved = new Set<string>()
+  let deferredAtomCount = 0
   for (const s of (gatewayResult.args.sections ?? []) as Array<any>) {
     for (const aid of (s?.atoms_used ?? [])) {
       if (aid) atomIdsResolved.add(String(aid))
     }
+    if (Array.isArray(s?.deferred_atoms)) deferredAtomCount += s.deferred_atoms.length
   }
 
   const outlineWithMeta = {
@@ -349,6 +372,10 @@ export default async function handler(req: any, res: any) {
       atom_resolution_rate: atomIdsRequested.size > 0
         ? Math.round((atomIdsResolved.size / atomIdsRequested.size) * 100) / 100
         : 1.0,
+      /** Total atoms the drafter explicitly deferred via the
+       *  structured escape hatch. Surfaces in the critique input + the
+       *  strategist view — visibility cost on the deferral channel. */
+      deferred_atom_count: deferredAtomCount,
       // Truncation is per-pass max, not sum (a single call hitting the
       // cap likely truncated; two passes summing to it did not — the
       // previous sum-based check false-fired on the first Fable 5 fire,
@@ -574,14 +601,30 @@ function buildUserMessage(pageSlug: string, inputs: AssembledInputs): string {
     '```',
     ``,
     `Now call \`${TOOL_NAME}\` with the page draft.`,
-    `Tracking rule: every section emits three arrays — atoms_used, facts_used,`,
-    `crawl_topics_used — each listing exactly the ids/keys whose content`,
-    `you wove into that section's copy. Empty array is fine for a kind`,
-    `you didn't consume in a section; missing array fails the schema.`,
-    `Cross-routing ids (atom UUID in facts_used, etc.) trips the validator.`,
+    `Tracking rule: every section emits three "used" arrays — atoms_used,`,
+    `facts_used, crawl_topics_used — each listing exactly the ids/keys`,
+    `whose content you wove into that section's copy. Empty array is fine`,
+    `for a kind you didn't consume in a section; missing array fails the`,
+    `schema. Cross-routing ids (atom UUID in facts_used, etc.) trips the`,
+    `validator.`,
+    ``,
     `Verbatim atoms (verbatim=true) MUST appear EXACTLY as a substring`,
     `of the section's copy — no compression, no rewording. The validator`,
     `does a substring check.`,
+    ``,
+    `If a verbatim atom physically can't fit (body longer than slot's`,
+    `max_chars, no compatible slot on the archetype, treatment conflicts`,
+    `with verbatim flag): declare it in \`deferred_atoms[]\` with a`,
+    `closed-enum reason and a concrete \`proposed_resolution\` the`,
+    `strategist can act on (e.g. "needs long-heading template variant"`,
+    `or "split into derived short heading + full body in quote slot").`,
+    `Rules:`,
+    `  - deferred_atoms[].atom_id and atoms_used MUST be mutually exclusive`,
+    `    (deferred means actually NOT in copy; claiming both is a lie).`,
+    `  - reason ∈ {${DEFERRED_ATOM_REASONS.join(', ')}}.`,
+    `  - proposed_resolution is required (10-200 chars), not optional.`,
+    `Never rewrite a verbatim atom to "make it fit" — the contract has a`,
+    `legal way to say "this can't land," and the strategist sees it.`,
   ].join('\n')
 }
 

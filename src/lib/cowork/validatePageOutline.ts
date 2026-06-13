@@ -58,6 +58,18 @@ export interface PageOutlineValidationManifest {
    *  flagged. Topic-aware skip in the draft validator is the permissive
    *  fix; this check is the architectural fix. */
   atom_topics: Record<string, string>
+  /** atom_id → {body, verbatim} for active+draft atoms. The validator
+   *  reads body.length for verbatim atoms and fails any assignment
+   *  whose slot's max_chars can't hold the body — the home-draft fire
+   *  of 2026-06-13 showed the outline routing a 121-char verbatim
+   *  prose_snippet to a 100-cap primary_heading. That invalid binding
+   *  is detectable at OUTLINE TIME from data both layers already
+   *  hold; catching it here, before any draft money is spent, is a
+   *  regression of doctrine the allocation SKILL already states
+   *  ("a heading source must be a short, lift-able phrase, ≤100
+   *  chars — flag it"). The outline layer just never inherited the
+   *  check as code. */
+  atom_bodies: Record<string, { body: string; verbatim: boolean }>
   /** church_facts.id values the project has. Restored 2026-06-12 after
    *  home failed because outline tried to bind facts but had nowhere to
    *  put them (model routed fact UUIDs into atom_assignments[].atom_id).
@@ -220,6 +232,28 @@ export function validatePageOutline(
 
       const topLevelSlot = resolveSlotHint(assignLabel, a.slot_hint)
       if (topLevelSlot) slotsCovered.add(topLevelSlot)
+
+      // Verbatim-vs-slot-cap check (regression of the empty-slot
+      // doctrine from allocation: "a heading source must be a short,
+      // lift-able phrase — flag if not"). Detect at outline time, when
+      // the binding is made, from data both layers already hold. Catches
+      // the 2026-06-13 home-draft failure mode upstream: outline routed
+      // a 121-char verbatim prose_snippet to a 100-cap primary_heading
+      // and the drafter was forced to either lie (paraphrase + flag) or
+      // surface as deferred_atoms. Better: never let that assignment
+      // land in the first place.
+      const body = mf.atom_bodies?.[a.atom_id]
+      if (body?.verbatim && topLevelSlot) {
+        const slotDef = slotDefs[topLevelSlot]
+        const subMatch = String(a.slot_hint ?? '').match(/\[\d+\]\.([\w-]+)$/)
+        const maxChars = subMatch && slotDef?.item_subfields?.[subMatch[1]]?.max_chars !== undefined
+          ? slotDef.item_subfields[subMatch[1]].max_chars
+          : slotDef?.max_chars
+        if (typeof maxChars === 'number' && body.body.length > maxChars) {
+          fail('verbatim_atom_exceeds_slot_cap',
+            `${assignLabel} routes verbatim atom_id='${a.atom_id}' (body.length=${body.body.length}) to slot '${a.slot_hint}' (max_chars=${maxChars}). Verbatim atoms can't be compressed — either pick an archetype/slot whose max_chars can hold the body, or declare in unresolved_inputs (e.g. "verbatim x_factor body too long for any heading slot — needs body/quote slot or a long-heading template variant").`)
+        }
+      }
     }
 
     // fact_assignments — every fact_id MUST resolve; slot_hint MUST
