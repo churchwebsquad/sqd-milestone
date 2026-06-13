@@ -38,10 +38,17 @@ export default async function handler(req: any, res: any) {
   // Pull the project inventory in parallel. Cheaper than four sequential round-trips.
   const [pillarsRes, factsRes, topicsRes, ccRes] = await Promise.all([
     sb.from('content_atoms')
-      .select('id, topic, body, status, source_kind, source_ref, verbatim, duplicate_of')
+      // duplicate_of dropped from select 2026-06-13 — the column was
+      // referenced in anticipation of a dedup feature that never landed
+      // (no downstream reader). Re-add when content_atoms gains the
+      // column AND a dedup writer populates it.
+      .select('id, topic, body, status, source_kind, source_ref, verbatim')
       .eq('web_project_id', projectId),
     sb.from('church_facts')
-      .select('id, topic, data, status, metadata')
+      // metadata dropped from select 2026-06-13 — same dead-reference
+      // pattern as duplicate_of on content_atoms above. Column doesn't
+      // exist on the live schema; nothing in this endpoint reads it.
+      .select('id, topic, data, status')
       .eq('web_project_id', projectId),
     sb.from('web_project_topics')
       .select('topic_key, topic_label, coverage_status, passages, items')

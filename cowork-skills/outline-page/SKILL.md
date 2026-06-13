@@ -280,31 +280,44 @@ states ("a heading source must be a short, lift-able phrase — flag
 if not"): the outline layer is where the rule has to be enforced as
 code because outline is where slot-binding happens.
 
-**The decision tree:**
+**The decision tree (banked 2026-06-13 strategist decision: long
+partner-sacred lines belong in body/quote slots with a derived short
+heading — DO NOT add long-heading template variants):**
 
-1. Can ANY slot on the chosen archetype hold the verbatim body?
-   - YES → assign it there. Don't squeeze it into a slot whose
-     max_chars is too small in the hope the drafter can compress —
-     verbatim means verbatim, the drafter can't.
-2. Can a DIFFERENT archetype on this section's flow_role hold it?
+1. Can the verbatim body fit a `body`, `quote`, or other long-cap
+   slot on the chosen archetype? Look beyond `primary_heading` /
+   `tagline` — those are SHORT slots by design.
+   - YES → assign the verbatim atom there. Set the section's
+     `voice_anchor` to a SHORT motif from the same atom's body (a
+     2-5 word phrase the drafter can use as the heading). The
+     drafter then DERIVES the heading from voice_anchor while keeping
+     the full verbatim body in the long slot.
+2. Can a DIFFERENT archetype on this section's flow_role hold it
+   in a body/quote slot?
    - YES → switch archetype. The flow_role is the constraint;
      the archetype is the lever.
 3. None of the above?
-   - Declare in `unresolved_inputs[]` with `what: "verbatim atom
-     <id> body (N chars) won't fit any slot on archetype <X> — needs
-     a long-heading template variant OR route to body/quote slot
-     with a derived short heading", where: "sections[ix] slot
-     <slot_name>"`. The strategist sees this and decides between
-     adding a template variant + re-firing, OR splitting the verbatim
-     into a derived short heading + the full body in a quote slot.
+   - Declare in `unresolved_inputs[]` with what+where pair. Last
+     resort.
 
-**The home failure of 2026-06-13.** The outline routed Paradox's
-verbatim x_factor and a 121-char prose_snippet to `primary_heading`
-(max 100). The drafter had no legal way out — verbatim discipline
-forbids compression, and the contract didn't yet have a
-`deferred_atoms` channel. So the model paraphrased + confessed in
-voice_notes. The validator caught the paraphrase. Fixing the assignment
-at outline time prevents this whole class of downstream lie.
+**The derived-heading pattern.** When you route a long verbatim atom
+to a body slot, the heading slot still needs SOMETHING — that's where
+voice_anchor earns its keep. The atom's body might be a full sentence
+("Where progressive thinking and Christian tradition meet, neither
+one watered down" — 120 chars); the voice_anchor for the section is
+a derived phrase ("Progressive thinking, Christian tradition" — 40
+chars) the drafter uses as the heading. The full verbatim line still
+appears, verbatim, in the body. Partner voice stays intact; cap
+constraints stay honored; no template variants needed.
+
+**The home failure of 2026-06-13 + the 2026-06-13 fix.** The outline
+routed Paradox's verbatim x_factor and a 121-char prose_snippet to
+`primary_heading` (max 100). The drafter had no legal way out. After
+the validator + deferred_atoms channel + this decision-tree update:
+the outline routes the verbatim atoms to body slots, sets voice_anchor
+to derived phrases, and the drafter writes derived headings while
+preserving the full verbatim text in body. No deferrals needed; no
+template variants needed.
 
 ## Three source kinds, three assignment arrays — route by kind, never cross-route
 
