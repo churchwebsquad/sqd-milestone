@@ -239,7 +239,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
   }, [state])
 
   return (
-    <div className="p-4 max-w-[920px] mx-auto">
+    <div className="p-6 max-w-[960px] mx-auto">
       <Header
         readiness={readiness}
         readinessLoading={readinessLoading}
@@ -249,14 +249,14 @@ export function CoworkWorkspace({ project, onChange }: Props) {
       />
 
       {error && (
-        <div className="mb-3 rounded-md border border-wm-danger bg-wm-danger-bg px-3 py-2 text-[12px] text-wm-danger">
+        <div className="mb-4 rounded-lg border border-wm-danger bg-wm-danger-bg px-4 py-3 text-[13px] text-wm-danger">
           {error}
         </div>
       )}
 
       {lastResult && (
         <div className={
-          'mb-3 rounded-md px-3 py-2 text-[12px] ' +
+          'mb-4 rounded-lg px-4 py-3 text-[13px] ' +
           (lastResult.ok
             ? 'border border-wm-success bg-wm-success-bg text-wm-success'
             : 'border border-wm-danger bg-wm-danger-bg text-wm-danger')
@@ -265,7 +265,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         </div>
       )}
 
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-4">
         {COWORK_STEPS.map(step => (
           <StepCard
             key={step.key}
@@ -318,42 +318,76 @@ function Header({ readiness, readinessLoading, overallStats, onRefresh, refreshi
     warnings.length > 0     ? `${warnings.length} warning${warnings.length === 1 ? '' : 's'}` :
                               'Ready to ship'
 
+  // Project-level steps total = 11 (steps 1-11). "Done" includes
+  // aggregate-info steps that have inventory.
+  const totalSteps    = 11
+  const completedPct  = overallStats ? Math.round((overallStats.done / totalSteps) * 100) : 0
+
   return (
-    <section className="mb-5">
-      <div className="flex items-end justify-between gap-3 flex-wrap mb-2">
+    <section className="mb-6">
+      {/* Title + refresh */}
+      <div className="flex items-end justify-between gap-3 flex-wrap mb-4">
         <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Project pipeline</p>
-          <h1 className="text-[18px] font-semibold text-wm-text">Cowork</h1>
-          {overallStats && (
-            <p className="text-[11.5px] text-wm-text-muted mt-0.5">
-              {overallStats.done} done · {overallStats.ready} ready ·{' '}
-              {overallStats.cowork} cowork session{overallStats.cowork === 1 ? '' : 's'} ·{' '}
-              {overallStats.stale} stale · {overallStats.waiting} waiting
-            </p>
-          )}
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Project pipeline</p>
+          <h1 className="text-[22px] font-semibold text-wm-text leading-tight">Cowork</h1>
         </div>
         <button
           type="button"
           onClick={onRefresh}
           disabled={refreshing}
-          className="text-[11px] font-medium px-2.5 py-1.5 rounded-md border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover disabled:opacity-50"
+          className="text-[12px] font-medium px-3 py-1.5 rounded-lg border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text disabled:opacity-50 transition-colors"
         >
           <span className="flex items-center gap-1.5">
-            {refreshing ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+            {refreshing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
             Refresh
           </span>
         </button>
       </div>
 
+      {/* Hero progress card */}
+      {overallStats && (
+        <div className="rounded-xl bg-wm-bg-elevated border border-wm-border shadow-sm px-6 py-5 mb-4">
+          <div className="flex items-end justify-between gap-3 flex-wrap mb-3">
+            <div>
+              <p className="text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Progress</p>
+              <div className="flex items-baseline gap-2">
+                <span className="text-[28px] font-semibold text-wm-text leading-none">{overallStats.done}</span>
+                <span className="text-[14px] text-wm-text-muted">of {totalSteps} steps complete</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap text-[11px] text-wm-text-muted">
+              {overallStats.ready > 0 && (
+                <span className="px-2 py-0.5 rounded-md bg-wm-info-bg text-wm-info font-medium">{overallStats.ready} ready</span>
+              )}
+              {overallStats.cowork > 0 && (
+                <span className="px-2 py-0.5 rounded-md bg-wm-accent-tint text-wm-accent-strong font-medium">{overallStats.cowork} cowork</span>
+              )}
+              {overallStats.stale > 0 && (
+                <span className="px-2 py-0.5 rounded-md bg-wm-warning-bg text-wm-warning font-medium">{overallStats.stale} stale</span>
+              )}
+              {overallStats.waiting > 0 && (
+                <span className="px-2 py-0.5 rounded-md bg-wm-bg text-wm-text-subtle">{overallStats.waiting} waiting</span>
+              )}
+            </div>
+          </div>
+          <div className="h-2 w-full bg-wm-bg rounded-full overflow-hidden">
+            <div
+              className="h-full bg-wm-accent transition-all duration-500"
+              style={{ width: `${completedPct}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Readiness panel */}
-      <div className="rounded-lg border border-wm-border bg-wm-bg-elevated">
-        <div className="px-4 py-3 flex items-center justify-between gap-2 border-b border-wm-border">
-          <div className="flex items-center gap-2">
-            <span className="text-[12px] font-medium text-wm-text">Inventory readiness</span>
+      <div className="rounded-xl border border-wm-border bg-wm-bg-elevated shadow-sm">
+        <div className="px-5 py-4 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5">
+            <span className="text-[13px] font-semibold text-wm-text">Inventory readiness</span>
             <WMStatusPill tone={readinessTone} size="sm">{readinessLabel}</WMStatusPill>
           </div>
           {s && (
-            <div className="text-[10px] text-wm-text-subtle">
+            <div className="text-[11px] text-wm-text-subtle">
               {s.pillars_total} core message{s.pillars_total === 1 ? '' : 's'} ({s.pillars_draft} draft) ·{' '}
               {s.facts_total} fact{s.facts_total === 1 ? '' : 's'} ·{' '}
               {s.crawl_topics_total} crawl topic{s.crawl_topics_total === 1 ? '' : 's'} ·{' '}
@@ -362,16 +396,16 @@ function Header({ readiness, readinessLoading, overallStats, onRefresh, refreshi
           )}
         </div>
         {(blockers.length > 0 || warnings.length > 0) && (
-          <div className="px-4 py-2 flex flex-col gap-1.5">
+          <div className="px-5 pb-4 pt-1 flex flex-col gap-2 border-t border-wm-border">
             {blockers.map((b, i) => (
-              <div key={`b-${i}`} className="text-[11.5px] text-wm-danger flex items-start gap-1.5">
-                <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+              <div key={`b-${i}`} className="text-[12px] text-wm-danger flex items-start gap-1.5 mt-2">
+                <AlertTriangle size={13} className="shrink-0 mt-0.5" />
                 <span><span className="font-semibold">{b.kind}:</span> {b.detail}</span>
               </div>
             ))}
             {warnings.map((w, i) => (
-              <div key={`w-${i}`} className="text-[11.5px] text-wm-warning flex items-start gap-1.5">
-                <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+              <div key={`w-${i}`} className="text-[12px] text-wm-warning flex items-start gap-1.5 mt-2">
+                <AlertTriangle size={13} className="shrink-0 mt-0.5" />
                 <span><span className="font-semibold">{w.kind}:</span> {w.detail}</span>
               </div>
             ))}
@@ -408,39 +442,77 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
   const isWaiting     = status === 'blocked_waiting'
   const isAggInfo     = status === 'aggregate_info'
 
-  // First ready/cowork card gets a subtle "next up" accent on the border
-  const accentClass = isFirstReady && (isReady || isCowork) ? 'border-wm-accent border-l-4' : 'border-wm-border'
+  // Visual weight per state. Active steps (ready / cowork-session /
+  // stale) get full-strength card. Done / waiting / aggregate-info
+  // recede with a tinted background + lighter type. The strategist's
+  // eye lands on the active rows first without needing a left
+  // accent bar (which the reference dashboard doesn't use).
+  const isActive = isReady || isCowork || isStale
+  const cardClass = isActive
+    ? 'bg-wm-bg-elevated border border-wm-border shadow-sm hover:shadow-md transition-shadow'
+    : (isDone
+        ? 'bg-wm-bg-elevated border border-wm-border'
+        : 'bg-wm-bg border border-wm-border')
 
   return (
-    <article className={`rounded-lg ${accentClass} border bg-wm-bg-elevated overflow-hidden`}>
-      {/* Header: step number + title + status pill */}
-      <div className="px-4 pt-3 pb-2 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <span className="text-[10px] font-mono text-wm-text-subtle">Step {step.step_number}</span>
-            <h2 className="text-[14.5px] font-semibold text-wm-text">{step.title}</h2>
-          </div>
-          <p className="text-[10px] font-mono text-wm-text-subtle mt-0.5">{step.subtitle}</p>
-        </div>
-        <StatusBadge status={status} />
-      </div>
-
-      {/* Description */}
-      <div className="px-4 pb-2">
-        <p className="text-[12px] text-wm-text-muted leading-relaxed">{step.description}</p>
-      </div>
-
-      {/* Progress bar (only for steps with progress) */}
-      {progress && (
-        <div className="px-4 pb-2">
-          <ProgressBar done={progress.done} total={progress.total} label={progress.label} />
+    <article className={`rounded-xl ${cardClass} overflow-hidden`}>
+      {/* "Next up" tag rendered ABOVE the title only for the first
+          ready/cowork card. Replaces the awkward left-accent border. */}
+      {isFirstReady && isActive && (
+        <div className="px-6 pt-5 pb-1">
+          <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">
+            <ArrowRight size={11} /> Next up
+          </span>
         </div>
       )}
 
-      {/* Last-run timestamp (only for completed web_ui or cowork-session steps) */}
+      {/* Header row: step number + title + status pill */}
+      <div className={`px-6 ${isFirstReady && isActive ? 'pt-2' : 'pt-5'} pb-3 flex items-start justify-between gap-4`}>
+        <div className="min-w-0">
+          <p className="text-[10px] font-mono uppercase tracking-wider text-wm-text-subtle mb-1.5">
+            Step {step.step_number}
+          </p>
+          <h2 className={
+            'leading-tight ' +
+            (isActive
+              ? 'text-[18px] font-semibold text-wm-text'
+              : 'text-[17px] font-semibold ' + (isDone ? 'text-wm-text' : 'text-wm-text-muted'))
+          }>
+            {step.title}
+          </h2>
+          <p className="text-[11px] font-mono text-wm-text-subtle mt-1">{step.subtitle}</p>
+        </div>
+        <div className="shrink-0">
+          <StatusBadge status={status} />
+        </div>
+      </div>
+
+      {/* Description */}
+      <div className="px-6 pb-4">
+        <p className={
+          'text-[13px] leading-relaxed ' +
+          (isActive || isDone ? 'text-wm-text-muted' : 'text-wm-text-subtle')
+        }>
+          {step.description}
+        </p>
+      </div>
+
+      {/* Progress bar (per-source / per-page steps) */}
+      {progress && (
+        <div className="px-6 pb-4">
+          <ProgressBar
+            done={progress.done}
+            total={progress.total}
+            label={progress.label}
+            tone={isDone ? 'success' : (isActive ? 'accent' : 'neutral')}
+          />
+        </div>
+      )}
+
+      {/* Last-run timestamp (web_ui + cowork-session done steps) */}
       {isDone && lastAt && (
-        <div className="px-4 pb-2 text-[10.5px] text-wm-text-subtle flex items-center gap-1.5 flex-wrap">
-          <Clock size={10} />
+        <div className="px-6 pb-4 text-[11px] text-wm-text-subtle flex items-center gap-1.5 flex-wrap">
+          <Clock size={11} />
           <span>Last run {new Date(lastAt).toLocaleString()}</span>
           {lastMdl && <span className="font-mono">· {lastMdl}</span>}
         </div>
@@ -448,57 +520,64 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
 
       {/* Cowork-session automation note */}
       {(isCowork || (step.kind === 'cowork_session' && isDone)) && (
-        <div className="px-4 pb-2 text-[11px] text-wm-text-muted italic flex items-start gap-1.5">
-          <ExternalLink size={11} className="shrink-0 mt-0.5" />
+        <div className="px-6 pb-4 text-[12px] text-wm-text-muted italic flex items-start gap-2">
+          <ExternalLink size={12} className="shrink-0 mt-0.5" />
           <span>
             Saves automatically when Cowork finishes — refresh the page (or wait for auto-refresh) to see the next step unlock.
           </span>
         </div>
       )}
 
-      {/* Action area */}
-      <div className="px-4 pb-3 pt-1 flex items-center justify-end gap-2">
-        {/* Aggregate-info steps: no action button, just a quiet inventory caption */}
+      {/* Action footer */}
+      <div className={
+        'px-6 py-4 border-t border-wm-border flex items-center justify-end gap-2 ' +
+        (isActive ? 'bg-wm-bg-elevated' : 'bg-transparent')
+      }>
+        {/* Aggregate-info — quiet text only, no button */}
         {isAggInfo && (
-          <span className="text-[10.5px] text-wm-text-subtle italic">No action here — extracted automatically during intake.</span>
+          <span className="text-[12px] text-wm-text-subtle italic">No action here — extracted automatically during intake.</span>
         )}
 
-        {/* Web-UI steps: View details if done, Run if ready/stale, nothing if waiting */}
+        {/* Waiting — quiet text only */}
+        {isWaiting && (
+          <span className="text-[12px] text-wm-text-subtle italic">Waiting on the previous step</span>
+        )}
+
+        {/* Web-UI completed — secondary View details */}
         {step.kind === 'web_ui' && isDone && (
           <button
             type="button"
             onClick={onViewDetails}
-            className="text-[12px] font-medium px-3 py-1.5 rounded-md border border-wm-border text-wm-text hover:bg-wm-bg-hover"
+            className="text-[13px] font-medium px-4 py-2 rounded-lg border border-wm-border text-wm-text hover:bg-wm-bg-hover transition-colors"
           >
             <span className="flex items-center gap-1.5">
-              <Eye size={12} />
+              <Eye size={13} />
               View details
             </span>
           </button>
         )}
+
+        {/* Web-UI ready / stale — primary Run */}
         {step.kind === 'web_ui' && (isReady || isStale) && (
           <button
             type="button"
             onClick={onRun}
             disabled={anyRunning}
             className={
-              'text-[12px] font-medium px-3 py-1.5 rounded-md disabled:opacity-50 ' +
+              'text-[13px] font-medium px-4 py-2 rounded-lg disabled:opacity-50 transition-colors ' +
               (isStale
                 ? 'border border-wm-warning text-wm-warning hover:bg-wm-warning-bg'
-                : 'bg-wm-accent text-wm-text-on-accent hover:bg-wm-accent-hover')
+                : 'bg-wm-accent text-wm-text-on-accent hover:bg-wm-accent-hover shadow-sm')
             }
           >
             <span className="flex items-center gap-1.5">
-              {running ? <Loader2 size={12} className="animate-spin" /> : <ArrowRight size={12} />}
+              {running ? <Loader2 size={13} className="animate-spin" /> : <ArrowRight size={13} />}
               {isStale ? 'Re-run this step' : 'Run this step'}
             </span>
           </button>
         )}
-        {step.kind === 'web_ui' && isWaiting && (
-          <span className="text-[10.5px] text-wm-text-subtle italic">Waiting on the previous step</span>
-        )}
 
-        {/* Cowork-session steps: Copy prompt + Open SKILL when ready/cowork, View details when done */}
+        {/* Cowork-session ready — Open SKILL + Copy prompt */}
         {step.kind === 'cowork_session' && isCowork && (
           <>
             {step.skill_md_path && (
@@ -506,34 +585,30 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
                 href={`https://github.com/churchwebsquad/milestone-comms-app/blob/main/${step.skill_md_path}`}
                 target="_blank"
                 rel="noreferrer"
-                className="text-[12px] font-medium px-3 py-1.5 rounded-md border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover"
+                className="text-[13px] font-medium px-4 py-2 rounded-lg border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text transition-colors"
               >
                 <span className="flex items-center gap-1.5">
-                  <ExternalLink size={12} />
+                  <ExternalLink size={13} />
                   Open SKILL
                 </span>
               </a>
             )}
-            <CopyPromptButton
-              step={step}
-              projectId={projectId}
-            />
+            <CopyPromptButton step={step} projectId={projectId} />
           </>
         )}
+
+        {/* Cowork-session done — View details */}
         {step.kind === 'cowork_session' && isDone && (
           <button
             type="button"
             onClick={onViewDetails}
-            className="text-[12px] font-medium px-3 py-1.5 rounded-md border border-wm-border text-wm-text hover:bg-wm-bg-hover"
+            className="text-[13px] font-medium px-4 py-2 rounded-lg border border-wm-border text-wm-text hover:bg-wm-bg-hover transition-colors"
           >
             <span className="flex items-center gap-1.5">
-              <Eye size={12} />
+              <Eye size={13} />
               View details
             </span>
           </button>
-        )}
-        {step.kind === 'cowork_session' && isWaiting && (
-          <span className="text-[10.5px] text-wm-text-subtle italic">Waiting on the previous step</span>
         )}
       </div>
     </article>
@@ -563,10 +638,10 @@ function CopyPromptButton({ step, projectId }: {
       type="button"
       onClick={handle}
       disabled={!step.starter_prompt}
-      className="text-[12px] font-medium px-3 py-1.5 rounded-md bg-wm-accent text-wm-text-on-accent hover:bg-wm-accent-hover disabled:opacity-50"
+      className="text-[13px] font-medium px-4 py-2 rounded-lg bg-wm-accent text-wm-text-on-accent hover:bg-wm-accent-hover disabled:opacity-50 shadow-sm transition-colors"
     >
       <span className="flex items-center gap-1.5">
-        {copied ? <Check size={12} /> : <ChevronRight size={12} />}
+        {copied ? <Check size={13} /> : <ChevronRight size={13} />}
         {copied ? 'Copied — paste in Cowork' : 'Copy prompt for Cowork'}
       </span>
     </button>
@@ -578,26 +653,38 @@ function CopyPromptButton({ step, projectId }: {
 // ────────────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: StepStatus }) {
-  if (status === 'done')             return <WMStatusPill tone="success" size="sm" icon={<Check size={10} />}>Done</WMStatusPill>
-  if (status === 'ready')            return <WMStatusPill tone="info"    size="sm">Ready</WMStatusPill>
-  if (status === 'stale')            return <WMStatusPill tone="warning" size="sm">Needs re-run</WMStatusPill>
-  if (status === 'blocked_waiting')  return <WMStatusPill tone="neutral" size="sm">Waiting</WMStatusPill>
-  if (status === 'cowork_session')   return <WMStatusPill tone="ai"      size="sm">Cowork session</WMStatusPill>
-  if (status === 'aggregate_info')   return <WMStatusPill tone="neutral" size="sm">Auto-extracted</WMStatusPill>
+  if (status === 'done')             return <WMStatusPill tone="success" size="md" icon={<Check size={12} />}>Done</WMStatusPill>
+  if (status === 'ready')            return <WMStatusPill tone="info"    size="md">Ready</WMStatusPill>
+  if (status === 'stale')            return <WMStatusPill tone="warning" size="md">Needs re-run</WMStatusPill>
+  if (status === 'blocked_waiting')  return <WMStatusPill tone="neutral" size="md">Waiting</WMStatusPill>
+  if (status === 'cowork_session')   return <WMStatusPill tone="ai"      size="md">Cowork session</WMStatusPill>
+  if (status === 'aggregate_info')   return <WMStatusPill tone="success" size="md" icon={<Check size={12} />}>Auto-extracted</WMStatusPill>
   return null
 }
 
-function ProgressBar({ done, total, label }: { done: number; total: number; label: string }) {
+function ProgressBar({ done, total, label, tone = 'accent' }: {
+  done:  number
+  total: number
+  label: string
+  tone?: 'accent' | 'success' | 'neutral'
+}) {
   const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0
+  const fillClass =
+    tone === 'success' ? 'bg-wm-success' :
+    tone === 'neutral' ? 'bg-wm-text-subtle' :
+                         'bg-wm-accent'
   return (
     <div>
-      <div className="h-1.5 w-full bg-wm-bg rounded-full overflow-hidden">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[11.5px] text-wm-text-muted">{label}</span>
+        <span className="text-[11px] font-medium text-wm-text-subtle">{pct}%</span>
+      </div>
+      <div className="h-2 w-full bg-wm-bg rounded-full overflow-hidden">
         <div
-          className="h-full bg-wm-accent transition-all"
+          className={`h-full ${fillClass} transition-all duration-500`}
           style={{ width: `${pct}%` }}
         />
       </div>
-      <p className="text-[10.5px] text-wm-text-subtle mt-1">{label}</p>
     </div>
   )
 }
