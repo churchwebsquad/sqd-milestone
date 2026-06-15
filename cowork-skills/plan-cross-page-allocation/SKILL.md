@@ -184,6 +184,23 @@ For every source, ask the journey questions in order:
    `weave_into_paragraph`. A voice sample from a sermon isn't a
    feature card — it's a `voice_anchor` for the section.
 
+### Source kinds (closed vocabulary)
+
+Every entry in `section_intents[].sources[].kind` MUST be one of:
+
+| kind | what it refers to | ref shape |
+|---|---|---|
+| `pillar` | content_atoms row | row UUID |
+| `fact` | church_facts row | row UUID |
+| `crawl_topic` | web_project_topics row (existing site content) | `topic_key` string |
+| `content_collection` | strategy_content_collection_sessions field | field key string |
+| `external` | **Off-site CTA target only — never content lift.** Guest-card pages, email lookup endpoints, ministry-partner sites the page should link to but never quote from. | absolute URL or `mailto:` |
+
+Do NOT shorten — `crawl_topic` not `crawl`. The validator rejects
+off-vocab kinds with `bad_source_kind`. `external` is only legitimate
+when paired with `treatment: 'cta_attach'` (the source is the
+section's invite/close link, nothing else).
+
 ## Empty-slot prevention (read before allocating)
 
 Before picking a canonical template for a section, load
@@ -300,11 +317,26 @@ re-run the audit, THEN ask the strategist to review. Report the
 results as a table in the review so they can see you actually ran
 them.
 
-1. **Inventory coverage.** Every `content_atom.id` lands somewhere
-   — either in an allocation entry's source list OR in
-   `unresolved_sources`. Every `web_project_topics.topic_key` lands
-   somewhere with the same rule. Every `church_facts.topic` group
-   lands somewhere. List anything missing.
+1. **Inventory coverage** — every `content_atom.id` lands in
+   **exactly one of three buckets**:
+   - **`allocations[].section_intents[].sources[]`** — placed on a
+     page (the default outcome).
+   - **`unresolved_sources[]`** — deliberately set aside with a
+     closed-vocabulary `reason` (duplicate of an already-placed
+     source, internal-admin contact, crawl noise, etc.).
+   - **`build_directives[]`** — only legitimate destination for
+     atoms with `topic: 'recommended_page'`. These are
+     page-creation suggestions for the dev handoff, not content to
+     place. Each directive stamps `source_kind: 'pillar'` +
+     `source_ref: <atom_id>` so the audit trail survives.
+
+   Coverage rule: `allocated ∪ unresolved ∪ directives ==` every
+   approved/draft atom. Same rule for `web_project_topics.topic_key`
+   (typically allocated or unresolved; directives are atom-only).
+   Same rule for `church_facts.topic` groups.
+
+   List anything missing AND list anything in build_directives that
+   isn't a `recommended_page` atom (that's a routing error).
 2. **Verbatim band stamped.** Every entry in `allocations[]` carries
    `intended_verbatim_band` equal to the approved
    `copy_approach.derived.intended_verbatim_band`. No entry left null

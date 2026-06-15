@@ -468,6 +468,81 @@ export function critiqueRollupToMarkdown(raw: unknown): string {
 }
 
 // ───────────────────────────────────────────────────────────────────
+//  page_allocation_plan — plan-cross-page-allocation output
+// ───────────────────────────────────────────────────────────────────
+
+export function pageAllocationPlanToMarkdown(raw: unknown): string {
+  const p: any = raw
+  if (!p || typeof p !== 'object') return '_No page allocation plan yet._'
+
+  const sections: Array<string | null> = ['# Page allocation plan']
+
+  // Allocations — per page, ordered section_intents with source bindings
+  const allocations: any[] = Array.isArray(p.allocations) ? p.allocations : []
+  if (allocations.length > 0) {
+    const pageBlocks = allocations.map((a: any) => {
+      const lines: string[] = [`### \`${a.page_slug ?? '(no slug)'}\``]
+      if (a.page_job)       lines.push(a.page_job)
+      const meta: string[] = []
+      if (a.primary_persona)          meta.push(`**Anchored to**: ${a.primary_persona}`)
+      if (a.intended_verbatim_band)   meta.push(`**Verbatim band**: \`${a.intended_verbatim_band}\``)
+      if (a.ministry_model_alignment) meta.push(`**Ministry alignment**: ${a.ministry_model_alignment}`)
+      if (meta.length) lines.push(meta.join(' · '))
+
+      const intents: any[] = Array.isArray(a.section_intents) ? a.section_intents : []
+      if (intents.length > 0) {
+        const intentLines = intents.map((si: any, ix: number) => {
+          const head = `${ix + 1}. **${si.flow_role ?? '?'}** — ${si.section_job ?? ''}`
+          const srcs: any[] = Array.isArray(si.sources) ? si.sources : []
+          if (srcs.length === 0) return head
+          const srcLines = srcs.map((src: any) => {
+            const refShort = typeof src.ref === 'string' && src.ref.length > 12
+              ? `${src.ref.slice(0, 8)}…`
+              : (src.ref ?? '—')
+            return `    - \`${src.kind}\` ${refShort} → *${src.treatment ?? '—'}*${src.note ? ` (${src.note})` : ''}`
+          })
+          return `${head}${NL}${srcLines.join(NL)}`
+        })
+        lines.push(intentLines.join(NL))
+      }
+      return lines.join(NL2)
+    })
+    sections.push(`## Allocations (${allocations.length})${NL2}${pageBlocks.join(NL2)}`)
+  }
+
+  // Unresolved sources — content the model deliberately didn't place
+  const unresolved: any[] = Array.isArray(p.unresolved_sources) ? p.unresolved_sources : []
+  if (unresolved.length > 0) {
+    const items = unresolved.map((u: any) => {
+      const refShort = typeof u.ref === 'string' && u.ref.length > 12
+        ? `${u.ref.slice(0, 8)}…`
+        : (u.ref ?? '—')
+      const detail = u.detail ? `${NL}  ${u.detail}` : ''
+      return `- \`${u.kind}\` ${refShort} — *${u.reason ?? 'unspecified'}*${detail}`
+    })
+    sections.push(`## Unresolved sources (${unresolved.length})${NL2}${items.join(NL)}`)
+  }
+
+  // Build directives — recommended_page atoms routed to dev-handoff
+  // surface rather than allocation. Renders here so the strategist
+  // can audit the placement without checking JSON.
+  const directives: any[] = Array.isArray(p.build_directives) ? p.build_directives : []
+  if (directives.length > 0) {
+    const items = directives.map((d: any) => {
+      const refShort = typeof d.source_ref === 'string' && d.source_ref.length > 12
+        ? `${d.source_ref.slice(0, 8)}…`
+        : (d.source_ref ?? '—')
+      const head = `- **applies_to**: \`${d.applies_to ?? '—'}\` · *source: ${d.source_kind ?? '?'} ${refShort}*`
+      const body = d.directive ? `${NL}  ${d.directive}` : ''
+      return `${head}${body}`
+    })
+    sections.push(`## Build directives (${directives.length})${NL2}${items.join(NL)}`)
+  }
+
+  return joinSections(sections)
+}
+
+// ───────────────────────────────────────────────────────────────────
 //  Dispatch
 // ───────────────────────────────────────────────────────────────────
 
@@ -483,6 +558,7 @@ export function getConverterForOutputKey(
     case 'stage_1':                return stage1ToMarkdown
     case 'ministry_model':         return ministryModelToMarkdown
     case 'site_strategy':          return siteStrategyToMarkdown
+    case 'page_allocation_plan':   return pageAllocationPlanToMarkdown
     case 'critique_rollup':        return critiqueRollupToMarkdown
     default:                       return null
   }

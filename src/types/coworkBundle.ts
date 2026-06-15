@@ -391,11 +391,21 @@ export interface CoworkPageAllocation {
   }>
 }
 
-export type SourceKindForAllocation =
-  | 'pillar'                                           // content_atoms row by ID
-  | 'fact'                                             // church_facts row by ID
-  | 'crawl_topic'                                      // web_project_topics by topic_key
-  | 'content_collection'                               // strategy_content_collection_sessions field key
+/** The four content-bearing source kinds plan-cross-page-allocation
+ *  can route — plus `'external'` for off-site CTA targets the page
+ *  should link to but never lift content from (guest-card pages,
+ *  email lookup, ministry-partner sites). Promoted to const tuple so
+ *  the validator + the SKILL prompt assembly can import one closed
+ *  list (same pattern as ALLOCATION_TREATMENTS + UNRESOLVED_REASONS_LIST). */
+export const SOURCE_KINDS_FOR_ALLOCATION = [
+  'pillar',             // content_atoms row by ID
+  'fact',               // church_facts row by ID
+  'crawl_topic',        // web_project_topics by topic_key
+  'content_collection', // strategy_content_collection_sessions field key
+  'external',           // off-site CTA target (URL, email lookup, partner site) — no content lift
+] as const
+
+export type SourceKindForAllocation = typeof SOURCE_KINDS_FOR_ALLOCATION[number]
 
 /** The treatment vocabulary plan-cross-page-allocation uses. Richer than
  *  the per-atom TreatmentSignal because this skill decides STRUCTURAL

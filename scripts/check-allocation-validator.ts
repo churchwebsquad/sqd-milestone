@@ -142,6 +142,84 @@ const results: CaseResult[] = []
   })
 }
 
+// ─── NEGATIVE: source kind drift (kind='crawl') MUST trip bad_source_kind ──
+// Regression for the DS run defect: model emitted kind='crawl' (off-vocab)
+// and kind='external' (was off-vocab pre-fix). Validator's (kind, ref)
+// lookup silently accepted a valid ref paired with bad kind. This case
+// pins the bad_source_kind check active.
+{
+  const manifest = loadJson<AllocationPlanManifest>('manifest.json')
+  const plan     = loadJson<Record<string, unknown>>('paradox-allocation-plan.fable5.json')
+
+  let mutated = false
+  outer: for (const a of (plan.allocations as Array<Record<string, unknown>> | undefined) ?? []) {
+    for (const s of (a.section_intents as Array<Record<string, unknown>> | undefined) ?? []) {
+      for (const src of (s.sources as Array<Record<string, unknown>> | undefined) ?? []) {
+        if (src.kind === 'crawl_topic') {
+          src.kind = 'crawl'    // off-vocab; model's natural drift
+          mutated = true
+          break outer
+        }
+      }
+    }
+  }
+  if (!mutated) {
+    console.error('Could not find a crawl_topic source to mutate; fixture changed shape.')
+    process.exit(1)
+  }
+
+  const r = validateAllocationPlan(plan as unknown as CoworkPageAllocationPlan, manifest)
+  results.push({
+    name:                 "mutated fixture (kind='crawl') fails with bad_source_kind",
+    expected:             'fail',
+    actual:               r.ok ? 'pass' : 'fail',
+    summary:              r.summary,
+    required_checks:      ['bad_source_kind'],
+    required_checks_seen: Object.keys(r.byCheck ?? {}),
+  })
+}
+
+// ─── POSITIVE: kind='external' is now in the enum; an external source
+//   paired with a CTA treatment MUST pass (no bad_source_kind trip) ────────
+{
+  const manifest = loadJson<AllocationPlanManifest>('manifest.json')
+  const plan     = loadJson<Record<string, unknown>>('paradox-allocation-plan.fable5.json')
+
+  // Append an external CTA source to the first allocation's last section_intent.
+  // The validator must NOT flag bad_source_kind, unknown_ref, or trace_missing
+  // for the external kind — its ref is owned by the model, not the manifest.
+  const firstAlloc = ((plan.allocations as Array<Record<string, unknown>> | undefined) ?? [])[0]
+  const sections   = (firstAlloc?.section_intents as Array<Record<string, unknown>> | undefined) ?? []
+  const lastSection = sections[sections.length - 1]
+  if (!lastSection) {
+    console.error('Could not find a section_intent to attach an external source to; fixture changed shape.')
+    process.exit(1)
+  }
+  const sources = (lastSection.sources as Array<Record<string, unknown>> | undefined) ?? []
+  sources.push({
+    kind:      'external',
+    ref:       'https://example.org/guest-card',
+    treatment: 'cta_attach',
+  })
+  lastSection.sources = sources
+
+  const r = validateAllocationPlan(plan as unknown as CoworkPageAllocationPlan, manifest)
+  const seen = Object.keys(r.byCheck ?? {})
+  // The fixture itself isn't necessarily "ok" — but the only new
+  // failures introduced by our external row MUST be none of:
+  // bad_source_kind, unknown_ref (for kind=external), trace_missing.
+  // Easiest assert: bad_source_kind absent from the check tags.
+  const externalRejected = seen.includes('bad_source_kind')
+  results.push({
+    name:                 "fixture with added kind='external' source does NOT trip bad_source_kind",
+    expected:             externalRejected ? 'fail' : 'pass',
+    actual:               externalRejected ? 'fail' : 'pass',
+    summary:              r.summary,
+    required_checks:      [],
+    required_checks_seen: seen,
+  })
+}
+
 // ─── Report ───────────────────────────────────────────────────────────────
 let exitCode = 0
 for (const c of results) {

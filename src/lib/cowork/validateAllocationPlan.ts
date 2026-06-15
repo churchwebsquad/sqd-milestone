@@ -20,11 +20,13 @@
 import {
   FLOW_ROLES,
   ALLOCATION_TREATMENTS,
+  SOURCE_KINDS_FOR_ALLOCATION,
   UNRESOLVED_REASONS_LIST,
 } from '../../types/coworkBundle'
 import type {
   AtomTopic,
   AllocationTreatment,
+  SourceKindForAllocation,
   CoworkPageAllocationPlan,
   CoworkUnresolvedReason,
 } from '../../types/coworkBundle'
@@ -53,6 +55,7 @@ const DIRECTIVE_TOPICS = new Set<AtomTopic>(['recommended_page'])
 // Sets for O(1) membership. Single source of truth — the tuples are the
 // values; adding a treatment / reason there propagates here automatically.
 const TREATMENTS = new Set<AllocationTreatment>(ALLOCATION_TREATMENTS)
+const SOURCE_KINDS = new Set<SourceKindForAllocation>(SOURCE_KINDS_FOR_ALLOCATION)
 const UNRESOLVED_REASONS = new Set<CoworkUnresolvedReason>(UNRESOLVED_REASONS_LIST)
 
 const DEFAULT_PRIMARY_PAGES = ['home', 'plan-a-visit', 'about', 'donate'] as const
@@ -141,12 +144,31 @@ export function validateAllocationPlan(
   for (const a of allocs) {
     for (const [ix, s] of (a.section_intents ?? []).entries()) {
       for (const src of s.sources ?? []) {
+        // 1) Kind must be in the closed vocabulary. The model has
+        //    historically emitted shortened ('crawl' instead of
+        //    'crawl_topic') or invented ('external' before it was
+        //    legal) kinds; the manifest-lookup check below silently
+        //    accepts those when paired with a real ref. Catch them
+        //    explicitly here.
+        if (!SOURCE_KINDS.has(src.kind as SourceKindForAllocation)) {
+          fail('bad_source_kind', `${a.page_slug}[${ix}] source kind='${src.kind}' not in {${SOURCE_KINDS_FOR_ALLOCATION.join('|')}}`)
+        }
+        // 2) Ref must exist in the manifest — except for 'external'
+        //    sources, where the ref is an arbitrary URL / email /
+        //    partner-site identifier the model owns and the
+        //    manifest never carried.
         const k = refKey(src.kind, src.ref)
-        if (!known.has(k))             fail('unknown_ref',     `${a.page_slug}[${ix}] references {${src.kind}, ${src.ref}} not present in input manifest (hallucinated ref?)`)
+        if (src.kind !== 'external' && !known.has(k)) {
+          fail('unknown_ref',     `${a.page_slug}[${ix}] references {${src.kind}, ${src.ref}} not present in input manifest (hallucinated ref?)`)
+        }
         if (!TREATMENTS.has(src.treatment as AllocationTreatment)) {
                                        fail('bad_treatment',   `${a.page_slug}[${ix}] {${src.kind}, ${src.ref}}: '${src.treatment}' not in treatment vocabulary`)
         }
-        if (!placed.has(k))            fail('trace_missing',   `{${src.kind}, ${src.ref}} used in ${a.page_slug}[${ix}] but absent from source_traces`)
+        // 3) source_traces only mirrors known-manifest refs; skip
+        //    the trace check for external (it never lands there).
+        if (src.kind !== 'external' && !placed.has(k)) {
+          fail('trace_missing',   `{${src.kind}, ${src.ref}} used in ${a.page_slug}[${ix}] but absent from source_traces`)
+        }
       }
     }
   }
@@ -311,6 +333,7 @@ export {
   VOICE_TOPICS,
   DIRECTIVE_TOPICS,
   TREATMENTS,
+  SOURCE_KINDS,
   UNRESOLVED_REASONS,
   DEFAULT_PRIMARY_PAGES,
 }
