@@ -203,15 +203,23 @@ export function CoworkWorkspace({ project, onChange }: Props) {
 
   // ─── Run a step ─────────────────────────────────────────────────
 
-  const runStep = async (step: StepCatalogEntry) => {
+  const runStep = async (step: StepCatalogEntry, force = false) => {
     if (!step.endpoint) return
+    // For done steps the strategist can still force a re-run (e.g.
+    // they want to swap models, or suspect the output missed
+    // something). Server-side staleness guard returns 409 without
+    // force=true, so the button just opts past it.
+    if (force) {
+      const ok = confirm(`Re-run ${step.title}? The current output will be overwritten.`)
+      if (!ok) return
+    }
     setRunningStep(step.key)
     setLastResult(null)
     try {
       const r = await fetch(step.endpoint, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ project_id: project.id }),
+        body:    JSON.stringify({ project_id: project.id, force }),
       })
       const body = await r.json().catch(() => ({}))
       const ok = r.ok
@@ -296,6 +304,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
             isFirstReady={overallStats?.firstReadyKey === step.key}
             projectId={project.id}
             onRun={() => void runStep(step)}
+            onForceRerun={() => void runStep(step, true)}
             onViewDetails={() => setDrawerStep(step)}
           />
         ))}
@@ -452,7 +461,7 @@ function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRe
 // StepCard
 // ────────────────────────────────────────────────────────────────────
 
-function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, onRun, onViewDetails }: {
+function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, onRun, onForceRerun, onViewDetails }: {
   step:          StepCatalogEntry
   state:         CoworkPipelineState | null
   running:       boolean
@@ -460,6 +469,7 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
   isFirstReady:  boolean
   projectId:     string
   onRun:         () => void
+  onForceRerun:  () => void
   onViewDetails: () => void
 }) {
   const status   = state ? step.computeStatus(state) : 'blocked_waiting'
@@ -574,18 +584,38 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
           <span className="text-[12px] text-wm-text-subtle italic">Waiting on the previous step</span>
         )}
 
-        {/* Web-UI completed — secondary View details */}
+        {/* Web-UI completed — secondary View details + tertiary
+            force-rerun. Re-run is intentionally less prominent than
+            View details since the step is already in its success
+            state; the affordance is here for cases where the
+            strategist wants to swap models, retry on a hunch, or
+            test a contract change without bumping any upstream
+            timestamp. Server staleness guard is bypassed via force. */}
         {step.kind === 'web_ui' && isDone && (
-          <button
-            type="button"
-            onClick={onViewDetails}
-            className="text-[13px] font-medium px-4 py-2 rounded-lg border border-wm-border text-wm-text hover:bg-wm-bg-hover transition-colors"
-          >
-            <span className="flex items-center gap-1.5">
-              <Eye size={13} />
-              View details
-            </span>
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={onForceRerun}
+              disabled={anyRunning}
+              className="text-[12px] font-medium px-3 py-2 rounded-lg text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text disabled:opacity-50 transition-colors"
+              title="Re-run this step. The current output will be overwritten."
+            >
+              <span className="flex items-center gap-1.5">
+                {running ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                Re-run
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={onViewDetails}
+              className="text-[13px] font-medium px-4 py-2 rounded-lg border border-wm-border text-wm-text hover:bg-wm-bg-hover transition-colors"
+            >
+              <span className="flex items-center gap-1.5">
+                <Eye size={13} />
+                View details
+              </span>
+            </button>
+          </>
         )}
 
         {/* Web-UI ready / stale — primary Run */}
