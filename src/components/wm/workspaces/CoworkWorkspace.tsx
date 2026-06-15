@@ -241,6 +241,66 @@ export function CoworkWorkspace({ project, onChange }: Props) {
     }
   }
 
+  /** Approve a stale step as-is: bump its output's _meta.generated_at
+   *  to now + stamp approved_as_is_at for audit. Content is preserved
+   *  byte-for-byte; only the timestamp moves. Useful when the
+   *  strategist has reviewed the existing artifact, decided the
+   *  upstream change doesn't invalidate it, and doesn't want to pay
+   *  for a re-run.
+   *
+   *  Works for any step whose output_key is a top-level roadmap_state
+   *  jsonb key (i.e. NOT the per-page cowork-session steps 8-10).
+   *  Uses two roadmap_state_set calls instead of a server-side
+   *  jsonb_set so we stay on the existing RPC contract — slightly more
+   *  network but no new RPC required. */
+  const approveAsIs = async (step: StepCatalogEntry) => {
+    if (!step.output_key) return
+    if (step.output_key.includes('.')) {
+      setLastResult({ step: step.title, ok: false, detail: 'Approve-as-is is not supported for per-page artifacts. Re-run instead.' })
+      return
+    }
+    const ok = confirm(`Approve "${step.title}" as-is? The existing output stays intact; only the timestamp moves so downstream steps stop seeing it as stale.`)
+    if (!ok) return
+    setRunningStep(step.key)
+    setLastResult(null)
+    try {
+      // Read the current artifact, splice fresh _meta fields, write back.
+      const nowIso = new Date().toISOString()
+      const { data: row, error: readErr } = await supabase
+        .from('strategy_web_projects')
+        .select('roadmap_state')
+        .eq('id', project.id)
+        .maybeSingle()
+      if (readErr) throw new Error(readErr.message)
+      const current = ((row as any)?.roadmap_state ?? {})[step.output_key]
+      if (!current || typeof current !== 'object') {
+        throw new Error(`${step.output_key} not present on roadmap_state — nothing to approve.`)
+      }
+      const revised = {
+        ...current,
+        _meta: {
+          ...(current._meta ?? {}),
+          generated_at:      nowIso,
+          approved_as_is_at: nowIso,
+        },
+      }
+      const { error: rpcErr } = await (supabase as any).rpc('roadmap_state_set', {
+        p_project_id: project.id,
+        p_path:       [step.output_key],
+        p_value:      revised,
+      })
+      if (rpcErr) throw new Error(rpcErr.message)
+      setLastResult({ step: step.title, ok: true, detail: `Approved as-is. Content preserved; timestamp bumped to now.` })
+      await loadProjectState()
+      await loadReadiness()
+      onChange?.()
+    } catch (e) {
+      setLastResult({ step: step.title, ok: false, detail: e instanceof Error ? e.message : 'approve-as-is failed' })
+    } finally {
+      setRunningStep(null)
+    }
+  }
+
   // Status pill + first ready step (for the "Up next" highlight).
   // aggregate_info steps count toward `done` — visually they read as
   // complete (auto-extracted + check pill + 100% progress bar) so the
@@ -306,6 +366,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
             projectId={project.id}
             onRun={() => void runStep(step)}
             onForceRerun={() => void runStep(step, true)}
+            onApproveAsIs={() => void approveAsIs(step)}
             onViewDetails={() => setDrawerStep(step)}
           />
         ))}
@@ -462,16 +523,17 @@ function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRe
 // StepCard
 // ────────────────────────────────────────────────────────────────────
 
-function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, onRun, onForceRerun, onViewDetails }: {
-  step:          StepCatalogEntry
-  state:         CoworkPipelineState | null
-  running:       boolean
-  anyRunning:    boolean
-  isFirstReady:  boolean
-  projectId:     string
-  onRun:         () => void
-  onForceRerun:  () => void
-  onViewDetails: () => void
+function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, onRun, onForceRerun, onApproveAsIs, onViewDetails }: {
+  step:           StepCatalogEntry
+  state:          CoworkPipelineState | null
+  running:        boolean
+  anyRunning:     boolean
+  isFirstReady:   boolean
+  projectId:      string
+  onRun:          () => void
+  onForceRerun:   () => void
+  onApproveAsIs:  () => void
+  onViewDetails:  () => void
 }) {
   const status   = state ? step.computeStatus(state) : 'blocked_waiting'
   const lastAt   = state && step.lastRunAt ? step.lastRunAt(state) : null
@@ -637,6 +699,24 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
           </>
         )}
 
+        {/* Web-UI stale — Approve as-is option BEFORE re-run, so the
+            strategist who's reviewed the existing output can clear
+            the stale flag without paying for a re-run. */}
+        {step.kind === 'web_ui' && isStale && (
+          <button
+            type="button"
+            onClick={onApproveAsIs}
+            disabled={anyRunning}
+            className="text-[12px] font-medium px-3 py-2 rounded-lg text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text disabled:opacity-50 transition-colors"
+            title="The existing output stays intact; the timestamp moves to now so downstream steps stop seeing it as stale."
+          >
+            <span className="flex items-center gap-1.5">
+              <Check size={12} />
+              Approve as-is
+            </span>
+          </button>
+        )}
+
         {/* Web-UI ready / stale — primary Run */}
         {step.kind === 'web_ui' && (isReady || isStale) && (
           <button
@@ -666,10 +746,13 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
         )}
 
         {/* Cowork-session stale — output exists but upstream changed.
-            Show View details (audit current) + Download SKILL + Copy
-            prompt (to re-run). Previously this state rendered NO
-            buttons, leaving the strategist with a "NEEDS RE-RUN" pill
-            and no way to act on it. */}
+            Strategist's options, in order of cost:
+              View current → audit what's there
+              Approve as-is → bump timestamp, content stays
+              Download SKILL → side-load contract into a fresh session
+              Re-run in Cowork → start a new session against the
+                                 fresher upstream
+            Previously this state rendered NO buttons. */}
         {step.kind === 'cowork_session' && isStale && (
           <>
             <button
@@ -680,6 +763,18 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
               <span className="flex items-center gap-1.5">
                 <Eye size={13} />
                 View current
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={onApproveAsIs}
+              disabled={anyRunning}
+              className="text-[12px] font-medium px-3 py-2 rounded-lg text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text disabled:opacity-50 transition-colors"
+              title="The existing output stays intact; the timestamp moves to now so downstream steps stop seeing it as stale."
+            >
+              <span className="flex items-center gap-1.5">
+                <Check size={12} />
+                Approve as-is
               </span>
             </button>
             {step.skill_md_path && <DownloadSkillButton skillPath={step.skill_md_path} />}
