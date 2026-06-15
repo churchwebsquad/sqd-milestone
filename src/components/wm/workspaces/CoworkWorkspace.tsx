@@ -216,14 +216,17 @@ export function CoworkWorkspace({ project, onChange }: Props) {
     }
   }
 
-  // Status pill + first ready step (for the "Up next" highlight)
+  // Status pill + first ready step (for the "Up next" highlight).
+  // aggregate_info steps count toward `done` — visually they read as
+  // complete (auto-extracted + check pill + 100% progress bar) so the
+  // counter has to match or it under-reports progress to the strategist.
   const overallStats = useMemo(() => {
     if (!state) return null
     let done = 0, ready = 0, stale = 0, cowork = 0, waiting = 0
     let firstReadyKey: string | null = null
     for (const step of COWORK_STEPS) {
       const s = step.computeStatus(state)
-      if (s === 'done')             done++
+      if (s === 'done' || s === 'aggregate_info') done++
       if (s === 'stale')            stale++
       if (s === 'blocked_waiting')  waiting++
       if (s === 'ready') {
