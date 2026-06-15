@@ -31,7 +31,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowRight, Check, ChevronRight, Clock, ExternalLink, Eye, Loader2, RefreshCw } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Check, ChevronRight, Clock, Download, ExternalLink, Eye, Loader2, RefreshCw } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { WMStatusPill, type WMStatusTone } from '../StatusPill'
 import { COWORK_STEPS, type CoworkPipelineState, type StepCatalogEntry, type StepStatus } from '../../../lib/cowork/stepCatalog'
@@ -443,14 +443,16 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
   const isAggInfo     = status === 'aggregate_info'
 
   // Visual weight per state. Active steps (ready / cowork-session /
-  // stale) get full-strength card. Done / waiting / aggregate-info
-  // recede with a tinted background + lighter type. The strategist's
-  // eye lands on the active rows first without needing a left
-  // accent bar (which the reference dashboard doesn't use).
-  const isActive = isReady || isCowork || isStale
+  // stale) get full-strength card with shadow. Done + aggregate-info
+  // both read as "complete" — elevated background, full-strength
+  // title, check-icon pill. Only blocked_waiting recedes to the dim
+  // canvas treatment so the strategist can tell waiting and
+  // auto-extracted apart at a glance.
+  const isActive       = isReady || isCowork || isStale
+  const isCompleteLike = isDone || isAggInfo
   const cardClass = isActive
     ? 'bg-wm-bg-elevated border border-wm-border shadow-sm hover:shadow-md transition-shadow'
-    : (isDone
+    : (isCompleteLike
         ? 'bg-wm-bg-elevated border border-wm-border'
         : 'bg-wm-bg border border-wm-border')
 
@@ -476,7 +478,7 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
             'leading-tight ' +
             (isActive
               ? 'text-[18px] font-semibold text-wm-text'
-              : 'text-[17px] font-semibold ' + (isDone ? 'text-wm-text' : 'text-wm-text-muted'))
+              : 'text-[17px] font-semibold ' + (isCompleteLike ? 'text-wm-text' : 'text-wm-text-muted'))
           }>
             {step.title}
           </h2>
@@ -491,7 +493,7 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
       <div className="px-6 pb-4">
         <p className={
           'text-[13px] leading-relaxed ' +
-          (isActive || isDone ? 'text-wm-text-muted' : 'text-wm-text-subtle')
+          (isActive || isCompleteLike ? 'text-wm-text-muted' : 'text-wm-text-subtle')
         }>
           {step.description}
         </p>
@@ -528,16 +530,13 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
         </div>
       )}
 
-      {/* Action footer */}
+      {/* Action footer — suppressed for aggregate_info (the check pill + progress
+          bar above already convey the done state; no button to render). */}
+      {!isAggInfo && (
       <div className={
         'px-6 py-4 border-t border-wm-border flex items-center justify-end gap-2 ' +
         (isActive ? 'bg-wm-bg-elevated' : 'bg-transparent')
       }>
-        {/* Aggregate-info — quiet text only, no button */}
-        {isAggInfo && (
-          <span className="text-[12px] text-wm-text-subtle italic">No action here — extracted automatically during intake.</span>
-        )}
-
         {/* Waiting — quiet text only */}
         {isWaiting && (
           <span className="text-[12px] text-wm-text-subtle italic">Waiting on the previous step</span>
@@ -577,22 +576,10 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
           </button>
         )}
 
-        {/* Cowork-session ready — Open SKILL + Copy prompt */}
+        {/* Cowork-session ready — Download SKILL + Copy prompt */}
         {step.kind === 'cowork_session' && isCowork && (
           <>
-            {step.skill_md_path && (
-              <a
-                href={`https://github.com/churchwebsquad/milestone-comms-app/blob/main/${step.skill_md_path}`}
-                target="_blank"
-                rel="noreferrer"
-                className="text-[13px] font-medium px-4 py-2 rounded-lg border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text transition-colors"
-              >
-                <span className="flex items-center gap-1.5">
-                  <ExternalLink size={13} />
-                  Open SKILL
-                </span>
-              </a>
-            )}
+            {step.skill_md_path && <DownloadSkillButton skillPath={step.skill_md_path} />}
             <CopyPromptButton step={step} projectId={projectId} />
           </>
         )}
@@ -611,7 +598,52 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
           </button>
         )}
       </div>
+      )}
     </article>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// DownloadSkillButton — fetches the SKILL.md via the local Vercel
+// endpoint and triggers a file download (no GitHub redirect; the
+// strategist gets a local SKILL.md to drop into Claude Desktop).
+// ────────────────────────────────────────────────────────────────────
+
+function DownloadSkillButton({ skillPath }: { skillPath: string }) {
+  const [downloading, setDownloading] = useState(false)
+  const handle = async () => {
+    setDownloading(true)
+    try {
+      const r = await fetch(`/api/web/cowork/skill-download?path=${encodeURIComponent(skillPath)}`)
+      if (!r.ok) throw new Error(`download failed (${r.status})`)
+      const blob = await r.blob()
+      const skillName = skillPath.split('/')[1] ?? 'skill'
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${skillName}.SKILL.md`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      // Quiet failure — strategist sees the button reset and can retry.
+    } finally {
+      setDownloading(false)
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => void handle()}
+      disabled={downloading}
+      className="text-[13px] font-medium px-4 py-2 rounded-lg border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text disabled:opacity-50 transition-colors"
+    >
+      <span className="flex items-center gap-1.5">
+        {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+        {downloading ? 'Downloading…' : 'Download SKILL'}
+      </span>
+    </button>
   )
 }
 

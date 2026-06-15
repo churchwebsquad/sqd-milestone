@@ -52,12 +52,17 @@ const NOISE_TEMPLATE_MARKERS: readonly string[] = [
  *  the goal is "flag for review", not "must be valid". */
 const PHONE_PATTERN = /(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b/
 
-/** The nine "must-have" page types for a church website. A coverage gap
+/** The eight "must-have" page types for a church website. A coverage gap
  *  is a page type with ZERO contributing crawl topics OR content
  *  collection fields. Strategist sees this BEFORE strategy stages run
- *  so they can request more intake before paying for downstream LLM calls. */
+ *  so they can request more intake before paying for downstream LLM calls.
+ *
+ *  NOTE: `home` intentionally not listed. Crawl taxonomies don't carry a
+ *  dedicated "home" topic — homepages are synthesized from other topics
+ *  (sundays, new_here, ethos, etc.) downstream in plan-cross-page-allocation.
+ *  Flagging home as missing intake produces a false-positive warning on
+ *  every project. */
 const PAGE_TYPE_COVERAGE: ReadonlyArray<{ page_type: string; matches: readonly string[] }> = [
-  { page_type: 'home',     matches: ['home', 'index'] },
   { page_type: 'visit',    matches: ['visit', 'plan_visit', 'new_here', 'planning'] },
   { page_type: 'kids',     matches: ['kids', 'children', 'family', 'paratots', 'preschool'] },
   { page_type: 'beliefs',  matches: ['beliefs', 'doctrine', 'theology', 'faith_statement'] },
