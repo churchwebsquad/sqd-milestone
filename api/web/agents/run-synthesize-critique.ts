@@ -44,9 +44,19 @@ const PRES_4   = ['strong', 'present', 'weak', 'missing'] as const
 const TOOL_SCHEMA: ToolSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['overall_band', 'voice_consistency', 'persona_coverage', 'structural_parity', 'source_coverage', 'cross_page_findings'],
+  required: ['overall_band', 'vision_alignment_summary', 'voice_consistency', 'persona_coverage', 'structural_parity', 'source_coverage', 'cross_page_findings'],
   properties: {
     overall_band: { type: 'string', enum: [...BAND_3] },
+    /** Project-level vision-fit summary. Required by the SKILL when
+     *  `church_vision` is approved in strategic_goals; empty string
+     *  when the strategist hasn't approved a vision. Drives the
+     *  strategist's read of whether the build channels the emotional
+     *  outcome the partner named. */
+    vision_alignment_summary: {
+      type: ['string', 'null'],
+      maxLength: 1200,
+      description: 'How well the project as a whole channels the approved church_vision. Anchor the language against the verbatim vision when present.',
+    },
     voice_consistency: {
       type: 'object',
       additionalProperties: false,

@@ -233,7 +233,17 @@ export interface CoworkStage1 {
   voice_exemplars:         string[]           // verbatim phrases to imitate shape of
   voice_anti_exemplars:    string[]           // verbatim phrases that show what NOT to write
   voice_characteristics:   string[]           // tone_descriptors expanded
+  /** Carried from the approved strategic_goals snapshot
+   *  (top_3_website_goals + primary_goals). Empty when nothing
+   *  approved. */
   project_goals:           string[]
+  /** Carried verbatim from approved strategic_goals.goals_and_vision.
+   *  church_vision (AM handoff). Empty string when not approved. */
+  vision_statement:        string
+  /** Carried verbatim from approved strategic_goals.voice_and_tone.
+   *  one_key_message — every page's voice anchors against this.
+   *  Empty string when not approved. */
+  key_message:             string
   sitemap_signals:         string[]           // partner-stated needs that drive sitemap shape
   topic_coverage_plan:     Record<string, string>  // every topic_key → which page handles it
   total_page_count?:       number
@@ -343,11 +353,26 @@ export type CoworkUnresolvedReason =
   | typeof UNRESOLVED_REASONS_LIST[number]
   | (string & {})
 
+/** Verbatim-band budget. Derived from `copy_approach` in the strategic
+ *  goals snapshot. Drives how much crawled prose outline + draft are
+ *  expected to keep verbatim:
+ *    high → ≥70% verbatim from crawl
+ *    mid  → ~50%
+ *    low  → ≤20% (treat crawl as background; write fresh prose)
+ *  null when the strategist hasn't approved copy_approach yet — the
+ *  pipeline falls back to the default mid behavior. */
+export type CoworkVerbatimBand = 'high' | 'mid' | 'low' | null
+
 export interface CoworkPageAllocation {
   page_slug:           string
   page_job:            string                          // one sentence: what this page does for its primary persona
   primary_persona:     string | null                   // name of the persona this page is anchored to
   ministry_model_alignment: MinistryModel | 'mixed'
+  /** Required per the plan-cross-page-allocation SKILL contract —
+   *  must equal the approved copy_approach.derived.intended_verbatim_band
+   *  so outline-page + draft-page + critique-page can enforce it
+   *  downstream. */
+  intended_verbatim_band?: CoworkVerbatimBand
   /** Ordered list of section intents — the journey down the page. Each
    *  entry is just an INTENT + flow_role + treatment hints; outline-page
    *  turns this into archetype + slot bindings + atom_assignments. */
@@ -415,6 +440,12 @@ export interface CoworkPageOutline {
     flow_role:         FlowRole
     voice_anchor:      string              // which voice_exemplar to imitate
     anti_pattern_to_avoid: string          // specific shape NOT to produce here
+    /** Per-section verbatim-band budget, inherited from the parent
+     *  allocation's `intended_verbatim_band`. Draft must hit this
+     *  band on the section's `actual_verbatim_ratio`; critique flags
+     *  drift as a directive. Optional during the migration to the
+     *  carry-through contract; required once outline-page emits it. */
+    intended_verbatim_band?: CoworkVerbatimBand
     /** Pillar atom bindings (content_atoms rows). word-level treatment vocab. */
     atom_assignments: Array<{
       atom_id:    string                   // REAL UUID from content_atoms — importer validates
@@ -509,6 +540,13 @@ export interface CoworkPageDraft {
     archetype:           string
     voice_notes:         string                   // 1-line: which exemplar this section imitates
     copy:                Record<string, unknown>  // slot map — keys match the archetype's slot shape
+    /** Share of section words lifted verbatim from cited crawl
+     *  passages (0.0-1.0). Critique checks this against the outline's
+     *  `intended_verbatim_band` (high ≥0.7, mid 0.3-0.7, low ≤0.2)
+     *  and flags drift as a directive. Optional during the
+     *  carry-through migration; once draft-page emits it the
+     *  validator enforces presence. */
+    actual_verbatim_ratio?: number
     atoms_used:          string[]                 // atom IDs actually consumed in this section
     /** Facts whose data the drafter wove into copy this section.
      *  Sourced from the outline's fact_assignments. Validator checks
@@ -633,6 +671,12 @@ export interface CoworkCritiqueRollup {
     overall: number
     dignity: number
   }>
+  /** Project-level vision-fit summary. Anchored against the approved
+   *  `church_vision` (AM handoff) when present — empty string when
+   *  not approved. Flags whether the project as a whole channels the
+   *  emotional outcome the partner named. The synthesize-critique
+   *  SKILL contract requires this when church_vision is approved. */
+  vision_alignment_summary?: string
   _meta: ArtifactMeta
 }
 
