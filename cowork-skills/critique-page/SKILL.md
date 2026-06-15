@@ -439,6 +439,41 @@ section with the procedure in mind before finalizing scores.
   positive-checks all support.** A page with 5 axes green but a
   mechanical em-dash hit is RED.
 
+## Built-in verification — run BEFORE handing the critique to the strategist
+
+Run these checks against your own output, fix anything that fails,
+re-run the audit, THEN ask the strategist to review. Report as a
+table.
+
+1. **All five axes scored** with a band + a rationale referencing
+   specific lines (not vibes). Dignity, voice_character, persona_fit,
+   source_coverage, claim_plausibility.
+2. **Vision-fit checked** when
+   `strategic_goals.goals_and_vision.church_vision` is approved: at
+   least one dignity-axis directive (severity ≥ warning) cites the
+   `church_vision` text verbatim when the draft drifts away from it,
+   or the dignity rationale names it as honored.
+3. **Verbatim band drift** detected: every `draft.sections[i]`'s
+   `actual_verbatim_ratio` falls inside its `intended_verbatim_band`
+   range (high ≥ 0.7 / mid 0.3-0.7 / low ≤ 0.2). Any drift surfaces
+   as a directive with kind `verbatim_band_drift` at severity
+   ≥ warning.
+4. **Mechanical scan reported** (em-dashes, banned filler, AI
+   clichés, anti-exemplar hits) — concatenated across all field
+   values. Zero-hit pages can land green; any hit forces ≥ yellow
+   and surfaces in the directives.
+5. **Standout + problem lines quoted**, not paraphrased. Each entry
+   names the section + the verbatim line so the strategist can
+   trace it.
+
+## Review format
+
+Walk the strategist through the verdict as a **scannable axis table**
+(axis → score → 1-line rationale → top directive), then a
+**directives section** grouped by severity (blocker → warning →
+nit), then **standout / problem lines** as blockquotes. **Not raw
+JSON.** Keep JSON as the persisted artifact only.
+
 ## Self-validation before returning
 
 1. mechanical_scan.no_em_dashes.passed === true OR confidence_band

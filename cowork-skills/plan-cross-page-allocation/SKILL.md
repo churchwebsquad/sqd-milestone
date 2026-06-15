@@ -279,6 +279,58 @@ catch here than to fail at bind time after 8 expensive LLM calls.
   reason `duplicate_of_placed_source`). Never place identical bodies at
   different targets as if they were two ideas.
 
+## Routing rigor (do this BEFORE finalizing placement)
+
+Inspect the **actual passages/items** of any ambiguous crawl topic
+before routing — especially the `other` bucket and every `rich` or
+`covered` topic whose destination isn't obvious from `topic_label`
+alone. Models that route by label-only routinely drop content the
+strategist wanted preserved.
+
+**Never silently drop a `rich` or `covered` topic**: either place it,
+or list it in `unresolved_sources` with a closed-vocabulary reason
+(see `CoworkUnresolvedReason` in the bundle types). `sparse` topics
+may be absorbed into a parent page's section OR unresolved with a
+reason — your call, but document it.
+
+## Built-in verification — run BEFORE handing the plan to the strategist
+
+Run these checks against your own output, fix anything that fails,
+re-run the audit, THEN ask the strategist to review. Report the
+results as a table in the review so they can see you actually ran
+them.
+
+1. **Inventory coverage.** Every `content_atom.id` lands somewhere
+   — either in an allocation entry's source list OR in
+   `unresolved_sources`. Every `web_project_topics.topic_key` lands
+   somewhere with the same rule. Every `church_facts.topic` group
+   lands somewhere. List anything missing.
+2. **Verbatim band stamped.** Every entry in `allocations[]` carries
+   `intended_verbatim_band` equal to the approved
+   `copy_approach.derived.intended_verbatim_band`. No entry left null
+   when the strategist has approved the field.
+3. **Structure.** Every page has ≥3 `section_intents` ending in
+   `invite` or `close` (except pages flagged `excluded_from_creative_lift`).
+   Every page named in `persona_journeys[].entry_points` opens with
+   a `hook` section.
+4. **Strategy mapping.** Each item in `top_3_website_goals`, each
+   ministry in `ministries_to_grow`, each item in `content_needs`,
+   each method in `best_outreach_methods`, and each display / copy /
+   nav preference maps to a specific page or section. Flag any not
+   accommodated and propose where they should land.
+
+If a check fails, fix it and re-run the audit before involving the
+strategist.
+
+## Review format
+
+Walk the strategist through each page's allocation in a
+**human-friendly view** — a scannable per-page layout (page → ordered
+sections → source ref + treatment + verbatim band, with flags for
+unresolved or low-confidence). **Not raw JSON.** Keep the JSON as the
+persisted artifact only. Pause for the strategist's push-back before
+persisting.
+
 ## Quality bar before returning
 
 Every item below is mechanically checkable. The runtime runs

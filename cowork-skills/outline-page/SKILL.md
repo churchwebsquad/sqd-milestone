@@ -591,6 +591,41 @@ that.
   bans (em-dashes, "delve", "tapestry", etc.).** Drafter scans this
   before writing.
 
+## Built-in verification — run BEFORE handing the outline to the strategist
+
+Run these checks against your own output, fix anything that fails,
+re-run the audit, THEN ask the strategist to review. Report results
+as a table.
+
+1. **Allocation coverage**: every `section_intent` from the allocation
+   page entry → either a `sections[]` entry or an `overflow_atoms`
+   entry. Count match.
+2. **Slot bindings**: for each section, every required slot in
+   `canonical_templates[template_key].slots[required=true]` has a
+   binding. List any unfilled.
+3. **Ref resolution**: every `atom_ref` / `fact_ref` / `crawl_topic_key`
+   resolves to a real id in `atoms_for_page` / `facts_for_page` /
+   `crawl_topics_for_page`. No dangling refs.
+4. **Verbatim discipline**: every \`verbatim: true\` atom is bound as
+   `atom_ref` with `treatment: 'use_as_is'` OR placed in
+   `overflow_atoms` with a structured reason. Never compressed.
+5. **Verbatim band stamped**: every entry in `sections[]` carries
+   `intended_verbatim_band` matching the parent allocation's band.
+6. **Voice anchor present**: at least one section per outline carries
+   a `voice_anchor` pointing at a `stage_1.voice_exemplars` phrase.
+   When `strategic_goals.voice_and_tone.one_key_message` is approved,
+   at least one section's voice anchors against it.
+7. **CTA target valid**: `page_level_cta.primary.target_slug` is a
+   real slug in `site_strategy.pages[].slug` (or in allocation's
+   section_intent CTAs as a fallback).
+
+## Review format
+
+Walk the strategist through the outline **per section** — a scannable
+layout (section archetype → voice anchor → sources bound to slots,
+with treatment + verbatim band). **Not raw JSON.** Keep JSON as the
+persisted artifact only. Pause for push-back before persisting.
+
 ## Self-validation before returning
 
 1. Every section_intent from `allocation` → either a `sections[]` entry

@@ -125,15 +125,41 @@ into a cowork session. The prompt names YOU.
    ```
    Get one last OK.
 
-7. **Persist via roadmap_state_set.** Single atomic write:
-   ```ts
-   sb.rpc('roadmap_state_set', {
-     p_project_id: '<project_id>',
-     p_path:       ['site_strategy'],
-     p_value:      revised_site_strategy_object,
-   })
+7. **Persist via roadmap_state_set — prefer server-side jsonb_set for surgical edits.**
+   site_strategy can run tens of KB once nav_presentation + persona_journeys are populated; re-transmitting the whole blob in a single SQL literal corrupts above ~8 KB. Two persistence paths:
+
+   **a. Small / structural edits (one or two top-level keys touched)** —
+   use server-side `jsonb_set` so you never re-transmit the whole blob:
+   ```sql
+   SELECT roadmap_state_set(
+     '<project_id>',
+     ARRAY['site_strategy'],
+     jsonb_set(
+       jsonb_set(
+         (SELECT roadmap_state->'site_strategy' FROM strategy_web_projects WHERE id = '<project_id>'),
+         '{pages}',        '<new pages array>'::jsonb,        true
+       ),
+       '{nav_presentation,megamenu_panels}', '<new panels>'::jsonb, true
+     )
+   );
    ```
-   The revised artifact MUST include a fresh `_meta`:
+   Dry-run the transformed object's invariants (counts, key
+   presence, nav slug ↔ pages[] cross-check) via a `SELECT` BEFORE
+   the write.
+
+   **b. Heavy edits / nav_presentation regenerated wholesale** —
+   chunked staging-table write:
+   1. Generate the revised JSON locally; compute md5 of the whole +
+      each ~9 KB chunk.
+   2. `CREATE TEMP TABLE _staging_revise (ix int, body text)`; insert
+      chunks via `$dollar$`-quoted literals.
+   3. Server-side verify: each chunk's md5 matches, assembled md5 ==
+      local md5, `(assembled)::jsonb` parses. The `::jsonb` cast
+      fails closed — a corrupted write cannot land.
+   4. `SELECT roadmap_state_set('<project_id>', ARRAY['site_strategy'], (assembled)::jsonb)`,
+      drop the staging table, read back `_meta` to confirm.
+
+   Either way, the revised artifact MUST include a fresh `_meta`:
    ```ts
    _meta: {
      ...current._meta,

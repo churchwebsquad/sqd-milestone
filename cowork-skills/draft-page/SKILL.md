@@ -327,6 +327,42 @@ variant + re-fire, or accept the derived heading.
   if a claim from atom.body doesn't make it into the drafted value,
   cite the omission.
 
+## Built-in verification — run BEFORE handing the draft to the strategist
+
+Run these checks against your own output, fix anything that fails,
+re-run the audit, THEN ask the strategist to review. Report as a
+table per section.
+
+1. **Verbatim band landed**: every section stamps `actual_verbatim_ratio`
+   (0.0-1.0) AND that ratio lands inside its `intended_verbatim_band`:
+   - `high` → ratio ≥ 0.7
+   - `mid`  → 0.3 ≤ ratio ≤ 0.7
+   - `low`  → ratio ≤ 0.2
+   If a section can't hit its band, defer it with reason
+   `verbatim_band_unreachable` rather than fake the number.
+2. **Voice anchor honored**: every section that the outline named a
+   `voice_anchor` for actually echoes that exemplar's rhythm in its
+   copy. List which exemplar each section channels.
+3. **Key message echoed**: when
+   `strategic_goals.voice_and_tone.one_key_message` is approved, at
+   least one section's copy carries the message in its own voice.
+   Name the section.
+4. **Source bindings used**: every `atom_assignments[].atom_id` in
+   the outline appears in `sections[].atoms_used[]` OR in
+   `deferred_atoms[]` with a structured reason. Same for facts +
+   crawl topics.
+5. **Voice ban scan**: concatenate every field_value into one string.
+   Zero hits for: em-dashes, banned filler intensifiers, AI clichés,
+   church clichés, anti-exemplar phrases.
+
+## Review format
+
+Walk the strategist through the draft **per section** — a scannable
+layout (section archetype → first line of each slot, with verbatim
+ratio + voice anchor cited, flags for deferred slots). **Not raw
+JSON.** Keep JSON as the persisted artifact only. Pause for push-
+back before persisting.
+
 ## Self-validation before returning
 
 1. Concatenate every field_value into one string. Mechanical scan for:
