@@ -24,7 +24,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import {
-  ClipboardList, LayoutGrid, FileText, Palette, Cog, Eye, Loader2, CalendarClock, Workflow, Atom, Rocket,
+  ClipboardList, LayoutGrid, FileText, Palette, Cog, Eye, Loader2, CalendarClock, Workflow, MessageSquareQuote, Rocket,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { WebManagerShell } from '../../components/wm'
@@ -60,7 +60,7 @@ type TabKey =
 const TABS: readonly WMTabItem<TabKey>[] = [
   { key: 'planning',   label: 'Planning',        icon: <CalendarClock size={13} /> },
   { key: 'intake',     label: 'Intake & Crawl',  icon: <ClipboardList size={13} /> },
-  { key: 'atoms',      label: 'Atoms',           icon: <Atom          size={13} /> },
+  { key: 'atoms',      label: 'Core messages',   icon: <MessageSquareQuote size={13} /> },
   { key: 'cowork',     label: 'Cowork',          icon: <Rocket        size={13} /> },
   { key: 'engine',     label: 'Copy Engine',     icon: <Workflow      size={13} /> },
   { key: 'pipeline',   label: 'Copywriting (legacy)', icon: <Workflow size={13} /> },

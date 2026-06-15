@@ -1,31 +1,33 @@
 /**
- * Web Manager — Atom Review workspace.
+ * Web Manager — Core Messages review workspace.
  *
- * The strategist's gate between normalize-intake (which produces atoms
- * in status='draft') and the cowork pipeline (which routes
- * status='approved' OR 'draft' atoms into allocation/outline/draft).
+ * Strategist-language naming: the partner-facing concept is "core
+ * message" — a discrete statement about the church (voice rule, value
+ * statement, ethos line, persona signal, etc.) that the pipeline can
+ * route into pages. Internally these are still rows on `content_atoms`
+ * and the local TypeScript interface is still `Atom` — implementation
+ * detail. The strategist sees "core messages" in every label.
+ *
+ * The strategist's gate between normalize-intake (which produces core
+ * messages in status='draft') and the cowork pipeline (which routes
+ * status='approved' OR 'draft' core messages into allocation/outline/
+ * draft).
  *
  * Surfaced 2026-06-13 by the DS inventory-readiness warning that 71/71
- * atoms on a real account still sat status='draft' — meaning every
- * cowork run was implicitly trusting unreviewed partner content. This
- * workspace closes that root-cause gap: the strategist reads each
- * atom + decides keep/edit/reject before any draft money is spent.
+ * core messages on a real account still sat status='draft' — meaning
+ * every cowork run was implicitly trusting unreviewed partner content.
+ * This workspace closes that root-cause gap: the strategist reads each
+ * core message + decides keep/edit/reject before any draft money is
+ * spent.
  *
  * MVP scope (deliberately narrow):
- *   - Group atoms by topic (voice_rule, value_statement, prose_snippet, …)
- *   - Per atom: body + source provenance + status + verbatim + confidence
- *   - Three actions per atom: Approve (draft→approved), Reject (→archived),
- *     Edit (inline body editor + verbatim toggle)
+ *   - Group core messages by topic (voice_rule, value_statement,
+ *     prose_snippet, …)
+ *   - Per message: body + source provenance + status + verbatim + confidence
+ *   - Three actions per message: Approve (draft→approved), Reject
+ *     (→archived), Edit (inline body editor + verbatim toggle)
  *   - Bulk-approve all drafts in a topic group
  *   - Filter by status (default: show drafts only — the review queue)
- *
- * Out of scope (would expand this beyond a half-day):
- *   - Duplicate detection / merge (no duplicate_of column on the schema)
- *   - Re-running normalize-intake from this UI (intake is its own
- *     workflow upstream)
- *   - Audit trail / who-approved-when (the content_atoms table doesn't
- *     carry approver fields; can be added when a real review history
- *     feature ships)
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -61,9 +63,10 @@ function pillToneFor(status: Atom['status']): 'neutral' | 'success' | 'warning' 
   return 'warning'   // 'draft' — needs strategist attention
 }
 
-/** Topic display order: voice/character atoms first (highest review value),
- *  then content, then everything else alphabetically. The strategist
- *  cares most about voice atoms — those drive every page's tone. */
+/** Topic display order: voice/character messages first (highest review
+ *  value), then content, then everything else alphabetically. The
+ *  strategist cares most about voice messages — those drive every
+ *  page's tone. */
 function topicSortKey(topic: string): string {
   const VOICE_FIRST = ['voice_rule', 'voice_sample', 'tone_descriptor']
   const ETHOS = ['ethos', 'mission_statement', 'vision_statement', 'x_factor']
@@ -166,7 +169,7 @@ export function AtomReviewWorkspace({ project, onChange }: Props) {
   const bulkApproveTopic = async (topic: string) => {
     const draftsInTopic = atoms.filter(a => a.topic === topic && a.status === 'draft')
     if (draftsInTopic.length === 0) return
-    if (!confirm(`Approve ${draftsInTopic.length} draft atom${draftsInTopic.length === 1 ? '' : 's'} in "${topic}"?`)) return
+    if (!confirm(`Approve ${draftsInTopic.length} draft core message${draftsInTopic.length === 1 ? '' : 's'} in "${topic}"?`)) return
     // Sequential to keep the optimistic UI honest about failures.
     for (const a of draftsInTopic) await approve(a.id)
   }
@@ -192,7 +195,7 @@ export function AtomReviewWorkspace({ project, onChange }: Props) {
       {grouped.length === 0 && (
         <div className="rounded-md border border-dashed border-wm-border bg-wm-bg p-5 text-center">
           <p className="text-[12px] text-wm-text-muted">
-            {statusFilter === 'draft' ? 'No drafts to review — all atoms are approved or archived.' : `No atoms with status=${statusFilter}.`}
+            {statusFilter === 'draft' ? 'No drafts to review — all core messages are approved or archived.' : `No core messages with status=${statusFilter}.`}
           </p>
         </div>
       )}
@@ -216,7 +219,7 @@ export function AtomReviewWorkspace({ project, onChange }: Props) {
                   {collapsed ? <ChevronRight size={14} className="text-wm-text-subtle shrink-0" /> : <ChevronDown size={14} className="text-wm-text-subtle shrink-0" />}
                   <span className="text-[13px] font-semibold text-wm-text">{topic}</span>
                   <span className="text-[11px] text-wm-text-muted">
-                    {topicAtoms.length} {topicAtoms.length === 1 ? 'atom' : 'atoms'}
+                    {topicAtoms.length} {topicAtoms.length === 1 ? 'core message' : 'core messages'}
                     {statusFilter === 'all' && draftsInGroup > 0 && ` · ${draftsInGroup} draft`}
                   </span>
                 </div>
@@ -267,7 +270,7 @@ function Header({ counts, statusFilter, onFilter }: {
   return (
     <div className="mb-4 flex items-end justify-between gap-2 flex-wrap">
       <div className="min-w-0">
-        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Atoms</p>
+        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Core messages</p>
         <h2 className="text-[15px] font-semibold text-wm-text">Strategist review queue</h2>
         <p className="text-[11px] text-wm-text-muted mt-0.5">
           {counts.total} total · {counts.draft} draft · {counts.approved} approved · {counts.archived} archived

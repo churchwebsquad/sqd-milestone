@@ -1583,7 +1583,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
               />
               <ScoreChip label="Voice"   value={critique.scores.voice_character ?? critique.scores.voice_consistency ?? 0} />
               <ScoreChip label="Persona" value={critique.scores.persona_fit ?? critique.scores.persona_coverage ?? 0} />
-              <ScoreChip label="Atoms"   value={critique.scores.source_coverage ?? 0} />
+              <ScoreChip label="Messages" value={critique.scores.source_coverage ?? 0} />
               <ScoreChip label="Claims"  value={critique.scores.claim_plausibility ?? 0} />
               <ScoreChip label="Overall" value={critique.scores.overall ?? 0} bold />
             </div>
