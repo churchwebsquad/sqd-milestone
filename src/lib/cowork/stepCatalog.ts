@@ -98,6 +98,11 @@ export interface StepCatalogEntry {
   /** Optional progress descriptor for aggregate steps (1, 2, 8, 9, 10).
    *  Returns done count + total count + label. */
   progress?:     (s: CoworkPipelineState) => { done: number; total: number; label: string }
+  /** Optional: when status==='stale', returns the upstream artifact
+   *  that bumped fresh past this step's output (so the UI can surface
+   *  "stale because <upstream> changed at <ts>"). null when stale isn't
+   *  due to a tracked upstream (or status isn't stale). */
+  staleReason?:  (s: CoworkPipelineState) => StaleReason | null
 }
 
 /** Common helper — refuse if output is at least as fresh as upstream.
@@ -119,6 +124,39 @@ function latestOf(...candidates: Array<string | null | undefined>): string | nul
     if (!max || c > max) max = c
   }
   return max
+}
+
+/** Resolved stale-reason for a step card. Names which upstream
+ *  artifact got fresher than this step's output. UI surfaces this in
+ *  a tooltip/banner so the strategist sees *why* before re-running. */
+export interface StaleReason {
+  upstream_label: string     // e.g. 'site_strategy' / 'stage_1' / 'strategic_goals'
+  upstream_at:    string     // ISO timestamp
+  output_at:      string     // ISO timestamp of THIS step's last run
+}
+
+/** Per-step upstream-source descriptor. Each step's computeStatus
+ *  uses these to derive both its status pill AND the StaleReason
+ *  shown to the strategist when stale. Pulled from the same state
+ *  shape so there's one source of truth. */
+type UpstreamRef = { label: string; getAt: (s: CoworkPipelineState) => string | null }
+
+function staleReasonFor(
+  state: CoworkPipelineState,
+  outputAt: string | null,
+  upstreams: UpstreamRef[],
+): StaleReason | null {
+  if (!outputAt) return null
+  // Pick the upstream with the LATEST timestamp that exceeds output_at.
+  let winner: { label: string; at: string } | null = null
+  for (const u of upstreams) {
+    const at = u.getAt(state)
+    if (!at) continue
+    if (at <= outputAt) continue
+    if (!winner || at > winner.at) winner = { label: u.label, at }
+  }
+  if (!winner) return null
+  return { upstream_label: winner.label, upstream_at: winner.at, output_at: outputAt }
 }
 
 export const COWORK_STEPS: StepCatalogEntry[] = [
@@ -177,6 +215,10 @@ export const COWORK_STEPS: StepCatalogEntry[] = [
       if (fresherThan(out, upstream))     return 'done'
       return 'stale'
     },
+    staleReason: s => staleReasonFor(s, s.stage_1?._meta?.generated_at ?? null, [
+      { label: 'content_atoms (newest edit)', getAt: ss => ss.latest_atom_at },
+      { label: 'strategic_goals',             getAt: ss => ss.strategic_goals_at },
+    ]),
     lastRunAt: s => s.stage_1?._meta?.generated_at ?? null,
     lastModel: s => s.stage_1?._meta?.model ?? null,
   },
@@ -197,6 +239,9 @@ export const COWORK_STEPS: StepCatalogEntry[] = [
       if (fresherThan(out, s.stage_1._meta.generated_at ?? null)) return 'done'
       return 'stale'
     },
+    staleReason: s => staleReasonFor(s, s.ministry_model?._meta?.generated_at ?? null, [
+      { label: 'stage_1', getAt: ss => ss.stage_1?._meta?.generated_at ?? null },
+    ]),
     lastRunAt: s => s.ministry_model?._meta?.generated_at ?? null,
     lastModel: s => s.ministry_model?._meta?.model ?? null,
   },
@@ -217,6 +262,9 @@ export const COWORK_STEPS: StepCatalogEntry[] = [
       if (fresherThan(out, s.stage_1._meta.generated_at ?? null)) return 'done'
       return 'stale'
     },
+    staleReason: s => staleReasonFor(s, s.acf_plan?._meta?.generated_at ?? null, [
+      { label: 'stage_1', getAt: ss => ss.stage_1?._meta?.generated_at ?? null },
+    ]),
     lastRunAt: s => s.acf_plan?._meta?.generated_at ?? null,
     lastModel: s => s.acf_plan?._meta?.model ?? null,
   },
@@ -240,6 +288,10 @@ export const COWORK_STEPS: StepCatalogEntry[] = [
       if (fresherThan(out, upstream))                          return 'done'
       return 'stale'
     },
+    staleReason: s => staleReasonFor(s, s.site_strategy?._meta?.generated_at ?? null, [
+      { label: 'ministry_model',  getAt: ss => ss.ministry_model?._meta?.generated_at ?? null },
+      { label: 'strategic_goals', getAt: ss => ss.strategic_goals_at },
+    ]),
     lastRunAt: s => s.site_strategy?._meta?.generated_at ?? null,
     lastModel: s => s.site_strategy?._meta?.model ?? null,
   },
@@ -289,6 +341,10 @@ When complete, write the allocation to \`roadmap_state.page_allocation_plan\` vi
       if (fresherThan(out, upstream)) return 'done'
       return 'stale'
     },
+    staleReason: s => staleReasonFor(s, s.page_allocation_plan?._meta?.generated_at ?? null, [
+      { label: 'site_strategy',   getAt: ss => ss.site_strategy?._meta?.generated_at ?? null },
+      { label: 'strategic_goals', getAt: ss => ss.strategic_goals_at },
+    ]),
     lastRunAt: s => s.page_allocation_plan?._meta?.generated_at ?? null,
     lastModel: s => s.page_allocation_plan?._meta?.model ?? null,
   },
@@ -429,6 +485,10 @@ When done, write to \`roadmap_state.page_critiques.<PAGE-SLUG>\` via \`roadmap_s
       if (fresherThan(out, upstream))                return 'done'
       return 'stale'
     },
+    staleReason: s => staleReasonFor(s, s.critique_rollup?._meta?.generated_at ?? null, [
+      { label: 'latest page critique', getAt: ss => ss.latest_critique_at },
+      { label: 'strategic_goals',      getAt: ss => ss.strategic_goals_at },
+    ]),
     lastRunAt: s => s.critique_rollup?._meta?.generated_at ?? null,
     lastModel: s => s.critique_rollup?._meta?.model ?? null,
   },

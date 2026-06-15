@@ -477,6 +477,9 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
   const lastAt   = state && step.lastRunAt ? step.lastRunAt(state) : null
   const lastMdl  = state && step.lastModel ? step.lastModel(state) : null
   const progress = state && step.progress  ? step.progress(state)  : null
+  const staleR   = state && step.staleReason && status === 'stale'
+    ? step.staleReason(state)
+    : null
 
   const isDone        = status === 'done'
   const isReady       = status === 'ready'
@@ -542,6 +545,20 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
         </p>
       </div>
 
+      {/* Stale-reason banner — names the upstream that bumped fresh
+          past this step's output, with both timestamps. Without this
+          the strategist sees "Needs re-run" and has no way to know
+          whether something they care about actually changed. */}
+      {isStale && staleR && (
+        <div className="px-6 pb-4">
+          <div className="rounded-md border border-wm-warning/30 bg-wm-warning-bg/40 px-3 py-2 text-[12px] text-wm-text leading-snug">
+            <span className="font-semibold">Needs re-run because </span>
+            <span className="font-mono">{staleR.upstream_label}</span>
+            <span> changed at {new Date(staleR.upstream_at).toLocaleString()} — your last run finished at {new Date(staleR.output_at).toLocaleString()}.</span>
+          </div>
+        </div>
+      )}
+
       {/* Progress bar (per-source / per-page steps) */}
       {progress && (
         <div className="px-6 pb-4">
@@ -563,8 +580,9 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
         </div>
       )}
 
-      {/* Cowork-session automation note */}
-      {(isCowork || (step.kind === 'cowork_session' && isDone)) && (
+      {/* Cowork-session automation note — also surfaced on stale so
+          the strategist sees the same expectation when re-running. */}
+      {step.kind === 'cowork_session' && (isCowork || isStale || isDone) && (
         <div className="px-6 pb-4 text-[12px] text-wm-text-muted italic flex items-start gap-2">
           <ExternalLink size={12} className="shrink-0 mt-0.5" />
           <span>
@@ -639,11 +657,33 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
           </button>
         )}
 
-        {/* Cowork-session ready — Download SKILL + Copy prompt */}
+        {/* Cowork-session ready (never run) — Download SKILL + Copy prompt */}
         {step.kind === 'cowork_session' && isCowork && (
           <>
             {step.skill_md_path && <DownloadSkillButton skillPath={step.skill_md_path} />}
             <CopyPromptButton step={step} projectId={projectId} />
+          </>
+        )}
+
+        {/* Cowork-session stale — output exists but upstream changed.
+            Show View details (audit current) + Download SKILL + Copy
+            prompt (to re-run). Previously this state rendered NO
+            buttons, leaving the strategist with a "NEEDS RE-RUN" pill
+            and no way to act on it. */}
+        {step.kind === 'cowork_session' && isStale && (
+          <>
+            <button
+              type="button"
+              onClick={onViewDetails}
+              className="text-[13px] font-medium px-4 py-2 rounded-lg border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text transition-colors"
+            >
+              <span className="flex items-center gap-1.5">
+                <Eye size={13} />
+                View current
+              </span>
+            </button>
+            {step.skill_md_path && <DownloadSkillButton skillPath={step.skill_md_path} />}
+            <CopyPromptButton step={step} projectId={projectId} label="Re-run in Cowork" />
           </>
         )}
 
@@ -715,9 +755,11 @@ function DownloadSkillButton({ skillPath }: { skillPath: string }) {
 // {{project_id}}, copies to clipboard, shows "Copied" for 2s.
 // ────────────────────────────────────────────────────────────────────
 
-function CopyPromptButton({ step, projectId }: {
+function CopyPromptButton({ step, projectId, label = 'Copy prompt for Cowork' }: {
   step:      StepCatalogEntry
   projectId: string
+  /** Override the idle button label — e.g. "Re-run in Cowork" for stale steps. */
+  label?:    string
 }) {
   const [copied, setCopied] = useState(false)
   const handle = () => {
@@ -737,7 +779,7 @@ function CopyPromptButton({ step, projectId }: {
     >
       <span className="flex items-center gap-1.5">
         {copied ? <Check size={13} /> : <ChevronRight size={13} />}
-        {copied ? 'Copied — paste in Cowork' : 'Copy prompt for Cowork'}
+        {copied ? 'Copied — paste in Cowork' : label}
       </span>
     </button>
   )
