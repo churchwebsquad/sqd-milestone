@@ -35,6 +35,7 @@ import { AlertTriangle, ArrowRight, Check, ChevronRight, Clock, Download, Extern
 import { supabase } from '../../../lib/supabase'
 import { WMStatusPill, type WMStatusTone } from '../StatusPill'
 import { COWORK_STEPS, type CoworkPipelineState, type StepCatalogEntry, type StepStatus } from '../../../lib/cowork/stepCatalog'
+import { expandCoworkTokens } from '../../../lib/cowork/coworkPromptContext'
 import { CoworkArtifactDrawer } from './CoworkArtifactDrawer'
 import type { StrategyWebProject } from '../../../types/database'
 
@@ -721,7 +722,7 @@ function CopyPromptButton({ step, projectId }: {
   const [copied, setCopied] = useState(false)
   const handle = () => {
     if (!step.starter_prompt) return
-    const text = step.starter_prompt.replaceAll('{{project_id}}', projectId)
+    const text = expandCoworkTokens(step.starter_prompt, projectId)
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)

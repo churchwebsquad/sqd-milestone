@@ -21,6 +21,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Check, Loader2, Pencil, X } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { getConverterForOutputKey } from '../../../lib/cowork/artifactsToMarkdown'
+import { expandCoworkTokens } from '../../../lib/cowork/coworkPromptContext'
 import { NavPresentationPanel, type NavPresentation } from '../NavPresentationPanel'
 
 interface Props {
@@ -114,8 +115,12 @@ export function CoworkArtifactDrawer({ outputKey, title, projectId, onClose }: P
    *  edit-in-place SKILL — button stays hidden in that case. */
   const editPrompt = useMemo<string | null>(() => {
     if (outputKey !== 'site_strategy') return null
+    // Tokens (`{{project_id}}`, `{{supabase_project}}`) get expanded
+    // by expandCoworkTokens at copy-time — keeps the substitution
+    // logic + Supabase preamble in one place across every cowork
+    // prompt.
     return [
-      `Use the **revise-site-strategy** skill for project_id \`${projectId}\`.`,
+      `Use the **revise-site-strategy** skill for project_id \`{{project_id}}\`.`,
       ``,
       `Read:`,
       `- \`roadmap_state.site_strategy\` (the current sitemap + nav)`,
@@ -142,10 +147,16 @@ export function CoworkArtifactDrawer({ outputKey, title, projectId, onClose }: P
       `(path: \`['site_strategy']\`). Bump \`_meta.generated_at\` and stamp \`_meta.revision_of\``,
       `with the prior generated_at so the audit trail survives.`,
     ].join('\n')
-  }, [outputKey, projectId])
+  }, [outputKey])
 
   const handleCopy = (kind: 'md' | 'json' | 'edit') => {
-    const text = kind === 'md' ? markdown : kind === 'json' ? jsonString : (editPrompt ?? '')
+    const text = kind === 'md'
+      ? markdown
+      : kind === 'json'
+        ? jsonString
+        : editPrompt
+          ? expandCoworkTokens(editPrompt, projectId)
+          : ''
     if (!text) return
     navigator.clipboard.writeText(text).then(() => {
       setCopiedKind(kind)
