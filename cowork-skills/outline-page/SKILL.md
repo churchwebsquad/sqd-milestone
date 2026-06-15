@@ -52,49 +52,72 @@ Loaded from `roadmap_state.strategic_goals` (`status='approved'` only):
   `embed-latest-sermon` archetype with a small archive link; `archive`
   → use a list/grid archetype that surfaces the full archive.
 
-## Your input
+## Walk the sitemap — do not ask which page
+
+You have the full page list from
+`cowork_load_outline_context(...).site_strategy_pages`. Walk it in
+`nav_order`. Don't prompt the strategist for the next slug; just
+open the next context call.
+
+## Your input — single MCP call per page
+
+The cowork starter prompt tells you to query:
+
+```sql
+SELECT cowork_load_outline_context('<project_id>'::uuid, '<page_slug>');
+```
+
+That one call returns this shape — replaces the 8-15 ad-hoc probes
+earlier drafts of this skill required:
 
 ```ts
 {
-  project_id:     string
-  page_slug:      string                  // 'plan-a-visit'
-  /** This page's slice of page_allocation_plan.allocations[]. */
-  allocation:     CoworkPageAllocation    // section_intents[] + page-level metadata
-  /** Subset of stage_1 needed for outline decisions:
-   *  - ethos_summary (loads into every system prompt)
-   *  - personas (so persona-fit checks work)
-   *  - voice_anti_exemplars (banned terms / forbidden moves) */
-  stage_1_brief:  {
-    ethos_summary:        string
-    personas:             CoworkStage1['personas']
-    voice_anti_exemplars: CoworkStage1['voice_anti_exemplars']
-  }
-  /** ministry_model dominant_model + secondary_blend. Drives which
-   *  outline templates we reach for. */
+  page_slug:    string                  // echoed back
+  allocation:   CoworkPageAllocation    // this page's slice of page_allocation_plan.allocations[]
+                                        // (tolerates both 'page_slug' and 'slug' field names —
+                                        //  model output drifted in past runs; both work)
+
+  atoms_for_page:        Array<ContentAtomRow>   // FULL rows for every atom the section_intents reference
+  facts_for_page:        Array<ChurchFactRow>    // FULL rows for every fact referenced
+  crawl_topics_for_page: Array<WebProjectTopic>  // FULL passages + items, not just keys
+
+  build_directives_for_page: BuildDirective[]    // directives where applies_to = page_slug OR 'site_wide'
+
+  stage_1:        CoworkStage1            // full stage_1 (voice, personas, ethos, key_message, vision_statement, project_goals)
   ministry_model: CoworkMinistryModel
-  /** Loaded from cowork-skills/references/canonical-templates.json.
-   *  This IS the closed enum — no other templates exist. */
+
+  /** Strategist-approved strategic goals, grouped by category. Filter
+   *  here = only fields with status='approved'. */
+  strategic_goals_approved: {
+    goals_and_vision?:       Record<string, StrategicGoalField>
+    voice_and_tone?:         Record<string, StrategicGoalField>
+    content_and_allocation?: Record<string, StrategicGoalField>
+    display_and_technical?:  Record<string, StrategicGoalField>
+    inspiration_and_notes?:  Record<string, StrategicGoalField>
+  }
+
+  prior_handoff_note:  string | null     // from page_allocation_plan._meta.handoff_note
+
+  /** The closed template + slot vocabulary. THIS IS YOUR TEMPLATE
+   *  ENUM. Don't invent template_keys not in here; don't bind to
+   *  slot_hints outside each template's cowork_writable_slots. */
   canonical_templates: CanonicalTemplateLibrary
-  /** Loaded from references/page-outlines-by-ministry-model.md. Maps
-   *  (page_type, ministry_model) → suggested section sequences. */
-  outline_patterns:    PageOutlinePatternLibrary
-  /** Compact atom projection — JUST the atoms allocated to this page.
-   *  id + topic + body + verbatim + content_quality. */
-  atoms_for_page: Array<{
-    id:               string
-    topic:            AtomTopic
-    body:             string
-    verbatim:         boolean
-    content_quality:  'clean' | 'noisy' | 'unknown'
-  }>
-  /** Compact fact projection — JUST the facts allocated to this page. */
-  facts_for_page: Array<{
-    id:       string
-    topic:    string
-    data:     Record<string, unknown>
+
+  /** Full sitemap with slug + name + nav_order + nav_strategy.
+   *  Use this as the walk list. */
+  site_strategy_pages: Array<{
+    slug: string
+    name: string
+    nav_order: number | null
+    nav_strategy: 'primary' | 'secondary' | 'footer' | 'contextual_only'
+    primary_persona: string | null
   }>
 }
 ```
+
+The RPC lives at `public.cowork_load_outline_context(uuid, text)` in
+the Supabase project; the strategist's cowork preamble carries the
+project_ref + the project_id token to use.
 
 ## What you produce (CoworkPageOutline)
 

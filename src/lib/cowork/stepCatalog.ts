@@ -364,27 +364,48 @@ When complete, write the allocation to \`roadmap_state.page_allocation_plan\` vi
     kind:        'cowork_session',
     skill_md_path: 'cowork-skills/outline-page/SKILL.md',
     starter_prompt:
-`Use the **outline-page** skill for project_id \`{{project_id}}\`, page_slug \`<PAGE-SLUG>\`.
+`Use the **outline-page** skill for project_id \`{{project_id}}\`. Walk the sitemap sequentially — don't ask me which page to start on, you have the list.
 
-**Read the handoff note from the prior step FIRST** — \`roadmap_state.page_allocation_plan._meta.handoff_note\` carries the allocation strategist's decisions + cross-step gotchas (verbatim band, ministries-to-grow placement, banned vocab, build_directives that affect outlining). Read it before you load the full allocation so you don't re-litigate decisions.
+## Workflow (two MCP calls per page — load, then write)
 
-Read:
-- \`roadmap_state.page_allocation_plan.allocations[]\` (find the entry where page_slug matches; respect its \`intended_verbatim_band\`)
-- \`roadmap_state.stage_1\` (strategic foundation)
-- \`roadmap_state.ministry_model\` (template choices)
-- \`roadmap_state.strategic_goals\` — filter to \`status='approved'\`. For this page outline, especially:
-  - \`content_and_allocation.copy_approach.derived.intended_verbatim_band\` — stamp this on each section. high = ≥70% verbatim from crawl; mid ≈ 50%; low ≤ 20%.
-  - \`voice_and_tone.one_key_message\` + \`voice_and_tone.recurring_message_theme\` — every page outline MUST include a section whose voice anchors against one of these.
-  - \`content_and_allocation.ministries_to_grow\` — if this page is the homepage OR a related ministry page, surface those ministries early with progression CTAs.
-  - \`content_and_allocation.content_needs\` — if this page is named in the AM content_needs, give it the section-count it needs.
-  - \`display_and_technical.sermons_display_preference\` — only relevant when outlining a sermons/watch page. embed_latest → single \`embed-latest-sermon\` archetype; archive → list/grid archetype.
-- The content_atoms / church_facts / web_project_topics referenced in the allocation slice
+**1. Read the handoff note from the prior step FIRST** — query \`SELECT roadmap_state->'page_allocation_plan'->'_meta'->>'handoff_note' FROM strategy_web_projects WHERE id = '{{project_id}}'\`. It carries the allocation strategist's decisions + cross-step gotchas (verbatim band, ministries-to-grow placement, banned vocab, build_directives that affect outlining). Skim before loading any context.
 
-Produce the outline per the SKILL contract: sections with archetype + atom_assignments + fact_assignments + crawl_topic_assignments + voice_anchor + \`intended_verbatim_band\` per section (matching the allocation).
+**2. For each page in nav_order, ONE context call replaces 8-15 ad-hoc probes**:
 
-When done, write to \`roadmap_state.page_outlines.<PAGE-SLUG>\` via \`roadmap_state_set\` (path: \`['page_outlines', '<PAGE-SLUG>']\`). Stamp \`_meta\`.
+\`\`\`sql
+SELECT cowork_load_outline_context('{{project_id}}'::uuid, '<page_slug>');
+\`\`\`
 
-**Final substep — handoff note.** Before declaring this page's outline done, write a ≤1-screen handoff note to \`roadmap_state.page_outlines.<PAGE-SLUG>._meta.handoff_note\` AND surface it in the conversation. Cover (a) what the outline contains (section count + archetypes), (b) any deferred slots / overflow atoms / unfilled required slots, (c) cross-step gotchas the drafter needs (verbatim band per section, voice anchor exemplars cited, persona posture, banned phrases that almost slipped in), (d) what draft-page should read first for this page.`,
+That single RPC returns one JSONB with everything you need:
+- \`allocation\` — the page's allocation slice (tolerates both \`page_slug\` and \`slug\` field names — model output drifted; both work)
+- \`atoms_for_page\` / \`facts_for_page\` / \`crawl_topics_for_page\` — FULL row data for everything the section_intents reference
+- \`build_directives_for_page\` — directives applying to this page or site-wide
+- \`stage_1\` (voice, personas, ethos, key_message, vision_statement, project_goals)
+- \`ministry_model\` (template choices)
+- \`strategic_goals_approved\` — filtered to \`status='approved'\`. For outlining, especially weigh:
+  - \`content_and_allocation.copy_approach.derived.intended_verbatim_band\` — stamp on each section. high = ≥70% verbatim from crawl; mid ≈ 50%; low ≤ 20%.
+  - \`voice_and_tone.one_key_message\` + \`recurring_message_theme\` — at least one section's voice anchors against these.
+  - \`content_and_allocation.ministries_to_grow\` — surface early on homepage / ministry pages.
+  - \`content_and_allocation.content_needs\` — pages named here need larger section count.
+  - \`display_and_technical.sermons_display_preference\` — relevant only for the sermons/watch page.
+- \`canonical_templates\` — the closed template + slot vocab manifest you MUST bind against (template_key, cowork_writable_slots, max_chars per slot, required-slot flags). This used to be a skill-bundle file you didn't have access to — now it's in the payload.
+- \`site_strategy_pages\` — full sitemap with slug + name + nav_order. Use this as your walk list.
+
+**3. Produce the outline** per the SKILL contract: sections with archetype + atom_assignments + fact_assignments + crawl_topic_assignments + voice_anchor + \`intended_verbatim_band\` per section (matching the allocation). Walk me through the outline before persisting; pause for my pushback.
+
+**4. Write the outline + handoff note** in ONE call:
+
+\`\`\`sql
+SELECT roadmap_state_set(
+  '{{project_id}}'::uuid,
+  ARRAY['page_outlines', '<page_slug>'],
+  '<full_outline_with_meta_handoff_note>'::jsonb
+);
+\`\`\`
+
+The outline's \`_meta\` MUST carry \`handoff_note\` (≤1-screen markdown — see the SKILL's Handoff Note section for the four buckets). The drafter will read it first when it starts the next page.
+
+**5. Walk the sitemap.** When the strategist OK's the outline, advance to the next page (next \`nav_order\` from \`site_strategy_pages\` in step 2's payload). Don't ask which page — just open the next context call and propose. Two approvals per page total: load + write.`,
     computeStatus: s => {
       if (!s.page_allocation_plan?._meta?.generated_at) return 'blocked_waiting'
       if (s.page_outlines_count === 0)                  return 'cowork_session'
