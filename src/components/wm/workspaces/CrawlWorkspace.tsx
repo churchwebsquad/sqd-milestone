@@ -61,14 +61,19 @@ export function CrawlWorkspace({ project }: Props) {
   // seconds-to-minutes later. Auto-stops on terminal status.
   const [watching, setWatching] = useState(false)
   const [lastChecked, setLastChecked] = useState<Date | null>(null)
-  // Test-scrape state — single page through Firecrawl /scrape with no
-  // DB writes. Pure preview surface so the strategist can see what
-  // the crawler captures before committing to a full crawl.
-  const [testUrl, setTestUrl] = useState<string>('')
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<CrawlPagePayload | null>(null)
-  const [testError, setTestError] = useState<string | null>(null)
-  const [testDuration, setTestDuration] = useState<number | null>(null)
+  // Manual-scrape state — N specific URLs through Firecrawl. Default
+  // behavior commits to the project's crawl_jobs row; toggle the
+  // "test scrape" checkbox to preview-only without DB writes.
+  // crawl_deeper toggle additionally follows internal links from each
+  // seed URL to pick up detail pages the seed crawl excluded.
+  const [scrapeUrls, setScrapeUrls]               = useState<string>('')
+  const [scrapeIsTest, setScrapeIsTest]           = useState<boolean>(false)
+  const [scrapeCrawlDeeper, setScrapeCrawlDeeper] = useState<boolean>(false)
+  const [scraping, setScraping]                   = useState(false)
+  const [scrapeResults, setScrapeResults]         = useState<CrawlPagePayload[]>([])
+  const [scrapeError, setScrapeError]             = useState<string | null>(null)
+  const [scrapeDuration, setScrapeDuration]       = useState<number | null>(null)
+  const [scrapeCommitted, setScrapeCommitted]     = useState<{ rows: number; crawl_job_id: string } | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -96,7 +101,7 @@ export function CrawlWorkspace({ project }: Props) {
     const url = (progRow as { church_website: string | null } | null)?.church_website ?? ''
     setDefaultUrl(url)
     setManualUrl(prev => prev || url)
-    setTestUrl(prev => prev || url)
+    setScrapeUrls(prev => prev || (url ? url : ''))
     setCrawlExcluded(Boolean((projRow as { crawl_excluded?: boolean } | null)?.crawl_excluded))
     setLastChecked(new Date())
     setLoading(false)
@@ -149,28 +154,57 @@ export function CrawlWorkspace({ project }: Props) {
     setTogglingExclusion(false)
   }
 
-  const runTestScrape = async () => {
-    setTesting(true)
-    setTestError(null)
-    setTestResult(null)
-    setTestDuration(null)
+  const runManualScrape = async () => {
+    setScraping(true)
+    setScrapeError(null)
+    setScrapeResults([])
+    setScrapeDuration(null)
+    setScrapeCommitted(null)
+    // Parse one URL per line; ignore blanks + lines that start with `#`
+    // so the strategist can paste a list with their own comments.
+    const urls = scrapeUrls
+      .split('\n')
+      .map(s => s.trim())
+      .filter(s => s && !s.startsWith('#'))
+    if (urls.length === 0) {
+      setScrapeError('Enter at least one URL (one per line)')
+      setScraping(false)
+      return
+    }
     try {
-      const { data, error: err } = await supabase.functions.invoke('scrape-test', {
-        body: { url: testUrl.trim() },
-      })
+      const requestBody: Record<string, unknown> = { urls }
+      if (scrapeCrawlDeeper) {
+        // Bounded depth so a strategist's "follow links" toggle can't
+        // turn into a runaway: depth=1, max 10 pages per seed.
+        requestBody.crawl_deeper = { max_depth: 1, max_pages: 10 }
+      }
+      if (!scrapeIsTest) {
+        requestBody.commit = { project_id: project.id }
+      }
+      const { data, error: err } = await supabase.functions.invoke('manual-scrape', { body: requestBody })
       if (err) throw err
-      const body = data as { ok?: boolean; duration?: number; data?: CrawlPagePayload; error?: string; details?: string }
+      const body = data as {
+        ok?:        boolean
+        duration?:  number
+        pages?:     CrawlPagePayload[]
+        committed?: { rows: number; crawl_job_id: string }
+        error?:     string
+        details?:   string
+      }
       if (!body?.ok) {
-        setTestError(body?.error || body?.details || 'Scrape failed')
+        setScrapeError(body?.error || body?.details || 'Scrape failed')
       } else {
-        const payload = body.data ?? null
-        if (payload) setTestResult({ ...payload, url: testUrl.trim() })
-        setTestDuration(body.duration ?? null)
+        setScrapeResults(Array.isArray(body.pages) ? body.pages : [])
+        setScrapeDuration(body.duration ?? null)
+        if (body.committed) setScrapeCommitted(body.committed)
+        // Refresh the crawl_jobs view so the strategist sees the new
+        // row count immediately when they committed.
+        if (body.committed) void load()
       }
     } catch (err) {
-      setTestError(err instanceof Error ? err.message : String(err))
+      setScrapeError(err instanceof Error ? err.message : String(err))
     }
-    setTesting(false)
+    setScraping(false)
   }
 
   useEffect(() => { void load() }, [project.id])
@@ -335,55 +369,101 @@ export function CrawlWorkspace({ project }: Props) {
         </div>
       )}
 
-      {/* Test scrape — single-page preview, no DB writes. Use this to
-          tinker with content extraction before committing to a full
-          crawl. */}
+      {/* Manual scrape — N specific URLs through Firecrawl. Default
+          commits to crawl_jobs; the "test scrape" checkbox flips to
+          preview-only. Use this when the full crawl missed pages and
+          you want to add them without re-firing the whole crawl. */}
       <section className="rounded-xl border border-wm-accent/30 bg-wm-accent-tint/30 p-4 space-y-3">
         <div className="flex items-baseline gap-2">
           <FlaskConical size={14} className="text-wm-accent" />
           <div className="flex-1">
-            <h2 className="text-[13px] font-bold text-wm-text">Test scrape</h2>
+            <h2 className="text-[13px] font-bold text-wm-text">Manual scrape</h2>
             <p className="text-[11px] text-wm-text-muted">
-              One-shot Firecrawl scrape of a single URL. Doesn't write
-              to the database — pure preview so you can see what the
-              crawler captures before firing a real crawl.
+              Paste up to 25 URLs (one per line). Pages get appended to this project's crawl results. Use this when the full crawl missed specific pages and you don't want to re-fire the whole thing.
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
-          <input
-            type="url"
-            value={testUrl}
-            onChange={e => setTestUrl(e.target.value)}
-            placeholder="https://example.org/some-page"
-            className="flex-1 rounded-md border border-wm-border bg-wm-bg-elevated px-3 py-2 text-[12px] font-mono text-wm-text outline-none focus:border-wm-accent focus:ring-2 focus:ring-wm-accent/15"
+        <div>
+          <label className="block text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">
+            URLs (one per line)
+          </label>
+          <textarea
+            value={scrapeUrls}
+            onChange={e => setScrapeUrls(e.target.value)}
+            rows={Math.min(8, Math.max(3, scrapeUrls.split('\n').length + 1))}
+            placeholder={'https://themet.church/parent-path/\nhttps://themet.church/milestone-1\nhttps://themet.church/milestone-2\n# lines starting with # are ignored'}
+            className="w-full rounded-md border border-wm-border bg-wm-bg-elevated px-3 py-2 text-[12px] font-mono text-wm-text outline-none focus:border-wm-accent focus:ring-2 focus:ring-wm-accent/15 leading-snug"
           />
+        </div>
+        <div className="flex flex-col gap-2">
+          <label className="flex items-start gap-2 text-[12px] text-wm-text cursor-pointer">
+            <input
+              type="checkbox"
+              checked={scrapeIsTest}
+              onChange={e => setScrapeIsTest(e.target.checked)}
+              className="mt-0.5 cursor-pointer"
+            />
+            <span>
+              <span className="font-semibold">Make this a test scrape</span>
+              <span className="text-wm-text-muted"> — preview the result before committing. Nothing gets written to this project's crawl results.</span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2 text-[12px] text-wm-text cursor-pointer">
+            <input
+              type="checkbox"
+              checked={scrapeCrawlDeeper}
+              onChange={e => setScrapeCrawlDeeper(e.target.checked)}
+              className="mt-0.5 cursor-pointer"
+            />
+            <span>
+              <span className="font-semibold">Crawl deeper</span>
+              <span className="text-wm-text-muted"> — also follow links found on these pages (depth 1, max 10 pages per seed). Useful when a parent page lists detail-page children the seed crawl excluded.</span>
+            </span>
+          </label>
+        </div>
+        <div className="flex justify-end">
           <button
             type="button"
-            onClick={runTestScrape}
-            disabled={testing || !testUrl.trim()}
+            onClick={runManualScrape}
+            disabled={scraping || scrapeUrls.trim().length === 0}
             className="inline-flex items-center gap-1.5 rounded-md bg-wm-accent text-white text-[12px] font-semibold px-4 py-2 hover:bg-wm-accent-hover transition-colors disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
           >
-            {testing ? <Loader2 size={12} className="animate-spin" /> : <FlaskConical size={12} />}
-            {testing ? 'Scraping…' : 'Scrape this page'}
+            {scraping ? <Loader2 size={12} className="animate-spin" /> : <FlaskConical size={12} />}
+            {scraping
+              ? (scrapeCrawlDeeper ? 'Crawling…' : 'Scraping…')
+              : (scrapeIsTest ? 'Preview scrape' : 'Scrape & save')}
           </button>
         </div>
 
-        {testError && (
+        {scrapeError && (
           <div className="rounded-md border border-wm-danger/30 bg-wm-danger-bg p-2 flex items-start gap-2">
             <AlertTriangle size={11} className="text-wm-danger mt-0.5 shrink-0" />
-            <p className="text-[11px] text-wm-text font-mono">{testError}</p>
+            <p className="text-[11px] text-wm-text font-mono">{scrapeError}</p>
           </div>
         )}
 
-        {testResult && (
+        {scrapeCommitted && (
+          <div className="rounded-md border border-wm-success/30 bg-wm-success-bg p-2 flex items-start gap-2">
+            <CheckCircle2 size={11} className="text-wm-success mt-0.5 shrink-0" />
+            <p className="text-[11px] text-wm-text">
+              Committed {scrapeCommitted.rows} page{scrapeCommitted.rows === 1 ? '' : 's'} to crawl job {scrapeCommitted.crawl_job_id.slice(0, 8)}…
+            </p>
+          </div>
+        )}
+
+        {scrapeResults.length > 0 && (
           <div className="space-y-2">
-            {testDuration != null && (
+            {scrapeDuration != null && (
               <p className="text-[10px] text-wm-text-muted">
-                Scraped in {testDuration < 1000 ? `${testDuration}ms` : `${(testDuration / 1000).toFixed(1)}s`}
+                {scrapeResults.length} page{scrapeResults.length === 1 ? '' : 's'} in {scrapeDuration < 1000 ? `${scrapeDuration}ms` : `${(scrapeDuration / 1000).toFixed(1)}s`}
+                {scrapeIsTest && ' · preview only — nothing saved'}
               </p>
             )}
-            <CrawlPageDetail page={testResult} />
+            <div className="space-y-3">
+              {scrapeResults.map((page, i) => (
+                <CrawlPageDetail key={`${page.url}-${i}`} page={page} />
+              ))}
+            </div>
           </div>
         )}
       </section>
