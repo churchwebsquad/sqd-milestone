@@ -21,6 +21,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Check, Loader2, X } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { getConverterForOutputKey } from '../../../lib/cowork/artifactsToMarkdown'
+import { NavPresentationPanel, type NavPresentation } from '../NavPresentationPanel'
 
 interface Props {
   /** roadmap_state key. Supports nested via dot (`page_critiques.<slug>`). */
@@ -90,6 +91,18 @@ export function CoworkArtifactDrawer({ outputKey, title, projectId, onClose }: P
     if (raw == null) return ''
     return JSON.stringify(raw, null, 2)
   }, [raw])
+
+  /** Site-strategy carries a nav_presentation block (either emitted
+   *  natively by cowork plan-site-strategy or spliced in from the
+   *  legacy stage_2.nav_presentation by the loader above). Render it
+   *  as a real JSX panel — boxed shell card + visible-header bar +
+   *  per-shell columns + featured persona callout — instead of trying
+   *  to fake the layout with markdown bullets. */
+  const navPresentation = useMemo<NavPresentation | null>(() => {
+    if (outputKey !== 'site_strategy') return null
+    const np = (raw as { nav_presentation?: NavPresentation } | null)?.nav_presentation
+    return np && typeof np === 'object' ? np : null
+  }, [raw, outputKey])
 
   const handleCopy = (kind: 'md' | 'json') => {
     const text = kind === 'md' ? markdown : jsonString
@@ -168,6 +181,11 @@ export function CoworkArtifactDrawer({ outputKey, title, projectId, onClose }: P
           {!loading && !error && raw != null && markdown && (
             <article className="prose-cowork">
               <MarkdownRender source={markdown} />
+              {navPresentation && (
+                <div className="mt-6">
+                  <NavPresentationPanel presentation={navPresentation} />
+                </div>
+              )}
             </article>
           )}
           {!loading && !error && raw != null && !markdown && (

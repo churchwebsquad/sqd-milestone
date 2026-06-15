@@ -267,106 +267,12 @@ export function siteStrategyToMarkdown(raw: unknown): string {
     if (navLines.length) sections.push(`## Navigation${NL2}${navLines.join(NL2)}`)
   }
 
-  // nav presentation — the richer "what the visitor SEES at rest"
-  // block. Legacy pipeline (stage_2.nav_presentation) carried this;
-  // new cowork plan-site-strategy doesn't emit it yet, so the drawer
-  // splices in stage_2.nav_presentation as a fallback before
-  // dispatching here.
-  const np: any = ss.nav_presentation
-  if (np && typeof np === 'object') {
-    const npLines: string[] = []
-    if (typeof np.shell === 'string') {
-      const shellLabels: Record<string, string> = {
-        standard_dropdowns: 'Standard dropdowns',
-        megamenu:           'Mega menu',
-        offcanvas:          'Off-canvas / hamburger',
-      }
-      npLines.push(`**Shell**: ${shellLabels[np.shell as string] ?? np.shell}`)
-    }
-    if (typeof np.presentation_rationale === 'string' && np.presentation_rationale.trim()) {
-      npLines.push(np.presentation_rationale)
-    }
-
-    // Visible top-level — what shows at rest
-    if (Array.isArray(np.visible_top_level) && np.visible_top_level.length > 0) {
-      const items = np.visible_top_level.map((it: any) => {
-        const label = it.label ?? it.group_label ?? it.slug ?? '(unlabeled)'
-        const kind  = it.kind ? ` *(${it.kind})*` : ''
-        return `- ${label}${kind}`
-      })
-      npLines.push(`**Visible top-level (at rest)**:` + NL + items.join(NL))
-    }
-
-    // Standard dropdowns
-    if (np.standard_dropdowns && Array.isArray(np.standard_dropdowns.groups) && np.standard_dropdowns.groups.length > 0) {
-      const groups = np.standard_dropdowns.groups.map((g: any) => {
-        const head  = g.group_label ?? '(unnamed group)'
-        const links = Array.isArray(g.children)
-          ? g.children.map((c: any) => `  - ${c.label ?? c.slug ?? ''}${c.one_line_description ? ` — *${c.one_line_description}*` : ''}`).join(NL)
-          : ''
-        return `**${head}**${links ? NL + links : ''}`
-      })
-      npLines.push(`**Dropdowns**:` + NL2 + groups.join(NL2))
-    }
-
-    // Megamenu panels — one per top-level hover, columns + featured tile
-    if (Array.isArray(np.megamenu_panels) && np.megamenu_panels.length > 0) {
-      const panels = np.megamenu_panels.map((panel: any) => {
-        const trigger = panel.triggered_by ?? '(unnamed)'
-        const lines: string[] = [`### Panel: "${trigger}"`]
-        if (Array.isArray(panel.columns) && panel.columns.length > 0) {
-          for (const col of panel.columns) {
-            const head = col.heading ?? '(column)'
-            const desc = col.description ? ` — *${col.description}*` : ''
-            const links = Array.isArray(col.links)
-              ? col.links.map((l: any) => `  - ${l.label ?? l.slug ?? ''}${l.one_line_description ? ` — *${l.one_line_description}*` : ''}`).join(NL)
-              : ''
-            lines.push(`**${head}**${desc}${links ? NL + links : ''}`)
-          }
-        }
-        if (panel.featured_tile && typeof panel.featured_tile === 'object') {
-          const ft = panel.featured_tile
-          const kind  = ft.kind ? ` *(${ft.kind})*` : ''
-          const head  = ft.heading ?? ''
-          const body  = ft.body ?? ''
-          const link  = ft.link_label ? `  → **${ft.link_label}**` : ''
-          lines.push(`**Featured tile**${kind}${head ? NL + head : ''}${body ? NL + body : ''}${link ? NL + link : ''}`)
-        }
-        return lines.join(NL2)
-      })
-      npLines.push(`**Megamenu panels** — one per top-level hover` + NL2 + panels.join(NL2))
-    }
-
-    // Off-canvas overlay
-    if (np.offcanvas_overlay && typeof np.offcanvas_overlay === 'object') {
-      const ov = np.offcanvas_overlay
-      const ovLines: string[] = []
-      if (ov.hero_message)   ovLines.push(`*Hero*: ${ov.hero_message}`)
-      if (Array.isArray(ov.sections) && ov.sections.length > 0) {
-        for (const s of ov.sections) {
-          const head  = s.section_label ?? '(section)'
-          const links = Array.isArray(s.links)
-            ? s.links.map((l: any) => `  - ${l.label ?? l.slug ?? ''}`).join(NL)
-            : ''
-          ovLines.push(`**${head}**${links ? NL + links : ''}`)
-        }
-      }
-      if (ov.surfaced_facts && typeof ov.surfaced_facts === 'object') {
-        const sf = ov.surfaced_facts
-        const facts: string[] = []
-        if (sf.service_times) facts.push(`service times: ${sf.service_times}`)
-        if (sf.address)       facts.push(`address: ${sf.address}`)
-        if (sf.search === true) facts.push('search enabled')
-        if (Array.isArray(sf.socials) && sf.socials.length > 0) {
-          facts.push(`socials: ${sf.socials.map((x: any) => x.platform).filter(Boolean).join(', ')}`)
-        }
-        if (facts.length) ovLines.push(`**Surfaced facts**: ${facts.join(' · ')}`)
-      }
-      if (ovLines.length) npLines.push(`**Off-canvas overlay**:` + NL2 + ovLines.join(NL2))
-    }
-
-    if (npLines.length) sections.push(`## Nav presentation${NL2}${npLines.join(NL2)}`)
-  }
+  // nav_presentation is NOT rendered in markdown — it's a richer
+  // visual block (shell + visible-header bar + megamenu panels + per-
+  // shell columns + featured persona callout) that lives as a JSX
+  // panel in CoworkArtifactDrawer. The drawer pairs this markdown
+  // with <NavPresentationPanel /> after the prose so the strategist
+  // gets the same card layout the legacy Copy Engine preview shows.
 
   // persona journeys
   if (Array.isArray(ss.persona_journeys) && ss.persona_journeys.length > 0) {
