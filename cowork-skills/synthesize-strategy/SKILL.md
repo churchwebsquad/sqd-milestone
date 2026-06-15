@@ -25,6 +25,27 @@ weak, `draft-page` writes weak copy. If `stage_1.personas` is vague,
 `plan-cross-page-allocation` allocates content to nobody. Your output is
 the single biggest lever on final quality.
 
+## Strategic Goals — inputs you MUST consume
+
+The endpoint loads `roadmap_state.strategic_goals` and projects the
+strategist-approved fields into your user message above the atoms +
+facts. These are NOT optional context — every approved field has a
+required mapping onto `stage_1`:
+
+| Strategic goal (approved) | stage_1 field that must reflect it |
+|---|---|
+| `top_3_website_goals` | `project_goals[]` — list each goal as a discrete string |
+| `primary_goals` (AM handoff) | `project_goals[]` — fold AM primary goals into the same list when they're stated as outcomes (de-dupe with discovery answers) |
+| `church_vision` (AM handoff) | `vision_statement` — VERBATIM where possible; this is the emotional outcome the partner most wants |
+| `one_key_message` | `key_message` — VERBATIM; the single sentence every page's voice should echo |
+| `recurring_message_theme` | factor into `ethos_summary` so the church's repeated message lands in the line every downstream prompt reads |
+| `ideal_website_experience` | factor into `persuasive_posture_by_persona` — the experience the partner imagines is per-persona evidence for how to talk to each one |
+
+Missing/unapproved fields are simply absent from the input — emit
+`project_goals: []`, `vision_statement: ""`, `key_message: ""` in
+that case. Do NOT invent strategic intent the strategist didn't
+approve.
+
 ## Your input (from cowork-director)
 
 ```ts
@@ -40,6 +61,9 @@ the single biggest lever on final quality.
   brand_guide?: string
   /** Raw text of the AM handoff form (any extras the AM flagged). */
   am_handoff?:  string
+  /** Strategist-approved strategic-intent snapshot. Rendered in the
+   *  user message above the atoms; see the table above for routing. */
+  strategic_goals?: StrategicGoalsSnapshot
 }
 ```
 
@@ -65,6 +89,21 @@ in `notes` and pick the canonical phrasing).
 
 ```ts
 {
+  /** Project goals carried forward from the strategist-approved
+   *  Strategic Goals snapshot (top_3_website_goals + primary_goals).
+   *  Each entry is a discrete outcome the site is trying to drive.
+   *  Empty array when nothing is approved. */
+  project_goals: string[]
+
+  /** The emotional outcome the partner most wants from the site.
+   *  VERBATIM from the approved `church_vision` field when present.
+   *  Empty string when not approved. */
+  vision_statement: string
+
+  /** The single sentence every page's voice must echo, lifted
+   *  VERBATIM from `one_key_message`. Empty string when not approved. */
+  key_message: string
+
   /** 3-5 named personas. Each one has a NAME, a barrier, and a desire. */
   personas: Array<{
     name:              string           // first-name only; "Lena" not "Lena Garcia"
@@ -79,7 +118,9 @@ in `notes` and pick the canonical phrasing).
   x_factor: string
 
   /** Pithy 1-2 sentence summary of the church's posture toward its
-   *  audience. Read at the top of every downstream system prompt. */
+   *  audience. Read at the top of every downstream system prompt.
+   *  When `recurring_message_theme` is approved, weave it into this
+   *  sentence so the repeated message lands everywhere downstream. */
   ethos_summary: string
 
   /** Verbatim phrases lifted from voice_sample / voice_rule pillars

@@ -48,6 +48,27 @@ export function stage1ToMarkdown(raw: unknown): string {
 
   const sections: Array<string | null> = ['# Strategic Foundation']
 
+  // Project goals — carried from strategic_goals snapshot (post-Phase-2)
+  const projectGoals: unknown = (s as any).project_goals
+  if (Array.isArray(projectGoals) && projectGoals.length > 0) {
+    const items = (projectGoals as unknown[])
+      .filter((g): g is string => typeof g === 'string' && g.trim() !== '')
+      .map(g => `- ${g}`)
+    if (items.length) sections.push(`## Project goals${NL2}${items.join(NL)}`)
+  }
+
+  // Vision statement — from approved church_vision
+  const vision: unknown = (s as any).vision_statement
+  if (typeof vision === 'string' && vision.trim()) {
+    sections.push(`## Vision statement${NL2}${quote(vision)}`)
+  }
+
+  // Key message — from approved one_key_message
+  const keyMsg: unknown = (s as any).key_message
+  if (typeof keyMsg === 'string' && keyMsg.trim()) {
+    sections.push(`## Key message${NL2}${quote(keyMsg)}`)
+  }
+
   // x_factor — string OR legacy object {top_attribute, messaging_focus}
   if (s.x_factor) {
     const xf: any = s.x_factor

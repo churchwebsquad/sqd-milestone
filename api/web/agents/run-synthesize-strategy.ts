@@ -70,9 +70,29 @@ const TOOL_DESCRIPTION =
 const TOOL_SCHEMA: ToolSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['personas', 'x_factor', 'ethos_summary', 'voice_exemplars',
+  required: ['project_goals', 'vision_statement', 'key_message',
+             'personas', 'x_factor', 'ethos_summary', 'voice_exemplars',
              'voice_anti_exemplars', 'persuasive_posture_by_persona', 'report'],
   properties: {
+    // Strategic-goals carry-through. Mapped from the approved
+    // snapshot in the user message; empty when not approved (NEVER
+    // invent).
+    project_goals: {
+      type: 'array',
+      maxItems: 8,
+      items: { type: 'string', minLength: 1, maxLength: 240 },
+      description: 'Discrete site goals from top_3_website_goals + primary_goals.',
+    },
+    vision_statement: {
+      type: 'string',
+      maxLength: 1200,
+      description: 'Emotional outcome from church_vision, verbatim where possible. Empty string if unapproved.',
+    },
+    key_message: {
+      type: 'string',
+      maxLength: 280,
+      description: 'The single sentence every page must echo, lifted verbatim from one_key_message. Empty string if unapproved.',
+    },
     // 3-5 personas — hard rule per SKILL.
     personas: {
       type: 'array',
