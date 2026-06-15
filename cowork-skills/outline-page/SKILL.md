@@ -28,6 +28,30 @@ naming + only exposes the slots the cowork pipeline cares about. That
 manifest is the source of truth; if a template isn't in it, you
 can't use it.
 
+## Strategic Goals — inputs you MUST consume
+
+Loaded from `roadmap_state.strategic_goals` (`status='approved'` only):
+
+- **`copy_approach.derived.intended_verbatim_band`** — stamp it on
+  EVERY section in your outline (`sections[].intended_verbatim_band`).
+  Must match the allocation entry's band. high = ≥70% verbatim; mid ≈
+  50%; low ≤ 20%. Downstream draft + critique enforce this.
+- **`one_key_message`** — every page outline MUST include at least
+  one section whose `voice_anchor` references this message verbatim.
+- **`recurring_message_theme`** — informs voice anchor selection
+  across all sections; surface in the outline's `voice_notes`.
+- **`ministries_to_grow`** — when outlining the homepage (or a page
+  related to a named ministry), the ministry gets an early section
+  with a clear progression CTA in its `cta` slot assignment.
+- **`content_needs`** (AM handoff) — pages listed here need more
+  sections than default; respect them.
+- **`best_outreach_methods`** — when outlining a page tied to these
+  programs, give them a section with prominent CTA placement.
+- **`sermons_display_preference`** — only relevant when outlining a
+  sermons/watch page. `embed_latest` → use a single
+  `embed-latest-sermon` archetype with a small archive link; `archive`
+  → use a list/grid archetype that surfaces the full archive.
+
 ## Your input
 
 ```ts

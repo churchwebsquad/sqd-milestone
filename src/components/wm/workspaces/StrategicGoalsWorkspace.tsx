@@ -175,6 +175,20 @@ export function StrategicGoalsWorkspace({ project, onChange }: Props) {
     for (const [key] of drafts) await approve(category, key)
   }
 
+  /** Bulk-approve every draft field across ALL categories. Same
+   *  sequential pattern as bulkApproveCategory. */
+  const bulkApproveAll = async () => {
+    if (!snapshot) return
+    const all: Array<[StrategicGoalCategory, string]> = []
+    for (const def of STRATEGIC_GOAL_FIELDS) {
+      const f = snapshot[def.category]?.[def.key]
+      if (f && f.status === 'draft' && f.value != null) all.push([def.category, def.key])
+    }
+    if (all.length === 0) return
+    if (!confirm(`Approve all ${all.length} draft strategic goal${all.length === 1 ? '' : 's'}?`)) return
+    for (const [cat, key] of all) await approve(cat, key)
+  }
+
   // ─── Per-category counts ─────────────────────────────────────────
 
   const counts = useMemo(() => {
@@ -211,6 +225,7 @@ export function StrategicGoalsWorkspace({ project, onChange }: Props) {
         onRefresh={() => void refresh(false)}
         refreshing={refreshing}
         lastSyncedAt={snapshot?._meta?.generated_at ?? null}
+        onApproveAll={() => void bulkApproveAll()}
       />
 
       {error && (
@@ -330,13 +345,14 @@ export function StrategicGoalsWorkspace({ project, onChange }: Props) {
 // Header — counts, filter, refresh
 // ────────────────────────────────────────────────────────────────────
 
-function Header({ counts, statusFilter, onFilter, onRefresh, refreshing, lastSyncedAt }: {
+function Header({ counts, statusFilter, onFilter, onRefresh, refreshing, lastSyncedAt, onApproveAll }: {
   counts:       { total: number; draft: number; approved: number; archived: number; populated: number }
   statusFilter: StatusFilter
   onFilter:     (f: StatusFilter) => void
   onRefresh:    () => void
   refreshing:   boolean
   lastSyncedAt: string | null
+  onApproveAll: () => void
 }) {
   return (
     <div className="mb-4 flex items-end justify-between gap-2 flex-wrap">
@@ -350,7 +366,7 @@ function Header({ counts, statusFilter, onFilter, onRefresh, refreshing, lastSyn
           )}
         </p>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-1 rounded-md border border-wm-border bg-wm-bg-elevated p-0.5 text-[11px]">
           {(['draft', 'approved', 'archived', 'all'] as StatusFilter[]).map(f => (
             <button
@@ -369,6 +385,17 @@ function Header({ counts, statusFilter, onFilter, onRefresh, refreshing, lastSyn
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          onClick={onApproveAll}
+          disabled={counts.draft === 0}
+          className="text-[11px] font-medium px-2.5 py-1.5 rounded-md bg-wm-accent text-wm-text-on-accent hover:bg-wm-accent-hover disabled:opacity-50"
+        >
+          <span className="flex items-center gap-1">
+            <Check size={11} />
+            Approve all {counts.draft > 0 ? `(${counts.draft})` : ''}
+          </span>
+        </button>
         <button
           type="button"
           onClick={onRefresh}

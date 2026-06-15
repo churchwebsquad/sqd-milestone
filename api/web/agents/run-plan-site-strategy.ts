@@ -28,6 +28,8 @@ import { resolveCoworkSkill } from './_lib/resolveCoworkSkill.js'
 import { setRoadmapStateAtomic } from './_lib/roadmapStateMerge.js'
 import { guardOrRefuse } from './_lib/stalenessGuard.js'
 import { BUNDLE_VERSION } from '../../../src/types/coworkBundle.js'
+import { renderStrategicGoalsForStep, getApprovedNavChangeLevel } from '../../../src/lib/cowork/strategicGoalsContext.js'
+import type { StrategicGoalsSnapshot } from '../../../src/lib/cowork/strategicGoals.js'
 
 export const maxDuration = 300
 
@@ -35,13 +37,20 @@ const TOOL_NAME = 'emit_site_strategy'
 const TOOL_DESCRIPTION =
   'Emit the CoworkSiteStrategy — pages[] (slug + name + purpose + audience + funnel + ' +
   'covers_cells + nav_order + nav_strategy + has_children), nav (primary/footer/cta_only), ' +
+  'nav_change_level (full_rewrite/partial/tweaks/preserve/null from current_navigation_satisfaction), ' +
   'persona_journeys[] (one per stage_1 persona), pages_considered_dropped[], and a report block.'
 
 const TOOL_SCHEMA: ToolSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['pages', 'nav', 'persona_journeys', 'pages_considered_dropped', 'report'],
+  required: ['pages', 'nav', 'nav_change_level', 'persona_journeys', 'pages_considered_dropped', 'report'],
   properties: {
+    nav_change_level: {
+      type: ['string', 'null'],
+      enum: ['full_rewrite', 'partial', 'tweaks', 'preserve', null],
+      description:
+        'How much to change the crawled nav. MUST match the derived value from current_navigation_satisfaction when the strategist has approved that field (≤6 → full_rewrite; 7-8 → partial; 9 → tweaks; 10 → preserve). null when nav satisfaction is unknown or not approved.',
+    },
     pages: {
       type: 'array',
       minItems: 4,
@@ -264,10 +273,11 @@ function mapGatewayError(res: any, e: unknown) {
 }
 
 interface AssembledInputs {
-  stage1:        Record<string, unknown> | null
-  ministryModel: Record<string, unknown> | null
-  acfPlan:       Record<string, unknown> | null
-  stage2:        Record<string, unknown> | null  // legacy sitemap, for carry-forward signals
+  stage1:         Record<string, unknown> | null
+  ministryModel:  Record<string, unknown> | null
+  acfPlan:        Record<string, unknown> | null
+  stage2:         Record<string, unknown> | null  // legacy sitemap, for carry-forward signals
+  strategicGoals: StrategicGoalsSnapshot | null
 }
 
 async function assembleEndpointInputs(
@@ -282,16 +292,21 @@ async function assembleEndpointInputs(
   if (error) throw new Error(`project load failed: ${error.message}`)
   const roadmap = (data?.roadmap_state ?? {}) as Record<string, any>
   return {
-    stage1:        roadmap.stage_1        ?? null,
-    ministryModel: roadmap.ministry_model ?? null,
-    acfPlan:       roadmap.acf_plan       ?? null,
-    stage2:        roadmap.stage_2        ?? null,
+    stage1:         roadmap.stage_1         ?? null,
+    ministryModel:  roadmap.ministry_model  ?? null,
+    acfPlan:        roadmap.acf_plan        ?? null,
+    stage2:         roadmap.stage_2         ?? null,
+    strategicGoals: (roadmap.strategic_goals as StrategicGoalsSnapshot | undefined) ?? null,
   }
 }
 
 function buildUserMessage(inputs: AssembledInputs): string {
+  const navLevel = getApprovedNavChangeLevel(inputs.strategicGoals)
+  const goalsBlock = renderStrategicGoalsForStep(inputs.strategicGoals, 'plan-site-strategy')
   return [
     `Plan the site strategy per the SKILL above.`,
+    ``,
+    goalsBlock ? goalsBlock : '_No approved strategic goals snapshot — proceed using stage_1 + ministry_model only._',
     ``,
     `## stage_1 (synthesize-strategy output — personas, voice, ethos, x_factor)`,
     '```json',
@@ -317,5 +332,12 @@ function buildUserMessage(inputs: AssembledInputs): string {
     `Persona_journeys count MUST match stage_1.personas.length (one journey per persona).`,
     `Every persona_journeys[].persona name MUST appear in stage_1.personas[].name.`,
     `Every nav.primary[].slug + persona_journeys[].entry_points/journey slug MUST appear in pages[].slug.`,
+    navLevel
+      ? `nav_change_level MUST equal "${navLevel}" — derived from the approved current_navigation_satisfaction in Strategic Goals above. ` +
+        `${navLevel === 'preserve' ? 'You MUST preserve the crawled nav verbatim. Do NOT change order or labels. ' : ''}` +
+        `${navLevel === 'tweaks' ? 'You may only adjust 1-2 labels — keep all crawled slugs + ordering otherwise. ' : ''}` +
+        `${navLevel === 'partial' ? 'Keep the crawled spine; you may regroup + relabel where strategy demands it. ' : ''}` +
+        `${navLevel === 'full_rewrite' ? 'Plan a fresh nav. Do NOT echo the crawled menu. ' : ''}`
+      : `nav_change_level: emit null. The strategist has not yet approved a current_navigation_satisfaction score.`,
   ].join('\n')
 }

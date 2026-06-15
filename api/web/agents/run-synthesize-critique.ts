@@ -27,6 +27,8 @@ import { resolveCoworkSkill } from './_lib/resolveCoworkSkill.js'
 import { setRoadmapStateAtomic } from './_lib/roadmapStateMerge.js'
 import { guardOrRefuse } from './_lib/stalenessGuard.js'
 import { BUNDLE_VERSION } from '../../../src/types/coworkBundle.js'
+import { renderStrategicGoalsForStep } from '../../../src/lib/cowork/strategicGoalsContext.js'
+import type { StrategicGoalsSnapshot } from '../../../src/lib/cowork/strategicGoals.js'
 
 export const maxDuration = 300
 
@@ -288,10 +290,11 @@ function mapGatewayError(res: any, e: unknown) {
 }
 
 interface AssembledInputs {
-  stage1:        Record<string, unknown> | null
-  siteStrategy:  Record<string, unknown> | null
-  pageCritiques: Record<string, Record<string, unknown>>
-  pageDrafts:    Record<string, Record<string, unknown>>
+  stage1:         Record<string, unknown> | null
+  siteStrategy:   Record<string, unknown> | null
+  pageCritiques:  Record<string, Record<string, unknown>>
+  pageDrafts:     Record<string, Record<string, unknown>>
+  strategicGoals: StrategicGoalsSnapshot | null
 }
 
 async function assembleEndpointInputs(
@@ -306,10 +309,11 @@ async function assembleEndpointInputs(
   if (error) throw new Error(`project load failed: ${error.message}`)
   const roadmap = (data?.roadmap_state ?? {}) as Record<string, any>
   return {
-    stage1:        roadmap.stage_1        ?? null,
-    siteStrategy:  roadmap.site_strategy  ?? null,
-    pageCritiques: (roadmap.page_critiques ?? {}) as Record<string, Record<string, unknown>>,
-    pageDrafts:    (roadmap.page_drafts    ?? {}) as Record<string, Record<string, unknown>>,
+    stage1:         roadmap.stage_1        ?? null,
+    siteStrategy:   roadmap.site_strategy  ?? null,
+    pageCritiques:  (roadmap.page_critiques ?? {}) as Record<string, Record<string, unknown>>,
+    pageDrafts:     (roadmap.page_drafts    ?? {}) as Record<string, Record<string, unknown>>,
+    strategicGoals: (roadmap.strategic_goals as StrategicGoalsSnapshot | undefined) ?? null,
   }
 }
 
@@ -352,8 +356,11 @@ function buildUserMessage(inputs: AssembledInputs): string {
     }
   }
 
+  const goalsBlock = renderStrategicGoalsForStep(inputs.strategicGoals, 'synthesize-critique')
   return [
     `Roll up the per-page critiques into a project-level verdict per the SKILL above.`,
+    ``,
+    goalsBlock ? goalsBlock : '_No approved strategic goals snapshot — roll up using stage_1 + per-page critiques alone._',
     ``,
     `## stage_1 (personas, voice exemplars, ethos)`,
     '```json',

@@ -26,6 +26,31 @@ You are NOT routing atoms to pages (that's plan-cross-page-allocation).
 You ARE deciding the sitemap shape, the nav structure, and the
 persona-journey overlay on top of it.
 
+## Strategic Goals — inputs you MUST consume
+
+When the Strategic Goals snapshot is in the user message above the
+stage_1 block, treat it as load-bearing. Specifically:
+
+- **`top_3_website_goals`** + **`primary_goals`** (AM handoff) — drive
+  page elevation: pages that serve a stated goal go in `nav_strategy:
+  'primary'`. Pages that don't serve any stated goal default to
+  `secondary` or `footer`. Surface the rationale in `report.coverage_gaps_addressed`.
+- **`ideal_website_experience`** — frames the nav choice and persona
+  journey shape. If the partner says "easy to navigate", err toward
+  fewer pages with clear paths over many pages with hidden navigation.
+- **`ministries_to_grow`** — every named ministry MUST appear in
+  primary nav OR be reachable via a single-click CTA from the homepage.
+  Their persona journeys should route through these ministries early.
+- **`current_navigation_satisfaction`** (1-10 score) → emits a
+  REQUIRED `nav_change_level` field on your output. The rule is fixed:
+  - ≤6 → `full_rewrite` — plan a fresh nav structure; do NOT echo the
+    crawled menu.
+  - 7-8 → `partial` — keep the crawled spine but adjust groupings +
+    labels where strategy demands.
+  - 9 → `tweaks` — keep crawled structure; only adjust 1-2 labels.
+  - 10 → `preserve` — keep crawled nav verbatim. Do not add or remove items.
+  When the field is unapproved/missing, emit `nav_change_level: null`.
+
 ## Your input
 
 ```ts
@@ -34,6 +59,7 @@ persona-journey overlay on top of it.
   stage_1:        CoworkStage1
   ministry_model: CoworkMinistryModel
   acf_plan:       CoworkAcfPlan       // includes cell_density + coverage_gaps
+  strategic_goals?: StrategicGoalsSnapshot   // approved-only fields rendered upstream
   /** OPTIONAL — partner has indicated a strict page count (e.g.
    *  "we want 10 pages, not more"). If unset, you pick. */
   page_count_hint?: number
@@ -73,6 +99,13 @@ persona-journey overlay on top of it.
     footer:    string[]                                          // footer-only links
     cta_only:  string[]                                          // sticky-CTA links (e.g. Give)
   }
+
+  /** REQUIRED. Derived from approved current_navigation_satisfaction.
+   *  full_rewrite (≤6) / partial (7-8) / tweaks (9) / preserve (10) /
+   *  null when the strategist hasn't approved a nav-satisfaction score
+   *  yet. The implementor enforces this against the snapshot the user
+   *  message includes. */
+  nav_change_level: 'full_rewrite' | 'partial' | 'tweaks' | 'preserve' | null
 
   /** One journey per stage_1.persona. Each journey walks the persona
    *  from `discover` → `commit` via specific page slugs. */

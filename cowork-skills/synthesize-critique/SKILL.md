@@ -19,6 +19,18 @@ wrong on each page. You catch what's wrong ACROSS pages.
 
 This is the last skill the strategist reads before approving the build.
 
+## Strategic Goals — inputs you MUST consume
+
+The endpoint loads `roadmap_state.strategic_goals` and projects
+approved fields into your user message. For the rollup, especially:
+
+- **`church_vision`** (AM handoff) — anchor the rollup's
+  `vision_alignment_summary` against this. If multiple pages drift
+  away from it, that's a project-level finding, not a per-page one.
+- **`top_3_website_goals`** + **`primary_goals`** — verify the
+  project as a whole serves these. Missing goal coverage across
+  pages → project-level cross-page finding.
+
 ## Your input
 
 ```ts

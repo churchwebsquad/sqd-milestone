@@ -23,6 +23,23 @@ You have fresh eyes. You did not write this copy. You are not invested
 in the wording. Your verdict feeds the strategist review queue and
 gates whether the page advances or kicks back to draft-page.
 
+## Strategic Goals — inputs you MUST consume
+
+Loaded from `roadmap_state.strategic_goals` (`status='approved'` only):
+
+- **`church_vision`** (AM handoff) — the partner's emotional outcome
+  for the site. Add a directive at severity ≥ warning when the draft
+  fails to channel this vision. Reference the church_vision text
+  verbatim in the `dignity` axis rationale.
+- **`copy_approach.derived.intended_verbatim_band`** — every section
+  in the draft carries `intended_verbatim_band` (from the outline) +
+  `actual_verbatim_ratio` (stamped by draft-page). Verify:
+  - high band → actual MUST be ≥ 0.7
+  - mid band  → actual MUST be 0.3-0.7
+  - low band  → actual MUST be ≤ 0.2
+  Drift outside the band → directive at severity ≥ warning, kind
+  `verbatim_band_drift`.
+
 ## Your input
 
 ```ts

@@ -54,6 +54,29 @@ Load them BEFORE looking at the project sources.
   + draft-page. You assign which strategic pillars are RELEVANT to
   each section; downstream decides which to anchor on.
 
+## Strategic Goals — inputs you MUST consume
+
+The starter prompt loads `roadmap_state.strategic_goals` and filters
+to fields with `status='approved'`. Treat them as load-bearing:
+
+- **`copy_approach.derived.intended_verbatim_band`** (`high` / `mid` /
+  `low`) — every entry in your output `allocations[]` MUST carry
+  `intended_verbatim_band` set to this exact value. Outline + draft
+  enforce it downstream. high → ≥70% verbatim from crawl; mid → ~50%;
+  low → ≤20%, treat crawl as background.
+- **`ministries_to_grow`** — every named ministry MUST appear as a
+  featured allocation slice on the homepage allocation AND on its own
+  page allocation when the sitemap has one for it.
+- **`content_needs`** (AM handoff) — the listed pages/areas need
+  larger allocation slices (more atoms + sections).
+- **`best_outreach_methods`** — earns its own allocation slice with a
+  clear CTA atom assignment.
+- **`additional_clarifications`** — each item routes to the
+  allocation entry it informs; record the routing in
+  `allocations[].rationale` so the strategist can audit.
+- **`top_3_website_goals`** + **`ideal_website_experience`** — frame
+  the relative emphasis between pages.
+
 ## Your input (from cowork-director)
 
 ```ts

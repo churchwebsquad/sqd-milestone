@@ -52,6 +52,8 @@ import { resolveCoworkSkill } from './_lib/resolveCoworkSkill.js'
 import { setRoadmapStateAtomic } from './_lib/roadmapStateMerge.js'
 import { guardOrRefuse } from './_lib/stalenessGuard.js'
 import { BUNDLE_VERSION } from '../../../src/types/coworkBundle.js'
+import { renderStrategicGoalsForStep } from '../../../src/lib/cowork/strategicGoalsContext.js'
+import type { StrategicGoalsSnapshot } from '../../../src/lib/cowork/strategicGoals.js'
 
 export const maxDuration = 300
 
@@ -285,10 +287,11 @@ function mapGatewayError(res: any, e: unknown) {
 // ──────────────────────────────────────────────────────────────────────
 
 interface AssembledInputs {
-  atoms:        Array<{ id: string; topic: string; body: string; verbatim: boolean; source_kind: string; source_ref: string }>
-  facts:        Array<{ id: string; topic: string; data: Record<string, unknown> }>
-  discoveryQa:  Record<string, unknown> | null
-  brandGuide:   Record<string, unknown> | null
+  atoms:          Array<{ id: string; topic: string; body: string; verbatim: boolean; source_kind: string; source_ref: string }>
+  facts:          Array<{ id: string; topic: string; data: Record<string, unknown> }>
+  discoveryQa:    Record<string, unknown> | null
+  brandGuide:     Record<string, unknown> | null
+  strategicGoals: StrategicGoalsSnapshot | null
 }
 
 async function assembleEndpointInputs(
@@ -296,15 +299,17 @@ async function assembleEndpointInputs(
   projectId: string,
 ): Promise<AssembledInputs> {
   // Load the project to get the member number (discovery + brand_guide
-  // are joined on member, not web_project_id).
+  // are joined on member, not web_project_id). Same fetch pulls
+  // roadmap_state for the strategic-goals snapshot.
   const { data: project, error: projErr } = await sb
     .from('strategy_web_projects')
-    .select('id, member')
+    .select('id, member, roadmap_state')
     .eq('id', projectId)
     .maybeSingle()
   if (projErr) throw new Error(`project load failed: ${projErr.message}`)
   if (!project) throw new Error(`project ${projectId} not found`)
   const member = project.member
+  const strategicGoals = ((project.roadmap_state as Record<string, unknown> | null)?.strategic_goals as StrategicGoalsSnapshot | undefined) ?? null
 
   const [atomsRes, factsRes, discoveryRes, brandGuideRes] = await Promise.all([
     sb.from('content_atoms')
@@ -335,10 +340,11 @@ async function assembleEndpointInputs(
   if (brandGuideRes.error)  throw new Error(`brand_guide load failed: ${brandGuideRes.error.message}`)
 
   return {
-    atoms:       (atomsRes.data ?? []) as AssembledInputs['atoms'],
-    facts:       (factsRes.data ?? []) as AssembledInputs['facts'],
-    discoveryQa: discoveryRes.data ?? null,
-    brandGuide:  brandGuideRes.data ?? null,
+    atoms:          (atomsRes.data ?? []) as AssembledInputs['atoms'],
+    facts:          (factsRes.data ?? []) as AssembledInputs['facts'],
+    discoveryQa:    discoveryRes.data ?? null,
+    brandGuide:     brandGuideRes.data ?? null,
+    strategicGoals,
   }
 }
 
@@ -365,8 +371,11 @@ function buildUserMessage(inputs: AssembledInputs): string {
       : String(f.data ?? '').slice(0, 200),
   }))
 
+  const goalsBlock = renderStrategicGoalsForStep(inputs.strategicGoals, 'synthesize-strategy')
   return [
     `Synthesize the stage_1 block for this project per the SKILL above.`,
+    ``,
+    goalsBlock ? goalsBlock : '_No approved strategic goals snapshot — proceed using atoms + facts + discovery alone._',
     ``,
     `## Pillar atoms (${compactAtoms.length} entries — the strategist-reviewed inventory)`,
     '```json',

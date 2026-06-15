@@ -22,6 +22,29 @@ prose.
 
 You are the only skill that uses Fable 5. Voice is the lever. Use it.
 
+## Strategic Goals — inputs you MUST consume
+
+Loaded from `roadmap_state.strategic_goals` (`status='approved'` only):
+
+- **`copy_approach.derived.intended_verbatim_band`** — applies PER
+  SECTION via the outline's `sections[].intended_verbatim_band`. After
+  drafting each section, stamp `actual_verbatim_ratio` (0.0-1.0) on
+  the section — the fraction of section words lifted verbatim from
+  cited crawl passages. Bands:
+  - `high`: actual MUST land ≥ 0.7 (preserve crawled lines; only edit
+    for voice/dignity).
+  - `mid`: actual MUST land between 0.3 and 0.7 (blend lifted lines
+    with fresh prose).
+  - `low`: actual MUST land ≤ 0.2 (treat crawl as background; write
+    fresh prose anchored in atoms + facts).
+  If a section can't hit its band, `defer` it with reason
+  `verbatim_band_unreachable` and flag in `voice_notes`.
+- **`one_key_message`** — at least one section's copy MUST echo this
+  message in its own voice. Note where in `voice_notes`.
+- **`recurring_message_theme`** — the page's overall voice posture
+  should resonate with this theme. Don't quote it verbatim; let it
+  shape the words you reach for.
+
 ## Your input
 
 ```ts

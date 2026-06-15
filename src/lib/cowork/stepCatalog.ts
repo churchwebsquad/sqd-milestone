@@ -237,11 +237,20 @@ export const COWORK_STEPS: StepCatalogEntry[] = [
 Read from Supabase:
 - \`strategy_web_projects.roadmap_state.stage_1\` (strategic foundation)
 - \`strategy_web_projects.roadmap_state.ministry_model\` (church posture)
-- \`strategy_web_projects.roadmap_state.site_strategy\` (sitemap)
+- \`strategy_web_projects.roadmap_state.site_strategy\` (sitemap; respect its \`nav_change_level\`)
 - \`strategy_web_projects.roadmap_state.acf_plan\` (audience × category × funnel matrix)
+- \`strategy_web_projects.roadmap_state.strategic_goals\` — **read this first**. Filter to fields where \`status = 'approved'\`. Especially weigh:
+  - \`content_and_allocation.copy_approach\` → \`derived.intended_verbatim_band\` (high/mid/low) sets the verbatim-vs-rewrite ratio. high = ≥70% verbatim from crawl, mid ≈ 50%, low ≤ 20%.
+  - \`content_and_allocation.ministries_to_grow\` — every named ministry MUST get a featured allocation on the homepage AND on its own page if one exists.
+  - \`content_and_allocation.content_needs\` (AM handoff) — the specific weak/missing areas drive allocation emphasis.
+  - \`content_and_allocation.best_outreach_methods\` — deserves a dedicated allocation slice with a clear CTA.
+  - \`content_and_allocation.additional_clarifications\` — read each item, route to the page it informs.
+  - \`goals_and_vision.top_3_website_goals\` + \`goals_and_vision.ideal_website_experience\` — frame page-level emphasis.
 - All \`content_atoms\` for this project where status in ('approved', 'draft')
 - All \`church_facts\` for this project where status in ('approved', 'draft')
 - All \`web_project_topics\` for this project (crawled content)
+
+Record the verbatim-band budget per allocation: each \`allocations[].intended_verbatim_band\` MUST equal the approved \`copy_approach.derived.intended_verbatim_band\` so outline + draft can enforce it downstream.
 
 Walk me through each page's allocation as you produce it — pause for my push-back before persisting.
 
@@ -271,12 +280,18 @@ When complete, write the allocation to \`roadmap_state.page_allocation_plan\` vi
 `Use the **outline-page** skill for project_id \`{{project_id}}\`, page_slug \`<PAGE-SLUG>\`.
 
 Read:
-- \`roadmap_state.page_allocation_plan.allocations[]\` (find the entry where page_slug matches)
+- \`roadmap_state.page_allocation_plan.allocations[]\` (find the entry where page_slug matches; respect its \`intended_verbatim_band\`)
 - \`roadmap_state.stage_1\` (strategic foundation)
 - \`roadmap_state.ministry_model\` (template choices)
+- \`roadmap_state.strategic_goals\` — filter to \`status='approved'\`. For this page outline, especially:
+  - \`content_and_allocation.copy_approach.derived.intended_verbatim_band\` — stamp this on each section. high = ≥70% verbatim from crawl; mid ≈ 50%; low ≤ 20%.
+  - \`voice_and_tone.one_key_message\` + \`voice_and_tone.recurring_message_theme\` — every page outline MUST include a section whose voice anchors against one of these.
+  - \`content_and_allocation.ministries_to_grow\` — if this page is the homepage OR a related ministry page, surface those ministries early with progression CTAs.
+  - \`content_and_allocation.content_needs\` — if this page is named in the AM content_needs, give it the section-count it needs.
+  - \`display_and_technical.sermons_display_preference\` — only relevant when outlining a sermons/watch page. embed_latest → single \`embed-latest-sermon\` archetype; archive → list/grid archetype.
 - The content_atoms / church_facts / web_project_topics referenced in the allocation slice
 
-Produce the outline per the SKILL contract: sections with archetype + atom_assignments + fact_assignments + crawl_topic_assignments + voice_anchor.
+Produce the outline per the SKILL contract: sections with archetype + atom_assignments + fact_assignments + crawl_topic_assignments + voice_anchor + \`intended_verbatim_band\` per section (matching the allocation).
 
 When done, write to \`roadmap_state.page_outlines.<PAGE-SLUG>\` via \`roadmap_state_set\` (path: \`['page_outlines', '<PAGE-SLUG>']\`). Stamp \`_meta\`.`,
     computeStatus: s => {
@@ -304,11 +319,15 @@ When done, write to \`roadmap_state.page_outlines.<PAGE-SLUG>\` via \`roadmap_st
 `Use the **draft-page** skill for project_id \`{{project_id}}\`, page_slug \`<PAGE-SLUG>\`.
 
 Read:
-- \`roadmap_state.page_outlines.<PAGE-SLUG>\` (the outline)
+- \`roadmap_state.page_outlines.<PAGE-SLUG>\` (the outline; honor each section's \`intended_verbatim_band\`)
 - \`roadmap_state.stage_1\` (voice, personas, ethos)
+- \`roadmap_state.strategic_goals\` — filter to \`status='approved'\`. For drafting, especially:
+  - \`content_and_allocation.copy_approach.derived.intended_verbatim_band\` — applies per section. high band: keep at least 70% of words from the cited crawl passages; only edit for voice/dignity. mid: blend lifted lines with fresh prose ~50/50. low: ≤20% verbatim from crawl, write fresh prose anchored in atoms + facts.
+  - \`voice_and_tone.one_key_message\` — every page MUST include a section whose copy echoes this message.
+  - \`voice_and_tone.recurring_message_theme\` — the page's voice posture should resonate with this theme.
 - The content_atoms / church_facts / web_project_topics the outline references
 
-Write the copy per the SKILL contract (each section's copy + atoms_used + facts_used + crawl_topics_used + voice_notes + deferred_atoms if any).
+Write the copy per the SKILL contract (each section's copy + atoms_used + facts_used + crawl_topics_used + voice_notes + deferred_atoms if any). Each section MUST stamp its \`actual_verbatim_ratio\` (0.0-1.0) — the share of section words lifted verbatim from cited crawl passages — so the critique can verify it lands within the section's \`intended_verbatim_band\`.
 
 When done, write to \`roadmap_state.page_drafts.<PAGE-SLUG>\` via \`roadmap_state_set\`. Stamp \`_meta\` with the model + prompt_hash + generated_at.`,
     computeStatus: s => {
@@ -339,10 +358,13 @@ Read:
 - \`roadmap_state.page_drafts.<PAGE-SLUG>\` (the draft)
 - \`roadmap_state.page_outlines.<PAGE-SLUG>\` (the outline)
 - \`roadmap_state.stage_1\` (voice + ethos for dignity scoring)
+- \`roadmap_state.strategic_goals\` — filter to \`status='approved'\`. For critique, especially:
+  - \`goals_and_vision.church_vision\` (AM handoff) — add a \`vision_fit\` directive when the draft fails to match the partner's stated emotional outcome.
+  - \`content_and_allocation.copy_approach.derived.intended_verbatim_band\` — every section's \`actual_verbatim_ratio\` MUST land within band (high ≥ 0.7; mid 0.3-0.7; low ≤ 0.2). Flag drift as a directive at severity ≥ warning.
 - The atoms / facts / crawl topics the draft used
 - The draft's deferred_atoms[] — every entry MUST surface in directives at severity ≥ warning
 
-Produce the 5-axis critique + standout_lines + problem_lines + directives + summary.
+Produce the 5-axis critique + standout_lines + problem_lines + directives + summary. Reference \`church_vision\` verbatim in the dignity-axis rationale when applicable.
 
 When done, write to \`roadmap_state.page_critiques.<PAGE-SLUG>\` via \`roadmap_state_set\`. Stamp \`_meta\`.`,
     computeStatus: s => {
