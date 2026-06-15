@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Check, ChevronDown, ChevronRight, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Pencil, Plus, Trash2, ClipboardCheck } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { WMCard } from '../Card'
 import { WMButton } from '../Button'
@@ -46,6 +46,31 @@ export function GlobalElementsWorkspace({ project, onChange }: Props) {
     () => new Set(LIBRARY_CATEGORIES)
   )
   const [editingConcept, setEditingConcept] = useState<LibraryConcept | null>(null)
+  // Display preferences from strategic_goals — surfaced as an advisory
+  // banner so the designer sees the partner's stated choices BEFORE
+  // binding sermon/event/group templates. (Phase 3.)
+  const [displayPrefs, setDisplayPrefs] = useState<{
+    sermons: string | null
+    events:  string | null
+    groups:  string | null
+  } | null>(null)
+  useEffect(() => {
+    void (async () => {
+      const { data } = await supabase
+        .from('strategy_web_projects')
+        .select('roadmap_state')
+        .eq('id', project.id)
+        .maybeSingle()
+      const block = (data as any)?.roadmap_state?.strategic_goals?.display_and_technical
+      const pick = (f: any): string | null =>
+        f && typeof f.value === 'string' && f.value.trim() && f.status !== 'archived' ? f.value : null
+      setDisplayPrefs({
+        sermons: pick(block?.sermons_display_preference),
+        events:  pick(block?.events_display_preference),
+        groups:  pick(block?.groups_display_preference),
+      })
+    })()
+  }, [project.id])
 
   // Re-derive library from project prop if it changes externally.
   useEffect(() => {
@@ -136,6 +161,31 @@ export function GlobalElementsWorkspace({ project, onChange }: Props) {
         </p>
       </header>
 
+      {displayPrefs && (displayPrefs.sermons || displayPrefs.events || displayPrefs.groups) && (
+        <WMCard padding="loose" className="mb-4">
+          <div className="flex items-start gap-2.5">
+            <ClipboardCheck size={14} className="shrink-0 mt-0.5 text-wm-accent-strong" />
+            <div className="min-w-0 flex-1">
+              <h2 className="text-[12px] font-bold uppercase tracking-widest text-wm-accent-strong mb-1">Partner display preferences</h2>
+              <p className="text-[11.5px] text-wm-text-muted mb-2 max-w-2xl">
+                From Content Collection. When you bind these concepts below, pick a template variant that matches.
+              </p>
+              <ul className="text-[12px] text-wm-text space-y-1">
+                {displayPrefs.sermons && (
+                  <li><span className="font-semibold">Sermons:</span> {humanizeDisplayPref('sermons', displayPrefs.sermons)}</li>
+                )}
+                {displayPrefs.events && (
+                  <li><span className="font-semibold">Events:</span> {humanizeDisplayPref('events', displayPrefs.events)}</li>
+                )}
+                {displayPrefs.groups && (
+                  <li><span className="font-semibold">Groups:</span> {humanizeDisplayPref('groups', displayPrefs.groups)}</li>
+                )}
+              </ul>
+            </div>
+          </div>
+        </WMCard>
+      )}
+
       <div className="space-y-3">
         {LIBRARY_CATEGORIES.map(category => {
           const concepts = LIBRARY_BY_CATEGORY[category]
@@ -193,6 +243,32 @@ export function GlobalElementsWorkspace({ project, onChange }: Props) {
       />
     </div>
   )
+}
+
+/** Closed-token humanizer for the display-preference enum values that
+ *  arrive from content_collection sessions. Falls back to the raw
+ *  value so a future-added preference still renders something useful. */
+function humanizeDisplayPref(kind: 'sermons' | 'events' | 'groups', value: string): string {
+  const norm = value.toLowerCase()
+  if (kind === 'sermons') {
+    if (norm.includes('embed_latest') || norm.includes('embed the most-recent') || norm.includes('embed-latest')) return 'Embed most-recent sermon on the watch page — pick a single-embed archetype, NOT a full archive grid.'
+    if (norm.includes('archive') || norm.includes('list'))    return 'Show the full sermon archive — pick a list/grid archetype with filters.'
+    if (norm.includes('external'))                            return 'External link only — minimal sermon page; bind a single CTA archetype.'
+  }
+  if (kind === 'events') {
+    if (norm.includes('card'))     return 'Card view — pick a card-grid Events archetype.'
+    if (norm.includes('list'))     return 'List view — pick a list/table Events archetype.'
+    if (norm.includes('calendar')) return 'Calendar view — bind a calendar-style archetype if one exists in the catalog.'
+    if (norm.includes('embed'))    return 'Embedded from Planning Center / Church Center — pick a minimal wrapper archetype.'
+    if (norm.includes('external')) return 'External link only — bind a CTA-anchored Events archetype.'
+  }
+  if (kind === 'groups') {
+    if (norm.includes('embed'))    return 'Embedded from Planning Center — pick a minimal wrapper archetype.'
+    if (norm.includes('card'))     return 'Card view — pick a card-grid Groups archetype.'
+    if (norm.includes('contact'))  return 'Contact-to-join only — bind a Groups archetype that emphasizes the CTA over a roster.'
+    if (norm.includes('external')) return 'External link only — bind a minimal Groups archetype.'
+  }
+  return value
 }
 
 function ConceptRow({

@@ -24,8 +24,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Palette, Plus, Trash2, Download, Save, Loader2, Type, Move, Square,
   Sparkles, ExternalLink, Check, AlertCircle, Layers, FileCode, FileText,
-  FolderOpen,
+  FolderOpen, Lightbulb,
 } from 'lucide-react'
+import { scanStrategicPhrases, extractInspirationalUrls } from '../../../lib/cowork/strategicPhraseScanner'
 import { supabase } from '../../../lib/supabase'
 import { WMButton } from '../Button'
 import { WMCard } from '../Card'
@@ -65,6 +66,27 @@ export function DesignWorkspace({ project, onChange }: Props) {
     summary: string[]
     message?: string
   } | null>(null)
+  // Inspirational-sites snapshot (Phase 3). Pulled from
+  // roadmap_state.strategic_goals.inspiration_and_notes.inspirational_websites.
+  // Surfaced to the designer with a scanned-phrase taxonomy so they
+  // see the strategic ASKS, not just URLs.
+  const [inspirational, setInspirational] = useState<{ value: string; status: string } | null>(null)
+  useEffect(() => {
+    void (async () => {
+      const { data } = await supabase
+        .from('strategy_web_projects')
+        .select('roadmap_state')
+        .eq('id', project.id)
+        .maybeSingle()
+      const sg = (data as any)?.roadmap_state?.strategic_goals
+      const field = sg?.inspiration_and_notes?.inspirational_websites
+      if (field && typeof field.value === 'string' && field.value.trim() && field.status !== 'archived') {
+        setInspirational({ value: field.value, status: field.status ?? 'draft' })
+      } else {
+        setInspirational(null)
+      }
+    })()
+  }, [project.id])
 
   // Force-reset on project switch — different project = fresh spec.
   useEffect(() => {
@@ -314,6 +336,7 @@ export function DesignWorkspace({ project, onChange }: Props) {
         )}
 
         <div className="space-y-5">
+          {inspirational && <InspirationalSitesSection value={inspirational.value} status={inspirational.status} />}
           <BrandAnchorsSection spec={spec} onChange={update} />
           <RoleAnchorsSection spec={spec} onChange={update} />
           <TonalPreviewSection spec={spec} />
@@ -330,6 +353,68 @@ export function DesignWorkspace({ project, onChange }: Props) {
 }
 
 // ── Brand anchors ───────────────────────────────────────────────────
+
+function InspirationalSitesSection({ value, status }: { value: string; status: string }) {
+  const urls    = useMemo(() => extractInspirationalUrls(value),    [value])
+  const phrases = useMemo(() => scanStrategicPhrases(value),        [value])
+  return (
+    <WMCard padding="loose">
+      <div className="flex items-start gap-2.5">
+        <Lightbulb size={14} className="shrink-0 mt-0.5 text-wm-accent-strong" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <h2 className="text-[13px] font-bold uppercase tracking-widest text-wm-accent-strong">Inspirational sites</h2>
+            {status === 'draft' && (
+              <span className="text-[10px] uppercase tracking-wider text-wm-text-subtle">draft — strategist hasn't approved</span>
+            )}
+          </div>
+          <p className="text-[12px] text-wm-text-muted max-w-2xl mb-3">
+            The partner's reference sites + the strategic phrases scanned out of their notes. Treat the phrases as design asks, not just visual cues.
+          </p>
+          {urls.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {urls.map(u => (
+                <a key={u} href={u} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12px] text-wm-accent-strong hover:underline">
+                  <ExternalLink size={11} />
+                  {u.replace(/^https?:\/\//, '').replace(/\/$/, '').slice(0, 60)}
+                </a>
+              ))}
+            </div>
+          )}
+          {phrases.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              {phrases.map(p => (
+                <span
+                  key={p.phrase}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-wm-accent-tint text-wm-accent-strong"
+                  title={p.implication}
+                >
+                  {p.phrase}
+                </span>
+              ))}
+            </div>
+          )}
+          {phrases.length > 0 && (
+            <details className="mt-2">
+              <summary className="text-[11px] text-wm-text-muted cursor-pointer hover:text-wm-text">What each phrase means for design</summary>
+              <ul className="mt-2 space-y-1.5">
+                {phrases.map(p => (
+                  <li key={p.phrase} className="text-[11.5px] text-wm-text leading-snug">
+                    <span className="font-semibold text-wm-accent-strong">{p.phrase}:</span> {p.implication}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          <details className="mt-3">
+            <summary className="text-[11px] text-wm-text-muted cursor-pointer hover:text-wm-text">Original notes</summary>
+            <p className="mt-2 text-[12px] text-wm-text-muted leading-snug whitespace-pre-wrap break-words">{value}</p>
+          </details>
+        </div>
+      </div>
+    </WMCard>
+  )
+}
 
 function BrandAnchorsSection({
   spec, onChange,

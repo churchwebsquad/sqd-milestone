@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Cog, Download, FileText, AlertCircle, Globe, Link as LinkIcon, ExternalLink, AlertTriangle, FolderOpen } from 'lucide-react'
+import { Cog, Download, FileText, AlertCircle, Globe, Link as LinkIcon, ExternalLink, AlertTriangle, FolderOpen, Server } from 'lucide-react'
 import { WMButton } from '../Button'
 import { WMCard } from '../Card'
 import { supabase } from '../../../lib/supabase'
@@ -74,6 +74,26 @@ export function DevHandoffWorkspace({ project }: Props) {
   const [seoRows, setSeoRows] = useState<PageSeoRow[]>([])
   const [ctaRows, setCtaRows] = useState<CtaRow[]>([])
   const [seoCtaLoading, setSeoCtaLoading] = useState(true)
+  // Software-in-use, surfaced from roadmap_state.strategic_goals (Phase 3).
+  // Shown prominently at the top so the dev knows what integrations
+  // the build has to plug into BEFORE reading the rest.
+  const [softwareInUse, setSoftwareInUse]   = useState<{ value: string; status: string } | null>(null)
+  useEffect(() => {
+    void (async () => {
+      const { data } = await supabase
+        .from('strategy_web_projects')
+        .select('roadmap_state')
+        .eq('id', project.id)
+        .maybeSingle()
+      const sg = (data as any)?.roadmap_state?.strategic_goals
+      const field = sg?.display_and_technical?.software_in_use
+      if (field && typeof field.value === 'string' && field.value.trim() && field.status !== 'archived') {
+        setSoftwareInUse({ value: field.value, status: field.status ?? 'draft' })
+      } else {
+        setSoftwareInUse(null)
+      }
+    })()
+  }, [project.id])
 
   useEffect(() => {
     void (async () => {
@@ -161,6 +181,27 @@ export function DevHandoffWorkspace({ project }: Props) {
         </header>
 
         <div className="space-y-5">
+          {/* ── Software in use (from strategic_goals) ─────────── */}
+          {softwareInUse && (
+            <WMCard padding="loose">
+              <div className="flex items-start gap-2.5">
+                <Server size={14} className="shrink-0 mt-0.5 text-wm-accent-strong" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <h2 className="text-[13px] font-bold uppercase tracking-widest text-wm-accent-strong">Software in use</h2>
+                    {softwareInUse.status === 'draft' && (
+                      <span className="text-[10px] uppercase tracking-wider text-wm-text-subtle">draft — strategist hasn't approved</span>
+                    )}
+                  </div>
+                  <p className="text-[12px] text-wm-text-muted mb-2 max-w-2xl">
+                    Existing tools the dev team has to integrate with. From Discovery; surfaced here so integrations are visible BEFORE you read the rest of the handoff.
+                  </p>
+                  <p className="text-[12.5px] text-wm-text leading-snug whitespace-pre-wrap break-words">{softwareInUse.value}</p>
+                </div>
+              </div>
+            </WMCard>
+          )}
+
           {/* ── Organized images folder ────────────────────────── */}
           {/* Authored on the Design Handoff tab; mirrored here so the dev
               team has the same link one click away without bouncing

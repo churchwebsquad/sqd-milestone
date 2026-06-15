@@ -68,6 +68,10 @@ export function CoworkWorkspace({ project, onChange }: Props) {
   const [runningStep, setRunningStep]         = useState<string | null>(null)
   const [drawerStep, setDrawerStep]           = useState<StepCatalogEntry | null>(null)
   const [lastResult, setLastResult]           = useState<{ step: string; ok: boolean; detail: string } | null>(null)
+  // Surfaced AM-handoff timeline notes from strategic_goals (Phase 3).
+  // Shown above the progress card so the strategist sees constraints
+  // BEFORE they fire any pipeline step.
+  const [timelineNotes, setTimelineNotes]     = useState<string | null>(null)
 
   // ─── Data loaders ───────────────────────────────────────────────
 
@@ -99,6 +103,17 @@ export function CoworkWorkspace({ project, onChange }: Props) {
       for (const crit of Object.values(pageCritiques)) {
         const ts = (crit as any)?._meta?.generated_at
         if (typeof ts === 'string' && (!latestCritiqueAt || ts > latestCritiqueAt)) latestCritiqueAt = ts
+      }
+
+      // Surface timeline_notes from the strategic_goals snapshot. We
+      // accept either status — even draft notes deserve visibility
+      // (the strategist hasn't approved them, but they need to read
+      // the timeline before launching anything). Archived → suppress.
+      const sgTimeline = roadmap.strategic_goals?.inspiration_and_notes?.timeline_notes
+      if (sgTimeline && sgTimeline.status !== 'archived' && typeof sgTimeline.value === 'string' && sgTimeline.value.trim()) {
+        setTimelineNotes(sgTimeline.value)
+      } else {
+        setTimelineNotes(null)
       }
 
       // sitemap_slugs — prefer cowork site_strategy, fall back to legacy stage_2
@@ -247,6 +262,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         readiness={readiness}
         readinessLoading={readinessLoading}
         overallStats={overallStats}
+        timelineNotes={timelineNotes}
         onRefresh={() => { void loadProjectState(); void loadReadiness() }}
         refreshing={loading || readinessLoading}
       />
@@ -300,10 +316,11 @@ export function CoworkWorkspace({ project, onChange }: Props) {
 // Header (readiness summary + refresh)
 // ────────────────────────────────────────────────────────────────────
 
-function Header({ readiness, readinessLoading, overallStats, onRefresh, refreshing }: {
+function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRefresh, refreshing }: {
   readiness:        ReadinessReport | null
   readinessLoading: boolean
   overallStats:     { done: number; ready: number; stale: number; cowork: number; waiting: number; firstReadyKey: string | null } | null
+  timelineNotes:    string | null
   onRefresh:        () => void
   refreshing:       boolean
 }) {
@@ -346,6 +363,17 @@ function Header({ readiness, readinessLoading, overallStats, onRefresh, refreshi
           </span>
         </button>
       </div>
+
+      {/* Timeline notes (AM handoff) — visibility BEFORE pipeline launch */}
+      {timelineNotes && (
+        <div className="mb-4 rounded-xl border border-wm-warning bg-wm-warning-bg px-4 py-3 flex items-start gap-2.5">
+          <Clock size={14} className="shrink-0 mt-0.5 text-wm-warning" />
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-wm-warning mb-1">Timeline notes (AM handoff)</p>
+            <p className="text-[12.5px] text-wm-text leading-snug whitespace-pre-wrap break-words">{timelineNotes}</p>
+          </div>
+        </div>
+      )}
 
       {/* Hero progress card */}
       {overallStats && (
