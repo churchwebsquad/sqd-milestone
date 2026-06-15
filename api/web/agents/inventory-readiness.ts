@@ -35,8 +35,8 @@ export default async function handler(req: any, res: any) {
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
-  // Pull the project inventory in parallel. Cheaper than four sequential round-trips.
-  const [pillarsRes, factsRes, topicsRes, ccRes] = await Promise.all([
+  // Pull the project inventory in parallel. Cheaper than five sequential round-trips.
+  const [pillarsRes, factsRes, topicsRes, ccRes, projRes] = await Promise.all([
     sb.from('content_atoms')
       // duplicate_of dropped from select 2026-06-13 — the column was
       // referenced in anticipation of a dedup feature that never landed
@@ -59,12 +59,17 @@ export default async function handler(req: any, res: any) {
       .order('submitted_at', { ascending: false, nullsFirst: false })
       .limit(1)
       .maybeSingle(),
+    sb.from('strategy_web_projects')
+      .select('roadmap_state')
+      .eq('id', projectId)
+      .maybeSingle(),
   ])
 
   if (pillarsRes.error) return res.status(500).json({ error: `content_atoms load failed: ${pillarsRes.error.message}` })
   if (factsRes.error)   return res.status(500).json({ error: `church_facts load failed: ${factsRes.error.message}` })
   if (topicsRes.error)  return res.status(500).json({ error: `web_project_topics load failed: ${topicsRes.error.message}` })
   if (ccRes.error)      return res.status(500).json({ error: `content_collection load failed: ${ccRes.error.message}` })
+  if (projRes.error)    return res.status(500).json({ error: `strategy_web_projects load failed: ${projRes.error.message}` })
 
   // Compress crawl topics: sum passages byte length + extract a noise-scan sample.
   const crawl_topics = (topicsRes.data ?? []).map((t: any) => {
@@ -101,11 +106,17 @@ export default async function handler(req: any, res: any) {
         .map(([k]) => k)
     : []
 
+  const roadmap = ((projRes.data as any)?.roadmap_state ?? {}) as Record<string, unknown>
+  const strategic_goals = (roadmap.strategic_goals && typeof roadmap.strategic_goals === 'object')
+    ? (roadmap.strategic_goals as InventoryReadinessInput['strategic_goals'])
+    : undefined
+
   const input: InventoryReadinessInput = {
     pillars:    (pillarsRes.data ?? []) as any,
     facts:      (factsRes.data ?? []) as any,
     crawl_topics,
     content_collection_fields,
+    strategic_goals,
   }
 
   const report = buildInventoryReadinessReport(input)

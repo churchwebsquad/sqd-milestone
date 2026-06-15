@@ -24,7 +24,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import {
-  ClipboardList, LayoutGrid, FileText, Palette, Cog, Eye, Loader2, CalendarClock, Workflow, MessageSquareQuote, Rocket,
+  ClipboardList, LayoutGrid, FileText, Palette, Cog, Eye, Loader2, CalendarClock, Workflow, MessageSquareQuote, Rocket, Target,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { WebManagerShell } from '../../components/wm'
@@ -41,6 +41,7 @@ import { PlanningWorkspace } from '../../components/wm/workspaces/PlanningWorksp
 import { PipelineWorkspace } from '../../components/wm/workspaces/PipelineWorkspace'
 import { CopyEngineWorkspace } from '../../components/wm/workspaces/CopyEngineWorkspace'
 import { AtomReviewWorkspace } from '../../components/wm/workspaces/AtomReviewWorkspace'
+import { StrategicGoalsWorkspace } from '../../components/wm/workspaces/StrategicGoalsWorkspace'
 import { CoworkWorkspace } from '../../components/wm/workspaces/CoworkWorkspace'
 import type { StrategyWebProject } from '../../types/database'
 
@@ -51,6 +52,7 @@ type TabKey =
   | 'cowork'
   | 'intake'
   | 'atoms'
+  | 'goals'
   | 'library'
   | 'pages'
   | 'design'
@@ -61,6 +63,7 @@ const TABS: readonly WMTabItem<TabKey>[] = [
   { key: 'planning',   label: 'Planning',        icon: <CalendarClock size={13} /> },
   { key: 'intake',     label: 'Intake & Crawl',  icon: <ClipboardList size={13} /> },
   { key: 'atoms',      label: 'Core messages',   icon: <MessageSquareQuote size={13} /> },
+  { key: 'goals',      label: 'Strategic goals', icon: <Target        size={13} /> },
   { key: 'cowork',     label: 'Cowork',          icon: <Rocket        size={13} /> },
   { key: 'engine',     label: 'Copy Engine',     icon: <Workflow      size={13} /> },
   { key: 'pipeline',   label: 'Copywriting (legacy)', icon: <Workflow size={13} /> },
@@ -87,7 +90,7 @@ export default function WebContentManagerPage() {
     }
     if (rawTab === 'settings') return DEFAULT_TAB   // moved to /web (org-wide)
     if (rawTab === 'crawl')    return 'intake'      // merged into intake
-    const known: ReadonlyArray<TabKey> = ['planning','engine','pipeline','cowork','intake','atoms','library','pages','design','devhandoff','review']
+    const known: ReadonlyArray<TabKey> = ['planning','engine','pipeline','cowork','intake','atoms','goals','library','pages','design','devhandoff','review']
     return (known as readonly string[]).includes(rawTab) ? (rawTab as TabKey) : DEFAULT_TAB
   })()
 
@@ -170,6 +173,7 @@ export default function WebContentManagerPage() {
         {activeTab === 'pipeline'   && <PipelineWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'intake'     && <IntakeWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'atoms'      && <AtomReviewWorkspace project={project} onChange={loadProject} />}
+        {activeTab === 'goals'      && <StrategicGoalsWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'cowork'     && <CoworkWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'library'    && <GlobalElementsWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'pages'      && <PagesWorkspace project={project} onChange={loadProject} />}

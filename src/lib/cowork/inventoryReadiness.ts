@@ -110,6 +110,17 @@ export interface InventoryReadinessInput {
   }>
   /** Content collection field keys present on the latest session. */
   content_collection_fields: string[]
+  /** Snapshot of `roadmap_state.strategic_goals` (the curated jsonb
+   *  produced by the aggregate-strategic-goals endpoint). Optional —
+   *  when omitted, the strategic-goals readiness gate is skipped (so
+   *  callers from before the snapshot existed keep passing). */
+  strategic_goals?: {
+    goals_and_vision?:       Record<string, { value: unknown; status?: string }>
+    voice_and_tone?:         Record<string, { value: unknown; status?: string }>
+    content_and_allocation?: Record<string, { value: unknown; status?: string }>
+    display_and_technical?:  Record<string, { value: unknown; status?: string }>
+    inspiration_and_notes?:  Record<string, { value: unknown; status?: string }>
+  }
 }
 
 export type ReadinessSeverity = 'blocker' | 'warning'
@@ -120,6 +131,7 @@ export type ReadinessIssueKind =
   | 'pii_flag_fact'
   | 'page_coverage_gap'
   | 'status_ambiguity'
+  | 'strategic_goals_unready'
 
 export interface ReadinessIssue {
   kind:     ReadinessIssueKind
@@ -146,6 +158,12 @@ export interface InventoryReadinessReport {
     noise_topics_found: number
     pii_flags:        number
     coverage_gaps:    string[]
+    /** Strategic-goals summary. Absent on legacy callers that didn't
+     *  pass the snapshot. */
+    strategic_goals?: {
+      total_high_importance:  number
+      missing_or_draft:       string[]    // field keys that gate the warning
+    }
   }
 }
 
@@ -268,6 +286,41 @@ export function buildInventoryReadinessReport(input: InventoryReadinessInput): I
     })
   }
 
+  // 6. Strategic-goals readiness — high-importance fields missing or
+  //    still draft. Warning only; never blocks. The list of fields and
+  //    their categories MUST stay in sync with STRATEGIC_GOAL_FIELDS
+  //    (strategicGoals.ts). High-importance entries duplicated here so
+  //    this module stays standalone (no upstream import dependency).
+  const HIGH_IMPORTANCE_FIELDS: ReadonlyArray<{ category: keyof NonNullable<InventoryReadinessInput['strategic_goals']>; key: string }> = [
+    { category: 'goals_and_vision',       key: 'top_3_website_goals' },
+    { category: 'goals_and_vision',       key: 'primary_goals' },
+    { category: 'voice_and_tone',         key: 'one_key_message' },
+    { category: 'content_and_allocation', key: 'copy_approach' },
+  ]
+  let strategicGoalsSummary: InventoryReadinessReport['summary']['strategic_goals']
+  if (input.strategic_goals) {
+    const missing: string[] = []
+    for (const f of HIGH_IMPORTANCE_FIELDS) {
+      const field = input.strategic_goals[f.category]?.[f.key]
+      const value = field?.value
+      const hasValue = value != null && (typeof value !== 'string' || value.trim() !== '')
+      const approved = field?.status === 'approved'
+      if (!hasValue || !approved) missing.push(f.key)
+    }
+    strategicGoalsSummary = {
+      total_high_importance: HIGH_IMPORTANCE_FIELDS.length,
+      missing_or_draft:      missing,
+    }
+    if (missing.length > 0) {
+      warnings.push({
+        kind:     'strategic_goals_unready',
+        severity: 'warning',
+        detail:   `${missing.length} of ${HIGH_IMPORTANCE_FIELDS.length} high-importance strategic goals not yet approved: ${missing.join(', ')}.`,
+        suggested_fix: 'Open the Strategic Goals tab, review each field, and Approve. The cowork pipeline will weigh approved fields when it runs.',
+      })
+    }
+  }
+
   return {
     ok: blockers.length === 0,
     blockers,
@@ -281,6 +334,7 @@ export function buildInventoryReadinessReport(input: InventoryReadinessInput): I
       noise_topics_found,
       pii_flags,
       coverage_gaps,
+      ...(strategicGoalsSummary ? { strategic_goals: strategicGoalsSummary } : {}),
     },
   }
 }
