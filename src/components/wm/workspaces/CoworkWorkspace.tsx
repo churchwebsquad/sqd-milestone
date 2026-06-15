@@ -145,6 +145,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         page_critiques_count: Object.keys(pageCritiques).length,
         latest_critique_at:   latestCritiqueAt,
         sitemap_slugs:        sitemapSlugs,
+        strategic_goals_at:   roadmap.strategic_goals?._meta?.generated_at ?? null,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'failed to load project state')

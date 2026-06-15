@@ -32,6 +32,10 @@ export interface CoworkPipelineState {
   site_strategy:         { _meta?: { generated_at?: string; model?: string } } | null
   page_allocation_plan:  { _meta?: { generated_at?: string; model?: string } } | null
   critique_rollup:       { _meta?: { generated_at?: string; model?: string } } | null
+  /** Strategic-goals snapshot timestamp — upstream of every step that
+   *  consumes goals (3, 6, 7, 8, 9, 10, 11). When this is fresher than
+   *  the step's own output, the step flips to 'stale'. */
+  strategic_goals_at:    string | null
 
   /** Per-page progress counts (steps 8-10 span all sitemap pages). */
   page_outlines_count:   number
@@ -104,6 +108,19 @@ function fresherThan(outputAt: string | undefined | null, upstreamAt: string | n
   return outputAt >= upstreamAt
 }
 
+/** Resolve the latest timestamp from an arbitrary list of upstream
+ *  candidates. nulls are skipped. Used by steps with multiple
+ *  upstream sources (e.g. step 6 watches both ministry_model AND
+ *  strategic_goals). */
+function latestOf(...candidates: Array<string | null | undefined>): string | null {
+  let max: string | null = null
+  for (const c of candidates) {
+    if (!c) continue
+    if (!max || c > max) max = c
+  }
+  return max
+}
+
 export const COWORK_STEPS: StepCatalogEntry[] = [
   // ── Inventory extraction (informational; driven outside the tab) ───
   {
@@ -153,7 +170,11 @@ export const COWORK_STEPS: StepCatalogEntry[] = [
     computeStatus: s => {
       const out = s.stage_1?._meta?.generated_at
       if (!out)                           return 'ready'
-      if (fresherThan(out, s.latest_atom_at))  return 'done'
+      // Step 3 consumes the strategic_goals snapshot — when the strategist
+      // edits/approves a field, mutateField bumps strategic_goals._meta.
+      // Treat that bump like an atom edit for staleness purposes.
+      const upstream = latestOf(s.latest_atom_at, s.strategic_goals_at)
+      if (fresherThan(out, upstream))     return 'done'
       return 'stale'
     },
     lastRunAt: s => s.stage_1?._meta?.generated_at ?? null,
@@ -213,7 +234,10 @@ export const COWORK_STEPS: StepCatalogEntry[] = [
       if (!s.ministry_model?._meta?.generated_at)              return 'blocked_waiting'
       const out = s.site_strategy?._meta?.generated_at
       if (!out)                                                return 'ready'
-      if (fresherThan(out, s.ministry_model._meta.generated_at ?? null)) return 'done'
+      // Step 6 consumes nav_satisfaction, primary_goals, ministries_to_grow,
+      // top_3_website_goals, ideal_website_experience — all in strategic_goals.
+      const upstream = latestOf(s.ministry_model._meta.generated_at ?? null, s.strategic_goals_at)
+      if (fresherThan(out, upstream))                          return 'done'
       return 'stale'
     },
     lastRunAt: s => s.site_strategy?._meta?.generated_at ?? null,
@@ -259,7 +283,10 @@ When complete, write the allocation to \`roadmap_state.page_allocation_plan\` vi
       if (!s.site_strategy?._meta?.generated_at) return 'blocked_waiting'
       const out = s.page_allocation_plan?._meta?.generated_at
       if (!out) return 'cowork_session'
-      if (fresherThan(out, s.site_strategy._meta.generated_at ?? null)) return 'done'
+      // Step 7 consumes copy_approach (verbatim band), ministries_to_grow,
+      // content_needs, best_outreach_methods, top_3_website_goals, etc.
+      const upstream = latestOf(s.site_strategy._meta.generated_at ?? null, s.strategic_goals_at)
+      if (fresherThan(out, upstream)) return 'done'
       return 'stale'
     },
     lastRunAt: s => s.page_allocation_plan?._meta?.generated_at ?? null,
@@ -395,7 +422,11 @@ When done, write to \`roadmap_state.page_critiques.<PAGE-SLUG>\` via \`roadmap_s
       if (s.page_critiques_count === 0)              return 'blocked_waiting'
       const out = s.critique_rollup?._meta?.generated_at
       if (!out)                                      return 'ready'
-      if (fresherThan(out, s.latest_critique_at))    return 'done'
+      // Step 11 reads church_vision (AM handoff) for project-level
+      // vision-drift detection; a fresh goals snapshot means the
+      // rollup needs to re-fire.
+      const upstream = latestOf(s.latest_critique_at, s.strategic_goals_at)
+      if (fresherThan(out, upstream))                return 'done'
       return 'stale'
     },
     lastRunAt: s => s.critique_rollup?._meta?.generated_at ?? null,

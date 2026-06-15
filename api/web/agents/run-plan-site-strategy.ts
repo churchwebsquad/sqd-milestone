@@ -177,7 +177,13 @@ export default async function handler(req: any, res: any) {
       project_id:   projectId,
       output_key:   'roadmap_state.site_strategy',
       output_spec:  { kind: 'roadmap_state_meta', key: 'site_strategy' },
-      upstream:     [{ kind: 'roadmap_state_meta', key: 'ministry_model' }],
+      upstream: [
+        { kind: 'roadmap_state_meta', key: 'ministry_model' },
+        // strategic_goals (nav_satisfaction, primary_goals, ministries_to_grow,
+        // top_3_website_goals, ideal_website_experience) drives nav_change_level
+        // + page elevation; a fresh snapshot means the sitemap needs to re-run.
+        { kind: 'roadmap_state_meta', key: 'strategic_goals' },
+      ],
     }, { force })
   } catch (e) {
     return res.status(500).json({ error: e instanceof Error ? e.message : 'staleness probe failed' })

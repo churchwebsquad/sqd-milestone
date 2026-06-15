@@ -140,6 +140,7 @@ export function StrategicGoalsWorkspace({ project, onChange }: Props) {
       }
     }
 
+    const nowIso = new Date().toISOString()
     const { error: err } = await (supabase as any).rpc('roadmap_state_set', {
       p_project_id: project.id,
       p_path:       ['strategic_goals', category, key],
@@ -150,10 +151,36 @@ export function StrategicGoalsWorkspace({ project, onChange }: Props) {
       setError(`Update failed for ${fullKey}: ${err.message}`)
       return false
     }
+
+    // Bump the snapshot's _meta.generated_at so downstream staleness
+    // probes (synthesize-strategy, plan-site-strategy, synthesize-
+    // critique, and the cowork-session computeStatus checks) see the
+    // input set has changed. Without this, approving a field after a
+    // step has already run leaves the step pinned to 'done' even
+    // though it never saw the field. Failure here is non-fatal — the
+    // field mutation already landed; we just lose the staleness flip
+    // for this round.
+    const updatedMeta = {
+      ...(snapshot?._meta ?? { version: 1, sources_synced_from: [] }),
+      generated_at: nowIso,
+    }
+    const { error: metaErr } = await (supabase as any).rpc('roadmap_state_set', {
+      p_project_id: project.id,
+      p_path:       ['strategic_goals', '_meta'],
+      p_value:      updatedMeta,
+    })
+    if (metaErr) {
+      console.warn('strategic_goals._meta bump failed (non-fatal):', metaErr.message)
+    }
+
     // Optimistic local update
     setSnapshot(prev => {
       if (!prev) return prev
-      const next = { ...prev, [category]: { ...prev[category], [key]: updated } } as StrategicGoalsSnapshot
+      const next: StrategicGoalsSnapshot = {
+        ...prev,
+        _meta:      { ...prev._meta, generated_at: nowIso },
+        [category]: { ...prev[category], [key]: updated },
+      }
       return next
     })
     onChange?.()

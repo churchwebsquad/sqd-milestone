@@ -187,7 +187,12 @@ export default async function handler(req: any, res: any) {
       project_id:   projectId,
       output_key:   'roadmap_state.critique_rollup',
       output_spec:  { kind: 'roadmap_state_meta', key: 'critique_rollup' },
-      upstream:     [{ kind: 'roadmap_state_meta_max_child', parent_key: 'page_critiques' }],
+      upstream: [
+        { kind: 'roadmap_state_meta_max_child', parent_key: 'page_critiques' },
+        // church_vision (AM handoff) is now a critique input — fresh snapshot
+        // means the rollup needs to re-run with the updated vision context.
+        { kind: 'roadmap_state_meta', key: 'strategic_goals' },
+      ],
     }, { force })
   } catch (e) {
     return res.status(500).json({ error: e instanceof Error ? e.message : 'staleness probe failed' })

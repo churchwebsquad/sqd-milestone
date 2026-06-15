@@ -166,7 +166,13 @@ export default async function handler(req: any, res: any) {
       project_id:   projectId,
       output_key:   'roadmap_state.stage_1',
       output_spec:  { kind: 'roadmap_state_meta', key: 'stage_1' },
-      upstream:     [{ kind: 'content_atoms_max_created_at' }],
+      upstream: [
+        { kind: 'content_atoms_max_created_at' },
+        // strategic_goals is now part of the prompt's input set; any
+        // strategist edit/approval bumps the snapshot meta and should
+        // mark stage_1 stale until it's re-synthesized.
+        { kind: 'roadmap_state_meta', key: 'strategic_goals' },
+      ],
     }, { force })
   } catch (e) {
     return res.status(500).json({ error: e instanceof Error ? e.message : 'staleness probe failed' })
