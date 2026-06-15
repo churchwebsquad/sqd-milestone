@@ -18,7 +18,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Check, Loader2, X } from 'lucide-react'
+import { Check, Loader2, Pencil, X } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { getConverterForOutputKey } from '../../../lib/cowork/artifactsToMarkdown'
 import { NavPresentationPanel, type NavPresentation } from '../NavPresentationPanel'
@@ -36,7 +36,7 @@ export function CoworkArtifactDrawer({ outputKey, title, projectId, onClose }: P
   const [raw, setRaw]         = useState<unknown>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState<string | null>(null)
-  const [copiedKind, setCopiedKind] = useState<'md' | 'json' | null>(null)
+  const [copiedKind, setCopiedKind] = useState<'md' | 'json' | 'edit' | null>(null)
 
   // Load the artifact on mount.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -104,8 +104,48 @@ export function CoworkArtifactDrawer({ outputKey, title, projectId, onClose }: P
     return np && typeof np === 'object' ? np : null
   }, [raw, outputKey])
 
-  const handleCopy = (kind: 'md' | 'json') => {
-    const text = kind === 'md' ? markdown : jsonString
+  /** Edit-in-cowork prompt template. Currently scoped to site_strategy
+   *  — strategist copies this, pastes into cowork, types their edits
+   *  between the angle-bracket markers, and the revise-site-strategy
+   *  SKILL walks them through each change. The SKILL.md handles the
+   *  conversational back-and-forth + persists via roadmap_state_set.
+   *
+   *  Returns null for artifact types that don't yet have an
+   *  edit-in-place SKILL — button stays hidden in that case. */
+  const editPrompt = useMemo<string | null>(() => {
+    if (outputKey !== 'site_strategy') return null
+    return [
+      `Use the **revise-site-strategy** skill for project_id \`${projectId}\`.`,
+      ``,
+      `Read:`,
+      `- \`roadmap_state.site_strategy\` (the current sitemap + nav)`,
+      `- \`roadmap_state.strategic_goals\` (filter to status='approved')`,
+      `- \`roadmap_state.stage_1\` (personas + voice context)`,
+      `- \`roadmap_state.ministry_model\` (template-choice context)`,
+      ``,
+      `The strategist wants the following changes:`,
+      ``,
+      `> <paste edits here — e.g. "Re-add the baptism page but merge it`,
+      `> with /discover and rename to 'Take your first steps' — it`,
+      `> should be a discipleship pathway page">`,
+      ``,
+      `Walk me through each change one at a time. For each one:`,
+      `1. Restate the intent in your own words.`,
+      `2. Propose the structural impact (pages[], nav.*, persona_journeys[], pages_considered_dropped[]).`,
+      `3. Show me the before→after diff for the affected slice.`,
+      `4. Wait for my OK before persisting.`,
+      ``,
+      `Sync \`nav_presentation\` for any edit that changes nav placement —`,
+      `add/remove chips, update megamenu columns, keep visible header + sitemap in lockstep.`,
+      ``,
+      `When I say "save", write the revised site_strategy back via the \`roadmap_state_set\` RPC`,
+      `(path: \`['site_strategy']\`). Bump \`_meta.generated_at\` and stamp \`_meta.revision_of\``,
+      `with the prior generated_at so the audit trail survives.`,
+    ].join('\n')
+  }, [outputKey, projectId])
+
+  const handleCopy = (kind: 'md' | 'json' | 'edit') => {
+    const text = kind === 'md' ? markdown : kind === 'json' ? jsonString : (editPrompt ?? '')
     if (!text) return
     navigator.clipboard.writeText(text).then(() => {
       setCopiedKind(kind)
@@ -127,6 +167,19 @@ export function CoworkArtifactDrawer({ outputKey, title, projectId, onClose }: P
             <h2 className="text-[14px] font-semibold text-wm-text truncate">{title}</h2>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            {editPrompt && (
+              <button
+                type="button"
+                onClick={() => handleCopy('edit')}
+                className="text-[11px] font-medium px-2.5 py-1 rounded-md bg-wm-accent text-wm-text-on-accent hover:bg-wm-accent-hover"
+                title="Copy a prompt that lets you edit this artifact in cowork. Paste into Claude Desktop, type your changes, the model walks you through each one and saves back."
+              >
+                <span className="flex items-center gap-1">
+                  {copiedKind === 'edit' ? <Check size={11} /> : <Pencil size={11} />}
+                  {copiedKind === 'edit' ? 'Copied — paste in cowork' : 'Edit in cowork'}
+                </span>
+              </button>
+            )}
             {markdown && (
               <button
                 type="button"
