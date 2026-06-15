@@ -61,6 +61,20 @@ export function CoworkArtifactDrawer({ outputKey, title, projectId, onClose }: P
         cursor = cursor?.[p]
         if (cursor == null) break
       }
+
+      // Legacy fallback: when viewing site_strategy and the new
+      // cowork artifact doesn't yet carry nav_presentation (the
+      // plan-site-strategy SKILL doesn't emit it yet), splice in the
+      // legacy stage_2.nav_presentation so the strategist sees the
+      // rich shell + megamenu panels rendering instead of just the
+      // pages list. Drops out once plan-site-strategy emits its own.
+      if (outputKey === 'site_strategy' && cursor && typeof cursor === 'object' && !(cursor as any).nav_presentation) {
+        const legacyNp = roadmap.stage_2?.nav_presentation
+        if (legacyNp && typeof legacyNp === 'object') {
+          cursor = { ...cursor, nav_presentation: legacyNp, _nav_presentation_source: 'legacy_stage_2' }
+        }
+      }
+
       setRaw(cursor ?? null)
       setLoading(false)
     })()
