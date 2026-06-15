@@ -44,7 +44,7 @@ const PRES_4   = ['strong', 'present', 'weak', 'missing'] as const
 const TOOL_SCHEMA: ToolSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['overall_band', 'vision_alignment_summary', 'voice_consistency', 'persona_coverage', 'structural_parity', 'source_coverage', 'cross_page_findings'],
+  required: ['overall_band', 'vision_alignment_summary', 'voice_consistency', 'persona_coverage', 'structural_parity', 'source_coverage', 'cross_page_findings', 'handoff_note'],
   properties: {
     overall_band: { type: 'string', enum: [...BAND_3] },
     /** Project-level vision-fit summary. Required by the SKILL when
@@ -173,6 +173,12 @@ const TOOL_SCHEMA: ToolSchema = {
         },
       },
     },
+    handoff_note: {
+      type: 'string',
+      minLength: 100,
+      maxLength: 4000,
+      description: '≤1-screen markdown handoff note covering (a) what was written + where, (b) open/deferred issues, (c) cross-step gotchas the next session needs, (d) what the next step should read + decisions already made. Aim for 250-400 words.',
+    },
   },
 }
 
@@ -259,8 +265,9 @@ export default async function handler(req: any, res: any) {
   }
 
   const now = new Date().toISOString()
+  const { handoff_note, ...artifactBody } = gatewayResult.args as Record<string, unknown>
   const rollupWithMeta = {
-    ...(gatewayResult.args as Record<string, unknown>),
+    ...artifactBody,
     _meta: {
       bundle_version: BUNDLE_VERSION,
       skill_name:     'synthesize-critique',
@@ -275,6 +282,7 @@ export default async function handler(req: any, res: any) {
       page_critique_count: Object.keys(inputs.pageCritiques).length,
       drafts_count:        Object.keys(inputs.pageDrafts).length,
       validator_iteration: 1,
+      handoff_note: typeof handoff_note === 'string' ? handoff_note : undefined,
     },
   }
 

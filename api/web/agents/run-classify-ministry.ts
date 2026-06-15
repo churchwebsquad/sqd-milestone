@@ -44,7 +44,7 @@ const TOOL_DESCRIPTION =
 const TOOL_SCHEMA: ToolSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['model', 'confidence', 'secondary_blend', 'blend_notes', 'evidence', 'rationale', 'cta_default'],
+  required: ['model', 'confidence', 'secondary_blend', 'blend_notes', 'evidence', 'rationale', 'cta_default', 'handoff_note'],
   properties: {
     model:           { type: 'string', enum: ['attractional', 'discipleship', 'missional'] },
     confidence:      { type: 'number', minimum: 0, maximum: 1 },
@@ -58,6 +58,12 @@ const TOOL_SCHEMA: ToolSchema = {
     },
     rationale:   { type: 'string', minLength: 40, maxLength: 800 },
     cta_default: { type: 'string', minLength: 1, maxLength: 80 },
+    handoff_note: {
+      type: 'string',
+      minLength: 100,
+      maxLength: 4000,
+      description: '≤1-screen markdown handoff note covering (a) what was written + where, (b) open/deferred issues, (c) cross-step gotchas the next session needs, (d) what the next step should read + decisions already made. Aim for 250-400 words.',
+    },
   },
 }
 
@@ -143,8 +149,9 @@ export default async function handler(req: any, res: any) {
   }
 
   const now = new Date().toISOString()
+  const { handoff_note, ...artifactBody } = gatewayResult.args as Record<string, unknown>
   const ministryModelWithMeta = {
-    ...(gatewayResult.args as Record<string, unknown>),
+    ...artifactBody,
     _meta: {
       bundle_version: BUNDLE_VERSION,
       skill_name:     'classify-ministry',
@@ -159,6 +166,7 @@ export default async function handler(req: any, res: any) {
       atom_count: inputs.atoms.length,
       fact_count: inputs.facts.length,
       validator_iteration: 1,
+      handoff_note: typeof handoff_note === 'string' ? handoff_note : undefined,
     },
   }
 

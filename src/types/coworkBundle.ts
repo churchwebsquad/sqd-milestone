@@ -753,4 +753,23 @@ export interface ArtifactMeta {
     count:    number
     by_check: Record<string, number>
   } | null
+  /** ≤1-screen markdown summary the model emits as the final substep
+   *  of every pipeline step. Captures: (a) what was written + where,
+   *  (b) open/deferred issues or validator gaps, (c) cross-step
+   *  gotchas (banned vocab, per-page exceptions, display preferences,
+   *  persona postures), (d) what the next step should read +
+   *  decisions already made. The persisted artifact is the source of
+   *  truth — this note exists so a fresh next-step cowork session
+   *  resumes without reconstructing context from scratch. */
+  handoff_note?: string
+  /** Audit trail for the "Approve as-is" UX path — when set, the
+   *  strategist resolved a stale state by bumping generated_at to
+   *  this timestamp without a fresh model run. Lets a pilot
+   *  post-mortem distinguish artifacts that were re-validated by
+   *  the strategist vs ones that landed from a real run. */
+  approved_as_is_at?: string
+  /** Optional pointer to the prior artifact this one supersedes —
+   *  written by revise-site-strategy and the Approve-as-is path.
+   *  Lets the audit trail walk back through revisions. */
+  revision_of?: string
 }

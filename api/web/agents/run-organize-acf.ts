@@ -62,7 +62,7 @@ function buildToolSchema(atomIds: string[], factIds: string[], audiences: string
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['atom_routes', 'fact_routes', 'cell_density', 'coverage_gaps'],
+    required: ['atom_routes', 'fact_routes', 'cell_density', 'coverage_gaps', 'handoff_note'],
     properties: {
       atom_routes: {
         type: 'array',
@@ -122,6 +122,12 @@ function buildToolSchema(atomIds: string[], factIds: string[], audiences: string
             gap_note: { type: 'string', minLength: 1, maxLength: 240 },
           },
         },
+      },
+      handoff_note: {
+        type: 'string',
+        minLength: 100,
+        maxLength: 4000,
+        description: '≤1-screen markdown handoff note covering (a) what was written + where, (b) open/deferred issues, (c) cross-step gotchas the next session needs, (d) what the next step should read + decisions already made. Aim for 250-400 words.',
       },
     },
   }
@@ -212,8 +218,9 @@ export default async function handler(req: any, res: any) {
   }
 
   const now = new Date().toISOString()
+  const { handoff_note, ...artifactBody } = gatewayResult.args as Record<string, unknown>
   const acfPlanWithMeta = {
-    ...(gatewayResult.args as Record<string, unknown>),
+    ...artifactBody,
     _meta: {
       bundle_version: BUNDLE_VERSION,
       skill_name:     'organize-acf',
@@ -229,6 +236,7 @@ export default async function handler(req: any, res: any) {
       fact_count: inputs.facts.length,
       audiences,
       validator_iteration: 1,
+      handoff_note: typeof handoff_note === 'string' ? handoff_note : undefined,
     },
   }
 

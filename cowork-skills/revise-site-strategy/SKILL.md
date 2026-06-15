@@ -221,3 +221,44 @@ Before the final `roadmap_state_set` call, verify:
 
 If any check fails, surface it and re-confirm with the strategist
 before writing.
+
+## Handoff Note — required final substep
+
+Before declaring this step done, emit a HANDOFF NOTE — a ≤1-screen
+markdown summary — and persist it to
+`roadmap_state.<output_key>._meta.handoff_note`. Also surface the
+note as a paste-ready block in the conversation so the strategist
+can copy it directly.
+
+Cover all four buckets, in this order:
+
+**(a) What was written and where.** Top-level outputs + the JSONB
+paths they landed at. Counts of array fields. Don't recite the whole
+artifact — the strategist has it; this is the orientation, not the
+artifact.
+
+**(b) Open / deferred issues.** Validator gaps you couldn't fix
+(reason + the field they're on), input ambiguities the strategist
+should know about, vocab drift, decisions you flagged for an
+upstream step rather than resolved here. If the validator returned
+clean, say so explicitly.
+
+**(c) Cross-step gotchas.** What a fresh next-step session must
+honor that ISN'T obvious from the persisted artifact: banned
+vocabulary, per-page exceptions, display preferences from
+strategic_goals, persona postures, edge-case routing decisions.
+
+**(d) What the next step should read + decisions already
+litigated.** Specific `roadmap_state` paths to load first. Decisions
+that have been settled in conversation so they don't get
+re-litigated (e.g., "Don't re-debate whether to keep the legacy
+/baptism slug — the strategist confirmed it merges into
+/take-your-first-steps").
+
+Because each step's artifact is large, the default workflow is to
+run the next step in a fresh cowork session. The persisted plan /
+outline / draft is the source of truth — the handoff note exists so
+a clean session resumes without reconstructing context.
+
+Keep the note tight: aim for 250-400 words. If you need more, the
+artifact itself is the canonical record; the note is the cliff notes.

@@ -43,7 +43,7 @@ const TOOL_DESCRIPTION =
 const TOOL_SCHEMA: ToolSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['pages', 'nav', 'nav_change_level', 'persona_journeys', 'pages_considered_dropped', 'report'],
+  required: ['pages', 'nav', 'nav_change_level', 'persona_journeys', 'pages_considered_dropped', 'report', 'handoff_note'],
   properties: {
     nav_change_level: {
       type: ['string', 'null'],
@@ -154,6 +154,12 @@ const TOOL_SCHEMA: ToolSchema = {
         coverage_gaps_addressed: { type: 'array', items: { type: 'string' } },
       },
     },
+    handoff_note: {
+      type: 'string',
+      minLength: 100,
+      maxLength: 4000,
+      description: '≤1-screen markdown handoff note covering (a) what was written + where, (b) open/deferred issues, (c) cross-step gotchas the next session needs, (d) what the next step should read + decisions already made. Aim for 250-400 words.',
+    },
   },
 }
 
@@ -234,8 +240,9 @@ export default async function handler(req: any, res: any) {
   }
 
   const now = new Date().toISOString()
+  const { handoff_note, ...artifactBody } = gatewayResult.args as Record<string, unknown>
   const siteStrategyWithMeta = {
-    ...(gatewayResult.args as Record<string, unknown>),
+    ...artifactBody,
     _meta: {
       bundle_version: BUNDLE_VERSION,
       skill_name:     'plan-site-strategy',
@@ -249,6 +256,7 @@ export default async function handler(req: any, res: any) {
       },
       personas_in_stage1: Array.isArray((inputs.stage1 as any)?.personas) ? (inputs.stage1 as any).personas.length : 0,
       validator_iteration: 1,
+      handoff_note: typeof handoff_note === 'string' ? handoff_note : undefined,
     },
   }
 

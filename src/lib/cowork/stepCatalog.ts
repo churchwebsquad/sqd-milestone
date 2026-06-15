@@ -310,6 +310,8 @@ export const COWORK_STEPS: StepCatalogEntry[] = [
     starter_prompt:
 `Use the **plan-cross-page-allocation** skill to produce a page_allocation_plan for project_id \`{{project_id}}\`.
 
+**Read the handoff note from the prior step FIRST** — \`roadmap_state.site_strategy._meta.handoff_note\` carries the decisions + cross-step gotchas the prior session resolved, including any persona / nav / ministry routing the strategist already settled. Skim it before you load the full artifacts so you don't re-litigate those decisions.
+
 Read from Supabase:
 - \`strategy_web_projects.roadmap_state.stage_1\` (strategic foundation)
 - \`strategy_web_projects.roadmap_state.ministry_model\` (church posture)
@@ -330,7 +332,9 @@ Record the verbatim-band budget per allocation: each \`allocations[].intended_ve
 
 Walk me through each page's allocation as you produce it — pause for my push-back before persisting.
 
-When complete, write the allocation to \`roadmap_state.page_allocation_plan\` via the \`roadmap_state_set\` RPC (path: \`['page_allocation_plan']\`). Stamp the \`_meta\` block per the SKILL contract.`,
+When complete, write the allocation to \`roadmap_state.page_allocation_plan\` via the \`roadmap_state_set\` RPC (path: \`['page_allocation_plan']\`). Stamp the \`_meta\` block per the SKILL contract.
+
+**Final substep — handoff note.** Before declaring this step done, write a ≤1-screen handoff note to \`roadmap_state.page_allocation_plan._meta.handoff_note\` AND surface it as a paste-ready block in the conversation. Cover (a) what was written + where, (b) any open/deferred issues or validator gaps, (c) cross-step gotchas the next session (outline-page) needs to honor — banned vocab, per-page exceptions, persona postures, copy-approach band, ministries-to-grow placement, build_directives that affect outlining — and (d) what outline-page should read + decisions already litigated.`,
     computeStatus: s => {
       if (!s.site_strategy?._meta?.generated_at) return 'blocked_waiting'
       const out = s.page_allocation_plan?._meta?.generated_at
@@ -362,6 +366,8 @@ When complete, write the allocation to \`roadmap_state.page_allocation_plan\` vi
     starter_prompt:
 `Use the **outline-page** skill for project_id \`{{project_id}}\`, page_slug \`<PAGE-SLUG>\`.
 
+**Read the handoff note from the prior step FIRST** — \`roadmap_state.page_allocation_plan._meta.handoff_note\` carries the allocation strategist's decisions + cross-step gotchas (verbatim band, ministries-to-grow placement, banned vocab, build_directives that affect outlining). Read it before you load the full allocation so you don't re-litigate decisions.
+
 Read:
 - \`roadmap_state.page_allocation_plan.allocations[]\` (find the entry where page_slug matches; respect its \`intended_verbatim_band\`)
 - \`roadmap_state.stage_1\` (strategic foundation)
@@ -376,7 +382,9 @@ Read:
 
 Produce the outline per the SKILL contract: sections with archetype + atom_assignments + fact_assignments + crawl_topic_assignments + voice_anchor + \`intended_verbatim_band\` per section (matching the allocation).
 
-When done, write to \`roadmap_state.page_outlines.<PAGE-SLUG>\` via \`roadmap_state_set\` (path: \`['page_outlines', '<PAGE-SLUG>']\`). Stamp \`_meta\`.`,
+When done, write to \`roadmap_state.page_outlines.<PAGE-SLUG>\` via \`roadmap_state_set\` (path: \`['page_outlines', '<PAGE-SLUG>']\`). Stamp \`_meta\`.
+
+**Final substep — handoff note.** Before declaring this page's outline done, write a ≤1-screen handoff note to \`roadmap_state.page_outlines.<PAGE-SLUG>._meta.handoff_note\` AND surface it in the conversation. Cover (a) what the outline contains (section count + archetypes), (b) any deferred slots / overflow atoms / unfilled required slots, (c) cross-step gotchas the drafter needs (verbatim band per section, voice anchor exemplars cited, persona posture, banned phrases that almost slipped in), (d) what draft-page should read first for this page.`,
     computeStatus: s => {
       if (!s.page_allocation_plan?._meta?.generated_at) return 'blocked_waiting'
       if (s.page_outlines_count === 0)                  return 'cowork_session'
@@ -401,6 +409,8 @@ When done, write to \`roadmap_state.page_outlines.<PAGE-SLUG>\` via \`roadmap_st
     starter_prompt:
 `Use the **draft-page** skill for project_id \`{{project_id}}\`, page_slug \`<PAGE-SLUG>\`.
 
+**Read the handoff note from the prior step FIRST** — \`roadmap_state.page_outlines.<PAGE-SLUG>._meta.handoff_note\` carries the outline strategist's decisions (verbatim band per section, voice anchor exemplars, persona posture, banned phrases). Skim it before loading the outline so you don't re-litigate those calls.
+
 Read:
 - \`roadmap_state.page_outlines.<PAGE-SLUG>\` (the outline; honor each section's \`intended_verbatim_band\`)
 - \`roadmap_state.stage_1\` (voice, personas, ethos)
@@ -412,7 +422,9 @@ Read:
 
 Write the copy per the SKILL contract (each section's copy + atoms_used + facts_used + crawl_topics_used + voice_notes + deferred_atoms if any). Each section MUST stamp its \`actual_verbatim_ratio\` (0.0-1.0) — the share of section words lifted verbatim from cited crawl passages — so the critique can verify it lands within the section's \`intended_verbatim_band\`.
 
-When done, write to \`roadmap_state.page_drafts.<PAGE-SLUG>\` via \`roadmap_state_set\`. Stamp \`_meta\` with the model + prompt_hash + generated_at.`,
+When done, write to \`roadmap_state.page_drafts.<PAGE-SLUG>\` via \`roadmap_state_set\`. Stamp \`_meta\` with the model + prompt_hash + generated_at.
+
+**Final substep — handoff note.** Write a ≤1-screen note to \`roadmap_state.page_drafts.<PAGE-SLUG>._meta.handoff_note\` AND surface it. Cover (a) what was drafted (section archetypes, total slot count, verbatim ratios), (b) deferred slots or atoms with reasons, (c) cross-step gotchas the critique should weigh (voice anchors honored, key_message section identified, mechanical-scan close calls), (d) what critique-page should focus on for this page.`,
     computeStatus: s => {
       if (s.page_outlines_count === 0)               return 'blocked_waiting'
       if (s.page_drafts_count === 0)                 return 'cowork_session'
@@ -437,6 +449,8 @@ When done, write to \`roadmap_state.page_drafts.<PAGE-SLUG>\` via \`roadmap_stat
     starter_prompt:
 `Use the **critique-page** skill for project_id \`{{project_id}}\`, page_slug \`<PAGE-SLUG>\`.
 
+**Read the handoff note from the prior step FIRST** — \`roadmap_state.page_drafts.<PAGE-SLUG>._meta.handoff_note\` carries the drafter's close calls + cross-step gotchas (voice anchors honored, mechanical-scan near-misses, deferred slot reasons). Skim it before scoring so you don't double-count what the drafter already self-reported.
+
 Read:
 - \`roadmap_state.page_drafts.<PAGE-SLUG>\` (the draft)
 - \`roadmap_state.page_outlines.<PAGE-SLUG>\` (the outline)
@@ -449,7 +463,9 @@ Read:
 
 Produce the 5-axis critique + standout_lines + problem_lines + directives + summary. Reference \`church_vision\` verbatim in the dignity-axis rationale when applicable.
 
-When done, write to \`roadmap_state.page_critiques.<PAGE-SLUG>\` via \`roadmap_state_set\`. Stamp \`_meta\`.`,
+When done, write to \`roadmap_state.page_critiques.<PAGE-SLUG>\` via \`roadmap_state_set\`. Stamp \`_meta\`.
+
+**Final substep — handoff note.** Write a ≤1-screen note to \`roadmap_state.page_critiques.<PAGE-SLUG>._meta.handoff_note\` AND surface it. Cover (a) overall band + per-axis bands, (b) the directives that gate ship-vs-iterate, (c) cross-step gotchas the rollup needs (voice-drift signals worth elevating, persona-fit edge cases, verbatim band misses), (d) what synthesize-critique should weight when this page enters the project verdict.`,
     computeStatus: s => {
       if (s.page_drafts_count === 0)                 return 'blocked_waiting'
       if (s.page_critiques_count === 0)              return 'cowork_session'

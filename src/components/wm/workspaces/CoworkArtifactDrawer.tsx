@@ -105,6 +105,26 @@ export function CoworkArtifactDrawer({ outputKey, title, projectId, onClose }: P
     return np && typeof np === 'object' ? np : null
   }, [raw, outputKey])
 
+  /** Handoff note — ≤1-screen summary the model emits as the final
+   *  substep of every pipeline step. Lands at _meta.handoff_note on
+   *  every artifact (TOOL_SCHEMA for web_ui endpoints + SKILL contract
+   *  for cowork sessions). Rendered as a prominent card at the top
+   *  of the drawer so the strategist sees orientation + gotchas
+   *  before they read the full artifact. Paste-ready via Copy button. */
+  const handoffNote = useMemo<string | null>(() => {
+    const meta = (raw as { _meta?: { handoff_note?: string } } | null)?._meta
+    const note = meta?.handoff_note
+    return typeof note === 'string' && note.trim() ? note : null
+  }, [raw])
+  const [handoffCopied, setHandoffCopied] = useState(false)
+  const copyHandoff = () => {
+    if (!handoffNote) return
+    navigator.clipboard.writeText(handoffNote).then(() => {
+      setHandoffCopied(true)
+      setTimeout(() => setHandoffCopied(false), 2000)
+    })
+  }
+
   /** Edit-in-cowork prompt template. Currently scoped to site_strategy
    *  — strategist copies this, pastes into cowork, types their edits
    *  between the angle-bracket markers, and the revise-site-strategy
@@ -242,6 +262,36 @@ export function CoworkArtifactDrawer({ outputKey, title, projectId, onClose }: P
               This step hasn't been run yet — nothing to show.
             </div>
           )}
+          {/* Handoff note — orientation card at the very top of the
+              body. Shown for ANY artifact whose _meta carries one
+              (cowork-session OR web_ui). Lets the strategist read
+              the model's own summary + gotchas before scanning the
+              full artifact. Paste-ready for piping into the next
+              cowork session. */}
+          {!loading && !error && handoffNote && (
+            <div className="mb-5 rounded-xl border border-wm-accent/30 bg-wm-accent-tint/20 px-4 py-3.5">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">Handoff note</p>
+                  <p className="text-[11px] text-wm-text-muted mt-0.5">From this step's session — paste into the next cowork session for context.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={copyHandoff}
+                  className="text-[11px] font-medium px-2.5 py-1 rounded-md border border-wm-border bg-wm-bg-elevated text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text shrink-0"
+                >
+                  <span className="flex items-center gap-1">
+                    {handoffCopied ? <Check size={11} /> : null}
+                    {handoffCopied ? 'Copied' : 'Copy note'}
+                  </span>
+                </button>
+              </div>
+              <article className="prose-cowork text-[12.5px] leading-relaxed">
+                <MarkdownRender source={handoffNote} />
+              </article>
+            </div>
+          )}
+
           {!loading && !error && raw != null && markdown && (
             <article className="prose-cowork">
               <MarkdownRender source={markdown} />

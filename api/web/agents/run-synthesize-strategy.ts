@@ -72,8 +72,17 @@ const TOOL_SCHEMA: ToolSchema = {
   additionalProperties: false,
   required: ['project_goals', 'vision_statement', 'key_message',
              'personas', 'x_factor', 'ethos_summary', 'voice_exemplars',
-             'voice_anti_exemplars', 'persuasive_posture_by_persona', 'report'],
+             'voice_anti_exemplars', 'persuasive_posture_by_persona',
+             'report', 'handoff_note'],
   properties: {
+    // ≤1-screen markdown summary the model emits as the final substep.
+    // Lands on _meta.handoff_note after the handler extracts it.
+    handoff_note: {
+      type: 'string',
+      minLength: 100,
+      maxLength: 4000,
+      description: '≤1-screen markdown handoff note covering (a) what was written + where, (b) open/deferred issues, (c) cross-step gotchas the next session needs, (d) what the next step should read + decisions already made. Aim for 250-400 words.',
+    },
     // Strategic-goals carry-through. Mapped from the approved
     // snapshot in the user message; empty when not approved (NEVER
     // invent).
@@ -253,9 +262,13 @@ export default async function handler(req: any, res: any) {
   }
 
   // ── _meta stamp ─────────────────────────────────────────────────
+  // handoff_note arrives at the top level of args (per TOOL_SCHEMA);
+  // we extract + relocate to _meta.handoff_note so the artifact body
+  // stays clean and downstream views read from one canonical path.
   const now = new Date().toISOString()
+  const { handoff_note, ...artifactBody } = gatewayResult.args as Record<string, unknown>
   const stage1WithMeta = {
-    ...(gatewayResult.args as Record<string, unknown>),
+    ...artifactBody,
     sources_used: inputs.atoms.map(a => `pillar:${a.id}`),
     _meta: {
       bundle_version: BUNDLE_VERSION,
@@ -276,6 +289,7 @@ export default async function handler(req: any, res: any) {
       // so the strategist UI shows "iteration 1 endpoint output —
       // not yet gated by the validator." Removed in iteration 2.
       validator_iteration: 1,
+      handoff_note: typeof handoff_note === 'string' ? handoff_note : undefined,
     },
   }
 
