@@ -604,34 +604,45 @@ const AUDIT_EXTERNAL_COPY_STEP: StepCatalogEntry = {
   kind:        'cowork_session',
   skill_md_path: 'cowork-skills/audit-external-copy/SKILL.md',
   starter_prompt:
-`Use the **audit-external-copy** skill for project_id \`{{project_id}}\`. Walk \`sitemap_pages\` sequentially — autonomous, don't prompt until done.
+`Use the **audit-external-copy** skill for project_id \`{{project_id}}\`. Autonomous run — don't prompt the strategist until the full audit is done. Use TWO MCP servers: **Notion MCP** (to walk the partner's database) + **Supabase MCP** (one write per page).
 
-## Inputs (attached, NOT MCP)
+## Inputs
 
 I'm attaching:
-1. The audit-external-copy **SKILL.md**.
-2. The **project bundle** \`cowork-pipeline.<partner>.project-bundle.json\` — atoms_pool / facts_pool / crawl_topics_pool / stage_1 / strategic_goals_approved / canonical_templates / sitemap_pages / **notion_audit_branch.pages_by_slug** (the rendered Notion bodies for every page in the partner's Notion database).
+1. The audit-external-copy **SKILL.md** — full contract.
+2. The **project bundle** \`cowork-pipeline.<partner>.project-bundle.json\` — foundations only.
 
-If \`notion_audit_branch.load_error\` is non-null, surface the error and stop — the strategist needs to fix Notion access before the audit can run.
+## Read this carefully — what's in the audit-branch bundle (and what isn't)
 
-## Workflow — ONE MCP write per page
+The audit branch ships a **deliberately slim** bundle. Don't treat missing fields as "the bundle failed" or "data is degraded" — they're intentional. Use only what's present; don't probe for the others.
 
-For each page in \`sitemap_pages\` (walk by \`nav_order\`):
+**PRESENT and authoritative**:
+- \`stage_1\` — voice exemplars, anti-exemplars, ethos, personas, key_message
+- \`ministry_model\` — page-treatment posture
+- \`strategic_goals_approved\` — copy_approach.derived.intended_verbatim_band, one_key_message, church_vision, recurring_message_theme, etc.
+- \`canonical_templates.page_section_templates\` — slot vocab + caps for the formatting axis
+- \`atoms_pool\` (by_id + by_topic) — for source-coverage axis
+- \`facts_pool\` (by_id + by_topic) — for claim-plausibility + source-coverage
+- \`notion_audit_branch.database_id\` + \`notion_audit_branch.database_url\` — your Notion entry point
 
-1. **Lookup the Notion page** in \`notion_audit_branch.pages_by_slug[<slug>]\`.
-   - If MISSING: write a placeholder critique (overall_band='gap', axes all null, a single directive \`{kind: 'missing_notion_page', severity: 'blocker', detail: 'No Notion page matched this sitemap slug — supplemental authoring required.'}\`). The supplemental step picks these up downstream.
-   - If PRESENT: continue.
+**INTENTIONALLY ABSENT in this branch — do NOT flag as missing**:
+- \`sitemap_pages\` — empty. The sitemap IS the Notion DB; derive it via Notion MCP \`query_database\`.
+- \`allocations_by_page\` — absent. Notion copy IS the allocation in this branch.
+- \`build_directives_by_page\` — empty. No allocation step ran.
+- \`notion_audit_branch.pages_by_slug\` — absent. You walk Notion yourself.
+- \`prior_handoff_notes\` — mostly null. No outline/draft steps run in this branch.
 
-2. **Audit body content against the canonical templates** (formatting axis):
-   - Compare the Notion body's section headings + body lengths against \`canonical_templates.page_section_templates\`.
-   - For each section, identify the most-likely template_key, then check primary_heading (≤100 chars), body (≤400), items (max counts per template), buttons (≤2 CTAs per family).
-   - Surface mismatches as directives: \`{kind: 'formatting_overage', section: 'hero', slot: 'primary_heading', detail: '142 chars exceeds the 100-char cap'}\`.
+**OPTIONAL — may be empty**:
+- \`crawl_topics_pool\` — only populated if the project has a site crawl. Many audit-branch projects don't (partner uploaded Notion instead of running a crawl). When empty, score source-coverage + verbatim-band against \`atoms_pool\` and \`facts_pool\` alone; don't flag "no crawl" as a problem.
 
-3. **Score 5 axes** (dignity, voice_character, persona_fit, source_coverage, claim_plausibility) using the same rubrics as critique-page.SKILL.md. Anchor against \`stage_1\` (voice_exemplars, ethos_summary) and \`strategic_goals_approved\` (one_key_message, copy_approach.derived.intended_verbatim_band, church_vision).
+## Workflow
 
-4. Compute the overall_band from the 5 axes per the standard rubric.
-
-5. **Single MCP write** per page:
+1. Notion MCP: \`query_database(database_id=notion_audit_branch.database_id)\` → page list. Walk in returned order.
+2. For each page: \`retrieve_block_children(page_id, recursive=true)\` → body.
+3. Slugify the page title (lowercase, non-alphas → dashes). Skip nav-container pages (no slug property OR Type='Nav Item' / 'Link').
+4. Audit body against \`canonical_templates\` (formatting axis: primary_heading / body / items / buttons caps).
+5. Score 5 axes against the foundations (use the standard rubric from critique-page.SKILL.md, which is referenced from this skill's frontmatter).
+6. ONE Supabase MCP write per page:
 
 \`\`\`sql
 SELECT roadmap_state_set(
@@ -641,17 +652,19 @@ SELECT roadmap_state_set(
 );
 \`\`\`
 
-The critique's \`_meta.audit_source = 'notion'\` so synthesize-critique knows this was an external-copy audit rather than a generated-copy critique. The \`_meta.handoff_note\` summarizes what was audited + which sitemap pages are flagged as gaps.
+The critique's \`_meta.audit_source = 'notion'\` so synthesize-critique knows this was an external-copy audit. \`_meta.handoff_note\` summarizes per-page findings.
 
 ## After all pages
 
-Surface a final report:
-- N pages audited; M pages flagged as gaps (no Notion match) → supplemental step
-- 5-axis distribution (counts per band)
+Surface a SINGLE final report (one message, not page-by-page):
+- N pages audited (excluded list: nav-container pages, external links)
+- 5-axis distribution (counts per band: green/yellow/red)
 - Top formatting violations (most-frequent slot caps exceeded)
+- Top claim / source issues (verbatim mismatches, contact-info drift between Notion and facts_pool)
 - Verbatim-band misses (which pages deviate from \`copy_approach.derived.intended_verbatim_band\`)
+- "Partner-input asks" — items that need partner clarification (named sermon series, current staff emails, etc.) so the strategist can batch them into one AM ping.
 
-Then prompt the strategist to launch the supplemental-page-authoring step.`,
+Then tell the strategist to run synthesize-critique (step 7) for the ship/iterate rollup.`,
   computeStatus: s => {
     // Audit branch foundations: stage_1 (voice rubric anchor) +
     // ministry_model (page-treatment context). We don't gate on

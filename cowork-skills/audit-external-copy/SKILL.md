@@ -100,6 +100,25 @@ the allocation. Your audit measures the existing copy against the
 foundations (atoms / facts / voice / ministry model) + the
 canonical-template slot vocab — not against a separately-planned IA.
 
+**Don't flag "missing" fields that are missing BY DESIGN.** The
+audit-branch bundle is deliberately slim. Treat the following as
+expected absence, not as bundle corruption:
+
+| Field | Expected when audit branch is on |
+|---|---|
+| `sitemap_pages` | EMPTY — derive from Notion |
+| `allocations_by_page` | ABSENT — Notion is the allocation |
+| `build_directives_by_page` | EMPTY — no allocation step ran |
+| `notion_audit_branch.pages_by_slug` | ABSENT — you walk Notion yourself |
+| `prior_handoff_notes.*` | Mostly NULL — no outline/draft/critique steps run upstream |
+| `crawl_topics_pool` | MAY be empty if the project skipped the crawl (e.g. partner uploaded Notion instead). Score source-coverage + verbatim-band against atoms_pool + facts_pool alone in that case — don't treat the empty crawl as a problem. |
+
+Do NOT include "the bundle came through degraded" or similar
+notes in the final report unless something you actually NEED is
+missing (e.g. `notion_audit_branch.database_id` itself is null,
+which would mean the project hasn't opted into the audit branch
+and you shouldn't be running).
+
 ## Walk the sitemap autonomously
 
 ### 1. List the Notion DB pages
