@@ -55,7 +55,13 @@ import { BUNDLE_VERSION } from '../../../src/types/coworkBundle.js'
 import { renderStrategicGoalsForStep } from '../../../src/lib/cowork/strategicGoalsContext.js'
 import type { StrategicGoalsSnapshot } from '../../../src/lib/cowork/strategicGoals.js'
 
-export const maxDuration = 300
+// 800s = Vercel Fluid Compute Pro ceiling. Bumped from 300s on
+// 2026-06-16 after 3061 (Real Life Church, 97 atoms + 103 facts +
+// 27KB discovery + 9.8KB content_strategy doc) blew past 5 minutes
+// and surfaced a body-less 500 to the strategist. The Opus-4.7 call
+// with maxTokens=12000 on a heavy input set scales near-linearly
+// with atom/fact count; the largest projects need the full budget.
+export const maxDuration = 800
 
 const TOOL_NAME = 'emit_stage_1'
 const TOOL_DESCRIPTION =

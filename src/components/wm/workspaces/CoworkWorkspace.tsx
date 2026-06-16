@@ -285,12 +285,28 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ project_id: project.id, force }),
       })
-      const body = await r.json().catch(() => ({}))
+      // Read response as text first so we can fall back to it when
+      // the body isn't valid JSON. Vercel kills functions that hit
+      // maxDuration and returns 500 with an EMPTY body — without
+      // this fallback the strategist sees a bare "status 500" and
+      // can't tell whether it was a timeout, an upstream model
+      // refusal, or a 4xx from auth.
+      const rawText = await r.text().catch(() => '')
+      let body: Record<string, unknown> = {}
+      try { body = rawText ? JSON.parse(rawText) : {} } catch { /* keep empty */ }
       const ok = r.ok
+      const detail = ok
+        ? `Ran ${step.subtitle}`
+        : ((body.detail as string | undefined)
+           ?? (body.error as string | undefined)
+           ?? (rawText && rawText.length < 240 ? rawText : null)
+           ?? (r.status >= 500
+              ? `status ${r.status} — function likely timed out or crashed. Vercel returned no body. Check Vercel function logs for /api/web/agents/run-…; raise maxDuration if the model call is exceeding the ceiling on this project's input size.`
+              : `status ${r.status}`))
       setLastResult({
         step:   step.title,
         ok,
-        detail: ok ? `Ran ${step.subtitle}` : (body?.detail ?? body?.error ?? `status ${r.status}`),
+        detail,
       })
       if (ok) {
         await loadProjectState()
