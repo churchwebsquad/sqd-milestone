@@ -66,7 +66,7 @@ const UNSUPPORTED_FORMATS = new Set([
 ])
 
 interface PreflightFile {
-  category: 'strategy_brief' | 'content_collection' | 'discovery_questionnaire_supplemental' | 'am_handoff_supplemental'
+  category: 'strategy_brief' | 'content_strategy' | 'content_collection' | 'discovery_questionnaire_supplemental' | 'am_handoff_supplemental'
   filename: string
   mime_type: string | null
   storage_url: string
@@ -616,6 +616,22 @@ Current phase: ${inputs.project.current_phase ?? 'intake'}`,
   // Strategy brief (the anchor)
   blocks.push({ type: 'text', text: '# Source: Strategy Brief (THE ANCHOR — wins all conflicts)' })
   appendCategoryFiles(blocks, inputs.filesLoaded, 'strategy_brief', 'Strategy Brief file')
+
+  // Content strategy (optional — when present, AUTHORITATIVE for
+  // sitemap + personas + x_factor + voice). Lifted 1:1 by
+  // synthesize-strategy + plan-site-strategy where the doc states
+  // values explicitly. The strategist uploaded this because they
+  // wanted these elements not re-synthesized.
+  if (inputs.filesLoaded.some(f => f.category === 'content_strategy')) {
+    blocks.push({
+      type: 'text',
+      text:
+`# Source: Content Strategy doc (AUTHORITATIVE — lift 1:1 where stated)
+
+This doc was uploaded as the partner's pre-written content strategy. When it states a sitemap, persona, x_factor, ethos, voice exemplar, or strategic goal explicitly, USE THAT VALUE — do not re-derive from atoms. Synthesize only the gaps.`,
+    })
+    appendCategoryFiles(blocks, inputs.filesLoaded, 'content_strategy', 'Content Strategy file')
+  }
 
   // Discovery questionnaire
   if (inputs.discoveryQuestionnaire) {

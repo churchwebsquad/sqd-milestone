@@ -292,35 +292,88 @@ interface AssembledInputs {
   acfPlan:        Record<string, unknown> | null
   stage2:         Record<string, unknown> | null  // legacy sitemap, for carry-forward signals
   strategicGoals: StrategicGoalsSnapshot | null
+  /** Pre-written content strategy doc (optional). When present, the
+   *  SKILL lifts the sitemap + nav + persona journeys verbatim. */
+  contentStrategyDocs: Array<{ filename: string; text: string }>
 }
 
 async function assembleEndpointInputs(
   sb:        any,
   projectId: string,
 ): Promise<AssembledInputs> {
-  const { data, error } = await sb
-    .from('strategy_web_projects')
-    .select('roadmap_state')
-    .eq('id', projectId)
-    .maybeSingle()
-  if (error) throw new Error(`project load failed: ${error.message}`)
-  const roadmap = (data?.roadmap_state ?? {}) as Record<string, any>
+  const [projRes, csDocsRes] = await Promise.all([
+    sb.from('strategy_web_projects')
+      .select('roadmap_state')
+      .eq('id', projectId)
+      .maybeSingle(),
+    sb.from('web_intake_documents')
+      .select('filename, storage_url, mime_type')
+      .eq('web_project_id', projectId)
+      .eq('category', 'content_strategy')
+      .eq('archived', false),
+  ])
+  if (projRes.error)   throw new Error(`project load failed: ${projRes.error.message}`)
+  if (csDocsRes.error) throw new Error(`content_strategy load failed: ${csDocsRes.error.message}`)
+  const roadmap = (projRes.data?.roadmap_state ?? {}) as Record<string, any>
+
+  // Fetch text content of every content_strategy doc — see the
+  // synthesize-strategy endpoint for the same pattern + the
+  // text-only constraint rationale.
+  const contentStrategyDocs: AssembledInputs['contentStrategyDocs'] = []
+  for (const doc of (csDocsRes.data ?? []) as Array<{ filename: string; storage_url: string; mime_type: string | null }>) {
+    const mime = (doc.mime_type ?? '').toLowerCase()
+    const isText =
+      mime.startsWith('text/') || mime === 'application/json' ||
+      /\.(md|markdown|txt|csv|json)$/i.test(doc.filename)
+    if (!isText) continue
+    try {
+      const r = await fetch(doc.storage_url)
+      if (!r.ok) continue
+      const text = await r.text()
+      if (text.trim().length > 0) contentStrategyDocs.push({ filename: doc.filename, text })
+    } catch {
+      // Skip unreadable docs quietly.
+    }
+  }
+
   return {
     stage1:         roadmap.stage_1         ?? null,
     ministryModel:  roadmap.ministry_model  ?? null,
     acfPlan:        roadmap.acf_plan        ?? null,
     stage2:         roadmap.stage_2         ?? null,
     strategicGoals: (roadmap.strategic_goals as StrategicGoalsSnapshot | undefined) ?? null,
+    contentStrategyDocs,
   }
 }
 
 function buildUserMessage(inputs: AssembledInputs): string {
   const navLevel = getApprovedNavChangeLevel(inputs.strategicGoals)
   const goalsBlock = renderStrategicGoalsForStep(inputs.strategicGoals, 'plan-site-strategy')
+
+  // Content Strategy doc block (AUTHORITATIVE — sitemap + nav +
+  // persona_journeys lifted 1:1). Per the SKILL's "Content Strategy
+  // doc — lift sitemap 1:1 when present" section.
+  const contentStrategyBlock = inputs.contentStrategyDocs.length > 0
+    ? [
+        '## AUTHORITATIVE: Pre-written content strategy doc(s) — lift sitemap + nav + persona journeys 1:1',
+        '',
+        'The strategist uploaded this/these doc(s) as the canonical source for the sitemap. When the doc lists pages, names a nav, or describes persona journeys, LIFT THEM VERBATIM into your output. Synthesize only the fields the doc doesn\'t state. Note the lift in `report.coverage_gaps_addressed`.',
+        '',
+        ...inputs.contentStrategyDocs.flatMap(d => [
+          `### ${d.filename}`,
+          '',
+          d.text,
+          '',
+        ]),
+      ].join('\n')
+    : null
+
   return [
     `Plan the site strategy per the SKILL above.`,
     ``,
     goalsBlock ? goalsBlock : '_No approved strategic goals snapshot — proceed using stage_1 + ministry_model only._',
+    ``,
+    contentStrategyBlock ?? '_No content_strategy doc uploaded — derive the sitemap from stage_1 + ministry_model._',
     ``,
     `## stage_1 (synthesize-strategy output — personas, voice, ethos, x_factor)`,
     '```json',

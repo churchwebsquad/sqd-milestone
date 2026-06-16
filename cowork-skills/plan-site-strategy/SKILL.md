@@ -51,6 +51,34 @@ stage_1 block, treat it as load-bearing. Specifically:
   - 10 → `preserve` — keep crawled nav verbatim. Do not add or remove items.
   When the field is unapproved/missing, emit `nav_change_level: null`.
 
+## Content Strategy doc — lift sitemap 1:1 when present
+
+When the input includes a "Content Strategy doc (AUTHORITATIVE)"
+section, that doc's sitemap is the source of truth. Specifically:
+
+- If the doc lists pages (slug + name + purpose), lift them verbatim
+  into `pages[]`. Don't drop pages the doc names; don't add pages the
+  doc doesn't.
+- If the doc states a primary nav, lift `nav.primary[]` verbatim
+  (slugs + children order).
+- If the doc states persona journeys, lift them into
+  `persona_journeys[]` with the same entry_points + journey arc.
+- For fields the doc DOESN'T state (covers_cells, drop_off_risk
+  mitigations, etc), synthesize from stage_1 + ministry_model +
+  acf_plan as usual.
+
+Note the lift in `report.coverage_gaps_addressed`:
+`"Lifted full sitemap (12 pages) + primary nav + 3/5 persona journeys
+verbatim from content_strategy doc. Synthesized: covers_cells per
+page, 2/5 persona journey drop-off-risks."`
+
+`nav_change_level` discipline still applies — when the doc's sitemap
+contradicts the current_navigation_satisfaction rule, the doc wins
+(the partner uploaded it as authoritative).
+
+This overrides the page-count + page-shape heuristics below where
+the doc speaks; those still apply for fields the doc leaves blank.
+
 ## Your input
 
 ```ts

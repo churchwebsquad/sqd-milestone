@@ -51,6 +51,13 @@ const ROW_META: Record<RowKey, {
     uploadCategory: 'strategy_brief',
     emptyHint: 'Upload the latest Notion export or signed PDF.',
   },
+  content_strategy: {
+    title: 'Content Strategy (optional)',
+    description: 'Pre-written content strategy with sitemap, personas, x-factor, voice. When uploaded, the cowork pipeline lifts these elements 1:1 instead of re-deriving them from atoms.',
+    hardStop: false,
+    uploadCategory: 'content_strategy',
+    emptyHint: 'Optional. Skip if the project doesn\'t have one — the pipeline will synthesize from atoms + discovery. Upload if you have a pre-written content-strategy doc and want it taken as authoritative.',
+  },
   brand_handoff: {
     title: 'Brand Handoff',
     description: 'The Brand Squad\'s official handoff for this partner.',
@@ -186,7 +193,7 @@ export default function WebIntakePage() {
         <StatusBar intake={intake} />
 
         <div className="mt-5 space-y-3">
-          {(['discovery_questionnaire', 'strategy_brief', 'brand_handoff', 'am_handoff', 'content_collection'] as const).map(key => (
+          {(['discovery_questionnaire', 'strategy_brief', 'content_strategy', 'brand_handoff', 'am_handoff', 'content_collection'] as const).map(key => (
             <IntakeRow
               key={key}
               rowKey={key}

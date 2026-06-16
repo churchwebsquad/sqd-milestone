@@ -1207,6 +1207,7 @@ export interface WebAIIdea {
  *  but a supplemental file can be uploaded when it isn't). */
 export type WebIntakeCategory =
   | 'strategy_brief'
+  | 'content_strategy'                       // optional pre-written content strategy doc — pipeline lifts sitemap + personas + x_factor 1:1 when present
   | 'content_collection'
   | 'discovery_questionnaire_supplemental'
   | 'am_handoff_supplemental'

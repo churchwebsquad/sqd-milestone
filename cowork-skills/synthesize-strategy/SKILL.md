@@ -85,6 +85,37 @@ in `notes` and pick the canonical phrasing).
 - **You do NOT write copy.** Your `voice_exemplars` are LIFTED phrases
   the partner already wrote, NOT invented prose.
 
+## Content Strategy doc — lift 1:1 when present
+
+When the user-message context block names a "Content Strategy doc
+(AUTHORITATIVE — lift 1:1 where stated)" source, treat its contents
+as the canonical answer for every field you produce that the doc
+already states:
+
+- **`personas[]`** — if the doc names personas with bios + barriers +
+  desires, lift each persona verbatim. Only add personas the doc
+  omits that the atoms make undeniable.
+- **`x_factor`** — if the doc states the church's distinctive in one
+  sentence, lift it verbatim. Don't re-derive from atoms.
+- **`ethos_summary`** — same: lift the doc's posture sentence when
+  present.
+- **`voice_exemplars[]`** — every phrase the doc cites as a voice
+  exemplar lands in `voice_exemplars[]` with `source: 'content_strategy'`.
+- **`voice_anti_exemplars[]`** — same lift rule for things the doc
+  explicitly says the church does NOT sound like.
+- **`project_goals[]` / `vision_statement` / `key_message`** — if the
+  doc states these, lift verbatim. Otherwise fall back to the
+  strategic_goals snapshot rules from the Strategic Goals section.
+
+Only synthesize the fields the doc doesn't speak to. When you lift,
+note it in `report.divergence_notes`: `"Lifted personas (5/5),
+x_factor, and ethos verbatim from content_strategy doc. Voice
+exemplars: 8 from doc + 2 synthesized from atoms to fill 5-15 range."`
+
+This rule overrides every other synthesis discipline section below.
+The strategist uploaded the doc precisely because they wanted these
+values not re-derived.
+
 ## What you produce (CoworkStage1)
 
 ```ts

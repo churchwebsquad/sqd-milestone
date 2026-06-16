@@ -332,6 +332,10 @@ interface AssembledInputs {
   discoveryQa:    Record<string, unknown> | null
   brandGuide:     Record<string, unknown> | null
   strategicGoals: StrategicGoalsSnapshot | null
+  /** Pre-written content strategy doc (optional intake upload). When
+   *  present, the SKILL lifts personas + x_factor + ethos +
+   *  voice_exemplars verbatim. text+filename per file. */
+  contentStrategyDocs: Array<{ filename: string; text: string }>
 }
 
 async function assembleEndpointInputs(
@@ -351,7 +355,7 @@ async function assembleEndpointInputs(
   const member = project.member
   const strategicGoals = ((project.roadmap_state as Record<string, unknown> | null)?.strategic_goals as StrategicGoalsSnapshot | undefined) ?? null
 
-  const [atomsRes, factsRes, discoveryRes, brandGuideRes] = await Promise.all([
+  const [atomsRes, factsRes, discoveryRes, brandGuideRes, csDocsRes] = await Promise.all([
     sb.from('content_atoms')
       .select('id, topic, body, verbatim, source_kind, source_ref')
       .eq('web_project_id', projectId)
@@ -373,11 +377,43 @@ async function assembleEndpointInputs(
       .order('last_updated_at', { ascending: false, nullsFirst: false })
       .limit(1)
       .maybeSingle(),
+    // Optional pre-written content strategy doc — when uploaded by the
+    // strategist, the SKILL contract lifts personas/x_factor/voice/ethos
+    // 1:1 from it instead of re-deriving from atoms.
+    sb.from('web_intake_documents')
+      .select('filename, storage_url, mime_type')
+      .eq('web_project_id', projectId)
+      .eq('category', 'content_strategy')
+      .eq('archived', false),
   ])
   if (atomsRes.error)       throw new Error(`content_atoms load failed: ${atomsRes.error.message}`)
   if (factsRes.error)       throw new Error(`church_facts load failed: ${factsRes.error.message}`)
   if (discoveryRes.error)   throw new Error(`discovery load failed: ${discoveryRes.error.message}`)
   if (brandGuideRes.error)  throw new Error(`brand_guide load failed: ${brandGuideRes.error.message}`)
+  if (csDocsRes.error)      throw new Error(`content_strategy load failed: ${csDocsRes.error.message}`)
+
+  // Fetch text content of every content_strategy doc. Only text-shaped
+  // formats are inlined; non-text (PDFs) are skipped here — those flow
+  // through extract-strategy's native-doc path on the legacy endpoint.
+  // The cowork synth path treats text as authoritative; PDFs surface a
+  // warning so the strategist can convert if they want them lifted.
+  const contentStrategyDocs: AssembledInputs['contentStrategyDocs'] = []
+  for (const doc of (csDocsRes.data ?? []) as Array<{ filename: string; storage_url: string; mime_type: string | null }>) {
+    const mime = (doc.mime_type ?? '').toLowerCase()
+    const isText =
+      mime.startsWith('text/') || mime === 'application/json' ||
+      /\.(md|markdown|txt|csv|json)$/i.test(doc.filename)
+    if (!isText) continue
+    try {
+      const r = await fetch(doc.storage_url)
+      if (!r.ok) continue
+      const text = await r.text()
+      if (text.trim().length > 0) contentStrategyDocs.push({ filename: doc.filename, text })
+    } catch {
+      // Quietly skip unreadable docs — the model proceeds without them
+      // and the strategist can re-upload if needed.
+    }
+  }
 
   return {
     atoms:          (atomsRes.data ?? []) as AssembledInputs['atoms'],
@@ -385,6 +421,7 @@ async function assembleEndpointInputs(
     discoveryQa:    discoveryRes.data ?? null,
     brandGuide:     brandGuideRes.data ?? null,
     strategicGoals,
+    contentStrategyDocs,
   }
 }
 
@@ -412,10 +449,33 @@ function buildUserMessage(inputs: AssembledInputs): string {
   }))
 
   const goalsBlock = renderStrategicGoalsForStep(inputs.strategicGoals, 'synthesize-strategy')
+
+  // Content Strategy doc block (AUTHORITATIVE — lifted 1:1). Lands
+  // RIGHT BELOW the SKILL prompt + strategic goals so the model
+  // reads it before the atom-derived sources. Per the SKILL's
+  // "Content Strategy doc — lift 1:1 when present" section, every
+  // field this doc states is canonical; only gaps get synthesized.
+  const contentStrategyBlock = inputs.contentStrategyDocs.length > 0
+    ? [
+        '## AUTHORITATIVE: Pre-written content strategy doc(s) — lift 1:1 where stated',
+        '',
+        'The strategist uploaded this/these doc(s) as the canonical source for personas, x_factor, ethos, voice exemplars, and any stated strategic elements. When the doc states a field explicitly, LIFT IT VERBATIM into your output. Synthesize only the fields the doc doesn\'t state. Note the lift in `report.divergence_notes`.',
+        '',
+        ...inputs.contentStrategyDocs.flatMap(d => [
+          `### ${d.filename}`,
+          '',
+          d.text,
+          '',
+        ]),
+      ].join('\n')
+    : null
+
   return [
     `Synthesize the stage_1 block for this project per the SKILL above.`,
     ``,
     goalsBlock ? goalsBlock : '_No approved strategic goals snapshot — proceed using atoms + facts + discovery alone._',
+    ``,
+    contentStrategyBlock ?? '_No content_strategy doc uploaded — synthesize from atoms + discovery + brand guide._',
     ``,
     `## Pillar atoms (${compactAtoms.length} entries — the strategist-reviewed inventory)`,
     '```json',

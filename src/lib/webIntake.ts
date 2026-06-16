@@ -20,6 +20,7 @@ export type IntakeKey =
   | 'am_handoff'
   | 'discovery_questionnaire'
   | 'strategy_brief'
+  | 'content_strategy'                // optional pre-written content strategy (lifted 1:1 by cowork pipeline)
   | 'brand_handoff'
   | 'content_collection'
 
@@ -39,6 +40,7 @@ export interface IntakeStatus {
   am_handoff:              IntakeRowStatus
   discovery_questionnaire: IntakeRowStatus
   strategy_brief:          IntakeRowStatus
+  content_strategy:        IntakeRowStatus
   brand_handoff:           IntakeRowStatus
   content_collection:      IntakeRowStatus
 
@@ -148,6 +150,21 @@ export async function fetchIntakeStatus(
     uploaded_files: briefs,
   }
 
+  // Content strategy — optional pre-written doc (sitemap + personas +
+  // x_factor + voice). When present, the cowork pipeline lifts these
+  // elements 1:1 from the doc instead of re-deriving from atoms.
+  // Never a hard stop; absence is the default for most projects.
+  const csDocs = docsByCategory('content_strategy')
+  const content_strategy: IntakeRowStatus = {
+    key: 'content_strategy',
+    is_hard_stop: false,
+    received: csDocs.length > 0,
+    received_at: csDocs[0]?.uploaded_at ?? null,
+    source_url: null,
+    source_label: csDocs.length > 0 ? `${csDocs.length} file${csDocs.length === 1 ? '' : 's'} uploaded — pipeline will lift 1:1` : null,
+    uploaded_files: csDocs,
+  }
+
   // Brand handoff — published row in strategy_brand_guides
   const brandRow = brandRes.data as { id: string; last_updated_at: string | null; slug?: string | null } | null
   const brand_handoff: IntakeRowStatus = {
@@ -227,6 +244,7 @@ export async function fetchIntakeStatus(
     am_handoff,
     discovery_questionnaire,
     strategy_brief,
+    content_strategy,
     brand_handoff,
     content_collection,
     hard_stops_total: hardStops.length,
