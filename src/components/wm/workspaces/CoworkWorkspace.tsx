@@ -901,20 +901,30 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
 
 function DownloadSkillButton({ skillPath, stepNumber }: { skillPath: string; stepNumber?: number }) {
   const [downloading, setDownloading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const handle = async () => {
     setDownloading(true)
+    setError(null)
     try {
       const stepQs = stepNumber != null ? `&step=${stepNumber}` : ''
       const r = await fetch(`/api/web/cowork/skill-download?path=${encodeURIComponent(skillPath)}${stepQs}`)
-      if (!r.ok) throw new Error(`download failed (${r.status})`)
+      if (!r.ok) {
+        // Surface the real reason — most likely the SKILL file isn't
+        // bundled into the serverless function (missing includeFiles)
+        // or the path didn't match the validator regex.
+        let detail = `status ${r.status}`
+        try {
+          const body = await r.json() as { error?: string; detail?: string }
+          detail = body.detail ?? body.error ?? detail
+        } catch { /* not JSON */ }
+        throw new Error(detail)
+      }
       const blob = await r.blob()
       const skillName = skillPath.split('/')[1] ?? 'skill'
       // Distinctive filename — includes "cowork-pipeline" so the
       // strategist's Claude Desktop session can't mistake it for
       // unrelated app docs, and step number so the order is
-      // obvious. Length is intentional — the past pattern of
-      // generic "SKILL.md" filenames led to renaming + content/
-      // filename mismatch in the cowork session.
+      // obvious.
       const stepPrefix = stepNumber != null ? `step-${String(stepNumber).padStart(2, '0')}.` : ''
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -924,24 +934,28 @@ function DownloadSkillButton({ skillPath, stepNumber }: { skillPath: string; ste
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
-    } catch {
-      // Quiet failure — strategist sees the button reset and can retry.
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Download failed')
     } finally {
       setDownloading(false)
     }
   }
   return (
-    <button
-      type="button"
-      onClick={() => void handle()}
-      disabled={downloading}
-      className="text-[13px] font-medium px-4 py-2 rounded-lg border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text disabled:opacity-50 transition-colors"
-    >
-      <span className="flex items-center gap-1.5">
-        {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-        {downloading ? 'Downloading…' : 'Download SKILL'}
-      </span>
-    </button>
+    <div className="flex flex-col items-start gap-1">
+      <button
+        type="button"
+        onClick={() => void handle()}
+        disabled={downloading}
+        className="text-[13px] font-medium px-4 py-2 rounded-lg border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text disabled:opacity-50 transition-colors"
+        title={error ?? undefined}
+      >
+        <span className="flex items-center gap-1.5">
+          {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+          {downloading ? 'Downloading…' : 'Download SKILL'}
+        </span>
+      </button>
+      {error && <p className="text-[11px] text-wm-danger max-w-[280px]">SKILL download: {error}</p>}
+    </div>
   )
 }
 

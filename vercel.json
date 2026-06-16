@@ -5,5 +5,10 @@
   ],
   "crons": [
     { "path": "/api/cron/scrub-replies", "schedule": "0 19 * * 1-5" }
-  ]
+  ],
+  "functions": {
+    "api/web/cowork/skill-download.ts": {
+      "includeFiles": "cowork-skills/**/SKILL.md"
+    }
+  }
 }
