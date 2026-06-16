@@ -57,7 +57,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Parallel load. The bundle is read-only, so a fan-out is safe.
   const [projRes, atomsRes, factsRes, topicsRes, templatesRes] = await Promise.all([
     sb.from('strategy_web_projects')
-      .select('id, roadmap_state, member')
+      .select('id, roadmap_state, member, notion_database_id, notion_database_url')
       .eq('id', projectId)
       .maybeSingle(),
     sb.from('content_atoms')
@@ -91,6 +91,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const partnerRes = member != null
     ? await sb.from('strategy_account_progress').select('church_name').eq('member', member).maybeSingle()
     : { data: null, error: null }
+
+  // Notion-audit branch: when notion_database_id is set, fetch every
+  // page in the database with its body rendered to markdown via the
+  // strategy-notion edge function. The audit-external-copy skill
+  // reads notion_pages_by_slug from the bundle in-context (no MCP
+  // round-trips per page). Failure is tolerated — the bundle ships
+  // without the Notion section and the skill falls back to standard
+  // generation, surfacing the error in notion_load_error.
+  const notionDbId = (projRes.data as any).notion_database_id as string | null
+  const notionDbUrl = (projRes.data as any).notion_database_url as string | null
+  let notionPagesBySlug: Record<string, unknown> | null = null
+  let notionLoadError: string | null = null
+  if (notionDbId) {
+    try {
+      const { data: notionRes, error: notionErr } = await sb.functions.invoke(
+        'strategy-notion',
+        { body: { op: 'list-database-pages-with-content', databaseId: notionDbId } },
+      )
+      if (notionErr) throw new Error(notionErr.message)
+      const pages = (notionRes as { pages?: Array<Record<string, any>> })?.pages ?? []
+      notionPagesBySlug = {}
+      for (const p of pages) {
+        if (typeof p.slug === 'string') notionPagesBySlug[p.slug] = p
+      }
+    } catch (e) {
+      notionLoadError = e instanceof Error ? e.message : 'Notion load failed'
+    }
+  }
 
   const state = (projRes.data.roadmap_state ?? {}) as Record<string, any>
 
@@ -224,6 +252,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     project_id:    projectId,
     generated_at:  new Date().toISOString(),
     generated_for: 'all' as const,
+
+    // Notion-audit branch metadata — present only when the project
+    // has notion_database_id set. When `notion_pages_by_slug` is
+    // populated, the cowork pipeline takes the audit-external-copy
+    // path; the skill matches sitemap pages to Notion pages by slug
+    // and scores existing copy against the 5 axes + canonical
+    // template slot vocab. Pages with no Notion match auto-route
+    // to supplemental-page-authoring.
+    notion_audit_branch: notionDbId
+      ? {
+          database_id:        notionDbId,
+          database_url:       notionDbUrl,
+          pages_by_slug:      notionPagesBySlug,
+          load_error:         notionLoadError,
+        }
+      : null,
 
     sitemap_pages:            sitemapPages,
     stage_1:                  state.stage_1 ?? null,

@@ -44,6 +44,7 @@ import { markActionItemComplete } from './_lib/ops/mark-action-item-complete.ts'
 import { suggestActionItem } from './_lib/ops/suggest-action-item.ts'
 import { promoteActionItem } from './_lib/ops/promote-action-item.ts'
 import { getActionItemContent } from './_lib/ops/get-action-item.ts'
+import { listDatabasePagesWithContent } from './_lib/ops/list-database-pages-with-content.ts'
 import type {
   InitiativeWritable, InitiativeCreate, MilestoneWritable, MilestoneCreate,
   ProgressWritable, ProgressCreate, DocWritable, DocCreate, StrategyEntity,
@@ -279,6 +280,18 @@ serve(async (req: Request) => {
 
       case 'sync-workflow-step-options':
         return json(await syncWorkflowStepOptions())
+
+      // ── Web cowork — Notion-audit branch ──────────────────────────────
+      // Walks a Notion database and returns every page's body rendered
+      // to markdown, so cowork's audit-external-copy skill can score
+      // existing partner copy against the canonical templates without
+      // a Notion-MCP round-trip per page. Triggered server-side when
+      // the cowork pipeline detects strategy_web_projects.notion_database_id.
+      case 'list-database-pages-with-content': {
+        const { databaseId } = args as { databaseId?: string }
+        if (!databaseId) return json400('Missing "databaseId" for list-database-pages-with-content.')
+        return json({ pages: await listDatabasePagesWithContent(databaseId) })
+      }
 
       case 'list-doc-comments': {
         const { id } = args as { id?: string }
