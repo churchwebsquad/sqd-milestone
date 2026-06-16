@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Loader2, FileText, MessagesSquare, Pencil, AlertCircle, ExternalLink, RefreshCw, Paperclip, CheckCircle2 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { attachmentPublicUrl, type AttachmentMetadata } from '../../../lib/contentCollectionAttachments'
+import { ContentCollectionAutoFillStaff } from './ContentCollectionAutoFillStaff'
 
 interface Props { projectId: string }
 
@@ -204,6 +205,12 @@ export function ContentCollectionResponsesPanel({ projectId }: Props) {
       )}
 
       <div className="p-5 space-y-5">
+        <ContentCollectionAutoFillStaff
+          projectId={projectId}
+          sessionId={session.id}
+          session={session as unknown as Record<string, unknown>}
+          onAccepted={() => void load()}
+        />
         <Step2AnswersSection session={session} />
         {answerMarks.length > 0 && (
           <Step1AnswerEditsSection marks={answerMarks} />
