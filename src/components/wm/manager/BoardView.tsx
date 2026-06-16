@@ -160,7 +160,9 @@ function ProjectRow({
   const sub   = row.health.subStatus
   const hoursRemain = row.health.remainingHoursAdjusted
   const hoursTotal  = Number(row.dev_hours_estimate ?? 0)
-  const churchLine  = row.church_name || `Member ${row.member}`
+  const churchLine  = row.church_name
+    ? `${row.church_name} · #${row.member}`
+    : `Member #${row.member}`
   return (
     <li
       draggable={draggable}

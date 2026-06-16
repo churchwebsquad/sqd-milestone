@@ -184,7 +184,9 @@ export function ScheduleView({
                   Sprint in progress · P{currentSprint.priority_order ?? '?'}
                 </p>
                 <p className="text-[13px] font-semibold text-wm-text">
-                  {currentSprint.church_name ?? `Member ${currentSprint.member}`}
+                  {currentSprint.church_name
+                    ? `${currentSprint.church_name} · #${currentSprint.member}`
+                    : `Member #${currentSprint.member}`}
                   {' · '}
                   {currentSprint.name}
                 </p>
@@ -303,7 +305,9 @@ function ProjectRow({
 }: RowProps) {
   const phase = (row.current_phase || 'intake') as WebProjectPhase
   const tint = PHASE_TINT[phase] ?? PHASE_TINT.intake
-  const churchLine = row.church_name || `Member ${row.member}`
+  const churchLine = row.church_name
+    ? `${row.church_name} · #${row.member}`
+    : `Member #${row.member}`
   const launchIso = row.launch_date
     ? fromIsoDate(row.launch_date)
       ? toIsoDate(weekStart(fromIsoDate(row.launch_date) as Date))

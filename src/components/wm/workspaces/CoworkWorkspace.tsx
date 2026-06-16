@@ -53,6 +53,7 @@ interface ReadinessReport {
     pillars_draft:      number
     facts_total:        number
     crawl_topics_total: number
+    cc_files_uploaded?: number
     duplicates_found:   number
     noise_topics_found: number
     pii_flags:          number
@@ -171,7 +172,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
           ok:       false,
           blockers: [{ kind: 'endpoint_error', severity: 'blocker', detail: body?.detail ?? body?.error ?? 'inventory-readiness failed' }],
           warnings: [],
-          summary: { pillars_total: 0, pillars_draft: 0, facts_total: 0, crawl_topics_total: 0, duplicates_found: 0, noise_topics_found: 0, pii_flags: 0, coverage_gaps: [] },
+          summary: { pillars_total: 0, pillars_draft: 0, facts_total: 0, crawl_topics_total: 0, cc_files_uploaded: 0, duplicates_found: 0, noise_topics_found: 0, pii_flags: 0, coverage_gaps: [] },
         })
       }
     } catch (e) {
@@ -493,8 +494,11 @@ function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRe
             <div className="text-[11px] text-wm-text-subtle">
               {s.pillars_total} core message{s.pillars_total === 1 ? '' : 's'} ({s.pillars_draft} draft) ·{' '}
               {s.facts_total} fact{s.facts_total === 1 ? '' : 's'} ·{' '}
-              {s.crawl_topics_total} crawl topic{s.crawl_topics_total === 1 ? '' : 's'} ·{' '}
-              {s.pii_flags} PII flag{s.pii_flags === 1 ? '' : 's'}
+              {s.crawl_topics_total} crawl topic{s.crawl_topics_total === 1 ? '' : 's'}
+              {(s.cc_files_uploaded ?? 0) > 0 && (
+                <> · {s.cc_files_uploaded} CC file{s.cc_files_uploaded === 1 ? '' : 's'} uploaded</>
+              )}
+              {' '}· {s.pii_flags} PII flag{s.pii_flags === 1 ? '' : 's'}
             </div>
           )}
         </div>

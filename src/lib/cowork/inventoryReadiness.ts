@@ -110,6 +110,14 @@ export interface InventoryReadinessInput {
   }>
   /** Content collection field keys present on the latest session. */
   content_collection_fields: string[]
+  /** Count of partner-uploaded content_collection files in foundations.
+   *  When > 0, the file is presumed to cover the same surface area as a
+   *  crawl inventory (so page_coverage_gap warnings get suppressed). */
+  cc_files_uploaded?: number
+  /** Page 2 (strategic configuration) fields that are still unanswered
+   *  on the latest CC session row. The strategist sees this list to
+   *  either fill in directly or ping the partner. */
+  cc_page2_unanswered?: Array<{ key: string; label: string }>
   /** Snapshot of `roadmap_state.strategic_goals` (the curated jsonb
    *  produced by the aggregate-strategic-goals endpoint). Optional —
    *  when omitted, the strategic-goals readiness gate is skipped (so
@@ -132,6 +140,7 @@ export type ReadinessIssueKind =
   | 'page_coverage_gap'
   | 'status_ambiguity'
   | 'strategic_goals_unready'
+  | 'cc_page2_unanswered'
 
 export interface ReadinessIssue {
   kind:     ReadinessIssueKind
@@ -154,6 +163,9 @@ export interface InventoryReadinessReport {
     pillars_draft:    number
     facts_total:      number
     crawl_topics_total: number
+    /** Count of partner-uploaded content_collection files. When > 0, the
+     *  pipeline treats them as crawl-equivalent input. */
+    cc_files_uploaded?: number
     duplicates_found: number
     noise_topics_found: number
     pii_flags:        number
@@ -253,25 +265,31 @@ export function buildInventoryReadinessReport(input: InventoryReadinessInput): I
   }
 
   // 4. Page-type coverage gaps
+  // CC file upload counts as full coverage — the partner provided a
+  // comprehensive content document, so the cowork pipeline lifts from
+  // there instead of crawl topics. Skip the gap scan entirely.
+  const ccFilesUploaded = input.cc_files_uploaded ?? 0
   const crawlKeys = new Set(input.crawl_topics.map(t => t.topic_key.toLowerCase()))
   const ccKeys    = new Set(input.content_collection_fields.map(k => k.toLowerCase()))
   const allTokens = new Set<string>()
   for (const k of crawlKeys) for (const tok of k.split(/[\s_-]+/)) allTokens.add(tok)
   for (const k of ccKeys)    for (const tok of k.split(/[\s_-]+/)) allTokens.add(tok)
   const coverage_gaps: string[] = []
-  for (const { page_type, matches } of PAGE_TYPE_COVERAGE) {
-    const has = matches.some(m =>
-      crawlKeys.has(m) || ccKeys.has(m) || allTokens.has(m),
-    )
-    if (!has) coverage_gaps.push(page_type)
-  }
-  if (coverage_gaps.length > 0) {
-    warnings.push({
-      kind:     'page_coverage_gap',
-      severity: 'warning',
-      detail:   `No crawl topic or content-collection field covers: ${coverage_gaps.join(', ')}`,
-      suggested_fix: 'Strategist should either confirm these pages are intentionally skipped OR follow up with the partner for missing intake (content collection extra-fields, supplemental brief).',
-    })
+  if (ccFilesUploaded === 0) {
+    for (const { page_type, matches } of PAGE_TYPE_COVERAGE) {
+      const has = matches.some(m =>
+        crawlKeys.has(m) || ccKeys.has(m) || allTokens.has(m),
+      )
+      if (!has) coverage_gaps.push(page_type)
+    }
+    if (coverage_gaps.length > 0) {
+      warnings.push({
+        kind:     'page_coverage_gap',
+        severity: 'warning',
+        detail:   `No crawl topic or content-collection field covers: ${coverage_gaps.join(', ')}`,
+        suggested_fix: 'Strategist should either confirm these pages are intentionally skipped OR follow up with the partner for missing intake (content collection extra-fields, supplemental brief).',
+      })
+    }
   }
 
   // 5. Status ambiguity — atoms still marked 'draft' (never reviewed/promoted)
@@ -286,7 +304,22 @@ export function buildInventoryReadinessReport(input: InventoryReadinessInput): I
     })
   }
 
-  // 6. Strategic-goals readiness — high-importance fields missing or
+  // 6. Content Collection — Page 2 unanswered strategic questions.
+  // Always a warning, never a blocker — the strategist can fill these
+  // in directly or follow up with the partner. Fires whenever the
+  // backend supplies the list (it's computed off the latest CC session
+  // row; absence = legacy caller, skip).
+  if (input.cc_page2_unanswered && input.cc_page2_unanswered.length > 0) {
+    warnings.push({
+      kind:     'cc_page2_unanswered',
+      severity: 'warning',
+      detail:   `${input.cc_page2_unanswered.length} Page 2 strategic question${input.cc_page2_unanswered.length === 1 ? '' : 's'} unanswered: ${input.cc_page2_unanswered.map(f => f.label).join(', ')}.`,
+      suggested_fix: 'Open the partner\'s Content Collection portal session and fill in these fields directly, OR re-send the portal link so the partner can complete Page 2. The cowork pipeline reads these when outlining pages.',
+      rows: input.cc_page2_unanswered.map(f => ({ id: f.key, topic: f.label })),
+    })
+  }
+
+  // 7. Strategic-goals readiness — high-importance fields missing or
   //    still draft. Warning only; never blocks. The list of fields and
   //    their categories MUST stay in sync with STRATEGIC_GOAL_FIELDS
   //    (strategicGoals.ts). High-importance entries duplicated here so
@@ -330,6 +363,7 @@ export function buildInventoryReadinessReport(input: InventoryReadinessInput): I
       pillars_draft:      draftAtoms.length,
       facts_total:        input.facts.length,
       crawl_topics_total: input.crawl_topics.length,
+      cc_files_uploaded:  ccFilesUploaded,
       duplicates_found,
       noise_topics_found,
       pii_flags,
