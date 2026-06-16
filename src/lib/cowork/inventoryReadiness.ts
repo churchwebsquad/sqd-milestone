@@ -91,9 +91,11 @@ export interface InventoryReadinessInput {
   facts: Array<{
     id:           string
     topic:        string
-    data:         unknown                // JSONB; we grep the stringified version for PII
+    /** JSONB. We grep the stringified version for PII; the
+     *  publishable flag lives at `data._publishable` (or legacy
+     *  `data._published`). church_facts has no metadata column. */
+    data:         unknown
     status?:      string
-    metadata?:    Record<string, unknown> | null
   }>
   /** web_project_topics rows (with passage byte totals — we don't pass
    *  the full passages[] arrays in for this gate). */

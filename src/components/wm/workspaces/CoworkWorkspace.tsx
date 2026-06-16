@@ -1177,7 +1177,7 @@ function PiiFactResolver({ issue, projectId, onResolved }: {
                     onClick={() => void markPublishable(row.id)}
                     disabled={savingId === row.id}
                     className="text-[11px] font-medium px-2 py-1 rounded border border-wm-border bg-wm-bg-elevated hover:bg-wm-bg-hover disabled:opacity-50"
-                    title="Set metadata.publishable=true. Use when this contact info is publishable (church main line, public email)."
+                    title="Set data._publishable=true on the fact row. Use when this contact info is publishable (church main line, public email)."
                   >
                     Mark publishable
                   </button>
