@@ -240,25 +240,30 @@ export function buildInventoryReadinessReport(input: InventoryReadinessInput): I
   }
 
   // 3. PII flags on contact facts (personal cells, emails not in published contacts)
+  // church_facts has no `metadata` column. The publishable signal
+  // lives on the `data` jsonb under reserved key `_publishable`
+  // (underscore prefix marks it as metadata vs. actual fact data).
+  // Strategists set this via the Cowork-tab readiness resolver.
   let pii_flags = 0
   for (const f of input.facts) {
     if (f.topic !== 'contact_method') continue
     const blob = JSON.stringify(f.data ?? '')
     if (PHONE_PATTERN.test(blob)) {
       pii_flags += 1
-      const metaSaysOk = f.metadata && (f.metadata.published === true || f.metadata.publishable === true)
+      const dataObj = (f.data && typeof f.data === 'object') ? (f.data as Record<string, unknown>) : null
+      const publishable = dataObj && (dataObj._publishable === true || dataObj._published === true)
       warnings.push({
         kind:     'pii_flag_fact',
-        severity: metaSaysOk ? 'warning' : 'blocker',
-        detail:   `contact_method fact ${f.id} contains a phone-number-shaped string. ${metaSaysOk ? 'Marked publishable in metadata.' : 'No publishable=true on metadata — likely a personal cell from AM handoff.'}`,
-        suggested_fix: metaSaysOk
-          ? 'Verified publishable — no action required, just acknowledge.'
-          : 'Confirm with the partner before publishing. If personal-only, tag the fact non-publishable so it stays out of plan-cross-page-allocation.',
+        severity: publishable ? 'warning' : 'blocker',
+        detail:   `contact_method fact ${f.id} contains a phone-number-shaped string. ${publishable ? 'Marked publishable by strategist.' : 'Not yet marked publishable — likely a personal cell from AM handoff.'}`,
+        suggested_fix: publishable
+          ? 'Verified publishable — no action required.'
+          : 'Confirm with the partner. Mark publishable if this is a church main line; archive if it\'s a personal cell.',
         rows: [{ id: f.id, topic: f.topic, preview: previewOf(blob) }],
       })
       // The blocker version goes to blockers[], the warning to warnings[] —
       // but we already pushed once above. Recategorize:
-      if (!metaSaysOk) {
+      if (!publishable) {
         blockers.push(warnings.pop()!)
       }
     }

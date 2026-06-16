@@ -44,10 +44,21 @@ interface Props {
   onChange?: () => void
 }
 
+interface ReadinessIssue {
+  kind:           string
+  severity:       string
+  detail:         string
+  suggested_fix?: string
+  /** Row references — pii_flag_fact carries fact ids + previews;
+   *  cc_page2_unanswered carries field keys + display labels. The
+   *  resolver UI uses these to render per-row actions. */
+  rows?: Array<{ id: string; topic?: string; preview?: string }>
+}
+
 interface ReadinessReport {
   ok:       boolean
-  blockers: Array<{ kind: string; severity: string; detail: string; suggested_fix?: string }>
-  warnings: Array<{ kind: string; severity: string; detail: string; suggested_fix?: string }>
+  blockers: ReadinessIssue[]
+  warnings: ReadinessIssue[]
   summary: {
     pillars_total:      number
     pillars_draft:      number
@@ -347,6 +358,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         timelineNotes={timelineNotes}
         onRefresh={() => { void loadProjectState(); void loadReadiness() }}
         refreshing={loading || readinessLoading}
+        projectId={project.id}
       />
 
       {error && (
@@ -400,13 +412,14 @@ export function CoworkWorkspace({ project, onChange }: Props) {
 // Header (readiness summary + refresh)
 // ────────────────────────────────────────────────────────────────────
 
-function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRefresh, refreshing }: {
+function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRefresh, refreshing, projectId }: {
   readiness:        ReadinessReport | null
   readinessLoading: boolean
   overallStats:     { done: number; ready: number; stale: number; cowork: number; waiting: number; firstReadyKey: string | null } | null
   timelineNotes:    string | null
   onRefresh:        () => void
   refreshing:       boolean
+  projectId:        string
 }) {
   const blockers = readiness?.blockers ?? []
   const warnings = readiness?.warnings ?? []
@@ -516,16 +529,10 @@ function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRe
         {(blockers.length > 0 || warnings.length > 0) && (
           <div className="px-5 pb-4 pt-1 flex flex-col gap-2 border-t border-wm-border">
             {blockers.map((b, i) => (
-              <div key={`b-${i}`} className="text-[12px] text-wm-danger flex items-start gap-1.5 mt-2">
-                <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                <span><span className="font-semibold">{b.kind}:</span> {b.detail}</span>
-              </div>
+              <ReadinessIssueRow key={`b-${i}`} issue={b} tone="danger" projectId={projectId} onResolved={onRefresh} />
             ))}
             {warnings.map((w, i) => (
-              <div key={`w-${i}`} className="text-[12px] text-wm-warning flex items-start gap-1.5 mt-2">
-                <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                <span><span className="font-semibold">{w.kind}:</span> {w.detail}</span>
-              </div>
+              <ReadinessIssueRow key={`w-${i}`} issue={w} tone="warning" projectId={projectId} onResolved={onRefresh} />
             ))}
           </div>
         )}
@@ -1003,4 +1010,347 @@ function ProgressBar({ done, total, label, tone = 'accent' }: {
       </div>
     </div>
   )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// ReadinessIssueRow + resolvers — let the strategist fix flagged
+// data inline instead of opening another workspace. Currently
+// handles pii_flag_fact (per-fact: mark publishable / archive / edit)
+// and cc_page2_unanswered (per-field: inline textarea, writes to
+// strategy_content_collection_sessions). Other warning kinds render
+// as text-only (no resolver yet).
+// ────────────────────────────────────────────────────────────────────
+
+function ReadinessIssueRow({ issue, tone, projectId, onResolved }: {
+  issue:      ReadinessIssue
+  tone:       'danger' | 'warning'
+  projectId:  string
+  onResolved: () => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const resolvable = issue.kind === 'pii_flag_fact' || issue.kind === 'cc_page2_unanswered'
+  const colorClass = tone === 'danger' ? 'text-wm-danger' : 'text-wm-warning'
+
+  return (
+    <div className={`text-[12px] ${colorClass}`}>
+      <div className="flex items-start gap-1.5 mt-2">
+        <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+        <span className="flex-1">
+          <span className="font-semibold">{issue.kind}:</span> {issue.detail}
+        </span>
+        {resolvable && (
+          <button
+            type="button"
+            onClick={() => setExpanded(v => !v)}
+            className="text-[11px] font-semibold text-wm-text hover:underline shrink-0"
+          >
+            {expanded ? 'Hide' : 'Resolve'}
+          </button>
+        )}
+      </div>
+      {expanded && issue.kind === 'pii_flag_fact' && (
+        <PiiFactResolver issue={issue} projectId={projectId} onResolved={onResolved} />
+      )}
+      {expanded && issue.kind === 'cc_page2_unanswered' && (
+        <CcPage2Resolver issue={issue} projectId={projectId} onResolved={onResolved} />
+      )}
+    </div>
+  )
+}
+
+function PiiFactResolver({ issue, projectId, onResolved }: {
+  issue:      ReadinessIssue
+  projectId:  string
+  onResolved: () => void
+}) {
+  // The readiness scanner ships `rows: [{id, topic, preview}]` for
+  // each flagged fact. We let the strategist act on each individually.
+  const [savingId, setSavingId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editDraft, setEditDraft] = useState('')
+
+  const updateFact = async (factId: string, patch: Record<string, unknown>): Promise<boolean> => {
+    setSavingId(factId)
+    setError(null)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: err } = await (supabase as any)
+      .from('church_facts')
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq('id', factId)
+      .eq('web_project_id', projectId)
+    setSavingId(null)
+    if (err) { setError(err.message); return false }
+    return true
+  }
+
+  const markPublishable = async (factId: string) => {
+    // church_facts has no `metadata` column — the publishable flag
+    // lives on the `data` jsonb under reserved key `_publishable`.
+    // Fetch the current data first so the merge preserves the
+    // partner's actual fact contents.
+    setSavingId(factId)
+    setError(null)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: row, error: readErr } = await (supabase as any)
+      .from('church_facts')
+      .select('data')
+      .eq('id', factId)
+      .maybeSingle()
+    if (readErr) { setError(readErr.message); setSavingId(null); return }
+    const currentData = (row?.data && typeof row.data === 'object') ? row.data as Record<string, unknown> : {}
+    setSavingId(null)
+    const ok = await updateFact(factId, { data: { ...currentData, _publishable: true } })
+    if (ok) onResolved()
+  }
+  const archive = async (factId: string) => {
+    if (!confirm('Archive this fact? It will be excluded from the cowork pipeline.')) return
+    const ok = await updateFact(factId, { status: 'archived' })
+    if (ok) onResolved()
+  }
+  const startEdit = async (factId: string) => {
+    // Pull current data to seed the edit textarea (rows[].preview is truncated).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error: err } = await (supabase as any)
+      .from('church_facts')
+      .select('data')
+      .eq('id', factId)
+      .maybeSingle()
+    if (err) { setError(err.message); return }
+    const current = (data as { data?: unknown } | null)?.data ?? ''
+    setEditDraft(typeof current === 'string' ? current : JSON.stringify(current, null, 2))
+    setEditingId(factId)
+  }
+  const saveEdit = async (factId: string) => {
+    // Try to parse JSON; fall back to string. The fact's `data` column
+    // is JSONB so both shapes are valid downstream.
+    let parsed: unknown
+    try { parsed = JSON.parse(editDraft) } catch { parsed = editDraft }
+    const ok = await updateFact(factId, { data: parsed })
+    if (ok) { setEditingId(null); onResolved() }
+  }
+
+  return (
+    <div className="mt-2 ml-5 rounded-md border border-wm-border bg-wm-bg-elevated p-3 text-wm-text">
+      <p className="text-[11px] text-wm-text-muted mb-2 leading-snug">
+        {issue.suggested_fix}
+      </p>
+      <ul className="flex flex-col gap-2">
+        {(issue.rows ?? []).map(row => (
+          <li key={row.id} className="rounded border border-wm-border bg-wm-bg p-2">
+            <p className="text-[11px] text-wm-text-muted mb-1">
+              <span className="font-mono">{row.id.slice(0, 8)}</span>
+              {row.topic && <> · <span>{row.topic}</span></>}
+            </p>
+            {editingId === row.id ? (
+              <>
+                <textarea
+                  value={editDraft}
+                  onChange={(e) => setEditDraft(e.target.value)}
+                  className="w-full rounded-md border border-wm-border bg-wm-bg-elevated px-2 py-1.5 text-[12px] text-wm-text font-mono leading-snug focus:outline-none focus:border-wm-border-focus min-h-[60px]"
+                  rows={4}
+                />
+                <div className="mt-1.5 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingId(null)}
+                    className="text-[11px] text-wm-text-muted hover:underline"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void saveEdit(row.id)}
+                    disabled={savingId === row.id}
+                    className="text-[11px] font-semibold px-2 py-1 rounded bg-wm-accent text-wm-text-on-accent disabled:opacity-50"
+                  >
+                    {savingId === row.id ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-[12px] text-wm-text break-words mb-2">{row.preview}</p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void markPublishable(row.id)}
+                    disabled={savingId === row.id}
+                    className="text-[11px] font-medium px-2 py-1 rounded border border-wm-border bg-wm-bg-elevated hover:bg-wm-bg-hover disabled:opacity-50"
+                    title="Set metadata.publishable=true. Use when this contact info is publishable (church main line, public email)."
+                  >
+                    Mark publishable
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void startEdit(row.id)}
+                    disabled={savingId === row.id}
+                    className="text-[11px] font-medium px-2 py-1 rounded border border-wm-border bg-wm-bg-elevated hover:bg-wm-bg-hover disabled:opacity-50"
+                  >
+                    Edit value
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void archive(row.id)}
+                    disabled={savingId === row.id}
+                    className="text-[11px] font-medium px-2 py-1 rounded border border-wm-danger/30 bg-wm-bg-elevated text-wm-danger hover:bg-wm-danger-bg disabled:opacity-50"
+                    title="Set status=archived. Use when this is a personal cell that shouldn't publish."
+                  >
+                    Archive
+                  </button>
+                </div>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      {error && <p className="mt-2 text-[11px] text-wm-danger">{error}</p>}
+    </div>
+  )
+}
+
+function CcPage2Resolver({ issue, projectId, onResolved }: {
+  issue:      ReadinessIssue
+  projectId:  string
+  onResolved: () => void
+}) {
+  // Find / create the latest open session row + render a textarea per
+  // unanswered Page 2 field. Free-text input is fine — the cowork
+  // pipeline reads these semantically, and the strategist context is
+  // "fill in what the partner didn't."
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [savingKey, setSavingKey] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      // Most-recent session for the project, status != closed. If none
+      // exists (partner never visited the portal but uploaded a CC file
+      // in foundations), bail with a clear note — the strategist needs
+      // to create one upstream or wait for the auto-create on next portal
+      // hit. (We could auto-create a session here, but that's a behavior
+      // change worth doing deliberately in a follow-up.)
+      const { data, error: err } = await supabase
+        .from('strategy_content_collection_sessions')
+        .select('id')
+        .eq('web_project_id', projectId)
+        .neq('status', 'closed')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (cancelled) return
+      if (err) setError(err.message)
+      setSessionId(data?.id ?? null)
+      setLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [projectId])
+
+  const saveField = async (key: string) => {
+    if (!sessionId) return
+    setSavingKey(key)
+    setError(null)
+    const raw = drafts[key]?.trim() ?? ''
+    // cms_managed_types is a text[] in the schema; split on commas.
+    // Everything else is a string column the cowork pipeline reads
+    // verbatim. Free-text input is fine for enum fields too — the
+    // downstream pipeline interprets semantically.
+    let value: unknown = raw
+    if (key === 'cms_managed_types') {
+      value = raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : []
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: err } = await (supabase as any)
+      .from('strategy_content_collection_sessions')
+      .update({ [key]: value })
+      .eq('id', sessionId)
+    setSavingKey(null)
+    if (err) { setError(err.message); return }
+    // Wipe the local draft for this row so the UI signals "saved" by
+    // collapsing back to the empty input + readiness re-fetch removes
+    // it from the warning list on the next pass.
+    setDrafts(prev => { const n = { ...prev }; delete n[key]; return n })
+    onResolved()
+  }
+
+  if (loading) {
+    return <div className="mt-2 ml-5 text-[11px] text-wm-text-muted">Loading session…</div>
+  }
+  if (!sessionId) {
+    return (
+      <div className="mt-2 ml-5 rounded-md border border-wm-border bg-wm-bg-elevated p-3 text-wm-text">
+        <p className="text-[11.5px] text-wm-text-muted leading-snug">
+          No Content Collection session exists for this project yet. Either send the partner the
+          portal link to auto-create one, or open the partner's portal session via the staff
+          intake panel.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-2 ml-5 rounded-md border border-wm-border bg-wm-bg-elevated p-3 text-wm-text">
+      <p className="text-[11px] text-wm-text-muted mb-2 leading-snug">
+        {issue.suggested_fix}
+      </p>
+      <ul className="flex flex-col gap-2.5">
+        {(issue.rows ?? []).map(row => (
+          <li key={row.id} className="rounded border border-wm-border bg-wm-bg p-2">
+            <label className="text-[11px] font-semibold text-wm-text block mb-1">
+              {row.topic ?? row.id}
+              <span className="ml-1.5 font-mono font-normal text-wm-text-subtle">{row.id}</span>
+            </label>
+            <textarea
+              value={drafts[row.id] ?? ''}
+              onChange={(e) => setDrafts(prev => ({ ...prev, [row.id]: e.target.value }))}
+              placeholder={fieldPlaceholder(row.id)}
+              className="w-full rounded-md border border-wm-border bg-wm-bg-elevated px-2 py-1.5 text-[12px] text-wm-text leading-snug focus:outline-none focus:border-wm-border-focus min-h-[44px]"
+              rows={2}
+            />
+            <div className="mt-1.5 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => void saveField(row.id)}
+                disabled={savingKey === row.id || !(drafts[row.id]?.trim())}
+                className="text-[11px] font-semibold px-2.5 py-1 rounded bg-wm-accent text-wm-text-on-accent disabled:opacity-50"
+              >
+                {savingKey === row.id ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {error && <p className="mt-2 text-[11px] text-wm-danger">{error}</p>}
+    </div>
+  )
+}
+
+function fieldPlaceholder(key: string): string {
+  // Keeps the strategist from guessing what shape each field expects.
+  // The values aren't constrained (free text reaches the cowork
+  // pipeline either way), but a hint cuts down on "what does the
+  // pipeline expect here?" friction.
+  switch (key) {
+    case 'events_display_preference':
+      return 'e.g. embed (Eventbrite/Planning Center embed), redirect (link to external calendar), or wordpress'
+    case 'sermons_display_preference':
+      return 'e.g. embed_latest (most recent sermon embed) or archive (full searchable archive)'
+    case 'groups_display_preference':
+      return 'e.g. embed (PCO Groups embed) or redirect (link out to existing platform)'
+    case 'cms_managed_types':
+      return 'Comma-separated: e.g. "staff_directory, volunteer_opportunities, events"'
+    case 'ministries_list_html':
+      return 'HTML or plain text listing each ministry — names + 1-line descriptions'
+    case 'discipleship_pathway_html':
+      return 'HTML or plain text describing the next-steps / discipleship journey'
+    case 'ministries_to_grow':
+      return 'Named ministries the partner wants surfaced early — comma-separated or prose'
+    case 'high_maintenance_pages_context':
+      return 'Context for the pages flagged as high-maintenance in discovery'
+    default:
+      return ''
+  }
 }
