@@ -31,7 +31,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Check, ChevronDown, ChevronRight, Edit2, Loader2, Save, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Edit2, Loader2, Plus, Save, X } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { WMStatusPill } from '../StatusPill'
 import type { StrategyWebProject } from '../../../types/database'
@@ -165,6 +165,51 @@ export function AtomReviewWorkspace({ project, onChange }: Props) {
   const reject  = (id: string) => mutateAtom(id, { status: 'archived' })
   const restore = (id: string) => mutateAtom(id, { status: 'draft' })
 
+  // Strategist-authored recommended_page entry. These represent build /
+  // workflow directives the partner needs (e.g. "We need a Staff CPT
+  // so the team can edit bios via the CMS") — NOT page copy. Routed to
+  // page_allocation_plan.build_directives by plan-cross-page-allocation
+  // and surfaced on the project's dev-handoff downstream. Status
+  // defaults to 'approved' since the strategist created the entry
+  // intentionally; source_kind='strategist_manual' so audit trails can
+  // distinguish hand-added entries from normalize-intake's extraction.
+  const addRecommendedPage = async (body: string): Promise<boolean> => {
+    const trimmed = body.trim()
+    if (!trimmed) return false
+    setError(null)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error: err } = await (supabase as any)
+      .from('content_atoms')
+      .insert({
+        web_project_id: project.id,
+        topic:          'recommended_page',
+        body:           trimmed,
+        source_kind:    'strategist_manual',
+        source_ref:     null,
+        verbatim:       false,
+        confidence:     1.0,
+        status:         'approved',
+      })
+      .select('id, topic, body, source_kind, source_ref, verbatim, confidence, status, created_at, updated_at')
+      .single()
+    if (err) {
+      setError(`Could not save: ${err.message}`)
+      return false
+    }
+    setAtoms(prev => [...prev, data as Atom])
+    onChange?.()
+    // Make sure the recommended_page section is visible when the user
+    // is filtering by 'draft' — drafts won't show the new entry.
+    if (statusFilter !== 'all' && statusFilter !== 'approved') setStatusFilter('all')
+    // Open the topic group if it's collapsed.
+    setCollapsedTopics(prev => {
+      const n = new Set(prev)
+      n.delete('recommended_page')
+      return n
+    })
+    return true
+  }
+
   // Bulk-approve all drafts in a topic group.
   const bulkApproveTopic = async (topic: string) => {
     const draftsInTopic = atoms.filter(a => a.topic === topic && a.status === 'draft')
@@ -184,7 +229,12 @@ export function AtomReviewWorkspace({ project, onChange }: Props) {
 
   return (
     <div className="p-4">
-      <Header counts={counts} statusFilter={statusFilter} onFilter={setStatusFilter} />
+      <Header
+        counts={counts}
+        statusFilter={statusFilter}
+        onFilter={setStatusFilter}
+        onAddRecommendedPage={addRecommendedPage}
+      />
 
       {error && (
         <div className="mb-3 rounded-md border border-wm-danger bg-wm-danger-bg px-3 py-2 text-[12px] text-wm-danger">
@@ -262,38 +312,104 @@ export function AtomReviewWorkspace({ project, onChange }: Props) {
   )
 }
 
-function Header({ counts, statusFilter, onFilter }: {
+function Header({ counts, statusFilter, onFilter, onAddRecommendedPage }: {
   counts:       { total: number; draft: number; approved: number; archived: number }
   statusFilter: StatusFilter
   onFilter:     (f: StatusFilter) => void
+  onAddRecommendedPage: (body: string) => Promise<boolean>
 }) {
+  const [adding, setAdding] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const submit = async () => {
+    setSaving(true)
+    const ok = await onAddRecommendedPage(draft)
+    setSaving(false)
+    if (ok) {
+      setDraft('')
+      setAdding(false)
+    }
+  }
+
   return (
-    <div className="mb-4 flex items-end justify-between gap-2 flex-wrap">
-      <div className="min-w-0">
-        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Core messages</p>
-        <h2 className="text-[15px] font-semibold text-wm-text">Strategist review queue</h2>
-        <p className="text-[11px] text-wm-text-muted mt-0.5">
-          {counts.total} total · {counts.draft} draft · {counts.approved} approved · {counts.archived} archived
-        </p>
-      </div>
-      <div className="flex items-center gap-1 rounded-md border border-wm-border bg-wm-bg-elevated p-0.5 text-[11px]">
-        {(['draft', 'approved', 'archived', 'all'] as StatusFilter[]).map(f => (
+    <div className="mb-4">
+      <div className="flex items-end justify-between gap-2 flex-wrap">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Core messages</p>
+          <h2 className="text-[15px] font-semibold text-wm-text">Strategist review queue</h2>
+          <p className="text-[11px] text-wm-text-muted mt-0.5">
+            {counts.total} total · {counts.draft} draft · {counts.approved} approved · {counts.archived} archived
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
           <button
-            key={f}
             type="button"
-            onClick={() => onFilter(f)}
-            className={
-              'px-2.5 py-1 rounded-[5px] font-medium ' +
-              (statusFilter === f
-                ? 'bg-wm-bg-selected text-wm-text'
-                : 'text-wm-text-muted hover:text-wm-text hover:bg-wm-bg-hover')
-            }
+            onClick={() => setAdding(v => !v)}
+            className="inline-flex items-center gap-1 rounded-md border border-wm-border bg-wm-bg-elevated text-wm-text-muted hover:text-wm-text hover:bg-wm-bg-hover px-2.5 py-1.5 text-[11px] font-medium"
+            title="Add a build / workflow directive that's NOT page copy (a recommended page, CPT, redirect map, seasonal theme, etc.). Routes to build_directives at allocation time."
           >
-            {f === 'all' ? 'All' : f[0].toUpperCase() + f.slice(1)}
-            {f !== 'all' && ` (${counts[f]})`}
+            <Plus size={12} />
+            Add recommended page
           </button>
-        ))}
+          <div className="flex items-center gap-1 rounded-md border border-wm-border bg-wm-bg-elevated p-0.5 text-[11px]">
+            {(['draft', 'approved', 'archived', 'all'] as StatusFilter[]).map(f => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => onFilter(f)}
+                className={
+                  'px-2.5 py-1 rounded-[5px] font-medium ' +
+                  (statusFilter === f
+                    ? 'bg-wm-bg-selected text-wm-text'
+                    : 'text-wm-text-muted hover:text-wm-text hover:bg-wm-bg-hover')
+                }
+              >
+                {f === 'all' ? 'All' : f[0].toUpperCase() + f.slice(1)}
+                {f !== 'all' && ` (${counts[f]})`}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
+
+      {adding && (
+        <div className="mt-3 rounded-md border border-wm-accent/30 bg-wm-accent-tint/30 p-3">
+          <p className="text-[11px] font-semibold text-wm-text mb-1">New recommended_page directive</p>
+          <p className="text-[11px] text-wm-text-muted mb-2 leading-snug">
+            One-line build / workflow directive the partner needs — a page the sitemap should
+            consider, a CPT/CMS requirement, a redirect map, seasonal theming, etc.
+            <strong> NOT page copy.</strong> Saves at status=approved with source_kind=strategist_manual;
+            the allocation step routes it to <code className="font-mono">build_directives[]</code> for dev handoff.
+          </p>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder='e.g. "We need a Staff CPT so the team can edit bios via the CMS without touching templates."'
+            className="w-full rounded-md border border-wm-border bg-wm-bg-elevated px-2.5 py-1.5 text-[12px] text-wm-text leading-snug focus:outline-none focus:border-wm-border-focus min-h-[56px]"
+            rows={3}
+          />
+          <div className="mt-2 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => { setDraft(''); setAdding(false) }}
+              disabled={saving}
+              className="text-[11px] font-medium px-2.5 py-1 rounded-md text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void submit()}
+              disabled={saving || !draft.trim()}
+              className="text-[11px] font-semibold px-3 py-1 rounded-md bg-wm-accent text-wm-text-on-accent hover:bg-wm-accent-hover disabled:opacity-50 inline-flex items-center gap-1"
+            >
+              {saving ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+              Add directive
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
