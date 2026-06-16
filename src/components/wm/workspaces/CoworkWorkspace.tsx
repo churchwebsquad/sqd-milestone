@@ -827,7 +827,7 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
         {step.kind === 'cowork_session' && isCowork && (
           <>
             {step.skill_md_path && <DownloadSkillButton skillPath={step.skill_md_path} stepNumber={step.step_number} />}
-            {['outline-page', 'draft-page', 'critique-page'].includes(step.key) && (
+            {['outline-page', 'draft-page', 'critique-page', 'audit-external-copy', 'supplemental-page-authoring'].includes(step.key) && (
               <DownloadBundleButton projectId={projectId} />
             )}
             <CopyPromptButton step={step} projectId={projectId} />
@@ -867,7 +867,7 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
               </span>
             </button>
             {step.skill_md_path && <DownloadSkillButton skillPath={step.skill_md_path} stepNumber={step.step_number} />}
-            {['outline-page', 'draft-page', 'critique-page'].includes(step.key) && (
+            {['outline-page', 'draft-page', 'critique-page', 'audit-external-copy', 'supplemental-page-authoring'].includes(step.key) && (
               <DownloadBundleButton projectId={projectId} />
             )}
             <CopyPromptButton step={step} projectId={projectId} label="Re-run in Cowork" />
