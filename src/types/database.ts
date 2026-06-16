@@ -1092,6 +1092,16 @@ export interface StrategyWebProject {
   strategy_brief_notion_url:  string | null
   external_brand_guide_url:   string | null
 
+  // ── Notion-audit branch (v74) ──
+  // Set when copywriting is already in progress in a Notion database.
+  // When present, the cowork pipeline collapses steps 7-10 into the
+  // autonomous audit-external-copy skill (walks the sitemap, scores
+  // existing Notion copy on the 5 axes, flags formatting gaps),
+  // then auto-fires supplemental-page-authoring for sitemap pages
+  // with no Notion match.
+  notion_database_id:   string | null
+  notion_database_url:  string | null
+
   // ── Content Manager — Roadmap deliverable + AI pipeline state (v30) ──
   roadmap_opening_paragraph:  string | null
   roadmap_properties:         Record<string, unknown>

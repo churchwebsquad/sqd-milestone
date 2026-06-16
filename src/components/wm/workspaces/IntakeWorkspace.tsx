@@ -254,6 +254,12 @@ export function IntakeWorkspace({ project, onChange }: Props) {
           </ul>
         </section>
 
+        {/* Copywriting branch — optional. When the partner came in
+            with copy already drafted in Notion, the cowork pipeline
+            collapses steps 7-10 into an autonomous audit pass instead
+            of generating from scratch. */}
+        <CopywritingSection project={project} onChange={onChange} />
+
         {/* Site crawl — formerly its own tab, now lives alongside the
             checklist since intake + crawl together form the "what do
             we know about this church?" surface. */}
@@ -637,6 +643,179 @@ function ExternalUrlField({
         )}
       </div>
     </div>
+  )
+}
+
+// ── Copywriting branch (Notion-audit) ────────────────────────────────
+
+/**
+ * Parses a Notion URL into its database id. Notion URLs come in a
+ * few flavors:
+ *   https://www.notion.so/<workspace>/<title-with-dashes>-<id-no-dashes>
+ *   https://www.notion.so/<id-no-dashes>?v=<view-id>
+ *   https://app.notion.com/p/<workspace>/<id-no-dashes>?v=<view-id>
+ * Returns the 32-char id (no dashes) or null when the URL doesn't
+ * fit any known shape. The strategist UI surfaces the null result
+ * as "couldn't parse — paste the full URL" so the typo is obvious.
+ */
+function extractNotionDatabaseId(input: string): string | null {
+  const cleaned = input.trim()
+  if (!cleaned) return null
+  // Look for a 32-char hex run anywhere in the URL (Notion ids are
+  // 32 hex chars, optionally split by dashes). Take the LAST match
+  // since query-string view ids appear after the database id.
+  const matches = cleaned.match(/[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g)
+  if (!matches || matches.length === 0) return null
+  // First match wins — that's the database id; later matches are
+  // view ids / block ids.
+  return matches[0].replace(/-/g, '')
+}
+
+function CopywritingSection({
+  project, onChange,
+}: { project: StrategyWebProject; onChange: () => Promise<void> }) {
+  const initiallyOn = !!project.notion_database_id
+  const [expanded, setExpanded] = useState(initiallyOn)
+  const [urlDraft, setUrlDraft] = useState(project.notion_database_url ?? '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const parsedId = extractNotionDatabaseId(urlDraft)
+  const dirty = urlDraft.trim() !== (project.notion_database_url ?? '').trim()
+
+  const save = async () => {
+    setError(null)
+    if (!urlDraft.trim()) {
+      // Empty URL = clearing the branch. Wipe both columns.
+      setSaving(true)
+      try {
+        const { error } = await supabase
+          .from('strategy_web_projects')
+          .update({ notion_database_id: null, notion_database_url: null })
+          .eq('id', project.id)
+        if (error) throw error
+        await onChange()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to clear Notion link')
+      } finally { setSaving(false) }
+      return
+    }
+    if (!parsedId) {
+      setError('Couldn\'t find a Notion id in this URL. Paste the full URL from your browser address bar.')
+      return
+    }
+    setSaving(true)
+    try {
+      const { error } = await supabase
+        .from('strategy_web_projects')
+        .update({ notion_database_id: parsedId, notion_database_url: urlDraft.trim() })
+        .eq('id', project.id)
+      if (error) throw error
+      await onChange()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save Notion link')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const clear = async () => {
+    setUrlDraft('')
+    setExpanded(false)
+    setSaving(true)
+    setError(null)
+    try {
+      const { error } = await supabase
+        .from('strategy_web_projects')
+        .update({ notion_database_id: null, notion_database_url: null })
+        .eq('id', project.id)
+      if (error) throw error
+      await onChange()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to clear Notion link')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <section className="rounded-xl border border-wm-border bg-wm-bg-elevated px-4 py-3">
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center justify-between gap-3 text-left"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          {expanded ? <ChevronDown size={14} className="text-wm-text-muted shrink-0" /> : <ChevronRight size={14} className="text-wm-text-muted shrink-0" />}
+          <h2 className="text-[14px] font-semibold text-wm-text">Copywriting (optional, external)</h2>
+          {initiallyOn && (
+            <span className="text-[10px] uppercase tracking-widest font-bold text-wm-success bg-wm-success/10 px-2 py-0.5 rounded">Audit branch on</span>
+          )}
+          {!initiallyOn && (
+            <span className="text-[10px] uppercase tracking-widest text-wm-text-subtle">Optional</span>
+          )}
+        </div>
+        {project.notion_database_url && (
+          <a
+            href={project.notion_database_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            className="text-[11px] text-wm-accent hover:underline inline-flex items-center gap-1 shrink-0"
+          >
+            Open in Notion <ExternalLink size={11} />
+          </a>
+        )}
+      </button>
+
+      {expanded && (
+        <div className="mt-3 space-y-3">
+          <p className="text-[12px] text-wm-text-muted leading-snug">
+            If the partner came in with copywriting already in progress (e.g. drafts in a Notion database), paste the database URL here. The cowork pipeline will collapse steps 7-10 into an autonomous audit pass that scores the existing copy on the 5 axes and flags formatting gaps against the canonical templates. Pages missing from Notion auto-route to a supplemental authoring step.
+          </p>
+          <div>
+            <label className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle block mb-1">
+              Notion database URL
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="url"
+                value={urlDraft}
+                onChange={e => setUrlDraft(e.target.value)}
+                placeholder="https://www.notion.so/workspace/Database-name-1234abcd…"
+                className="flex-1 min-w-0 rounded-md border border-wm-border bg-wm-bg-elevated px-2.5 py-1.5 text-[12px] text-wm-text placeholder-wm-text-subtle outline-none focus:border-wm-accent focus:ring-2 focus:ring-wm-accent/15"
+              />
+              {dirty && (
+                <button
+                  type="button"
+                  onClick={() => void save()}
+                  disabled={saving}
+                  className="text-[11px] font-semibold rounded-md px-3 py-1.5 bg-wm-accent text-wm-text-on-accent hover:bg-wm-accent-hover transition-colors disabled:opacity-50"
+                >
+                  {saving ? '…' : 'Save'}
+                </button>
+              )}
+              {initiallyOn && !dirty && (
+                <button
+                  type="button"
+                  onClick={() => void clear()}
+                  disabled={saving}
+                  className="text-[11px] font-medium rounded-md px-3 py-1.5 text-wm-text-muted hover:bg-wm-bg-hover transition-colors disabled:opacity-50"
+                  title="Removes the Notion link and reverts the pipeline to the standard generate-from-scratch branch."
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            {parsedId && (
+              <p className="mt-1 text-[11px] text-wm-text-muted">
+                Parsed database id: <code className="font-mono">{parsedId}</code>
+              </p>
+            )}
+            {error && (
+              <p className="mt-1 text-[11px] text-wm-danger">{error}</p>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
   )
 }
 
