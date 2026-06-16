@@ -72,7 +72,11 @@ serve(async (req: Request) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        // Current stable Sonnet. The previous date-suffixed alias
+        // (claude-sonnet-4-20250514) has been retired by Anthropic,
+        // which surfaced as a 4xx from the upstream API and a non-2xx
+        // back to the brand-guide editor when uploading strategy briefs.
+        model: 'claude-sonnet-4-6',
         max_tokens: 3000,
         system: SYSTEM_PROMPT,
         messages: [{

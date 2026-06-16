@@ -2183,7 +2183,23 @@ function VoicePrefillCard({ bundle, onPrefilled, onError }: {
         'brand-voice-prefill',
         { body: { markdown } },
       )
-      if (error) throw error
+      if (error) {
+        // supabase-js wraps non-2xx into a generic "Edge Function
+        // returned a non-2xx status code" message that hides the
+        // upstream reason (model retired, key missing, parse failure,
+        // etc.). The error carries the Response under `context` —
+        // pull the JSON body's `error` field so the strategist sees
+        // the real failure mode.
+        const ctx = (err => (err as { context?: Response }).context)(error)
+        let detail = error.message
+        if (ctx && typeof ctx.json === 'function') {
+          try {
+            const body = await ctx.json() as { error?: string }
+            if (body?.error) detail = body.error
+          } catch { /* body wasn't JSON — keep the generic message */ }
+        }
+        throw new Error(detail)
+      }
       if (!data?.prefill) throw new Error(data?.error ?? 'No prefill returned from AI')
       await commitPrefill(bundle, data.prefill)
       await onPrefilled()
