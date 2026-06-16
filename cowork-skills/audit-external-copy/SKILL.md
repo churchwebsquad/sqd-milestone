@@ -3,30 +3,52 @@ name: audit-external-copy
 description: |
   Replaces outline-page + draft-page + critique-page for projects
   where copywriting was already in progress externally (Notion
-  database). Walks the sitemap autonomously, matches each page to
-  a Notion page by slug, scores existing copy on the 5 axes
-  (dignity / voice / persona / source_coverage / claim_plausibility),
-  AND audits structure against canonical_templates' slot vocab
-  (formatting axis). Pages with no Notion match get a placeholder
-  critique flagged for supplemental-page-authoring.
+  database). Walks the partner's Notion DB via Notion MCP, BINDS each
+  Notion section to a canonical Brixies template_key + maps content
+  into cowork_writable_slots, resolves overflow (split / substitute /
+  truncate), scores the bound copy on the 5 axes, and writes THREE
+  artifacts per page: page_outlines.<slug> (template + slot binding),
+  page_drafts.<slug> (slot values), page_critiques.<slug> (5-axis
+  scoring + directives). The outline + draft are what the importer
+  needs to insert pages into Brixies — without them the audit branch
+  produces only feedback, not a shippable build.
 model: anthropic/claude-opus-4-7
 allowed-tools: Read
-version: '1.0.0'
+version: '2.0.0'
 references:
   - ../critique-page/references/audit-criteria.md
 ---
 
 # Audit External Copy
 
-You audit copy the partner already wrote. You do not generate. You do
-not redesign. You check what's there against the foundations + the
-canonical templates, score it on the 5 axes, and flag pages that need
-supplemental authoring because no Notion match exists.
+You take copy the partner already wrote in Notion and turn it into a
+Brixies-importable build: pick the right canonical template for each
+section, map the Notion content into the template's slots, resolve
+any overflow, and score what you produced. Three artifacts per page:
+outline (template + slot binding), draft (slot values), critique
+(5-axis scoring). The strategist sees a final report; the importer
+ingests the outline+draft like any other branch.
 
 This skill replaces the standard outline → draft → critique trio for
 the audit branch — one autonomous pass over the whole sitemap rather
-than three rounds × N pages. You walk pages without prompting the
-strategist; the report at the end surfaces everything for review.
+than three cowork sessions × N pages. You walk pages without prompting
+the strategist; the report at the end surfaces everything for review.
+
+## Why three artifacts (not just a critique)
+
+Earlier versions of this skill wrote only `page_critiques.<slug>` —
+that gave the strategist feedback but left the partner's Notion copy
+unimportable, because the importer needs `page_outlines.<slug>`
+(template + slot binding) and `page_drafts.<slug>` (slot values) to
+insert pages into Brixies. The Brixies bind step in the standard
+pipeline lives in draft-page; in the audit branch it has to live
+here, or the audit produces feedback no one can ship.
+
+The decisions you make for the formatting axis ARE the binding —
+when you say "this section maps to feature_team but overflows the
+2-item cap," you've already decided template_key + identified the
+slot mismatch. Now persist that decision as `page_outlines.<slug>`
+and write the slot values as `page_drafts.<slug>`.
 
 ## Strategic Goals — inputs you MUST consume
 
@@ -136,13 +158,18 @@ For each Notion page:
 The slug is your `page_slug` for both the critique write key and the
 strategist-facing report.
 
-### 2. Audit body formatting against canonical_templates
+### 2. Bind each Notion section to a canonical template
 
-Read the Notion body's structural shape. For each visible section
-(typically a heading-2 or heading-3 starting a new block):
+Read the Notion body's structural shape. Split into sections — each
+heading-2 (or heading-3 if no h2 exists in the page) starts a new
+section that runs until the next heading at the same level.
 
-- Infer the most-likely `template_key` from `canonical_templates.page_section_templates`. Match by section role + content shape:
-  - Lead-in / opener → `hero_homepage` (home) or `hero_inner` (every other)
+For each section, decide three things — these BECOME the outline +
+draft for the page:
+
+**(a) Pick a `template_key`** from `canonical_templates.page_section_templates`. Match by section role + content shape:
+
+  - Lead-in / opener at top of page → `hero_homepage` (home only) or `hero_inner` (every other page)
   - Card list / 3-item feature → `content_featured_a` (with palette) or `content_image_text_a`
   - 2-column content → `content_image_text_b`
   - Accordion-shaped FAQ → `accordion_faq`
@@ -151,29 +178,52 @@ Read the Notion body's structural shape. For each visible section
   - Testimonials → `testimonial_written` / `testimonial_video`
   - Timeline / story → `timeline_story`
   - Contact / address block → `contact_section`
-- Verify against the picked template's `cowork_writable_slots`:
-  - `primary_heading.max_chars` (typically 100) — over? flag.
-  - `body.max_chars` (typically 400) — over? flag.
-  - `items[].max_items` — too many bullets / cards? flag.
-  - `items[].item_subfields.item_heading.max_chars` / `item_body.max_chars` — same.
-  - `buttons.max_items` (typically 2) — too many CTAs? flag.
-  - `tagline.max_chars` (typically 60) — over? flag.
+  - Video content → `content_video`
+  - Career listings → `career_section`
+  - Generic prose with no card structure → `content_image_text_b`
 
-Capture each violation as a directive:
+**(b) Resolve overflow** — when the Notion content exceeds the
+picked template's slot caps, RESOLVE it (don't just flag). Three
+moves, in preference order:
 
-```json
-{ "kind": "formatting_overage", "severity": "warning",
-  "section": "<heading or slug>", "slot": "body",
-  "detail": "412 chars vs 400 cap (12 over). Trim or split." }
-```
+  1. **SUBSTITUTE template** — if another `template_key` in the
+     manifest fits the actual content count + shape, pick it.
+     Example: 6 staff with `feature_team` (cap 2) → check if a
+     `feature_team_grid` or similar exists. If so, use that.
+  2. **SPLIT into N sections** — same `template_key`, repeated.
+     6 staff → 3× `feature_team` sections (2 each), each with its
+     own primary_heading ("Lead Pastors" / "Staff Pastors" /
+     "Support Team" — derive groupings from titles when possible,
+     otherwise just "Staff (1 of 3)" / "Staff (2 of 3)" / etc.).
+     8 items → 2× sections of 4.
+  3. **TRUNCATE + defer** — only when SUBSTITUTE and SPLIT both
+     fail (e.g. 12 FAQ items, `accordion_faq` cap 5, no other
+     accordion variant). Keep the top N items by priority; surface
+     the deferred ones in `deferred_atoms[]` on the draft AND as a
+     directive on the critique so the strategist sees what was cut.
 
-If a section doesn't fit ANY template, surface that too:
+For body / heading / item-body overages: TRIM (paraphrase down to
+the cap, preserving the partner's voice from `stage_1.voice_exemplars`)
+or SPLIT (two short sections instead of one overflowing one).
 
-```json
-{ "kind": "formatting_unmatched_section", "severity": "warning",
-  "section": "<heading>",
-  "detail": "Section shape doesn't fit any canonical template. Either restructure or add to a content_image_text_b body." }
-```
+**(c) Map content into slots**. Per the picked template's
+`cowork_writable_slots`:
+  - `tagline` (eyebrow) ← any short kicker line, if present
+  - `primary_heading` ← the section heading (or partner-supplied h2)
+  - `body` ← the section's descriptive prose (≤400 chars, trim if needed)
+  - `accent_body` ← only on templates that have it (content_video etc.)
+  - `items[]` ← each card / list item / staff member / etc., with
+    `item_heading`, `item_body`, and optional `item_meta` (role,
+    date, location, etc.) per the template's `item_subfields`.
+  - `buttons[]` ← CTAs found in the section (label + url). Max
+    per template's `buttons.max_items`. Map button URLs to fact
+    rows in `facts_pool` when possible (e.g. /give → giving fact).
+
+**Validate before continuing**: every slot with `required: true`
+in the template's `cowork_writable_slots` MUST have a value. If a
+required slot is empty after binding, either pull from another
+section nearby, OR emit a `required_slot_unfilled` directive on
+the critique and use a placeholder string the strategist can fix.
 
 ### 3. Score the 5 axes (use the standard rubrics)
 
@@ -204,24 +254,104 @@ Per the rubric in audit-criteria.md:
 - Any axis 50-74 OR any warning directive → `yellow`
 - Any axis <50 OR any blocker directive → `red`
 
-### 5. Write the critique
+### 5. Write THREE artifacts per page
 
-ONE MCP call:
+THREE Supabase MCP writes per page. Same `audit_source = 'notion'` on
+every `_meta` block so synthesize-critique + the downstream importer
+can tell where these artifacts came from.
 
-```sql
-SELECT roadmap_state_set(
-  '<project_id>'::uuid,
-  ARRAY['page_critiques', '<page_slug>'],
-  '<full_critique_jsonb>'::jsonb
-);
+**(a) `page_outlines.<slug>`** — the template + slot-binding plan.
+Shape mirrors what outline-page would produce in the standard branch:
+
+```json
+{
+  "page_slug": "<slug>",
+  "page_type": "<inferred: home / plan_visit / about / ministry / serve / give / connect / belief / staff / practical / other>",
+  "page_promise": "<one-sentence aggregate promise of the page>",
+  "sections": [
+    {
+      "section_intent_id": "<short id, e.g. 's1-hero'>",
+      "template_key": "<chosen template>",
+      "flow_role": "<hook / orient / inform / reassure / invite / deepen>",
+      "section_job": "<one-sentence what this section does>",
+      "intended_verbatim_band": "<from strategic_goals copy_approach.derived.intended_verbatim_band>",
+      "atom_assignments": [
+        { "slot": "primary_heading", "source": "notion:<heading text>" },
+        { "slot": "body",             "source": "notion:<paragraph>" },
+        { "slot": "items",            "source": "notion:<card group>" }
+      ],
+      "voice_anchor": "<a stage_1.voice_exemplars phrase the section voice should align with>"
+    }
+  ],
+  "_meta": {
+    "audit_source": "notion",
+    "notion_page_id": "<id>",
+    "notion_url":     "<url>",
+    "generated_at":   "<iso>"
+  }
+}
 ```
 
-The critique's shape mirrors the standard critique-page output, plus:
-- `_meta.audit_source = 'notion'`
-- `_meta.notion_page_id` + `_meta.notion_url`
-- `_meta.handoff_note` (≤1 screen): what was audited, top 3 violations,
-  overall band, any flag for the strategist (verbatim-band miss,
-  vision-fit gap, missing key_message reflection).
+```sql
+SELECT roadmap_state_set('<project_id>'::uuid, ARRAY['page_outlines', '<slug>'], '<outline_jsonb>'::jsonb);
+```
+
+**(b) `page_drafts.<slug>`** — the actual slot values, ready for the importer.
+
+```json
+{
+  "page_slug": "<slug>",
+  "sections": [
+    {
+      "section_intent_id": "s1-hero",
+      "template_key":      "hero_inner",
+      "slot_values": {
+        "primary_heading": "Plan a Visit",
+        "body":            "...",
+        "items":           [ ... ],
+        "buttons":         [ { "label": "...", "url": "..." } ]
+      },
+      "atoms_used":         [],
+      "facts_used":         ["<fact_id>"],
+      "crawl_topics_used":  [],
+      "deferred_atoms":     [],
+      "actual_verbatim_ratio": 0.85,
+      "voice_notes":        "Lifted from Notion verbatim; matches stage_1 voice posture."
+    }
+  ],
+  "_meta": {
+    "audit_source": "notion",
+    "notion_page_id": "<id>",
+    "notion_url":     "<url>",
+    "generated_at":   "<iso>"
+  }
+}
+```
+
+Source-tracking on the draft: every Notion lift counts as verbatim
+when it matches an atom / fact / crawl-passage body. When the Notion
+copy DOESN'T trace back to a source (partner wrote it fresh in
+Notion), still include it — but report `actual_verbatim_ratio` based
+on the share that DOES trace. Don't fabricate atom_ids.
+
+```sql
+SELECT roadmap_state_set('<project_id>'::uuid, ARRAY['page_drafts', '<slug>'], '<draft_jsonb>'::jsonb);
+```
+
+**(c) `page_critiques.<slug>`** — 5-axis scoring + directives, same
+shape as critique-page's standard output. `_meta.handoff_note`
+≤1 screen: what was audited + bound, top 3 directives, overall_band,
+any partner-input asks (sermon series name, contact info to
+verify, etc.).
+
+```sql
+SELECT roadmap_state_set('<project_id>'::uuid, ARRAY['page_critiques', '<slug>'], '<critique_jsonb>'::jsonb);
+```
+
+Three writes per page in this order: outline → draft → critique
+(outline references drive the draft; the draft drives the critique).
+If a write fails, surface the error and STOP — don't continue to
+the next page until the strategist clears it.
 
 ## Final report — surface to strategist after ALL pages
 
@@ -232,43 +362,54 @@ written for gaps), produce ONE consolidated report in conversation:
 # Audit complete — <N> pages
 
 ## Summary
-- **<X> audited** (matched a Notion page) — <green count> green / <yellow count> yellow / <red count> red
+- **<X> audited + bound** (outline + draft + critique written for each) — <green count> green / <yellow count> yellow / <red count> red
 - **<Y> gaps** (no Notion match) — supplemental-page-authoring will write copy for these:
   - <slug-1>
   - <slug-2>
   - ...
 
-## Top formatting violations (most-frequent)
-- `body` overage on <N> pages (avg <chars-over> chars over)
-- `primary_heading` overage on <N> pages
-- `items` count overage on <N> pages
+## Brixies binding summary
+- Template distribution: <e.g. 19 hero_inner, 11 feature_team, 7 content_image_text_b, ...>
+- Overflow resolutions: <N> SPLITs / <N> SUBSTITUTEs / <N> TRUNCATEs
+- Pages with TRUNCATED content (deferred items the strategist should review):
+  - <slug>: <which items got cut, where they're tracked>
+
+## Top content issues (sorted by frequency)
+- `body` trim required on <N> pages (avg <chars-over> chars over before trim)
+- `items` count overflow handled on <N> pages (SPLIT/SUBSTITUTE applied)
+- `required_slot_unfilled` on <N> pages (placeholder set, strategist must fill)
+- Source / contact drift between Notion and `facts_pool` on <N> pages
+
+## Partner-input asks (batch into one AM ping)
+- <slug>: <what the partner needs to clarify, e.g. "current sermon series name">
 - ...
 
 ## Verbatim-band misses
 - <slug> — band=<approved>, observed=<measured> (drift=<delta>)
 - ...
 
-## Vision-fit gaps
-- <slug> — `church_vision` not reflected; recommend revision.
-- ...
-
 ## Strategist next steps
 1. Review the <yellow + red count> flagged pages in the workspace.
-2. Launch **supplemental-page-authoring** to fill the <Y> gap pages.
-3. Run **synthesize-critique** when satisfied with the audit results.
+2. Send the partner-input asks to the AM as one batch.
+3. Run **synthesize-critique** when satisfied — produces the project-level rollup. The importer can ingest the outlines + drafts after that.
 ```
 
 Do not prompt for confirmation per page. Walk all pages, write all
-critiques, surface the report once. The strategist reads the report
-and decides whether to drill in.
+three artifacts per page, surface the report once. The strategist
+reads the report and decides whether to drill in.
 
 ## Hard rules
 
-- ONE Supabase MCP write per page. Reads via Notion MCP are fine
-  (that's how you walk the DB) — but don't run per-section
-  `roadmap_state_set` calls.
-- Do not invent missing slots — flag them, don't fill them.
-- Do not rewrite copy. The audit is read-only against page_critiques.
+- THREE Supabase MCP writes per page (outline → draft → critique).
+  Reads via Notion MCP are fine (that's how you walk the DB) — but
+  don't fan out additional `roadmap_state_set` calls per section.
+- Resolve overflow during binding (SPLIT / SUBSTITUTE / TRUNCATE).
+  Don't ship an outline whose section would overflow its template's
+  slot caps — the importer rejects those.
+- Don't invent atom/fact ids in `atoms_used` / `facts_used`. Only
+  reference rows that exist in the bundle's `atoms_pool.by_id` /
+  `facts_pool.by_id`. Notion-original copy with no source lift
+  gets reported in `actual_verbatim_ratio` but no fake source ids.
 - If `notion_audit_branch` is null in the bundle, the project isn't
   on the audit branch — stop, surface to the strategist (they're
   probably running you on the wrong project).

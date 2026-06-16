@@ -597,10 +597,10 @@ SELECT roadmap_state_set(
 const AUDIT_EXTERNAL_COPY_STEP: StepCatalogEntry = {
   key:         'audit-external-copy',
   step_number: 8,
-  title:       'Audit each page (Notion copy)',
+  title:       'Audit + bind each page (Notion copy → Brixies)',
   subtitle:    'audit-external-copy',
   description:
-    'Walks the sitemap and scores the partner\'s existing Notion copy on the 5 axes (dignity, voice character, persona fit, source coverage, claim plausibility). Also audits the page structure against the canonical templates and flags formatting gaps. Replaces outline + draft + critique for projects where copywriting was already in progress externally. Pages with no Notion match get flagged for the supplemental authoring step.',
+    'Walks the partner\'s Notion DB via Notion MCP and produces THREE artifacts per page in one pass: page_outlines (template + slot binding), page_drafts (slot values), page_critiques (5-axis scoring + directives). Overflow (e.g. 6 staff when feature_team caps at 2) gets RESOLVED during binding — split into multiple sections, substituted to a template with a higher cap, or truncated with deferred items tracked on the draft. Replaces outline + draft + critique for projects where copywriting was already drafted externally; the outline + draft are what the importer needs to insert pages into Brixies.',
   kind:        'cowork_session',
   skill_md_path: 'cowork-skills/audit-external-copy/SKILL.md',
   starter_prompt:
@@ -635,34 +635,41 @@ The audit branch ships a **deliberately slim** bundle. Don't treat missing field
 **OPTIONAL — may be empty**:
 - \`crawl_topics_pool\` — only populated if the project has a site crawl. Many audit-branch projects don't (partner uploaded Notion instead of running a crawl). When empty, score source-coverage + verbatim-band against \`atoms_pool\` and \`facts_pool\` alone; don't flag "no crawl" as a problem.
 
-## Workflow
+## Workflow — produces THREE artifacts per page
+
+This step is the audit-branch equivalent of outline + draft + critique
+collapsed into one pass. For each Notion page you write **three**
+Supabase MCP records, so the importer can ingest pages without
+re-running anything.
 
 1. Notion MCP: \`query_database(database_id=notion_audit_branch.database_id)\` → page list. Walk in returned order.
 2. For each page: \`retrieve_block_children(page_id, recursive=true)\` → body.
 3. Slugify the page title (lowercase, non-alphas → dashes). Skip nav-container pages (no slug property OR Type='Nav Item' / 'Link').
-4. Audit body against \`canonical_templates\` (formatting axis: primary_heading / body / items / buttons caps).
-5. Score 5 axes against the foundations (use the standard rubric from critique-page.SKILL.md, which is referenced from this skill's frontmatter).
-6. ONE Supabase MCP write per page:
+4. **Bind each section to a canonical template** (see SKILL §2):
+   - Pick \`template_key\` from \`canonical_templates.page_section_templates\`.
+   - RESOLVE overflow: SUBSTITUTE (better-fitting template) → SPLIT (N sections of the same template) → TRUNCATE+defer (only when neither works).
+   - Map content into the template's \`cowork_writable_slots\` (primary_heading / body / items / buttons / tagline / accent_body).
+   - Every \`required: true\` slot must have a value — if absent, emit a directive and use a placeholder.
+5. Score 5 axes on the bound copy against the foundations (audit-criteria.md rubric, referenced from this SKILL's frontmatter).
+6. **THREE Supabase MCP writes per page** (outline → draft → critique):
 
 \`\`\`sql
-SELECT roadmap_state_set(
-  '{{project_id}}'::uuid,
-  ARRAY['page_critiques', '<slug>'],
-  '<full_audit_critique_with_meta_handoff_note>'::jsonb
-);
+SELECT roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_outlines',  '<slug>'], '<outline_jsonb>'::jsonb);
+SELECT roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_drafts',    '<slug>'], '<draft_jsonb>'::jsonb);
+SELECT roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_critiques', '<slug>'], '<critique_jsonb>'::jsonb);
 \`\`\`
 
-The critique's \`_meta.audit_source = 'notion'\` so synthesize-critique knows this was an external-copy audit. \`_meta.handoff_note\` summarizes per-page findings.
+All three \`_meta\` blocks carry \`audit_source = 'notion'\` so synthesize-critique + the importer can tell where these artifacts came from.
 
 ## After all pages
 
 Surface a SINGLE final report (one message, not page-by-page):
-- N pages audited (excluded list: nav-container pages, external links)
+- N pages audited + bound (excluded list: nav-container pages, external links)
 - 5-axis distribution (counts per band: green/yellow/red)
-- Top formatting violations (most-frequent slot caps exceeded)
-- Top claim / source issues (verbatim mismatches, contact-info drift between Notion and facts_pool)
+- **Brixies binding summary**: template distribution, overflow resolutions (N splits / N substitutes / N truncates), pages with TRUNCATED content the strategist should review
+- Top content issues (body trims, items overflow, required_slot_unfilled, source / contact drift between Notion and facts_pool)
+- **Partner-input asks** — items that need partner clarification (named sermon series, current staff emails, etc.) so the strategist can batch them into one AM ping
 - Verbatim-band misses (which pages deviate from \`copy_approach.derived.intended_verbatim_band\`)
-- "Partner-input asks" — items that need partner clarification (named sermon series, current staff emails, etc.) so the strategist can batch them into one AM ping.
 
 Then tell the strategist to run synthesize-critique (step 7) for the ship/iterate rollup.`,
   computeStatus: s => {
@@ -671,19 +678,28 @@ Then tell the strategist to run synthesize-critique (step 7) for the ship/iterat
     // allocation — Notion copy IS the allocation in this branch.
     if (!s.stage_1?._meta?.generated_at)        return 'blocked_waiting'
     if (!s.ministry_model?._meta?.generated_at) return 'blocked_waiting'
-    if (s.page_critiques_count === 0)           return 'cowork_session'
-    // "Done" when every page in the sitemap has a critique. Sitemap
-    // for the audit branch is the Notion DB pages (lifted in the
-    // bundle); sitemap_slugs reflects that count when audit branch
-    // is on. If we don't know the total yet, stay in cowork_session.
-    if (s.sitemap_slugs.length > 0 && s.page_critiques_count >= s.sitemap_slugs.length) return 'done'
+    // This step produces THREE artifacts per page (outline, draft,
+    // critique). "Done" requires all three to be written across the
+    // sitemap so the importer can ingest. If any page is partially
+    // bound (e.g. critique exists but no outline), the step stays
+    // in cowork_session until the strategist re-runs to finish.
+    const allThree = Math.min(s.page_outlines_count, s.page_drafts_count, s.page_critiques_count)
+    if (allThree === 0)                         return 'cowork_session'
+    if (s.sitemap_slugs.length > 0 && allThree >= s.sitemap_slugs.length) return 'done'
     return 'cowork_session'
   },
-  progress: s => ({
-    done:  s.page_critiques_count,
-    total: s.sitemap_slugs.length,
-    label: `${s.page_critiques_count} of ${s.sitemap_slugs.length || '?'} Notion page${s.sitemap_slugs.length === 1 ? '' : 's'} audited`,
-  }),
+  progress: s => {
+    // Surface the laggard among the three artifact counts so the
+    // strategist sees which write is incomplete. All three should
+    // tick up in lockstep — divergence means the cowork session
+    // wrote some but bailed.
+    const minCount = Math.min(s.page_outlines_count, s.page_drafts_count, s.page_critiques_count)
+    return {
+      done:  minCount,
+      total: s.sitemap_slugs.length,
+      label: `${minCount} of ${s.sitemap_slugs.length || '?'} Notion page${s.sitemap_slugs.length === 1 ? '' : 's'} bound (outline + draft + critique)`,
+    }
+  },
 }
 
 const SUPPLEMENTAL_PAGE_AUTHORING_STEP: StepCatalogEntry = {
