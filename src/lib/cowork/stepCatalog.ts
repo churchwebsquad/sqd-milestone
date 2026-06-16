@@ -45,6 +45,14 @@ export interface CoworkPipelineState {
   latest_critique_at:    string | null
   /** Sitemap slugs from site_strategy.pages (or legacy stage_2.pages). */
   sitemap_slugs:         string[]
+
+  // ── Notion-audit branch (v74) ─────────────────────────────────
+  /** When set, the project takes the audit-external-copy branch:
+   *  steps 8-10 collapse into a single autonomous audit pass that
+   *  scores existing Notion copy against the 5 axes. Drawn from
+   *  strategy_web_projects.notion_database_id. */
+  notion_database_id:    string | null
+  notion_database_url:   string | null
 }
 
 /** Status a step card displays. Maps onto a colored pill in the UI. */
@@ -159,7 +167,12 @@ function staleReasonFor(
   return { upstream_label: winner.label, upstream_at: winner.at, output_at: outputAt }
 }
 
-export const COWORK_STEPS: StepCatalogEntry[] = [
+/** The audit-branch alternates for steps 8-10 + a supplemental step.
+ *  Returned when the project has notion_database_id set; otherwise
+ *  the default outline/draft/critique trio applies. Defined at the
+ *  bottom of this file (below COWORK_STEPS_BASE) so the entries can
+ *  reference the shared helpers + types declared above. */
+const COWORK_STEPS_BASE: StepCatalogEntry[] = [
   // ── Inventory extraction (informational; driven outside the tab) ───
   {
     key:         'extract-strategic-pillars',
@@ -570,3 +583,170 @@ SELECT roadmap_state_set(
     lastModel: s => s.critique_rollup?._meta?.model ?? null,
   },
 ]
+
+// ── Audit-branch step entries ─────────────────────────────────────────
+// When the project has notion_database_id set, steps 8-10 collapse
+// into ONE autonomous audit-external-copy step. A supplemental
+// authoring step appears between audit and synthesize-critique to
+// cover any sitemap pages that didn't have a Notion match.
+//
+// The artifact shapes match the default branch exactly
+// (page_critiques.<slug>) so synthesize-critique + downstream
+// dev-handoff don't need to know which branch produced the data.
+
+const AUDIT_EXTERNAL_COPY_STEP: StepCatalogEntry = {
+  key:         'audit-external-copy',
+  step_number: 8,
+  title:       'Audit each page (Notion copy)',
+  subtitle:    'audit-external-copy',
+  description:
+    'Walks the sitemap and scores the partner\'s existing Notion copy on the 5 axes (dignity, voice character, persona fit, source coverage, claim plausibility). Also audits the page structure against the canonical templates and flags formatting gaps. Replaces outline + draft + critique for projects where copywriting was already in progress externally. Pages with no Notion match get flagged for the supplemental authoring step.',
+  kind:        'cowork_session',
+  skill_md_path: 'cowork-skills/audit-external-copy/SKILL.md',
+  starter_prompt:
+`Use the **audit-external-copy** skill for project_id \`{{project_id}}\`. Walk \`sitemap_pages\` sequentially — autonomous, don't prompt until done.
+
+## Inputs (attached, NOT MCP)
+
+I'm attaching:
+1. The audit-external-copy **SKILL.md**.
+2. The **project bundle** \`cowork-pipeline.<partner>.project-bundle.json\` — atoms_pool / facts_pool / crawl_topics_pool / stage_1 / strategic_goals_approved / canonical_templates / sitemap_pages / **notion_audit_branch.pages_by_slug** (the rendered Notion bodies for every page in the partner's Notion database).
+
+If \`notion_audit_branch.load_error\` is non-null, surface the error and stop — the strategist needs to fix Notion access before the audit can run.
+
+## Workflow — ONE MCP write per page
+
+For each page in \`sitemap_pages\` (walk by \`nav_order\`):
+
+1. **Lookup the Notion page** in \`notion_audit_branch.pages_by_slug[<slug>]\`.
+   - If MISSING: write a placeholder critique (overall_band='gap', axes all null, a single directive \`{kind: 'missing_notion_page', severity: 'blocker', detail: 'No Notion page matched this sitemap slug — supplemental authoring required.'}\`). The supplemental step picks these up downstream.
+   - If PRESENT: continue.
+
+2. **Audit body content against the canonical templates** (formatting axis):
+   - Compare the Notion body's section headings + body lengths against \`canonical_templates.page_section_templates\`.
+   - For each section, identify the most-likely template_key, then check primary_heading (≤100 chars), body (≤400), items (max counts per template), buttons (≤2 CTAs per family).
+   - Surface mismatches as directives: \`{kind: 'formatting_overage', section: 'hero', slot: 'primary_heading', detail: '142 chars exceeds the 100-char cap'}\`.
+
+3. **Score 5 axes** (dignity, voice_character, persona_fit, source_coverage, claim_plausibility) using the same rubrics as critique-page.SKILL.md. Anchor against \`stage_1\` (voice_exemplars, ethos_summary) and \`strategic_goals_approved\` (one_key_message, copy_approach.derived.intended_verbatim_band, church_vision).
+
+4. Compute the overall_band from the 5 axes per the standard rubric.
+
+5. **Single MCP write** per page:
+
+\`\`\`sql
+SELECT roadmap_state_set(
+  '{{project_id}}'::uuid,
+  ARRAY['page_critiques', '<slug>'],
+  '<full_audit_critique_with_meta_handoff_note>'::jsonb
+);
+\`\`\`
+
+The critique's \`_meta.audit_source = 'notion'\` so synthesize-critique knows this was an external-copy audit rather than a generated-copy critique. The \`_meta.handoff_note\` summarizes what was audited + which sitemap pages are flagged as gaps.
+
+## After all pages
+
+Surface a final report:
+- N pages audited; M pages flagged as gaps (no Notion match) → supplemental step
+- 5-axis distribution (counts per band)
+- Top formatting violations (most-frequent slot caps exceeded)
+- Verbatim-band misses (which pages deviate from \`copy_approach.derived.intended_verbatim_band\`)
+
+Then prompt the strategist to launch the supplemental-page-authoring step.`,
+  computeStatus: s => {
+    if (!s.page_allocation_plan?._meta?.generated_at) return 'blocked_waiting'
+    if (s.page_critiques_count === 0)                 return 'cowork_session'
+    if (s.page_critiques_count === s.sitemap_slugs.length) return 'done'
+    return 'cowork_session'
+  },
+  progress: s => ({
+    done:  s.page_critiques_count,
+    total: s.sitemap_slugs.length,
+    label: `${s.page_critiques_count} of ${s.sitemap_slugs.length || '?'} page${s.sitemap_slugs.length === 1 ? '' : 's'} audited`,
+  }),
+}
+
+const SUPPLEMENTAL_PAGE_AUTHORING_STEP: StepCatalogEntry = {
+  key:         'supplemental-page-authoring',
+  step_number: 9,
+  title:       'Author copy for gap pages',
+  subtitle:    'supplemental-page-authoring',
+  description:
+    'Sitemap pages that didn\'t have a matching Notion page need copy written. This step is the standard outline → draft → critique sequence, scoped to ONLY those gap pages. Runs after audit-external-copy. If no gaps exist, the step is a no-op and the strategist marks it complete.',
+  kind:        'cowork_session',
+  skill_md_path: 'cowork-skills/supplemental-page-authoring/SKILL.md',
+  starter_prompt:
+`Use the **supplemental-page-authoring** skill for project_id \`{{project_id}}\`. Read the audit's gap-list first; if there are no gaps, surface that and stop.
+
+## Inputs (attached, NOT MCP)
+
+I'm attaching:
+1. The supplemental-page-authoring **SKILL.md**.
+2. The **project bundle** \`cowork-pipeline.<partner>.project-bundle.json\` — same bundle as audit-external-copy. \`notion_audit_branch.pages_by_slug\` tells you which sitemap pages were covered by Notion (the audited set). The complement is the gap set you author for.
+
+## Workflow
+
+1. **Compute the gap set**: \`sitemap_pages\` minus the slugs in \`notion_audit_branch.pages_by_slug\`. These are the pages with no existing Notion copy.
+
+2. **For each gap page**: run outline + draft + critique inline (no separate steps — this skill produces all three artifacts in conversation). Reuse the outline-page / draft-page / critique-page rubrics from those SKILL.mds. Each page writes:
+   - \`page_outlines.<slug>\` (the outline)
+   - \`page_drafts.<slug>\` (the draft)
+   - \`page_critiques.<slug>\` REPLACES the placeholder critique the audit wrote (which had overall_band='gap'). The new critique has \`_meta.audit_source = 'generated-supplemental'\` so synthesize-critique can distinguish.
+
+3. **Single MCP write per page** for each of the three artifacts. The outline + draft + critique-replace happen in three writes total per page (six approvals for three artifacts × paste-confirm cadence).
+
+If gaps.length === 0, surface "All sitemap pages had matching Notion copy — no supplemental authoring needed" and stop. The strategist marks the step done via Approve as-is on the workspace card.`,
+  computeStatus: s => {
+    if (s.page_critiques_count === 0)                  return 'blocked_waiting'
+    if (s.page_critiques_count < s.sitemap_slugs.length) return 'blocked_waiting'
+    // Audit is done. Whether supplemental is needed depends on whether
+    // any page_critique has _meta.audit_source === 'notion-gap'. The
+    // workspace surfaces this via a "ready" card; the strategist clicks
+    // through and the SKILL itself determines the gap set from the
+    // bundle. We mark ready (cowork_session) by default; the SKILL
+    // will say "no gaps, nothing to do" when applicable.
+    if (!s.page_drafts_count || s.page_drafts_count === 0) return 'cowork_session'
+    if (s.page_drafts_count >= s.sitemap_slugs.length)     return 'done'
+    return 'cowork_session'
+  },
+  progress: s => ({
+    done:  s.page_drafts_count,
+    total: s.sitemap_slugs.length,
+    label: `${s.page_drafts_count} of ${s.sitemap_slugs.length} page${s.sitemap_slugs.length === 1 ? '' : 's'} authored`,
+  }),
+}
+
+/** Select the right step catalog for the project's branch.
+ *
+ * Default (notion_database_id null): the standard
+ *   inventory → strategy → ministry → ACF → sitemap → allocation →
+ *   outline → draft → critique → rollup
+ *   pipeline.
+ *
+ * Audit branch (notion_database_id set): steps 1-7 unchanged. Steps
+ *   8-10 collapse into one autonomous audit-external-copy pass. A
+ *   supplemental-page-authoring step covers any sitemap pages
+ *   without a Notion match. Step 11 (synthesize-critique) runs the
+ *   same rollup at the end.
+ */
+export function getCoworkSteps(opts: { auditBranch: boolean }): StepCatalogEntry[] {
+  if (!opts.auditBranch) return COWORK_STEPS_BASE
+  // Steps 1-7 + 11 unchanged; 8-10 → audit; insert supplemental as
+  // the new step 9; renumber 11 → 10 (or keep 11 as-is since
+  // step_number is display-only).
+  const before = COWORK_STEPS_BASE.filter(s =>
+    !['outline-page', 'draft-page', 'critique-page'].includes(s.key),
+  )
+  // Insert audit + supplemental BEFORE synthesize-critique.
+  const synth = before.find(s => s.key === 'synthesize-critique')
+  const rest  = before.filter(s => s.key !== 'synthesize-critique')
+  return [
+    ...rest,
+    AUDIT_EXTERNAL_COPY_STEP,
+    SUPPLEMENTAL_PAGE_AUTHORING_STEP,
+    ...(synth ? [{ ...synth, step_number: 10 }] : []),
+  ]
+}
+
+/** Default export for legacy consumers. Equivalent to
+ *  getCoworkSteps({ auditBranch: false }). */
+export const COWORK_STEPS: StepCatalogEntry[] = COWORK_STEPS_BASE

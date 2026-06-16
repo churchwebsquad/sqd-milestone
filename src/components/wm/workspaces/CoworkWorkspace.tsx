@@ -34,7 +34,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ArrowRight, Check, ChevronRight, Clock, Download, ExternalLink, Eye, Loader2, RefreshCw } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { WMStatusPill, type WMStatusTone } from '../StatusPill'
-import { COWORK_STEPS, type CoworkPipelineState, type StepCatalogEntry, type StepStatus } from '../../../lib/cowork/stepCatalog'
+import { getCoworkSteps, type CoworkPipelineState, type StepCatalogEntry, type StepStatus } from '../../../lib/cowork/stepCatalog'
 import { expandCoworkTokens } from '../../../lib/cowork/coworkPromptContext'
 import { CoworkArtifactDrawer } from './CoworkArtifactDrawer'
 import type { StrategyWebProject } from '../../../types/database'
@@ -148,6 +148,8 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         latest_critique_at:   latestCritiqueAt,
         sitemap_slugs:        sitemapSlugs,
         strategic_goals_at:   roadmap.strategic_goals?._meta?.generated_at ?? null,
+        notion_database_id:   project.notion_database_id ?? null,
+        notion_database_url:  project.notion_database_url ?? null,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'failed to load project state')
@@ -302,6 +304,15 @@ export function CoworkWorkspace({ project, onChange }: Props) {
     }
   }
 
+  // Step catalog is branch-aware: when the project has
+  // notion_database_id set, steps 8-10 collapse into a single
+  // audit-external-copy pass + a supplemental-page-authoring step
+  // for sitemap pages without a Notion match.
+  const steps = useMemo(
+    () => getCoworkSteps({ auditBranch: !!project.notion_database_id }),
+    [project.notion_database_id],
+  )
+
   // Status pill + first ready step (for the "Up next" highlight).
   // aggregate_info steps count toward `done` — visually they read as
   // complete (auto-extracted + check pill + 100% progress bar) so the
@@ -310,7 +321,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
     if (!state) return null
     let done = 0, ready = 0, stale = 0, cowork = 0, waiting = 0
     let firstReadyKey: string | null = null
-    for (const step of COWORK_STEPS) {
+    for (const step of steps) {
       const s = step.computeStatus(state)
       if (s === 'done' || s === 'aggregate_info') done++
       if (s === 'stale')            stale++
@@ -356,7 +367,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
       )}
 
       <div className="flex flex-col gap-4">
-        {COWORK_STEPS.map(step => (
+        {steps.map(step => (
           <StepCard
             key={step.key}
             step={step}
