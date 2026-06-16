@@ -120,6 +120,7 @@ export function IntakeWorkspace({ project, onChange }: Props) {
   const [intake, setIntake] = useState<IntakeStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [autoFireMsg, setAutoFireMsg] = useState<string | null>(null)
 
   const refreshIntake = async () => {
     try {
@@ -145,6 +146,56 @@ export function IntakeWorkspace({ project, onChange }: Props) {
     })()
     return () => { cancelled = true }
   }, [project.id, project.member])
+
+  // Auto-fire normalize-intake + aggregate-strategic-goals when the
+  // three hard stops have just finished AND no atoms exist yet for
+  // the project. This is the "content collection is done — run the
+  // first cowork stages" trigger the strategist used to fire manually.
+  // De-duped via sessionStorage so re-renders don't re-fire.
+  useEffect(() => {
+    if (!intake?.ready_for_content) return
+    const dedupKey = `cowork-autofire-cc.${project.id}`
+    if (sessionStorage.getItem(dedupKey)) return
+    let cancelled = false
+    void (async () => {
+      const { count: atomCount } = await supabase
+        .from('content_atoms')
+        .select('id', { count: 'exact', head: true })
+        .eq('web_project_id', project.id)
+      if (cancelled) return
+      if ((atomCount ?? 0) > 0) {
+        sessionStorage.setItem(dedupKey, '1')
+        return
+      }
+      sessionStorage.setItem(dedupKey, '1')
+      setAutoFireMsg('Content collection is complete — running normalize-intake + strategic-goals snapshot. This takes 1-2 minutes; you can keep working.')
+      const { data: { session } } = await supabase.auth.getSession()
+      const jwt = session?.access_token
+      if (!jwt) {
+        setAutoFireMsg('Auto-fire skipped: no auth session. Run normalize-intake manually from the Cowork tab.')
+        return
+      }
+      const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` }
+      // normalize-intake runs long — fire-and-forget, but await the
+      // request kickoff so any 4xx surfaces in the toast.
+      try {
+        await Promise.allSettled([
+          fetch('/api/web/agents/orchestrate', {
+            method: 'POST', headers,
+            body: JSON.stringify({ action: 'run_normalize', projectId: project.id }),
+          }),
+          fetch('/api/web/cowork/aggregate-strategic-goals', {
+            method: 'POST', headers,
+            body: JSON.stringify({ project_id: project.id }),
+          }),
+        ])
+        if (!cancelled) setAutoFireMsg('Triggered normalize-intake + strategic-goals snapshot. Open the Cowork tab to watch progress.')
+      } catch (e) {
+        if (!cancelled) setAutoFireMsg(`Auto-fire failed: ${e instanceof Error ? e.message : 'unknown error'}. Run normalize-intake manually from Cowork.`)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [intake?.ready_for_content, project.id])
 
   if (loading) {
     return (
@@ -178,6 +229,13 @@ export function IntakeWorkspace({ project, onChange }: Props) {
             automatically once it runs.
           </p>
         </header>
+
+        {autoFireMsg && (
+          <div className="rounded-lg border border-wm-accent/30 bg-wm-accent-tint/40 px-4 py-3 text-[12.5px] text-wm-text flex items-start gap-2">
+            <Loader2 size={14} className="shrink-0 mt-0.5 animate-spin text-wm-accent" />
+            <span>{autoFireMsg}</span>
+          </div>
+        )}
 
         {/* Compact checklist — each row collapses to a single line by
             default. Click to expand for uploads + per-row affordances. */}
