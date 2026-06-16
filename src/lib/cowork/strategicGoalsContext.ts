@@ -26,7 +26,7 @@ import {
   type StrategicGoalField,
   type StrategicGoalFieldDef,
   type StrategicGoalsSnapshot,
-} from './strategicGoals'
+} from './strategicGoals.js'
 
 /** Build the strategic-goals block for a specific step. Returns ''
  *  when no relevant fields are populated/approved — caller can splice

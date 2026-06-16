@@ -22,14 +22,14 @@ import {
   ALLOCATION_TREATMENTS,
   SOURCE_KINDS_FOR_ALLOCATION,
   UNRESOLVED_REASONS_LIST,
-} from '../../types/coworkBundle'
+} from '../../types/coworkBundle.js'
 import type {
   AtomTopic,
   AllocationTreatment,
   SourceKindForAllocation,
   CoworkPageAllocationPlan,
   CoworkUnresolvedReason,
-} from '../../types/coworkBundle'
+} from '../../types/coworkBundle.js'
 
 // ─── Rule constants ─────────────────────────────────────────────────────
 
