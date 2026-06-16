@@ -1220,6 +1220,7 @@ function CcPage2Resolver({ issue, projectId, onResolved }: {
   // "fill in what the partner didn't."
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [creating, setCreating] = useState(false)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [savingKey, setSavingKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -1227,12 +1228,9 @@ function CcPage2Resolver({ issue, projectId, onResolved }: {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      // Most-recent session for the project, status != closed. If none
-      // exists (partner never visited the portal but uploaded a CC file
-      // in foundations), bail with a clear note — the strategist needs
-      // to create one upstream or wait for the auto-create on next portal
-      // hit. (We could auto-create a session here, but that's a behavior
-      // change worth doing deliberately in a follow-up.)
+      // Most-recent non-closed session for the project. If none exists
+      // (partner uploaded a CC file in foundations but never visited
+      // the portal), the strategist can create one inline below.
       const { data, error: err } = await supabase
         .from('strategy_content_collection_sessions')
         .select('id')
@@ -1248,6 +1246,44 @@ function CcPage2Resolver({ issue, projectId, onResolved }: {
     })()
     return () => { cancelled = true }
   }, [projectId])
+
+  const createSession = async () => {
+    setCreating(true)
+    setError(null)
+    // Pull the project's member — required NOT NULL on the session row.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: proj, error: projErr } = await (supabase as any)
+      .from('strategy_web_projects')
+      .select('member')
+      .eq('id', projectId)
+      .maybeSingle()
+    if (projErr || !proj) {
+      setError(projErr?.message ?? 'Could not find project — refresh and retry')
+      setCreating(false)
+      return
+    }
+    // Insert the session with sensible defaults (status='open',
+    // inventory_snapshot='{}', domain_invite_confirmed=false,
+    // hosting_approved=false — all carry DB-level defaults so we only
+    // need to set web_project_id + member). The strategist is filling
+    // in Page 2 fields next, so this row owns those answers.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: row, error: insErr } = await (supabase as any)
+      .from('strategy_content_collection_sessions')
+      .insert({
+        web_project_id: projectId,
+        member:         proj.member,
+      })
+      .select('id')
+      .single()
+    if (insErr || !row) {
+      setError(insErr?.message ?? 'Could not create session — try again')
+      setCreating(false)
+      return
+    }
+    setSessionId(row.id as string)
+    setCreating(false)
+  }
 
   const saveField = async (key: string) => {
     if (!sessionId) return
@@ -1282,11 +1318,20 @@ function CcPage2Resolver({ issue, projectId, onResolved }: {
   if (!sessionId) {
     return (
       <div className="mt-2 ml-5 rounded-md border border-wm-border bg-wm-bg-elevated p-3 text-wm-text">
-        <p className="text-[11.5px] text-wm-text-muted leading-snug">
-          No Content Collection session exists for this project yet. Either send the partner the
-          portal link to auto-create one, or open the partner's portal session via the staff
-          intake panel.
+        <p className="text-[11.5px] text-wm-text-muted leading-snug mb-2">
+          No Content Collection session exists for this project yet (the partner uploaded a file
+          but never opened the portal). Create a session row to hold your answers — the
+          cowork pipeline reads from this row exactly like it would the partner-submitted one.
         </p>
+        <button
+          type="button"
+          onClick={() => void createSession()}
+          disabled={creating}
+          className="text-[11px] font-semibold px-2.5 py-1 rounded bg-wm-accent text-wm-text-on-accent disabled:opacity-50"
+        >
+          {creating ? 'Creating…' : 'Create session + fill in answers'}
+        </button>
+        {error && <p className="mt-2 text-[11px] text-wm-danger">{error}</p>}
       </div>
     )
   }
