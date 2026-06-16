@@ -741,10 +741,17 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
           </button>
         )}
 
-        {/* Cowork-session ready (never run) — Download SKILL + Copy prompt */}
+        {/* Cowork-session ready (never run) — Download SKILL + Copy prompt
+            Steps 8-10 (outline-page, draft-page, critique-page) also get
+            a Download bundle button: the per-page sessions read the
+            attached bundle in-context instead of fanning out per-page
+            MCP reads. */}
         {step.kind === 'cowork_session' && isCowork && (
           <>
-            {step.skill_md_path && <DownloadSkillButton skillPath={step.skill_md_path} />}
+            {step.skill_md_path && <DownloadSkillButton skillPath={step.skill_md_path} stepNumber={step.step_number} />}
+            {['outline-page', 'draft-page', 'critique-page'].includes(step.key) && (
+              <DownloadBundleButton projectId={projectId} />
+            )}
             <CopyPromptButton step={step} projectId={projectId} />
           </>
         )}
@@ -781,7 +788,10 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
                 Approve as-is
               </span>
             </button>
-            {step.skill_md_path && <DownloadSkillButton skillPath={step.skill_md_path} />}
+            {step.skill_md_path && <DownloadSkillButton skillPath={step.skill_md_path} stepNumber={step.step_number} />}
+            {['outline-page', 'draft-page', 'critique-page'].includes(step.key) && (
+              <DownloadBundleButton projectId={projectId} />
+            )}
             <CopyPromptButton step={step} projectId={projectId} label="Re-run in Cowork" />
           </>
         )}
@@ -811,19 +821,27 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
 // strategist gets a local SKILL.md to drop into Claude Desktop).
 // ────────────────────────────────────────────────────────────────────
 
-function DownloadSkillButton({ skillPath }: { skillPath: string }) {
+function DownloadSkillButton({ skillPath, stepNumber }: { skillPath: string; stepNumber?: number }) {
   const [downloading, setDownloading] = useState(false)
   const handle = async () => {
     setDownloading(true)
     try {
-      const r = await fetch(`/api/web/cowork/skill-download?path=${encodeURIComponent(skillPath)}`)
+      const stepQs = stepNumber != null ? `&step=${stepNumber}` : ''
+      const r = await fetch(`/api/web/cowork/skill-download?path=${encodeURIComponent(skillPath)}${stepQs}`)
       if (!r.ok) throw new Error(`download failed (${r.status})`)
       const blob = await r.blob()
       const skillName = skillPath.split('/')[1] ?? 'skill'
+      // Distinctive filename — includes "cowork-pipeline" so the
+      // strategist's Claude Desktop session can't mistake it for
+      // unrelated app docs, and step number so the order is
+      // obvious. Length is intentional — the past pattern of
+      // generic "SKILL.md" filenames led to renaming + content/
+      // filename mismatch in the cowork session.
+      const stepPrefix = stepNumber != null ? `step-${String(stepNumber).padStart(2, '0')}.` : ''
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${skillName}.SKILL.md`
+      a.download = `cowork-pipeline.${stepPrefix}${skillName}.SKILL.md`
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -844,6 +862,57 @@ function DownloadSkillButton({ skillPath }: { skillPath: string }) {
       <span className="flex items-center gap-1.5">
         {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
         {downloading ? 'Downloading…' : 'Download SKILL'}
+      </span>
+    </button>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// DownloadBundleButton — fetches the project context bundle (one JSON
+// with every read the per-page sessions need: allocations,
+// atoms/facts/crawl pools, stage_1, ministry_model, strategic_goals,
+// canonical_templates slot vocab, handoff notes from prior steps).
+// The strategist attaches it to Claude Desktop alongside the SKILL.md
+// so the cowork session reads in-context instead of running per-page
+// RPC fan-outs. Covers steps 8/9/10 — one bundle, three rounds.
+// ────────────────────────────────────────────────────────────────────
+
+function DownloadBundleButton({ projectId }: { projectId: string }) {
+  const [downloading, setDownloading] = useState(false)
+  const handle = async () => {
+    setDownloading(true)
+    try {
+      const r = await fetch(`/api/web/cowork/page-context-bundle?project_id=${encodeURIComponent(projectId)}`)
+      if (!r.ok) throw new Error(`download failed (${r.status})`)
+      const blob = await r.blob()
+      const cd = r.headers.get('Content-Disposition') ?? ''
+      const m = cd.match(/filename="([^"]+)"/)
+      const filename = m?.[1] ?? `cowork-pipeline.${projectId.slice(0, 8)}.project-bundle.json`
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      // Quiet failure — strategist sees the button reset and can retry.
+    } finally {
+      setDownloading(false)
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => void handle()}
+      disabled={downloading}
+      className="text-[13px] font-medium px-4 py-2 rounded-lg border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text disabled:opacity-50 transition-colors"
+      title="Pre-packaged project data the cowork session reads in-context. Attach to Claude Desktop alongside the SKILL.md so per-page MCP fan-out collapses to writes only."
+    >
+      <span className="flex items-center gap-1.5">
+        {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+        {downloading ? 'Downloading…' : 'Download bundle'}
       </span>
     </button>
   )

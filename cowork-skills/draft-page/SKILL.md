@@ -45,39 +45,80 @@ Loaded from `roadmap_state.strategic_goals` (`status='approved'` only):
   should resonate with this theme. Don't quote it verbatim; let it
   shape the words you reach for.
 
-## Your input
+## Your input — read from the attached project bundle, NOT from MCP
+
+The strategist attached **`cowork-pipeline.<partner>.project-bundle.json`**
+to this conversation. Walk `sitemap_pages` in `nav_order` and for each
+page read everything from the bundle. **MCP usage drops to ONE write
+per page** (`roadmap_state_set` to persist the draft).
+
+Bundle shape (same file outline-page consumed; draft-page reads
+different keys):
 
 ```ts
 {
   project_id:    string
-  page_slug:     string
-  outline:       CoworkPageOutline       // full output of outline-page
-  /** Stage_1 fields you need for voice work. */
-  stage_1: {
-    ethos_summary:        string         // loaded into your system prompt
-    voice_exemplars:      Array<{ phrase: string; why_it_works: string }>
-    voice_anti_exemplars: Array<{ phrase: string; why_it_breaks: string }>
+  generated_at:  string                          // flag if stale vs project state
+  sitemap_pages: Array<{ slug, name, nav_order, ... }>
+
+  stage_1: {                                     // voice work pulls from here
+    ethos_summary:        string
+    voice_exemplars:      Array<{ phrase, why_it_works }>
+    voice_anti_exemplars: Array<{ phrase, why_it_breaks }>
     persuasive_posture_by_persona: Record<string, string>
+    /* + key_message, vision_statement, project_goals, personas */
   }
-  /** Resolved atoms — full body, not preview. */
-  atoms: Record<string, {
-    id:               string
-    topic:            AtomTopic
-    body:             string
-    verbatim:         boolean
-    content_quality:  'clean' | 'noisy' | 'unknown'
-  }>
-  /** Resolved facts — full data. */
-  facts: Record<string, {
-    id:    string
-    topic: string
-    data:  Record<string, unknown>
-  }>
-  /** Canonical template definitions — slot names + max_chars + shape
-   *  constraints + heading_strategy. */
-  canonical_templates: CanonicalTemplateLibrary
+  strategic_goals_approved: { /* approved-only category buckets */ }
+
+  canonical_templates: {
+    version: string
+    page_section_templates: Record<string, { cowork_writable_slots: SlotSpec }>
+  }
+
+  prior_handoff_notes: {
+    site_strategy:        string | null          // (consumed by outline-page)
+    page_allocation_plan: string | null          // (consumed by outline-page)
+    page_outlines:        string | null          // <-- read THIS first; outline-page's handoff
+  }
+
+  /** Shared content pools — already loaded; index in-context. */
+  atoms_pool: {
+    by_id:    Record<string, ContentAtomRow>     // body, topic, verbatim, status, ...
+    by_topic: Record<string, string[]>           // topic → atom ids (drift shim)
+  }
+  facts_pool: {
+    by_id:    Record<string, ChurchFactRow>
+    by_topic: Record<string, string[]>           // 'service_times' → [uuid] (drift shim)
+  }
+  crawl_topics_pool: {
+    by_key: Record<string, {                     // topic_key → row
+      passages, passages_total, passages_truncated, items, ...
+    }>
+  }
 }
 ```
+
+You also need the outline this draft is based on — read it from
+`roadmap_state.page_outlines.<slug>` via ONE `SELECT` (the bundle
+doesn't inline page_outlines because they update mid-session as
+outline-page rolls through pages). That + the bundle is your full
+context.
+
+### Source-ref resolution
+
+For each `atoms_used[]` / `facts_used[]` / `crawl_topics_used[]` you
+report on your draft sections, resolve the same way outline-page did:
+- atom ids → `atoms_pool.by_id[id]` (or by_topic fallback)
+- fact ids → `facts_pool.by_id[id]` (or by_topic fallback for
+  topic-keyed refs like 'service_times')
+- crawl keys → `crawl_topics_pool.by_key[key]`
+
+### When to use MCP
+
+- ONE `SELECT` to read the page's outline (per page).
+- ONE `roadmap_state_set` write to persist the draft at
+  `['page_drafts', '<slug>']` (per page).
+That's it. No per-section RPC fan-out.
 
 ## What you produce (CoworkPageDraft)
 

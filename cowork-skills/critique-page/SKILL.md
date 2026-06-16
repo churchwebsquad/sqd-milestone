@@ -40,34 +40,75 @@ Loaded from `roadmap_state.strategic_goals` (`status='approved'` only):
   Drift outside the band → directive at severity ≥ warning, kind
   `verbatim_band_drift`.
 
-## Your input
+## Your input — read from the attached project bundle, NOT from MCP
+
+The strategist attached **`cowork-pipeline.<partner>.project-bundle.json`**
+to this conversation. Walk `sitemap_pages` in `nav_order` and critique
+each page from the bundle + the draft you load via one `SELECT` per
+page. **MCP usage drops to ONE write per page** (`roadmap_state_set`
+to persist the critique).
+
+Bundle shape (same file outline + draft consumed; critique reads):
 
 ```ts
 {
-  project_id:   string
-  page_slug:    string
-  /** Full draft from draft-page. */
-  draft:        CoworkPageDraft
-  /** Outline so you can check section_jobs were addressed. */
-  outline:      CoworkPageOutline
-  /** Canonical template definitions — for max_chars + required-slot
-   *  + shape verification. */
-  canonical_templates: CanonicalTemplateLibrary
-  /** Partner-specific voice card — banned_terms, branded_vocabulary,
-   *  sample_sentences_in_voice, example_phrases_bad. THIS PARTNER's
-   *  config. NOT in your skill text. */
-  voice_card:   PartnerVoiceCard
-  /** Global rules — em-dashes, filler triads, AI clichés, etc.
-   *  Loaded from cowork-skills/skills/web-page-reviewer/references/
-   *  audit-criteria.md. Versioned + partner-agnostic. */
-  global_audit_criteria: GlobalAuditCriteria
-  /** Stage_1 — for persona fit + ethos floor checks. */
-  stage_1:      CoworkStage1
-  /** Resolved atoms — for verbatim-atom-preservation + atom-coverage
-   *  checks. */
-  atoms:        Record<string, CoworkAtomRow>
+  project_id:    string
+  sitemap_pages: Array<{ slug, name, nav_order, ... }>
+
+  stage_1: CoworkStage1                          // persona fit + ethos floor checks
+  strategic_goals_approved: { ... }              // approved-only
+
+  canonical_templates: {                          // max_chars + required-slot verification
+    version: string
+    page_section_templates: Record<string, { cowork_writable_slots: SlotSpec }>
+  }
+
+  prior_handoff_notes: {
+    page_outlines: string | null                  // (outline-page's note — context)
+    /* draft-page handoff lives on roadmap_state.page_drafts.<slug>._meta.handoff_note;
+       read per-page in the same SELECT that loads the draft */
+  }
+
+  atoms_pool: {                                   // verbatim-atom-preservation + coverage
+    by_id:    Record<string, ContentAtomRow>
+    by_topic: Record<string, string[]>            // drift shim
+  }
+  facts_pool: {
+    by_id:    Record<string, ChurchFactRow>
+    by_topic: Record<string, string[]>            // drift shim
+  }
+  crawl_topics_pool: {
+    by_key: Record<string, { passages, passages_total, passages_truncated, items, ... }>
+  }
 }
 ```
+
+Per page, you ALSO need the outline + draft you're critiquing —
+these live in `roadmap_state.page_outlines.<slug>` and
+`roadmap_state.page_drafts.<slug>`. Pull both in ONE `SELECT` per
+page (the bundle doesn't inline them because they're written mid-
+session by the prior steps and would go stale).
+
+### Partner voice card + global audit criteria
+
+The **partner voice card** (banned_terms, branded_vocabulary,
+sample_sentences_in_voice, example_phrases_bad) is partner-specific
+and lives on `stage_1` in the bundle — read it from there.
+
+The **global audit criteria** (em-dash discipline, filler triads,
+AI clichés, etc.) live in
+`cowork-skills/skills/web-page-reviewer/references/audit-criteria.md`
+— that's part of your SKILL bundle, not the project bundle. The
+strategist downloads it via the SKILL attachment, not the project
+attachment.
+
+### When to use MCP
+
+- ONE `SELECT` per page (loads both `page_outlines.<slug>` and
+  `page_drafts.<slug>` in one shot).
+- ONE `roadmap_state_set` write to persist the critique at
+  `['page_critiques', '<slug>']`.
+That's it.
 
 ## What you produce (CoworkPageCritique)
 

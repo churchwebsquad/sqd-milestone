@@ -54,40 +54,32 @@ Loaded from `roadmap_state.strategic_goals` (`status='approved'` only):
 
 ## Walk the sitemap — do not ask which page
 
-You have the full page list from
-`cowork_load_outline_context(...).site_strategy_pages`. Walk it in
-`nav_order`. Don't prompt the strategist for the next slug; just
-open the next context call.
+You have the full page list in the attached project bundle at
+`sitemap_pages`. Walk it in `nav_order`. Don't prompt the strategist
+for the next slug; just look up the next entry in-context.
 
-## Your input — single MCP call per page
+## Your input — read from the attached project bundle, NOT from MCP
 
-The cowork starter prompt tells you to query:
+The strategist attached **`cowork-pipeline.<partner>.project-bundle.json`**
+to this conversation. **Read EVERYTHING from that file.** Per-page
+MCP fan-out (a 68KB RPC + byte-size checks + md5 + ::jsonb casting)
+was eating ~20 min/page. The bundle is now the single source of
+truth — MCP usage drops to ONE write per page (the `roadmap_state_set`
+that persists your outline).
 
-```sql
-SELECT cowork_load_outline_context('<project_id>'::uuid, '<page_slug>');
-```
-
-That one call returns this shape — replaces the 8-15 ad-hoc probes
-earlier drafts of this skill required:
+Bundle shape (open the JSON in conversation, treat keys as fields):
 
 ```ts
 {
-  page_slug:    string                  // echoed back
-  allocation:   CoworkPageAllocation    // this page's slice of page_allocation_plan.allocations[]
-                                        // (tolerates both 'page_slug' and 'slug' field names —
-                                        //  model output drifted in past runs; both work)
+  project_id:    string
+  generated_at:  string                        // ISO timestamp — flag if older than the project's _meta
+  generated_for: 'all'                          // covers outline + draft + critique
 
-  atoms_for_page:        Array<ContentAtomRow>   // FULL rows for every atom the section_intents reference
-  facts_for_page:        Array<ChurchFactRow>    // FULL rows for every fact referenced
-  crawl_topics_for_page: Array<WebProjectTopic>  // FULL passages + items, not just keys
-
-  build_directives_for_page: BuildDirective[]    // directives where applies_to = page_slug OR 'site_wide'
-
-  stage_1:        CoworkStage1            // full stage_1 (voice, personas, ethos, key_message, vision_statement, project_goals)
+  sitemap_pages: Array<{ slug, name, nav_order, nav_strategy, primary_persona }>
+  stage_1:        CoworkStage1                  // voice, personas, ethos, key_message, vision_statement, project_goals
   ministry_model: CoworkMinistryModel
 
-  /** Strategist-approved strategic goals, grouped by category. Filter
-   *  here = only fields with status='approved'. */
+  /** Strategist-approved fields only — already filtered to status='approved'. */
   strategic_goals_approved: {
     goals_and_vision?:       Record<string, StrategicGoalField>
     voice_and_tone?:         Record<string, StrategicGoalField>
@@ -96,28 +88,82 @@ earlier drafts of this skill required:
     inspiration_and_notes?:  Record<string, StrategicGoalField>
   }
 
-  prior_handoff_note:  string | null     // from page_allocation_plan._meta.handoff_note
+  /** Closed template enum — slot specs only (no family/variant/
+   *  design_handoff_image_count bloat). THIS IS YOUR TEMPLATE ENUM.
+   *  Don't invent template_keys not in here; don't bind to
+   *  slots outside each template's cowork_writable_slots. */
+  canonical_templates: {
+    version: string
+    page_section_templates: Record<string, { cowork_writable_slots: SlotSpec }>
+  }
 
-  /** The closed template + slot vocabulary. THIS IS YOUR TEMPLATE
-   *  ENUM. Don't invent template_keys not in here; don't bind to
-   *  slot_hints outside each template's cowork_writable_slots. */
-  canonical_templates: CanonicalTemplateLibrary
+  /** Handoff notes from prior steps. site_strategy is your direct
+   *  upstream (read FIRST — carries the allocation strategist's
+   *  decisions and cross-step gotchas). */
+  prior_handoff_notes: {
+    site_strategy:        string | null
+    page_allocation_plan: string | null         // page_allocation_plan._meta.handoff_note
+    page_outlines:        string | null         // (consumed by critique, not you)
+  }
 
-  /** Full sitemap with slug + name + nav_order + nav_strategy.
-   *  Use this as the walk list. */
-  site_strategy_pages: Array<{
-    slug: string
-    name: string
-    nav_order: number | null
-    nav_strategy: 'primary' | 'secondary' | 'footer' | 'contextual_only'
-    primary_persona: string | null
-  }>
+  /** Page-keyed lookups — for each page in sitemap_pages[].slug,
+   *  look up its allocation slice + the build_directives that target it. */
+  allocations_by_page:      Record<string, CoworkPageAllocation>
+  build_directives_by_page: Record<string, BuildDirective[]>
+
+  /** Shared content pools — load ONCE for the whole session, index
+   *  into them when resolving each source's `ref` against your
+   *  section_intents. The `by_topic` indexes shim around the live
+   *  bug where allocation plans emit topic-based refs (e.g.
+   *  kind='fact', ref='service_times') instead of UUIDs — look up
+   *  by either form. */
+  atoms_pool: {
+    by_id:    Record<string, ContentAtomRow>
+    by_topic: Record<string, string[]>          // topic → atom ids
+  }
+  facts_pool: {
+    by_id:    Record<string, ChurchFactRow>
+    by_topic: Record<string, string[]>          // <-- 'service_times' → [uuid, uuid]
+  }
+  crawl_topics_pool: {
+    by_key: Record<string, {
+      topic_label, topic_group, coverage_status,
+      passages: (string | { text, ... })[],     // capped: 10 passages × 600 chars
+      passages_total: number,
+      passages_truncated: boolean,
+      items: unknown[]
+    }>
+  }
 }
 ```
 
-The RPC lives at `public.cowork_load_outline_context(uuid, text)` in
-the Supabase project; the strategist's cowork preamble carries the
-project_ref + the project_id token to use.
+### Source-ref resolution
+
+Each `section_intents[].sources[]` has `{ kind, ref, treatment }`.
+Resolve as:
+
+- `kind='pillar'`: look up `atoms_pool.by_id[ref]`. If not found AND
+  ref looks like a topic (lowercase_with_underscores), fall back to
+  `atoms_pool.by_topic[ref]` and use the first match.
+- `kind='fact'`: look up `facts_pool.by_id[ref]`. If not found AND
+  ref looks like a topic, fall back to `facts_pool.by_topic[ref]`.
+- `kind='crawl_topic'`: look up `crawl_topics_pool.by_key[ref]`.
+  Mind `passages_truncated` — if true and the page genuinely needs
+  more, that's the ONE valid case to fall back to a direct SELECT
+  against `web_project_topics`.
+- `kind='content_collection'`: ref is a session field key; the
+  bundle doesn't currently inline this — read it via a direct SELECT
+  against `strategy_content_collection_sessions` only when needed.
+- `kind='external'`: don't lift content; treat the ref as a URL/CTA
+  target only.
+
+### When to use MCP
+
+ONE write per page: `roadmap_state_set` to persist the outline at
+`['page_outlines', '<slug>']`. **Do NOT run** `cowork_load_outline_context`
+or per-row SELECTs as part of your routine flow — that's exactly the
+fan-out this bundle eliminated. The legacy RPC stays in place as a
+safety net for the rare "the bundle is missing X" case.
 
 ## What you produce (CoworkPageOutline)
 

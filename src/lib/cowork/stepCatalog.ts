@@ -366,34 +366,29 @@ When complete, write the allocation to \`roadmap_state.page_allocation_plan\` vi
     starter_prompt:
 `Use the **outline-page** skill for project_id \`{{project_id}}\`. Walk the sitemap sequentially — don't ask me which page to start on, you have the list.
 
-## Workflow (two MCP calls per page — load, then write)
+## Inputs (attached, NOT MCP)
 
-**1. Read the handoff note from the prior step FIRST** — query \`SELECT roadmap_state->'page_allocation_plan'->'_meta'->>'handoff_note' FROM strategy_web_projects WHERE id = '{{project_id}}'\`. It carries the allocation strategist's decisions + cross-step gotchas (verbatim band, ministries-to-grow placement, banned vocab, build_directives that affect outlining). Skim before loading any context.
+I'm attaching two files to this conversation:
+1. The outline-page **SKILL.md** (contract + slot rules + verification checklist).
+2. The **project bundle** \`cowork-pipeline.<partner>.project-bundle.json\` — every read you need for the whole sitemap, pre-packaged. Atoms/facts/crawl pools indexed by id AND topic so source refs resolve in-context. Allocations keyed by page_slug. Handoff notes from prior steps. Canonical templates slot vocab. Strategic goals filtered to approved-only.
 
-**2. For each page in nav_order, ONE context call replaces 8-15 ad-hoc probes**:
+**Read the bundle first.** Skim \`prior_handoff_notes.site_strategy\` and \`prior_handoff_notes.page_allocation_plan\` so you start with the allocation strategist's decisions and cross-step gotchas already loaded.
 
-\`\`\`sql
-SELECT cowork_load_outline_context('{{project_id}}'::uuid, '<page_slug>');
-\`\`\`
+## Workflow — ONE MCP write per page
 
-That single RPC returns one JSONB with everything you need:
-- \`allocation\` — the page's allocation slice (tolerates both \`page_slug\` and \`slug\` field names — model output drifted; both work)
-- \`atoms_for_page\` / \`facts_for_page\` / \`crawl_topics_for_page\` — FULL row data for everything the section_intents reference
-- \`build_directives_for_page\` — directives applying to this page or site-wide
-- \`stage_1\` (voice, personas, ethos, key_message, vision_statement, project_goals)
-- \`ministry_model\` (template choices)
-- \`strategic_goals_approved\` — filtered to \`status='approved'\`. For outlining, especially weigh:
-  - \`content_and_allocation.copy_approach.derived.intended_verbatim_band\` — stamp on each section. high = ≥70% verbatim from crawl; mid ≈ 50%; low ≤ 20%.
-  - \`voice_and_tone.one_key_message\` + \`recurring_message_theme\` — at least one section's voice anchors against these.
-  - \`content_and_allocation.ministries_to_grow\` — surface early on homepage / ministry pages.
-  - \`content_and_allocation.content_needs\` — pages named here need larger section count.
-  - \`display_and_technical.sermons_display_preference\` — relevant only for the sermons/watch page.
-- \`canonical_templates\` — the closed template + slot vocab manifest you MUST bind against (template_key, cowork_writable_slots, max_chars per slot, required-slot flags). This used to be a skill-bundle file you didn't have access to — now it's in the payload.
-- \`site_strategy_pages\` — full sitemap with slug + name + nav_order. Use this as your walk list.
+For each page in \`sitemap_pages\` (walk by \`nav_order\`):
 
-**3. Produce the outline** per the SKILL contract: sections with archetype + atom_assignments + fact_assignments + crawl_topic_assignments + voice_anchor + \`intended_verbatim_band\` per section (matching the allocation). Walk me through the outline before persisting; pause for my pushback.
-
-**4. Write the outline + handoff note** in ONE call:
+1. Look up the allocation in-context: \`allocations_by_page[<slug>]\` plus \`build_directives_by_page[<slug>]\`.
+2. Resolve each \`section_intents[].sources[].ref\` against the bundle pools:
+   - \`kind='pillar'\` → \`atoms_pool.by_id[ref]\` (fall back to \`atoms_pool.by_topic[ref]\` for topic-keyed drift)
+   - \`kind='fact'\` → \`facts_pool.by_id[ref]\` (fall back to \`facts_pool.by_topic[ref]\` — fixes the \`'service_times'\` / \`'kids'\` topic-ref drift)
+   - \`kind='crawl_topic'\` → \`crawl_topics_pool.by_key[ref]\` (passages capped 10 × 600 chars; if \`passages_truncated\` and the page genuinely needs more, that's the ONE valid case to run a direct SELECT)
+3. Apply strategic_goals_approved gates:
+   - \`content_and_allocation.copy_approach.derived.intended_verbatim_band\` — stamp on each section.
+   - \`voice_and_tone.one_key_message\` + \`recurring_message_theme\` — at least one section's voice anchors against these.
+   - \`content_and_allocation.ministries_to_grow\` — surface early on homepage / ministry pages.
+4. Walk me through the outline before persisting; pause for my pushback.
+5. **Single MCP write** to persist:
 
 \`\`\`sql
 SELECT roadmap_state_set(
@@ -403,9 +398,9 @@ SELECT roadmap_state_set(
 );
 \`\`\`
 
-The outline's \`_meta\` MUST carry \`handoff_note\` (≤1-screen markdown — see the SKILL's Handoff Note section for the four buckets). The drafter will read it first when it starts the next page.
+The outline's \`_meta\` MUST carry \`handoff_note\` (≤1-screen markdown — see the SKILL). The drafter reads it first on its next page.
 
-**5. Walk the sitemap.** When the strategist OK's the outline, advance to the next page (next \`nav_order\` from \`site_strategy_pages\` in step 2's payload). Don't ask which page — just open the next context call and propose. Two approvals per page total: load + write.`,
+**No per-page RPC fan-out.** The legacy \`cowork_load_outline_context(...)\` is a fallback — don't run it as part of routine flow. ONE write per page is the contract.`,
     computeStatus: s => {
       if (!s.page_allocation_plan?._meta?.generated_at) return 'blocked_waiting'
       if (s.page_outlines_count === 0)                  return 'cowork_session'
@@ -428,24 +423,47 @@ The outline's \`_meta\` MUST carry \`handoff_note\` (≤1-screen markdown — se
     kind:        'cowork_session',
     skill_md_path: 'cowork-skills/draft-page/SKILL.md',
     starter_prompt:
-`Use the **draft-page** skill for project_id \`{{project_id}}\`, page_slug \`<PAGE-SLUG>\`.
+`Use the **draft-page** skill for project_id \`{{project_id}}\`. Walk \`sitemap_pages\` sequentially — don't ask me which page to start on.
 
-**Read the handoff note from the prior step FIRST** — \`roadmap_state.page_outlines.<PAGE-SLUG>._meta.handoff_note\` carries the outline strategist's decisions (verbatim band per section, voice anchor exemplars, persona posture, banned phrases). Skim it before loading the outline so you don't re-litigate those calls.
+## Inputs (attached, NOT MCP)
 
-Read:
-- \`roadmap_state.page_outlines.<PAGE-SLUG>\` (the outline; honor each section's \`intended_verbatim_band\`)
-- \`roadmap_state.stage_1\` (voice, personas, ethos)
-- \`roadmap_state.strategic_goals\` — filter to \`status='approved'\`. For drafting, especially:
-  - \`content_and_allocation.copy_approach.derived.intended_verbatim_band\` — applies per section. high band: keep at least 70% of words from the cited crawl passages; only edit for voice/dignity. mid: blend lifted lines with fresh prose ~50/50. low: ≤20% verbatim from crawl, write fresh prose anchored in atoms + facts.
-  - \`voice_and_tone.one_key_message\` — every page MUST include a section whose copy echoes this message.
-  - \`voice_and_tone.recurring_message_theme\` — the page's voice posture should resonate with this theme.
-- The content_atoms / church_facts / web_project_topics the outline references
+I'm attaching:
+1. The draft-page **SKILL.md**.
+2. The **project bundle** \`cowork-pipeline.<partner>.project-bundle.json\` — same file outline-page consumed. You read atoms_pool / facts_pool / crawl_topics_pool / stage_1 / strategic_goals_approved / canonical_templates / sitemap_pages from it in-context.
 
-Write the copy per the SKILL contract (each section's copy + atoms_used + facts_used + crawl_topics_used + voice_notes + deferred_atoms if any). Each section MUST stamp its \`actual_verbatim_ratio\` (0.0-1.0) — the share of section words lifted verbatim from cited crawl passages — so the critique can verify it lands within the section's \`intended_verbatim_band\`.
+**Read \`prior_handoff_notes.page_outlines\` first** — the outline strategist's cross-step gotchas (voice anchor exemplars, persona postures, banned phrases, key_message section, mechanical-scan close calls).
 
-When done, write to \`roadmap_state.page_drafts.<PAGE-SLUG>\` via \`roadmap_state_set\`. Stamp \`_meta\` with the model + prompt_hash + generated_at.
+## Workflow — TWO MCP calls per page (1 SELECT to read the outline, 1 write)
 
-**Final substep — handoff note.** Write a ≤1-screen note to \`roadmap_state.page_drafts.<PAGE-SLUG>._meta.handoff_note\` AND surface it. Cover (a) what was drafted (section archetypes, total slot count, verbatim ratios), (b) deferred slots or atoms with reasons, (c) cross-step gotchas the critique should weigh (voice anchors honored, key_message section identified, mechanical-scan close calls), (d) what critique-page should focus on for this page.`,
+For each page in \`sitemap_pages\` (walk by \`nav_order\`):
+
+1. **Load the outline** (the bundle doesn't inline page_outlines — they're written mid-session by step 8):
+
+\`\`\`sql
+SELECT roadmap_state->'page_outlines'->'<slug>' AS outline
+FROM strategy_web_projects WHERE id = '{{project_id}}';
+\`\`\`
+
+2. Look up resources from the bundle in-context:
+   - Voice work: \`stage_1\` (ethos_summary, voice_exemplars, voice_anti_exemplars, persuasive_posture_by_persona)
+   - Strategic goals: \`strategic_goals_approved.content_and_allocation.copy_approach.derived.intended_verbatim_band\` (high ≥0.7 verbatim, mid ~0.5, low ≤0.2)
+   - \`strategic_goals_approved.voice_and_tone.one_key_message\` — every page MUST include a section whose copy echoes this.
+   - Atoms / facts referenced by the outline → \`atoms_pool.by_id\` / \`facts_pool.by_id\` (with by_topic fallback for drift)
+   - Crawl passages → \`crawl_topics_pool.by_key\`
+
+3. Draft per the SKILL contract. Each section stamps its \`actual_verbatim_ratio\` (0.0-1.0).
+
+4. **Single MCP write** to persist:
+
+\`\`\`sql
+SELECT roadmap_state_set(
+  '{{project_id}}'::uuid,
+  ARRAY['page_drafts', '<slug>'],
+  '<full_draft_with_meta_handoff_note>'::jsonb
+);
+\`\`\`
+
+**Final substep — handoff note.** Stamp \`_meta.handoff_note\` (≤1 screen): (a) section archetypes + verbatim ratios, (b) deferred slots/atoms with reasons, (c) cross-step gotchas for critique, (d) critique focus areas. The critique reads it first.`,
     computeStatus: s => {
       if (s.page_outlines_count === 0)               return 'blocked_waiting'
       if (s.page_drafts_count === 0)                 return 'cowork_session'
@@ -468,25 +486,47 @@ When done, write to \`roadmap_state.page_drafts.<PAGE-SLUG>\` via \`roadmap_stat
     kind:        'cowork_session',
     skill_md_path: 'cowork-skills/critique-page/SKILL.md',
     starter_prompt:
-`Use the **critique-page** skill for project_id \`{{project_id}}\`, page_slug \`<PAGE-SLUG>\`.
+`Use the **critique-page** skill for project_id \`{{project_id}}\`. Walk \`sitemap_pages\` sequentially.
 
-**Read the handoff note from the prior step FIRST** — \`roadmap_state.page_drafts.<PAGE-SLUG>._meta.handoff_note\` carries the drafter's close calls + cross-step gotchas (voice anchors honored, mechanical-scan near-misses, deferred slot reasons). Skim it before scoring so you don't double-count what the drafter already self-reported.
+## Inputs (attached, NOT MCP)
 
-Read:
-- \`roadmap_state.page_drafts.<PAGE-SLUG>\` (the draft)
-- \`roadmap_state.page_outlines.<PAGE-SLUG>\` (the outline)
-- \`roadmap_state.stage_1\` (voice + ethos for dignity scoring)
-- \`roadmap_state.strategic_goals\` — filter to \`status='approved'\`. For critique, especially:
-  - \`goals_and_vision.church_vision\` (AM handoff) — add a \`vision_fit\` directive when the draft fails to match the partner's stated emotional outcome.
-  - \`content_and_allocation.copy_approach.derived.intended_verbatim_band\` — every section's \`actual_verbatim_ratio\` MUST land within band (high ≥ 0.7; mid 0.3-0.7; low ≤ 0.2). Flag drift as a directive at severity ≥ warning.
-- The atoms / facts / crawl topics the draft used
-- The draft's deferred_atoms[] — every entry MUST surface in directives at severity ≥ warning
+I'm attaching:
+1. The critique-page **SKILL.md**.
+2. The **project bundle** \`cowork-pipeline.<partner>.project-bundle.json\` — same file outline + draft consumed. You read atoms_pool / facts_pool / crawl_topics_pool / stage_1 / strategic_goals_approved / canonical_templates / sitemap_pages from it.
 
-Produce the 5-axis critique + standout_lines + problem_lines + directives + summary. Reference \`church_vision\` verbatim in the dignity-axis rationale when applicable.
+## Workflow — TWO MCP calls per page (1 SELECT to read outline+draft, 1 write)
 
-When done, write to \`roadmap_state.page_critiques.<PAGE-SLUG>\` via \`roadmap_state_set\`. Stamp \`_meta\`.
+For each page in \`sitemap_pages\`:
 
-**Final substep — handoff note.** Write a ≤1-screen note to \`roadmap_state.page_critiques.<PAGE-SLUG>._meta.handoff_note\` AND surface it. Cover (a) overall band + per-axis bands, (b) the directives that gate ship-vs-iterate, (c) cross-step gotchas the rollup needs (voice-drift signals worth elevating, persona-fit edge cases, verbatim band misses), (d) what synthesize-critique should weight when this page enters the project verdict.`,
+1. **Load outline + draft + draft's handoff note** in one SELECT (skim the handoff note FIRST so you don't double-count the drafter's self-reports):
+
+\`\`\`sql
+SELECT
+  roadmap_state->'page_outlines'->'<slug>' AS outline,
+  roadmap_state->'page_drafts'->'<slug>'   AS draft
+FROM strategy_web_projects WHERE id = '{{project_id}}';
+\`\`\`
+
+2. Look up resources from the bundle:
+   - Voice + ethos for dignity scoring: \`stage_1\`
+   - \`strategic_goals_approved.goals_and_vision.church_vision\` — when the draft fails the partner's stated emotional outcome, add a \`vision_fit\` directive (reference \`church_vision\` verbatim in the dignity-axis rationale).
+   - \`strategic_goals_approved.content_and_allocation.copy_approach.derived.intended_verbatim_band\` — every section's \`actual_verbatim_ratio\` MUST land within band (high ≥0.7, mid 0.3-0.7, low ≤0.2). Flag drift as a directive at severity ≥ warning.
+   - Atoms / facts / crawl topics the draft used → bundle pools (by_id with by_topic fallback)
+   - The draft's \`deferred_atoms[]\` — every entry MUST surface in directives at severity ≥ warning.
+
+3. Produce the 5-axis critique + standout_lines + problem_lines + directives + summary.
+
+4. **Single MCP write**:
+
+\`\`\`sql
+SELECT roadmap_state_set(
+  '{{project_id}}'::uuid,
+  ARRAY['page_critiques', '<slug>'],
+  '<full_critique_with_meta_handoff_note>'::jsonb
+);
+\`\`\`
+
+**Final substep — handoff note.** Stamp \`_meta.handoff_note\` (≤1 screen): (a) overall band + per-axis bands, (b) directives that gate ship-vs-iterate, (c) cross-step gotchas for rollup (voice-drift signals, persona-fit edge cases, verbatim-band misses), (d) what synthesize-critique should weight when this page enters the project verdict.`,
     computeStatus: s => {
       if (s.page_drafts_count === 0)                 return 'blocked_waiting'
       if (s.page_critiques_count === 0)              return 'cowork_session'
