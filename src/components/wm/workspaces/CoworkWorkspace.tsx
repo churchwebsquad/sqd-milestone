@@ -31,7 +31,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowRight, Check, ChevronRight, Clock, Download, ExternalLink, Eye, Loader2, RefreshCw } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Check, ChevronRight, Clock, Download, ExternalLink, Eye, FileText, Loader2, RefreshCw } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { WMStatusPill, type WMStatusTone } from '../StatusPill'
 import { getCoworkSteps, type CoworkPipelineState, type StepCatalogEntry, type StepStatus } from '../../../lib/cowork/stepCatalog'
@@ -138,6 +138,34 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         const stage2 = roadmap.stage_2
         if (stage2 && Array.isArray(stage2.pages)) {
           sitemapSlugs = stage2.pages.map((p: any) => typeof p?.slug === 'string' ? p.slug : null).filter(Boolean)
+        }
+      }
+
+      // Audit branch — when notion_database_id is set, the Notion DB
+      // pages ARE the sitemap (partner already decided IA externally).
+      // Cache the result per-session because list-database-pages-with-
+      // content fetches every page's body (heavy); the workspace render
+      // shouldn't re-hit Notion on every visibility change.
+      if (project.notion_database_id) {
+        const cacheKey = `notion-slugs.${project.id}.${project.notion_database_id}`
+        const cached = sessionStorage.getItem(cacheKey)
+        if (cached) {
+          try { sitemapSlugs = JSON.parse(cached) as string[] } catch { /* fall through to refetch */ }
+        }
+        if (!cached) {
+          try {
+            const { data: notionRes, error: notionErr } = await supabase.functions.invoke<{ pages: Array<{ slug: string }> }>(
+              'strategy-notion',
+              { body: { op: 'list-database-pages-with-content', databaseId: project.notion_database_id } },
+            )
+            if (!notionErr && notionRes?.pages) {
+              const fromNotion = notionRes.pages.map(p => p.slug).filter(Boolean)
+              if (fromNotion.length > 0) {
+                sitemapSlugs = fromNotion
+                sessionStorage.setItem(cacheKey, JSON.stringify(fromNotion))
+              }
+            }
+          } catch { /* silently fall back to roadmap_state-derived slugs */ }
         }
       }
 
@@ -359,6 +387,9 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         onRefresh={() => { void loadProjectState(); void loadReadiness() }}
         refreshing={loading || readinessLoading}
         projectId={project.id}
+        auditBranch={!!project.notion_database_id}
+        notionDatabaseUrl={project.notion_database_url ?? null}
+        totalSteps={steps.length}
       />
 
       {error && (
@@ -412,7 +443,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
 // Header (readiness summary + refresh)
 // ────────────────────────────────────────────────────────────────────
 
-function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRefresh, refreshing, projectId }: {
+function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRefresh, refreshing, projectId, auditBranch, notionDatabaseUrl, totalSteps }: {
   readiness:        ReadinessReport | null
   readinessLoading: boolean
   overallStats:     { done: number; ready: number; stale: number; cowork: number; waiting: number; firstReadyKey: string | null } | null
@@ -420,6 +451,9 @@ function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRe
   onRefresh:        () => void
   refreshing:       boolean
   projectId:        string
+  auditBranch:      boolean
+  notionDatabaseUrl: string | null
+  totalSteps:       number
 }) {
   const blockers = readiness?.blockers ?? []
   const warnings = readiness?.warnings ?? []
@@ -435,9 +469,6 @@ function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRe
     warnings.length > 0     ? `${warnings.length} warning${warnings.length === 1 ? '' : 's'}` :
                               'Ready to ship'
 
-  // Project-level steps total = 11 (steps 1-11). "Done" includes
-  // aggregate-info steps that have inventory.
-  const totalSteps    = 11
   const completedPct  = overallStats ? Math.round((overallStats.done / totalSteps) * 100) : 0
 
   return (
@@ -460,6 +491,35 @@ function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRe
           </span>
         </button>
       </div>
+
+      {/* Audit-branch banner — visible whenever the project has
+          notion_database_id set, so the strategist can SEE which
+          pipeline they're in (the from-scratch flow is much longer). */}
+      {auditBranch && (
+        <div className="mb-4 rounded-xl border border-wm-accent/40 bg-wm-accent-tint/40 px-4 py-3 flex items-start gap-2.5">
+          <FileText size={14} className="shrink-0 mt-0.5 text-wm-accent-strong" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong mb-1">
+              Audit branch — Notion copy already drafted
+            </p>
+            <p className="text-[12.5px] text-wm-text leading-snug">
+              This project's copy lives in Notion, so the pipeline collapses to <strong>{totalSteps} steps</strong>:
+              foundations (atoms / facts / strategy / ministry), then the audit-external-copy pass against the
+              Notion DB, then the rollup. No outline / draft / allocation work — Notion IS the allocation.
+            </p>
+            {notionDatabaseUrl && (
+              <a
+                href={notionDatabaseUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-[11px] text-wm-accent hover:underline"
+              >
+                Open Notion database <ExternalLink size={10} />
+              </a>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Timeline notes (AM handoff) — visibility BEFORE pipeline launch */}
       {timelineNotes && (

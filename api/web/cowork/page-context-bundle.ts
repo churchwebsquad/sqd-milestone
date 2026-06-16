@@ -115,6 +115,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       for (const p of pages) {
         if (typeof p.slug === 'string') notionPagesBySlug[p.slug] = p
       }
+      // OVERRIDE sitemap_pages with the Notion DB pages when audit
+      // branch is on. The Notion DB IS the IA — the partner already
+      // decided what pages exist. nav_order is the Notion sort order
+      // (we walk the DB in returned order; Notion's default sort is
+      // by create time, which the strategist can reorder in Notion
+      // and the bundle re-fetches on next download).
+      sitemapPages = pages
+        .filter(p => typeof p.slug === 'string' && p.slug)
+        .map((p, i) => ({
+          slug:            String(p.slug),
+          name:            String(p.title ?? p.slug),
+          nav_order:       i,                      // Notion order = nav order
+          nav_strategy:    null,                   // not modeled in Notion side
+          primary_persona: null,                   // ditto
+        }))
     } catch (e) {
       notionLoadError = e instanceof Error ? e.message : 'Notion load failed'
     }
@@ -123,7 +138,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const state = (projRes.data.roadmap_state ?? {}) as Record<string, any>
 
   // ── Sitemap, stage_1, ministry_model, handoff notes, strategic goals
-  const sitemapPages = Array.isArray(state.site_strategy?.pages)
+  // Default branch: sitemap comes from roadmap_state.site_strategy.pages
+  // (the output of plan-site-strategy). For the audit branch we'll
+  // OVERRIDE this further down — the Notion DB pages ARE the sitemap.
+  let sitemapPages = Array.isArray(state.site_strategy?.pages)
     ? (state.site_strategy.pages as Array<Record<string, any>>).map(p => ({
         slug:            String(p.slug ?? ''),
         name:            String(p.name ?? ''),

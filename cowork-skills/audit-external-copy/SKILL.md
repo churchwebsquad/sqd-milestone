@@ -53,12 +53,24 @@ The strategist attached `cowork-pipeline.<partner>.project-bundle.json`.
 Read everything from there. **MCP usage drops to ONE write per page**
 (the critique).
 
+**Sitemap source — IMPORTANT.** In the audit branch, the partner
+already decided their IA in Notion. `sitemap_pages` in the bundle is
+derived directly from the Notion DB (one Notion page → one sitemap
+entry, in Notion's sort order). There is NO separate plan-site-strategy
+or plan-cross-page-allocation step in this branch — Notion IS the
+allocation. Walk `sitemap_pages` and look each one up in
+`notion_audit_branch.pages_by_slug` (the slugs match 1:1 by construction).
+
 Bundle keys you consume:
 
 ```ts
 {
+  /** Lifted from the Notion DB in the audit branch — one entry
+   *  per Notion page, nav_order = Notion sort position. */
   sitemap_pages: Array<{ slug, name, nav_order, nav_strategy, primary_persona }>
+
   stage_1:                    CoworkStage1                  // voice, personas, ethos
+  ministry_model:             CoworkMinistryModel           // page-treatment context
   strategic_goals_approved:   { ... approved-only buckets }
   canonical_templates: {                                     // slot vocab
     page_section_templates: Record<string, { cowork_writable_slots }>
@@ -68,8 +80,8 @@ Bundle keys you consume:
   facts_pool:        { by_id, by_topic }
   crawl_topics_pool: { by_key }                             // for verbatim-band measurement
 
-  /** PRESENT only in the audit branch. Contains every page in the
-   *  partner's Notion database, body rendered to markdown. */
+  /** PRESENT only in the audit branch. Same slugs as
+   *  sitemap_pages — the rendered Notion body per page. */
   notion_audit_branch: {
     database_id:   string
     database_url:  string | null
@@ -88,6 +100,12 @@ Bundle keys you consume:
 If `notion_audit_branch.load_error` is non-null, STOP — surface the
 error and instruct the strategist to fix Notion access. Don't attempt
 the audit on partial data.
+
+Note: in the audit branch there is NO `allocations_by_page` to read
+against. The partner's Notion copy IS the allocation. Your audit
+measures the existing copy against the foundations (atoms / facts /
+voice / ministry model) + the canonical-template slot vocab — not
+against a separately-planned IA.
 
 ## Walk the sitemap autonomously
 

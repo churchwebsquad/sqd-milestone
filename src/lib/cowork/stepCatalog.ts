@@ -653,15 +653,23 @@ Surface a final report:
 
 Then prompt the strategist to launch the supplemental-page-authoring step.`,
   computeStatus: s => {
-    if (!s.page_allocation_plan?._meta?.generated_at) return 'blocked_waiting'
-    if (s.page_critiques_count === 0)                 return 'cowork_session'
-    if (s.page_critiques_count === s.sitemap_slugs.length) return 'done'
+    // Audit branch foundations: stage_1 (voice rubric anchor) +
+    // ministry_model (page-treatment context). We don't gate on
+    // allocation — Notion copy IS the allocation in this branch.
+    if (!s.stage_1?._meta?.generated_at)        return 'blocked_waiting'
+    if (!s.ministry_model?._meta?.generated_at) return 'blocked_waiting'
+    if (s.page_critiques_count === 0)           return 'cowork_session'
+    // "Done" when every page in the sitemap has a critique. Sitemap
+    // for the audit branch is the Notion DB pages (lifted in the
+    // bundle); sitemap_slugs reflects that count when audit branch
+    // is on. If we don't know the total yet, stay in cowork_session.
+    if (s.sitemap_slugs.length > 0 && s.page_critiques_count >= s.sitemap_slugs.length) return 'done'
     return 'cowork_session'
   },
   progress: s => ({
     done:  s.page_critiques_count,
     total: s.sitemap_slugs.length,
-    label: `${s.page_critiques_count} of ${s.sitemap_slugs.length || '?'} page${s.sitemap_slugs.length === 1 ? '' : 's'} audited`,
+    label: `${s.page_critiques_count} of ${s.sitemap_slugs.length || '?'} Notion page${s.sitemap_slugs.length === 1 ? '' : 's'} audited`,
   }),
 }
 
@@ -717,33 +725,49 @@ If gaps.length === 0, surface "All sitemap pages had matching Notion copy — no
 
 /** Select the right step catalog for the project's branch.
  *
- * Default (notion_database_id null): the standard
- *   inventory → strategy → ministry → ACF → sitemap → allocation →
- *   outline → draft → critique → rollup
- *   pipeline.
+ * Default (notion_database_id null): the standard 11-step pipeline.
+ *   inventory → facts → strategy → ministry → ACF → sitemap →
+ *   allocation → outline → draft → critique → rollup
  *
- * Audit branch (notion_database_id set): steps 1-7 unchanged. Steps
- *   8-10 collapse into one autonomous audit-external-copy pass. A
- *   supplemental-page-authoring step covers any sitemap pages
- *   without a Notion match. Step 11 (synthesize-critique) runs the
- *   same rollup at the end.
+ * Audit branch (notion_database_id set): just SEVEN steps. The
+ * partner came in with copy already drafted in Notion, so the
+ * "design the IA + plan the allocation + write the copy" middle
+ * three steps (organize-acf / plan-site-strategy /
+ * plan-cross-page-allocation) get dropped — the sitemap IS the
+ * Notion DB and the existing copy IS the allocation. We keep the
+ * foundation steps (1-4) because the audit needs atoms + facts +
+ * stage_1 voice + ministry_model to score against. Then a single
+ * autonomous audit-external-copy step walks the Notion pages,
+ * scores 5 axes + flags formatting gaps against canonical templates;
+ * supplemental-page-authoring fills any gap pages; and the same
+ * project-level rollup runs at the end.
+ *
+ * The collapse from 11 steps to 7 is intentional — Arvada Vineyard
+ * (the seed use case) shouldn't have to re-design IA the partner
+ * already specified in Notion.
  */
 export function getCoworkSteps(opts: { auditBranch: boolean }): StepCatalogEntry[] {
   if (!opts.auditBranch) return COWORK_STEPS_BASE
-  // Steps 1-7 + 11 unchanged; 8-10 → audit; insert supplemental as
-  // the new step 9; renumber 11 → 10 (or keep 11 as-is since
-  // step_number is display-only).
-  const before = COWORK_STEPS_BASE.filter(s =>
-    !['outline-page', 'draft-page', 'critique-page'].includes(s.key),
-  )
-  // Insert audit + supplemental BEFORE synthesize-critique.
-  const synth = before.find(s => s.key === 'synthesize-critique')
-  const rest  = before.filter(s => s.key !== 'synthesize-critique')
+  // KEEP: foundations the audit reads against (atoms, facts, stage_1,
+  // ministry_model) + the project-level rollup at the end.
+  // DROP: organize-acf, plan-site-strategy, plan-cross-page-allocation,
+  // outline-page, draft-page, critique-page — none serve "audit
+  // existing Notion copy."
+  const KEEP_FOUNDATION = new Set<string>([
+    'extract-strategic-pillars',
+    'parse-facts-csv',
+    'synthesize-strategy',
+    'classify-ministry',
+  ])
+  const foundation = COWORK_STEPS_BASE.filter(s => KEEP_FOUNDATION.has(s.key))
+  const synth      = COWORK_STEPS_BASE.find(s => s.key === 'synthesize-critique')
+  // Renumber to a tight 1-7 sequence so the workspace progress bar
+  // ("4 of 7 steps complete") reads honestly. Display-only.
   return [
-    ...rest,
-    AUDIT_EXTERNAL_COPY_STEP,
-    SUPPLEMENTAL_PAGE_AUTHORING_STEP,
-    ...(synth ? [{ ...synth, step_number: 10 }] : []),
+    ...foundation.map((s, i) => ({ ...s, step_number: i + 1 })),
+    { ...AUDIT_EXTERNAL_COPY_STEP, step_number: 5 },
+    { ...SUPPLEMENTAL_PAGE_AUTHORING_STEP, step_number: 6 },
+    ...(synth ? [{ ...synth, step_number: 7 }] : []),
   ]
 }
 
