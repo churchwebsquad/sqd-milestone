@@ -92,48 +92,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ? await sb.from('strategy_account_progress').select('church_name').eq('member', member).maybeSingle()
     : { data: null, error: null }
 
-  // Notion-audit branch: when notion_database_id is set, fetch every
-  // page in the database with its body rendered to markdown via the
-  // strategy-notion edge function. The audit-external-copy skill
-  // reads notion_pages_by_slug from the bundle in-context (no MCP
-  // round-trips per page). Failure is tolerated — the bundle ships
-  // without the Notion section and the skill falls back to standard
-  // generation, surfacing the error in notion_load_error.
+  // Notion-audit branch: pass through database_id + database_url only.
+  // The audit-external-copy skill walks the Notion DB itself via
+  // Claude Desktop's Notion MCP — lazy, no rate-limit risk on the
+  // edge function path, and the model can reason about content
+  // while reading it. Earlier versions of the bundle pre-fetched
+  // every page's body server-side via the strategy-notion edge
+  // function, but that path turned out to be fragile (Notion's
+  // 3-req/s limit + edge function execution-time budget) and meant
+  // the bundle could ship a `load_error` that made the audit
+  // SKILL dead-end. Moving the walk to MCP makes the audit
+  // self-contained.
   const notionDbId = (projRes.data as any).notion_database_id as string | null
   const notionDbUrl = (projRes.data as any).notion_database_url as string | null
-  let notionPagesBySlug: Record<string, unknown> | null = null
-  let notionLoadError: string | null = null
-  if (notionDbId) {
-    try {
-      const { data: notionRes, error: notionErr } = await sb.functions.invoke(
-        'strategy-notion',
-        { body: { op: 'list-database-pages-with-content', databaseId: notionDbId } },
-      )
-      if (notionErr) throw new Error(notionErr.message)
-      const pages = (notionRes as { pages?: Array<Record<string, any>> })?.pages ?? []
-      notionPagesBySlug = {}
-      for (const p of pages) {
-        if (typeof p.slug === 'string') notionPagesBySlug[p.slug] = p
-      }
-      // OVERRIDE sitemap_pages with the Notion DB pages when audit
-      // branch is on. The Notion DB IS the IA — the partner already
-      // decided what pages exist. nav_order is the Notion sort order
-      // (we walk the DB in returned order; Notion's default sort is
-      // by create time, which the strategist can reorder in Notion
-      // and the bundle re-fetches on next download).
-      sitemapPages = pages
-        .filter(p => typeof p.slug === 'string' && p.slug)
-        .map((p, i) => ({
-          slug:            String(p.slug),
-          name:            String(p.title ?? p.slug),
-          nav_order:       i,                      // Notion order = nav order
-          nav_strategy:    null,                   // not modeled in Notion side
-          primary_persona: null,                   // ditto
-        }))
-    } catch (e) {
-      notionLoadError = e instanceof Error ? e.message : 'Notion load failed'
-    }
-  }
 
   const state = (projRes.data.roadmap_state ?? {}) as Record<string, any>
 
@@ -280,10 +251,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // to supplemental-page-authoring.
     notion_audit_branch: notionDbId
       ? {
-          database_id:        notionDbId,
-          database_url:       notionDbUrl,
-          pages_by_slug:      notionPagesBySlug,
-          load_error:         notionLoadError,
+          database_id:  notionDbId,
+          database_url: notionDbUrl,
+          // pages_by_slug is intentionally absent — the audit SKILL
+          // walks Notion directly via Claude Desktop's Notion MCP.
+          // Keeping the field name reserved in case a future bundle
+          // version reinstates server-side pre-fetch behind a flag.
         }
       : null,
 

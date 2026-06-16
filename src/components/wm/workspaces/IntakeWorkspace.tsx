@@ -176,20 +176,35 @@ export function IntakeWorkspace({ project, onChange }: Props) {
         return
       }
       const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` }
-      // normalize-intake runs long — fire-and-forget, but await the
-      // request kickoff so any 4xx surfaces in the toast.
+      // normalize-intake runs LONG (minutes). Browser fetches typically
+      // abort at ~60-300s, which would cancel the function before it
+      // finishes — leaving atom_count=0 even though the strategist saw
+      // "Triggered…" in the toast. Two fixes:
+      //   1. `keepalive: true` — tells the browser to keep the request
+      //      alive even when the page is unloaded, raising the abort
+      //      ceiling.
+      //   2. Don't AWAIT the slow one. Send-and-forget; the function
+      //      keeps running on Vercel until its maxDuration (800s).
+      // strategic-goals aggregation is quick — we DO await that so the
+      // toast flips to "Triggered" only after both kickoffs completed.
       try {
-        await Promise.allSettled([
-          fetch('/api/web/agents/orchestrate', {
-            method: 'POST', headers,
-            body: JSON.stringify({ action: 'run_normalize', projectId: project.id }),
-          }),
-          fetch('/api/web/cowork/aggregate-strategic-goals', {
-            method: 'POST', headers,
-            body: JSON.stringify({ project_id: project.id }),
-          }),
-        ])
-        if (!cancelled) setAutoFireMsg('Triggered normalize-intake + strategic-goals snapshot. Open the Cowork tab to watch progress.')
+        // Fire-and-forget normalize-intake. Don't await — Vercel will
+        // continue running it after the browser disconnects.
+        void fetch('/api/web/agents/orchestrate', {
+          method: 'POST', headers,
+          body: JSON.stringify({ action: 'run_normalize', projectId: project.id }),
+          keepalive: true,
+        }).catch(() => { /* swallow — server side keeps running */ })
+        // Await the quick one so we surface its errors meaningfully.
+        const sgRes = await fetch('/api/web/cowork/aggregate-strategic-goals', {
+          method: 'POST', headers,
+          body: JSON.stringify({ project_id: project.id }),
+        })
+        if (!sgRes.ok) {
+          const body = await sgRes.json().catch(() => ({}))
+          throw new Error(`strategic-goals: ${(body as { error?: string }).error ?? sgRes.statusText}`)
+        }
+        if (!cancelled) setAutoFireMsg('Triggered normalize-intake (running in background, 1-2 min) + strategic-goals snapshot. Refresh the Cowork tab in a minute to see atoms appear.')
       } catch (e) {
         if (!cancelled) setAutoFireMsg(`Auto-fire failed: ${e instanceof Error ? e.message : 'unknown error'}. Run normalize-intake manually from Cowork.`)
       }

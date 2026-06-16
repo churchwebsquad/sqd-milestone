@@ -47,28 +47,27 @@ From `strategic_goals_approved` (already filtered to status='approved'):
   named ministries get a coverage check: does the Notion copy
   surface these ministries early + with a clear CTA?
 
-## Your input — read from the attached project bundle, NOT from MCP
+## Your input — bundle for foundations, Notion MCP for the pages
 
 The strategist attached `cowork-pipeline.<partner>.project-bundle.json`.
-Read everything from there. **MCP usage drops to ONE write per page**
-(the critique).
+Read the foundations from there (atoms, facts, stage_1, strategic
+goals, canonical templates). **Walk the Notion database itself via
+Claude Desktop's Notion MCP** — earlier versions of this skill
+pre-fetched every page body server-side into `pages_by_slug`, but
+that path was fragile (Notion's 3-req/s API limit + edge-function
+execution budget) and the audit dead-ended whenever the pre-fetch
+failed. Doing the walk via your own MCP is lazy, reliable, and lets
+you reason about content while reading it.
 
-**Sitemap source — IMPORTANT.** In the audit branch, the partner
-already decided their IA in Notion. `sitemap_pages` in the bundle is
-derived directly from the Notion DB (one Notion page → one sitemap
-entry, in Notion's sort order). There is NO separate plan-site-strategy
-or plan-cross-page-allocation step in this branch — Notion IS the
-allocation. Walk `sitemap_pages` and look each one up in
-`notion_audit_branch.pages_by_slug` (the slugs match 1:1 by construction).
+**MCP usage pattern**:
+- Notion MCP: `list_databases` / `query_database` / `retrieve_page` /
+  `retrieve_block_children` — to walk the DB and read each page.
+- Supabase MCP: ONE `roadmap_state_set` write per page (the critique).
 
 Bundle keys you consume:
 
 ```ts
 {
-  /** Lifted from the Notion DB in the audit branch — one entry
-   *  per Notion page, nav_order = Notion sort position. */
-  sitemap_pages: Array<{ slug, name, nav_order, nav_strategy, primary_persona }>
-
   stage_1:                    CoworkStage1                  // voice, personas, ethos
   ministry_model:             CoworkMinistryModel           // page-treatment context
   strategic_goals_approved:   { ... approved-only buckets }
@@ -80,63 +79,43 @@ Bundle keys you consume:
   facts_pool:        { by_id, by_topic }
   crawl_topics_pool: { by_key }                             // for verbatim-band measurement
 
-  /** PRESENT only in the audit branch. Same slugs as
-   *  sitemap_pages — the rendered Notion body per page. */
+  /** Audit-branch signal — tells you to walk Notion. */
   notion_audit_branch: {
-    database_id:   string
-    database_url:  string | null
-    pages_by_slug: Record<string, {
-      notion_page_id: string
-      title:          string
-      slug:           string
-      notion_url:     string
-      body_markdown:  string
-    }>
-    load_error: string | null
+    database_id:  string   // pass this to Notion MCP query_database
+    database_url: string   // human-readable click-through
+    // pages_by_slug INTENTIONALLY ABSENT — you walk Notion yourself.
   }
 }
 ```
 
-If `notion_audit_branch.load_error` is non-null, STOP — surface the
-error and instruct the strategist to fix Notion access. Don't attempt
-the audit on partial data.
+**Sitemap source.** In the audit branch, the partner's Notion DB IS
+the sitemap — one Notion page = one sitemap entry. There is NO
+`sitemap_pages` array in the bundle (it would just duplicate Notion).
+Walk the DB in Notion's sort order via `query_database`; the page
+titles slugify into your output keys (lowercase, non-alphanumerics
+→ dashes, e.g. "Plan a Visit" → `plan-a-visit`).
 
-Note: in the audit branch there is NO `allocations_by_page` to read
-against. The partner's Notion copy IS the allocation. Your audit
-measures the existing copy against the foundations (atoms / facts /
-voice / ministry model) + the canonical-template slot vocab — not
-against a separately-planned IA.
+**Allocation.** There is NO `allocations_by_page`. Notion copy IS
+the allocation. Your audit measures the existing copy against the
+foundations (atoms / facts / voice / ministry model) + the
+canonical-template slot vocab — not against a separately-planned IA.
 
 ## Walk the sitemap autonomously
 
-Open the bundle. For each page in `sitemap_pages` (walk by
-`nav_order`):
+### 1. List the Notion DB pages
 
-### 1. Lookup the Notion match
+Call Notion MCP `query_database(database_id=notion_audit_branch.database_id)`
+once at the top to get the full page list. Walk in Notion's returned
+order (which is the partner's sort).
 
-`notion_audit_branch.pages_by_slug[<sitemap_page.slug>]`.
+For each Notion page:
+- Extract the title (the page's `properties.title` rich-text run).
+- Slugify: lowercase, non-alphanumerics → dashes, collapse runs.
+  ("Plan a Visit" → `plan-a-visit`, "About Us" → `about-us`).
+- Fetch the body via `retrieve_block_children(page_id, recursive=true)`.
 
-**If MISSING** — write a placeholder critique that the supplemental
-step will replace:
-
-```json
-{
-  "page_slug": "<slug>",
-  "overall_band": "gap",
-  "axes": { "dignity": null, "voice": null, "persona": null, "source_coverage": null, "claim_plausibility": null },
-  "directives": [
-    { "kind": "missing_notion_page", "severity": "blocker",
-      "detail": "No Notion page matched this sitemap slug. Supplemental authoring required." }
-  ],
-  "_meta": {
-    "audit_source": "notion-gap",
-    "generated_at": "<iso>",
-    "handoff_note": "Gap — no Notion match. supplemental-page-authoring will replace this critique with a generated outline + draft + critique."
-  }
-}
-```
-
-**If PRESENT** — continue to step 2.
+The slug is your `page_slug` for both the critique write key and the
+strategist-facing report.
 
 ### 2. Audit body formatting against canonical_templates
 
@@ -266,14 +245,17 @@ and decides whether to drill in.
 
 ## Hard rules
 
-- ONE MCP write per page. No per-section RPC fan-out.
+- ONE Supabase MCP write per page. Reads via Notion MCP are fine
+  (that's how you walk the DB) — but don't run per-section
+  `roadmap_state_set` calls.
 - Do not invent missing slots — flag them, don't fill them.
 - Do not rewrite copy. The audit is read-only against page_critiques.
-- If `notion_audit_branch.load_error` is set, stop and surface.
-- If a sitemap page has no Notion match, write the placeholder
-  critique with `audit_source='notion-gap'` — supplemental-page-
-  authoring keys off that meta field.
-- Match Notion pages to sitemap slugs by EXACT slug match (the
-  bundle pre-slugified titles using the same lowercase-dashed
-  transform as the sitemap). If the strategist needs fuzzy matching,
-  surface that as a manual prompt — don't guess.
+- If `notion_audit_branch` is null in the bundle, the project isn't
+  on the audit branch — stop, surface to the strategist (they're
+  probably running you on the wrong project).
+- If Notion MCP returns a permission / access error on
+  `query_database`, surface it verbatim. The strategist needs to
+  share the database with the integration or fix the URL.
+- Slugs are computed from Notion page titles (lowercase, non-alphas →
+  dashes). If two pages slugify to the same key, append `-2`, `-3`
+  in Notion's sort order and flag the collision in the final report.

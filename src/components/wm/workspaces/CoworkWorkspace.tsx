@@ -141,33 +141,14 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         }
       }
 
-      // Audit branch — when notion_database_id is set, the Notion DB
-      // pages ARE the sitemap (partner already decided IA externally).
-      // Cache the result per-session because list-database-pages-with-
-      // content fetches every page's body (heavy); the workspace render
-      // shouldn't re-hit Notion on every visibility change.
-      if (project.notion_database_id) {
-        const cacheKey = `notion-slugs.${project.id}.${project.notion_database_id}`
-        const cached = sessionStorage.getItem(cacheKey)
-        if (cached) {
-          try { sitemapSlugs = JSON.parse(cached) as string[] } catch { /* fall through to refetch */ }
-        }
-        if (!cached) {
-          try {
-            const { data: notionRes, error: notionErr } = await supabase.functions.invoke<{ pages: Array<{ slug: string }> }>(
-              'strategy-notion',
-              { body: { op: 'list-database-pages-with-content', databaseId: project.notion_database_id } },
-            )
-            if (!notionErr && notionRes?.pages) {
-              const fromNotion = notionRes.pages.map(p => p.slug).filter(Boolean)
-              if (fromNotion.length > 0) {
-                sitemapSlugs = fromNotion
-                sessionStorage.setItem(cacheKey, JSON.stringify(fromNotion))
-              }
-            }
-          } catch { /* silently fall back to roadmap_state-derived slugs */ }
-        }
-      }
+      // Audit branch — sitemap_slugs stays empty pre-audit. The
+      // audit-external-copy skill walks Notion via Claude Desktop's
+      // Notion MCP and writes one page_critique per Notion page;
+      // page_critiques_count IS the audited total. The workspace
+      // intentionally doesn't pre-fetch the Notion DB itself — that
+      // server-side path proved fragile (Notion 3-req/s rate limit
+      // + edge function execution-time budget) and gave the audit
+      // SKILL a load_error to dead-end on.
 
       setState({
         atom_count:           atomCountsRes.count ?? atomRows.length,
@@ -243,6 +224,46 @@ export function CoworkWorkspace({ project, onChange }: Props) {
     document.addEventListener('visibilitychange', onVis)
     return () => document.removeEventListener('visibilitychange', onVis)
   }, [project.id])
+
+  // Auto-fire normalize-intake when the strategist lands on Cowork
+  // for a project with 0 atoms. This is the safety net for cases
+  // where the IntakeWorkspace's own auto-fire didn't run (strategist
+  // skipped that tab) or the browser canceled the slow request
+  // before Vercel could finish (the earlier failure mode for 3249).
+  // Same fire-and-forget keepalive shape as IntakeWorkspace.
+  useEffect(() => {
+    if (!state) return
+    if (state.atom_count > 0) return                    // already has atoms — nothing to do
+    if (state.fact_count > 0) return                    // facts only is rare but still skips
+    const dedupKey = `cowork-autofire-norm.${project.id}`
+    if (sessionStorage.getItem(dedupKey)) return
+    let cancelled = false
+    void (async () => {
+      sessionStorage.setItem(dedupKey, '1')
+      const { data: { session: authSession } } = await supabase.auth.getSession()
+      const jwt = authSession?.access_token
+      if (!jwt || cancelled) return
+      const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` }
+      void fetch('/api/web/agents/orchestrate', {
+        method: 'POST', headers,
+        body: JSON.stringify({ action: 'run_normalize', projectId: project.id }),
+        keepalive: true,
+      }).catch(() => { /* server keeps running */ })
+      // strategic-goals snapshot is quick + read-only; safe to also fire.
+      void fetch('/api/web/cowork/aggregate-strategic-goals', {
+        method: 'POST', headers,
+        body: JSON.stringify({ project_id: project.id }),
+        keepalive: true,
+      }).catch(() => { /* same — quick endpoint, fire and forget */ })
+      setLastResult({
+        step: 'auto-fire',
+        ok: true,
+        detail: 'No atoms found — triggered normalize-intake + strategic-goals in the background. Refresh in 1-2 minutes.',
+      })
+    })()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.atom_count, state?.fact_count, project.id])
 
   // ─── Run a step ─────────────────────────────────────────────────
 
