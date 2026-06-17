@@ -265,6 +265,64 @@ export function CoworkWorkspace({ project, onChange }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.atom_count, state?.fact_count, project.id])
 
+  // Auto-fire handoff-to-pages when step 7 (synthesize-critique) lands
+  // its rollup. This is the cowork→pages bridge — moves outline +
+  // draft + critique into web_pages/web_sections with full provenance.
+  // Dedup by critique_rollup.generated_at so a single rollup write only
+  // fires the handoff once; re-running step 7 generates a new timestamp
+  // and re-fires the handoff (the endpoint is idempotent — preserves
+  // strategist edits on page_name and refuses partner-locked overwrites
+  // without force).
+  useEffect(() => {
+    const rollupAt = state?.critique_rollup?._meta?.generated_at
+    if (!rollupAt) return
+    if (!state || state.page_critiques_count === 0) return
+    const dedupKey = `cowork-handoff.${project.id}.${rollupAt}`
+    if (sessionStorage.getItem(dedupKey)) return
+    let cancelled = false
+    void (async () => {
+      sessionStorage.setItem(dedupKey, '1')
+      const { data: { session: authSession } } = await supabase.auth.getSession()
+      const jwt = authSession?.access_token
+      if (!jwt || cancelled) return
+      try {
+        const r = await fetch('/api/web/cowork/handoff-to-pages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
+          body: JSON.stringify({ project_id: project.id }),
+          keepalive: true,
+        })
+        const body = await r.json().catch(() => ({}))
+        if (cancelled) return
+        if (r.ok) {
+          const pageCount = (body as { pages?: number }).pages ?? 0
+          const audit = (body as { audit?: { total_atoms_preserved?: number; total_facts_preserved?: number; any_round_trip_loss?: boolean } }).audit
+          setLastResult({
+            step: 'cowork → pages handoff',
+            ok: true,
+            detail: `Pushed ${pageCount} page${pageCount === 1 ? '' : 's'} to Pages with full provenance · ${audit?.total_atoms_preserved ?? 0} atoms / ${audit?.total_facts_preserved ?? 0} facts preserved · ${audit?.any_round_trip_loss ? 'WITH ROUND-TRIP LOSS — check the audit/scan tab' : 'no information loss'}. Open the Pages workspace to review.`,
+          })
+        } else {
+          const detail = (body as { detail?: string; error?: string }).detail ?? (body as { error?: string }).error ?? `status ${r.status}`
+          setLastResult({
+            step: 'cowork → pages handoff',
+            ok: false,
+            detail: `Handoff failed: ${detail}. The cowork artifacts are still in roadmap_state — fix the issue and re-run synthesize-critique to retry.`,
+          })
+        }
+      } catch (e) {
+        if (cancelled) return
+        setLastResult({
+          step: 'cowork → pages handoff',
+          ok: false,
+          detail: `Handoff network error: ${e instanceof Error ? e.message : 'unknown'}`,
+        })
+      }
+    })()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.critique_rollup?._meta?.generated_at, state?.page_critiques_count, project.id])
+
   // ─── Run a step ─────────────────────────────────────────────────
 
   const runStep = async (step: StepCatalogEntry, force = false) => {
