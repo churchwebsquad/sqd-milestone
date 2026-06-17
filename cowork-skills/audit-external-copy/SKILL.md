@@ -334,9 +334,25 @@ SELECT roadmap_state_set('<project_id>'::uuid, ARRAY['page_outlines', '<slug>'],
       "template_key":      "hero_inner",
       "slot_values": {
         "primary_heading": "Plan a Visit",
+        "tagline":         "...",
         "body":            "...",
-        "items":           [ ... ],
-        "buttons":         [ { "label": "...", "url": "..." } ]
+        "accent_body":     "...",
+        "items":           [
+          {
+            "item_heading":   "...",
+            "item_body":      "...",
+            "item_meta":      "...",
+            "item_cta_label": "...",   // optional — preserve per-item CTA label if Notion has one
+            "item_cta_url":   "..."    // optional — preserve per-item CTA href if Notion has one
+          }
+        ],
+        "buttons":         [
+          {
+            "label": "...",
+            "url":   "...",
+            "kind":  "primary"          // optional — 'primary' | 'secondary'
+          }
+        ]
       },
       "atoms_used":         [],
       "facts_used":         ["<fact_id>"],
@@ -360,6 +376,85 @@ when it matches an atom / fact / crawl-passage body. When the Notion
 copy DOESN'T trace back to a source (partner wrote it fresh in
 Notion), still include it — but report `actual_verbatim_ratio` based
 on the share that DOES trace. Don't fabricate atom_ids.
+
+### Capture rules — VERBATIM is the default
+
+The audit's whole reason for existing is that the partner provided
+copy. Lifting it 1:1 IS the win condition. The most common ways this
+skill has hurt the strategist:
+
+1. **`[NEEDS INPUT: ...]` placeholders are not content — preserve
+   verbatim.** When a Notion section has copy like
+   `**Tagline:** [NEEDS INPUT: Ben Folman — three starter directions
+   to react to: 'A Church for Arvada.' / 'Rooted Here in Arvada.' /
+   'Faith That Stays in Arvada.']`, put the FULL bracket payload
+   into the slot exactly as written. Never pick one of the starter
+   options as if it were final copy. Never paraphrase the bracket
+   text. The handoff renderer recognizes `[NEEDS INPUT: ...]` and
+   handles it (visible text stays so the strategist sees the gap;
+   url slots blank the href so it doesn't become a broken link).
+
+2. **Capture every CTA — primary, secondary, AND per-item.** Notion
+   sections often have multiple CTAs:
+
+   ```
+   ## Final CTA Section
+   - Primary CTA: **Plan a Visit** → `/plan-a-visit`
+   - Secondary CTA: **Watch the Latest Message** → `/watch`
+   ```
+
+   This becomes `buttons: [{label, url, kind: "primary"}, {label,
+   url, kind: "secondary"}]`. NOT a single button.
+
+   When ITEMS have CTAs (cards grids, ministry spotlights, policy
+   lists):
+
+   ```
+   **Card 1**
+   - *Headline:* **Vineyard Kids**
+   - *Body:* Secure check-in...
+   - *CTA:* Learn About Vineyard Kids → `/kids`
+   ```
+
+   This becomes `items: [{item_heading, item_body, item_cta_label:
+   "Learn About Vineyard Kids", item_cta_url: "/kids"}]`. Dropping
+   the per-item CTA is a structural loss the importer cannot
+   recover.
+
+3. **Don't drop or merge Notion sections.** Every `##` heading in
+   the Notion page body (except metadata blocks: Strategic Purpose,
+   Personas, Phase, Slug, Part 1: Strategic Setup, Sources
+   Referenced, Gaps Flagged) becomes ITS OWN section in the draft.
+   Do not combine "Hero" + "Service Times" into one section. Do
+   not skip "Newsletter Signup" because it feels small. Sub-section
+   `###` headings inside a `##` MAY group as a single section if
+   they're tightly coupled, but only with explicit reasoning in
+   `voice_notes`.
+
+4. **Respect template hints written into Notion section headings.**
+   The strategist annotates the structural intent right in the
+   heading. Match these to `pickable_templates`:
+
+   | Notion hint contains | Pick template_key |
+   |---|---|
+   | "Hero" / "Hero Section" | hero_homepage (home) / hero_inner (inner pages) |
+   | "Cards Grid" / "Spotlights" + per-card CTAs | `cards_with_cta` (feature-section-103) |
+   | "Cards Grid" / "Spotlights" without per-card CTAs | `content_featured_a` |
+   | "Quick-Info" / "Band" / "Service Times" | `cta_simple` |
+   | "Newsletter" / "Signup" | `cta_simple` or `cta_callout` |
+   | "Mission" + quote | `content_video` (gives a pull-quote treatment) |
+   | "First-Visit" + paragraph | `content_image_text_b` |
+   | "FAQ" / "Accordion" / "Statement of Faith" | `accordion_faq` |
+   | "Team" / "Staff" / "Leadership" | `feature_team` |
+   | "Testimony" / "Quote" | `testimonial_written` / `testimonial_video` |
+   | "Timeline" / "Story" | `timeline_story` |
+   | "Contact" / "Address" | `contact_section` |
+   | "Final CTA" / "Page Visitor Actions" | `cta_callout` |
+
+   If two templates could fit, pick the one with the closer slot
+   shape match. A "Cards Grid" where the source has per-card CTAs
+   MUST pick `cards_with_cta`, not `content_featured_a` — the
+   latter cannot hold the CTA URLs and will silently drop them.
 
 ```sql
 SELECT roadmap_state_set('<project_id>'::uuid, ARRAY['page_drafts', '<slug>'], '<draft_jsonb>'::jsonb);

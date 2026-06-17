@@ -3,22 +3,24 @@
  * Cowork→Pages handoff. Lives here so the handoff endpoint AND the
  * dry-run regression script share one source of truth.
  *
- * Input: cowork-emitted uniform `slot_values` + a v2.0.0 manifest
- * entry per `cowork-skills/canonical-templates.json`.
+ * Input: cowork-emitted uniform `slot_values` + a manifest entry per
+ * `cowork-skills/canonical-templates.json`.
  *
  * Output: { field_values (Brixies-shaped), bind_quality, gaps[] }.
  *
  * Contract:
- *   - Cowork emits a CLOSED set of 5 top-level slots:
- *       primary_heading, tagline, body, items, buttons.
- *     `accent_body` is never emitted by cowork audit — templates that
- *     need it stay with the Brixies designer placeholder.
- *   - Items use `{item_heading, item_body, item_meta}` closed subkeys.
- *   - Buttons use `{label, url}` closed subkeys.
+ *   - Cowork emits a CLOSED set of top-level slots:
+ *       primary_heading, tagline, body, accent_body, items, buttons.
+ *   - Items use `{item_heading, item_body, item_meta,
+ *                 item_cta_label, item_cta_url}` (v2 schema — added
+ *     per-item CTA fields to stop dropping cards-grid CTAs).
+ *   - Buttons use `{label, url, kind?: 'primary'|'secondary'}`.
+ *   - VERBATIM PRESERVATION: any value containing `[NEEDS INPUT: ...]`
+ *     is passed through unchanged. Never substitute starter language.
+ *     Button urls that are `[NEEDS INPUT: ...]` are blanked at bind
+ *     time so the rendered href doesn't become a literal-text link.
  *   - Translator NEVER throws. Partial bindings return with a
- *     populated gaps[]; the caller decides the bind_quality verdict.
- *   - field_values shape matches the renderer contract verbatim per
- *     the verified Phase 0 working examples. No guesswork.
+ *     populated gaps[]; the caller decides bind_quality.
  */
 
 export interface ManifestEntry {
@@ -81,6 +83,23 @@ function escapeHtml(s: string): string {
 export function isHtmlAlready(value: unknown): boolean {
   if (typeof value !== 'string') return false
   return /^<(p|ul|ol|li|h\d|div|blockquote|figure|table|section|article)[\s>]/i.test(value.trim())
+}
+
+/** True if a string is (or starts with) a `[NEEDS INPUT: ...]` marker.
+ *  These are explicit strategist placeholders for missing data —
+ *  never substitute, never fabricate. Visible-text slots keep them
+ *  verbatim; url slots return empty so the rendered href doesn't
+ *  become a literal "[NEEDS INPUT: maps link]" link. */
+export function isNeedsInput(value: unknown): boolean {
+  return typeof value === 'string' && /^\s*\[NEEDS INPUT\b/i.test(value)
+}
+
+/** Sanitize a URL field: blank out `[NEEDS INPUT: ...]` so it doesn't
+ *  become a broken href. Pass through real URLs verbatim. */
+export function sanitizeUrl(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  if (isNeedsInput(value)) return ''
+  return value
 }
 
 export function composeFieldValuesForBrixies(
@@ -150,11 +169,22 @@ export function composeFieldValuesForBrixies(
           typeof b.contact === 'string' ? b.contact :
           (b.contact && typeof b.contact === 'object' && typeof (b.contact as any).label === 'string'
             ? (b.contact as any).label : '')
-        const url =
+        const rawUrl =
           typeof b.url === 'string' ? b.url :
           typeof b.href === 'string' ? b.href :
           (b.contact && typeof b.contact === 'object' && typeof (b.contact as any).url === 'string'
             ? (b.contact as any).url : '')
+        // [NEEDS INPUT: …] in a url slot → blank href (visible label
+        // stays verbatim so the strategist sees the unresolved item).
+        const url = sanitizeUrl(rawUrl)
+        if (rawUrl && isNeedsInput(rawUrl)) {
+          gaps.push({
+            kind:     'needs_input_url_blanked',
+            severity: 'info',
+            detail:   `button '${label}' has placeholder url ${rawUrl}; rendered as no-href`,
+            slot:     'buttons',
+          })
+        }
         if (!label) {
           gaps.push({
             kind: 'button_missing_label',
@@ -348,18 +378,22 @@ function applyTemplateOverrides(
 
     case 'feature-section-103': {
       // feature_unique — row_list per item; each row has heading +
-      // nested item_list → card → {heading_card, list_item[].description}.
-      // For cowork we collapse each item to a single row/card and
-      // put item_body as one list_item description.
-      out.row_list = items.map(it => ({
-        heading: String(it.item_heading ?? ''),
-        item_list: [{
-          card: [{
-            heading_card: String(it.item_heading ?? ''),
-            list_item:   [{ description: ensureHtml(String(it.item_body ?? '')) }],
-          }],
-        }],
-      }))
+      // nested item_list → card → {heading_card, list_item[].description,
+      // button_card (cta)}. Per-card CTAs land in button_card when
+      // cowork captured item_cta_label/url.
+      out.row_list = items.map(it => {
+        const card: Record<string, unknown> = {
+          heading_card: String(it.item_heading ?? ''),
+          list_item:   [{ description: ensureHtml(String(it.item_body ?? '')) }],
+        }
+        const ctaLabel = typeof it.item_cta_label === 'string' ? it.item_cta_label : ''
+        const ctaUrl   = sanitizeUrl(it.item_cta_url)
+        if (ctaLabel) card.button_card = { label: ctaLabel, url: ctaUrl }
+        return {
+          heading:   String(it.item_heading ?? ''),
+          item_list: [{ card: [card] }],
+        }
+      })
       return out
     }
 

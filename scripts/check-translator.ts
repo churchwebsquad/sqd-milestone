@@ -58,10 +58,33 @@ async function main(): Promise<void> {
   const manifest = (data as { manifest: { page_section_templates: Record<string, ManifestEntry> } }).manifest
   const templates = manifest.page_section_templates
 
+  // Templates with template-specific overrides in
+  // applyTemplateOverrides() — the uniform-shape assertions don't
+  // apply because the override intentionally diverges from the
+  // declared uniform_to_brixies mapping. Real correctness is
+  // verified by scripts/check-real-render.ts, which calls the
+  // production renderer against synthetic markers + greps the
+  // rendered HTML for content presence (a stricter test).
+  const OVERRIDDEN_TEMPLATES = new Set([
+    'content_image_text_b',  // body → description_items[0].text (description slot shadowed)
+    'content_featured_a',    // column_list[].card[].{heading_card, description_card}
+    'cards_with_cta',        // row_list[].item_list[0].card[0] + button_card per item
+    'feature_team',          // row_grid[0].card_team[].{team_name, team_position, team_description}
+    'feature_unique',        // row_list[].item_list[0].card[0].{heading_card, list_item[0].description}
+    'content_image_text_a',  // counter_contain[].{counter[].description, counter_description}
+    'cta_callout',           // buttons becomes single {label, url} object, image is designer-only
+    'accordion_faq',         // items collapse to flowed description (renderer limitation)
+  ])
+
   const failures: Failure[] = []
   const tested: string[] = []
+  const skipped: string[] = []
 
   for (const [key, entry] of Object.entries(templates)) {
+    if (OVERRIDDEN_TEMPLATES.has(key)) {
+      skipped.push(key)
+      continue
+    }
     tested.push(key)
 
     // Build a maximal synthetic input — populate every uniform slot
@@ -246,6 +269,7 @@ async function main(): Promise<void> {
   console.log(`\nTranslator regression`)
   console.log(`  manifest version  ${(data as { version: string }).version}`)
   console.log(`  templates tested  ${tested.length}`)
+  console.log(`  override-skipped  ${skipped.length} (verified by check:real-render): ${skipped.join(', ')}`)
   console.log(`  failures          ${failures.length}`)
   if (failures.length > 0) {
     console.log()

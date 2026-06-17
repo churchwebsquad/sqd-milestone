@@ -1,5 +1,5 @@
 {
-  "version": "2.0.1",
+  "version": "2.1.0",
   "source": "Phase 0 ground-truth audit (Side A: 13 templates \u00d7 verified web_sections rows; Side B: Arvada's 95 sections \u00d7 cowork-emitted slot_values). Source-of-truth for the Cowork\u2192Pages bridge translator.",
   "doc": {
     "purpose": "Per-template uniform\u2192Brixies mapping for the handoff endpoint. The handoff ALWAYS pushes; the translator reports bind_quality (perfect | partial) + gaps[] per section. Strategist sees the Brixies preview + Rich Content Companion side-by-side and resolves gaps via UI. Refusals are logged for Claude Code, not the user.",
@@ -561,7 +561,42 @@
       ],
       "verified": false,
       "verified_examples": [],
-      "notes": "Palette-referenced items (Card). No non-cowork ground truth; schema-inferred."
+      "notes": "Palette-referenced items (Card). Cards have heading + description ONLY — no per-card CTA slot. If the source has per-card CTAs, prefer `cards_with_cta` (feature-section-103) which supports button_card per item."
+    },
+    "cards_with_cta": {
+      "template_id": "feature-section-103",
+      "concept": "cards_with_cta",
+      "family": "Feature Section",
+      "variant": "103",
+      "cowork_writable_slots": {
+        "tagline":         { "max_chars": 60, "required": false },
+        "primary_heading": { "max_chars": 100, "required": true },
+        "body":            { "max_chars": 400, "required": false },
+        "items":           { "max_items": 4, "required": false, "supports_item_cta": true },
+        "buttons":         { "max_items": 2, "required": false }
+      },
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline":         "tagline",
+        "primary_heading": "heading",
+        "body":            "description",
+        "accent_body":     null,
+        "buttons": {
+          "field":     "buttons",
+          "subfields": { "label": "label", "url": "url" },
+          "nesting":   "contact"
+        },
+        "items": {
+          "field":     "row_list",
+          "subfields": { "item_heading": "heading_card", "item_body": "description", "item_meta": null },
+          "split":     null
+        }
+      },
+      "richtext_keys":   ["description"],
+      "required_slots":  ["heading"],
+      "verified":        false,
+      "verified_examples": [],
+      "notes": "Cards-Grid template that supports per-card CTAs via `button_card` (kind:cta) inside each card. The audit SKILL must pick THIS template (not content_featured_a) when the Notion source has per-card CTAs (e.g. `### Ministry Spotlights (Cards Grid)` where each card has its own CTA URL). Translator override in coworkToBrixies.ts:applyTemplateOverrides routes item_cta_label/item_cta_url into row_list[].item_list[0].card[0].button_card."
     },
     "content_featured_b": {
       "template_id": "content-section-91",
