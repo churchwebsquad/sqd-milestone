@@ -531,7 +531,8 @@ skill has hurt the strategist:
    | "Testimony" / "Quote" | `testimonial_written` / `testimonial_video` |
    | "Timeline" / "Story" | `timeline_story` |
    | "Contact" / "Address" | `contact_section` |
-   | "Final CTA" / "Page Visitor Actions" | `cta_callout` |
+   | "Final CTA" with ONE button                | `cta_callout` (cta-section-52) |
+   | "Final CTA" with PRIMARY + SECONDARY buttons | `cta_simple` (cta-section-20) |
 
    If two templates could fit, pick the one with the closer slot
    shape match. A "Cards Grid" where the source has per-card CTAs

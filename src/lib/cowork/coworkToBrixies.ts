@@ -222,6 +222,18 @@ export function composeFieldValuesForBrixies(
   // ── Buttons ────────────────────────────────────────────────────
   if (Array.isArray(slotValues.buttons) && slotValues.buttons.length > 0) {
     const coworkButtons = slotValues.buttons as Array<Record<string, unknown>>
+    // cta_callout (cta-section-52) has a SINGLE cta slot — secondary
+    // buttons get dropped (strategist sees them in the Rich Companion
+    // + can swap to cta_simple which has a 2-button group). Surface
+    // the loss as a warning so it shows up in the audit panel.
+    if (entry.template_id === 'cta-section-52' && coworkButtons.length > 1) {
+      gaps.push({
+        kind: 'secondary_button_unfilled_by_template',
+        severity: 'warning',
+        detail: `template 'cta-section-52' has 1 cta slot but cowork emitted ${coworkButtons.length} buttons. Primary renders; secondary preserved in cowork_slot_values + visible in the Rich Companion. Swap to 'cta_simple' to render both.`,
+        slot: 'buttons',
+      })
+    }
     if (map.buttons == null) {
       gaps.push({
         kind: 'uniform_slot_not_supported_by_template',
@@ -480,10 +492,18 @@ function applyTemplateOverrides(
     case 'cta-section-52': {
       // cta_callout — buttons is a SINGLE cta slot (kind:slot
       // type:cta), not an array. `image` is a designer-only group.
+      //
+      // When cowork emits 2+ buttons (primary + secondary), pick the
+      // PRIMARY (kind:'primary' if marked, else buttons[0]) for the
+      // single cta slot. The secondary is preserved bit-for-bit in
+      // cowork_slot_values and visible in the Rich Companion;
+      // strategist can swap to cta_simple (2-button slot) via the
+      // variant picker. The audit SKILL should prefer cta_simple for
+      // 2-button sections — see SKILL.md template-hint table.
       if (buttons.length > 0) {
-        const b = buttons[0]
-        const label = typeof b.label === 'string' ? b.label : ''
-        const url   = typeof b.url   === 'string' ? b.url   : ''
+        const primary = buttons.find(b => b.kind === 'primary') ?? buttons[0]
+        const label = typeof primary.label === 'string' ? primary.label : ''
+        const url   = typeof primary.url   === 'string' ? primary.url   : ''
         out.buttons = { label, url }
       } else {
         delete out.buttons

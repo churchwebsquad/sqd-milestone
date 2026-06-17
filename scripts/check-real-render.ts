@@ -136,9 +136,22 @@ async function main(): Promise<void> {
     // translator (the stored field_values reflect whatever the
     // handoff endpoint wrote at last push — which may be stale).
     const entry = entryByTemplateId.get(tpl.id)
-    const derived = entry
-      ? composeFieldValuesForBrixies((s.cowork_slot_values ?? {}) as any, entry).field_values
-      : (s.field_values ?? {})
+    const bindResult = entry
+      ? composeFieldValuesForBrixies((s.cowork_slot_values ?? {}) as any, entry)
+      : { field_values: (s.field_values ?? {}) as Record<string, unknown>, gaps: [] as any[] }
+    const derived = bindResult.field_values
+
+    // Known-intentional template-cap losses get reported separately
+    // — these aren't bugs, they're documented limits the strategist
+    // resolves via the variant picker. Currently:
+    //   secondary_button_unfilled_by_template — cta_callout has 1
+    //     cta slot but cowork emitted 2+ buttons. Surfaced as a
+    //     warning in the audit panel; secondary preserved in
+    //     cowork_slot_values + Rich Companion.
+    const intentionalGapKinds = new Set([
+      'secondary_button_unfilled_by_template',
+    ])
+    const intentionalGaps = (bindResult.gaps ?? []).filter((g: any) => intentionalGapKinds.has(g.kind))
 
     let html: string
     try {
@@ -167,7 +180,13 @@ async function main(): Promise<void> {
       if (it.item_heading) fieldSightings.push([`items[${i}].item_heading`, it.item_heading])
       if (it.item_body)    fieldSightings.push([`items[${i}].item_body`,    it.item_body])
     }
+    // Skip secondary button label check when the template has the
+    // documented "1 cta slot, multiple buttons" loss (cta_callout)
+    // — that's an intentional template-cap limit, not a render bug.
+    // Strategist resolves via variant picker (swap to cta_simple).
+    const skipSecondaryButton = intentionalGaps.some((g: any) => g.kind === 'secondary_button_unfilled_by_template')
     for (const [i, b] of Array.from((cowork.buttons as any[]) ?? []).entries()) {
+      if (skipSecondaryButton && i > 0) continue
       if (b.label) fieldSightings.push([`buttons[${i}].label`, b.label])
     }
 

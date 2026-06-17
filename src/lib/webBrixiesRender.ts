@@ -402,11 +402,26 @@ function neutralizeDefaultButtonLabels(root: Element): void {
   let node = walker.nextNode() as Text | null
   while (node) {
     const v = (node.nodeValue ?? '').trim().toLowerCase()
-    if (v && DEFAULT_BUTTON_LABELS.has(v) && isInsideButtonShell(node)) {
+    if (v && DEFAULT_BUTTON_LABELS.has(v) && isInsideButtonShell(node)
+        && !isInsideSubstituted(node)) {
       node.nodeValue = ''
     }
     node = walker.nextNode() as Text | null
   }
+}
+
+/** True if the node lives inside an element marked data-substituted="1"
+ *  — i.e. applyCta actually wrote a partner-chosen label here, so the
+ *  text is REAL content, not a Brixies placeholder. Without this guard,
+ *  partner labels like "Sign Up" / "Subscribe" / "Learn More" get wiped
+ *  whenever they collide with DEFAULT_BUTTON_LABELS. */
+function isInsideSubstituted(node: Node): boolean {
+  let el: Element | null = node.parentElement
+  while (el) {
+    if (el.getAttribute?.('data-substituted') === '1') return true
+    el = el.parentElement
+  }
+  return false
 }
 
 /** Hide leaf button shells whose label is empty after binding +
@@ -979,6 +994,13 @@ function applyCta(el: Element, cta: { label?: string; url?: string }): void {
     const leaf = findButtonLabelLeaf(el)
     if (leaf) leaf.textContent = label
     else el.textContent = label
+    // Mark this CTA as substituted so neutralizeDefaultButtonLabels
+    // doesn't wipe partner-chosen labels that happen to collide with
+    // Brixies's default-label list (e.g. a real "Sign Up" on a
+    // Newsletter Signup section). Without this mark, the post-render
+    // pass strips any text node matching DEFAULT_BUTTON_LABELS inside
+    // a button shell — false-positive on legitimately-bound copy.
+    el.setAttribute('data-substituted', '1')
   }
   if (url) {
     el.setAttribute('data-href', url)
