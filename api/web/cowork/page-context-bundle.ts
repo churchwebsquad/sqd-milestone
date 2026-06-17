@@ -391,6 +391,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     },
     prior_handoff_notes:      priorHandoffNotes,
 
+    /** Full step-6 output. The trimmed `sitemap_pages` above
+     *  carries only slug/name/nav_order/nav_strategy/primary_persona
+     *  — enough for steps 8–10, which work page-by-page off the
+     *  slug list. Step 7 (plan-cross-page-allocation) needs the
+     *  WHOLE site_strategy artifact: persona_journeys[] (per-
+     *  persona ordered slug sequences the allocation must respect),
+     *  page_elevations[] (which pages elevate which strategic
+     *  goals), nav_change_level + nav_drop_candidates (allocation
+     *  must NOT route content to slugs the strategist is planning
+     *  to drop), and the page-level rationale + treatment hints
+     *  from plan-site-strategy. */
+    site_strategy:            state.site_strategy ?? null,
+
+    /** Full step-5 output. plan-cross-page-allocation reads
+     *  atom_routes[] + fact_routes[] + cell_density[] + coverage_gaps[]
+     *  to know which Audience × Category × Funnel cell each atom +
+     *  fact belongs to — that's what drives the page allocation
+     *  decision. Without acf_plan, step 7 has no signal about
+     *  audience/funnel routing and re-derives everything from
+     *  scratch each session. */
+    acf_plan:                 state.acf_plan ?? null,
+
     allocations_by_page:      allocationsByPage,
     build_directives_by_page: buildDirectivesByPage,
 
