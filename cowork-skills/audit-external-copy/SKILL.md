@@ -196,6 +196,32 @@ moves, in preference order:
      "Support Team" — derive groupings from titles when possible,
      otherwise just "Staff (1 of 3)" / "Staff (2 of 3)" / etc.).
      8 items → 2× sections of 4.
+
+     **SPLIT marker contract — REQUIRED**: every section produced by
+     a SPLIT MUST stamp two fields on its `_meta` so the handoff
+     endpoint can group siblings without inference:
+       - `split_from`: a stable string identifying the original
+         Notion section (use the original heading text — e.g.
+         `"Staff"` — verbatim from the Notion page).
+       - `split_position`: 1-based index within the split group
+         (1, 2, 3 for a 3-way split).
+     Standalone (non-split) sections leave both fields absent.
+     Example metadata on outline section #2 of a 3-way staff split:
+     ```json
+     "_meta": {
+       "audit_source": "notion",
+       "notion_page_id": "<id>",
+       "notion_url":     "<url>",
+       "split_from":     "Staff",
+       "split_position": 2
+     }
+     ```
+     The handoff endpoint mints ONE `split_group_id` UUID per unique
+     `(notion_page_id, split_from)` pair and stamps it on every
+     web_section in the group. Without the marker, the importer has
+     no way to detect groupings + the audit-tab UI can't render
+     "split 2 of 3 from one Notion section" — so the marker is the
+     load-bearing contract.
   3. **TRUNCATE + defer** — only when SUBSTITUTE and SPLIT both
      fail (e.g. 12 FAQ items, `accordion_faq` cap 5, no other
      accordion variant). Keep the top N items by priority; surface

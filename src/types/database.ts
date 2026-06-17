@@ -1371,7 +1371,72 @@ export interface WebPage {
   /** SEO / AEO (answer engine) / GEO (geo-targeting) authoring per
    *  page. Shape is open — see WebPageSeo for the canonical keys. */
   seo: WebPageSeo | null
+
+  // ── Cowork → Pages handoff provenance (v75) ──
+  /** Full mirror of outline._meta + critique._meta + page-level audit
+   *  info from /api/web/cowork/handoff-to-pages. Read by the Pages
+   *  workspace audit/scan tab. NULL when this page predates the handoff. */
+  cowork_handoff_meta: CoworkHandoffPageMeta | null
+  /** Provenance source. Narrow + queryable. NULL pre-handoff. */
+  audit_source: 'notion' | 'notion-gap' | 'generated' | 'generated-supplemental' | null
+  /** Click-through to Notion when audit_source = 'notion'. */
+  notion_url: string | null
+  /** Timestamp of the most recent handoff write. NULL pre-handoff. */
+  cowork_handoff_at: string | null
+
   [key: string]: unknown
+}
+
+/** Page-level cowork handoff metadata. Mirrors the shape the handoff
+ *  endpoint writes to web_pages.cowork_handoff_meta. Shape is intentionally
+ *  open so cowork can evolve outputs without schema changes — the audit
+ *  tab renders defensively. */
+export interface CoworkHandoffPageMeta {
+  /** Branch this handoff came from. */
+  branch: 'audit' | 'from-scratch'
+  /** Mirrored from page_outlines.<slug>._meta. */
+  outline_meta: Record<string, unknown> & {
+    generated_at?:     string
+    model?:            string
+    audit_source?:     'notion' | 'notion-gap' | 'generated' | 'generated-supplemental'
+    notion_page_id?:   string
+    notion_url?:       string
+    handoff_note?:     string
+  }
+  /** Mirrored from page_critiques.<slug>._meta. */
+  critique_meta: Record<string, unknown> & {
+    generated_at?:     string
+    model?:            string
+    handoff_note?:     string
+    audit_source?:     string
+  }
+  /** Overall band from the critique (green / yellow / red / gap). */
+  overall_band:    'green' | 'yellow' | 'red' | 'gap' | null
+  /** Page-level directives from the critique (formatting violations,
+   *  required-slot gaps, partner-input asks, etc.). */
+  directives:      Array<{
+    kind:          string
+    severity:      'info' | 'warning' | 'blocker'
+    detail:        string
+    section?:      string
+    slot?:         string
+  }>
+  /** Round-trip preservation summary written by the handoff endpoint.
+   *  any_loss = false is the no-information-loss guarantee. */
+  round_trip: {
+    sections_in_draft:     number
+    sections_written:      number
+    atoms_in_drafts:       number
+    atoms_preserved:       number
+    facts_in_drafts:       number
+    facts_preserved:       number
+    crawl_topics_in_drafts: number
+    crawl_topics_preserved: number
+    deferred_total:        number
+    split_groups:          number
+    any_loss:              boolean
+    losses?:               string[]
+  }
 }
 
 /** CTA value bound to a `slot.type === 'cta'` field. Backwards-
@@ -1472,12 +1537,92 @@ export interface WebSection {
    *  on rebind). `default` = template placeholder. `unbound` = template
    *  required a value but none was bound. Added in v54. */
   field_provenance: FieldProvenanceMap | null
+
+  // ── Cowork → Pages handoff provenance (v75) ──
+  /** Full provenance bundle from the cowork artifact triplet (outline +
+   *  draft + critique) for this section. Read by the Pages workspace
+   *  audit/scan tab; never read by Brixies render path. NULL for
+   *  pre-v75 sections + freehand author sections. */
+  cowork_section_meta: CoworkHandoffSectionMeta | null
+  /** Uniform-named slot values from cowork (primary_heading, body,
+   *  items, buttons, tagline, accent_body). The Brixies-named version
+   *  lives in field_values, derived from this at handoff time via
+   *  canonical_templates.uniform_to_brixies. Round-tripping here lets
+   *  re-translations happen without re-running cowork. */
+  cowork_slot_values: Record<string, unknown> | null
+  /** When audit-branch overflow SPLIT one Notion section into N
+   *  web_sections (e.g. 6 staff → 3× feature_team), siblings share
+   *  this uuid. NULL means standalone section. */
+  split_group_id: string | null
+  /** 1-based position within the split_group. NULL when split_group_id IS NULL. */
+  split_position: number | null
+
   sort_order: number
   content_status: 'draft' | 'internal_review' | 'partner_review' | 'partner_approved' | string
   notes: string | null
   created_at: string
   updated_at: string
   [key: string]: unknown
+}
+
+/** Section-level cowork handoff metadata. Populated by
+ *  /api/web/cowork/handoff-to-pages — mirrors the outline section +
+ *  draft section + critique section data that named this row. */
+export interface CoworkHandoffSectionMeta {
+  /** From page_outlines.<slug>.sections[].section_intent_id — the
+   *  stable id strategists + cowork share to refer to "this section". */
+  section_intent_id:        string
+  /** From page_outlines.<slug>.sections[].section_job — one-line
+   *  description of what this section is supposed to do. */
+  section_intent_text:      string
+  /** Voice exemplar atom_id(s) this section's voice anchors against. */
+  voice_anchor_atom_ids:    string[]
+  /** Target verbatim band from strategic_goals copy_approach. */
+  intended_verbatim_band:   'high' | 'mid' | 'low' | null
+  /** Measured verbatim ratio from the draft (0.00 - 1.00). */
+  actual_verbatim_ratio:    number | null
+  /** Source atoms referenced by this section. */
+  atom_ids_used:            string[]
+  /** Source facts referenced by this section. */
+  fact_ids_used:            string[]
+  /** Source crawl topics referenced by this section. */
+  crawl_topic_keys_used:    string[]
+  /** Items the audit TRUNCATED out of this section because the
+   *  canonical template couldn't hold them. Strategist can promote
+   *  any item to a new section or dismiss. */
+  deferred_items:           Array<{
+    kind:           string    // e.g. 'staff_member', 'partnership', 'belief_article'
+    source_ref?:    string    // atom_id / fact_id / topic_key it came from
+    title?:         string
+    body?:          string
+    reason:         string    // 'cap_overage' | 'unmatched_template' | etc.
+    why_truncated?: string    // human-readable explanation
+  }>
+  /** voice_notes string from the draft section (annotation per section). */
+  voice_notes:              string | null
+  /** Per-axis scores from the critique. */
+  axes: {
+    dignity?:           { score: number; pass: boolean; rationale?: string }
+    voice_character?:   { score: number; pass: boolean; rationale?: string }
+    persona_fit?:       { score: number; pass: boolean; rationale?: string }
+    source_coverage?:   { score: number; pass: boolean; rationale?: string }
+    claim_plausibility?:{ score: number; pass: boolean; rationale?: string }
+  } | null
+  /** Critique directives scoped to this section. */
+  directives:               Array<{
+    kind:     string
+    severity: 'info' | 'warning' | 'blocker'
+    detail:   string
+    slot?:    string
+  }>
+  /** Audit-branch provenance — present when this section came from
+   *  Notion. NULL for from-scratch / generated-supplemental sections. */
+  notion_page_id:           string | null
+  notion_url:               string | null
+  /** When audit-branch overflow split happened, this marker lets the
+   *  audit tab show "split from <original heading>" + lets the
+   *  importer group siblings via split_group_id. */
+  split_from:               string | null
 }
 
 /** Per-field provenance tag. Lives at `web_sections.field_provenance[fieldKey]`.

@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "source": "Paradox Church (TEST) curated_library (project 15394f01-b371-415e-9bae-5d6e7d50c58a)",
   "doc": {
     "purpose": "Single source-of-truth that the cowork pipeline reads when picking templates + populating slots. Bind-time translation between this uniform vocabulary and Brixies field names lives in the app-side import endpoint, NOT in cowork.",
@@ -28,7 +28,8 @@
         "importer (app-side): last line of defense. Refuses INSERT if any required slot empty. Returns structured error pointing at page + section + slot + missing atom + suggested fix.",
         "Strategist UI: surfaces unresolved gaps with context. Strategist sees exactly which page/section/slot needs input, what was missing, what to do."
       ]
-    }
+    },
+    "uniform_to_brixies_purpose": "Per-template map from cowork uniform slot names to actual Brixies field keys in web_content_templates.fields. Read by the cowork\u2192pages handoff endpoint to compose web_sections.field_values without guessing. Source: web_content_templates.fields jsonb on 2026-06-16. Verified by live-schema audit, not hand-rolled."
   },
   "page_section_templates": {
     "hero_homepage": {
@@ -61,7 +62,21 @@
           }
         }
       },
-      "design_handoff_image_count": 0
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": null
+      }
     },
     "hero_inner": {
       "template_id": "hero-section-1",
@@ -89,7 +104,21 @@
           }
         }
       },
-      "design_handoff_image_count": 1
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": null,
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": null
+      }
     },
     "hero_featured": {
       "template_id": "hero-section-43",
@@ -117,7 +146,21 @@
           }
         }
       },
-      "design_handoff_image_count": 1
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": null,
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": null
+      }
     },
     "cta_simple": {
       "template_id": "cta-section-20",
@@ -145,7 +188,21 @@
           }
         }
       },
-      "design_handoff_image_count": 1
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": null,
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": null
+      }
     },
     "cta_callout": {
       "template_id": "cta-section-52",
@@ -173,7 +230,21 @@
           }
         }
       },
-      "design_handoff_image_count": 0
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": null,
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": null,
+            "url": null
+          }
+        },
+        "items": null
+      }
     },
     "accordion_faq": {
       "template_id": "faq-section-10",
@@ -206,7 +277,28 @@
           }
         }
       },
-      "design_handoff_image_count": 0
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": {
+          "field": "accordion_right",
+          "subfields": {
+            "item_heading": "text",
+            "item_body": "text",
+            "item_meta": null
+          }
+        }
+      }
     },
     "content_image_text_a": {
       "template_id": "content-section-45",
@@ -235,7 +327,28 @@
           }
         }
       },
-      "design_handoff_image_count": 1
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": null,
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": {
+          "field": "list_content",
+          "subfields": {
+            "item_heading": "heading",
+            "item_body": "description",
+            "item_meta": null
+          }
+        }
+      }
     },
     "content_image_text_b": {
       "template_id": "content-section-16",
@@ -268,7 +381,28 @@
           }
         }
       },
-      "design_handoff_image_count": 1
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": {
+          "field": "description_items",
+          "subfields": {
+            "item_heading": null,
+            "item_body": "text",
+            "item_meta": null
+          }
+        }
+      }
     },
     "content_video": {
       "template_id": "content-section-25",
@@ -289,7 +423,21 @@
           "required": false
         }
       },
-      "design_handoff_image_count": 1
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": null,
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": "accent_description",
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": null
+      }
     },
     "content_featured_a": {
       "template_id": "content-section-89",
@@ -322,7 +470,28 @@
           }
         }
       },
-      "design_handoff_image_count": 3
+      "design_handoff_image_count": 3,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": {
+          "field": "column_list",
+          "subfields": {
+            "item_heading": "heading_card",
+            "item_body": "description_card",
+            "item_meta": null
+          }
+        }
+      }
     },
     "content_featured_b": {
       "template_id": "content-section-91",
@@ -366,7 +535,28 @@
           }
         }
       },
-      "design_handoff_image_count": 1
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": {
+          "field": "list_element_5",
+          "subfields": {
+            "item_heading": null,
+            "item_body": "description",
+            "item_meta": null
+          }
+        }
+      }
     },
     "contact_section": {
       "template_id": "content-section-96",
@@ -410,7 +600,28 @@
           }
         }
       },
-      "design_handoff_image_count": 1
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": {
+          "field": "counter_contain",
+          "subfields": {
+            "item_heading": null,
+            "item_body": "counter_description",
+            "item_meta": null
+          }
+        }
+      }
     },
     "feature_team": {
       "template_id": "team-section-14",
@@ -443,7 +654,28 @@
           }
         }
       },
-      "design_handoff_image_count": 0
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": {
+          "field": "row_grid",
+          "subfields": {
+            "item_heading": "team_name",
+            "item_body": "team_description",
+            "item_meta": "team_position"
+          }
+        }
+      }
     },
     "feature_tabbed": {
       "template_id": "feature-section-66",
@@ -480,7 +712,28 @@
           }
         }
       },
-      "design_handoff_image_count": 4
+      "design_handoff_image_count": 4,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": {
+          "field": "tab",
+          "subfields": {
+            "item_heading": "heading",
+            "item_body": "description",
+            "item_meta": null
+          }
+        }
+      }
     },
     "feature_unique": {
       "template_id": "feature-section-103",
@@ -513,7 +766,28 @@
           }
         }
       },
-      "design_handoff_image_count": 0
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": {
+          "field": "row_list",
+          "subfields": {
+            "item_heading": "heading",
+            "item_body": null,
+            "item_meta": null
+          }
+        }
+      }
     },
     "feature_card_carousel_proxy": {
       "template_id": "feature-section-6",
@@ -545,7 +819,21 @@
           }
         }
       },
-      "design_handoff_image_count": 0
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": null
+      }
     },
     "testimonial_written": {
       "template_id": "feature-section-19",
@@ -578,7 +866,28 @@
           }
         }
       },
-      "design_handoff_image_count": 2
+      "design_handoff_image_count": 2,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": {
+          "field": "card_slider",
+          "subfields": {
+            "item_heading": "heading",
+            "item_body": "description",
+            "item_meta": null
+          }
+        }
+      }
     },
     "testimonial_video": {
       "template_id": "feature-section-77",
@@ -611,7 +920,28 @@
           }
         }
       },
-      "design_handoff_image_count": 0
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": {
+          "field": "tab",
+          "subfields": {
+            "item_heading": null,
+            "item_body": "description",
+            "item_meta": null
+          }
+        }
+      }
     },
     "timeline_story": {
       "template_id": "timeline-section-6",
@@ -655,7 +985,28 @@
           }
         }
       },
-      "design_handoff_image_count": 1
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": {
+          "field": "element_timeline",
+          "subfields": {
+            "item_heading": null,
+            "item_body": null,
+            "item_meta": "tagline_element_timeline"
+          }
+        }
+      }
     },
     "career_section": {
       "template_id": "career-section-3",
@@ -688,7 +1039,28 @@
           }
         }
       },
-      "design_handoff_image_count": 0
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "contact",
+            "url": null
+          }
+        },
+        "items": {
+          "field": "accordion_item",
+          "subfields": {
+            "item_heading": "heading_accordion_item",
+            "item_body": null,
+            "item_meta": null
+          }
+        }
+      }
     }
   },
   "post_and_listing_templates_for_design_handoff": {
