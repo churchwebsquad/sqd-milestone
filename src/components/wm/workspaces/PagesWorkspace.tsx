@@ -1444,6 +1444,7 @@ function PageEditor({
               ))}
             </div>
           ) : (
+            <>
             <SectionList
               sections={sections}
               templates={templates}
@@ -1460,6 +1461,19 @@ function PageEditor({
               onInsertBefore={() => setPickerOpen(true)}
               onInsertAfter={() => setPickerOpen(true)}
             />
+            {/* Bottom-of-page add affordance. Always visible (even
+                when there are no sections yet) so the strategist
+                has an obvious entry point to grow the page beyond
+                the cowork-handed-off baseline. */}
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              className="mt-4 w-full rounded-xl border-2 border-dashed border-wm-border bg-transparent px-6 py-5 text-[13px] font-semibold text-wm-text-muted hover:border-wm-accent hover:bg-wm-accent-tint hover:text-wm-accent-strong transition-colors flex items-center justify-center gap-2"
+            >
+              <span className="text-[18px] leading-none">+</span>
+              Add section
+            </button>
+            </>
           )}
         </div>
       </div>
