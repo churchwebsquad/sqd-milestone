@@ -1,35 +1,33 @@
 {
-  "version": "1.1.0",
-  "source": "Paradox Church (TEST) curated_library (project 15394f01-b371-415e-9bae-5d6e7d50c58a)",
+  "version": "2.0.1",
+  "source": "Phase 0 ground-truth audit (Side A: 13 templates \u00d7 verified web_sections rows; Side B: Arvada's 95 sections \u00d7 cowork-emitted slot_values). Source-of-truth for the Cowork\u2192Pages bridge translator.",
   "doc": {
-    "purpose": "Single source-of-truth that the cowork pipeline reads when picking templates + populating slots. Bind-time translation between this uniform vocabulary and Brixies field names lives in the app-side import endpoint, NOT in cowork.",
-    "cowork_vocabulary": {
-      "tagline": "text, optional, eyebrow above primary_heading",
-      "primary_heading": "text, REQUIRED, page-section title (Brixies h1/h2 depending on template)",
-      "body": "richtext, optional, descriptive prose under the heading",
-      "accent_body": "richtext, optional, secondary descriptive prose. Only on templates that have a SECOND visible richtext block.",
-      "buttons": "array of { label, url } CTAs. max_items varies per template.",
-      "items": "array of { item_heading, item_body, item_meta? }. Used by accordion, cards, tabs, timeline, team, etc. max_items + palette ref vary per template; the importer figures out the visual layout."
+    "purpose": "Per-template uniform\u2192Brixies mapping for the handoff endpoint. The handoff ALWAYS pushes; the translator reports bind_quality (perfect | partial) + gaps[] per section. Strategist sees the Brixies preview + Rich Content Companion side-by-side and resolves gaps via UI. Refusals are logged for Claude Code, not the user.",
+    "cowork_emission_contract": {
+      "top_level_slots": [
+        "primary_heading",
+        "tagline",
+        "body",
+        "items",
+        "buttons"
+      ],
+      "items_subfields": [
+        "item_heading",
+        "item_body",
+        "item_meta"
+      ],
+      "buttons_subfields": [
+        "label",
+        "url"
+      ],
+      "accent_body": "NEVER emitted by cowork audit \u2014 leave designer placeholder OR pick a template that doesn't require it",
+      "notes": "Items + buttons subfields are closed sets. Top-level keys are a closed set of 5. The translator works to this contract, no exceptions."
     },
-    "designer_slots": "Every image slot in the underlying Brixies template is designer-populated (not by cowork). The total per template is recorded as design_handoff_image_count for the design handoff checklist.",
-    "importer_responsibilities": [
-      "Translate uniform_to_brixies field names for the picked template",
-      "For multi-group templates (accordion_faq, content_image_text_b, contact_section): split items[] across the visual groups per layout-specific rule",
-      "For palette-ref groups (feature_team, content_featured_a): look up the project curated_library.card_* binding to resolve the actual Card variant + write item fields against that variant",
-      "Validate every required uniform slot is populated before INSERT into web_sections",
-      "Leave all image fields empty (placeholders render until designer fills via design handoff)"
-    ],
-    "empty_slot_prevention": {
-      "philosophy": "Required slots empty at bind time = preventable upstream. Every layer validates against this manifest BEFORE handing off.",
-      "layers": [
-        "plan-cross-page-allocation: for each section_intent, check that allocated sources contain content sufficient to fill the picked template required slots. Gaps land in unresolved_sources with exact slot named.",
-        "outline-page: declares atom_assignments covering all required uniform slots before returning. Self-validates against the manifest.",
-        "draft-page: validates its own draft output before returning. Every required slot has non-empty content. One retry on gap. Else returns validation.unresolved_required_slots[].",
-        "importer (app-side): last line of defense. Refuses INSERT if any required slot empty. Returns structured error pointing at page + section + slot + missing atom + suggested fix.",
-        "Strategist UI: surfaces unresolved gaps with context. Strategist sees exactly which page/section/slot needs input, what was missing, what to do."
-      ]
+    "bind_quality_rubric": {
+      "perfect": "All required_slots populated; every group has at least min_items; no string written to image fields; no lorem/placeholder text rendered.",
+      "partial": "At least one gap \u2014 but the section still pushes; Rich Companion + variant picker UI lets strategist resolve."
     },
-    "uniform_to_brixies_purpose": "Per-template map from cowork uniform slot names to actual Brixies field keys in web_content_templates.fields. Read by the cowork\u2192pages handoff endpoint to compose web_sections.field_values without guessing. Source: web_content_templates.fields jsonb on 2026-06-16. Verified by live-schema audit, not hand-rolled."
+    "first_pass_target": "\u226590% of sections must hit `perfect` bind_quality on first push. Below 90% = implementation failure; root-cause via handoff_refusal_log + re-tune."
   },
   "page_section_templates": {
     "hero_homepage": {
@@ -52,14 +50,7 @@
         },
         "buttons": {
           "max_items": 2,
-          "item_subfields": {
-            "label": {
-              "max_chars": 30
-            },
-            "url": {
-              "type": "url"
-            }
-          }
+          "required": false
         }
       },
       "design_handoff_image_count": 0,
@@ -71,19 +62,34 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": null
-      }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": [
+        "12449525-eae3-43fd-a435-06dd6efefc31"
+      ]
     },
     "hero_inner": {
-      "template_id": "hero-section-1",
+      "template_id": "hero-section-42",
       "concept": "hero_inner",
       "family": "Hero Section",
-      "variant": "1",
+      "variant": "42",
       "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
         "primary_heading": {
           "max_chars": 100,
           "required": true
@@ -94,31 +100,34 @@
         },
         "buttons": {
           "max_items": 2,
-          "item_subfields": {
-            "label": {
-              "max_chars": 30
-            },
-            "url": {
-              "type": "url"
-            }
-          }
+          "required": false
         }
       },
       "design_handoff_image_count": 1,
       "uniform_to_brixies": {
-        "tagline": null,
+        "tagline": "tagline",
         "primary_heading": "heading",
         "body": "description",
         "accent_body": null,
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": null
-      }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Phase-0 v2.0.0 picked hero-section-1, which has no tagline slot. Dry-run found 13/18 Arvada hero_inner sections emit a tagline, dropping bind_quality to partial. Remapped to hero-section-42 (tagline + heading + description + buttons-contact-nested + image + designer-only feature_element group). All currently-perfect hero_inner sections stay perfect; tagline-bearing ones become perfect too. Image stays designer-bound; feature_element renders 3 default placeholder rows."
     },
     "hero_featured": {
       "template_id": "hero-section-43",
@@ -136,14 +145,7 @@
         },
         "buttons": {
           "max_items": 2,
-          "item_subfields": {
-            "label": {
-              "max_chars": 30
-            },
-            "url": {
-              "type": "url"
-            }
-          }
+          "required": false
         }
       },
       "design_handoff_image_count": 1,
@@ -155,12 +157,22 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": null
-      }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Not used by Arvada. No working rows. Inferred from hero_inner analogue."
     },
     "cta_simple": {
       "template_id": "cta-section-20",
@@ -178,14 +190,7 @@
         },
         "buttons": {
           "max_items": 2,
-          "item_subfields": {
-            "label": {
-              "max_chars": 30
-            },
-            "url": {
-              "type": "url"
-            }
-          }
+          "required": false
         }
       },
       "design_handoff_image_count": 1,
@@ -197,12 +202,21 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": null
-      }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": []
     },
     "cta_callout": {
       "template_id": "cta-section-52",
@@ -219,15 +233,8 @@
           "required": false
         },
         "buttons": {
-          "max_items": 1,
-          "item_subfields": {
-            "label": {
-              "max_chars": 30
-            },
-            "url": {
-              "type": "url"
-            }
-          }
+          "max_items": 3,
+          "required": false
         }
       },
       "design_handoff_image_count": 0,
@@ -237,14 +244,26 @@
         "body": "description",
         "accent_body": null,
         "buttons": {
-          "field": "buttons",
+          "field": "image",
           "subfields": {
-            "label": null,
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "flat"
         },
         "items": null
-      }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": [
+        "3fae1677-6c17-4b9d-83a8-6b336833975e"
+      ],
+      "notes": "SCHEMA-VS-REALITY INVERSION: schema declares 'buttons' as the CTA group, but every working row puts CTAs in the 'image' field instead. Translator maps cowork buttons\u2192image, not buttons\u2192buttons."
     },
     "accordion_faq": {
       "template_id": "faq-section-10",
@@ -265,16 +284,12 @@
           "required": false
         },
         "items": {
-          "max_items": 5,
-          "uses_palette": null,
-          "item_subfields": {
-            "item_heading": {
-              "max_chars": 100
-            },
-            "item_body": {
-              "max_chars": 400
-            }
-          }
+          "max_items": 10,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
         }
       },
       "design_handoff_image_count": 0,
@@ -286,19 +301,36 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "flat"
         },
         "items": {
-          "field": "accordion_right",
           "subfields": {
-            "item_heading": "text",
-            "item_body": "text",
+            "item_heading": "title",
+            "item_body": "description",
             "item_meta": null
+          },
+          "split": {
+            "groups": [
+              "accordion_left",
+              "accordion_right"
+            ],
+            "rule": "alternate"
           }
         }
-      }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": [
+        "f38bb4ad-8433-4a64-afdf-49c9e3ac3094"
+      ]
     },
     "content_image_text_a": {
       "template_id": "content-section-45",
@@ -316,15 +348,11 @@
         },
         "items": {
           "max_items": 3,
-          "uses_palette": null,
-          "item_subfields": {
-            "item_heading": {
-              "max_chars": 100
-            },
-            "item_body": {
-              "max_chars": 400
-            }
-          }
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
         }
       },
       "design_handoff_image_count": 1,
@@ -336,9 +364,10 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": {
           "field": "list_content",
@@ -346,9 +375,19 @@
             "item_heading": "heading",
             "item_body": "description",
             "item_meta": null
-          }
+          },
+          "split": null
         }
-      }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "No non-cowork ground truth. Schema-inferred."
     },
     "content_image_text_b": {
       "template_id": "content-section-16",
@@ -370,15 +409,11 @@
         },
         "items": {
           "max_items": 2,
-          "uses_palette": null,
-          "item_subfields": {
-            "item_heading": {
-              "max_chars": 100
-            },
-            "item_body": {
-              "max_chars": 400
-            }
-          }
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
         }
       },
       "design_handoff_image_count": 1,
@@ -390,9 +425,10 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": {
           "field": "description_items",
@@ -400,9 +436,19 @@
             "item_heading": null,
             "item_body": "text",
             "item_meta": null
-          }
+          },
+          "split": null
         }
-      }
+      },
+      "richtext_keys": [
+        "description",
+        "text"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": []
     },
     "content_video": {
       "template_id": "content-section-25",
@@ -421,6 +467,10 @@
         "accent_body": {
           "max_chars": 300,
           "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
         }
       },
       "design_handoff_image_count": 1,
@@ -432,12 +482,23 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": null
-      }
+      },
+      "richtext_keys": [
+        "description",
+        "accent_description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": [],
+      "notes": "Phase-0 v2.0.0 missed the buttons group (sourced from a verified row that didn't have buttons). Dry-run found 2 Arvada content_video sections emit buttons, dropping bind_quality to partial. Real content-section-25 schema has buttons group with contact-nested item_schema; restored the mapping. Cowork does NOT emit accent_body \u2014 accent_description slot stays Brixies-designer-bound."
     },
     "content_featured_a": {
       "template_id": "content-section-89",
@@ -459,15 +520,11 @@
         },
         "items": {
           "max_items": 3,
-          "uses_palette": "Card",
-          "item_subfields": {
-            "item_heading": {
-              "max_chars": 100
-            },
-            "item_body": {
-              "max_chars": 400
-            }
-          }
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
         }
       },
       "design_handoff_image_count": 3,
@@ -479,9 +536,10 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": {
           "field": "column_list",
@@ -489,9 +547,21 @@
             "item_heading": "heading_card",
             "item_body": "description_card",
             "item_meta": null
-          }
+          },
+          "split": null
         }
-      }
+      },
+      "palette_ref": "Card",
+      "richtext_keys": [
+        "description",
+        "description_card"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Palette-referenced items (Card). No non-cowork ground truth; schema-inferred."
     },
     "content_featured_b": {
       "template_id": "content-section-91",
@@ -513,26 +583,11 @@
         },
         "buttons": {
           "max_items": 2,
-          "item_subfields": {
-            "label": {
-              "max_chars": 30
-            },
-            "url": {
-              "type": "url"
-            }
-          }
+          "required": false
         },
         "items": {
           "max_items": 1,
-          "uses_palette": null,
-          "item_subfields": {
-            "item_heading": {
-              "max_chars": 100
-            },
-            "item_body": {
-              "max_chars": 400
-            }
-          }
+          "required": false
         }
       },
       "design_handoff_image_count": 1,
@@ -544,9 +599,10 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": {
           "field": "list_element_5",
@@ -554,9 +610,19 @@
             "item_heading": null,
             "item_body": "description",
             "item_meta": null
-          }
+          },
+          "split": null
         }
-      }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Not used by Arvada. Schema-inferred."
     },
     "contact_section": {
       "template_id": "content-section-96",
@@ -578,26 +644,11 @@
         },
         "buttons": {
           "max_items": 2,
-          "item_subfields": {
-            "label": {
-              "max_chars": 30
-            },
-            "url": {
-              "type": "url"
-            }
-          }
+          "required": false
         },
         "items": {
           "max_items": 3,
-          "uses_palette": null,
-          "item_subfields": {
-            "item_heading": {
-              "max_chars": 100
-            },
-            "item_body": {
-              "max_chars": 400
-            }
-          }
+          "required": false
         }
       },
       "design_handoff_image_count": 1,
@@ -609,9 +660,10 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": {
           "field": "counter_contain",
@@ -619,9 +671,20 @@
             "item_heading": null,
             "item_body": "counter_description",
             "item_meta": null
-          }
+          },
+          "split": null
         }
-      }
+      },
+      "richtext_keys": [
+        "description",
+        "counter_description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "No non-cowork ground truth; schema-inferred."
     },
     "feature_team": {
       "template_id": "team-section-14",
@@ -643,15 +706,11 @@
         },
         "items": {
           "max_items": 2,
-          "uses_palette": "Card",
-          "item_subfields": {
-            "item_heading": {
-              "max_chars": 100
-            },
-            "item_body": {
-              "max_chars": 400
-            }
-          }
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
         }
       },
       "design_handoff_image_count": 0,
@@ -663,19 +722,32 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": {
           "field": "row_grid",
           "subfields": {
-            "item_heading": "team_name",
-            "item_body": "team_description",
-            "item_meta": "team_position"
-          }
+            "item_heading": "name",
+            "item_body": "description_member",
+            "item_meta": "title"
+          },
+          "split": null
         }
-      }
+      },
+      "palette_ref": "Card",
+      "richtext_keys": [
+        "description",
+        "description_member"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": [],
+      "notes": "Only 1 working row available; verified but single-source. row_grid items use partner-vocab {name, title, description_member} not schema's {team_name, team_position, team_description}."
     },
     "feature_tabbed": {
       "template_id": "feature-section-66",
@@ -697,19 +769,7 @@
         },
         "items": {
           "max_items": 4,
-          "uses_palette": null,
-          "item_subfields": {
-            "item_heading": {
-              "max_chars": 100
-            },
-            "item_body": {
-              "max_chars": 400
-            },
-            "item_meta": {
-              "max_chars": 60,
-              "required": false
-            }
-          }
+          "required": false
         }
       },
       "design_handoff_image_count": 4,
@@ -718,22 +778,25 @@
         "primary_heading": "heading",
         "body": "description",
         "accent_body": null,
-        "buttons": {
-          "field": "buttons",
-          "subfields": {
-            "label": "contact",
-            "url": null
-          }
-        },
+        "buttons": null,
         "items": {
           "field": "tab",
           "subfields": {
             "item_heading": "heading",
             "item_body": "description",
-            "item_meta": null
-          }
+            "item_meta": "tagline"
+          },
+          "split": null
         }
-      }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": []
     },
     "feature_unique": {
       "template_id": "feature-section-103",
@@ -755,15 +818,7 @@
         },
         "items": {
           "max_items": 2,
-          "uses_palette": null,
-          "item_subfields": {
-            "item_heading": {
-              "max_chars": 100
-            },
-            "item_body": {
-              "max_chars": 400
-            }
-          }
+          "required": false
         }
       },
       "design_handoff_image_count": 0,
@@ -772,22 +827,26 @@
         "primary_heading": "heading",
         "body": "description",
         "accent_body": null,
-        "buttons": {
-          "field": "buttons",
-          "subfields": {
-            "label": "contact",
-            "url": null
-          }
-        },
+        "buttons": null,
         "items": {
-          "field": "row_list",
+          "field": "grid",
           "subfields": {
             "item_heading": "heading",
-            "item_body": null,
-            "item_meta": null
-          }
+            "item_body": "description",
+            "item_meta": "tagline"
+          },
+          "split": null
         }
-      }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": [],
+      "notes": "Schema declares 'row_list' but working row uses 'grid'. Trust working over schema. Inner per-item feature_list nesting omitted \u2014 cowork doesn't emit feature lists per item."
     },
     "feature_card_carousel_proxy": {
       "template_id": "feature-section-6",
@@ -809,14 +868,7 @@
         },
         "buttons": {
           "max_items": 2,
-          "item_subfields": {
-            "label": {
-              "max_chars": 30
-            },
-            "url": {
-              "type": "url"
-            }
-          }
+          "required": false
         }
       },
       "design_handoff_image_count": 0,
@@ -828,12 +880,22 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": null
-      }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Not used by Arvada. Schema-inferred."
     },
     "testimonial_written": {
       "template_id": "feature-section-19",
@@ -855,15 +917,7 @@
         },
         "items": {
           "max_items": 2,
-          "uses_palette": null,
-          "item_subfields": {
-            "item_heading": {
-              "max_chars": 100
-            },
-            "item_body": {
-              "max_chars": 400
-            }
-          }
+          "required": false
         }
       },
       "design_handoff_image_count": 2,
@@ -875,9 +929,10 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": {
           "field": "card_slider",
@@ -885,9 +940,19 @@
             "item_heading": "heading",
             "item_body": "description",
             "item_meta": null
-          }
+          },
+          "split": null
         }
-      }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Not used by Arvada. Schema-inferred."
     },
     "testimonial_video": {
       "template_id": "feature-section-77",
@@ -909,15 +974,7 @@
         },
         "items": {
           "max_items": 1,
-          "uses_palette": null,
-          "item_subfields": {
-            "item_heading": {
-              "max_chars": 100
-            },
-            "item_body": {
-              "max_chars": 400
-            }
-          }
+          "required": false
         }
       },
       "design_handoff_image_count": 0,
@@ -929,9 +986,10 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": {
           "field": "tab",
@@ -939,9 +997,19 @@
             "item_heading": null,
             "item_body": "description",
             "item_meta": null
-          }
+          },
+          "split": null
         }
-      }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Not used by Arvada. Schema-inferred."
     },
     "timeline_story": {
       "template_id": "timeline-section-6",
@@ -963,26 +1031,11 @@
         },
         "buttons": {
           "max_items": 2,
-          "item_subfields": {
-            "label": {
-              "max_chars": 30
-            },
-            "url": {
-              "type": "url"
-            }
-          }
+          "required": false
         },
         "items": {
           "max_items": 5,
-          "uses_palette": null,
-          "item_subfields": {
-            "item_heading": {
-              "max_chars": 100
-            },
-            "item_body": {
-              "max_chars": 400
-            }
-          }
+          "required": false
         }
       },
       "design_handoff_image_count": 1,
@@ -994,9 +1047,10 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": {
           "field": "element_timeline",
@@ -1004,9 +1058,19 @@
             "item_heading": null,
             "item_body": null,
             "item_meta": "tagline_element_timeline"
-          }
+          },
+          "split": null
         }
-      }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Not used by Arvada. Schema-inferred. Limited item slot \u2014 only item_meta survives the binding."
     },
     "career_section": {
       "template_id": "career-section-3",
@@ -1028,15 +1092,7 @@
         },
         "items": {
           "max_items": 3,
-          "uses_palette": null,
-          "item_subfields": {
-            "item_heading": {
-              "max_chars": 100
-            },
-            "item_body": {
-              "max_chars": 400
-            }
-          }
+          "required": false
         }
       },
       "design_handoff_image_count": 0,
@@ -1048,9 +1104,10 @@
         "buttons": {
           "field": "buttons",
           "subfields": {
-            "label": "contact",
-            "url": null
-          }
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
         },
         "items": {
           "field": "accordion_item",
@@ -1058,9 +1115,19 @@
             "item_heading": "heading_accordion_item",
             "item_body": null,
             "item_meta": null
-          }
+          },
+          "split": null
         }
-      }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Not used by Arvada. Schema-inferred."
     }
   },
   "post_and_listing_templates_for_design_handoff": {
