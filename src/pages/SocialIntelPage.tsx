@@ -90,7 +90,9 @@ export default function SocialIntelPage() {
       const { data: { user } } = await supabase.auth.getUser()
       const email = user?.email ?? 'unknown'
 
-      const { data: existing } = await supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = supabase as any
+      const { data: existing } = await db
         .from('strategy_church_intel')
         .select('id, intel_version')
         .eq('member', selectedMember)
@@ -99,7 +101,7 @@ export default function SocialIntelPage() {
       const version = (existing?.intel_version ?? 0) + 1
 
       if (existing) {
-        await supabase.from('strategy_church_intel').update({
+        await db.from('strategy_church_intel').update({
           intel_profile: profile,
           intel_version: version,
           intel_updated_at: new Date().toISOString(),
@@ -107,7 +109,7 @@ export default function SocialIntelPage() {
           status: 'live',
         }).eq('id', existing.id)
 
-        await supabase.from('strategy_church_intel_history').insert({
+        await db.from('strategy_church_intel_history').insert({
           church_intel_id: existing.id,
           version,
           intel_profile: profile,
@@ -115,7 +117,7 @@ export default function SocialIntelPage() {
           reason: 'Social Intel Profile generated',
         })
       } else {
-        const { data: inserted } = await supabase.from('strategy_church_intel').insert({
+        const { data: inserted } = await db.from('strategy_church_intel').insert({
           member: selectedMember,
           intel_profile: profile,
           intel_version: 1,
@@ -125,7 +127,7 @@ export default function SocialIntelPage() {
         }).select('id').single()
 
         if (inserted) {
-          await supabase.from('strategy_church_intel_history').insert({
+          await db.from('strategy_church_intel_history').insert({
             church_intel_id: inserted.id,
             version: 1,
             intel_profile: profile,
