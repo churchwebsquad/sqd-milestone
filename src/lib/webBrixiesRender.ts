@@ -64,6 +64,13 @@ export function renderSectionToHtml(
   neutralizeLoremPlaceholders(root)
   neutralizeDefaultButtonLabels(root)
   hideEmptyButtonShells(root)
+  // Last cleanup pass: hide decorative groups + image slots the
+  // strategist's content doesn't fill. Brixies templates ship every
+  // group with default_count > 0 so designer previews look "complete"
+  // — but for cowork sections those defaults render as empty cube
+  // icons / checkmark circles / placeholder squares, which the user
+  // reads as "the layout is broken." Hide them after substitution.
+  hideUnfilledDecorativeSlots(root, template.fields, values)
   // Hard-coded layout fix for Hero 44 (and any other Brixies template
   // using the `data-layer="Image fan"` convention). Image bind data
   // never feeds these — they're decorative — so we force a canonical
@@ -471,6 +478,77 @@ function hideEmptyButtonShells(root: Element): void {
     if (hasMeaningfulHref(el)) continue
     forceHide(el)
   }
+}
+
+/** Hide decorative top-level groups + image slots that the strategist's
+ *  bind doesn't fill. Without this pass, Brixies templates render their
+ *  designer-time defaults (3 checkmark circles for feature_element, 3
+ *  cube icons for description_items, an image placeholder square for
+ *  card_icon, etc.) — which the partner reads as "the layout has empty
+ *  holes."
+ *
+ *  Rules (conservative — only hide what's clearly decorative):
+ *  - Top-level group with `default_count > 0` and EMPTY field_values
+ *    entry → hide every element whose data-layer matches its layer_name.
+ *  - Top-level image slot with EMPTY field_values entry, where the
+ *    rendered element still carries Brixies-default content (no real
+ *    src) → hide.
+ *  - Buttons/contact slots are EXCLUDED — they have their own pass
+ *    (hideEmptyButtonShells) which understands the contact-nested
+ *    wrapping pattern. */
+function hideUnfilledDecorativeSlots(
+  root: Element,
+  fields: ReadonlyArray<WebFieldDef> | undefined | null,
+  values: Record<string, unknown>,
+): void {
+  if (!fields) return
+  for (const field of fields) {
+    const layerName = (field as { layer_name?: string }).layer_name ?? field.key
+    if (!layerName) continue
+    const lc = layerName.toLowerCase()
+    // Skip button-family layers — they're handled by hideEmptyButtonShells.
+    if (lc.includes('button') || lc === 'contact' || lc.includes('buttons')) continue
+
+    if (field.kind === 'group') {
+      const userItems = values[field.key]
+      const hasUserContent = Array.isArray(userItems) && userItems.length > 0
+      if (hasUserContent) continue
+      // Only hide groups that have a designer-time default rendering
+      // (default_count > 0). Groups with default_count: 0 would already
+      // render no children — nothing to hide.
+      const defaultCount = (field as { default_count?: number }).default_count ?? 0
+      if (defaultCount <= 0) continue
+      // Find every element matching this group's layer_name and hide.
+      // For nested groups the inner clones inherit the layer of their
+      // schema slot, so a single querySelectorAll catches the
+      // top-level group container.
+      const els = root.querySelectorAll(`[data-layer="${cssEscape(layerName)}"]`)
+      for (const el of Array.from(els) as HTMLElement[]) {
+        // Don't hide elements that got marked data-substituted="1" —
+        // those received real content via the substitution pass.
+        if (el.getAttribute('data-substituted') === '1') continue
+        forceHide(el)
+      }
+      continue
+    }
+
+    if (field.kind === 'slot' && field.type === 'image') {
+      const v = values[field.key]
+      if (typeof v === 'string' && v.trim() !== '') continue   // user supplied a real src
+      const els = root.querySelectorAll(`[data-layer="${cssEscape(layerName)}"]`)
+      for (const el of Array.from(els) as HTMLElement[]) {
+        if (el.getAttribute('data-substituted') === '1') continue
+        forceHide(el)
+      }
+    }
+  }
+}
+
+/** Minimal CSS attribute-value escape — enough for layer_name values
+ *  (the schema permits letters, digits, spaces, hyphens; quotes are
+ *  unlikely but we still escape backslash + double quote to be safe). */
+function cssEscape(v: string): string {
+  return v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
 
 function isButtonShellLayer(el: Element): boolean {
