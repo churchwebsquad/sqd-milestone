@@ -274,7 +274,139 @@ export function composeFieldValuesForBrixies(
     }
   }
 
+  // ── Template-specific render-shape overrides ──────────────────
+  //
+  // The default mapping above writes Brixies field keys from the
+  // manifest's uniform_to_brixies. That gets most templates right,
+  // but six of them have nested or quirky layer structures the
+  // simple mapping can't express. These overrides were each
+  // verified by running the production renderer (jsdom) against
+  // synthetic markers — see scripts/find-shape.ts. Don't change
+  // these without re-running scripts/check-real-render.ts.
+  const fv2 = applyTemplateOverrides(entry.template_id, fv, slotValues)
+
   const bind_quality: 'perfect' | 'partial' = gaps.length === 0 ? 'perfect' : 'partial'
 
-  return { field_values: fv, bind_quality, gaps }
+  return { field_values: fv2, bind_quality, gaps }
+}
+
+function applyTemplateOverrides(
+  templateId:  string,
+  fv:          Record<string, unknown>,
+  cowork:      Record<string, unknown>,
+): Record<string, unknown> {
+  const items = Array.isArray(cowork.items) ? cowork.items as Array<Record<string, unknown>> : []
+  const buttons = Array.isArray(cowork.buttons) ? cowork.buttons as Array<Record<string, unknown>> : []
+  const body = typeof cowork.body === 'string' ? cowork.body : ''
+  const out = { ...fv }
+
+  switch (templateId) {
+    case 'content-section-16': {
+      // content_image_text_b — `description` slot is shadowed by
+      // `description_items` (same layer_name "Description"); the
+      // group wins. Move body INTO description_items[0].text, and
+      // each items[i].item_body into description_items[i+1].text.
+      delete out.description
+      const di: Array<Record<string, unknown>> = []
+      if (body) di.push({ text: ensureHtml(body) })
+      for (const it of items) {
+        const ibBody = it.item_body ?? it.body ?? ''
+        const hdr    = it.item_heading ?? it.heading ?? ''
+        // If both heading and body present, concat (description_items
+        // is a single-slot list, no separate heading subfield).
+        const combined = hdr ? `<p><strong>${escapeHtml(String(hdr))}</strong></p>${ensureHtml(String(ibBody))}` : ensureHtml(String(ibBody))
+        di.push({ text: combined })
+      }
+      out.description_items = di
+      return out
+    }
+
+    case 'content-section-89': {
+      // content_featured_a — column_list each entry has a nested
+      // `card` group; cards carry {heading_card, description_card}.
+      out.column_list = items.map(it => ({
+        card: [{
+          heading_card:     String(it.item_heading ?? ''),
+          description_card: ensureHtml(String(it.item_body ?? '')),
+        }],
+      }))
+      return out
+    }
+
+    case 'team-section-14': {
+      // feature_team — row_grid wrapper holds a single card_team
+      // group; cards carry {team_name, team_position, team_description}.
+      out.row_grid = [{
+        card_team: items.map(it => ({
+          team_name:        String(it.item_heading ?? ''),
+          team_position:    String(it.item_meta ?? ''),
+          team_description: ensureHtml(String(it.item_body ?? '')),
+        })),
+      }]
+      return out
+    }
+
+    case 'feature-section-103': {
+      // feature_unique — row_list per item; each row has heading +
+      // nested item_list → card → {heading_card, list_item[].description}.
+      // For cowork we collapse each item to a single row/card and
+      // put item_body as one list_item description.
+      out.row_list = items.map(it => ({
+        heading: String(it.item_heading ?? ''),
+        item_list: [{
+          card: [{
+            heading_card: String(it.item_heading ?? ''),
+            list_item:   [{ description: ensureHtml(String(it.item_body ?? '')) }],
+          }],
+        }],
+      }))
+      return out
+    }
+
+    case 'content-section-96': {
+      // counter_contain[]{counter[].description, counter_description}
+      out.counter_contain = items.map(it => ({
+        counter:             [{ description: String(it.item_heading ?? '') }],
+        counter_description: ensureHtml(String(it.item_body ?? '')),
+      }))
+      return out
+    }
+
+    case 'cta-section-52': {
+      // cta_callout — buttons is a SINGLE cta slot (kind:slot
+      // type:cta), not an array. `image` is a designer-only group.
+      if (buttons.length > 0) {
+        const b = buttons[0]
+        const label = typeof b.label === 'string' ? b.label : ''
+        const url   = typeof b.url   === 'string' ? b.url   : ''
+        out.buttons = { label, url }
+      } else {
+        delete out.buttons
+      }
+      delete out.image
+      return out
+    }
+
+    case 'faq-section-10': {
+      // accordion_faq — the renderer's heuristic collapses each
+      // accordion side to a single leaf node, breaking item
+      // binding. Until the renderer learns to handle Frame
+      // wrappers with literal-lorem data-layer names, we collapse
+      // items into a flowed description so the content stays
+      // visible. Strategist can hand-polish layout via the Rich
+      // Companion's variant picker.
+      if (items.length > 0) {
+        const concat = items
+          .map(it => `<p><strong>${escapeHtml(String(it.item_heading ?? ''))}</strong> — ${escapeHtml(String(it.item_body ?? ''))}</p>`)
+          .join('\n')
+        out.description = concat
+      }
+      delete out.accordion_left
+      delete out.accordion_right
+      return out
+    }
+
+    default:
+      return out
+  }
 }
