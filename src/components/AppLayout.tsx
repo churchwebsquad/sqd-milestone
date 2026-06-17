@@ -59,8 +59,9 @@ const NAV_STRUCTURE: NavEntry[] = [
       // Prompt Settings used to be a sibling — it's now nested under the
       // SRP Generator (the only tool that consumes it).
       { kind: 'item', to: '/social/srp',     label: 'SRP Generator',      icon: Sparkles,     end: false },
-      { kind: 'item', to: '/social/intel',   label: 'Intel Audit Tool',   icon: Search,       end: false },
-      { kind: 'item', to: '/social/planner', label: 'Planning Calendar',  icon: CalendarDays, end: false },
+      { kind: 'item', to: '/social/intel',        label: 'Intel Audit Tool',   icon: Search,       end: false },
+      { kind: 'item', to: '/social/social-intel', label: 'Social Intel',        icon: Search,       end: false },
+      { kind: 'item', to: '/social/planner',      label: 'Planning Calendar',   icon: CalendarDays, end: false },
     ],
   },
   {
