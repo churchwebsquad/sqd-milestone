@@ -71,6 +71,14 @@ export function renderSectionToHtml(
   // icons / checkmark circles / placeholder squares, which the user
   // reads as "the layout is broken." Hide them after substitution.
   hideUnfilledDecorativeSlots(root, template.fields, values)
+  // Generic schema-driven visibility: for every USER-INPUT slot in
+  // the template (text/richtext/cta), if the strategist didn't fill
+  // it, hide its rendered element. For GROUPS, hide the entire
+  // container when no items are bound. Walks the schema recursively
+  // so nested item_schemas are covered. Designer-bound assets
+  // (image slots, image-containing groups) are NEVER hidden — those
+  // are template-design defaults.
+  hideUnpopulatedSchemaSlots(root, template.fields, values)
   // Hard-coded layout fix for Hero 44 (and any other Brixies template
   // using the `data-layer="Image fan"` convention). Image bind data
   // never feeds these — they're decorative — so we force a canonical
@@ -625,6 +633,55 @@ function hideUnsubstitutedItemClones(
 function hasBoundDescendant(el: Element): boolean {
   if (el.getAttribute?.('data-substituted') === '1') return true
   return el.querySelector('[data-substituted="1"]') != null
+}
+
+/** Generic schema-driven visibility pass. The rule (per user
+ *  direction): IF an element has a user-input field tied to it
+ *  (heading, button, body, card item, etc.) AND it's not populated
+ *  by user content, do NOT show the element.
+ *
+ *  Walks template.fields recursively. For each text/richtext/cta
+ *  slot, if the value at that key is empty/missing, find the
+ *  rendered element by layer_name and hide it. For groups, the
+ *  hideUnfilledDecorativeSlots pass (run before this) handles
+ *  the empty-group case; this pass handles only slot-level
+ *  emptiness.
+ *
+ *  IMPORTANT exemptions (never hide):
+ *   - image / video slots — designer-bound assets
+ *   - Heading slots inside an item that's been substituted — the
+ *     substitution pass marks them data-substituted='1'
+ *   - Elements already inside a hidden ancestor (display:none from
+ *     a previous pass) — querying still finds them but they're
+ *     visually gone */
+function hideUnpopulatedSchemaSlots(
+  root: Element,
+  fields: ReadonlyArray<WebFieldDef> | undefined | null,
+  values: Record<string, unknown>,
+): void {
+  if (!fields) return
+  for (const field of fields) {
+    if (field.kind !== 'slot') continue
+    // Designer-bound asset slots stay even when empty.
+    if (field.type === 'image') continue
+    const layerName = (field as { layer_name?: string }).layer_name ?? field.key
+    if (!layerName) continue
+    // Skip button-family layers — hideEmptyButtonShells handles them.
+    const lc = layerName.toLowerCase()
+    if (lc.includes('button') || lc === 'contact' || lc.includes('contact')) continue
+
+    const value = values[field.key]
+    const isEmpty = value == null || value === '' ||
+      (typeof value === 'string' && value.trim().length === 0)
+    if (!isEmpty) continue
+
+    // Hide the rendered element(s) bound to this slot.
+    const els = root.querySelectorAll(`[data-layer="${cssEscape(layerName)}"]`)
+    for (const el of Array.from(els) as HTMLElement[]) {
+      if (el.getAttribute('data-substituted') === '1') continue
+      forceHide(el)
+    }
+  }
 }
 
 /** Brixies sources mark design wrappers with `data-layer="Frame NN"`
