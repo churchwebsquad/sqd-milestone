@@ -47,7 +47,6 @@ import { PageBriefImportModal } from '../PageBriefImportModal'
 import { AddPageModal } from '../AddPageModal'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { PagePreview } from '../PagePreview'
-import { PageTextView } from './PageTextView'
 import { markOverride } from '../../../lib/webFieldProvenance'
 import { WMSegmentedToggle } from '../SegmentedToggle'
 import { SectionList } from '../sectioneditor/SectionList'
@@ -612,7 +611,7 @@ function PageEditor({
   // Edit ↔ Preview mode for the page editor body. Edit is the live-
   // assembly canvas; Preview renders the full page via the bound
   // templates' source_html with current copy substituted (iframe).
-  const [viewMode, setViewMode] = useState<'text' | 'edit' | 'preview'>('edit')
+  const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit')
   // The currently-selected section in the canvas — drives the
   // right-side details panel.
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null)
@@ -1313,9 +1312,8 @@ function PageEditor({
         <div className="flex items-center gap-2">
           <WMSegmentedToggle
             options={[
-              { key: 'text',    label: 'Text',    icon: <FileText size={11} /> },
-              { key: 'edit',    label: 'Layout',  icon: <Edit3    size={11} /> },
-              { key: 'preview', label: 'Preview', icon: <Eye      size={11} /> },
+              { key: 'edit',    label: 'Layout',  icon: <Edit3 size={11} /> },
+              { key: 'preview', label: 'Preview', icon: <Eye   size={11} /> },
             ]}
             active={viewMode}
             onChange={setViewMode}
@@ -1420,23 +1418,6 @@ function PageEditor({
                 })
               }}
             />
-          ) : viewMode === 'text' ? (
-            loadingSections ? (
-              <div className="space-y-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="h-32 rounded-xl bg-wm-bg-hover animate-pulse" />
-                ))}
-              </div>
-            ) : (
-              <PageTextView
-                pageId={page.id}
-                sections={sections}
-                templates={templates}
-                snippets={snippets}
-                pageContext={{ page_slug: page.slug, page_title: page.name ?? undefined }}
-                onSectionsChanged={() => void loadSections()}
-              />
-            )
           ) : loadingSections ? (
             <div className="space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (

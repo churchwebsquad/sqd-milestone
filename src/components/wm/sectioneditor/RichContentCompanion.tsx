@@ -34,7 +34,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, RefreshCw, Loader2, Check, AlertTriangle, X } from 'lucide-react'
+import { RefreshCw, Loader2, Check, AlertTriangle, X } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { composeFieldValuesForBrixies, type ManifestEntry } from '../../../lib/cowork/coworkToBrixies'
 import type { WebSection, WebContentTemplate, CoworkHandoffSectionMeta } from '../../../types/database'
@@ -82,10 +82,8 @@ export function RichContentCompanion({ section, template, onChange }: Props) {
   const [items,           setItems]           = useState<ItemRow[]>(initial.items ?? [])
   const [buttons,         setButtons]         = useState<ButtonRow[]>(initial.buttons ?? [])
   const [saving,          setSaving]          = useState(false)
-  const [showVariants,    setShowVariants]    = useState(false)
   const [manifest,        setManifest]        = useState<Record<string, ManifestEntry> | null>(null)
   const [manifestLoading, setManifestLoading] = useState(false)
-  const [switching,       setSwitching]       = useState<string | null>(null)
 
   // Re-seed when the section row changes (e.g. after a save round-trip
   // or a template swap from a sibling component).
@@ -122,16 +120,6 @@ export function RichContentCompanion({ section, template, onChange }: Props) {
     if (!manifest || !template) return null
     return Object.values(manifest).find(e => e.template_id === template.id) ?? null
   }, [manifest, template])
-
-  // Variants: same family from pickable_templates.
-  const variants: Array<{ concept: string; entry: ManifestEntry }> = useMemo(() => {
-    if (!manifest || !currentEntry) return []
-    const family = currentEntry.family
-    return Object.entries(manifest)
-      .filter(([, e]) => e.family === family && e.template_id !== currentEntry.template_id)
-      .map(([concept, entry]) => ({ concept, entry }))
-      .sort((a, b) => Number(b.entry.verified) - Number(a.entry.verified))
-  }, [manifest, currentEntry])
 
   const gapsBySlot: Record<string, string[]> = useMemo(() => {
     const acc: Record<string, string[]> = {}
@@ -208,36 +196,16 @@ export function RichContentCompanion({ section, template, onChange }: Props) {
     setTimeout(() => setSaving(false), 300)   // visual ack
   }
 
-  const switchVariant = (_concept: string, newEntry: ManifestEntry) => {
-    if (!newEntry.template_id) return
-    setSwitching(newEntry.template_id)
-    const slotValues = buildSlotValues()
-    const bind = composeFieldValuesForBrixies(slotValues, newEntry)
-    onChange({
-      content_template_id: newEntry.template_id,
-      cowork_slot_values:  slotValues,
-      field_values:        bind.field_values,
-      source_field_values: slotValues,
-      cowork_section_meta: {
-        ...(meta ?? {}),
-        bind_quality: bind.bind_quality,
-        gaps:         bind.gaps,
-      } as any,
-    })
-    setShowVariants(false)
-    setTimeout(() => setSwitching(null), 300)
-  }
-
   // Hide entirely if there's no cowork content on this section.
   if (section.cowork_slot_values == null) return null
 
   return (
     <div className="rounded-lg border-2 border-wm-accent/40 bg-wm-accent-tint/20 overflow-hidden mb-3">
       {/* Header */}
-      <div className="px-3 py-2.5 border-b border-wm-accent/30 bg-wm-accent-tint/40">
+      <div className="px-3 py-2 border-b border-wm-accent/30 bg-wm-accent-tint/40">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[10px] uppercase tracking-wide font-bold text-wm-accent-strong">
-            Cowork rich content
+            Original Content
           </span>
           {meta?.bind_quality && (
             <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${
@@ -246,45 +214,8 @@ export function RichContentCompanion({ section, template, onChange }: Props) {
               {meta.bind_quality === 'perfect' ? '✓ perfect bind' : `~ ${meta.gaps?.length ?? 0} gap(s)`}
             </span>
           )}
-          <span className="text-[10px] text-wm-text-muted ml-auto">
-            Source of truth · edits re-render the Brixies layout
-          </span>
         </div>
-        <p className="text-[10.5px] text-wm-text-muted mt-1 leading-snug">
-          Cowork-shaped content (tagline / heading / body / items / buttons). Edits save here, then re-derive the Brixies field_values shown below. The layout stays Brixies; the words stay yours.
-        </p>
       </div>
-
-      {/* Variant picker */}
-      {variants.length > 0 && (
-        <div className="px-3 py-2 border-b border-wm-accent/20">
-          <button
-            type="button"
-            onClick={() => setShowVariants(v => !v)}
-            className="flex items-center gap-1 text-[11px] font-semibold text-wm-accent-strong hover:underline"
-          >
-            {showVariants ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-            Try a different {currentEntry?.family ?? 'template'} variant ({variants.length} available)
-          </button>
-          {showVariants && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {variants.map(({ concept, entry }) => (
-                <button
-                  key={entry.template_id}
-                  type="button"
-                  disabled={switching != null}
-                  onClick={() => switchVariant(concept, entry)}
-                  className="text-[10px] px-2 py-1 rounded border border-wm-accent/40 bg-white hover:bg-wm-accent-tint disabled:opacity-50 font-mono"
-                  title={entry.notes ?? ''}
-                >
-                  {switching === entry.template_id ? <Loader2 size={10} className="animate-spin inline mr-1" /> : null}
-                  {entry.template_id}{entry.verified ? ' ✓' : ''}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Slot editors */}
       <div className="p-3 space-y-3">

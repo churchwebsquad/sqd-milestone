@@ -146,6 +146,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['FAQ Section'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'faq-section-10',
   },
 
   // ── Hero Sections ────────────────────────────────────────────────
@@ -158,6 +159,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Hero Section'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'hero-section-102',
   },
   {
     id: 'hero_inner',
@@ -168,6 +170,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Hero Section'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'hero-section-1',
   },
   {
     id: 'hero_featured',
@@ -178,6 +181,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Hero Section'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'hero-section-43',
   },
 
   // ── CTA Banners ──────────────────────────────────────────────────
@@ -190,6 +194,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['CTA Section', 'Banner Section'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'cta-section-20',
   },
   {
     id: 'cta_callout',
@@ -200,6 +205,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['CTA Section', 'Banner Section'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'cta-section-52',
   },
 
   // ── Content Sections ─────────────────────────────────────────────
@@ -212,6 +218,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Content Section', 'Intro Section'],
     kindFilter: ['content'],
     maxPicks: 2,
+    defaultTemplateId: 'content-section-45',
   },
   {
     id: 'content_featured',
@@ -222,6 +229,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Content Section', 'Feature Section'],
     kindFilter: ['content'],
     maxPicks: 2,
+    defaultTemplateId: 'content-section-89',
   },
   {
     id: 'content_video',
@@ -232,6 +240,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Content Section', 'Gallery Section'],
     kindFilter: ['content', 'media'],
     maxPicks: 1,
+    defaultTemplateId: 'content-section-25',
   },
 
   // ── Feature Sections ─────────────────────────────────────────────
@@ -266,6 +275,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Feature Section'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'feature-section-66',
   },
   {
     id: 'feature_unique',
@@ -276,6 +286,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Feature Section', 'Process Section'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'feature-section-103',
   },
   {
     id: 'feature_team',
@@ -286,6 +297,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Team Section'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'team-section-14',
   },
 
   // ── Archive ──────────────────────────────────────────────────────
@@ -298,6 +310,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Category Filter', 'Blog Section'],
     kindFilter: ['functional', 'content'],
     maxPicks: 1,
+    defaultTemplateId: 'category-filter-6',
   },
   {
     id: 'archive_current_series',
@@ -308,6 +321,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Content Section', 'Feature Section'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'feature-section-6',
   },
 
   // ── Single Post Templates ────────────────────────────────────────
@@ -320,6 +334,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Single Event Section'],
     kindFilter: ['post_template'],
     maxPicks: 1,
+    defaultTemplateId: 'single-event-section-4',
   },
   {
     id: 'single_blog',
@@ -330,6 +345,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Single Post Section'],
     kindFilter: ['post_template'],
     maxPicks: 1,
+    defaultTemplateId: 'single-post-section-8',
   },
   {
     id: 'single_staff',
@@ -340,6 +356,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Single Team Section'],
     kindFilter: ['post_template'],
     maxPicks: 1,
+    defaultTemplateId: 'single-team-section-6',
   },
   {
     id: 'single_sermon',
@@ -350,6 +367,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Single Post Section', 'Single Event Section'],
     kindFilter: ['post_template'],
     maxPicks: 1,
+    defaultTemplateId: 'single-event-section-4',
   },
 
   // ── Timeline / Story ─────────────────────────────────────────────
@@ -362,6 +380,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Timeline Section'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'timeline-section-6',
   },
 
   // ── Testimonial ──────────────────────────────────────────────────
@@ -374,6 +393,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Gallery Section', 'Feature Section'],
     kindFilter: ['content', 'media'],
     maxPicks: 1,
+    defaultTemplateId: 'feature-section-77',
   },
   {
     id: 'testimonial_written',
@@ -384,6 +404,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Content Section', 'Intro Section', 'Feature Section'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'feature-section-19',
   },
 
   // ── Contact ──────────────────────────────────────────────────────
@@ -396,6 +417,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Content Section', 'Footer'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'content-section-96',
   },
 
   // ── Career ───────────────────────────────────────────────────────
@@ -408,6 +430,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Career Section'],
     kindFilter: ['content'],
     maxPicks: 1,
+    defaultTemplateId: 'career-section-3',
   },
 ]
 

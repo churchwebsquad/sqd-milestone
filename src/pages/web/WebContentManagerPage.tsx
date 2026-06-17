@@ -24,7 +24,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import {
-  ClipboardList, LayoutGrid, FileText, Palette, Cog, Eye, Loader2, CalendarClock, Workflow, MessageSquareQuote, Rocket, Target,
+  ClipboardList, LayoutGrid, FileText, Palette, Cog, Eye, Loader2, CalendarClock, Rocket, Target,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { WebManagerShell } from '../../components/wm'
@@ -38,21 +38,15 @@ import { DevHandoffWorkspace } from '../../components/wm/workspaces/DevHandoffWo
 import { IntakeWorkspace } from '../../components/wm/workspaces/IntakeWorkspace'
 import { ReviewWorkspace } from '../../components/wm/workspaces/ReviewWorkspace'
 import { PlanningWorkspace } from '../../components/wm/workspaces/PlanningWorkspace'
-import { PipelineWorkspace } from '../../components/wm/workspaces/PipelineWorkspace'
-import { CopyEngineWorkspace } from '../../components/wm/workspaces/CopyEngineWorkspace'
-import { AtomReviewWorkspace } from '../../components/wm/workspaces/AtomReviewWorkspace'
-import { StrategicGoalsWorkspace } from '../../components/wm/workspaces/StrategicGoalsWorkspace'
+import { FoundationWorkspace } from '../../components/wm/workspaces/FoundationWorkspace'
 import { CoworkWorkspace } from '../../components/wm/workspaces/CoworkWorkspace'
 import type { StrategyWebProject } from '../../types/database'
 
 type TabKey =
   | 'planning'
-  | 'engine'
-  | 'pipeline'
   | 'cowork'
   | 'intake'
-  | 'atoms'
-  | 'goals'
+  | 'foundation'
   | 'library'
   | 'pages'
   | 'design'
@@ -60,18 +54,15 @@ type TabKey =
   | 'review'
 
 const TABS: readonly WMTabItem<TabKey>[] = [
-  { key: 'planning',   label: 'Planning',        icon: <CalendarClock size={13} /> },
-  { key: 'intake',     label: 'Intake & Crawl',  icon: <ClipboardList size={13} /> },
-  { key: 'atoms',      label: 'Core messages',   icon: <MessageSquareQuote size={13} /> },
-  { key: 'goals',      label: 'Strategic goals', icon: <Target        size={13} /> },
-  { key: 'cowork',     label: 'Cowork',          icon: <Rocket        size={13} /> },
-  { key: 'engine',     label: 'Copy Engine',     icon: <Workflow      size={13} /> },
-  { key: 'pipeline',   label: 'Copywriting (legacy)', icon: <Workflow size={13} /> },
-  { key: 'library',    label: 'Site Library',    icon: <LayoutGrid    size={13} /> },
-  { key: 'pages',      label: 'Pages',           icon: <FileText      size={13} /> },
-  { key: 'design',     label: 'Design Handoff',  icon: <Palette       size={13} /> },
-  { key: 'devhandoff', label: 'Dev Handoff',     icon: <Cog           size={13} /> },
-  { key: 'review',     label: 'Review',          icon: <Eye           size={13} /> },
+  { key: 'planning',   label: 'Planning',         icon: <CalendarClock size={13} /> },
+  { key: 'intake',     label: 'Intake & Crawl',   icon: <ClipboardList size={13} /> },
+  { key: 'foundation', label: 'Foundation',       icon: <Target        size={13} /> },
+  { key: 'cowork',     label: 'Content Engine',   icon: <Rocket        size={13} /> },
+  { key: 'library',    label: 'Site Library',     icon: <LayoutGrid    size={13} /> },
+  { key: 'pages',      label: 'Pages',            icon: <FileText      size={13} /> },
+  { key: 'design',     label: 'Design Handoff',   icon: <Palette       size={13} /> },
+  { key: 'devhandoff', label: 'Dev Handoff',      icon: <Cog           size={13} /> },
+  { key: 'review',     label: 'Review',           icon: <Eye           size={13} /> },
 ]
 
 const DEFAULT_TAB: TabKey = 'pages'
@@ -84,13 +75,15 @@ export default function WebContentManagerPage() {
   const rawTab = params.get('tab')
   const activeTab: TabKey = (() => {
     if (!rawTab) return DEFAULT_TAB
-    if (rawTab === 'global') return 'library'           // renamed
+    if (rawTab === 'global') return 'library'                        // renamed
+    if (rawTab === 'atoms' || rawTab === 'goals') return 'foundation' // merged into Foundation
+    if (rawTab === 'engine' || rawTab === 'pipeline') return 'cowork' // legacy workspaces folded into Content Engine
     if (rawTab === 'roadmap' || rawTab === 'rollup' || rawTab === 'snippets' || rawTab === 'voice' || rawTab === 'heuristics') {
-      return DEFAULT_TAB                                // dropped/moved → land on pages
+      return DEFAULT_TAB                                              // dropped/moved → land on pages
     }
     if (rawTab === 'settings') return DEFAULT_TAB   // moved to /web (org-wide)
     if (rawTab === 'crawl')    return 'intake'      // merged into intake
-    const known: ReadonlyArray<TabKey> = ['planning','engine','pipeline','cowork','intake','atoms','goals','library','pages','design','devhandoff','review']
+    const known: ReadonlyArray<TabKey> = ['planning','cowork','intake','foundation','library','pages','design','devhandoff','review']
     return (known as readonly string[]).includes(rawTab) ? (rawTab as TabKey) : DEFAULT_TAB
   })()
 
@@ -169,11 +162,8 @@ export default function WebContentManagerPage() {
         onRailToggle={setRailOpen}
       >
         {activeTab === 'planning'   && <PlanningWorkspace project={project} onChange={loadProject} />}
-        {activeTab === 'engine'     && <CopyEngineWorkspace project={project} onChange={loadProject} />}
-        {activeTab === 'pipeline'   && <PipelineWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'intake'     && <IntakeWorkspace project={project} onChange={loadProject} />}
-        {activeTab === 'atoms'      && <AtomReviewWorkspace project={project} onChange={loadProject} />}
-        {activeTab === 'goals'      && <StrategicGoalsWorkspace project={project} onChange={loadProject} />}
+        {activeTab === 'foundation' && <FoundationWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'cowork'     && <CoworkWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'library'    && <GlobalElementsWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'pages'      && <PagesWorkspace project={project} onChange={loadProject} />}

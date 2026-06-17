@@ -25,7 +25,6 @@ import type { SlotAiContext } from './SlotEditor'
 import { GroupEditor } from './GroupEditor'
 import { GridEditor, detectGridChain } from './GridEditor'
 import { SnippetMenu } from './SnippetMenu'
-import { BindHealthPanel } from './BindHealthPanel'
 import { RichContentCompanion } from './RichContentCompanion'
 import { CommentActions } from './CommentActions'
 import { FeedbackCard } from '../feedback/FeedbackCard'
@@ -95,11 +94,12 @@ export function SectionDetailsPanel({
   const setValue = (key: string, v: unknown) => {
     onChange({ field_values: { ...values, [key]: v } })
   }
-  // Bumped by the bind-health pull to force the Fields editor + its
-  // child SlotEditors to remount, ensuring memoized inputs (TipTap
-  // richtext, in particular) pick up the new value prop rather than
-  // staying on whatever they had at mount.
-  const [fieldsRemountKey, setFieldsRemountKey] = useState(0)
+  // Remount key — kept for downstream callers that bump it after an
+  // out-of-band value swap (e.g. an external paste tool); harmless
+  // when nothing bumps it. The pre-removal use case (bind-health
+  // pull suggestion) is gone but the affordance still works for
+  // anything else that needs a forced remount of memoized editors.
+  const [fieldsRemountKey] = useState(0)
 
   const presence = template ? summarizeSlotPresence(template, values) : null
   const fields: WebFieldDef[] = template?.fields ?? []
@@ -231,52 +231,12 @@ export function SectionDetailsPanel({
           </Section>
         )}
 
-        {/* Bind health — shows empty text slots + offers nested-pull
-            suggestions when content of the same canonical type exists
-            in a group item. Self-hides on a clean section. */}
-        {template && (
-          <Section title="Bind health" defaultOpen>
-            <BindHealthPanel
-              template={template}
-              fieldValues={values}
-              onPullSuggestion={(slotKey, raw, sourceType) => {
-                // Coerce nested → top-level. Three cases:
-                //  - source richtext, value already HTML → pass through
-                //  - source richtext, value plain text  → wrap in <p>
-                //  - source text, target slot is richtext → wrap in <p> too,
-                //    otherwise the editor renders <p>-less plain string
-                const targetSlot = (template?.fields ?? []).find(
-                  (f): f is import('../../../types/database').WebSlotDef =>
-                    f.kind === 'slot' && f.key === slotKey,
-                )
-                let next = raw
-                const isHtml = typeof raw === 'string' && /<[a-z][^>]*>/i.test(raw)
-                if (typeof raw === 'string' && !isHtml && targetSlot?.type === 'richtext') {
-                  next = `<p>${escapeHtml(raw)}</p>`
-                }
-                // Visible diagnostic so the strategist can confirm what
-                // landed where. The "pull writes but I don't see it"
-                // symptom is almost always one of: editor for slotKey
-                // isn't visible in the current panel scroll, OR the
-                // value matches what was already there. Logging shows
-                // both states.
-                console.info('[BindHealthPanel] pull', {
-                  slotKey,
-                  targetType: targetSlot?.type ?? '(no top-level field)',
-                  sourceType,
-                  valuePreview: typeof next === 'string' ? next.slice(0, 80) : next,
-                })
-                setValue(slotKey, next)
-                // Force the Fields editor below to remount so its
-                // memoized child editors (TipTap, in particular,
-                // shouldn't need this but does occasionally miss
-                // value-prop updates) pick up the new value.
-                setFieldsRemountKey(k => k + 1)
-                void sourceType  // referenced for the API contract; we now use targetSlot
-              }}
-            />
-          </Section>
-        )}
+        {/* Bind-health panel + "suggest item" pull affordance removed
+            (2026-06-17). The cowork pipeline now owns binding via the
+            Original Content side panel + the project's curated_library
+            defaults; per-slot bind-health hints and nested-content
+            suggestions don't fit the strategist's actual workflow
+            anymore, so they were retired here. */}
 
         {/* Field editors */}
         {template && visibleFields.length > 0 && (
