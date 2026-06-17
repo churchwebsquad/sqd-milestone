@@ -30,6 +30,7 @@ import { runAudit } from '../../lib/webAudit'
 import type { AuditFinding, AuditSeverity } from '../../lib/webAudit'
 import type {
   StrategyWebProject, WebReview, WebReviewComment, WebReviewEdit,
+  CoworkHandoffPageMeta, CoworkHandoffSectionMeta,
 } from '../../types/database'
 import {
   loadProjectReviewState, startReview, closeReview, loadProjectReviewEdits,
@@ -606,6 +607,17 @@ function AuditTab({
   // strategist sees scan flags + kickbacks + gaps without leaving
   // the rail.
   const [pageBrief, setPageBrief] = useState<unknown>(null)
+  // Cowork handoff metadata for the active page — populated by
+  // /api/web/cowork/handoff-to-pages. When present, this tab surfaces
+  // the cowork audit (per-section provenance, verbatim band, deferred
+  // items, axes, directives, notion link) ABOVE the heuristic scan.
+  // The two coexist: cowork audit is the high-signal pipeline output;
+  // the heuristic scan is the read-anything-checker safety net.
+  const [coworkPageMeta, setCoworkPageMeta] = useState<CoworkHandoffPageMeta | null>(null)
+  const [coworkSections, setCoworkSections]   = useState<Array<CoworkHandoffSectionMeta & { web_section_id: string; sort_order: number; template_id: string | null; split_group_id: string | null; split_position: number | null }>>([])
+  const [coworkPageAuditSource, setCoworkPageAuditSource] = useState<string | null>(null)
+  const [coworkPageNotionUrl, setCoworkPageNotionUrl] = useState<string | null>(null)
+  const [coworkHandoffAt, setCoworkHandoffAt] = useState<string | null>(null)
 
   const scan = useCallback(async () => {
     if (!activePageId) return
@@ -628,12 +640,52 @@ function AuditTab({
     }
     let cancelled = false
     void (async () => {
-      const { data } = await supabase
-        .from('web_pages')
-        .select('brief')
-        .eq('id', activePageId)
-        .maybeSingle()
-      if (!cancelled) setPageBrief((data as { brief?: unknown } | null)?.brief ?? null)
+      const [pageRes, sectionsRes] = await Promise.all([
+        supabase
+          .from('web_pages')
+          .select('brief, cowork_handoff_meta, audit_source, notion_url, cowork_handoff_at')
+          .eq('id', activePageId)
+          .maybeSingle(),
+        supabase
+          .from('web_sections')
+          .select('id, sort_order, content_template_id, split_group_id, split_position, cowork_section_meta')
+          .eq('web_page_id', activePageId)
+          .order('sort_order', { ascending: true }),
+      ])
+      if (cancelled) return
+      const pageRow = pageRes.data as {
+        brief?: unknown
+        cowork_handoff_meta?: CoworkHandoffPageMeta | null
+        audit_source?: string | null
+        notion_url?: string | null
+        cowork_handoff_at?: string | null
+      } | null
+      setPageBrief(pageRow?.brief ?? null)
+      setCoworkPageMeta(pageRow?.cowork_handoff_meta ?? null)
+      setCoworkPageAuditSource(pageRow?.audit_source ?? null)
+      setCoworkPageNotionUrl(pageRow?.notion_url ?? null)
+      setCoworkHandoffAt(pageRow?.cowork_handoff_at ?? null)
+
+      const rows = (sectionsRes.data ?? []) as Array<{
+        id: string
+        sort_order: number
+        content_template_id: string | null
+        split_group_id: string | null
+        split_position: number | null
+        cowork_section_meta: CoworkHandoffSectionMeta | null
+      }>
+      setCoworkSections(
+        rows
+          .filter(r => r.cowork_section_meta != null)
+          .map(r => ({
+            ...(r.cowork_section_meta as CoworkHandoffSectionMeta),
+            web_section_id:  r.id,
+            sort_order:      r.sort_order,
+            template_id:     r.content_template_id,
+            split_group_id:  r.split_group_id,
+            split_position:  r.split_position,
+          })),
+      )
     })()
     return () => { cancelled = true }
   }, [activePageId, onCount])
@@ -657,6 +709,16 @@ function AuditTab({
 
   return (
     <div className="p-3 space-y-2">
+      {coworkPageMeta && (
+        <CoworkAuditPanel
+          pageMeta={coworkPageMeta}
+          auditSource={coworkPageAuditSource}
+          notionUrl={coworkPageNotionUrl}
+          handoffAt={coworkHandoffAt}
+          sections={coworkSections}
+          filter={q}
+        />
+      )}
       <CopywriterNotesPanel brief={pageBrief} />
       <WMButton
         variant="secondary"
@@ -724,6 +786,241 @@ function FindingRow({ finding }: { finding: AuditFinding }) {
           <p className="text-[11px] text-wm-text mt-1 italic line-clamp-2">"{finding.location.matched_text}"</p>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Cowork audit panel ────────────────────────────────────────────────
+// Lives in the AuditTab when the active page has cowork_handoff_meta
+// (i.e. the page came from the cowork pipeline). Renders the
+// per-section provenance the handoff endpoint preserved: section
+// intent, verbatim band/actual, atom/fact/crawl pills, voice anchor,
+// deferred items, axes, directives, notion link, split-group marker.
+//
+// Filter (the searchbox in the rail header) matches against section
+// intent text + directive details + any pill label.
+
+function CoworkAuditPanel({
+  pageMeta, auditSource, notionUrl, handoffAt, sections, filter,
+}: {
+  pageMeta:    CoworkHandoffPageMeta
+  auditSource: string | null
+  notionUrl:   string | null
+  handoffAt:   string | null
+  sections:    Array<CoworkHandoffSectionMeta & { web_section_id: string; sort_order: number; template_id: string | null; split_group_id: string | null; split_position: number | null }>
+  filter:      string
+}) {
+  const bandTone: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
+    green:  'success',
+    yellow: 'warning',
+    red:    'danger',
+    gap:    'neutral',
+  }
+  const auditLabel: Record<string, string> = {
+    'notion':                 '📓 from Notion',
+    'notion-gap':             '⚠ gap (no Notion match)',
+    'generated':              '✨ generated by cowork',
+    'generated-supplemental': '✨ generated (supplemental)',
+  }
+
+  const pageDirectives = (pageMeta.directives ?? []) as Array<{ kind: string; severity: string; detail: string; section?: string; slot?: string }>
+  const handoffNote   = (pageMeta.outline_meta?.handoff_note as string | undefined) ?? null
+
+  // Apply the filter to sections + their directives + intent text.
+  const sectionsVisible = !filter ? sections : sections.filter(s => {
+    const hay = [
+      s.section_intent_text,
+      ...(s.directives ?? []).map(d => `${d.kind} ${d.detail}`),
+      s.notion_url,
+      s.split_from,
+      s.template_id,
+    ].filter(Boolean).join(' ').toLowerCase()
+    return hay.includes(filter.toLowerCase())
+  })
+
+  return (
+    <div className="rounded-lg border border-wm-accent/40 bg-wm-accent-tint/30 overflow-hidden">
+      {/* Page header */}
+      <header className="px-3 py-2.5 border-b border-wm-accent/30">
+        <div className="flex items-center gap-2 flex-wrap mb-1">
+          <WMStatusPill tone={bandTone[pageMeta.overall_band ?? ''] ?? 'neutral'} size="sm">
+            {pageMeta.overall_band ?? 'audited'}
+          </WMStatusPill>
+          {auditSource && (
+            <span className="text-[10px] uppercase tracking-wide font-bold text-wm-accent-strong">
+              {auditLabel[auditSource] ?? auditSource}
+            </span>
+          )}
+          {handoffAt && (
+            <span className="text-[10px] text-wm-text-subtle ml-auto">
+              {new Date(handoffAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
+        </div>
+        {notionUrl && (
+          <a
+            href={notionUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[11px] text-wm-accent hover:underline inline-flex items-center gap-1"
+          >
+            Open source in Notion →
+          </a>
+        )}
+        {handoffNote && (
+          <details className="mt-2 text-[11px] text-wm-text-muted">
+            <summary className="cursor-pointer font-semibold text-wm-text">Page handoff note</summary>
+            <pre className="mt-1.5 whitespace-pre-wrap font-sans text-[11px] leading-snug">{handoffNote}</pre>
+          </details>
+        )}
+        {pageDirectives.length > 0 && (
+          <div className="mt-2 space-y-1">
+            <p className="text-[10px] uppercase tracking-wide font-bold text-wm-text-subtle">Page directives</p>
+            {pageDirectives.map((d, i) => <DirectiveRow key={i} directive={d} />)}
+          </div>
+        )}
+      </header>
+
+      {/* Per-section detail */}
+      <div className="divide-y divide-wm-accent/20">
+        {sectionsVisible.length === 0 && filter && (
+          <p className="px-3 py-2 text-[11px] text-wm-text-muted italic">No sections match "{filter}".</p>
+        )}
+        {sectionsVisible.map(sec => <CoworkSectionRow key={sec.web_section_id} sec={sec} />)}
+      </div>
+    </div>
+  )
+}
+
+function CoworkSectionRow({
+  sec,
+}: { sec: CoworkHandoffSectionMeta & { web_section_id: string; sort_order: number; template_id: string | null; split_group_id: string | null; split_position: number | null } }) {
+  const [expanded, setExpanded] = useState(false)
+  const bandLabels = { high: '≥0.7', mid: '0.3–0.7', low: '≤0.2' } as const
+  const bandTarget = sec.intended_verbatim_band ? bandLabels[sec.intended_verbatim_band] : null
+  const actual = sec.actual_verbatim_ratio
+  const inBand = sec.intended_verbatim_band && typeof actual === 'number'
+    ? (sec.intended_verbatim_band === 'high' ? actual >= 0.7
+      : sec.intended_verbatim_band === 'mid'  ? actual >= 0.3 && actual <= 0.7
+      : sec.intended_verbatim_band === 'low'  ? actual <= 0.2
+      : true)
+    : null
+
+  return (
+    <div className="px-3 py-2.5">
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-start gap-2 text-left"
+      >
+        {expanded ? <ChevronDown size={12} className="text-wm-text-subtle shrink-0 mt-0.5" /> : <ChevronRight size={12} className="text-wm-text-subtle shrink-0 mt-0.5" />}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+            {sec.template_id && (
+              <span className="text-[9px] uppercase tracking-wider font-bold text-wm-text-subtle bg-wm-bg-elevated px-1.5 py-0.5 rounded">
+                {sec.template_id}
+              </span>
+            )}
+            {sec.split_group_id && sec.split_position && (
+              <span className="text-[9px] uppercase tracking-wider font-bold text-wm-warning bg-wm-warning-bg px-1.5 py-0.5 rounded">
+                split {sec.split_position}{sec.split_from ? ` of ${sec.split_from}` : ''}
+              </span>
+            )}
+          </div>
+          {sec.section_intent_text && (
+            <p className="text-[11px] text-wm-text leading-snug">{sec.section_intent_text}</p>
+          )}
+          <div className="mt-1 flex items-center gap-2 text-[10px] text-wm-text-muted flex-wrap">
+            {sec.atom_ids_used.length > 0 && <span title="atoms cited">🔵 {sec.atom_ids_used.length} atom{sec.atom_ids_used.length === 1 ? '' : 's'}</span>}
+            {sec.fact_ids_used.length > 0 && <span title="facts cited">🟢 {sec.fact_ids_used.length} fact{sec.fact_ids_used.length === 1 ? '' : 's'}</span>}
+            {sec.crawl_topic_keys_used.length > 0 && <span title="crawl topics cited">🟠 {sec.crawl_topic_keys_used.length} crawl</span>}
+            {sec.deferred_items.length > 0 && <span title="items deferred at bind" className="text-wm-warning">📦 {sec.deferred_items.length} deferred</span>}
+            {bandTarget && typeof actual === 'number' && (
+              <span className={inBand ? 'text-wm-success' : 'text-wm-danger'} title={`band: ${sec.intended_verbatim_band} (target ${bandTarget}) · actual: ${actual.toFixed(2)}`}>
+                verbatim {actual.toFixed(2)} {inBand ? '✓' : '✗'}
+              </span>
+            )}
+          </div>
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="mt-2 ml-4 space-y-2 text-[10.5px] text-wm-text-muted">
+          {sec.voice_notes && (
+            <div>
+              <p className="text-[9px] uppercase tracking-wider font-bold text-wm-text-subtle mb-0.5">Voice notes</p>
+              <p className="leading-snug">{sec.voice_notes}</p>
+            </div>
+          )}
+          {sec.axes && Object.keys(sec.axes).length > 0 && (
+            <div>
+              <p className="text-[9px] uppercase tracking-wider font-bold text-wm-text-subtle mb-0.5">5-axis scores</p>
+              <ul className="space-y-0.5">
+                {Object.entries(sec.axes).map(([axis, v]) => (
+                  <li key={axis} className="flex items-center justify-between gap-2">
+                    <span>{axis}</span>
+                    <span className={v.pass ? 'text-wm-success' : 'text-wm-danger'}>
+                      {v.score}{v.pass ? '' : '✗'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {sec.directives.length > 0 && (
+            <div>
+              <p className="text-[9px] uppercase tracking-wider font-bold text-wm-text-subtle mb-0.5">Directives</p>
+              {sec.directives.map((d, i) => <DirectiveRow key={i} directive={d} />)}
+            </div>
+          )}
+          {sec.deferred_items.length > 0 && (
+            <div>
+              <p className="text-[9px] uppercase tracking-wider font-bold text-wm-warning mb-0.5">Deferred items ({sec.deferred_items.length})</p>
+              <p className="text-[10px] text-wm-text-subtle italic mb-1">Items the audit truncated to fit the template. Promote any to a new section or accept the truncation.</p>
+              <ul className="space-y-1">
+                {sec.deferred_items.map((d, i) => (
+                  <li key={i} className="rounded bg-wm-bg-elevated border border-wm-border p-1.5">
+                    <p className="font-semibold text-wm-text text-[10.5px]">{String((d as Record<string, unknown>).title ?? (d as Record<string, unknown>).kind ?? 'item')}</p>
+                    {(d as Record<string, unknown>).reason ? <p className="text-[10px]">{String((d as Record<string, unknown>).reason)}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {sec.notion_url && (
+            <a href={sec.notion_url} target="_blank" rel="noopener noreferrer" className="text-[10.5px] text-wm-accent hover:underline inline-flex items-center gap-1">
+              View this section's source in Notion →
+            </a>
+          )}
+          {(sec.atom_ids_used.length > 0 || sec.fact_ids_used.length > 0 || sec.crawl_topic_keys_used.length > 0) && (
+            <details>
+              <summary className="cursor-pointer text-[10.5px] font-semibold text-wm-text">Source references</summary>
+              <div className="mt-1 ml-2 space-y-1 font-mono text-[10px]">
+                {sec.atom_ids_used.length > 0 && <p>🔵 atoms: {sec.atom_ids_used.map(a => a.slice(0, 8)).join(', ')}</p>}
+                {sec.fact_ids_used.length > 0 && <p>🟢 facts: {sec.fact_ids_used.map(a => a.slice(0, 8)).join(', ')}</p>}
+                {sec.crawl_topic_keys_used.length > 0 && <p>🟠 crawl: {sec.crawl_topic_keys_used.join(', ')}</p>}
+                {sec.voice_anchor_atom_ids.length > 0 && <p>🎙 voice anchor: {sec.voice_anchor_atom_ids.map(a => a.slice(0, 8)).join(', ')}</p>}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DirectiveRow({ directive }: { directive: { kind: string; severity: string; detail: string; section?: string; slot?: string } }) {
+  const tone: 'danger' | 'warning' | 'info' =
+    directive.severity === 'blocker' ? 'danger' :
+    directive.severity === 'warning' ? 'warning' : 'info'
+  return (
+    <div className="rounded bg-wm-bg-elevated border border-wm-border p-1.5">
+      <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+        <WMStatusPill tone={tone} size="sm">{directive.severity}</WMStatusPill>
+        <span className="text-[10px] font-mono text-wm-text-subtle">{directive.kind}</span>
+        {directive.slot && <span className="text-[10px] text-wm-text-subtle">· slot: {directive.slot}</span>}
+      </div>
+      <p className="text-[10.5px] text-wm-text leading-snug">{directive.detail}</p>
     </div>
   )
 }
