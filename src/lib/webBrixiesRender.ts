@@ -538,6 +538,138 @@ function hideUnfilledDecorativeSlots(
   }
 }
 
+/** Hide UNSUBSTITUTED CLONE elements inside groups that DO have user
+ *  content. Companion pass to hideUnfilledDecorativeSlots:
+ *
+ *  - hideUnfilledDecorativeSlots handles GROUPS that are completely
+ *    empty (cowork provided no items at all) — wipes the whole group
+ *    when its item_schema is text-only.
+ *  - This pass handles GROUPS WITH SOME content (user provided 1 item
+ *    but the source HTML ships 3 sibling slots / Frame 50/51/52 etc.).
+ *    The renderer leaves the extras as designer-bound padding; they
+ *    render as empty cube icons / checkmark circles / placeholder
+ *    squares — the same visual noise the partner reads as "the layout
+ *    has broken items it doesn't need."
+ *
+ *  Rule: walk every TOP-LEVEL group's container element. For each
+ *  direct data-layer child:
+ *    - If the child OR its subtree carries data-substituted="1"
+ *      → it received real bound content, KEEP.
+ *    - Else if the child has no meaningful text + no real bound asset
+ *      → it's leftover padding, HIDE.
+ *
+ *  This means an item clone with a real `Card icon` (image SLOT inside
+ *  an unfilled item) gets HIDDEN along with its sibling text slot —
+ *  because the item AS A WHOLE has no content. Top-level image slots
+ *  (outside any group container, e.g. a hero photo or content-section
+ *  Image 1 area) are NOT touched by this pass; hideUnfilledDecorative
+ *  Slots already exempts them. */
+function hideUnsubstitutedItemClones(
+  root: Element,
+  fields: ReadonlyArray<WebFieldDef> | undefined | null,
+  values: Record<string, unknown>,
+): void {
+  if (!fields) return
+  for (const field of fields) {
+    if (field.kind !== 'group') continue
+    const layerName = (field as { layer_name?: string }).layer_name ?? field.key
+    if (!layerName) continue
+
+    // Skip button family — handled by hideEmptyButtonShells.
+    const lc = layerName.toLowerCase()
+    if (lc.includes('button') || lc === 'contact' || lc.includes('buttons')) continue
+
+    // Find every container element for this top-level group.
+    const containers = Array.from(root.querySelectorAll(`[data-layer="${cssEscape(layerName)}"]`)) as HTMLElement[]
+    for (const container of containers) {
+      // Determine candidate item clones: direct data-layer children.
+      // (Some Brixies sources use a wrapping Frame around items —
+      // descend one level into a single non-data-layer wrapper if
+      // there are no direct data-layer children but the wrapper has
+      // them. Keep this conservative; only one hop.)
+      let candidates = Array.from(container.children).filter(c => c.hasAttribute('data-layer')) as HTMLElement[]
+      if (candidates.length === 0) {
+        for (const wrapper of Array.from(container.children) as HTMLElement[]) {
+          const inner = Array.from(wrapper.children).filter(c => c.hasAttribute('data-layer')) as HTMLElement[]
+          if (inner.length >= 2) { candidates = inner; break }
+        }
+      }
+      if (candidates.length < 2) continue   // only one item or none — nothing to trim
+
+      // Hide candidates that received NO bound content. "Bound" means:
+      //   - any descendant (or self) marked data-substituted="1", OR
+      //   - any non-whitespace text content the substitution pass put
+      //     there (defensive: some substituteElement paths set text
+      //     without the marker).
+      // An unsubstituted candidate may still LOOK populated because
+      // Brixies ships it with default lorem text + decorative SVGs +
+      // a Card-icon image placeholder — those are exactly what we're
+      // hiding. So we check substituted ancestry specifically; raw
+      // textContent isn't sufficient because Brixies defaults carry
+      // their own lorem strings that get neutralized post-pass.
+      for (const cand of candidates) {
+        if (hasBoundDescendant(cand)) continue
+        // Belt-and-suspenders: if the candidate has post-neutralize
+        // text content that wasn't from a default-lorem strip, treat
+        // as bound. neutralizeLoremPlaceholders sets text to empty
+        // for known lorem; what's left would be real partner copy.
+        if ((cand.textContent ?? '').trim().length > 0) continue
+        forceHide(cand)
+      }
+    }
+  }
+}
+
+/** True if `el` or any descendant carries data-substituted="1" —
+ *  i.e. the substitution pass actually wrote content there. */
+function hasBoundDescendant(el: Element): boolean {
+  if (el.getAttribute?.('data-substituted') === '1') return true
+  return el.querySelector('[data-substituted="1"]') != null
+}
+
+/** Brixies sources mark design wrappers with `data-layer="Frame NN"`
+ *  (numeric suffix). When a Frame's entire subtree has no text content
+ *  + no substituted descendant, it's leftover padding from a default-
+ *  count expansion (e.g. content-section-16 ships 3 Frame items for
+ *  the description_items group; cowork sections only fill one). Hide
+ *  these — they otherwise render as empty cube icons / decorative
+ *  placeholder squares.
+ *
+ *  Safe scope:
+ *  - Only `Frame \d+` named layers (the Brixies convention). Real
+ *    content layers ("Heading", "Description", "Card", "Tab", etc.)
+ *    are untouched.
+ *  - An empty Frame stays IF any descendant is substituted, has real
+ *    text, OR contains a real (non-placeholder) <img>/<video>. */
+function hideEmptyNumberedFrames(root: Element): void {
+  const els = root.querySelectorAll('[data-layer]')
+  for (const el of Array.from(els) as HTMLElement[]) {
+    const layer = el.getAttribute('data-layer') ?? ''
+    if (!/^Frame\s+\d+$/i.test(layer)) continue
+    // Skip if anything was bound here.
+    if (el.getAttribute('data-substituted') === '1') continue
+    if (el.querySelector('[data-substituted="1"]') != null) continue
+    // Skip if any real text remains.
+    if ((el.textContent ?? '').trim().length > 0) continue
+    // Skip if any descendant <img> has a real src (non-placeholder).
+    if (hasRealImage(el)) continue
+    forceHide(el)
+  }
+}
+
+/** True if `el` contains an <img> with a real src (anything that
+ *  isn't an empty string or a generic placeholder host like
+ *  placehold.co). svg-only or empty <img> elements don't count. */
+function hasRealImage(el: Element): boolean {
+  for (const img of Array.from(el.querySelectorAll('img')) as HTMLImageElement[]) {
+    const src = (img.getAttribute('src') ?? '').trim()
+    if (!src) continue
+    if (/^(data:image\/svg|placehold\.co|placeholder)/i.test(src)) continue
+    return true
+  }
+  return false
+}
+
 /** True when the field array contains an image-typed slot anywhere
  *  in its tree (including nested groups). Used to recognize "this
  *  group renders design-time assets we must not hide." */
