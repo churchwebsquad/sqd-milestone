@@ -997,18 +997,34 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
           </>
         )}
 
-        {/* Cowork-session done — View details */}
+        {/* Cowork-session done — View details + tertiary Re-run path.
+            Done steps used to only offer View details, which trapped
+            the strategist when the SKILL contract changes upstream
+            (e.g. capture rules tightened after the step has already
+            run cleanly). The strategist needs to be able to pull
+            the freshest SKILL.md + bundle and start a new Claude
+            Desktop session without having to manually mark the step
+            stale first. The Re-run set is rendered LESS prominently
+            than View details so the visual hierarchy still says
+            "this is done." */}
         {step.kind === 'cowork_session' && isDone && (
-          <button
-            type="button"
-            onClick={onViewDetails}
-            className="text-[13px] font-medium px-4 py-2 rounded-lg border border-wm-border text-wm-text hover:bg-wm-bg-hover transition-colors"
-          >
-            <span className="flex items-center gap-1.5">
-              <Eye size={13} />
-              View details
-            </span>
-          </button>
+          <>
+            {step.skill_md_path && <DownloadSkillButton skillPath={step.skill_md_path} stepNumber={step.step_number} />}
+            {['outline-page', 'draft-page', 'critique-page', 'audit-external-copy', 'supplemental-page-authoring'].includes(step.key) && (
+              <DownloadBundleButton projectId={projectId} />
+            )}
+            <CopyPromptButton step={step} projectId={projectId} label="Re-run in Cowork" />
+            <button
+              type="button"
+              onClick={onViewDetails}
+              className="text-[13px] font-medium px-4 py-2 rounded-lg border border-wm-border text-wm-text hover:bg-wm-bg-hover transition-colors"
+            >
+              <span className="flex items-center gap-1.5">
+                <Eye size={13} />
+                View details
+              </span>
+            </button>
+          </>
         )}
       </div>
       )}
