@@ -88,11 +88,20 @@ export function isHtmlAlready(value: unknown): boolean {
 /** True if a string is a strategist gap marker that must never be
  *  treated as final content. Recognized shapes (matching the audit
  *  SKILL's verbatim-preservation rule):
- *    - `[NEEDS INPUT: ...]`           — explicit placeholder
- *    - `\[NEEDS INPUT: ...\]`         — escaped-bracket variant
- *    - `*pending: ...*`               — italicized strategist note
- *    - `*photo: [NEEDS INPUT: ...]*`  — per-item asset marker
- *    - `*image: [NEEDS INPUT: ...]*`  — same, image variant
+ *    - `[NEEDS INPUT: ...]`                — explicit placeholder
+ *    - `\[NEEDS INPUT: ...\]`              — escaped-bracket variant
+ *    - `*pending: ...*` / `*Pending Partner Input: ...*`
+ *                                          — italicized strategist note
+ *    - `*photo: [NEEDS INPUT: ...]*`       — per-item asset marker
+ *    - `*image: [NEEDS INPUT: ...]*`       — same, image variant
+ *    - `*Embed (video): [NEEDS INPUT…]*`   — video primary URL placeholder
+ *    - `*Fallback: [NEEDS INPUT…]*`        — video fallback placeholder
+ *    - `*Status: pending_partner_input*`   — per-item machine status tag
+ *
+ *  NOTE: `[NEEDS INPUT — suggested: "..."]` is INTENTIONALLY NOT a
+ *  blocker — that variant carries a working value the strategist
+ *  has supplied. extractSuggestedValue() pulls the value out before
+ *  reaching this check. See its docs.
  *
  *  Visible-text slots keep these verbatim so the strategist sees the
  *  gap; URL slots return empty (sanitizeUrl) so the rendered href
@@ -102,9 +111,41 @@ export function isNeedsInput(value: unknown): boolean {
   const s = value.trim()
   return (
     /^\\?\[NEEDS INPUT\b/i.test(s) ||
-    /^\*pending\s*:/i.test(s) ||
-    /^\*(?:photo|image)\s*:\s*\\?\[NEEDS INPUT\b/i.test(s)
+    /^\*pending(?:\s+partner\s+input)?\s*:/i.test(s) ||
+    /^\*(?:photo|image|embed[^*]*|fallback)\s*:/i.test(s) ||
+    /^\*status\s*:\s*pending_partner_input/i.test(s)
   )
+}
+
+/** If a string is the suggested-value variant
+ *  `[NEEDS INPUT — suggested: "..."]`, return the suggested text
+ *  (without quotes/brackets). Otherwise return the original string.
+ *
+ *  This variant is used for metadata fields and other slots where
+ *  the strategist HAS supplied a working value and is just asking
+ *  the partner to confirm or override. Shipping the suggested text
+ *  as the live draft (instead of treating it as a blocker) means
+ *  the partner sees a complete page, and the audit logs it as a
+ *  `pending_approval` rather than `pending_input`.
+ *
+ *  Examples that extract:
+ *    [NEEDS INPUT — suggested: "Justice & Local Partners | Arvada Vineyard"]
+ *      → "Justice & Local Partners | Arvada Vineyard"
+ *    \[NEEDS INPUT — suggested: "..."\]
+ *      → same after unescaping
+ *
+ *  Examples that DON'T extract (return original):
+ *    [NEEDS INPUT: maps link]               // no suggested value
+ *    [NEEDS INPUT: Ben Folman to confirm]   // no suggested value
+ *    *pending: confirm email*               // different marker shape
+ */
+export function extractSuggestedValue(value: unknown): { text: string; wasSuggested: boolean } {
+  if (typeof value !== 'string') return { text: '', wasSuggested: false }
+  // Match either '[NEEDS INPUT — suggested: "..."]' or '\[NEEDS INPUT … suggested: "…"\]'
+  // The dash is U+2014 (em dash) — some sources use a plain hyphen or en dash too.
+  const m = value.match(/\\?\[NEEDS INPUT\s*[—–\-]\s*suggested\s*:\s*"([^"]+)"\s*\\?\]/i)
+  if (m) return { text: m[1], wasSuggested: true }
+  return { text: value, wasSuggested: false }
 }
 
 /** Sanitize a URL field: blank out `[NEEDS INPUT: ...]` so it doesn't
@@ -154,10 +195,27 @@ export function composeFieldValuesForBrixies(
       continue
     }
 
+    // `[NEEDS INPUT — suggested: "..."]` ships the suggested text
+    // and logs a pending_approval gap (info severity) so the
+    // strategist sees what's pending without the page rendering
+    // a literal-bracket placeholder. Other NEEDS INPUT shapes
+    // pass through verbatim (blockers).
+    let resolved: unknown = coworkValue
+    const { text: extracted, wasSuggested } = extractSuggestedValue(coworkValue)
+    if (wasSuggested) {
+      resolved = extracted
+      gaps.push({
+        kind: 'pending_partner_approval',
+        severity: 'info',
+        detail: `slot '${uniformKey}' shipped a strategist-suggested value awaiting partner approval: "${extracted.slice(0, 80)}${extracted.length > 80 ? '…' : ''}"`,
+        slot: uniformKey,
+      })
+    }
+
     if (richtextKeys.has(brixiesKey)) {
-      fv[brixiesKey] = isHtmlAlready(coworkValue) ? coworkValue : ensureHtml(coworkValue)
+      fv[brixiesKey] = isHtmlAlready(resolved) ? resolved : ensureHtml(resolved)
     } else {
-      fv[brixiesKey] = String(coworkValue)
+      fv[brixiesKey] = String(resolved)
     }
   }
 

@@ -24,6 +24,7 @@
     "check:handoff-dry-run": "tsx scripts/check-handoff-dry-run.ts",
     "check:handoff-render-integrity": "tsx scripts/check-handoff-render-integrity.ts",
     "check:real-render": "tsx scripts/check-real-render.ts",
+    "needs-input": "tsx scripts/needs-input-punch-list.ts",
     "check:skill-prompts": "node scripts/generate-skill-prompts.mjs --check",
     "check:skill-prompts:write": "node scripts/generate-skill-prompts.mjs",
     "smoke:outline": "tsx scripts/cowork-smoke-outline.ts",

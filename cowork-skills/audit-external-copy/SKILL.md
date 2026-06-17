@@ -385,27 +385,55 @@ skill has hurt the strategist:
 
 1. **Strategist-placed gap markers are not content — preserve
    verbatim.** Recognized marker shapes (treat the entire run as
-   ONE atomic string):
+   ONE atomic string unless an exception below applies):
    - `[NEEDS INPUT: ...]` — explicit placeholder for missing data.
      Often carries starter options ("react to: 'A.' / 'B.' / 'C.'")
      — those are prompts to the client, NOT picks. Never substitute
      one option as final copy.
-   - `*pending: ...*` — italicized strategist note (e.g. `*pending:
-     confirm email domain*`). Belongs in `item_meta` or appended to
-     the slot it annotates.
+   - `*pending: ...*` / `*Pending Partner Input: ...*` — italicized
+     strategist note (case-insensitive). Belongs in `item_meta` or
+     appended to the slot it annotates. If the note names an owner
+     ("Ben Folman to confirm…") preserve the name verbatim.
    - `*photo: [NEEDS INPUT: ...]*`, `*image: [NEEDS INPUT: ...]*`
      — per-item asset placeholders for staff bios, cards, etc.
      Preserve in `item_meta`; do NOT route into the image slot
      (cowork never fills image slots — those stay
      Brixies-designer-bound).
-   - `\[NEEDS INPUT\]` / `\[NEEDS INPUT: ...\]` — same as above
-     when Notion has escaped the brackets in markdown.
+   - `*Embed (video): [NEEDS INPUT: ...]*` + `*Fallback: <url>*`
+     — video block markers. Capture the fallback URL as the
+     working `video_url`; log the [NEEDS INPUT] as a
+     `pending_permanent_video_url` gap on the section. Section
+     ships with the fallback playing.
+   - `*Status: pending_partner_input*` — per-item machine status
+     tag on a cards-grid item. Item ships with whatever fields
+     are populated; audit flags `item_pending_partner_input`.
+   - `*Preservation: source-verbatim ...*` / `*preservation: ...*`
+     — block-level or per-item flag locking the text against
+     paraphrase. Pass to `cowork_section_meta.preservation:
+     'source-verbatim'` so downstream editors respect it.
+   - `\[NEEDS INPUT\]` / `\[NEEDS INPUT: ...\]` — escaped-bracket
+     variants (Notion markdown sometimes escapes the brackets).
 
-   The handoff renderer recognizes these via `isNeedsInput()` in
-   coworkToBrixies.ts: visible text shows the marker so the
-   strategist sees the gap; URL slots blank the href so it doesn't
-   become a broken literal-text link. NEVER substitute, paraphrase,
-   or summarize a marker. NEVER drop it.
+   **EXCEPTION — suggested-value variant:**
+   `[NEEDS INPUT — suggested: "..."]` carries a strategist-supplied
+   working value. EXTRACT the quoted value as the slot's content
+   (ship-now) and log a `pending_partner_approval` gap (info
+   severity, NOT a blocker). Example:
+   ```
+   **METADATA TITLE:** [NEEDS INPUT — suggested: "Justice | Arvada Vineyard"]
+   ```
+   Ships `Justice | Arvada Vineyard` as the title; audit notes
+   that partner approval is still pending. The handoff translator
+   does this extraction automatically via `extractSuggestedValue()`
+   in coworkToBrixies.ts — but the SKILL should do it too so the
+   `slot_values` in the draft contains the resolved text rather
+   than the raw marker.
+
+   The handoff renderer recognizes the blocking shapes via
+   `isNeedsInput()` in coworkToBrixies.ts: visible text shows the
+   marker so the strategist sees the gap; URL slots blank the
+   href so it doesn't become a broken literal-text link. NEVER
+   substitute, paraphrase, or summarize a marker. NEVER drop it.
 
 2. **Capture every CTA — primary, secondary, AND per-item.** Notion
    sections often have multiple CTAs:
@@ -437,12 +465,53 @@ skill has hurt the strategist:
 3. **Don't drop or merge Notion sections.** Every `##` heading in
    the Notion page body (except metadata blocks: Strategic Purpose,
    Personas, Phase, Slug, Part 1: Strategic Setup, Sources
-   Referenced, Gaps Flagged) becomes ITS OWN section in the draft.
-   Do not combine "Hero" + "Service Times" into one section. Do
-   not skip "Newsletter Signup" because it feels small. Sub-section
-   `###` headings inside a `##` MAY group as a single section if
-   they're tightly coupled, but only with explicit reasoning in
-   `voice_notes`.
+   Referenced, Gaps Flagged, **Page Visitor Actions**) becomes ITS
+   OWN section in the draft. Do not combine "Hero" + "Service
+   Times" into one section. Do not skip "Newsletter Signup"
+   because it feels small. Sub-section `###` headings inside a
+   `##` MAY group as a single section if they're tightly coupled,
+   but only with explicit reasoning in `voice_notes`.
+
+   `## Page Visitor Actions` is a metadata block — it restates the
+   hero's primary + secondary CTAs as a handoff/QA consistency
+   check. Skip it from the draft (do NOT create a draft section
+   for it), but DO validate: hero primary/secondary must match
+   Page Visitor Actions primary/secondary. Flag a `cta_mismatch`
+   directive if they diverge.
+
+3a. **Labeled sub-bullets inside items.** When a Notion bullet has
+   nested `Label: value` rows, treat each label as a structured
+   item field rather than nested content. Recognized labels:
+
+   | Label | Routes to |
+   |---|---|
+   | `URL:` | `item_cta_url` (label implicit: "Read More" / contextual) |
+   | `Form:` | `item_cta_url` + `item_cta_label: "Sign Up"` |
+   | `Contact:` | `item_contact_name` (people name, NOT a URL) |
+   | `Email:` | `item_contact_email` or `item_cta_url: mailto:…` |
+   | `Phone:` | `item_contact_phone` |
+
+   Example — Serve page Sign-up Forms:
+   ```
+   - **Hospitality (Greeting, Cafe)**
+     - Contact: Ben Folman
+     - Form: <https://docs.google.com/forms/...>
+   ```
+   Becomes:
+   ```json
+   { "item_heading": "Hospitality (Greeting, Cafe)",
+     "item_contact_name": "Ben Folman",
+     "item_cta_label": "Sign Up",
+     "item_cta_url": "https://docs.google.com/forms/..." }
+   ```
+
+3b. **Hash-anchor CTAs (`#partners`, `#serve-teams`)** are in-page
+   jumps to another section on the same page. Preserve as-is in
+   the button url. Validate: the target anchor MUST match a
+   slugified section heading in the same draft (e.g. `#partners`
+   targets `## Local Partners`). If no match found, flag a
+   `broken_anchor_link` directive — strategist needs to either
+   rename a section or fix the anchor.
 
 4. **Respect template hints written into Notion section headings.**
    The strategist annotates the structural intent right in the
