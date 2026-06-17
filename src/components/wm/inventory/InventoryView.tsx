@@ -57,10 +57,15 @@ export interface SnippetRow { token: string; label: string; expansion: string }
 
 export type MarkStatus = 'approved' | 'outdated' | 'approved_keep_as_is'
 export interface Mark {
-  target_kind:   string
-  target_path:   string
-  status:        MarkStatus
-  client_note:   string | null
+  target_kind:                   string
+  target_path:                   string
+  status:                        MarkStatus
+  client_note:                   string | null
+  /** Partner-supplied name for an "Add something we missed" entry —
+   *  the title they typed in the form. Surfaced back beneath the
+   *  bucket so the saved entry stays visible after the form closes. */
+  proposed_program_name?:        string | null
+  proposed_program_description?: string | null
 }
 
 export type SaveMark = (
@@ -838,6 +843,9 @@ function BucketReviewCard({
             Supplied during onboarding
           </p>
         )}
+        {marks && (
+          <PartnerAddedList bucketKey={bucket.key} marks={marks} saveMark={saveMark} />
+        )}
         {saveMark && <AddMissingButton bucketKey={bucket.key} groupLabel={bucket.label} saveMark={saveMark} marks={marks} />}
       </article>
     )
@@ -906,6 +914,16 @@ function BucketReviewCard({
           </div>
         )}
 
+        {/* What you added — list every "Add something we missed" entry
+            the partner has saved for this bucket so it stays visible
+            after the form closes. Baseline-tied additions
+            (`missing:bucket/baseline-...`) already surface inline next
+            to their field via the "You added (N)" badge; this list is
+            the standalone-addition surface. */}
+        {marks && (
+          <PartnerAddedList bucketKey={bucket.key} marks={marks} saveMark={saveMark} />
+        )}
+
         {/* Add something we missed — always at the bottom of the
             bucket so the partner sees their content first, then has
             the affordance to flag anything we missed. */}
@@ -919,6 +937,86 @@ function BucketReviewCard({
         )}
       </div>
     </article>
+  )
+}
+
+/** List of partner-added entries for a bucket — surfaces the
+ *  `proposed_program_name` + `client_note` from each non-baseline
+ *  `missing:bucket/...` mark so the partner can see what they just
+ *  saved. Without this, the AddMissingButton would close on save and
+ *  the entry would visually disappear (the data is still saved, but
+ *  the partner reads it as "Where did my note go?"). */
+function PartnerAddedList({
+  bucketKey, marks, saveMark,
+}: {
+  bucketKey: string
+  marks:     Map<string, Mark>
+  saveMark?: SaveMark
+}) {
+  // Standalone additions only — baseline-tied ones render their
+  // "You added" badge inline next to the matching field.
+  const baselinePrefix = `missing:${bucketKey}/baseline-`
+  const bucketPrefix   = `missing:${bucketKey}/`
+  const entries: Array<{ path: string; mark: Mark }> = []
+  for (const [path, mark] of marks) {
+    if (!path.startsWith(bucketPrefix)) continue
+    if (path.startsWith(baselinePrefix)) continue
+    // After "Remove" the row stays in the DB (we don't support hard
+    // delete) but we null out the proposed name — filter those out so
+    // they disappear from the list.
+    const hasName = mark.proposed_program_name?.trim()
+    const hasNote = (mark.client_note ?? mark.proposed_program_description ?? '').trim()
+    if (!hasName && !hasNote) continue
+    entries.push({ path, mark })
+  }
+  if (entries.length === 0) return null
+
+  return (
+    <div className="border-t border-lavender/60 pt-3">
+      <p className="text-[10px] uppercase tracking-wider font-bold text-emerald-700 mb-2">
+        You added ({entries.length})
+      </p>
+      <ul className="space-y-2">
+        {entries.map(({ path, mark }) => {
+          const name = mark.proposed_program_name?.trim() || '(unnamed)'
+          const note = (mark.client_note ?? mark.proposed_program_description ?? '').trim()
+          return (
+            <li
+              key={path}
+              className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-sm font-semibold text-deep-plum">{name}</p>
+                {saveMark && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      // Soft-delete: clear the proposed name + note
+                      // so the filter above drops this row. We don't
+                      // hard-delete to keep audit history.
+                      await saveMark(path, 'missing_program', 'approved_keep_as_is', null, {
+                        proposed_program_name:        null,
+                        proposed_program_description: null,
+                      })
+                    }}
+                    className="text-[11px] text-emerald-700/70 hover:text-emerald-900 font-semibold"
+                    title="Remove"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+              {note && (
+                <div
+                  className="text-[12px] text-deep-plum/85 mt-1 prose prose-sm max-w-none"
+                  dangerouslySetInnerHTML={{ __html: note }}
+                />
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
   )
 }
 

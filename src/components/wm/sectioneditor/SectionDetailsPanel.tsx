@@ -642,18 +642,15 @@ function isEditableField(field: WebFieldDef): boolean {
   // placeholder pill explaining the referenced template).
   if (field.item_template_ref) return true
   const itemSchema = Array.isArray(field.item_schema) ? field.item_schema : []
-  // Decorative single-instance group with no editable slots in its
-  // item_schema. Common pattern: `Step` group with empty item_schema
-  // whose text is "Step 01" — handled entirely by the renderer's
-  // renumberDecorativeSequences pass.
-  if (itemSchema.length === 0 && field.single_instance_hint) return false
-  // Group whose item_schema has no editable content at any depth.
-  if (itemSchema.length === 0) {
-    // Empty multi-instance — surface it so the strategist can see the
-    // count but it won't have edit fields. Could hide entirely; for
-    // now keep visible.
-    return true
-  }
+  // Empty item_schema = no user-editable fields per item. Surfacing
+  // an "Add item" button for these creates a UX dead-end (clicking
+  // expands an empty row), and the count itself isn't useful since
+  // there's nothing to count against. Hide the field entirely; the
+  // strategist's path forward is the variant picker. Covers
+  // banner-section-4 (info_wrapper / image marquee bands),
+  // single-instance `Step` decorations, and any future decorative
+  // multi-instance band.
+  if (itemSchema.length === 0) return false
   const anyEditable = itemSchema.some(f => isEditableField(f))
   return anyEditable
 }

@@ -91,8 +91,61 @@ export function renderSectionToHtml(
   // a carousel that needs wrapping; this restores the intended bleed.
   fixHero34BleedStrips(root)
   fixContent53Overlap(root)
+  fixCta52ImageList(root)
 
   return root.outerHTML
+}
+
+/** CTA Section 52 ships its 6 polaroid images as absolute-positioned
+ *  siblings inside a 690px fixed-width `Image list` container, with
+ *  alternating ±4° rotations. `unstackAbsoluteSiblings` strips the
+ *  absolute + transform attrs, leaving 6 inline-flex children that
+ *  rely on the parent's exact 690px width to lay out — and at narrower
+ *  workspace iframe widths (or with neutralized placeholder srcs that
+ *  re-flow the column), several images drop out of view.
+ *
+ *  Fix: force the Image list to a centered flex row with wrap enabled,
+ *  give each image a small fixed size + subtle alternating tilt for the
+ *  polaroid aesthetic, and let the container size to its content so
+ *  every image stays visible regardless of parent width. */
+function fixCta52ImageList(root: Element): void {
+  const sections: HTMLElement[] = []
+  if ((root as HTMLElement).getAttribute?.('data-layer') === 'CTA Section 52') {
+    sections.push(root as HTMLElement)
+  }
+  sections.push(...Array.from(root.querySelectorAll<HTMLElement>('[data-layer="CTA Section 52"]')))
+  for (const sec of sections) {
+    const lists = Array.from(sec.querySelectorAll<HTMLElement>('[data-layer="Image list"]'))
+    for (const list of lists) {
+      list.setAttribute('style', [
+        'position: relative',
+        'width: 100%',
+        'max-width: 760px',
+        'margin: 0 auto',
+        'display: flex',
+        'flex-wrap: nowrap',
+        'justify-content: center',
+        'align-items: center',
+        'gap: 6px',
+        'min-height: 165px',
+      ].join('; '))
+      const imgs = Array.from(list.querySelectorAll<HTMLElement>('[data-layer="Image"]'))
+      imgs.forEach((img, i) => {
+        const rotate = i % 2 === 0 ? '-4deg' : '4deg'
+        const offsetY = i % 2 === 0 ? '4px' : '-4px'
+        img.setAttribute('style', [
+          'width: 110px',
+          'height: 146.67px',
+          'flex-shrink: 0',
+          'border-radius: 8px',
+          'border: 1px solid var(--White-white, white)',
+          'box-shadow: 0 4px 12px rgba(22, 22, 22, 0.08)',
+          'object-fit: cover',
+          `transform: rotate(${rotate}) translateY(${offsetY})`,
+        ].join('; '))
+      })
+    }
+  }
 }
 
 /** Force the Hero "Image fan" wrapper to a centered 3-image layout
@@ -621,22 +674,30 @@ function hideUnfilledDecorativeSlots(
     if (!Array.isArray(itemSchema) || itemSchema.length === 0) continue
     if (containsImageField(itemSchema)) continue
 
-    const els = root.querySelectorAll(`[data-layer="${cssEscape(layerName)}"]`)
-    for (const el of Array.from(els) as HTMLElement[]) {
+    const els = Array.from(root.querySelectorAll(`[data-layer="${cssEscape(layerName)}"]`)) as HTMLElement[]
+    const hidden: HTMLElement[] = []
+    for (const el of els) {
       if (el.getAttribute('data-substituted') === '1') continue
       if (hasSubstitutedAncestor(el)) continue
       forceHide(el)
-      // Bubble up the hide to a wrapper ancestor when this group was
-      // its sole visible content. Brixies often wraps a decorative
-      // group (feature_element's 3 checkmark circles, etc.) inside
-      // a styled container with padding/border; with the group hidden
-      // the styled container still paints a visible border — the
-      // "feature element border remains" symptom. Walk up until we
-      // find an ancestor with siblings or hit the root.
-      let parent: HTMLElement | null = el.parentElement
+      hidden.push(el)
+    }
+    // Bubble up AFTER all matching elements are hidden — Brixies often
+    // wraps a decorative group (feature_element's 3 checkmark circles,
+    // hero-42 Features list, etc.) inside a styled container with
+    // padding/border. With the group's instances all hidden the
+    // container still paints a visible outline + padding box. Walk up
+    // from each unique parent and hide it when every one of its
+    // data-layer children is now hidden.
+    const parents = new Set<HTMLElement>()
+    for (const el of hidden) {
+      if (el.parentElement) parents.add(el.parentElement)
+    }
+    for (const startParent of parents) {
+      let parent: HTMLElement | null = startParent
       while (parent && parent !== root) {
         const dataChildren = Array.from(parent.children).filter(c => c.hasAttribute('data-layer')) as HTMLElement[]
-        if (dataChildren.length !== 1) break
+        if (dataChildren.length === 0) break
         if (!isAllHidden(dataChildren)) break
         if (parent.getAttribute('data-layer') === root.getAttribute('data-layer')) break
         forceHide(parent)
