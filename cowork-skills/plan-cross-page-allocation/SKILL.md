@@ -383,6 +383,53 @@ Before emitting, re-read your output:
 5. Are unresolved_sources genuinely unresolvable, or are you
    skipping work?
 
+## Persist — base64-chunked + md5-guarded + IS NOT NULL (load-bearing)
+
+The allocation plan is large (page_allocation_plan for a 20-page
+sitemap is typically 30-60 KB; the post-write roadmap_state on a
+mature project is 350-400 KB). A naive `SELECT roadmap_state_set(...)`
+returns the FULL roadmap_state jsonb on success, which blows the
+Supabase MCP output limit and surfaces as an API error / stall.
+This is the exact failure that broke step 7 on Arvada (2026-06-17).
+
+The discipline — ONE `execute_sql` round trip:
+
+1. Base64-encode the allocation JSON locally (only `[A-Za-z0-9+/=]`
+   — sidesteps quote/escape corruption inside the SQL literal).
+2. Split into <8 KB chunks (Supabase MCP single-literal cap).
+3. Compute the whole-payload `md5` LOCALLY.
+4. Assemble + write + return a BOOLEAN, not the RPC's return value:
+
+```sql
+WITH chunks AS (VALUES (0, '<b64-0>'), (1, '<b64-1>'), …),
+     assembled AS (
+       SELECT convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') AS body
+       FROM chunks
+     )
+SELECT
+  CASE
+    WHEN md5(body) = '<local-md5>' THEN
+      (roadmap_state_set('<project_id>'::uuid, ARRAY['page_allocation_plan'], body::jsonb) IS NOT NULL)
+    ELSE false
+  END AS ok
+FROM assembled;
+```
+
+**CRITICAL — the `IS NOT NULL` wrapper.** `roadmap_state_set` returns
+the FULL `roadmap_state` (typically ~370 KB on a real project).
+Selecting that for inspection blows the MCP output limit. Wrap each
+`roadmap_state_set` call in `IS NOT NULL` so the row returns a
+single boolean. NEVER select the RPC's return value directly.
+
+The md5 guard + the `::jsonb` cast fail closed — if the base64
+transcribed wrong, `md5(body) != <local-md5>` skips the write,
+and you re-emit the chunks. Silent corruption is impossible.
+
+Why not psql / PostgREST / a file API? None available in the
+sandbox — Supabase MCP `execute_sql` is the only write path, and
+there's no file→tool-param bridge, so the payload travels as text
+in the query.
+
 ## Handoff Note — required final substep
 
 Before declaring this step done, emit a HANDOFF NOTE — a ≤1-screen

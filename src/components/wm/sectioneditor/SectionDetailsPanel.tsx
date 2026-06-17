@@ -216,27 +216,14 @@ export function SectionDetailsPanel({
           />
         )}
 
-        {/* Layout-budget overflow rollup — shown above the field
-            editors so the strategist sees overflow before scrolling
-            through individual char counters. Each entry names the
-            field and how many chars over budget it is. */}
-        {template && overflowingSlots.length > 0 && (
-          <Section title={`Layout budget · ${overflowingSlots.length} field${overflowingSlots.length === 1 ? '' : 's'} over`} defaultOpen>
-            <TightenAllPanel
-              overflowingSlots={overflowingSlots}
-              aiContext={aiContext}
-              fieldValues={values}
-              onApplyAll={(nextValues) => onChange({ field_values: nextValues })}
-            />
-          </Section>
-        )}
-
-        {/* Bind-health panel + "suggest item" pull affordance removed
-            (2026-06-17). The cowork pipeline now owns binding via the
-            Original Content side panel + the project's curated_library
-            defaults; per-slot bind-health hints and nested-content
-            suggestions don't fit the strategist's actual workflow
-            anymore, so they were retired here. */}
+        {/* Layout-budget overflow rollup + bind-health panel + AI
+            suggest affordance removed (2026-06-17). The cowork
+            pipeline owns binding via the Original Content panel +
+            curated_library defaults; per-slot AI suggestion +
+            char-cap policing don't fit the strategist's actual
+            workflow anymore. Sections that exceed a layout's natural
+            character budget render long without trim; that's a
+            strategist judgment call, not an automated nudge. */}
 
         {/* Field editors */}
         {template && visibleFields.length > 0 && (

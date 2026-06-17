@@ -336,31 +336,68 @@ const COWORK_STEPS_BASE: StepCatalogEntry[] = [
     starter_prompt:
 `Use the **plan-cross-page-allocation** skill to produce a page_allocation_plan for project_id \`{{project_id}}\`.
 
-**Read the handoff note from the prior step FIRST** — \`roadmap_state.site_strategy._meta.handoff_note\` carries the decisions + cross-step gotchas the prior session resolved, including any persona / nav / ministry routing the strategist already settled. Skim it before you load the full artifacts so you don't re-litigate those decisions.
+## Inputs (attached, NOT MCP)
 
-Read from Supabase:
-- \`strategy_web_projects.roadmap_state.stage_1\` (strategic foundation)
-- \`strategy_web_projects.roadmap_state.ministry_model\` (church posture)
-- \`strategy_web_projects.roadmap_state.site_strategy\` (sitemap; respect its \`nav_change_level\`)
-- \`strategy_web_projects.roadmap_state.acf_plan\` (audience × category × funnel matrix)
-- \`strategy_web_projects.roadmap_state.strategic_goals\` — **read this first**. Filter to fields where \`status = 'approved'\`. Especially weigh:
-  - \`content_and_allocation.copy_approach\` → \`derived.intended_verbatim_band\` (high/mid/low) sets the verbatim-vs-rewrite ratio. high = ≥70% verbatim from crawl, mid ≈ 50%, low ≤ 20%.
-  - \`content_and_allocation.ministries_to_grow\` — every named ministry MUST get a featured allocation on the homepage AND on its own page if one exists.
-  - \`content_and_allocation.content_needs\` (AM handoff) — the specific weak/missing areas drive allocation emphasis.
-  - \`content_and_allocation.best_outreach_methods\` — deserves a dedicated allocation slice with a clear CTA.
-  - \`content_and_allocation.additional_clarifications\` — read each item, route to the page it informs.
-  - \`goals_and_vision.top_3_website_goals\` + \`goals_and_vision.ideal_website_experience\` — frame page-level emphasis.
-- All \`content_atoms\` for this project where status in ('approved', 'draft')
-- All \`church_facts\` for this project where status in ('approved', 'draft')
-- All \`web_project_topics\` for this project (crawled content)
+I'm attaching:
+1. The plan-cross-page-allocation **SKILL.md**.
+2. The **project bundle** \`cowork-pipeline.<partner>.project-bundle.json\` — one JSON that holds every read this step needs in-context. **Do not fan out individual MCP SELECTs to load these — the bundle has them already.** The bundle carries:
+   - \`stage_1\`, \`ministry_model\`, \`strategic_goals_approved\` (filtered to status='approved' for you)
+   - \`site_strategy\` (full step-6 artifact: pages + persona_journeys + page_elevations + nav_change_level + nav_drop_candidates)
+   - \`acf_plan\` (full step-5 artifact: atom_routes + fact_routes + cell_density + coverage_gaps)
+   - \`atoms_pool.by_id\` / \`facts_pool.by_id\` / \`crawl_topics_pool.by_key\` — the FULL content inventory
+   - \`partner_added_inventory[]\` — the partner's "Add something we missed" submissions from content collection (fourth source kind; route each entry whose bucket maps to a page)
+   - \`canonical_templates\` (slot vocab + pickable_templates allow-list)
+   - \`prior_handoff_notes.site_strategy\` — read this FIRST so you don't re-litigate the step-6 strategist's decisions
+   - \`build_directives_by_page\` (when present from prior runs)
 
-Record the verbatim-band budget per allocation: each \`allocations[].intended_verbatim_band\` MUST equal the approved \`copy_approach.derived.intended_verbatim_band\` so outline + draft can enforce it downstream.
+If something genuinely isn't in the bundle and you need it, fall back to a single targeted MCP SELECT — but the bundle is shaped for this step, so check it carefully before fanning out.
+
+## Read order
+
+1. \`prior_handoff_notes.site_strategy\` — what step 6 already settled. Honor it.
+2. \`strategic_goals_approved\` — especially weigh:
+   - \`content_and_allocation.copy_approach.derived.intended_verbatim_band\` (high/mid/low) sets the verbatim-vs-rewrite ratio. Every \`allocations[].intended_verbatim_band\` MUST equal this approved band.
+   - \`content_and_allocation.ministries_to_grow\` — every named ministry MUST get a featured allocation on the homepage AND on its own page if one exists.
+   - \`content_and_allocation.content_needs\` (AM handoff), \`best_outreach_methods\`, \`additional_clarifications\`.
+   - \`goals_and_vision.top_3_website_goals\` + \`ideal_website_experience\` — frame page-level emphasis.
+3. \`site_strategy.persona_journeys[]\` + \`site_strategy.page_elevations[]\` — the journey ordering + which pages elevate which goals.
+4. \`acf_plan.atom_routes[]\` + \`fact_routes[]\` — which Audience × Category × Funnel cell each source lives in.
+5. \`partner_added_inventory[]\` — every entry whose \`bucket_key\` clearly maps to a planned page MUST be routed somewhere. Bucket → page mapping (e.g. ways_to_give → /give, care → /care, kids → /kids, global_outreach → /local-global or /missions).
+6. Atoms/facts/crawl pools — the source bodies the allocation routes.
 
 Walk me through each page's allocation as you produce it — pause for my push-back before persisting.
 
-When complete, write the allocation to \`roadmap_state.page_allocation_plan\` via the \`roadmap_state_set\` RPC (path: \`['page_allocation_plan']\`). Stamp the \`_meta\` block per the SKILL contract.
+## Persist — base64-chunked + md5-guarded + IS NOT NULL (load-bearing)
 
-**Final substep — handoff note.** Before declaring this step done, write a ≤1-screen handoff note to \`roadmap_state.page_allocation_plan._meta.handoff_note\` AND surface it as a paste-ready block in the conversation. Cover (a) what was written + where, (b) any open/deferred issues or validator gaps, (c) cross-step gotchas the next session (outline-page) needs to honor — banned vocab, per-page exceptions, persona postures, copy-approach band, ministries-to-grow placement, build_directives that affect outlining — and (d) what outline-page should read + decisions already litigated.`,
+When complete, write the allocation in ONE \`execute_sql\` via Supabase MCP. **Do NOT use a naive \`SELECT roadmap_state_set(...)\` —** the RPC returns the full ~370 KB \`roadmap_state\` jsonb on success, which blows the MCP output limit and surfaces as an API error / stall (this is the exact failure that previously broke step 7).
+
+The discipline:
+
+1. Base64-encode the allocation JSON locally (only \`[A-Za-z0-9+/=]\` — sidesteps quote/escape corruption inside the SQL literal).
+2. Split into <8 KB chunks (Supabase MCP single-literal cap).
+3. Compute the whole-payload \`md5\` locally.
+4. Run ONE statement that assembles + writes + returns a BOOLEAN, not the RPC's return value:
+
+\`\`\`sql
+WITH chunks AS (VALUES (0, '<b64-0>'), (1, '<b64-1>'), …),
+     assembled AS (
+       SELECT convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') AS body
+       FROM chunks
+     )
+SELECT
+  CASE
+    WHEN md5(body) = '<local-md5>' THEN
+      (roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_allocation_plan'], body::jsonb) IS NOT NULL)
+    ELSE false
+  END AS ok
+FROM assembled;
+\`\`\`
+
+**CRITICAL \`IS NOT NULL\` wrapper.** Without it, the RPC's full-state return value floods the MCP output. With it, you get a single boolean per write. The md5 guard + \`::jsonb\` cast fail closed — a transcription error can't land.
+
+If the md5 guard returns \`false\`, re-emit the chunks and try again — don't proceed.
+
+**Final substep — handoff note.** Before declaring this step done, write a ≤1-screen handoff note to \`roadmap_state.page_allocation_plan._meta.handoff_note\` AND surface it as a paste-ready block in the conversation. Cover (a) what was written + where, (b) any open/deferred issues or validator gaps, (c) cross-step gotchas the next session (outline-page) needs to honor — banned vocab, per-page exceptions, persona postures, copy-approach band, ministries-to-grow placement, build_directives that affect outlining, partner_added entries surfaced — and (d) what outline-page should read + decisions already litigated.`,
     computeStatus: s => {
       if (!s.site_strategy?._meta?.generated_at) return 'blocked_waiting'
       const out = s.page_allocation_plan?._meta?.generated_at
