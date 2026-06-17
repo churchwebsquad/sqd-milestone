@@ -415,22 +415,25 @@ function applyTemplateOverrides(
 
   switch (templateId) {
     case 'content-section-16': {
-      // content_image_text_b — `description` slot is shadowed by
-      // `description_items` (same layer_name "Description"); the
-      // group wins. Move body INTO description_items[0].text, and
-      // each items[i].item_body into description_items[i+1].text.
-      delete out.description
-      const di: Array<Record<string, unknown>> = []
-      if (body) di.push({ text: ensureHtml(body) })
-      for (const it of items) {
-        const ibBody = it.item_body ?? it.body ?? ''
-        const hdr    = it.item_heading ?? it.heading ?? ''
-        // If both heading and body present, concat (description_items
-        // is a single-slot list, no separate heading subfield).
-        const combined = hdr ? `<p><strong>${escapeHtml(String(hdr))}</strong></p>${ensureHtml(String(ibBody))}` : ensureHtml(String(ibBody))
-        di.push({ text: combined })
+      // content_image_text_b — schema simplified per user direction:
+      // description_items removed; description slot is the only body
+      // surface. To avoid losing items[] content when the audit picked
+      // this template for a section that HAS items, concat the items
+      // into the description as flowed HTML. Strategist can swap to a
+      // cards-grid template later if they want item structure back.
+      delete out.description_items
+      if (items.length > 0) {
+        const itemsHtml = items.map(it => {
+          const hdr  = it.item_heading ?? ''
+          const bdy  = it.item_body ?? ''
+          if (hdr && bdy) return `<p><strong>${escapeHtml(String(hdr))}</strong> — ${String(bdy).replace(/^<p>|<\/p>$/g, '')}</p>`
+          if (hdr)        return `<p><strong>${escapeHtml(String(hdr))}</strong></p>`
+          if (bdy)        return ensureHtml(String(bdy))
+          return ''
+        }).filter(Boolean).join('\n')
+        const existing = typeof out.description === 'string' ? out.description : ensureHtml(body)
+        out.description = (existing && existing.trim()) ? `${existing}\n${itemsHtml}` : itemsHtml
       }
-      out.description_items = di
       return out
     }
 
@@ -477,6 +480,22 @@ function applyTemplateOverrides(
           item_list: [{ card: [card] }],
         }
       })
+      return out
+    }
+
+    case 'feature-section-66': {
+      // feature_tabbed — each tab has heading+description+buttons,
+      // PLUS a separate top-level `tab_button` group whose own
+      // `heading` slot drives the tab-switcher chip label. Per user
+      // direction: auto-derive tab_button.heading from tab.heading
+      // so the strategist doesn't have to type each label twice.
+      // Strategist override remains possible if they fill tab_button
+      // manually — only apply when tab_button is empty or missing.
+      const tabs = Array.isArray(out.tab) ? out.tab as Array<Record<string, unknown>> : []
+      const existingButtons = Array.isArray(out.tab_button) ? out.tab_button as Array<Record<string, unknown>> : []
+      if (tabs.length > 0 && existingButtons.length === 0) {
+        out.tab_button = tabs.map(t => ({ heading: String(t.heading ?? '') }))
+      }
       return out
     }
 

@@ -90,6 +90,7 @@ export function renderSectionToHtml(
   // wrapOverflowingFlexContainers pass mistakes the wide top row for
   // a carousel that needs wrapping; this restores the intended bleed.
   fixHero34BleedStrips(root)
+  fixContent53Overlap(root)
 
   return root.outerHTML
 }
@@ -532,6 +533,34 @@ function hideEmptyButtonShells(root: Element): void {
     if (hasMeaningfulHref(el)) continue
     forceHide(el)
   }
+
+  // Pass 4 — button CONTAINER wrappers. After passes 1-3, a wrapper
+  // like `data-layer="Container buttons"` / `Buttons` may still have a
+  // visible background/border with all its children hidden. Walk every
+  // wrapper-like layer and hide it if it has no visible (non-hidden)
+  // button descendants left + no own text. This catches the
+  // "floating black box where no button was added" symptom.
+  for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-layer]'))) {
+    const layer = (el.getAttribute('data-layer') ?? '').toLowerCase()
+    if (!/buttons?$|container buttons?$|button group/i.test(layer)) continue
+    if (hasVisibleChild(el)) continue
+    if (hasButtonText(el)) continue
+    forceHide(el)
+  }
+}
+
+/** True if `el` has at least one descendant whose computed display
+ *  isn't `none` (via inline style). We can't read live CSS in the
+ *  static render, so we approximate by checking the inline style for
+ *  display:none. Any non-hidden descendant counts as "has content." */
+function hasVisibleChild(el: Element): boolean {
+  for (const c of Array.from(el.querySelectorAll('*'))) {
+    const s = (c as HTMLElement).getAttribute?.('style') ?? ''
+    if (/display\s*:\s*none/i.test(s)) continue
+    // Element exists and isn't display:none → counts as visible content.
+    return true
+  }
+  return false
 }
 
 /** Hide decorative TEXT-ONLY top-level groups that cowork doesn't fill.
@@ -597,8 +626,66 @@ function hideUnfilledDecorativeSlots(
       if (el.getAttribute('data-substituted') === '1') continue
       if (hasSubstitutedAncestor(el)) continue
       forceHide(el)
+      // Bubble up the hide to a wrapper ancestor when this group was
+      // its sole visible content. Brixies often wraps a decorative
+      // group (feature_element's 3 checkmark circles, etc.) inside
+      // a styled container with padding/border; with the group hidden
+      // the styled container still paints a visible border — the
+      // "feature element border remains" symptom. Walk up until we
+      // find an ancestor with siblings or hit the root.
+      let parent: HTMLElement | null = el.parentElement
+      while (parent && parent !== root) {
+        const dataChildren = Array.from(parent.children).filter(c => c.hasAttribute('data-layer')) as HTMLElement[]
+        if (dataChildren.length !== 1) break
+        if (!isAllHidden(dataChildren)) break
+        if (parent.getAttribute('data-layer') === root.getAttribute('data-layer')) break
+        forceHide(parent)
+        parent = parent.parentElement
+      }
     }
   }
+}
+
+/** Content Section 53 ships its Image 1 with `position: absolute; left:
+ *  0; top: 0; width: 1350px; height: 675px` — it COVERS the whole
+ *  Container. The Card with heading + description renders inside the
+ *  same container with no z-index, so it sits behind the image and the
+ *  partner sees only the image placeholder. Scoped fix: push the Card
+ *  layer (and any text content sibling of Image 1) to a positive
+ *  z-index so it paints over the image. */
+function fixContent53Overlap(root: Element): void {
+  const sections: HTMLElement[] = []
+  if ((root as HTMLElement).getAttribute?.('data-layer') === 'Content Section 53') {
+    sections.push(root as HTMLElement)
+  }
+  sections.push(...Array.from(root.querySelectorAll<HTMLElement>('[data-layer="Content Section 53"]')))
+  for (const sec of sections) {
+    // Force the Card layer above the image.
+    for (const card of Array.from(sec.querySelectorAll<HTMLElement>('[data-layer="Card"]'))) {
+      let s = card.getAttribute('style') ?? ''
+      s = s.replace(/z-index\s*:\s*-?\d+\s*;?/gi, '')
+      s = s.replace(/position\s*:\s*static\s*;?/gi, '')
+      s = appendStyle(s, 'position: relative')
+      s = appendStyle(s, 'z-index: 2')
+      card.setAttribute('style', s)
+    }
+    // Push the image to z-index 0 so it stays behind.
+    for (const img of Array.from(sec.querySelectorAll<HTMLElement>('[data-layer="Image 1"]'))) {
+      let s = img.getAttribute('style') ?? ''
+      s = s.replace(/z-index\s*:\s*-?\d+\s*;?/gi, '')
+      s = appendStyle(s, 'z-index: 0')
+      img.setAttribute('style', s)
+    }
+  }
+}
+
+/** True if every element in `els` has display:none in its inline style. */
+function isAllHidden(els: HTMLElement[]): boolean {
+  for (const e of els) {
+    const s = e.getAttribute('style') ?? ''
+    if (!/display\s*:\s*none/i.test(s)) return false
+  }
+  return true
 }
 
 /** Hide UNSUBSTITUTED CLONE elements inside groups that DO have user
