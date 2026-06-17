@@ -943,14 +943,17 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
         )}
 
         {/* Cowork-session ready (never run) — Download SKILL + Copy prompt
-            Steps 8-10 (outline-page, draft-page, critique-page) also get
-            a Download bundle button: the per-page sessions read the
-            attached bundle in-context instead of fanning out per-page
-            MCP reads. */}
+            Steps 7–10 (plan-cross-page-allocation through critique-page)
+            + the audit branch (audit-external-copy, supplemental-page-
+            authoring) get a Download bundle button: the session reads
+            the attached bundle in-context instead of fanning out per-
+            page MCP reads. Step 7 was missing from this list before;
+            without the bundle the allocation step couldn't see the
+            partner_added_inventory the bundle now ships. */}
         {step.kind === 'cowork_session' && isCowork && (
           <>
             {step.skill_md_path && <DownloadSkillButton skillPath={step.skill_md_path} stepNumber={step.step_number} />}
-            {['outline-page', 'draft-page', 'critique-page', 'audit-external-copy', 'supplemental-page-authoring'].includes(step.key) && (
+            {['plan-cross-page-allocation', 'outline-page', 'draft-page', 'critique-page', 'audit-external-copy', 'supplemental-page-authoring'].includes(step.key) && (
               <DownloadBundleButton projectId={projectId} />
             )}
             <CopyPromptButton step={step} projectId={projectId} />
@@ -990,7 +993,7 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
               </span>
             </button>
             {step.skill_md_path && <DownloadSkillButton skillPath={step.skill_md_path} stepNumber={step.step_number} />}
-            {['outline-page', 'draft-page', 'critique-page', 'audit-external-copy', 'supplemental-page-authoring'].includes(step.key) && (
+            {['plan-cross-page-allocation', 'outline-page', 'draft-page', 'critique-page', 'audit-external-copy', 'supplemental-page-authoring'].includes(step.key) && (
               <DownloadBundleButton projectId={projectId} />
             )}
             <CopyPromptButton step={step} projectId={projectId} label="Re-run in Cowork" />
@@ -1010,7 +1013,7 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
         {step.kind === 'cowork_session' && isDone && (
           <>
             {step.skill_md_path && <DownloadSkillButton skillPath={step.skill_md_path} stepNumber={step.step_number} />}
-            {['outline-page', 'draft-page', 'critique-page', 'audit-external-copy', 'supplemental-page-authoring'].includes(step.key) && (
+            {['plan-cross-page-allocation', 'outline-page', 'draft-page', 'critique-page', 'audit-external-copy', 'supplemental-page-authoring'].includes(step.key) && (
               <DownloadBundleButton projectId={projectId} />
             )}
             <CopyPromptButton step={step} projectId={projectId} label="Re-run in Cowork" />
