@@ -367,35 +367,59 @@ If something genuinely isn't in the bundle and you need it, fall back to a singl
 
 Walk me through each page's allocation as you produce it — pause for my push-back before persisting.
 
-## Persist — base64-chunked + md5-guarded + IS NOT NULL (load-bearing)
+## Persist — column-free chunked write (load-bearing)
 
-When complete, write the allocation in ONE \`execute_sql\` via Supabase MCP. **Do NOT use a naive \`SELECT roadmap_state_set(...)\` —** the RPC returns the full ~370 KB \`roadmap_state\` jsonb on success, which blows the MCP output limit and surfaces as an API error / stall (this is the exact failure that previously broke step 7).
+Two failures we have to avoid every time:
 
-The discipline:
+**(A) Output-limit failure** — a naked \`SELECT roadmap_state_set(...)\` returns the full ~370 KB roadmap_state on success and blows the MCP output limit. **Every \`roadmap_state_set\` call MUST be wrapped in \`IS NOT NULL\`.**
 
-1. Base64-encode the allocation JSON locally (only \`[A-Za-z0-9+/=]\` — sidesteps quote/escape corruption inside the SQL literal).
-2. Split into <8 KB chunks (Supabase MCP single-literal cap).
-3. Compute the whole-payload \`md5\` locally.
-4. Run ONE statement that assembles + writes + returns a BOOLEAN, not the RPC's return value:
+**(B) Input-size failure** — emitting a single \`execute_sql\` with all chunks inline as VALUES exceeds your output token cap (~32 KB SQL) once the allocation grows past ~12 KB raw JSON. The session improvises ad-hoc temp tables, mid-stream socket disconnects leave state partial. This is what broke step 7 on Arvada (2026-06-17).
+
+**Use the column-free scratchpad pattern.** Every individual statement < 8 KB SQL. See the SKILL §Persist for the full rationale. The four-step shape:
 
 \`\`\`sql
-WITH chunks AS (VALUES (0, '<b64-0>'), (1, '<b64-1>'), …),
-     assembled AS (
-       SELECT convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') AS body
-       FROM chunks
-     )
+-- Step 1: clear prior scratch (idempotent)
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_allocation_plan}'
+WHERE id = '{{project_id}}'::uuid;
+
+-- Step 2: stage each chunk (one tiny call per chunk index)
+UPDATE strategy_web_projects
+SET roadmap_state = jsonb_set(
+  COALESCE(roadmap_state, '{}'::jsonb),
+  ARRAY['_chunks','page_allocation_plan','<INDEX>'],
+  to_jsonb('<BASE64-CHUNK>'::text)
+)
+WHERE id = '{{project_id}}'::uuid;
+
+-- Step 3: assemble + verify + write + return BOOLEAN
+WITH chunks AS (
+  SELECT (e.key)::int AS ix, e.value AS b64
+  FROM strategy_web_projects p,
+       jsonb_each_text(p.roadmap_state -> '_chunks' -> 'page_allocation_plan') AS e
+  WHERE p.id = '{{project_id}}'::uuid
+),
+body_cte AS (
+  SELECT convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') AS body
+  FROM chunks
+)
 SELECT
-  CASE
-    WHEN md5(body) = '<local-md5>' THEN
-      (roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_allocation_plan'], body::jsonb) IS NOT NULL)
+  CASE WHEN md5(body) = '<LOCAL-MD5>'
+    THEN (roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_allocation_plan'], body::jsonb) IS NOT NULL)
     ELSE false
   END AS ok
-FROM assembled;
+FROM body_cte;
+
+-- Step 4: clear scratch
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_allocation_plan}'
+WHERE id = '{{project_id}}'::uuid;
 \`\`\`
 
-**CRITICAL \`IS NOT NULL\` wrapper.** Without it, the RPC's full-state return value floods the MCP output. With it, you get a single boolean per write. The md5 guard + \`::jsonb\` cast fail closed — a transcription error can't land.
+Each chunk write is idempotent. Step 3 \`false\` → re-emit the bad chunk via Step 2 and re-run Step 3. Never silently proceed.
 
-If the md5 guard returns \`false\`, re-emit the chunks and try again — don't proceed.
+Inspect staged chunks without pulling the payload:
+\`SELECT jsonb_object_keys(roadmap_state -> '_chunks' -> 'page_allocation_plan') FROM strategy_web_projects WHERE id = '{{project_id}}'::uuid;\`
 
 **Final substep — handoff note.** Before declaring this step done, write a ≤1-screen handoff note to \`roadmap_state.page_allocation_plan._meta.handoff_note\` AND surface it as a paste-ready block in the conversation. Cover (a) what was written + where, (b) any open/deferred issues or validator gaps, (c) cross-step gotchas the next session (outline-page) needs to honor — banned vocab, per-page exceptions, persona postures, copy-approach band, ministries-to-grow placement, build_directives that affect outlining, partner_added entries surfaced — and (d) what outline-page should read + decisions already litigated.`,
     computeStatus: s => {
@@ -451,19 +475,55 @@ For each page in \`sitemap_pages\` (walk by \`nav_order\`):
    - \`voice_and_tone.one_key_message\` + \`recurring_message_theme\` — at least one section's voice anchors against these.
    - \`content_and_allocation.ministries_to_grow\` — surface early on homepage / ministry pages.
 4. Walk me through the outline before persisting; pause for my pushback.
-5. **Single MCP write** to persist:
+5. **Persist via the column-free chunked-write pattern** (see SKILL §Persist for the full rationale + recovery hints). Each per-page write is:
 
 \`\`\`sql
-SELECT roadmap_state_set(
-  '{{project_id}}'::uuid,
-  ARRAY['page_outlines', '<page_slug>'],
-  '<full_outline_with_meta_handoff_note>'::jsonb
-);
+-- Step 1: clear scratch
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_outlines,<slug>}'
+WHERE id = '{{project_id}}'::uuid;
+
+-- Step 2: stage each chunk (≤6 KB base64 per call)
+UPDATE strategy_web_projects
+SET roadmap_state = jsonb_set(
+  COALESCE(roadmap_state, '{}'::jsonb),
+  ARRAY['_chunks','page_outlines','<slug>','<INDEX>'],
+  to_jsonb('<BASE64-CHUNK>'::text)
+)
+WHERE id = '{{project_id}}'::uuid;
+
+-- Step 3: assemble + verify + write + return BOOLEAN
+WITH chunks AS (
+  SELECT (e.key)::int AS ix, e.value AS b64
+  FROM strategy_web_projects p,
+       jsonb_each_text(p.roadmap_state -> '_chunks' -> 'page_outlines' -> '<slug>') AS e
+  WHERE p.id = '{{project_id}}'::uuid
+),
+body_cte AS (SELECT convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') AS body FROM chunks)
+SELECT
+  CASE WHEN md5(body) = '<LOCAL-MD5>'
+    THEN (roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_outlines','<slug>'], body::jsonb) IS NOT NULL)
+    ELSE false
+  END AS ok
+FROM body_cte;
+
+-- Step 4: clear scratch
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_outlines,<slug>}'
+WHERE id = '{{project_id}}'::uuid;
 \`\`\`
+
+**Small outlines (≤12 KB raw JSON) can skip the scratchpad** and inline-write directly:
+
+\`\`\`sql
+SELECT roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_outlines','<slug>'], '<inline_jsonb>'::jsonb) IS NOT NULL AS ok;
+\`\`\`
+
+The \`IS NOT NULL\` wrapper is mandatory even for inline writes — without it the RPC's full-state return floods the MCP output (the failure that broke step 7 on Arvada).
 
 The outline's \`_meta\` MUST carry \`handoff_note\` (≤1-screen markdown — see the SKILL). The drafter reads it first on its next page.
 
-**No per-page RPC fan-out.** The legacy \`cowork_load_outline_context(...)\` is a fallback — don't run it as part of routine flow. ONE write per page is the contract.`,
+**No per-page RPC fan-out.** The legacy \`cowork_load_outline_context(...)\` is a fallback — don't run it as part of routine flow.`,
     computeStatus: s => {
       if (!s.page_allocation_plan?._meta?.generated_at) return 'blocked_waiting'
       if (s.page_outlines_count === 0)                  return 'cowork_session'
@@ -543,19 +603,57 @@ When the strategist authorizes a \`max_chars\` cap waiver (e.g. "the section 16 
 
 Re-run all draft-page self-validation steps (mechanical scan, source-coverage cross-foot, no-fabrication spot check) against the revised batch. Fix any new violations.
 
-### 5. Persist the WHOLE batch in ONE combined write
+### 5. Persist each page in the batch via the column-free chunked-write pattern
 
-Trim each draft to the lean shape (see SKILL.md §Persistence — drop \`char_budgets\`, prune \`voice_notes_by_slot\` to slots with a real note only) so most pages fall near/under 8 KB.
+Trim each draft to the lean shape (see SKILL.md §Persistence — drop \`char_budgets\`, prune \`voice_notes_by_slot\` to slots with a real note only). Then for EACH of the 5 pages, run the four-step pattern (SKILL.md §Persist has the full recipe + recovery hints):
 
-Build ONE \`execute_sql\` per batch that:
-- For each of the 5 pages, base64-encodes the trimmed JSON, splits into <8 KB chunks, computes the whole-payload \`md5\` locally.
-- Uses a chunks CTE per slug, assembles via \`string_agg(... ORDER BY ix)\`, \`convert_from(decode(b64,'base64'),'UTF8')\`, then for each slug: \`CASE WHEN md5(s) = '<local_md5>' THEN (roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_drafts','<slug>'], s::jsonb) IS NOT NULL) END\`.
+\`\`\`sql
+-- Step 1: clear scratch for this page (idempotent)
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_drafts,<slug>}'
+WHERE id = '{{project_id}}'::uuid;
 
-**CRITICAL: NEVER select the RPC's return value directly.** \`roadmap_state_set\` returns the full \`roadmap_state\` (~370 KB on a typical project). Selecting that for 5 pages blows the MCP output limit. Wrap in \`IS NOT NULL\` so the result is just a boolean per slug. The md5 guard + \`::jsonb\` cast fail closed — a transcription error can't land. Base64 (only \`[A-Za-z0-9+/=]\`) sidesteps quote-escape corruption.
+-- Step 2: stage each chunk (one tiny call per chunk index, ≤6 KB base64 per chunk)
+UPDATE strategy_web_projects
+SET roadmap_state = jsonb_set(
+  COALESCE(roadmap_state, '{}'::jsonb),
+  ARRAY['_chunks','page_drafts','<slug>','<INDEX>'],
+  to_jsonb('<BASE64-CHUNK>'::text)
+)
+WHERE id = '{{project_id}}'::uuid;
 
-If a write fails the md5 guard: re-emit JUST that slug's chunks (don't re-do the whole batch).
+-- Step 3: assemble + verify + write + return BOOLEAN
+WITH chunks AS (
+  SELECT (e.key)::int AS ix, e.value AS b64
+  FROM strategy_web_projects p,
+       jsonb_each_text(p.roadmap_state -> '_chunks' -> 'page_drafts' -> '<slug>') AS e
+  WHERE p.id = '{{project_id}}'::uuid
+),
+body_cte AS (SELECT convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') AS body FROM chunks)
+SELECT
+  CASE WHEN md5(body) = '<LOCAL-MD5>'
+    THEN (roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_drafts','<slug>'], body::jsonb) IS NOT NULL)
+    ELSE false
+  END AS ok
+FROM body_cte;
 
-**Why combined batch + base64:** Supabase MCP \`execute_sql\` is the only write path available (no psql, no PostgREST, no file→tool-param bridge). One round trip beats five for latency, and the md5 guard makes silent corruption impossible. Subagents-in-parallel is a viable alternative on a very large batch but adds idle-timeout risk; prefer the combined write once payloads are trimmed.
+-- Step 4: clear scratch
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_drafts,<slug>}'
+WHERE id = '{{project_id}}'::uuid;
+\`\`\`
+
+**Why per-page instead of one combined batch write?** Previously this skill prescribed a single \`execute_sql\` with inline-VALUES for all 5 pages. That works on paper but breaks once the combined SQL exceeds your output token cap (~32 KB total) — typical for trimmed drafts past ~6 KB raw JSON each. The session would improvise ad-hoc temp tables to compensate, then a mid-stream socket disconnect leaves state partial. Per-page scratchpad keeps every individual statement small (< 8 KB SQL) AND keeps assembly server-side.
+
+**Small drafts (≤12 KB raw JSON) — inline shortcut:**
+
+\`\`\`sql
+SELECT roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_drafts','<slug>'], '<inline_jsonb>'::jsonb) IS NOT NULL AS ok;
+\`\`\`
+
+\`IS NOT NULL\` wrapper is mandatory either way — without it the RPC's full-state return blows the MCP output limit (the failure that broke step 7 on Arvada).
+
+If Step 3 returns \`false\`, the md5 mismatched — re-emit JUST that slug's bad chunks via Step 2 and re-run Step 3.
 
 ### Move to the next 5
 
@@ -614,15 +712,51 @@ FROM strategy_web_projects WHERE id = '{{project_id}}';
 
 3. Produce the 5-axis critique + standout_lines + problem_lines + directives + summary.
 
-4. **Single MCP write**:
+4. **Persist via the column-free chunked-write pattern** (see SKILL §Persist). Critiques on clean greens are usually small enough to inline-write; verbose problem_lines + per-section directives can push past 12 KB and need the scratchpad. Same four-step shape as outline-page, just with \`page_critiques\` in the path:
 
 \`\`\`sql
-SELECT roadmap_state_set(
-  '{{project_id}}'::uuid,
-  ARRAY['page_critiques', '<slug>'],
-  '<full_critique_with_meta_handoff_note>'::jsonb
-);
+-- Step 1: clear scratch
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_critiques,<slug>}'
+WHERE id = '{{project_id}}'::uuid;
+
+-- Step 2: stage each chunk (≤6 KB base64 per call)
+UPDATE strategy_web_projects
+SET roadmap_state = jsonb_set(
+  COALESCE(roadmap_state, '{}'::jsonb),
+  ARRAY['_chunks','page_critiques','<slug>','<INDEX>'],
+  to_jsonb('<BASE64-CHUNK>'::text)
+)
+WHERE id = '{{project_id}}'::uuid;
+
+-- Step 3: assemble + verify + write
+WITH chunks AS (
+  SELECT (e.key)::int AS ix, e.value AS b64
+  FROM strategy_web_projects p,
+       jsonb_each_text(p.roadmap_state -> '_chunks' -> 'page_critiques' -> '<slug>') AS e
+  WHERE p.id = '{{project_id}}'::uuid
+),
+body_cte AS (SELECT convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') AS body FROM chunks)
+SELECT
+  CASE WHEN md5(body) = '<LOCAL-MD5>'
+    THEN (roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_critiques','<slug>'], body::jsonb) IS NOT NULL)
+    ELSE false
+  END AS ok
+FROM body_cte;
+
+-- Step 4: clear scratch
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_critiques,<slug>}'
+WHERE id = '{{project_id}}'::uuid;
 \`\`\`
+
+**Small critiques (≤12 KB raw JSON) — inline shortcut:**
+
+\`\`\`sql
+SELECT roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_critiques','<slug>'], '<inline_jsonb>'::jsonb) IS NOT NULL AS ok;
+\`\`\`
+
+\`IS NOT NULL\` wrapper is mandatory either way.
 
 **Final substep — handoff note.** Stamp \`_meta.handoff_note\` (≤1 screen): (a) overall band + per-axis bands, (b) directives that gate ship-vs-iterate, (c) cross-step gotchas for rollup (voice-drift signals, persona-fit edge cases, verbatim-band misses), (d) what synthesize-critique should weight when this page enters the project verdict.`,
     computeStatus: s => {
@@ -736,15 +870,15 @@ re-running anything.
    - Map content into the template's \`cowork_writable_slots\` (primary_heading / body / items / buttons / tagline / accent_body).
    - Every \`required: true\` slot must have a value — if absent, emit a directive and use a placeholder.
 5. Score 5 axes on the bound copy against the foundations (audit-criteria.md rubric, referenced from this SKILL's frontmatter).
-6. **THREE Supabase MCP writes per page** (outline → draft → critique):
+6. **Persist per page via the column-free chunked-write pattern** (see SKILL §Persist for the full recipe). Three artifacts per page — outline → draft → critique — each goes through the four-step scratchpad pattern. Plus the page-level \`cowork_page_meta.<slug>\` write when the page has a \`# SEO\` or \`## GAPS FLAGGED\` block, and ONE project-level \`global_footer\` write across the whole walk.
+
+**EVERY \`roadmap_state_set\` MUST be wrapped in \`IS NOT NULL\`.** Without it, the RPC's full-state return floods the MCP output. A 20-page audit does 60+ artifact writes; unchecked returns guarantee a mid-stream MCP failure. The audit-branch SKILL has a dedicated §Persist section with the four-step scratchpad pattern (clear → stage chunks → assemble + verify + write → clear). Use it for every artifact whose payload exceeds ~12 KB raw JSON. For smaller artifacts (most \`cowork_page_meta\`, often \`page_critiques\` on clean greens) the inline shortcut is fine — but still \`IS NOT NULL\`:
 
 \`\`\`sql
-SELECT roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_outlines',  '<slug>'], '<outline_jsonb>'::jsonb);
-SELECT roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_drafts',    '<slug>'], '<draft_jsonb>'::jsonb);
-SELECT roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_critiques', '<slug>'], '<critique_jsonb>'::jsonb);
+SELECT roadmap_state_set('{{project_id}}'::uuid, <target_path>, '<inline_jsonb>'::jsonb) IS NOT NULL AS ok;
 \`\`\`
 
-All three \`_meta\` blocks carry \`audit_source = 'notion'\` so synthesize-critique + the importer can tell where these artifacts came from.
+All artifact \`_meta\` blocks carry \`audit_source = 'notion'\` so synthesize-critique + the importer can tell where these came from.
 
 ## After all pages
 

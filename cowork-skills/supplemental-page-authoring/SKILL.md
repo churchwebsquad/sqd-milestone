@@ -79,13 +79,10 @@ Follow the **outline-page** SKILL contract:
 
 Write the outline:
 
-```sql
-SELECT roadmap_state_set(
-  '<project_id>'::uuid,
-  ARRAY['page_outlines', '<slug>'],
-  '<outline_jsonb>'::jsonb
-);
-```
+Persist via the column-free chunked-write pattern in §Persist below
+with `target_path = ARRAY['page_outlines', '<slug>']`. Never use a
+naked `SELECT roadmap_state_set(...)` — the RPC returns the full
+~370 KB roadmap_state on success and blows the MCP output limit.
 
 ### 2. Draft the page
 
@@ -98,13 +95,8 @@ Follow the **draft-page** SKILL contract:
 
 Write the draft:
 
-```sql
-SELECT roadmap_state_set(
-  '<project_id>'::uuid,
-  ARRAY['page_drafts', '<slug>'],
-  '<draft_jsonb>'::jsonb
-);
-```
+Persist via the column-free chunked-write pattern in §Persist below
+with `target_path = ARRAY['page_drafts', '<slug>']`.
 
 ### 3. Critique the page — REPLACES the audit's placeholder
 
@@ -119,13 +111,9 @@ Follow the **critique-page** SKILL contract:
 Write the critique — this OVERWRITES the gap placeholder the audit
 wrote at `page_critiques.<slug>`:
 
-```sql
-SELECT roadmap_state_set(
-  '<project_id>'::uuid,
-  ARRAY['page_critiques', '<slug>'],
-  '<critique_jsonb>'::jsonb
-);
-```
+Persist via the column-free chunked-write pattern in §Persist below
+with `target_path = ARRAY['page_critiques', '<slug>']`. This
+OVERWRITES the gap placeholder the audit wrote.
 
 The critique's `_meta.audit_source = 'generated-supplemental'` so
 synthesize-critique can distinguish "external copy audited" from
@@ -138,6 +126,74 @@ one-screen summary and pause so the strategist can push back before
 you advance to the next gap. This is the cost of supplemental
 authoring being a fresh write rather than an audit — the strategist
 wants to verify the new copy lands before more is generated.
+
+## Persist — column-free chunked write (load-bearing — applies to every artifact above)
+
+Same pattern as the audit-external-copy SKILL. Every per-page
+artifact (outline / draft / critique) uses this; never a naked
+`SELECT roadmap_state_set(...)`.
+
+### Step 1 — clear scratch (idempotent)
+
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- ARRAY['_chunks', <…target_path…>]
+WHERE id = '<project_id>'::uuid;
+```
+
+### Step 2 — stage each chunk
+
+Base64-encode the artifact JSON locally; split into chunks ≤6 KB.
+
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = jsonb_set(
+  COALESCE(roadmap_state, '{}'::jsonb),
+  ARRAY['_chunks', <…target_path…>, '<INDEX>'],
+  to_jsonb('<BASE64-CHUNK-TEXT>'::text)
+)
+WHERE id = '<project_id>'::uuid;
+```
+
+Idempotent. Returns no rows. Inspect what's staged:
+
+```sql
+SELECT jsonb_object_keys(roadmap_state #> ARRAY['_chunks', <…target_path…>])
+FROM strategy_web_projects WHERE id = '<project_id>'::uuid;
+```
+
+### Step 3 — assemble + verify + write + return BOOLEAN
+
+```sql
+WITH chunks AS (
+  SELECT (e.key)::int AS ix, e.value AS b64
+  FROM strategy_web_projects p,
+       jsonb_each_text(p.roadmap_state #> ARRAY['_chunks', <…target_path…>]) AS e
+  WHERE p.id = '<project_id>'::uuid
+),
+body_cte AS (
+  SELECT convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') AS body
+  FROM chunks
+)
+SELECT
+  CASE WHEN md5(body) = '<LOCAL-MD5>'
+    THEN (roadmap_state_set('<project_id>'::uuid, <target_path>, body::jsonb) IS NOT NULL)
+    ELSE false
+  END AS ok
+FROM body_cte;
+```
+
+### Step 4 — clear scratch
+
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- ARRAY['_chunks', <…target_path…>]
+WHERE id = '<project_id>'::uuid;
+```
+
+Small artifacts (≤12 KB raw JSON) can skip the scratchpad and
+inline-write directly — but the `IS NOT NULL` wrapper around
+`roadmap_state_set` is still mandatory.
 
 ## After all gap pages
 

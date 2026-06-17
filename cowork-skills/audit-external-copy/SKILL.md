@@ -84,11 +84,16 @@ you reason about content while reading it.
 **MCP usage pattern**:
 - Notion MCP: `query_database` / `notion-fetch` (page_id) /
   `retrieve_block_children` — to walk the DB and read each page.
-- Supabase MCP: up to FOUR `roadmap_state_set` writes per page —
-  outline, draft, critique, and `cowork_page_meta` (when the page
-  has a `# SEO` block and/or `## GAPS FLAGGED` block). Plus ONE
-  project-level `global_footer` write (when a Type=Footer row or
-  `## GLOBAL FOOTER` block is present).
+- Supabase MCP: up to FOUR per-page writes (outline, draft, critique,
+  and `cowork_page_meta` when the page has a `# SEO` and/or
+  `## GAPS FLAGGED` block) + ONE project-level `global_footer` write.
+  **Every one of those writes goes through the column-free chunked-
+  write pattern documented in §Persist below** — never a naked
+  `SELECT roadmap_state_set(...)`. The RPC returns the full ~370 KB
+  roadmap_state on success, which blows the Supabase MCP output
+  limit; the audit run typically writes 60+ artifacts (3 per page ×
+  20 pages), so unchecked returns are a guaranteed mid-stream
+  failure.
 
 Bundle keys you consume:
 
@@ -538,9 +543,8 @@ endpoint can persist what the partner wrote:
 }
 ```
 
-```sql
-SELECT roadmap_state_set('<project_id>'::uuid, ARRAY['page_outlines', '<slug>'], '<outline_jsonb>'::jsonb);
-```
+Persist via the column-free chunked-write pattern in §Persist below
+with `target_path = ARRAY['page_outlines', '<slug>']`.
 
 **(b) `page_drafts.<slug>`** — the actual slot values, ready for the importer.
 
@@ -744,9 +748,8 @@ skill has hurt the strategist:
    is actually a 2-button CTA, or names a section "## Mission" but
    the content shape is a 5-item testimonials grid.
 
-```sql
-SELECT roadmap_state_set('<project_id>'::uuid, ARRAY['page_drafts', '<slug>'], '<draft_jsonb>'::jsonb);
-```
+Persist via the column-free chunked-write pattern in §Persist below
+with `target_path = ARRAY['page_drafts', '<slug>']`.
 
 **(c) `page_critiques.<slug>`** — 5-axis scoring + directives, same
 shape as critique-page's standard output. `_meta.handoff_note`
@@ -754,9 +757,8 @@ shape as critique-page's standard output. `_meta.handoff_note`
 any partner-input asks (sermon series name, contact info to
 verify, etc.).
 
-```sql
-SELECT roadmap_state_set('<project_id>'::uuid, ARRAY['page_critiques', '<slug>'], '<critique_jsonb>'::jsonb);
-```
+Persist via the column-free chunked-write pattern in §Persist below
+with `target_path = ARRAY['page_critiques', '<slug>']`.
 
 **(d) `cowork_page_meta.<slug>`** — page-level partner-written
 metadata that lives at the PAGE level (not per-section). Holds the
@@ -784,9 +786,8 @@ verbatim `# SEO` block + page-final `## GAPS FLAGGED` bullets:
 }
 ```
 
-```sql
-SELECT roadmap_state_set('<project_id>'::uuid, ARRAY['cowork_page_meta', '<slug>'], '<page_meta_jsonb>'::jsonb);
-```
+Persist via the column-free chunked-write pattern in §Persist below
+with `target_path = ARRAY['cowork_page_meta', '<slug>']`.
 
 Omit fields that the partner didn't write (no `# SEO` block → omit
 `seo`; no `## GAPS FLAGGED` → omit `gaps_flagged`). Skip the write
@@ -828,9 +829,9 @@ row should be authoritative):
 }
 ```
 
-```sql
-SELECT roadmap_state_set('<project_id>'::uuid, ARRAY['global_footer'], '<footer_jsonb>'::jsonb);
-```
+Persist via the column-free chunked-write pattern in §Persist below
+with `target_path = ARRAY['global_footer']` (project-level — no slug
+component, one write across the whole walk).
 
 Up to FIVE writes per page (outline → draft → critique → page_meta →
 optionally global_footer once across the whole walk). Order:
@@ -838,6 +839,105 @@ outline → draft → critique → page_meta. The global_footer write
 happens once (the Footer row itself OR the first Homepage section
 pass that emits it). If a write fails, surface the error and STOP —
 don't continue to the next page until the strategist clears it.
+
+## Persist — column-free chunked write (load-bearing — applies to EVERY artifact above)
+
+Every per-page artifact AND the project-level `global_footer` goes
+through the same pattern. Two failure modes the audit run trips
+without it:
+
+**(A) Output-limit failure** — `SELECT roadmap_state_set(...)`
+returns the FULL roadmap_state on success (~370 KB once a mature
+project's column has filled in). A typical audit-branch run does
+3-5 writes per page × 20 pages = 60+ artifact writes. Unchecked
+returns flood the Supabase MCP output limit and the session reads
+each truncated response as an API error → retries / stalls.
+**EVERY `roadmap_state_set` call MUST be wrapped in `IS NOT NULL`.**
+
+**(B) Input-size failure** — Notion pages with rich content can
+produce outlines + drafts that exceed Claude's output-token cap
+(~32 KB of SQL) when serialized inline. The session improvises
+ad-hoc temp tables, then a mid-stream socket disconnect leaves
+state partial. Avoid by keeping every individual statement < 8 KB.
+
+**Pattern — used identically for every `target_path` value:**
+
+### Step 1 — clear any prior scratch at this target (idempotent)
+
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- ARRAY['_chunks'] || <target_path_as_text_array>
+WHERE id = '<project_id>'::uuid;
+```
+
+(In practice, just write the path inline:
+`roadmap_state #- '{_chunks,page_outlines,<slug>}'` etc.)
+
+### Step 2 — for EACH chunk i in 0..N-1
+
+Base64-encode the artifact JSON locally. Split into chunks ≤6 KB.
+Stage:
+
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = jsonb_set(
+  COALESCE(roadmap_state, '{}'::jsonb),
+  ARRAY['_chunks', <…target_path…>, '<INDEX>'],
+  to_jsonb('<BASE64-CHUNK-TEXT>'::text)
+)
+WHERE id = '<project_id>'::uuid;
+```
+
+For example, for `target_path = ARRAY['page_drafts', '<slug>']`,
+the scratchpad path becomes
+`ARRAY['_chunks', 'page_drafts', '<slug>', '<INDEX>']`.
+
+Each call: tiny, idempotent, returns no rows.
+
+### Step 3 — assemble + md5-verify + write + return BOOLEAN
+
+```sql
+WITH chunks AS (
+  SELECT (e.key)::int AS ix, e.value AS b64
+  FROM strategy_web_projects p,
+       jsonb_each_text(p.roadmap_state #> ARRAY['_chunks', <…target_path…>]) AS e
+  WHERE p.id = '<project_id>'::uuid
+),
+body_cte AS (
+  SELECT convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') AS body
+  FROM chunks
+)
+SELECT
+  CASE WHEN md5(body) = '<LOCAL-MD5>'
+    THEN (roadmap_state_set('<project_id>'::uuid, <target_path>, body::jsonb) IS NOT NULL)
+    ELSE false
+  END AS ok
+FROM body_cte;
+```
+
+Result `false` → some chunk mis-staged; re-emit and re-run.
+
+### Step 4 — clear scratch
+
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- ARRAY['_chunks', <…target_path…>]
+WHERE id = '<project_id>'::uuid;
+```
+
+### Small artifacts can skip the scratchpad
+
+When an artifact is small enough (≤12 KB raw JSON — common for
+`cowork_page_meta`, sometimes for `page_critiques` on clean greens,
+occasionally for short outlines), inline-write is still ok:
+
+```sql
+SELECT roadmap_state_set('<project_id>'::uuid, <target_path>, '<inline_jsonb>'::jsonb) IS NOT NULL AS ok;
+```
+
+The `IS NOT NULL` wrapper is still mandatory even for inline writes
+— the output-limit failure isn't about payload size, it's about the
+RPC's full-state return.
 
 ## Final report — surface to strategist after ALL pages
 

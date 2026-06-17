@@ -104,11 +104,15 @@ attachment.
 
 ### When to use MCP
 
-- ONE `SELECT` per page (loads both `page_outlines.<slug>` and
-  `page_drafts.<slug>` in one shot).
-- ONE `roadmap_state_set` write to persist the critique at
-  `['page_critiques', '<slug>']`.
-That's it.
+- ONE `SELECT` per page that loads BOTH `page_outlines.<slug>`
+  and `page_drafts.<slug>` (read via jsonb-arrow operators so the
+  result is just those two values — never `SELECT roadmap_state`).
+- The critique write uses the **column-free chunked-write
+  pattern** below (load-bearing). A naked
+  `SELECT roadmap_state_set(...)` returns the full ~370 KB
+  roadmap_state and blows the MCP output limit; an inline-VALUES
+  one-statement chunked write outgrows Claude's output-token cap
+  once critiques push past ~12 KB.
 
 ## What you produce (CoworkPageCritique)
 
@@ -662,6 +666,67 @@ JSON.** Keep JSON as the persisted artifact only.
 6. score on each axis matches the rubric anchor for that band — if
    voice_character.score = 85 but the assessment notes 3
    anti-exemplar hits, the score is wrong.
+
+## Persist — column-free chunked write (load-bearing)
+
+Same pattern as outline-page + draft-page: stage chunks under a
+scratchpad path, assemble + verify + write server-side, clear
+scratch. Every individual statement < 8 KB SQL.
+
+### Step 1 — clear prior scratch for this page (idempotent)
+
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_critiques,<slug>}'
+WHERE id = '<project_id>'::uuid;
+```
+
+### Step 2 — stage each chunk (one tiny call per chunk)
+
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = jsonb_set(
+  COALESCE(roadmap_state, '{}'::jsonb),
+  ARRAY['_chunks','page_critiques','<slug>','<INDEX>'],
+  to_jsonb('<BASE64-CHUNK-TEXT>'::text)
+)
+WHERE id = '<project_id>'::uuid;
+```
+
+### Step 3 — assemble + md5-verify + write (returns BOOLEAN)
+
+```sql
+WITH chunks AS (
+  SELECT (e.key)::int AS ix, e.value AS b64
+  FROM strategy_web_projects p,
+       jsonb_each_text(p.roadmap_state -> '_chunks' -> 'page_critiques' -> '<slug>') AS e
+  WHERE p.id = '<project_id>'::uuid
+),
+body_cte AS (
+  SELECT convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') AS body
+  FROM chunks
+)
+SELECT
+  CASE WHEN md5(body) = '<LOCAL-MD5>'
+    THEN (roadmap_state_set('<project_id>'::uuid, ARRAY['page_critiques','<slug>'], body::jsonb) IS NOT NULL)
+    ELSE false
+  END AS ok
+FROM body_cte;
+```
+
+### Step 4 — clear scratch
+
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_critiques,<slug>}'
+WHERE id = '<project_id>'::uuid;
+```
+
+Critiques whose payload is small enough to fit one statement (under
+~12 KB raw JSON, common for clean greens) can skip the scratchpad
+and go straight to a single
+`roadmap_state_set(...) IS NOT NULL` call inline. The scratchpad is
+always safe and is the default.
 
 ## Handoff Note — required final substep
 

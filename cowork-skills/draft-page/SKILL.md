@@ -731,67 +731,115 @@ violation. Drafter NEVER self-grants a cap override; only the
 strategist authorizes; only for slots whose layout supports it
 (NEVER headings, taglines, CTA labels — those clip).
 
-**Combined batch write — one `execute_sql` round trip per 5 pages:**
+**Batch write — column-free chunk pattern (load-bearing).**
 
-For each page in the batch:
-1. Trim the artifact (above).
-2. Base64-encode the JSON (only `[A-Za-z0-9+/=]` — sidesteps
-   quote/escape corruption).
-3. Split into <8 KB chunks (Supabase MCP single-literal cap).
-4. Compute whole-payload `md5` LOCALLY.
+Avoid two distinct failure modes every time:
 
-Then ONE statement with a chunks CTE per slug, assembling each
-slug's chunks via `string_agg(... ORDER BY ix)`, decoding via
-`convert_from(decode(b64, 'base64'), 'UTF8')`, casting to jsonb,
-and writing with an md5 guard:
+**(A) Output-limit failure** — `SELECT roadmap_state_set(...)` returns
+the FULL roadmap_state on success (~370 KB). Selecting that for any
+number of writes blows the Supabase MCP output limit. **Every
+`roadmap_state_set` call MUST be wrapped in `IS NOT NULL`** so the
+row returns just a boolean.
+
+**(B) Input-size failure** — emitting a single execute_sql with
+multiple pages' chunks inline as VALUES exceeds Claude's output
+token cap (~8k tokens, ~32 KB SQL). The session can't fit one big
+statement in one tool call; ad-hoc temp-table staging mid-stream
+introduces socket-disconnect failures and partial state.
+
+**The reliable shape — every individual statement < 8 KB SQL.**
+Each page in the 5-page batch goes through this loop:
+
+### Step 1 — clear prior scratch for this page (idempotent)
 
 ```sql
-WITH
-  chunks_pageA AS (VALUES (0, '<b64-0>'), (1, '<b64-1>'), …),
-  chunks_pageB AS (VALUES (0, '<b64-0>'), …),
-  …
-  assembled AS (
-    SELECT
-      'pageA' AS slug,
-      convert_from(
-        decode(string_agg(b64, '' ORDER BY ix), 'base64'),
-        'UTF8'
-      ) AS body
-    FROM chunks_pageA
-    UNION ALL
-    SELECT 'pageB', convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') FROM chunks_pageB
-    UNION ALL
-    …
-  )
-SELECT
-  slug,
-  CASE
-    WHEN slug = 'pageA' AND md5(body) = '<local-md5-pageA>' THEN
-      (roadmap_state_set('<project_id>'::uuid, ARRAY['page_drafts','pageA'], body::jsonb) IS NOT NULL)
-    WHEN slug = 'pageB' AND md5(body) = '<local-md5-pageB>' THEN
-      (roadmap_state_set('<project_id>'::uuid, ARRAY['page_drafts','pageB'], body::jsonb) IS NOT NULL)
-    …
-  END AS ok
-FROM assembled;
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_drafts,<slug>}'
+WHERE id = '<project_id>'::uuid;
 ```
 
-**CRITICAL — `IS NOT NULL` wrapper.** `roadmap_state_set` returns
-the FULL `roadmap_state` (typically ~370 KB on a real project).
-Selecting that for 5 pages in one statement blows the MCP output
-limit and the call fails before any data lands. Wrap each
-`roadmap_state_set` call in `IS NOT NULL` so each row returns a
-single boolean. NEVER select the RPC's return value directly.
+### Step 2 — for EACH chunk i in 0..N-1 of this page's payload
 
-The md5 guard + the `::jsonb` cast fail closed — if the base64
-transcribed wrong, `md5(body) != <local-md5>` skips the write,
-and you re-emit just that slug's chunks. Silent corruption is
-impossible.
+Base64-encode the trimmed draft JSON locally (only `[A-Za-z0-9+/=]`
+— sidesteps quote/escape corruption). Split into chunks ≤6 KB
+each so the surrounding UPDATE stays under 8 KB total. Stage:
 
-Why not psql / PostgREST / a file API? None available in the
-sandbox — Supabase MCP `execute_sql` is the only write path, and
-there's no file→tool-param bridge, so the payload travels as text
-in the query. Smaller payloads + one combined call is the fastest
-reliable shape.
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = jsonb_set(
+  COALESCE(roadmap_state, '{}'::jsonb),
+  ARRAY['_chunks','page_drafts','<slug>','<INDEX>'],
+  to_jsonb('<BASE64-CHUNK-TEXT>'::text)
+)
+WHERE id = '<project_id>'::uuid;
+```
+
+- Each call: tiny, well under the output-token cap.
+- Idempotent — re-running a chunk write is safe.
+- Returns no rows; MCP sees an affected-rows count only.
+
+To inspect what's currently staged for a page without pulling the
+payload:
+
+```sql
+SELECT jsonb_object_keys(roadmap_state -> '_chunks' -> 'page_drafts' -> '<slug>')
+FROM strategy_web_projects
+WHERE id = '<project_id>'::uuid;
+```
+
+### Step 3 — assemble + verify + write + return BOOLEAN (per page)
+
+```sql
+WITH chunks AS (
+  SELECT (e.key)::int AS ix, e.value AS b64
+  FROM strategy_web_projects p,
+       jsonb_each_text(p.roadmap_state -> '_chunks' -> 'page_drafts' -> '<slug>') AS e
+  WHERE p.id = '<project_id>'::uuid
+),
+body_cte AS (
+  SELECT convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') AS body
+  FROM chunks
+)
+SELECT
+  CASE WHEN md5(body) = '<LOCAL-MD5>'
+    THEN (roadmap_state_set('<project_id>'::uuid, ARRAY['page_drafts','<slug>'], body::jsonb) IS NOT NULL)
+    ELSE false
+  END AS ok
+FROM body_cte;
+```
+
+- All assembly happens server-side via `jsonb_each_text`. The
+  payload never travels back on the wire.
+- `md5(body) = '<LOCAL-MD5>'` fail-closes when transcription went
+  wrong. Result `false` → some chunk mis-staged. Re-emit that
+  chunk via Step 2 and re-run Step 3.
+- The `IS NOT NULL` wrapper around `roadmap_state_set` collapses
+  the RPC's full-state return to a single boolean.
+
+### Step 4 — clear scratch for this page
+
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_drafts,<slug>}'
+WHERE id = '<project_id>'::uuid;
+```
+
+### Why this pattern beats inline `VALUES`
+
+The previous discipline put every chunk inline in one `VALUES`
+list. Clean on paper, but the moment a payload exceeded ~12 KB
+raw JSON the SQL outgrew Claude's output-token cap. The session
+would split into ad-hoc temp tables to compensate, and the
+unstructured improvisation introduced socket disconnects mid-
+stream that left state partial and recovery muddy. The column-
+free scratchpad keeps every individual statement small AND keeps
+assembly server-side, so payload size doesn't constrain the wire
+format.
+
+Run pages in the batch in sequence — each page's Step 1→4 loop
+is independent. If one page fails mid-staging, its chunks live
+under its own slug in `_chunks.page_drafts.<slug>`, so other
+pages' state isn't affected.
 
 ## Hard rules
 

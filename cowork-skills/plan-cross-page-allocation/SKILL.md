@@ -383,52 +383,127 @@ Before emitting, re-read your output:
 5. Are unresolved_sources genuinely unresolvable, or are you
    skipping work?
 
-## Persist — base64-chunked + md5-guarded + IS NOT NULL (load-bearing)
+## Persist — column-free chunked write (load-bearing — read carefully)
 
 The allocation plan is large (page_allocation_plan for a 20-page
-sitemap is typically 30-60 KB; the post-write roadmap_state on a
-mature project is 350-400 KB). A naive `SELECT roadmap_state_set(...)`
-returns the FULL roadmap_state jsonb on success, which blows the
-Supabase MCP output limit and surfaces as an API error / stall.
-This is the exact failure that broke step 7 on Arvada (2026-06-17).
+sitemap is typically 30-100 KB; a mature project's roadmap_state
+column is 350-400 KB). Two distinct failure modes have to be
+avoided every single time:
 
-The discipline — ONE `execute_sql` round trip:
+**(A) The output-limit failure.** A naive
+`SELECT roadmap_state_set(...)` returns the FULL roadmap_state
+jsonb on success, which blows the Supabase MCP output limit.
+Symptom: API error, session reads the truncated response as a
+failure, retries or stalls. **Wrap every roadmap_state_set call
+in `IS NOT NULL` so the row returns a single boolean.**
 
-1. Base64-encode the allocation JSON locally (only `[A-Za-z0-9+/=]`
-   — sidesteps quote/escape corruption inside the SQL literal).
-2. Split into <8 KB chunks (Supabase MCP single-literal cap).
-3. Compute the whole-payload `md5` LOCALLY.
-4. Assemble + write + return a BOOLEAN, not the RPC's return value:
+**(B) The input-size failure.** Trying to emit one giant
+`execute_sql` with all base64 chunks inline in a `VALUES` list
+exceeds Claude Desktop's output token cap (~8k tokens, ~32 KB of
+SQL). The session can't fit the SQL in one tool call. Symptom:
+session improvises — stages chunks into ad-hoc temp tables one at
+a time, and one of those small calls trips a socket disconnect
+mid-stream. Lost chunks, partial state, recovery is muddy.
+
+**The reliable pattern — each MCP call is < 8 KB SQL:**
+
+### Step 1 — clear any prior scratch (idempotent)
 
 ```sql
-WITH chunks AS (VALUES (0, '<b64-0>'), (1, '<b64-1>'), …),
-     assembled AS (
-       SELECT convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') AS body
-       FROM chunks
-     )
-SELECT
-  CASE
-    WHEN md5(body) = '<local-md5>' THEN
-      (roadmap_state_set('<project_id>'::uuid, ARRAY['page_allocation_plan'], body::jsonb) IS NOT NULL)
-    ELSE false
-  END AS ok
-FROM assembled;
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_allocation_plan}'
+WHERE id = '<project_id>'::uuid;
 ```
 
-**CRITICAL — the `IS NOT NULL` wrapper.** `roadmap_state_set` returns
-the FULL `roadmap_state` (typically ~370 KB on a real project).
-Selecting that for inspection blows the MCP output limit. Wrap each
-`roadmap_state_set` call in `IS NOT NULL` so the row returns a
-single boolean. NEVER select the RPC's return value directly.
+This UPDATE returns no rows (no RETURNING clause) so the MCP
+response is just an affected-rows count. Safe to run any number
+of times.
 
-The md5 guard + the `::jsonb` cast fail closed — if the base64
-transcribed wrong, `md5(body) != <local-md5>` skips the write,
-and you re-emit the chunks. Silent corruption is impossible.
+### Step 2 — for EACH chunk i in 0..N-1, one tiny call
 
-Why not psql / PostgREST / a file API? None available in the
-sandbox — Supabase MCP `execute_sql` is the only write path, and
-there's no file→tool-param bridge, so the payload travels as text
-in the query.
+Base64-encode your assembled-JSON payload locally (only
+`[A-Za-z0-9+/=]` chars — sidesteps quote/escape corruption inside
+the SQL literal). Split into chunks of ≤6 KB each so the
+surrounding statement stays comfortably under 8 KB total. Write
+each chunk to its own slot under `_chunks.page_allocation_plan`:
+
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = jsonb_set(
+  COALESCE(roadmap_state, '{}'::jsonb),
+  ARRAY['_chunks','page_allocation_plan','<INDEX>'],
+  to_jsonb('<BASE64-CHUNK-TEXT>'::text)
+)
+WHERE id = '<project_id>'::uuid;
+```
+
+Each call:
+- One small statement, well under the output-token cap.
+- Idempotent — re-running any single chunk write is safe.
+- Returns no rows; MCP sees just the status.
+
+If a chunk write fails (socket disconnect, etc.), just re-run it.
+Status can be inspected without pulling the payload:
+
+```sql
+SELECT jsonb_object_keys(roadmap_state -> '_chunks' -> 'page_allocation_plan')
+FROM strategy_web_projects
+WHERE id = '<project_id>'::uuid;
+```
+
+### Step 3 — assemble + verify + write + return BOOLEAN
+
+ONE final call, also small (~1 KB SQL):
+
+```sql
+WITH chunks AS (
+  SELECT (e.key)::int AS ix, e.value AS b64
+  FROM strategy_web_projects p,
+       jsonb_each_text(p.roadmap_state -> '_chunks' -> 'page_allocation_plan') AS e
+  WHERE p.id = '<project_id>'::uuid
+),
+body_cte AS (
+  SELECT convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') AS body
+  FROM chunks
+)
+SELECT
+  CASE WHEN md5(body) = '<LOCAL-MD5>'
+    THEN (roadmap_state_set('<project_id>'::uuid, ARRAY['page_allocation_plan'], body::jsonb) IS NOT NULL)
+    ELSE false
+  END AS ok
+FROM body_cte;
+```
+
+- The chunks live in `roadmap_state._chunks.page_allocation_plan`,
+  read server-side via `jsonb_each_text`. No payload travels back
+  on the wire — only a boolean.
+- `md5(body) = '<LOCAL-MD5>'` fail-closes when transcription went
+  wrong. Result `false` → some chunk mis-staged. Re-emit that
+  chunk via Step 2 and re-run Step 3.
+- The `IS NOT NULL` wrapper around `roadmap_state_set` collapses
+  the RPC's full-state return to a single boolean. Never select
+  the RPC's return value directly.
+
+### Step 4 — clear scratch
+
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_allocation_plan}'
+WHERE id = '<project_id>'::uuid;
+```
+
+### Why this pattern beats inline `VALUES`
+
+The previous discipline put every chunk inline in a single
+statement's `VALUES` list. That was clean on paper but failed in
+practice the moment the payload exceeded ~12 KB raw JSON, because
+the model can't emit > 32 KB of SQL text in one tool call. The
+session would split into ad-hoc temp tables to compensate, and
+the unstructured improvisation introduced socket-disconnect-mid-
+stream failures that left state partial and unrecoverable. The
+column-free scratchpad above keeps every individual statement
+small AND keeps the assembly server-side, so the payload's
+total size doesn't constrain the wire format.
 
 ## Handoff Note — required final substep
 

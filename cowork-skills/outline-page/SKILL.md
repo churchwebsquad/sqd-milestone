@@ -177,11 +177,19 @@ Resolve as:
 
 ### When to use MCP
 
-ONE write per page: `roadmap_state_set` to persist the outline at
-`['page_outlines', '<slug>']`. **Do NOT run** `cowork_load_outline_context`
-or per-row SELECTs as part of your routine flow — that's exactly the
-fan-out this bundle eliminated. The legacy RPC stays in place as a
-safety net for the rare "the bundle is missing X" case.
+ONE write per page via the **column-free chunked-write pattern**
+(see §Persist below — load-bearing). A naked
+`SELECT roadmap_state_set(...)` returns the full ~370 KB
+roadmap_state on success and blows the MCP output limit; an
+inline-VALUES one-statement chunked write outgrows Claude's
+output-token cap once outlines push past ~12 KB. Use the
+scratchpad pattern: per-chunk UPDATE → assemble + write + IS NOT
+NULL → cleanup.
+
+**Do NOT run** `cowork_load_outline_context` or per-row SELECTs
+as part of your routine flow — that's exactly the fan-out this
+bundle eliminated. The legacy RPC stays in place as a safety net
+for the rare "the bundle is missing X" case.
 
 ## What you produce (CoworkPageOutline)
 
@@ -789,6 +797,95 @@ persisted artifact only. Pause for push-back before persisting.
    site_strategy's pages list — outline-page is downstream of that;
    if you don't have site_strategy as input, fall back to the
    target_slug from allocation's section_intent CTAs).
+
+## Persist — column-free chunked write (load-bearing — read carefully)
+
+Avoid two distinct failure modes every time:
+
+**(A) Output-limit failure** — `SELECT roadmap_state_set(...)`
+returns the FULL roadmap_state on success (~370 KB). Selecting
+that blows the Supabase MCP output limit. **Every
+`roadmap_state_set` call MUST be wrapped in `IS NOT NULL`** so the
+row returns just a boolean.
+
+**(B) Input-size failure** — emitting a single execute_sql with
+all chunks inline as `VALUES` exceeds Claude's output-token cap
+(~8k tokens, ~32 KB SQL). The session improvises ad-hoc temp
+tables, and one mid-stream socket disconnect leaves state
+partial. Avoid by keeping every individual statement small.
+
+**The reliable shape — every individual statement < 8 KB SQL.**
+
+### Step 1 — clear any prior scratch for this page (idempotent)
+
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_outlines,<slug>}'
+WHERE id = '<project_id>'::uuid;
+```
+
+### Step 2 — for EACH chunk i in 0..N-1, one tiny call
+
+Base64-encode the outline JSON locally (only `[A-Za-z0-9+/=]`).
+Split into chunks ≤6 KB each. Stage:
+
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = jsonb_set(
+  COALESCE(roadmap_state, '{}'::jsonb),
+  ARRAY['_chunks','page_outlines','<slug>','<INDEX>'],
+  to_jsonb('<BASE64-CHUNK-TEXT>'::text)
+)
+WHERE id = '<project_id>'::uuid;
+```
+
+Each call: tiny, idempotent, returns no rows. Inspect staged
+chunks (without pulling payload):
+
+```sql
+SELECT jsonb_object_keys(roadmap_state -> '_chunks' -> 'page_outlines' -> '<slug>')
+FROM strategy_web_projects
+WHERE id = '<project_id>'::uuid;
+```
+
+### Step 3 — assemble + verify + write + return BOOLEAN
+
+```sql
+WITH chunks AS (
+  SELECT (e.key)::int AS ix, e.value AS b64
+  FROM strategy_web_projects p,
+       jsonb_each_text(p.roadmap_state -> '_chunks' -> 'page_outlines' -> '<slug>') AS e
+  WHERE p.id = '<project_id>'::uuid
+),
+body_cte AS (
+  SELECT convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') AS body
+  FROM chunks
+)
+SELECT
+  CASE WHEN md5(body) = '<LOCAL-MD5>'
+    THEN (roadmap_state_set('<project_id>'::uuid, ARRAY['page_outlines','<slug>'], body::jsonb) IS NOT NULL)
+    ELSE false
+  END AS ok
+FROM body_cte;
+```
+
+Result `false` → some chunk mis-staged. Re-emit that chunk via
+Step 2 and re-run Step 3. Never silently proceed.
+
+### Step 4 — clear scratch for this page
+
+```sql
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,page_outlines,<slug>}'
+WHERE id = '<project_id>'::uuid;
+```
+
+For pages whose outline payload is small (under ~12 KB raw JSON
+— rare for outlines but possible on a thin landing page), it's
+ok to skip the chunk stage and go straight to a single
+`roadmap_state_set(...) IS NOT NULL` call with the full JSON
+inline. But the scratchpad path is always safe and is the
+default.
 
 ## Handoff Note — required final substep
 
