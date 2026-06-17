@@ -449,7 +449,7 @@ The outline's \`_meta\` MUST carry \`handoff_note\` (≤1-screen markdown — se
     kind:        'cowork_session',
     skill_md_path: 'cowork-skills/draft-page/SKILL.md',
     starter_prompt:
-`Use the **draft-page** skill for project_id \`{{project_id}}\`. Walk \`sitemap_pages\` sequentially — don't ask me which page to start on.
+`Use the **draft-page** skill for project_id \`{{project_id}}\`. Walk \`sitemap_pages\` in \`nav_order\` — don't ask me which page to start on.
 
 ## Inputs (attached, NOT MCP)
 
@@ -459,37 +459,72 @@ I'm attaching:
 
 **Read \`prior_handoff_notes.page_outlines\` first** — the outline strategist's cross-step gotchas (voice anchor exemplars, persona postures, banned phrases, key_message section, mechanical-scan close calls).
 
-## Workflow — TWO MCP calls per page (1 SELECT to read the outline, 1 write)
+## Workflow — 5-page BATCHES (draft → show full copy → revise → combined persist)
 
-For each page in \`sitemap_pages\` (walk by \`nav_order\`):
+Drafting is fast; the bottleneck is the strategist's review + persistence. So we batch. Walk \`sitemap_pages\` in chunks of FIVE pages. Per batch:
 
-1. **Load the outline** (the bundle doesn't inline page_outlines — they're written mid-session by step 8):
+### 1. Draft all 5
 
-\`\`\`sql
-SELECT roadmap_state->'page_outlines'->'<slug>' AS outline
-FROM strategy_web_projects WHERE id = '{{project_id}}';
+For each page in the batch:
+- Load the outline (one SELECT per page — the bundle doesn't inline page_outlines because they're written mid-session by step 8):
+  \`SELECT roadmap_state->'page_outlines'->'<slug>' AS outline FROM strategy_web_projects WHERE id = '{{project_id}}';\`
+- Look up resources from the bundle in-context: \`stage_1\`, \`strategic_goals_approved.content_and_allocation.copy_approach.derived.intended_verbatim_band\`, \`strategic_goals_approved.voice_and_tone.one_key_message\`, \`atoms_pool.by_id\`, \`facts_pool.by_id\`, \`crawl_topics_pool.by_key\`.
+- **MANDATORY full source-read step BEFORE drafting any slot of any page** (see SKILL.md §Source coverage). Walk every assigned crawl topic's FULL \`items\` tree, every kind. Never \`[:N]\`. Never subset kinds. This is what burned Desert Springs.
+- Draft per the SKILL contract. Each section stamps \`actual_verbatim_ratio\` AND a \`source_coverage[]\` report (one entry per assigned source per kind, with every items[] leaf marked \`rendered\` / \`deferred\` / \`coverage_gap\`).
+
+### 2. Show ALL 5 pages in chat — FULL rendered copy, not JSON
+
+Render the batch as a scannable spread:
+
+\`\`\`
+# /<slug-1>  (template_archetype_list — e.g. "hero_inner · content_image_text_b · feature_card_carousel_proxy")
+## Section 1 — <template_key>  ·  verbatim ratio: 0.78 / band: high ✓
+🔒 <verbatim atom text exactly as it will land in slot X>
+✍️ <drafter-written text for slot Y>
+✍️ <drafter-written text for slot Z>
+…build_cards (for feature_card_carousel_proxy): 🔒/✍️ heading + body + cta label/url per card…
+
+## Section 2 — …
+…
 \`\`\`
 
-2. Look up resources from the bundle in-context:
-   - Voice work: \`stage_1\` (ethos_summary, voice_exemplars, voice_anti_exemplars, persuasive_posture_by_persona)
-   - Strategic goals: \`strategic_goals_approved.content_and_allocation.copy_approach.derived.intended_verbatim_band\` (high ≥0.7 verbatim, mid ~0.5, low ≤0.2)
-   - \`strategic_goals_approved.voice_and_tone.one_key_message\` — every page MUST include a section whose copy echoes this.
-   - Atoms / facts referenced by the outline → \`atoms_pool.by_id\` / \`facts_pool.by_id\` (with by_topic fallback for drift)
-   - Crawl passages → \`crawl_topics_pool.by_key\`
+**Marker rules:**
+- 🔒 = locked / verbatim atom text (the church's own words, preserved character-for-character).
+- ✍️ = drafter-authored text (you wrote it; the strategist may revise it without breaking any contract).
 
-3. Draft per the SKILL contract. Each section stamps its \`actual_verbatim_ratio\` (0.0-1.0).
+Show EVERY slot of EVERY section of all 5 pages, with the exact words that will appear on the page. **NOT JSON. NOT abbreviated.** Pad with per-section verbatim ratio + band status (\`band: high ✓\` / \`band: mid ✓\` / \`band: high ✗ verbatim_band_unreachable\` etc.).
 
-4. **Single MCP write** to persist:
+### 3. Collect consolidated revisions
 
-\`\`\`sql
-SELECT roadmap_state_set(
-  '{{project_id}}'::uuid,
-  ARRAY['page_drafts', '<slug>'],
-  '<full_draft_with_meta_handoff_note>'::jsonb
-);
-\`\`\`
+Wait for the strategist to walk the batch and feed back a single consolidated revision pass (edits, swaps, "kick this section to a different template", template-swap-back-to-outline asks, cap_override authorizations for long bodies, etc.).
 
-**Final substep — handoff note.** Stamp \`_meta.handoff_note\` (≤1 screen): (a) section archetypes + verbatim ratios, (b) deferred slots/atoms with reasons, (c) cross-step gotchas for critique, (d) critique focus areas. The critique reads it first.`,
+When the strategist edits a 🔒 line: keep the atom_id in \`atoms_used\` AND log a \`section.verbatim_overrides[]\` entry: \`{atom_id, reason: "strategist_directed_modification", note: "<what they changed and why>"}\`. If the change drops the section under its \`intended_verbatim_band\`, stamp \`band_status: "verbatim_band_unreachable"\` + a \`band_note\`. critique-page treats logged overrides as authorized.
+
+When the strategist authorizes a \`max_chars\` cap waiver (e.g. "the section 16 long-form body holds a full pastor bio, don't trim to 400"): add the slot to that section's \`cap_overrides: [...]\` array; the self-validator skips the cap check for that slot. Only the strategist can authorize; only for layouts known to support long text (NEVER headings, taglines, CTA labels).
+
+### 4. Polish + re-validate
+
+Re-run all draft-page self-validation steps (mechanical scan, source-coverage cross-foot, no-fabrication spot check) against the revised batch. Fix any new violations.
+
+### 5. Persist the WHOLE batch in ONE combined write
+
+Trim each draft to the lean shape (see SKILL.md §Persistence — drop \`char_budgets\`, prune \`voice_notes_by_slot\` to slots with a real note only) so most pages fall near/under 8 KB.
+
+Build ONE \`execute_sql\` per batch that:
+- For each of the 5 pages, base64-encodes the trimmed JSON, splits into <8 KB chunks, computes the whole-payload \`md5\` locally.
+- Uses a chunks CTE per slug, assembles via \`string_agg(... ORDER BY ix)\`, \`convert_from(decode(b64,'base64'),'UTF8')\`, then for each slug: \`CASE WHEN md5(s) = '<local_md5>' THEN (roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_drafts','<slug>'], s::jsonb) IS NOT NULL) END\`.
+
+**CRITICAL: NEVER select the RPC's return value directly.** \`roadmap_state_set\` returns the full \`roadmap_state\` (~370 KB on a typical project). Selecting that for 5 pages blows the MCP output limit. Wrap in \`IS NOT NULL\` so the result is just a boolean per slug. The md5 guard + \`::jsonb\` cast fail closed — a transcription error can't land. Base64 (only \`[A-Za-z0-9+/=]\`) sidesteps quote-escape corruption.
+
+If a write fails the md5 guard: re-emit JUST that slug's chunks (don't re-do the whole batch).
+
+**Why combined batch + base64:** Supabase MCP \`execute_sql\` is the only write path available (no psql, no PostgREST, no file→tool-param bridge). One round trip beats five for latency, and the md5 guard makes silent corruption impossible. Subagents-in-parallel is a viable alternative on a very large batch but adds idle-timeout risk; prefer the combined write once payloads are trimmed.
+
+### Move to the next 5
+
+Do NOT persist any page before the strategist signs off on its batch. Do NOT ask which page to start on. Walk in \`nav_order\`.
+
+**Final substep (after the LAST batch lands) — handoff note.** Stamp \`_meta.handoff_note\` on the final page (≤1 screen): (a) section archetypes + verbatim ratios + band_statuses, (b) deferred slots/atoms with reasons + \`source_coverage[]\` coverage_gaps + cross-source conflicts surfaced for partner confirmation, (c) cross-step gotchas for critique (banned-phrase close calls, template swaps that need outline re-fire, cap_overrides logged), (d) critique focus areas. The critique reads it first.`,
     computeStatus: s => {
       if (s.page_outlines_count === 0)               return 'blocked_waiting'
       if (s.page_drafts_count === 0)                 return 'cowork_session'

@@ -33,9 +33,27 @@ can't use it.
 Loaded from `roadmap_state.strategic_goals` (`status='approved'` only):
 
 - **`copy_approach.derived.intended_verbatim_band`** — stamp it on
-  EVERY section in your outline (`sections[].intended_verbatim_band`).
-  Must match the allocation entry's band. high = ≥70% verbatim; mid ≈
-  50%; low ≤ 20%. Downstream draft + critique enforce this.
+  every section that has at least one atom_assignment / fact_assignment /
+  crawl_topic_assignment with verbatim-shaped content. Must match the
+  allocation entry's band. high = ≥70% verbatim; mid ≈ 50%; low ≤ 20%.
+  Downstream draft + critique enforce this.
+
+  **DO NOT over-stamp `high` on directive-only sections.** A section
+  with NO atom/fact/crawl-topic assignment (pure `directive` bindings
+  for a CTA banner, an embed-only block, a sectioned form, etc.)
+  CANNOT structurally reach a high verbatim band — there's no source
+  body to lift from. Stamp the band that actually matches the
+  routed sources, and on sections where no source body is routable
+  AT ALL (the partner approved the project at `low` overall but
+  some sections like a footer CTA carry no source), set the
+  section's `intended_verbatim_band` to the project's approved
+  band but DON'T over-claim. The drafter has a sibling escape
+  hatch: when it can't hit a band, it stamps
+  `band_status: "verbatim_band_unreachable"` + a `band_note`, and
+  critique-page treats that as authorized (not as
+  `verbatim_band_drift`). Don't paper over the gap at outline-time
+  by stamping `high` on a section that has no source — that just
+  forces the drafter to fake the ratio.
 - **`one_key_message`** — every page outline MUST include at least
   one section whose `voice_anchor` references this message verbatim.
 - **`recurring_message_theme`** — informs voice anchor selection
@@ -276,6 +294,46 @@ safety net for the rare "the bundle is missing X" case.
    - `reassure` → `testimonial_*` or `faq_*`
    - `evidence` → `stats_*`, `logo_grid_*`, `cards_with_stat_*`
    - `invite` → `cta_split` / `cta_with_image`
+
+### Template selection rubric — STRATEGIST HOUSE RULE (load-bearing)
+
+Pick the template by its **job**, using this map. Left =
+strategist's section vocabulary; right = canonical key. The
+drafter and the outliner BOTH obey this — if the strategist forces
+a swap mid-draft, the swap round-trips to outline-page (re-fire).
+
+| Section job | Canonical key | Notes |
+|---|---|---|
+| First section of EVERY interior page = a hero | `hero_inner` | Interior pages always open with the inner page hero. |
+| The **Visit / I'm New** page hero specifically | `hero_featured` | Visit always uses the featured page hero, not the inner hero. |
+| **Messages / Sermons** page hero | `content_video` | The "current series" section IS the Messages hero most of the time. |
+| Standard content | `content_image_text_a` / `content_image_text_b` | The default content section = **image left / text right**. Use for prose like a pastor bio (long body is OK here — see §Persistence cap override). |
+| Featured content | `content_featured_a` / `content_featured_b` | Sections with a small curated card set + bullet list, e.g. "What to Expect on a Sunday", "For Your Family". `content_featured_a` = 3 cards, `content_featured_b` = featured content + button. |
+| Video / playlist | `content_video` | Single video or a playlist. |
+| **Card grid (4+ items or dynamic/seasonal)** | `feature_card_carousel_proxy` | Use for ministry grids, next-steps, path choices, link-card rows — anything that reads as a uniform grid of cards. The DEFAULT for card sets > 4 items. Cards have no writable slots on the proxy itself, so AUTHOR them in `build_cards[]` (heading + body + cta label + url per card) and render them in the in-chat copy review. Every card gets its own CTA. **"We're missing the cards" is the drafter rendering a carousel shell without authoring the card content — that's a structural failure.** |
+| Tabbed / nested content | `feature_tabbed` | ONLY for genuinely tabbed/nested content (e.g. serve/volunteer opportunities with nested sub-lists). 4 cards max; has `item_meta` slot usable for a per-card CTA label or eyebrow. **NOT a substitute for a card grid.** Drafter was over-routing short card sets here — STOP. |
+| Series archive | (filter layout) | The sermon/series archive uses a filter layout, not a static section. |
+| Timeline | `timeline_story` | ONLY a history timeline. Never reach for it just because content has steps/dates. **A pastor bio is NOT a timeline.** |
+| CTA banner | `cta_simple` / `cta_callout` | A CTA banner is a SHORT, end-of-page call-out ("Got questions?", "Plan a Visit"). Use **once per page, at the end**. `cta_callout` = 1 button; `cta_simple` = primary + secondary. **DO NOT scatter `cta_callout`/`cta_simple` mid-page.** Mid-page content with a button belongs in `content_featured_b` (featured content + button) or a standard content section with a build-directive link. **The pastor bio does NOT belong in `cta_callout` — that's a content container failure mode the drafter has hit twice now.** |
+| Quote / written testimony | `testimonial_written` | Quote + attribution. |
+| Video testimony | `testimonial_video` | Quote + attribution + embedded video. |
+| Staff / leadership | `feature_team` | 2-item layout. SPLIT into siblings when the staff list is larger. |
+| Contact / address / map | `contact_section` | When the content has a map embed (`*[Map embed: <iframe…>]*`) or an address block, this template binds it cleanly. |
+| FAQ / accordion | `accordion_faq` | ≥3 Q&A pairs. Split when the items exceed the visual rhythm. |
+
+**Fixed-count card capacities (memorize):**
+
+- `content_image_text_a` / `content_image_text_b` — up to 3 plain (non-Card) text blocks.
+- `content_featured_a` — 3 cards.
+- `feature_tabbed` — 4 cards.
+- `feature_unique` / `feature_team` — 2 items.
+- `feature_card_carousel_proxy` — N cards (no fixed cap; the layout renders from a listing/CPT).
+
+Pick the FIXED template that matches the real card count;
+escalate to `feature_card_carousel_proxy` only when the count
+exceeds the largest fixed template (4) OR the set is
+dynamic/seasonal. Forcing 8 ministries down to 3 cards drops
+content the church gave us.
 
 ## Slot-binding discipline
 

@@ -1059,20 +1059,47 @@ function DownloadSkillButton({ skillPath, stepNumber }: { skillPath: string; ste
         throw new Error(detail)
       }
       const blob = await r.blob()
+      if (blob.size === 0) throw new Error('empty response body')
       const skillName = skillPath.split('/')[1] ?? 'skill'
       // Distinctive filename — includes "cowork-pipeline" so the
       // strategist's Claude Desktop session can't mistake it for
       // unrelated app docs, and step number so the order is
       // obvious.
       const stepPrefix = stepNumber != null ? `step-${String(stepNumber).padStart(2, '0')}.` : ''
-      const url = URL.createObjectURL(blob)
+      // Force the blob's MIME type to text/markdown so the browser's
+      // download path uses the filename + extension we set. Without
+      // an explicit type the blob inherits the response's
+      // Content-Type which can be enough on most browsers, but the
+      // explicit cast removes one more spot where the download
+      // silently no-ops (Safari + some Chromium-based browsers were
+      // ignoring the click when the blob came back typeless).
+      const typed = blob.type ? blob : new Blob([blob], { type: 'text/markdown;charset=utf-8' })
+      const url = URL.createObjectURL(typed)
       const a = document.createElement('a')
       a.href = url
       a.download = `cowork-pipeline.${stepPrefix}${skillName}.SKILL.md`
+      a.rel = 'noopener'
+      // Hide the synthetic <a> so it never paints between attach +
+      // click; not all browsers handle a visible 0-size anchor well.
+      a.style.position = 'fixed'
+      a.style.opacity  = '0'
+      a.style.pointerEvents = 'none'
       document.body.appendChild(a)
       a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
+      // CRITICAL: don't revoke the blob URL synchronously. Some
+      // browsers (notably Safari + Chromium with strict download
+      // policies) haven't yet started the file transfer when
+      // a.click() returns, so revoking the URL right after the
+      // click silently aborts the download — exactly the
+      // "button clicks, nothing downloads" symptom. Defer both the
+      // node removal AND the URL.revoke to the next animation
+      // frame; that's enough for every modern engine to register
+      // the download intent and start transferring before we drop
+      // the underlying blob.
+      requestAnimationFrame(() => {
+        a.remove()
+        URL.revokeObjectURL(url)
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Download failed')
     } finally {
@@ -1220,42 +1247,59 @@ function PushToPagesCard({ projectId, rollupAt, handoffAudit, onComplete }: {
 
 function DownloadBundleButton({ projectId }: { projectId: string }) {
   const [downloading, setDownloading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const handle = async () => {
     setDownloading(true)
+    setError(null)
     try {
       const r = await fetch(`/api/web/cowork/page-context-bundle?project_id=${encodeURIComponent(projectId)}`)
       if (!r.ok) throw new Error(`download failed (${r.status})`)
       const blob = await r.blob()
+      if (blob.size === 0) throw new Error('empty response body')
       const cd = r.headers.get('Content-Disposition') ?? ''
       const m = cd.match(/filename="([^"]+)"/)
       const filename = m?.[1] ?? `cowork-pipeline.${projectId.slice(0, 8)}.project-bundle.json`
-      const url = URL.createObjectURL(blob)
+      const typed = blob.type ? blob : new Blob([blob], { type: 'application/json;charset=utf-8' })
+      const url = URL.createObjectURL(typed)
       const a = document.createElement('a')
       a.href = url
       a.download = filename
+      a.rel = 'noopener'
+      a.style.position = 'fixed'
+      a.style.opacity  = '0'
+      a.style.pointerEvents = 'none'
       document.body.appendChild(a)
       a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
-    } catch {
-      // Quiet failure — strategist sees the button reset and can retry.
+      // See DownloadSkillButton — revoking the blob URL
+      // synchronously after a.click() races the browser's download
+      // pipeline; defer to the next frame so the transfer kicks off
+      // before the underlying blob is dropped.
+      requestAnimationFrame(() => {
+        a.remove()
+        URL.revokeObjectURL(url)
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Download failed')
     } finally {
       setDownloading(false)
     }
   }
   return (
-    <button
-      type="button"
-      onClick={() => void handle()}
-      disabled={downloading}
-      className="text-[13px] font-medium px-4 py-2 rounded-lg border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text disabled:opacity-50 transition-colors"
-      title="Pre-packaged project data the cowork session reads in-context. Attach to Claude Desktop alongside the SKILL.md so per-page MCP fan-out collapses to writes only."
-    >
-      <span className="flex items-center gap-1.5">
-        {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-        {downloading ? 'Downloading…' : 'Download bundle'}
-      </span>
-    </button>
+    <div className="flex flex-col items-start gap-1">
+      <button
+        type="button"
+        onClick={() => void handle()}
+        disabled={downloading}
+        className="text-[13px] font-medium px-4 py-2 rounded-lg border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text disabled:opacity-50 transition-colors"
+        title={error ?? 'Pre-packaged project data the cowork session reads in-context. Attach to Claude Desktop alongside the SKILL.md so per-page MCP fan-out collapses to writes only.'}
+      >
+        <span className="flex items-center gap-1.5">
+          {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+          {downloading ? 'Downloading…' : 'Download bundle'}
+        </span>
+      </button>
+      {error && <p className="text-[11px] text-wm-danger max-w-[280px]">Bundle download: {error}</p>}
+    </div>
   )
 }
 

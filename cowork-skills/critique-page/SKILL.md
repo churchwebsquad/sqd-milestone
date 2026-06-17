@@ -283,12 +283,25 @@ hits. The verdict's `confidence_band` is computed from the 5 axes.
 
 100: Every atom in `atoms_for_page` either appears in a field_value
      (atom_ref binding) OR is justifiably absent (deferred_slot with
-     reason). Verbatim atoms: exact preservation. No orphans.
-80: 90%+ atoms landed; orphans have reasons; verbatim preserved.
+     reason). **Every program / CTA / detail / scripture / key_phrase
+     in every assigned crawl topic's `items` tree is rendered or
+     justifiably deferred per the draft's `source_coverage[]`.**
+     Verbatim atoms: exact preservation OR a logged
+     `verbatim_overrides[]` entry naming a strategist-directed change.
+     No orphans, no silent omissions.
+80: 90%+ atoms landed; orphans have reasons; verbatim preserved;
+    every crawl-items[] entry accounted for.
 60: 70-90% atoms landed; reasons thin; OR 1 verbatim atom slightly
-    altered (still recognizable).
-0:  Verbatim atom not preserved; OR <50% atoms landed without
-    reasons.
+    altered (still recognizable); OR 1-2 crawl-items[] entries
+    unaccounted for.
+0:  Verbatim atom not preserved AND no override logged; OR <50%
+    atoms landed without reasons; OR ANY unaccounted program in
+    `source_coverage[]` (the silent-omission failure mode that
+    burned Desert Springs — care lost Pastoral Counseling +
+    Hospital Visits, give lost the Tithe + 3 Scriptures + Stocks
+    CTA, youth lost Fine Arts + the Costa Rica Global Trip — none
+    of those landed because the drafter saw a truncated/subsetted
+    view; the coverage recompute below catches it).
 
 ### Claim plausibility (4 of 5)
 
@@ -440,6 +453,86 @@ If your scores are higher AND you emitted no directive for either
 class, you skipped the procedure — re-read the draft section by
 section with the procedure in mind before finalizing scores.
 
+### source_coverage — the recompute-against-live-inventory procedure
+
+The drafter MUST emit `source_coverage[]` (one entry per assigned
+source per section, each carrying a full `items[]` walk with every
+item marked `rendered` / `deferred` / `coverage_gap`). Your job is
+to recompute that report against **live inventory** (atoms_pool,
+facts_pool, crawl_topics_pool) and FAIL the critique on any
+unaccounted entry.
+
+Procedure:
+
+1. **Re-walk every assigned crawl topic.** For each
+   `crawl_topic_assignments[].topic_key` in the outline, load the
+   topic from `crawl_topics_pool.by_key[topic_key]` and walk the
+   FULL `items` tree recursively. Enumerate every sub-item of every
+   kind — `program` / `cta` / `detail` / `scripture` /
+   `key_phrase` / `contact_block` / `meeting_time` / `faq`. Do NOT
+   subset kinds; do NOT truncate the walk. This is the exact bug
+   shape that hid Desert Springs's tithe Scriptures.
+2. **Cross-foot.** Every leaf in the live items tree must appear in
+   the draft's `source_coverage[].items[]` for that
+   `(section_intent_id, topic_key)` pair. An item present in
+   inventory but absent from the report = `coverage_gap` directive
+   at severity `blocker`. Quote the item label verbatim
+   ("Pastoral Counseling", "Tithe — Malachi 3:10", "Fine Arts").
+3. **Audit the rendered ones.** For each item marked `rendered`,
+   verify its content actually appears in the draft's field_values
+   at the named `slot_path`. A `rendered` marker with no matching
+   text in the draft is the same omission with a paper trail —
+   surface as `coverage_marker_unsupported`.
+4. **Audit the deferred ones.** A `deferred` reason like "no slot
+   available" is valid; "didn't fit voice" is not — that's a
+   `unjustified_deferral` directive at severity `warning`.
+
+This procedure is what makes the no-omission contract enforceable.
+Without it, the drafter's coverage report is a self-attestation;
+with it, the critique recomputes against truth.
+
+### no-fabrication spot check (claim_plausibility extension)
+
+Pair the source-grounding loop in §claim_plausibility above with
+this rule: a `coverage_gap` from the source_coverage recompute
+should NOT also surface as a claim_plausibility hit — those are
+omissions, not inventions. But if the drafter wrote a claim
+("most fill up fast, so register early") that doesn't trace to any
+atom/fact/crawl item AND wasn't surfaced as a content_gap by the
+drafter, that's a fabrication directive at severity `blocker`. On
+Desert Springs the drafter invented "Most fill up fast, so
+register early" on the youth page; it sounded plausible and was
+wrong. The critique should have caught it; encode this here so
+it does next time.
+
+### cross-source conflict flag
+
+If the drafter's `voice_signal_report.notes` mentions a value
+disagreement between sources (Desert Springs youth: text-to-connect
+fact `55678` vs crawl `620-322-2390`), surface that conflict as a
+directive at severity `warning` so the strategist routes to partner
+confirmation. Never silently pick one value.
+
+### Authorized strategist overrides — DO NOT flag these as errors
+
+When the drafter logs a `verbatim_overrides[]` entry on a section
+(strategist directed a modification to a verbatim atom's content,
+e.g. swapping "going on mission" → "Global Trip" per house
+terminology, or normalizing a single em-dash inside an atom), the
+critique MUST treat it as authorized — not as a verbatim violation.
+The contract: the override is a paper trail the strategist
+intentionally created. Critique still spot-checks the override
+reason for plausibility (the kind enum is closed:
+`strategist_directed_modification` / `em_dash_normalization` /
+`house_terminology_swap`) but doesn't score against verbatim
+preservation for the override-scoped atom.
+
+Same for `band_status`. When a section stamps
+`band_status: "verbatim_band_unreachable"` + a `band_note` because
+the outline routed it as directive-only OR the strategist's edits
+dropped it under the band, do NOT emit a `verbatim_band_drift`
+directive. The status IS the explanation.
+
 ## Mechanical-scan nuance
 
 - **Triads** — `\b\w+, \w+,? and \w+\b` is the pattern. Distinguish:
@@ -496,16 +589,39 @@ table.
    or the dignity rationale names it as honored.
 3. **Verbatim band drift** detected: every `draft.sections[i]`'s
    `actual_verbatim_ratio` falls inside its `intended_verbatim_band`
-   range (high ≥ 0.7 / mid 0.3-0.7 / low ≤ 0.2). Any drift surfaces
-   as a directive with kind `verbatim_band_drift` at severity
-   ≥ warning.
-4. **Mechanical scan reported** (em-dashes, banned filler, AI
+   range (high ≥ 0.7 / mid 0.3-0.7 / low ≤ 0.2) — EXCEPT for
+   sections stamped `band_status: "verbatim_band_unreachable"`
+   (authorized — see "Authorized strategist overrides"). Any
+   unauthorized drift surfaces as a directive with kind
+   `verbatim_band_drift` at severity ≥ warning.
+4. **Source-coverage recompute** (NEW — the no-omission backstop):
+   for every section, walk the live inventory for each assigned
+   atom/fact/crawl-topic and cross-foot against the drafter's
+   `source_coverage[].items[]` list. Any leaf in inventory absent
+   from the report = `coverage_gap` directive at severity `blocker`.
+   Any `rendered` marker without matching text in field_values =
+   `coverage_marker_unsupported` directive at severity `blocker`.
+   Quote the item label verbatim so the strategist can trace.
+5. **Mechanical scan reported** (em-dashes, banned filler, AI
    clichés, anti-exemplar hits) — concatenated across all field
    values. Zero-hit pages can land green; any hit forces ≥ yellow
-   and surfaces in the directives.
-5. **Standout + problem lines quoted**, not paraphrased. Each entry
+   and surfaces in the directives. Honor `verbatim_overrides[]`:
+   logged single-character normalizations inside a verbatim atom
+   (e.g. em-dash → en-dash with reason `em_dash_normalization`)
+   are AUTHORIZED, not a mechanical-scan failure.
+6. **Standout + problem lines quoted**, not paraphrased. Each entry
    names the section + the verbatim line so the strategist can
    trace it.
+7. **`come as you are` always loses** even when a partner exemplar
+   uses it. Globally-banned clichés beat per-project voice
+   exemplars; if the draft contains the phrase, surface as a
+   `cliche_banned` directive regardless of whether the partner's
+   stage_1 voice card lists it. The ban wins.
+8. **`just` intensifier vs `just like` comparison** — the
+   mechanical scan must NOT false-positive on `just like` inside a
+   verbatim atom. `just` as a filler intensifier
+   ("we just want you here") still fails; `just like` as
+   comparison ("just like Jesus did") is allowed. Context check.
 
 ## Review format
 

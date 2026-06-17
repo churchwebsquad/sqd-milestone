@@ -1568,7 +1568,7 @@ Final status write: \`{ status: "done" }\` OR \`{ status: "failed", last_error }
     name:         'critique-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  'ed7ae4f1eb0889cb',
+    contentHash:  'a627bf51cd50b1fa',
     references:   [
       'cowork-skills/critique-page/references/audit-criteria.md',
     ],
@@ -1841,12 +1841,25 @@ hits. The verdict's \`confidence_band\` is computed from the 5 axes.
 
 100: Every atom in \`atoms_for_page\` either appears in a field_value
      (atom_ref binding) OR is justifiably absent (deferred_slot with
-     reason). Verbatim atoms: exact preservation. No orphans.
-80: 90%+ atoms landed; orphans have reasons; verbatim preserved.
+     reason). **Every program / CTA / detail / scripture / key_phrase
+     in every assigned crawl topic's \`items\` tree is rendered or
+     justifiably deferred per the draft's \`source_coverage[]\`.**
+     Verbatim atoms: exact preservation OR a logged
+     \`verbatim_overrides[]\` entry naming a strategist-directed change.
+     No orphans, no silent omissions.
+80: 90%+ atoms landed; orphans have reasons; verbatim preserved;
+    every crawl-items[] entry accounted for.
 60: 70-90% atoms landed; reasons thin; OR 1 verbatim atom slightly
-    altered (still recognizable).
-0:  Verbatim atom not preserved; OR <50% atoms landed without
-    reasons.
+    altered (still recognizable); OR 1-2 crawl-items[] entries
+    unaccounted for.
+0:  Verbatim atom not preserved AND no override logged; OR <50%
+    atoms landed without reasons; OR ANY unaccounted program in
+    \`source_coverage[]\` (the silent-omission failure mode that
+    burned Desert Springs — care lost Pastoral Counseling +
+    Hospital Visits, give lost the Tithe + 3 Scriptures + Stocks
+    CTA, youth lost Fine Arts + the Costa Rica Global Trip — none
+    of those landed because the drafter saw a truncated/subsetted
+    view; the coverage recompute below catches it).
 
 ### Claim plausibility (4 of 5)
 
@@ -1998,6 +2011,86 @@ If your scores are higher AND you emitted no directive for either
 class, you skipped the procedure — re-read the draft section by
 section with the procedure in mind before finalizing scores.
 
+### source_coverage — the recompute-against-live-inventory procedure
+
+The drafter MUST emit \`source_coverage[]\` (one entry per assigned
+source per section, each carrying a full \`items[]\` walk with every
+item marked \`rendered\` / \`deferred\` / \`coverage_gap\`). Your job is
+to recompute that report against **live inventory** (atoms_pool,
+facts_pool, crawl_topics_pool) and FAIL the critique on any
+unaccounted entry.
+
+Procedure:
+
+1. **Re-walk every assigned crawl topic.** For each
+   \`crawl_topic_assignments[].topic_key\` in the outline, load the
+   topic from \`crawl_topics_pool.by_key[topic_key]\` and walk the
+   FULL \`items\` tree recursively. Enumerate every sub-item of every
+   kind — \`program\` / \`cta\` / \`detail\` / \`scripture\` /
+   \`key_phrase\` / \`contact_block\` / \`meeting_time\` / \`faq\`. Do NOT
+   subset kinds; do NOT truncate the walk. This is the exact bug
+   shape that hid Desert Springs's tithe Scriptures.
+2. **Cross-foot.** Every leaf in the live items tree must appear in
+   the draft's \`source_coverage[].items[]\` for that
+   \`(section_intent_id, topic_key)\` pair. An item present in
+   inventory but absent from the report = \`coverage_gap\` directive
+   at severity \`blocker\`. Quote the item label verbatim
+   ("Pastoral Counseling", "Tithe — Malachi 3:10", "Fine Arts").
+3. **Audit the rendered ones.** For each item marked \`rendered\`,
+   verify its content actually appears in the draft's field_values
+   at the named \`slot_path\`. A \`rendered\` marker with no matching
+   text in the draft is the same omission with a paper trail —
+   surface as \`coverage_marker_unsupported\`.
+4. **Audit the deferred ones.** A \`deferred\` reason like "no slot
+   available" is valid; "didn't fit voice" is not — that's a
+   \`unjustified_deferral\` directive at severity \`warning\`.
+
+This procedure is what makes the no-omission contract enforceable.
+Without it, the drafter's coverage report is a self-attestation;
+with it, the critique recomputes against truth.
+
+### no-fabrication spot check (claim_plausibility extension)
+
+Pair the source-grounding loop in §claim_plausibility above with
+this rule: a \`coverage_gap\` from the source_coverage recompute
+should NOT also surface as a claim_plausibility hit — those are
+omissions, not inventions. But if the drafter wrote a claim
+("most fill up fast, so register early") that doesn't trace to any
+atom/fact/crawl item AND wasn't surfaced as a content_gap by the
+drafter, that's a fabrication directive at severity \`blocker\`. On
+Desert Springs the drafter invented "Most fill up fast, so
+register early" on the youth page; it sounded plausible and was
+wrong. The critique should have caught it; encode this here so
+it does next time.
+
+### cross-source conflict flag
+
+If the drafter's \`voice_signal_report.notes\` mentions a value
+disagreement between sources (Desert Springs youth: text-to-connect
+fact \`55678\` vs crawl \`620-322-2390\`), surface that conflict as a
+directive at severity \`warning\` so the strategist routes to partner
+confirmation. Never silently pick one value.
+
+### Authorized strategist overrides — DO NOT flag these as errors
+
+When the drafter logs a \`verbatim_overrides[]\` entry on a section
+(strategist directed a modification to a verbatim atom's content,
+e.g. swapping "going on mission" → "Global Trip" per house
+terminology, or normalizing a single em-dash inside an atom), the
+critique MUST treat it as authorized — not as a verbatim violation.
+The contract: the override is a paper trail the strategist
+intentionally created. Critique still spot-checks the override
+reason for plausibility (the kind enum is closed:
+\`strategist_directed_modification\` / \`em_dash_normalization\` /
+\`house_terminology_swap\`) but doesn't score against verbatim
+preservation for the override-scoped atom.
+
+Same for \`band_status\`. When a section stamps
+\`band_status: "verbatim_band_unreachable"\` + a \`band_note\` because
+the outline routed it as directive-only OR the strategist's edits
+dropped it under the band, do NOT emit a \`verbatim_band_drift\`
+directive. The status IS the explanation.
+
 ## Mechanical-scan nuance
 
 - **Triads** — \`\\b\\w+, \\w+,? and \\w+\\b\` is the pattern. Distinguish:
@@ -2054,16 +2147,39 @@ table.
    or the dignity rationale names it as honored.
 3. **Verbatim band drift** detected: every \`draft.sections[i]\`'s
    \`actual_verbatim_ratio\` falls inside its \`intended_verbatim_band\`
-   range (high ≥ 0.7 / mid 0.3-0.7 / low ≤ 0.2). Any drift surfaces
-   as a directive with kind \`verbatim_band_drift\` at severity
-   ≥ warning.
-4. **Mechanical scan reported** (em-dashes, banned filler, AI
+   range (high ≥ 0.7 / mid 0.3-0.7 / low ≤ 0.2) — EXCEPT for
+   sections stamped \`band_status: "verbatim_band_unreachable"\`
+   (authorized — see "Authorized strategist overrides"). Any
+   unauthorized drift surfaces as a directive with kind
+   \`verbatim_band_drift\` at severity ≥ warning.
+4. **Source-coverage recompute** (NEW — the no-omission backstop):
+   for every section, walk the live inventory for each assigned
+   atom/fact/crawl-topic and cross-foot against the drafter's
+   \`source_coverage[].items[]\` list. Any leaf in inventory absent
+   from the report = \`coverage_gap\` directive at severity \`blocker\`.
+   Any \`rendered\` marker without matching text in field_values =
+   \`coverage_marker_unsupported\` directive at severity \`blocker\`.
+   Quote the item label verbatim so the strategist can trace.
+5. **Mechanical scan reported** (em-dashes, banned filler, AI
    clichés, anti-exemplar hits) — concatenated across all field
    values. Zero-hit pages can land green; any hit forces ≥ yellow
-   and surfaces in the directives.
-5. **Standout + problem lines quoted**, not paraphrased. Each entry
+   and surfaces in the directives. Honor \`verbatim_overrides[]\`:
+   logged single-character normalizations inside a verbatim atom
+   (e.g. em-dash → en-dash with reason \`em_dash_normalization\`)
+   are AUTHORIZED, not a mechanical-scan failure.
+6. **Standout + problem lines quoted**, not paraphrased. Each entry
    names the section + the verbatim line so the strategist can
    trace it.
+7. **\`come as you are\` always loses** even when a partner exemplar
+   uses it. Globally-banned clichés beat per-project voice
+   exemplars; if the draft contains the phrase, surface as a
+   \`cliche_banned\` directive regardless of whether the partner's
+   stage_1 voice card lists it. The ban wins.
+8. **\`just\` intensifier vs \`just like\` comparison** — the
+   mechanical scan must NOT false-positive on \`just like\` inside a
+   verbatim atom. \`just\` as a filler intensifier
+   ("we just want you here") still fails; \`just like\` as
+   comparison ("just like Jesus did") is allowed. Context check.
 
 ## Review format
 
@@ -2387,7 +2503,7 @@ For each candidate, include \`occurrences\` and \`sections\` arrays in the propo
     name:         'draft-page',
     model:        'anthropic/claude-opus-4-8',
     version:      '1.0.0',
-    contentHash:  '05902ac627a0234d',
+    contentHash:  '1686ffcb85d6a9e2',
     references:   [
       'cowork-skills/canonical-templates.json',
     ],
@@ -2491,12 +2607,99 @@ report on your draft sections, resolve the same way outline-page did:
   topic-keyed refs like 'service_times')
 - crawl keys → \`crawl_topics_pool.by_key[key]\`
 
+### Source coverage — the no-omission contract (READ THIS BEFORE DRAFTING ANYTHING)
+
+The single most damaging way this skill has hurt strategists is by
+silently omitting real church content. It does not error. It does not
+fail validation. Whole programs, scriptures, and CTAs the church
+gave us just disappear from the page. The pattern was always the
+same: the drafter worked from an INCOMPLETE view of the inventory —
+either length-truncated (\`items[:600]\`) or kind-subsetted (printing
+\`cta\`/\`detail\` but skipping \`scripture\`/\`key_phrase\`) — then
+authored confidently from the subset, never realising the rest was
+there.
+
+Concrete losses from the Desert Springs run that this section
+prevents: care dropped Pastoral Counseling + Hospital Visits;
+counseling dropped the three providers' websites; kids dropped the
+BGMC fund detail + the check-in FAQ; give dropped the Tithe (3
+purposes + 3 Scriptures), the Stocks CTA, the Kingdom Builders $100K
+goal + sub-program focus areas; youth dropped Fine Arts, the Costa
+Rica Global Trip, and the Sunday-in-Main-Auditorium detail. **None
+of these failed validation.** They were just absent.
+
+**Iron rules — apply every time, no exceptions:**
+
+0. **MANDATORY full-read step BEFORE drafting any page.** For each
+   page, the very first action is to resolve and READ the complete
+   source kit for everything the outline routes:
+   - Every assigned atom's \`body\` IN FULL.
+   - Every assigned fact's \`data\` IN FULL.
+   - Every assigned crawl topic's **entire \`items\` tree, recursively,
+     every sub-item kind** — plus its \`passages\`.
+   No page is drafted from a preview. If the source kit is too long
+   to hold in mind, summarise it for yourself into a per-page
+   coverage checklist (item names only, no content discarded) and
+   draft against the checklist. Don't shortcut by sampling.
+
+1. **NEVER truncate AND never subset.**
+   - Do not \`[:N]\`, head, or preview source payloads — that's
+     length-truncation.
+   - Do not enumerate only *some* sub-item kinds. A resolver that
+     walks \`cta\`/\`detail\`/\`contact_block\`/\`meeting_time\`/\`faq\` but
+     skips \`scripture\`/\`key_phrase\` is the SAME bug shape as
+     truncation. It's silent omission either way.
+   - If output is long, persist the full kit to a scratch artifact /
+     file you can re-read. **Treat any \`[:N]\` on source data, or any
+     hard-coded list of "kinds to print," as a bug.**
+
+2. **Crawl \`items\` are primary content, not metadata.** For every
+   \`crawl_topic_assignments[].topic_key\` the outline routes, the
+   drafter MUST walk the topic's full \`items\` tree and enumerate:
+   - Every \`program\` (with its description + nested CTAs +
+     \`contact_block\`s + \`meeting_time\`s + \`faq\`s + \`scripture\`s +
+     \`key_phrase\`s + \`detail\`s)
+   - Every standalone \`cta\` / \`detail\` / \`scripture\` / \`key_phrase\`
+   A \`program\` is usually a section/card the page should render
+   (e.g. "Pastoral Counseling", "Hospital Visits", each counselor,
+   each kids age-group, "Fine Arts"). Do not stop at excerpting a
+   passage when the items tree has structure beneath.
+
+3. **No fabricated facts or claims.** Connective, on-voice prose is
+   expected, but every factual statement — a number, a frequency, a
+   scripture reference, a partner name, a claim like "most fill up
+   fast, so register early" — must trace to the inventory
+   (atom/fact/crawl). On Desert Springs the drafter invented "Most
+   fill up fast, so register early" on the youth page; it sounded
+   plausible and was wrong. If a claim isn't in the sources, don't
+   write it. If a section needs a fact that doesn't exist, surface
+   it as a content gap (\`source_coverage[].coverage_gaps\`), not a
+   guess.
+
+4. **Flag cross-source conflicts.** When a fact and a crawl item
+   disagree on the same value (Desert Springs: youth text-to-connect
+   fact \`55678\` vs crawl \`620-322-2390\`), surface BOTH in
+   \`voice_signal_report.notes\` for partner confirmation. Never
+   silently pick one.
+
+5. **Build the source kit as a deterministic full dump.** Before
+   you draft the first slot of a page, list every sub-item the
+   page's assigned sources contain. This is the checklist your
+   self-validation ticks against. The extractor must NOT hard-code
+   which kinds to print — walk them all.
+
 ### When to use MCP
 
-- ONE \`SELECT\` to read the page's outline (per page).
-- ONE \`roadmap_state_set\` write to persist the draft at
-  \`['page_drafts', '<slug>']\` (per page).
-That's it. No per-section RPC fan-out.
+- ONE \`SELECT\` to read each page's outline (the bundle doesn't
+  inline page_outlines because they're written mid-session by
+  step 8).
+- ONE combined batch write per 5-page chunk (NOT one write per
+  page). See §Persistence below — base64-chunked, md5-guarded,
+  wrapped in \`IS NOT NULL\`. The combined batch keeps roundtrips
+  low and the md5 guard makes silent corruption impossible.
+- The strategist-facing orchestration prompt (the one pasted into
+  Claude Desktop) drives the 5-page batch loop end-to-end; see
+  \`stepCatalog.ts\` for the canonical prompt body.
 
 ## What you produce (CoworkPageDraft)
 
@@ -2507,6 +2710,54 @@ That's it. No per-section RPC fan-out.
   sections: Array<{
     section_intent_id: string                 // preserve from outline
     template_key:      string                  // preserve from outline
+    /** Strategist-authorized cap waivers. When a section's bound
+     *  template has a \`max_chars\` value that's too conservative for
+     *  the layout's real capacity (canonical example: the long-form
+     *  image-left/text-right content section, \`content_image_text_b\`
+     *  — the body slot's declared cap of ~400 chars is conservative;
+     *  the layout comfortably renders multi-paragraph bios at 950+),
+     *  the strategist may authorize the drafter to skip the cap
+     *  check on listed slots. The self-validator skips the
+     *  max_chars assertion for these slots; critique-page treats
+     *  them as authorized, not as violations.
+     *
+     *  ONLY the strategist authorizes (drafter doesn't self-grant).
+     *  ONLY for slots whose layout genuinely supports long text
+     *  (body / accent_body in long-form content templates).
+     *  NEVER for headings, taglines, CTA labels — those stay
+     *  hard-capped because their layouts physically clip overflow. */
+    cap_overrides?:    string[]                // e.g. ["body"]
+    /** Strategist-directed modifications to atom content that the
+     *  drafter logged on this section (paper trail for critique-
+     *  page to authorize). Set when the strategist edits a
+     *  🔒/verbatim atom's text — drafter keeps the atom_id in
+     *  atoms_used (the content is still represented) and adds an
+     *  override entry naming the reason. critique-page MUST treat
+     *  logged overrides as authorized, not as verbatim violations.
+     *
+     *  Closed \`reason\` enum:
+     *   - \`strategist_directed_modification\` — strategist edited
+     *     copy in conversation; drafter applied verbatim from there.
+     *   - \`em_dash_normalization\` — a single em-dash in a verbatim
+     *     atom was replaced (en-dash or comma) to satisfy the
+     *     global em-dash ban. One-character change; preserve
+     *     everything else.
+     *   - \`house_terminology_swap\` — strategist's terminology
+     *     vocab swap (e.g. "going on mission" → "Global Trip")
+     *     applied to a verbatim atom. */
+    verbatim_overrides?: Array<{
+      atom_id: string
+      reason: 'strategist_directed_modification' | 'em_dash_normalization' | 'house_terminology_swap'
+      note:   string                            // ≤200 chars; what changed, why
+    }>
+    /** Set when the section CAN'T hit its \`intended_verbatim_band\`
+     *  by design — directive-only sections with no atom/fact/crawl
+     *  assignment, sections the strategist edited down under the
+     *  band, etc. Stamp this rather than faking the ratio. critique-
+     *  page treats this status as authorized (no
+     *  \`verbatim_band_drift\` directive). */
+    band_status?:      'verbatim_band_unreachable'
+    band_note?:        string                   // ≤200 chars; why the band can't land
     /** Slot → drafted value. Keys MUST match the closed uniform
      *  slot vocabulary: tagline, primary_heading, body, accent_body,
      *  items[], buttons[]. The downstream translator
@@ -2528,7 +2779,22 @@ That's it. No per-section RPC fan-out.
      *  Primary+Secondary CTAs on a final-CTA section are two
      *  separate entries with \`kind\` set. */
     field_values:      Record<string, unknown>
-    /** Per-slot drafter notes. critique-page reads these. */
+    /** Per-slot drafter notes — critique-page reads these AND the
+     *  build pipeline picks up build-directive notes (link targets,
+     *  CMS wiring intent, dynamic-content instructions) from here.
+     *
+     *  Common load-bearing patterns:
+     *   - **Card link targets on templates whose item subfields
+     *     don't carry a \`url\`** (e.g. \`content_featured_a\` items,
+     *     \`feature_tabbed\` items). DO NOT invent a \`url\` slot;
+     *     record the link intent here:
+     *     \`voice_notes_by_slot["items[0]"] = "Card → /community-groups"\`
+     *   - \`lift_phrase\` treatments: name which phrase you lifted.
+     *   - Dynamic-content directives lifted from italic markers
+     *     (\`*[This section features 3-4 upcoming events …]*\`).
+     *
+     *  Prune empty strings before persistence — only slots with a
+     *  REAL note carry. */
     voice_notes_by_slot: Record<string, string>   // optional but encouraged
     /** Slots you couldn't draft (deferred from outline / verbatim
      *  atom with content_quality=noisy / etc.). */
@@ -2543,17 +2809,98 @@ That's it. No per-section RPC fan-out.
      *  during compression (e.g. atom said 'truly unique', drafter cut
      *  'truly'). */
     anti_exemplars_caught: string[]
-    /** Per-slot character budgets and what you used. */
-    char_budgets:        Array<{ section_intent_id: string; slot_name: string; max: number; used: number }>
     /** Atoms whose treatment was 'compress' — show what got cut.
      *  critique-page checks no claim was lost in compression. */
     compression_notes:   Array<{ atom_id: string; before_chars: number; after_chars: number; preserved_claims: string[] }>
     notes:               string[]
   }
 
+  /** Source-coverage report — the no-omission contract made
+   *  AUDITABLE. One entry per assigned source per section. critique-
+   *  page recomputes this against live inventory and FAILS the
+   *  critique on any unaccounted program / CTA / scripture /
+   *  detail.
+   *
+   *  Build it like this: for every atom/fact/crawl-topic the outline
+   *  routes to this section, walk the source's sub-items (recurse
+   *  the items tree for crawl topics) and emit one item entry per
+   *  leaf — program / cta / detail / scripture / key_phrase /
+   *  contact_block / meeting_time / faq / etc. Mark each one as
+   *  rendered or deferred:
+   *
+   *  - \`rendered\`  — surfaced in copy. \`slot_path\` names where
+   *    (e.g. \`items[2].item_body\` or \`body\` or \`buttons[0].label\`).
+   *  - \`deferred\`  — intentionally left out (room cap, secondary
+   *    info, future page). \`reason\` explains why.
+   *  - \`coverage_gap\` — should have rendered but you couldn't fit
+   *    it AND can't justify the deferral. This is the same shape
+   *    as a deferred slot, but called out separately so the
+   *    strategist sees it as a real omission to resolve, not a
+   *    routine cap-overage. */
+  source_coverage: Array<{
+    section_intent_id:   string
+    source_kind:         'atom' | 'fact' | 'crawl_topic'
+    source_ref:          string                              // atom_id / fact_id / topic_key
+    items: Array<{
+      kind:              'program' | 'cta' | 'detail' | 'scripture' |
+                         'key_phrase' | 'contact_block' | 'meeting_time' |
+                         'faq' | 'fact_field' | 'atom_claim'
+      label:             string                              // human-readable item name (e.g. "Pastoral Counseling", "Tithe — Malachi 3:10")
+      status:            'rendered' | 'deferred' | 'coverage_gap'
+      slot_path?:        string                              // when rendered — where the content landed
+      reason?:           string                              // when deferred / coverage_gap — why
+    }>
+  }>
+
   _meta: ArtifactMeta
 }
 \`\`\`
+
+## Template-pick discipline (mid-draft swaps round-trip to outline-page)
+
+The OUTLINE picks the template. The DRAFTER doesn't second-guess
+unless the strategist forces a swap in conversation (e.g. "this
+pastor bio doesn't belong in \`cta_callout\` — move it to
+\`content_image_text_b\`"). When that happens:
+
+1. Apply the swap to this section's \`template_key\` for the
+   purposes of the in-chat copy render (so the strategist sees
+   the page rendered against the new layout).
+2. Add \`template_swap\` to this section's \`voice_signal_report.notes\`
+   with the old key, new key, reason, and a flag that outline-page
+   needs to re-fire for this section. The handoff note's
+   "cross-step gotchas" enumerates these swaps so the next
+   outline-page run sees them.
+3. Do NOT silently rewrite the outline yourself; outline-page is
+   the source of truth for binding decisions. Your swap is a
+   strategist-signed request, not the new ground truth.
+
+The selection rubric itself lives in \`outline-page/SKILL.md\`
+§Template-pick discipline → Template selection rubric. Key
+recurring traps you must NOT fall into (from Desert Springs):
+- Card sets with > 3 items binding to \`feature_tabbed\` instead of
+  \`feature_card_carousel_proxy\` — wrong; tabbed is for tabbed
+  content, not card grids.
+- Long-form content (pastor bio) binding to \`cta_callout\` — wrong;
+  \`cta_callout\` is a short end-of-page call-out, not a content
+  container. Bio goes in \`content_image_text_a\` or
+  \`content_image_text_b\` with a \`cap_overrides: ["body"]\` if the
+  strategist confirms the layout supports long text.
+- Anything with steps/dates binding to \`timeline_story\` — only
+  history timelines bind there; a bio that mentions when someone
+  started ≠ a timeline.
+- Scattering \`cta_callout\`/\`cta_simple\` mid-page — they're one-
+  per-page end-of-page banners. Mid-page content with a button
+  belongs in \`content_featured_b\` (featured content + button) or
+  in a standard content section with a build-directive link.
+
+When the strategist forces a card-grid section into
+\`feature_card_carousel_proxy\`, AUTHOR the cards as
+\`build_cards[]\` on the section (heading + body + cta label +
+url per card) AND render them in the in-chat copy review.
+Rendering only the carousel shell = strategists see a hole and
+ask "where are the cards?" — that's the same loss as omitting
+crawl items.
 
 ## Voice discipline
 
@@ -2760,6 +3107,116 @@ or derived heading from voice anchor → strategist sees both the
 deferral AND your fallback. They decide whether to add a template
 variant + re-fire, or accept the derived heading.
 
+## Persistence — trim the artifact + combined batch write
+
+The persisted draft is a lean, faithful record — not the whole
+session. The strategist already saw every word in the in-chat
+render (per §Workflow). Drop anything derivable + keep only the
+load-bearing fields.
+
+**KEEP:**
+- \`page_slug\`
+- \`sections[]\` with \`field_values\`, \`atoms_used\` / \`facts_used\` /
+  \`crawl_topics_used\`, \`intended_verbatim_band\`,
+  \`actual_verbatim_ratio\`, \`band_status\`/\`band_note\`,
+  \`voice_anchor\`, \`verbatim_overrides\`, \`deferred_slots\` /
+  \`deferred_atoms\`, \`cap_overrides\`
+- \`source_coverage[]\` (the no-omission contract — critique-page
+  recomputes against this)
+- \`voice_signal_report\` MINUS \`char_budgets\` (which is fully
+  derivable from \`field_values\` + template \`max_chars\` — critique
+  recomputes when needed)
+- A SHORT \`_meta.handoff_note\` (≤1 screen)
+
+**DROP / PRUNE:**
+- \`voice_signal_report.char_budgets\` — drop entirely
+- \`voice_notes_by_slot\` — keep only slots with a REAL note;
+  empty-string entries get pruned
+- Any debug telemetry the strategist confirmed in chat
+- Internal scratch (working aliases, in-process state)
+
+This trim cuts ~40% of payload size; most pages then fall near or
+under the 8 KB single-literal threshold the combined batch write
+relies on.
+
+**Per-slot \`max_chars\` is NOT always a hard cap.** The canonical
+values in \`canonical_templates\` are conservative defaults. Some
+Brixies/Bricks layouts comfortably hold much more — the clearest
+case is the image-left/text-right long-form content section
+(strategist's "section 16", mapped to \`content_image_text_b\`)
+which holds full multi-paragraph bios (~950+ chars) in its \`body\`.
+DO NOT trim church-supplied long-form content to force it under
+400 when the strategist has confirmed the layout supports it.
+Mechanism: when the strategist authorizes, add the slot to that
+section's \`cap_overrides: ["body"]\` array. The self-validator
+skips the cap check for that slot AND records the override on the
+artifact so critique-page treats it as authorized, not a
+violation. Drafter NEVER self-grants a cap override; only the
+strategist authorizes; only for slots whose layout supports it
+(NEVER headings, taglines, CTA labels — those clip).
+
+**Combined batch write — one \`execute_sql\` round trip per 5 pages:**
+
+For each page in the batch:
+1. Trim the artifact (above).
+2. Base64-encode the JSON (only \`[A-Za-z0-9+/=]\` — sidesteps
+   quote/escape corruption).
+3. Split into <8 KB chunks (Supabase MCP single-literal cap).
+4. Compute whole-payload \`md5\` LOCALLY.
+
+Then ONE statement with a chunks CTE per slug, assembling each
+slug's chunks via \`string_agg(... ORDER BY ix)\`, decoding via
+\`convert_from(decode(b64, 'base64'), 'UTF8')\`, casting to jsonb,
+and writing with an md5 guard:
+
+\`\`\`sql
+WITH
+  chunks_pageA AS (VALUES (0, '<b64-0>'), (1, '<b64-1>'), …),
+  chunks_pageB AS (VALUES (0, '<b64-0>'), …),
+  …
+  assembled AS (
+    SELECT
+      'pageA' AS slug,
+      convert_from(
+        decode(string_agg(b64, '' ORDER BY ix), 'base64'),
+        'UTF8'
+      ) AS body
+    FROM chunks_pageA
+    UNION ALL
+    SELECT 'pageB', convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') FROM chunks_pageB
+    UNION ALL
+    …
+  )
+SELECT
+  slug,
+  CASE
+    WHEN slug = 'pageA' AND md5(body) = '<local-md5-pageA>' THEN
+      (roadmap_state_set('<project_id>'::uuid, ARRAY['page_drafts','pageA'], body::jsonb) IS NOT NULL)
+    WHEN slug = 'pageB' AND md5(body) = '<local-md5-pageB>' THEN
+      (roadmap_state_set('<project_id>'::uuid, ARRAY['page_drafts','pageB'], body::jsonb) IS NOT NULL)
+    …
+  END AS ok
+FROM assembled;
+\`\`\`
+
+**CRITICAL — \`IS NOT NULL\` wrapper.** \`roadmap_state_set\` returns
+the FULL \`roadmap_state\` (typically ~370 KB on a real project).
+Selecting that for 5 pages in one statement blows the MCP output
+limit and the call fails before any data lands. Wrap each
+\`roadmap_state_set\` call in \`IS NOT NULL\` so each row returns a
+single boolean. NEVER select the RPC's return value directly.
+
+The md5 guard + the \`::jsonb\` cast fail closed — if the base64
+transcribed wrong, \`md5(body) != <local-md5>\` skips the write,
+and you re-emit just that slug's chunks. Silent corruption is
+impossible.
+
+Why not psql / PostgREST / a file API? None available in the
+sandbox — Supabase MCP \`execute_sql\` is the only write path, and
+there's no file→tool-param bridge, so the payload travels as text
+in the query. Smaller payloads + one combined call is the fastest
+reliable shape.
+
 ## Hard rules
 
 - **EVERY required slot in every section's template MUST have a
@@ -2802,7 +3259,35 @@ table per section.
    the outline appears in \`sections[].atoms_used[]\` OR in
    \`deferred_atoms[]\` with a structured reason. Same for facts +
    crawl topics.
-5. **Voice ban scan**: concatenate every field_value into one string.
+5. **Source-coverage hard check** (NEW — prevents silent omissions):
+   - For every assigned crawl topic, walk its FULL \`items\` tree
+     (every sub-item kind: \`program\` / \`cta\` / \`detail\` /
+     \`scripture\` / \`key_phrase\` / \`contact_block\` / \`meeting_time\` /
+     \`faq\`) and emit one \`source_coverage[].items[]\` entry per leaf.
+   - For every assigned atom, list each distinct claim in the body
+     as an \`atom_claim\` item.
+   - For every assigned fact, list each rendered field as a
+     \`fact_field\` item.
+   - Mark each item \`rendered\` (with \`slot_path\`) / \`deferred\` (with
+     \`reason\`) / \`coverage_gap\` (with \`reason\`).
+   - **An item that is none of the three is a structural error.**
+     Any unaccounted program / CTA / scripture / detail =
+     hand-the-draft-back-to-yourself-and-write-it bug. critique-
+     page recomputes this against live inventory and fails on any
+     unaccounted entry.
+6. **No-fabrication spot check**: for every concrete claim in the
+   drafted copy (number, frequency, scripture reference, partner
+   name, "most fill up fast" / "the kids love it" / etc.), point
+   to the atom_id / fact_id / topic_key it traces to. If you can't
+   point to a source, the claim is fabricated — DELETE IT and
+   surface a \`content_gap\` note. Connective on-voice prose is fine;
+   invented FACTS are not.
+7. **Cross-source conflict flag**: if a fact and a crawl item
+   disagree on the same value (e.g. text-to-connect number \`55678\`
+   on the fact vs \`620-322-2390\` in crawl), surface BOTH values in
+   \`voice_signal_report.notes\` and pick neither. Strategist routes
+   to partner confirmation.
+8. **Voice ban scan**: concatenate every field_value into one string.
    Zero hits for: em-dashes, banned filler intensifiers, AI clichés,
    church clichés, anti-exemplar phrases.
 
@@ -2819,18 +3304,57 @@ back before persisting.
 1. Concatenate every field_value into one string. Mechanical scan for:
    em-dashes, banned filler intensifiers, AI clichés, church clichés,
    anti-exemplar phrases. Zero hits required.
+
+   **Mechanical-scan nuance (don't false-positive on these):**
+   - \`come as you are\` is BOTH a partner exemplar AND a globally
+     banned cliché. The global ban wins. If the partner's voice
+     card includes it, you still don't paste it — derive a warm
+     equivalent that captures the spirit ("There's a seat saved
+     for you", "Walk in however you walk in") and log the swap in
+     \`voice_signal_report.notes\`.
+   - \`just\` as a filler intensifier ("we just want you here") =
+     fail. \`just like\` as comparison ("just like Jesus did") =
+     allowed. Context check; don't false-positive on the
+     comparison form inside a verbatim atom.
+   - A single em-dash inside an otherwise-verbatim atom (e.g. atom
+     \`5a2c3a55\` "opening your home—there's") = normalize the em-
+     dash to an en-dash OR a comma, and log it as a one-character
+     \`verbatim_override\` with reason \`em_dash_normalization\`. The
+     atom_id stays in \`atoms_used\`. critique-page treats this as
+     authorized.
+   - Strategist rewrites STILL respect house-terminology vocab
+     swaps. When the strategist hands you edited copy that
+     contains a banned-vocab term ("going on mission" → swap to
+     "Global Trip"; "mission trip" → swap to "Global Trip" if the
+     church uses that term), apply the swap AND log it as a
+     \`verbatim_override\` with reason \`house_terminology_swap\`.
+     The strategist's authority is over content, not over the
+     vocab discipline.
 2. For each section: every required slot in
    \`canonical_templates[template_key].slots[required]\` has a
    field_value entry OR is in \`deferred_slots\`.
-3. For each slot: \`field_value.length ≤ slot.max_chars\`. Count
-   accurately (no markdown stripping; count what you wrote).
+3. For each slot: \`field_value.length ≤ slot.max_chars\` UNLESS the
+   section has the slot listed in \`cap_overrides[]\` (strategist-
+   authorized cap waiver — see §Persistence). Count accurately (no
+   markdown stripping; count what you wrote).
 4. Verbatim atoms: confirm each bound verbatim atom's body appears
-   exactly in its field_value.
-5. Headings: confirm no heading is a complete sentence (no
-   "subject + verb + object" with period/question mark).
+   exactly in its field_value, OR a \`verbatim_overrides[]\` entry
+   names the strategist-directed modification.
+5. Headings: confirm headings default to label-form (no complete
+   sentence with subject + verb + object + period/question mark).
+   Exception: if the strategist already confirmed a warm sentence
+   heading in conversation (e.g. "We're Saving a Seat for You"),
+   keep it and log a critique close-call instead of auto-rewriting.
 6. \`compression_notes\` covers every atom with treatment='compress'.
 7. \`exemplars_echoed\` lists at least 1 voice_exemplar phrase you
    imitated (or surface in \`notes\` why none fit).
+8. **\`source_coverage[]\` is populated for every section** with one
+   entry per assigned source per kind (atom / fact / crawl_topic),
+   each carrying its full \`items[]\` walk. Every item has a \`status\`
+   of \`rendered\` / \`deferred\` / \`coverage_gap\`. No silent omissions.
+9. **No-fabrication spot check** — every concrete factual claim in
+   field_values traces to a source id you can name (atom / fact /
+   crawl topic). Connective on-voice prose ok; invented facts not.
 
 ## Handoff Note — required final substep
 
@@ -4495,7 +5019,7 @@ artifact itself is the canonical record; the note is the cliff notes.
     name:         'outline-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  'ecd55327b2da1788',
+    contentHash:  '80e7c49a33f21343',
     references:   [
       'cowork-skills/canonical-templates.json',
       'cowork-skills/page-outlines-by-ministry-model.md',
@@ -4518,9 +5042,27 @@ can't use it.
 Loaded from \`roadmap_state.strategic_goals\` (\`status='approved'\` only):
 
 - **\`copy_approach.derived.intended_verbatim_band\`** — stamp it on
-  EVERY section in your outline (\`sections[].intended_verbatim_band\`).
-  Must match the allocation entry's band. high = ≥70% verbatim; mid ≈
-  50%; low ≤ 20%. Downstream draft + critique enforce this.
+  every section that has at least one atom_assignment / fact_assignment /
+  crawl_topic_assignment with verbatim-shaped content. Must match the
+  allocation entry's band. high = ≥70% verbatim; mid ≈ 50%; low ≤ 20%.
+  Downstream draft + critique enforce this.
+
+  **DO NOT over-stamp \`high\` on directive-only sections.** A section
+  with NO atom/fact/crawl-topic assignment (pure \`directive\` bindings
+  for a CTA banner, an embed-only block, a sectioned form, etc.)
+  CANNOT structurally reach a high verbatim band — there's no source
+  body to lift from. Stamp the band that actually matches the
+  routed sources, and on sections where no source body is routable
+  AT ALL (the partner approved the project at \`low\` overall but
+  some sections like a footer CTA carry no source), set the
+  section's \`intended_verbatim_band\` to the project's approved
+  band but DON'T over-claim. The drafter has a sibling escape
+  hatch: when it can't hit a band, it stamps
+  \`band_status: "verbatim_band_unreachable"\` + a \`band_note\`, and
+  critique-page treats that as authorized (not as
+  \`verbatim_band_drift\`). Don't paper over the gap at outline-time
+  by stamping \`high\` on a section that has no source — that just
+  forces the drafter to fake the ratio.
 - **\`one_key_message\`** — every page outline MUST include at least
   one section whose \`voice_anchor\` references this message verbatim.
 - **\`recurring_message_theme\`** — informs voice anchor selection
@@ -4761,6 +5303,46 @@ safety net for the rare "the bundle is missing X" case.
    - \`reassure\` → \`testimonial_*\` or \`faq_*\`
    - \`evidence\` → \`stats_*\`, \`logo_grid_*\`, \`cards_with_stat_*\`
    - \`invite\` → \`cta_split\` / \`cta_with_image\`
+
+### Template selection rubric — STRATEGIST HOUSE RULE (load-bearing)
+
+Pick the template by its **job**, using this map. Left =
+strategist's section vocabulary; right = canonical key. The
+drafter and the outliner BOTH obey this — if the strategist forces
+a swap mid-draft, the swap round-trips to outline-page (re-fire).
+
+| Section job | Canonical key | Notes |
+|---|---|---|
+| First section of EVERY interior page = a hero | \`hero_inner\` | Interior pages always open with the inner page hero. |
+| The **Visit / I'm New** page hero specifically | \`hero_featured\` | Visit always uses the featured page hero, not the inner hero. |
+| **Messages / Sermons** page hero | \`content_video\` | The "current series" section IS the Messages hero most of the time. |
+| Standard content | \`content_image_text_a\` / \`content_image_text_b\` | The default content section = **image left / text right**. Use for prose like a pastor bio (long body is OK here — see §Persistence cap override). |
+| Featured content | \`content_featured_a\` / \`content_featured_b\` | Sections with a small curated card set + bullet list, e.g. "What to Expect on a Sunday", "For Your Family". \`content_featured_a\` = 3 cards, \`content_featured_b\` = featured content + button. |
+| Video / playlist | \`content_video\` | Single video or a playlist. |
+| **Card grid (4+ items or dynamic/seasonal)** | \`feature_card_carousel_proxy\` | Use for ministry grids, next-steps, path choices, link-card rows — anything that reads as a uniform grid of cards. The DEFAULT for card sets > 4 items. Cards have no writable slots on the proxy itself, so AUTHOR them in \`build_cards[]\` (heading + body + cta label + url per card) and render them in the in-chat copy review. Every card gets its own CTA. **"We're missing the cards" is the drafter rendering a carousel shell without authoring the card content — that's a structural failure.** |
+| Tabbed / nested content | \`feature_tabbed\` | ONLY for genuinely tabbed/nested content (e.g. serve/volunteer opportunities with nested sub-lists). 4 cards max; has \`item_meta\` slot usable for a per-card CTA label or eyebrow. **NOT a substitute for a card grid.** Drafter was over-routing short card sets here — STOP. |
+| Series archive | (filter layout) | The sermon/series archive uses a filter layout, not a static section. |
+| Timeline | \`timeline_story\` | ONLY a history timeline. Never reach for it just because content has steps/dates. **A pastor bio is NOT a timeline.** |
+| CTA banner | \`cta_simple\` / \`cta_callout\` | A CTA banner is a SHORT, end-of-page call-out ("Got questions?", "Plan a Visit"). Use **once per page, at the end**. \`cta_callout\` = 1 button; \`cta_simple\` = primary + secondary. **DO NOT scatter \`cta_callout\`/\`cta_simple\` mid-page.** Mid-page content with a button belongs in \`content_featured_b\` (featured content + button) or a standard content section with a build-directive link. **The pastor bio does NOT belong in \`cta_callout\` — that's a content container failure mode the drafter has hit twice now.** |
+| Quote / written testimony | \`testimonial_written\` | Quote + attribution. |
+| Video testimony | \`testimonial_video\` | Quote + attribution + embedded video. |
+| Staff / leadership | \`feature_team\` | 2-item layout. SPLIT into siblings when the staff list is larger. |
+| Contact / address / map | \`contact_section\` | When the content has a map embed (\`*[Map embed: <iframe…>]*\`) or an address block, this template binds it cleanly. |
+| FAQ / accordion | \`accordion_faq\` | ≥3 Q&A pairs. Split when the items exceed the visual rhythm. |
+
+**Fixed-count card capacities (memorize):**
+
+- \`content_image_text_a\` / \`content_image_text_b\` — up to 3 plain (non-Card) text blocks.
+- \`content_featured_a\` — 3 cards.
+- \`feature_tabbed\` — 4 cards.
+- \`feature_unique\` / \`feature_team\` — 2 items.
+- \`feature_card_carousel_proxy\` — N cards (no fixed cap; the layout renders from a listing/CPT).
+
+Pick the FIXED template that matches the real card count;
+escalate to \`feature_card_carousel_proxy\` only when the count
+exceeds the largest fixed template (4) OR the set is
+dynamic/seasonal. Forcing 8 ministries down to 3 cards drops
+content the church gave us.
 
 ## Slot-binding discipline
 
@@ -10261,7 +10843,7 @@ artifact itself is the canonical record; the note is the cliff notes.
     name:         'supplemental-page-authoring',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  '26ef2dedb431b83a',
+    contentHash:  '0677e2e7eb1f127a',
     references:   [
       'cowork-skills/outline-page/SKILL.md',
       'cowork-skills/draft-page/SKILL.md',
@@ -10461,9 +11043,27 @@ can't use it.
 Loaded from \`roadmap_state.strategic_goals\` (\`status='approved'\` only):
 
 - **\`copy_approach.derived.intended_verbatim_band\`** — stamp it on
-  EVERY section in your outline (\`sections[].intended_verbatim_band\`).
-  Must match the allocation entry's band. high = ≥70% verbatim; mid ≈
-  50%; low ≤ 20%. Downstream draft + critique enforce this.
+  every section that has at least one atom_assignment / fact_assignment /
+  crawl_topic_assignment with verbatim-shaped content. Must match the
+  allocation entry's band. high = ≥70% verbatim; mid ≈ 50%; low ≤ 20%.
+  Downstream draft + critique enforce this.
+
+  **DO NOT over-stamp \`high\` on directive-only sections.** A section
+  with NO atom/fact/crawl-topic assignment (pure \`directive\` bindings
+  for a CTA banner, an embed-only block, a sectioned form, etc.)
+  CANNOT structurally reach a high verbatim band — there's no source
+  body to lift from. Stamp the band that actually matches the
+  routed sources, and on sections where no source body is routable
+  AT ALL (the partner approved the project at \`low\` overall but
+  some sections like a footer CTA carry no source), set the
+  section's \`intended_verbatim_band\` to the project's approved
+  band but DON'T over-claim. The drafter has a sibling escape
+  hatch: when it can't hit a band, it stamps
+  \`band_status: "verbatim_band_unreachable"\` + a \`band_note\`, and
+  critique-page treats that as authorized (not as
+  \`verbatim_band_drift\`). Don't paper over the gap at outline-time
+  by stamping \`high\` on a section that has no source — that just
+  forces the drafter to fake the ratio.
 - **\`one_key_message\`** — every page outline MUST include at least
   one section whose \`voice_anchor\` references this message verbatim.
 - **\`recurring_message_theme\`** — informs voice anchor selection
@@ -10704,6 +11304,46 @@ safety net for the rare "the bundle is missing X" case.
    - \`reassure\` → \`testimonial_*\` or \`faq_*\`
    - \`evidence\` → \`stats_*\`, \`logo_grid_*\`, \`cards_with_stat_*\`
    - \`invite\` → \`cta_split\` / \`cta_with_image\`
+
+### Template selection rubric — STRATEGIST HOUSE RULE (load-bearing)
+
+Pick the template by its **job**, using this map. Left =
+strategist's section vocabulary; right = canonical key. The
+drafter and the outliner BOTH obey this — if the strategist forces
+a swap mid-draft, the swap round-trips to outline-page (re-fire).
+
+| Section job | Canonical key | Notes |
+|---|---|---|
+| First section of EVERY interior page = a hero | \`hero_inner\` | Interior pages always open with the inner page hero. |
+| The **Visit / I'm New** page hero specifically | \`hero_featured\` | Visit always uses the featured page hero, not the inner hero. |
+| **Messages / Sermons** page hero | \`content_video\` | The "current series" section IS the Messages hero most of the time. |
+| Standard content | \`content_image_text_a\` / \`content_image_text_b\` | The default content section = **image left / text right**. Use for prose like a pastor bio (long body is OK here — see §Persistence cap override). |
+| Featured content | \`content_featured_a\` / \`content_featured_b\` | Sections with a small curated card set + bullet list, e.g. "What to Expect on a Sunday", "For Your Family". \`content_featured_a\` = 3 cards, \`content_featured_b\` = featured content + button. |
+| Video / playlist | \`content_video\` | Single video or a playlist. |
+| **Card grid (4+ items or dynamic/seasonal)** | \`feature_card_carousel_proxy\` | Use for ministry grids, next-steps, path choices, link-card rows — anything that reads as a uniform grid of cards. The DEFAULT for card sets > 4 items. Cards have no writable slots on the proxy itself, so AUTHOR them in \`build_cards[]\` (heading + body + cta label + url per card) and render them in the in-chat copy review. Every card gets its own CTA. **"We're missing the cards" is the drafter rendering a carousel shell without authoring the card content — that's a structural failure.** |
+| Tabbed / nested content | \`feature_tabbed\` | ONLY for genuinely tabbed/nested content (e.g. serve/volunteer opportunities with nested sub-lists). 4 cards max; has \`item_meta\` slot usable for a per-card CTA label or eyebrow. **NOT a substitute for a card grid.** Drafter was over-routing short card sets here — STOP. |
+| Series archive | (filter layout) | The sermon/series archive uses a filter layout, not a static section. |
+| Timeline | \`timeline_story\` | ONLY a history timeline. Never reach for it just because content has steps/dates. **A pastor bio is NOT a timeline.** |
+| CTA banner | \`cta_simple\` / \`cta_callout\` | A CTA banner is a SHORT, end-of-page call-out ("Got questions?", "Plan a Visit"). Use **once per page, at the end**. \`cta_callout\` = 1 button; \`cta_simple\` = primary + secondary. **DO NOT scatter \`cta_callout\`/\`cta_simple\` mid-page.** Mid-page content with a button belongs in \`content_featured_b\` (featured content + button) or a standard content section with a build-directive link. **The pastor bio does NOT belong in \`cta_callout\` — that's a content container failure mode the drafter has hit twice now.** |
+| Quote / written testimony | \`testimonial_written\` | Quote + attribution. |
+| Video testimony | \`testimonial_video\` | Quote + attribution + embedded video. |
+| Staff / leadership | \`feature_team\` | 2-item layout. SPLIT into siblings when the staff list is larger. |
+| Contact / address / map | \`contact_section\` | When the content has a map embed (\`*[Map embed: <iframe…>]*\`) or an address block, this template binds it cleanly. |
+| FAQ / accordion | \`accordion_faq\` | ≥3 Q&A pairs. Split when the items exceed the visual rhythm. |
+
+**Fixed-count card capacities (memorize):**
+
+- \`content_image_text_a\` / \`content_image_text_b\` — up to 3 plain (non-Card) text blocks.
+- \`content_featured_a\` — 3 cards.
+- \`feature_tabbed\` — 4 cards.
+- \`feature_unique\` / \`feature_team\` — 2 items.
+- \`feature_card_carousel_proxy\` — N cards (no fixed cap; the layout renders from a listing/CPT).
+
+Pick the FIXED template that matches the real card count;
+escalate to \`feature_card_carousel_proxy\` only when the count
+exceeds the largest fixed template (4) OR the set is
+dynamic/seasonal. Forcing 8 ministries down to 3 cards drops
+content the church gave us.
 
 ## Slot-binding discipline
 
@@ -11303,12 +11943,99 @@ report on your draft sections, resolve the same way outline-page did:
   topic-keyed refs like 'service_times')
 - crawl keys → \`crawl_topics_pool.by_key[key]\`
 
+### Source coverage — the no-omission contract (READ THIS BEFORE DRAFTING ANYTHING)
+
+The single most damaging way this skill has hurt strategists is by
+silently omitting real church content. It does not error. It does not
+fail validation. Whole programs, scriptures, and CTAs the church
+gave us just disappear from the page. The pattern was always the
+same: the drafter worked from an INCOMPLETE view of the inventory —
+either length-truncated (\`items[:600]\`) or kind-subsetted (printing
+\`cta\`/\`detail\` but skipping \`scripture\`/\`key_phrase\`) — then
+authored confidently from the subset, never realising the rest was
+there.
+
+Concrete losses from the Desert Springs run that this section
+prevents: care dropped Pastoral Counseling + Hospital Visits;
+counseling dropped the three providers' websites; kids dropped the
+BGMC fund detail + the check-in FAQ; give dropped the Tithe (3
+purposes + 3 Scriptures), the Stocks CTA, the Kingdom Builders $100K
+goal + sub-program focus areas; youth dropped Fine Arts, the Costa
+Rica Global Trip, and the Sunday-in-Main-Auditorium detail. **None
+of these failed validation.** They were just absent.
+
+**Iron rules — apply every time, no exceptions:**
+
+0. **MANDATORY full-read step BEFORE drafting any page.** For each
+   page, the very first action is to resolve and READ the complete
+   source kit for everything the outline routes:
+   - Every assigned atom's \`body\` IN FULL.
+   - Every assigned fact's \`data\` IN FULL.
+   - Every assigned crawl topic's **entire \`items\` tree, recursively,
+     every sub-item kind** — plus its \`passages\`.
+   No page is drafted from a preview. If the source kit is too long
+   to hold in mind, summarise it for yourself into a per-page
+   coverage checklist (item names only, no content discarded) and
+   draft against the checklist. Don't shortcut by sampling.
+
+1. **NEVER truncate AND never subset.**
+   - Do not \`[:N]\`, head, or preview source payloads — that's
+     length-truncation.
+   - Do not enumerate only *some* sub-item kinds. A resolver that
+     walks \`cta\`/\`detail\`/\`contact_block\`/\`meeting_time\`/\`faq\` but
+     skips \`scripture\`/\`key_phrase\` is the SAME bug shape as
+     truncation. It's silent omission either way.
+   - If output is long, persist the full kit to a scratch artifact /
+     file you can re-read. **Treat any \`[:N]\` on source data, or any
+     hard-coded list of "kinds to print," as a bug.**
+
+2. **Crawl \`items\` are primary content, not metadata.** For every
+   \`crawl_topic_assignments[].topic_key\` the outline routes, the
+   drafter MUST walk the topic's full \`items\` tree and enumerate:
+   - Every \`program\` (with its description + nested CTAs +
+     \`contact_block\`s + \`meeting_time\`s + \`faq\`s + \`scripture\`s +
+     \`key_phrase\`s + \`detail\`s)
+   - Every standalone \`cta\` / \`detail\` / \`scripture\` / \`key_phrase\`
+   A \`program\` is usually a section/card the page should render
+   (e.g. "Pastoral Counseling", "Hospital Visits", each counselor,
+   each kids age-group, "Fine Arts"). Do not stop at excerpting a
+   passage when the items tree has structure beneath.
+
+3. **No fabricated facts or claims.** Connective, on-voice prose is
+   expected, but every factual statement — a number, a frequency, a
+   scripture reference, a partner name, a claim like "most fill up
+   fast, so register early" — must trace to the inventory
+   (atom/fact/crawl). On Desert Springs the drafter invented "Most
+   fill up fast, so register early" on the youth page; it sounded
+   plausible and was wrong. If a claim isn't in the sources, don't
+   write it. If a section needs a fact that doesn't exist, surface
+   it as a content gap (\`source_coverage[].coverage_gaps\`), not a
+   guess.
+
+4. **Flag cross-source conflicts.** When a fact and a crawl item
+   disagree on the same value (Desert Springs: youth text-to-connect
+   fact \`55678\` vs crawl \`620-322-2390\`), surface BOTH in
+   \`voice_signal_report.notes\` for partner confirmation. Never
+   silently pick one.
+
+5. **Build the source kit as a deterministic full dump.** Before
+   you draft the first slot of a page, list every sub-item the
+   page's assigned sources contain. This is the checklist your
+   self-validation ticks against. The extractor must NOT hard-code
+   which kinds to print — walk them all.
+
 ### When to use MCP
 
-- ONE \`SELECT\` to read the page's outline (per page).
-- ONE \`roadmap_state_set\` write to persist the draft at
-  \`['page_drafts', '<slug>']\` (per page).
-That's it. No per-section RPC fan-out.
+- ONE \`SELECT\` to read each page's outline (the bundle doesn't
+  inline page_outlines because they're written mid-session by
+  step 8).
+- ONE combined batch write per 5-page chunk (NOT one write per
+  page). See §Persistence below — base64-chunked, md5-guarded,
+  wrapped in \`IS NOT NULL\`. The combined batch keeps roundtrips
+  low and the md5 guard makes silent corruption impossible.
+- The strategist-facing orchestration prompt (the one pasted into
+  Claude Desktop) drives the 5-page batch loop end-to-end; see
+  \`stepCatalog.ts\` for the canonical prompt body.
 
 ## What you produce (CoworkPageDraft)
 
@@ -11319,6 +12046,54 @@ That's it. No per-section RPC fan-out.
   sections: Array<{
     section_intent_id: string                 // preserve from outline
     template_key:      string                  // preserve from outline
+    /** Strategist-authorized cap waivers. When a section's bound
+     *  template has a \`max_chars\` value that's too conservative for
+     *  the layout's real capacity (canonical example: the long-form
+     *  image-left/text-right content section, \`content_image_text_b\`
+     *  — the body slot's declared cap of ~400 chars is conservative;
+     *  the layout comfortably renders multi-paragraph bios at 950+),
+     *  the strategist may authorize the drafter to skip the cap
+     *  check on listed slots. The self-validator skips the
+     *  max_chars assertion for these slots; critique-page treats
+     *  them as authorized, not as violations.
+     *
+     *  ONLY the strategist authorizes (drafter doesn't self-grant).
+     *  ONLY for slots whose layout genuinely supports long text
+     *  (body / accent_body in long-form content templates).
+     *  NEVER for headings, taglines, CTA labels — those stay
+     *  hard-capped because their layouts physically clip overflow. */
+    cap_overrides?:    string[]                // e.g. ["body"]
+    /** Strategist-directed modifications to atom content that the
+     *  drafter logged on this section (paper trail for critique-
+     *  page to authorize). Set when the strategist edits a
+     *  🔒/verbatim atom's text — drafter keeps the atom_id in
+     *  atoms_used (the content is still represented) and adds an
+     *  override entry naming the reason. critique-page MUST treat
+     *  logged overrides as authorized, not as verbatim violations.
+     *
+     *  Closed \`reason\` enum:
+     *   - \`strategist_directed_modification\` — strategist edited
+     *     copy in conversation; drafter applied verbatim from there.
+     *   - \`em_dash_normalization\` — a single em-dash in a verbatim
+     *     atom was replaced (en-dash or comma) to satisfy the
+     *     global em-dash ban. One-character change; preserve
+     *     everything else.
+     *   - \`house_terminology_swap\` — strategist's terminology
+     *     vocab swap (e.g. "going on mission" → "Global Trip")
+     *     applied to a verbatim atom. */
+    verbatim_overrides?: Array<{
+      atom_id: string
+      reason: 'strategist_directed_modification' | 'em_dash_normalization' | 'house_terminology_swap'
+      note:   string                            // ≤200 chars; what changed, why
+    }>
+    /** Set when the section CAN'T hit its \`intended_verbatim_band\`
+     *  by design — directive-only sections with no atom/fact/crawl
+     *  assignment, sections the strategist edited down under the
+     *  band, etc. Stamp this rather than faking the ratio. critique-
+     *  page treats this status as authorized (no
+     *  \`verbatim_band_drift\` directive). */
+    band_status?:      'verbatim_band_unreachable'
+    band_note?:        string                   // ≤200 chars; why the band can't land
     /** Slot → drafted value. Keys MUST match the closed uniform
      *  slot vocabulary: tagline, primary_heading, body, accent_body,
      *  items[], buttons[]. The downstream translator
@@ -11340,7 +12115,22 @@ That's it. No per-section RPC fan-out.
      *  Primary+Secondary CTAs on a final-CTA section are two
      *  separate entries with \`kind\` set. */
     field_values:      Record<string, unknown>
-    /** Per-slot drafter notes. critique-page reads these. */
+    /** Per-slot drafter notes — critique-page reads these AND the
+     *  build pipeline picks up build-directive notes (link targets,
+     *  CMS wiring intent, dynamic-content instructions) from here.
+     *
+     *  Common load-bearing patterns:
+     *   - **Card link targets on templates whose item subfields
+     *     don't carry a \`url\`** (e.g. \`content_featured_a\` items,
+     *     \`feature_tabbed\` items). DO NOT invent a \`url\` slot;
+     *     record the link intent here:
+     *     \`voice_notes_by_slot["items[0]"] = "Card → /community-groups"\`
+     *   - \`lift_phrase\` treatments: name which phrase you lifted.
+     *   - Dynamic-content directives lifted from italic markers
+     *     (\`*[This section features 3-4 upcoming events …]*\`).
+     *
+     *  Prune empty strings before persistence — only slots with a
+     *  REAL note carry. */
     voice_notes_by_slot: Record<string, string>   // optional but encouraged
     /** Slots you couldn't draft (deferred from outline / verbatim
      *  atom with content_quality=noisy / etc.). */
@@ -11355,17 +12145,98 @@ That's it. No per-section RPC fan-out.
      *  during compression (e.g. atom said 'truly unique', drafter cut
      *  'truly'). */
     anti_exemplars_caught: string[]
-    /** Per-slot character budgets and what you used. */
-    char_budgets:        Array<{ section_intent_id: string; slot_name: string; max: number; used: number }>
     /** Atoms whose treatment was 'compress' — show what got cut.
      *  critique-page checks no claim was lost in compression. */
     compression_notes:   Array<{ atom_id: string; before_chars: number; after_chars: number; preserved_claims: string[] }>
     notes:               string[]
   }
 
+  /** Source-coverage report — the no-omission contract made
+   *  AUDITABLE. One entry per assigned source per section. critique-
+   *  page recomputes this against live inventory and FAILS the
+   *  critique on any unaccounted program / CTA / scripture /
+   *  detail.
+   *
+   *  Build it like this: for every atom/fact/crawl-topic the outline
+   *  routes to this section, walk the source's sub-items (recurse
+   *  the items tree for crawl topics) and emit one item entry per
+   *  leaf — program / cta / detail / scripture / key_phrase /
+   *  contact_block / meeting_time / faq / etc. Mark each one as
+   *  rendered or deferred:
+   *
+   *  - \`rendered\`  — surfaced in copy. \`slot_path\` names where
+   *    (e.g. \`items[2].item_body\` or \`body\` or \`buttons[0].label\`).
+   *  - \`deferred\`  — intentionally left out (room cap, secondary
+   *    info, future page). \`reason\` explains why.
+   *  - \`coverage_gap\` — should have rendered but you couldn't fit
+   *    it AND can't justify the deferral. This is the same shape
+   *    as a deferred slot, but called out separately so the
+   *    strategist sees it as a real omission to resolve, not a
+   *    routine cap-overage. */
+  source_coverage: Array<{
+    section_intent_id:   string
+    source_kind:         'atom' | 'fact' | 'crawl_topic'
+    source_ref:          string                              // atom_id / fact_id / topic_key
+    items: Array<{
+      kind:              'program' | 'cta' | 'detail' | 'scripture' |
+                         'key_phrase' | 'contact_block' | 'meeting_time' |
+                         'faq' | 'fact_field' | 'atom_claim'
+      label:             string                              // human-readable item name (e.g. "Pastoral Counseling", "Tithe — Malachi 3:10")
+      status:            'rendered' | 'deferred' | 'coverage_gap'
+      slot_path?:        string                              // when rendered — where the content landed
+      reason?:           string                              // when deferred / coverage_gap — why
+    }>
+  }>
+
   _meta: ArtifactMeta
 }
 \`\`\`
+
+## Template-pick discipline (mid-draft swaps round-trip to outline-page)
+
+The OUTLINE picks the template. The DRAFTER doesn't second-guess
+unless the strategist forces a swap in conversation (e.g. "this
+pastor bio doesn't belong in \`cta_callout\` — move it to
+\`content_image_text_b\`"). When that happens:
+
+1. Apply the swap to this section's \`template_key\` for the
+   purposes of the in-chat copy render (so the strategist sees
+   the page rendered against the new layout).
+2. Add \`template_swap\` to this section's \`voice_signal_report.notes\`
+   with the old key, new key, reason, and a flag that outline-page
+   needs to re-fire for this section. The handoff note's
+   "cross-step gotchas" enumerates these swaps so the next
+   outline-page run sees them.
+3. Do NOT silently rewrite the outline yourself; outline-page is
+   the source of truth for binding decisions. Your swap is a
+   strategist-signed request, not the new ground truth.
+
+The selection rubric itself lives in \`outline-page/SKILL.md\`
+§Template-pick discipline → Template selection rubric. Key
+recurring traps you must NOT fall into (from Desert Springs):
+- Card sets with > 3 items binding to \`feature_tabbed\` instead of
+  \`feature_card_carousel_proxy\` — wrong; tabbed is for tabbed
+  content, not card grids.
+- Long-form content (pastor bio) binding to \`cta_callout\` — wrong;
+  \`cta_callout\` is a short end-of-page call-out, not a content
+  container. Bio goes in \`content_image_text_a\` or
+  \`content_image_text_b\` with a \`cap_overrides: ["body"]\` if the
+  strategist confirms the layout supports long text.
+- Anything with steps/dates binding to \`timeline_story\` — only
+  history timelines bind there; a bio that mentions when someone
+  started ≠ a timeline.
+- Scattering \`cta_callout\`/\`cta_simple\` mid-page — they're one-
+  per-page end-of-page banners. Mid-page content with a button
+  belongs in \`content_featured_b\` (featured content + button) or
+  in a standard content section with a build-directive link.
+
+When the strategist forces a card-grid section into
+\`feature_card_carousel_proxy\`, AUTHOR the cards as
+\`build_cards[]\` on the section (heading + body + cta label +
+url per card) AND render them in the in-chat copy review.
+Rendering only the carousel shell = strategists see a hole and
+ask "where are the cards?" — that's the same loss as omitting
+crawl items.
 
 ## Voice discipline
 
@@ -11572,6 +12443,116 @@ or derived heading from voice anchor → strategist sees both the
 deferral AND your fallback. They decide whether to add a template
 variant + re-fire, or accept the derived heading.
 
+## Persistence — trim the artifact + combined batch write
+
+The persisted draft is a lean, faithful record — not the whole
+session. The strategist already saw every word in the in-chat
+render (per §Workflow). Drop anything derivable + keep only the
+load-bearing fields.
+
+**KEEP:**
+- \`page_slug\`
+- \`sections[]\` with \`field_values\`, \`atoms_used\` / \`facts_used\` /
+  \`crawl_topics_used\`, \`intended_verbatim_band\`,
+  \`actual_verbatim_ratio\`, \`band_status\`/\`band_note\`,
+  \`voice_anchor\`, \`verbatim_overrides\`, \`deferred_slots\` /
+  \`deferred_atoms\`, \`cap_overrides\`
+- \`source_coverage[]\` (the no-omission contract — critique-page
+  recomputes against this)
+- \`voice_signal_report\` MINUS \`char_budgets\` (which is fully
+  derivable from \`field_values\` + template \`max_chars\` — critique
+  recomputes when needed)
+- A SHORT \`_meta.handoff_note\` (≤1 screen)
+
+**DROP / PRUNE:**
+- \`voice_signal_report.char_budgets\` — drop entirely
+- \`voice_notes_by_slot\` — keep only slots with a REAL note;
+  empty-string entries get pruned
+- Any debug telemetry the strategist confirmed in chat
+- Internal scratch (working aliases, in-process state)
+
+This trim cuts ~40% of payload size; most pages then fall near or
+under the 8 KB single-literal threshold the combined batch write
+relies on.
+
+**Per-slot \`max_chars\` is NOT always a hard cap.** The canonical
+values in \`canonical_templates\` are conservative defaults. Some
+Brixies/Bricks layouts comfortably hold much more — the clearest
+case is the image-left/text-right long-form content section
+(strategist's "section 16", mapped to \`content_image_text_b\`)
+which holds full multi-paragraph bios (~950+ chars) in its \`body\`.
+DO NOT trim church-supplied long-form content to force it under
+400 when the strategist has confirmed the layout supports it.
+Mechanism: when the strategist authorizes, add the slot to that
+section's \`cap_overrides: ["body"]\` array. The self-validator
+skips the cap check for that slot AND records the override on the
+artifact so critique-page treats it as authorized, not a
+violation. Drafter NEVER self-grants a cap override; only the
+strategist authorizes; only for slots whose layout supports it
+(NEVER headings, taglines, CTA labels — those clip).
+
+**Combined batch write — one \`execute_sql\` round trip per 5 pages:**
+
+For each page in the batch:
+1. Trim the artifact (above).
+2. Base64-encode the JSON (only \`[A-Za-z0-9+/=]\` — sidesteps
+   quote/escape corruption).
+3. Split into <8 KB chunks (Supabase MCP single-literal cap).
+4. Compute whole-payload \`md5\` LOCALLY.
+
+Then ONE statement with a chunks CTE per slug, assembling each
+slug's chunks via \`string_agg(... ORDER BY ix)\`, decoding via
+\`convert_from(decode(b64, 'base64'), 'UTF8')\`, casting to jsonb,
+and writing with an md5 guard:
+
+\`\`\`sql
+WITH
+  chunks_pageA AS (VALUES (0, '<b64-0>'), (1, '<b64-1>'), …),
+  chunks_pageB AS (VALUES (0, '<b64-0>'), …),
+  …
+  assembled AS (
+    SELECT
+      'pageA' AS slug,
+      convert_from(
+        decode(string_agg(b64, '' ORDER BY ix), 'base64'),
+        'UTF8'
+      ) AS body
+    FROM chunks_pageA
+    UNION ALL
+    SELECT 'pageB', convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') FROM chunks_pageB
+    UNION ALL
+    …
+  )
+SELECT
+  slug,
+  CASE
+    WHEN slug = 'pageA' AND md5(body) = '<local-md5-pageA>' THEN
+      (roadmap_state_set('<project_id>'::uuid, ARRAY['page_drafts','pageA'], body::jsonb) IS NOT NULL)
+    WHEN slug = 'pageB' AND md5(body) = '<local-md5-pageB>' THEN
+      (roadmap_state_set('<project_id>'::uuid, ARRAY['page_drafts','pageB'], body::jsonb) IS NOT NULL)
+    …
+  END AS ok
+FROM assembled;
+\`\`\`
+
+**CRITICAL — \`IS NOT NULL\` wrapper.** \`roadmap_state_set\` returns
+the FULL \`roadmap_state\` (typically ~370 KB on a real project).
+Selecting that for 5 pages in one statement blows the MCP output
+limit and the call fails before any data lands. Wrap each
+\`roadmap_state_set\` call in \`IS NOT NULL\` so each row returns a
+single boolean. NEVER select the RPC's return value directly.
+
+The md5 guard + the \`::jsonb\` cast fail closed — if the base64
+transcribed wrong, \`md5(body) != <local-md5>\` skips the write,
+and you re-emit just that slug's chunks. Silent corruption is
+impossible.
+
+Why not psql / PostgREST / a file API? None available in the
+sandbox — Supabase MCP \`execute_sql\` is the only write path, and
+there's no file→tool-param bridge, so the payload travels as text
+in the query. Smaller payloads + one combined call is the fastest
+reliable shape.
+
 ## Hard rules
 
 - **EVERY required slot in every section's template MUST have a
@@ -11614,7 +12595,35 @@ table per section.
    the outline appears in \`sections[].atoms_used[]\` OR in
    \`deferred_atoms[]\` with a structured reason. Same for facts +
    crawl topics.
-5. **Voice ban scan**: concatenate every field_value into one string.
+5. **Source-coverage hard check** (NEW — prevents silent omissions):
+   - For every assigned crawl topic, walk its FULL \`items\` tree
+     (every sub-item kind: \`program\` / \`cta\` / \`detail\` /
+     \`scripture\` / \`key_phrase\` / \`contact_block\` / \`meeting_time\` /
+     \`faq\`) and emit one \`source_coverage[].items[]\` entry per leaf.
+   - For every assigned atom, list each distinct claim in the body
+     as an \`atom_claim\` item.
+   - For every assigned fact, list each rendered field as a
+     \`fact_field\` item.
+   - Mark each item \`rendered\` (with \`slot_path\`) / \`deferred\` (with
+     \`reason\`) / \`coverage_gap\` (with \`reason\`).
+   - **An item that is none of the three is a structural error.**
+     Any unaccounted program / CTA / scripture / detail =
+     hand-the-draft-back-to-yourself-and-write-it bug. critique-
+     page recomputes this against live inventory and fails on any
+     unaccounted entry.
+6. **No-fabrication spot check**: for every concrete claim in the
+   drafted copy (number, frequency, scripture reference, partner
+   name, "most fill up fast" / "the kids love it" / etc.), point
+   to the atom_id / fact_id / topic_key it traces to. If you can't
+   point to a source, the claim is fabricated — DELETE IT and
+   surface a \`content_gap\` note. Connective on-voice prose is fine;
+   invented FACTS are not.
+7. **Cross-source conflict flag**: if a fact and a crawl item
+   disagree on the same value (e.g. text-to-connect number \`55678\`
+   on the fact vs \`620-322-2390\` in crawl), surface BOTH values in
+   \`voice_signal_report.notes\` and pick neither. Strategist routes
+   to partner confirmation.
+8. **Voice ban scan**: concatenate every field_value into one string.
    Zero hits for: em-dashes, banned filler intensifiers, AI clichés,
    church clichés, anti-exemplar phrases.
 
@@ -11631,18 +12640,57 @@ back before persisting.
 1. Concatenate every field_value into one string. Mechanical scan for:
    em-dashes, banned filler intensifiers, AI clichés, church clichés,
    anti-exemplar phrases. Zero hits required.
+
+   **Mechanical-scan nuance (don't false-positive on these):**
+   - \`come as you are\` is BOTH a partner exemplar AND a globally
+     banned cliché. The global ban wins. If the partner's voice
+     card includes it, you still don't paste it — derive a warm
+     equivalent that captures the spirit ("There's a seat saved
+     for you", "Walk in however you walk in") and log the swap in
+     \`voice_signal_report.notes\`.
+   - \`just\` as a filler intensifier ("we just want you here") =
+     fail. \`just like\` as comparison ("just like Jesus did") =
+     allowed. Context check; don't false-positive on the
+     comparison form inside a verbatim atom.
+   - A single em-dash inside an otherwise-verbatim atom (e.g. atom
+     \`5a2c3a55\` "opening your home—there's") = normalize the em-
+     dash to an en-dash OR a comma, and log it as a one-character
+     \`verbatim_override\` with reason \`em_dash_normalization\`. The
+     atom_id stays in \`atoms_used\`. critique-page treats this as
+     authorized.
+   - Strategist rewrites STILL respect house-terminology vocab
+     swaps. When the strategist hands you edited copy that
+     contains a banned-vocab term ("going on mission" → swap to
+     "Global Trip"; "mission trip" → swap to "Global Trip" if the
+     church uses that term), apply the swap AND log it as a
+     \`verbatim_override\` with reason \`house_terminology_swap\`.
+     The strategist's authority is over content, not over the
+     vocab discipline.
 2. For each section: every required slot in
    \`canonical_templates[template_key].slots[required]\` has a
    field_value entry OR is in \`deferred_slots\`.
-3. For each slot: \`field_value.length ≤ slot.max_chars\`. Count
-   accurately (no markdown stripping; count what you wrote).
+3. For each slot: \`field_value.length ≤ slot.max_chars\` UNLESS the
+   section has the slot listed in \`cap_overrides[]\` (strategist-
+   authorized cap waiver — see §Persistence). Count accurately (no
+   markdown stripping; count what you wrote).
 4. Verbatim atoms: confirm each bound verbatim atom's body appears
-   exactly in its field_value.
-5. Headings: confirm no heading is a complete sentence (no
-   "subject + verb + object" with period/question mark).
+   exactly in its field_value, OR a \`verbatim_overrides[]\` entry
+   names the strategist-directed modification.
+5. Headings: confirm headings default to label-form (no complete
+   sentence with subject + verb + object + period/question mark).
+   Exception: if the strategist already confirmed a warm sentence
+   heading in conversation (e.g. "We're Saving a Seat for You"),
+   keep it and log a critique close-call instead of auto-rewriting.
 6. \`compression_notes\` covers every atom with treatment='compress'.
 7. \`exemplars_echoed\` lists at least 1 voice_exemplar phrase you
    imitated (or surface in \`notes\` why none fit).
+8. **\`source_coverage[]\` is populated for every section** with one
+   entry per assigned source per kind (atom / fact / crawl_topic),
+   each carrying its full \`items[]\` walk. Every item has a \`status\`
+   of \`rendered\` / \`deferred\` / \`coverage_gap\`. No silent omissions.
+9. **No-fabrication spot check** — every concrete factual claim in
+   field_values traces to a source id you can name (atom / fact /
+   crawl topic). Connective on-voice prose ok; invented facts not.
 
 ## Handoff Note — required final substep
 
@@ -11974,12 +13022,25 @@ hits. The verdict's \`confidence_band\` is computed from the 5 axes.
 
 100: Every atom in \`atoms_for_page\` either appears in a field_value
      (atom_ref binding) OR is justifiably absent (deferred_slot with
-     reason). Verbatim atoms: exact preservation. No orphans.
-80: 90%+ atoms landed; orphans have reasons; verbatim preserved.
+     reason). **Every program / CTA / detail / scripture / key_phrase
+     in every assigned crawl topic's \`items\` tree is rendered or
+     justifiably deferred per the draft's \`source_coverage[]\`.**
+     Verbatim atoms: exact preservation OR a logged
+     \`verbatim_overrides[]\` entry naming a strategist-directed change.
+     No orphans, no silent omissions.
+80: 90%+ atoms landed; orphans have reasons; verbatim preserved;
+    every crawl-items[] entry accounted for.
 60: 70-90% atoms landed; reasons thin; OR 1 verbatim atom slightly
-    altered (still recognizable).
-0:  Verbatim atom not preserved; OR <50% atoms landed without
-    reasons.
+    altered (still recognizable); OR 1-2 crawl-items[] entries
+    unaccounted for.
+0:  Verbatim atom not preserved AND no override logged; OR <50%
+    atoms landed without reasons; OR ANY unaccounted program in
+    \`source_coverage[]\` (the silent-omission failure mode that
+    burned Desert Springs — care lost Pastoral Counseling +
+    Hospital Visits, give lost the Tithe + 3 Scriptures + Stocks
+    CTA, youth lost Fine Arts + the Costa Rica Global Trip — none
+    of those landed because the drafter saw a truncated/subsetted
+    view; the coverage recompute below catches it).
 
 ### Claim plausibility (4 of 5)
 
@@ -12131,6 +13192,86 @@ If your scores are higher AND you emitted no directive for either
 class, you skipped the procedure — re-read the draft section by
 section with the procedure in mind before finalizing scores.
 
+### source_coverage — the recompute-against-live-inventory procedure
+
+The drafter MUST emit \`source_coverage[]\` (one entry per assigned
+source per section, each carrying a full \`items[]\` walk with every
+item marked \`rendered\` / \`deferred\` / \`coverage_gap\`). Your job is
+to recompute that report against **live inventory** (atoms_pool,
+facts_pool, crawl_topics_pool) and FAIL the critique on any
+unaccounted entry.
+
+Procedure:
+
+1. **Re-walk every assigned crawl topic.** For each
+   \`crawl_topic_assignments[].topic_key\` in the outline, load the
+   topic from \`crawl_topics_pool.by_key[topic_key]\` and walk the
+   FULL \`items\` tree recursively. Enumerate every sub-item of every
+   kind — \`program\` / \`cta\` / \`detail\` / \`scripture\` /
+   \`key_phrase\` / \`contact_block\` / \`meeting_time\` / \`faq\`. Do NOT
+   subset kinds; do NOT truncate the walk. This is the exact bug
+   shape that hid Desert Springs's tithe Scriptures.
+2. **Cross-foot.** Every leaf in the live items tree must appear in
+   the draft's \`source_coverage[].items[]\` for that
+   \`(section_intent_id, topic_key)\` pair. An item present in
+   inventory but absent from the report = \`coverage_gap\` directive
+   at severity \`blocker\`. Quote the item label verbatim
+   ("Pastoral Counseling", "Tithe — Malachi 3:10", "Fine Arts").
+3. **Audit the rendered ones.** For each item marked \`rendered\`,
+   verify its content actually appears in the draft's field_values
+   at the named \`slot_path\`. A \`rendered\` marker with no matching
+   text in the draft is the same omission with a paper trail —
+   surface as \`coverage_marker_unsupported\`.
+4. **Audit the deferred ones.** A \`deferred\` reason like "no slot
+   available" is valid; "didn't fit voice" is not — that's a
+   \`unjustified_deferral\` directive at severity \`warning\`.
+
+This procedure is what makes the no-omission contract enforceable.
+Without it, the drafter's coverage report is a self-attestation;
+with it, the critique recomputes against truth.
+
+### no-fabrication spot check (claim_plausibility extension)
+
+Pair the source-grounding loop in §claim_plausibility above with
+this rule: a \`coverage_gap\` from the source_coverage recompute
+should NOT also surface as a claim_plausibility hit — those are
+omissions, not inventions. But if the drafter wrote a claim
+("most fill up fast, so register early") that doesn't trace to any
+atom/fact/crawl item AND wasn't surfaced as a content_gap by the
+drafter, that's a fabrication directive at severity \`blocker\`. On
+Desert Springs the drafter invented "Most fill up fast, so
+register early" on the youth page; it sounded plausible and was
+wrong. The critique should have caught it; encode this here so
+it does next time.
+
+### cross-source conflict flag
+
+If the drafter's \`voice_signal_report.notes\` mentions a value
+disagreement between sources (Desert Springs youth: text-to-connect
+fact \`55678\` vs crawl \`620-322-2390\`), surface that conflict as a
+directive at severity \`warning\` so the strategist routes to partner
+confirmation. Never silently pick one value.
+
+### Authorized strategist overrides — DO NOT flag these as errors
+
+When the drafter logs a \`verbatim_overrides[]\` entry on a section
+(strategist directed a modification to a verbatim atom's content,
+e.g. swapping "going on mission" → "Global Trip" per house
+terminology, or normalizing a single em-dash inside an atom), the
+critique MUST treat it as authorized — not as a verbatim violation.
+The contract: the override is a paper trail the strategist
+intentionally created. Critique still spot-checks the override
+reason for plausibility (the kind enum is closed:
+\`strategist_directed_modification\` / \`em_dash_normalization\` /
+\`house_terminology_swap\`) but doesn't score against verbatim
+preservation for the override-scoped atom.
+
+Same for \`band_status\`. When a section stamps
+\`band_status: "verbatim_band_unreachable"\` + a \`band_note\` because
+the outline routed it as directive-only OR the strategist's edits
+dropped it under the band, do NOT emit a \`verbatim_band_drift\`
+directive. The status IS the explanation.
+
 ## Mechanical-scan nuance
 
 - **Triads** — \`\\b\\w+, \\w+,? and \\w+\\b\` is the pattern. Distinguish:
@@ -12187,16 +13328,39 @@ table.
    or the dignity rationale names it as honored.
 3. **Verbatim band drift** detected: every \`draft.sections[i]\`'s
    \`actual_verbatim_ratio\` falls inside its \`intended_verbatim_band\`
-   range (high ≥ 0.7 / mid 0.3-0.7 / low ≤ 0.2). Any drift surfaces
-   as a directive with kind \`verbatim_band_drift\` at severity
-   ≥ warning.
-4. **Mechanical scan reported** (em-dashes, banned filler, AI
+   range (high ≥ 0.7 / mid 0.3-0.7 / low ≤ 0.2) — EXCEPT for
+   sections stamped \`band_status: "verbatim_band_unreachable"\`
+   (authorized — see "Authorized strategist overrides"). Any
+   unauthorized drift surfaces as a directive with kind
+   \`verbatim_band_drift\` at severity ≥ warning.
+4. **Source-coverage recompute** (NEW — the no-omission backstop):
+   for every section, walk the live inventory for each assigned
+   atom/fact/crawl-topic and cross-foot against the drafter's
+   \`source_coverage[].items[]\` list. Any leaf in inventory absent
+   from the report = \`coverage_gap\` directive at severity \`blocker\`.
+   Any \`rendered\` marker without matching text in field_values =
+   \`coverage_marker_unsupported\` directive at severity \`blocker\`.
+   Quote the item label verbatim so the strategist can trace.
+5. **Mechanical scan reported** (em-dashes, banned filler, AI
    clichés, anti-exemplar hits) — concatenated across all field
    values. Zero-hit pages can land green; any hit forces ≥ yellow
-   and surfaces in the directives.
-5. **Standout + problem lines quoted**, not paraphrased. Each entry
+   and surfaces in the directives. Honor \`verbatim_overrides[]\`:
+   logged single-character normalizations inside a verbatim atom
+   (e.g. em-dash → en-dash with reason \`em_dash_normalization\`)
+   are AUTHORIZED, not a mechanical-scan failure.
+6. **Standout + problem lines quoted**, not paraphrased. Each entry
    names the section + the verbatim line so the strategist can
    trace it.
+7. **\`come as you are\` always loses** even when a partner exemplar
+   uses it. Globally-banned clichés beat per-project voice
+   exemplars; if the draft contains the phrase, surface as a
+   \`cliche_banned\` directive regardless of whether the partner's
+   stage_1 voice card lists it. The ban wins.
+8. **\`just\` intensifier vs \`just like\` comparison** — the
+   mechanical scan must NOT false-positive on \`just like\` inside a
+   verbatim atom. \`just\` as a filler intensifier
+   ("we just want you here") still fails; \`just like\` as
+   comparison ("just like Jesus did") is allowed. Context check.
 
 ## Review format
 
