@@ -26,6 +26,7 @@ import { GroupEditor } from './GroupEditor'
 import { GridEditor, detectGridChain } from './GridEditor'
 import { SnippetMenu } from './SnippetMenu'
 import { BindHealthPanel } from './BindHealthPanel'
+import { RichContentCompanion } from './RichContentCompanion'
 import { CommentActions } from './CommentActions'
 import { FeedbackCard } from '../feedback/FeedbackCard'
 import { SaveToLibraryButton } from './SaveToLibraryButton'
@@ -187,6 +188,18 @@ export function SectionDetailsPanel({
 
       {/* Scrollable body */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-5">
+        {/* Rich Content Companion — the durable cowork source-of-truth
+            for cowork-produced sections. Renders ABOVE the Brixies
+            field editor so the strategist edits uniform-shaped content
+            and the translator re-derives Brixies field_values on save.
+            Hidden when cowork_slot_values is null (non-cowork sections
+            use the existing field editor directly). */}
+        <RichContentCompanion
+          section={section}
+          template={template}
+          onChange={onChange}
+        />
+
         {/* When an internal review is active, surface the review
             comments block at the TOP so it's visually distinct from
             the page-editing chrome — it's the primary action surface
