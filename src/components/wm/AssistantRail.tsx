@@ -826,11 +826,21 @@ function CoworkAuditPanel({
   const pageDirectives = (pageMeta.directives ?? []) as Array<{ kind: string; severity: string; detail: string; section?: string; slot?: string }>
   const handoffNote   = (pageMeta.outline_meta?.handoff_note as string | undefined) ?? null
 
+  // Render-integrity summary: how many sections on this page bound
+  // perfectly + how many landed partial. Surfaces the v2 translator's
+  // bind_quality verdict so the strategist sees integrity at a glance
+  // before walking the per-section list.
+  const sectionsWithBind = sections.filter(s => s.bind_quality)
+  const perfectCount = sectionsWithBind.filter(s => s.bind_quality === 'perfect').length
+  const partialCount = sectionsWithBind.filter(s => s.bind_quality === 'partial').length
+  const integrityRate = sectionsWithBind.length > 0 ? perfectCount / sectionsWithBind.length : null
+
   // Apply the filter to sections + their directives + intent text.
   const sectionsVisible = !filter ? sections : sections.filter(s => {
     const hay = [
       s.section_intent_text,
       ...(s.directives ?? []).map(d => `${d.kind} ${d.detail}`),
+      ...(s.gaps ?? []).map(g => `${g.kind} ${g.detail}`),
       s.notion_url,
       s.split_from,
       s.template_id,
@@ -879,6 +889,19 @@ function CoworkAuditPanel({
             {pageDirectives.map((d, i) => <DirectiveRow key={i} directive={d} />)}
           </div>
         )}
+        {integrityRate != null && (
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <WMStatusPill
+              tone={integrityRate >= 0.9 ? 'success' : integrityRate >= 0.5 ? 'warning' : 'danger'}
+              size="sm"
+            >
+              {Math.round(integrityRate * 100)}% perfect bind
+            </WMStatusPill>
+            <span className="text-[10px] text-wm-text-muted">
+              {perfectCount} perfect{partialCount > 0 ? ` · ${partialCount} partial — edit in the Rich Content panel` : ''}
+            </span>
+          </div>
+        )}
       </header>
 
       {/* Per-section detail */}
@@ -921,6 +944,14 @@ function CoworkSectionRow({
                 {sec.template_id}
               </span>
             )}
+            {sec.bind_quality && (
+              <WMStatusPill
+                tone={sec.bind_quality === 'perfect' ? 'success' : 'warning'}
+                size="sm"
+              >
+                {sec.bind_quality === 'perfect' ? '✓ perfect bind' : `~ partial${sec.gaps?.length ? ` (${sec.gaps.length})` : ''}`}
+              </WMStatusPill>
+            )}
             {sec.split_group_id && sec.split_position && (
               <span className="text-[9px] uppercase tracking-wider font-bold text-wm-warning bg-wm-warning-bg px-1.5 py-0.5 rounded">
                 split {sec.split_position}{sec.split_from ? ` of ${sec.split_from}` : ''}
@@ -946,6 +977,31 @@ function CoworkSectionRow({
 
       {expanded && (
         <div className="mt-2 ml-4 space-y-2 text-[10.5px] text-wm-text-muted">
+          {sec.bind_quality === 'partial' && Array.isArray(sec.gaps) && sec.gaps.length > 0 && (
+            <div>
+              <p className="text-[9px] uppercase tracking-wider font-bold text-wm-warning mb-0.5">Bind gaps ({sec.gaps.length})</p>
+              <p className="text-[10px] text-wm-text-subtle italic mb-1">
+                The picked template couldn't render every slot cowork emitted, OR cowork didn't fill a required slot. The content is preserved in cowork_slot_values + editable in the Rich Content panel; swap the template variant or edit there to resolve.
+              </p>
+              <ul className="space-y-1">
+                {sec.gaps.map((g, i) => (
+                  <li key={i} className="rounded bg-wm-bg-elevated border border-wm-border p-1.5">
+                    <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                      <WMStatusPill
+                        tone={g.severity === 'blocker' ? 'danger' : g.severity === 'warning' ? 'warning' : 'info'}
+                        size="sm"
+                      >
+                        {g.severity}
+                      </WMStatusPill>
+                      <span className="text-[10px] font-mono text-wm-text-subtle">{g.kind}</span>
+                      {g.slot && <span className="text-[10px] text-wm-text-subtle">· slot: {g.slot}</span>}
+                    </div>
+                    <p className="text-[10.5px] text-wm-text leading-snug">{g.detail}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {sec.voice_notes && (
             <div>
               <p className="text-[9px] uppercase tracking-wider font-bold text-wm-text-subtle mb-0.5">Voice notes</p>
