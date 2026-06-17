@@ -7,10 +7,23 @@ description: |
   matrix downstream skills (plan-site-strategy, plan-cross-page-allocation)
   use to decide which page each atom/fact belongs on AND how to sequence
   the visitor journey through them.
-model: anthropic/claude-opus-4-7
+model: anthropic/claude-sonnet-4-6
 allowed-tools: Read
-version: '1.0.0'
+version: '1.1.0'
 ---
+
+<!--
+Model picked: claude-sonnet-4-6 (2026-06-17). Was claude-opus-4-7.
+Reason: this step is structured classification (route N atoms + facts
+into a closed audience × category × funnel cell space). With adaptive
+thinking always-on on Opus 4.7, large inventories (3249 = 83 atoms +
+135 facts = 218 routes) routinely exhausted Vercel's 300s function
+timeout. Sonnet 4.6 ships the same structured-output reliability at
+~2-3x the throughput, well within Vercel Pro's window. If quality
+slips on a specific project, the per-project addendum in
+web_pipeline_prompts can override.
+-->
+
 
 # Organize ACF
 

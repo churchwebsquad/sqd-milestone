@@ -210,8 +210,15 @@ export default async function handler(req: any, res: any) {
       toolSchema,
       // ACF plan is structurally dense — every atom + every fact gets
       // a route. Budget linearly: ~120 chars rationale × ~150 sources
-      // = ~20k chars output ≈ ~5-7k tokens. 16k cap is comfortable.
-      maxTokens:       16000,
+      // = ~20k chars output ≈ ~5-7k tokens. 12k cap leaves headroom
+      // for adaptive thinking without exhausting Vercel's 300s
+      // function window — large projects (e.g. 3249 = 83 atoms +
+      // 135 facts = 218 routes) were hitting FUNCTION_INVOCATION_TIMEOUT
+      // on the 16k cap because thinking + generation together stretched
+      // past 5 minutes. Combined with the model switch to sonnet-4-6
+      // (organize-acf SKILL v1.1.0), this keeps even the largest
+      // inventories comfortably inside the function window.
+      maxTokens:       12000,
     })
   } catch (e) {
     return mapGatewayError(res, e)

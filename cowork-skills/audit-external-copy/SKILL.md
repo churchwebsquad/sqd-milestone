@@ -82,9 +82,13 @@ failed. Doing the walk via your own MCP is lazy, reliable, and lets
 you reason about content while reading it.
 
 **MCP usage pattern**:
-- Notion MCP: `list_databases` / `query_database` / `retrieve_page` /
+- Notion MCP: `query_database` / `notion-fetch` (page_id) /
   `retrieve_block_children` — to walk the DB and read each page.
-- Supabase MCP: ONE `roadmap_state_set` write per page (the critique).
+- Supabase MCP: up to FOUR `roadmap_state_set` writes per page —
+  outline, draft, critique, and `cowork_page_meta` (when the page
+  has a `# SEO` block and/or `## GAPS FLAGGED` block). Plus ONE
+  project-level `global_footer` write (when a Type=Footer row or
+  `## GLOBAL FOOTER` block is present).
 
 Bundle keys you consume:
 
@@ -144,115 +148,294 @@ and you shouldn't be running).
 
 ## Walk the sitemap autonomously
 
-### 1. List the Notion DB pages
+### 1. List the Notion DB pages, filter by Type, derive slug map
 
 Call Notion MCP `query_database(database_id=notion_audit_branch.database_id)`
-once at the top to get the full page list. Walk in Notion's returned
-order (which is the partner's sort).
+once at the top to get the full page list. The partner's copywriter
+filed each row with a `Type` property — read it and BRANCH:
 
-For each Notion page:
-- Extract the title (the page's `properties.title` rich-text run).
-- Slugify: lowercase, non-alphanumerics → dashes, collapse runs.
-  ("Plan a Visit" → `plan-a-visit`, "About Us" → `about-us`).
-- Fetch the body via `retrieve_block_children(page_id, recursive=true)`.
+| `Type` | What to do |
+|---|---|
+| `Page` / `Nav+Page` | Walk body → outline + draft + critique (Steps 2-4). |
+| `Footer` | Walk body → write to `roadmap_state.global_footer` (one per project). No outline/draft/critique. |
+| `Nav Item` / `Link` | **Skip entirely.** Sitemap-only nodes; no page body to bind. |
+| (anything else, or template rows like "New Page" / "New Nav Item" / "Add Footer") | Skip — those are Notion's template scaffolds, not real pages. |
 
-The slug is your `page_slug` for both the critique write key and the
-strategist-facing report.
+`Type` is the ONLY Notion-property the SKILL reads. Slug, Categories:
+Style Guide, designer-notes columns — all IGNORED. Everything else
+comes from parsing the partner's body markdown.
 
-### 2. Bind each Notion section to a canonical template
+**Slug derivation — footer pre-pass.** Before processing pages, walk
+the Footer row's body (if Type=Footer exists) OR the Homepage's
+`## GLOBAL FOOTER` block, and extract a `title → /slug` map from its
+"Quick Navigation" bulleted list:
 
-Read the Notion body's structural shape. Split into sections — each
-heading-2 (or heading-3 if no h2 exists in the page) starts a new
-section that runs until the next heading at the same level.
+```
+- I'm New → /new
+- Worship → /worship
+- Children & Youth → /children-youth
+```
 
-For each section, decide three things — these BECOME the outline +
-draft for the page:
+builds `{ "I'm New": "/new", "Worship": "/worship", … }`.
 
-**(a) Pick a `template_key`** from `canonical_templates.pickable_templates` (the bundle's allow-list of templates whose `uniform_to_brixies` mapping is grounded in real Brixies schemas). Emitting a `template_key` NOT in `pickable_templates` is a hard error — the handoff translator can't bind it. Match by section role + content shape:
+For each subsequent page row:
+- Extract the page title (`properties.title`).
+- `slug = slug_map[title] ?? (title.toLowerCase() in {"home","homepage","index"} ? "/" : kebab(title))`
+  where `kebab(title)` = lowercase + non-alphanumerics → dashes,
+  collapse runs ("Plan a Visit" → `plan-a-visit`). This honors the
+  partner's URL plan without consuming the Notion `Slug` column.
+- Fetch the body via `retrieve_block_children(page_id, recursive=true)`
+  OR `notion-fetch(page_id)` — the latter returns enhanced markdown
+  which is easier to parse and includes inline marker formatting.
 
-  - Lead-in / opener at top of page → `hero_homepage` (home only) or `hero_inner` (every other page)
-  - Card list / 3-item feature → `content_featured_a` (with palette) or `content_image_text_a`
-  - 2-column content → `content_image_text_b`
-  - Accordion-shaped FAQ → `accordion_faq`
-  - Final CTA → `cta_simple` or `cta_callout`
-  - Team / staff → `feature_team`
-  - Testimonials → `testimonial_written` / `testimonial_video`
-  - Timeline / story → `timeline_story`
-  - Contact / address block → `contact_section`
-  - Video content → `content_video`
-  - Career listings → `career_section`
-  - Generic prose with no card structure → `content_image_text_b`
+The slug is your `page_slug` for the roadmap_state write keys.
 
-**(b) Resolve overflow** — when the Notion content exceeds the
-picked template's slot caps, RESOLVE it (don't just flag). Three
-moves, in preference order:
+### 2. Parse the page body into sections + slot bindings (VERBATIM)
 
-  1. **SUBSTITUTE template** — if another `template_key` in the
-     manifest fits the actual content count + shape, pick it.
-     Example: 6 staff with `feature_team` (cap 2) → check if a
-     `feature_team_grid` or similar exists. If so, use that.
-  2. **SPLIT into N sections** — same `template_key`, repeated.
-     6 staff → 3× `feature_team` sections (2 each), each with its
-     own primary_heading ("Lead Pastors" / "Staff Pastors" /
-     "Support Team" — derive groupings from titles when possible,
-     otherwise just "Staff (1 of 3)" / "Staff (2 of 3)" / etc.).
-     8 items → 2× sections of 4.
+The partner's body is structured prose with explicit slot labels they
+wrote themselves (`**H1:**`, `**Tagline:**`, `**CTA 1:**`, italic
+`*[Image: …]*` / `*[Map embed: …]*` markers, per-item Buttons, a
+page-final `## GAPS FLAGGED` block). Your job is to read it
+top-to-bottom and emit a verbatim-preserved structure — never
+paraphrasing, never truncating, never dropping an italic note. The
+char caps Brixies templates declare are **advisory only** in this
+branch: render every character. If the layout stretches, the
+strategist resolves it in the workspace via the variant picker.
 
-     **SPLIT marker contract — REQUIRED**: every section produced by
-     a SPLIT MUST stamp two fields on its `_meta` so the handoff
-     endpoint can group siblings without inference:
-       - `split_from`: a stable string identifying the original
-         Notion section (use the original heading text — e.g.
-         `"Staff"` — verbatim from the Notion page).
-       - `split_position`: 1-based index within the split group
-         (1, 2, 3 for a 3-way split).
-     Standalone (non-split) sections leave both fields absent.
-     Example metadata on outline section #2 of a 3-way staff split:
-     ```json
-     "_meta": {
-       "audit_source": "notion",
-       "notion_page_id": "<id>",
-       "notion_url":     "<url>",
-       "split_from":     "Staff",
-       "split_position": 2
-     }
-     ```
-     The handoff endpoint mints ONE `split_group_id` UUID per unique
-     `(notion_page_id, split_from)` pair and stamps it on every
-     web_section in the group. Without the marker, the importer has
-     no way to detect groupings + the audit-tab UI can't render
-     "split 2 of 3 from one Notion section" — so the marker is the
-     load-bearing contract.
-  3. **TRUNCATE + defer** — only when SUBSTITUTE and SPLIT both
-     fail (e.g. 12 FAQ items, `accordion_faq` cap 5, no other
-     accordion variant). Keep the top N items by priority; surface
-     the deferred ones in `deferred_atoms[]` on the draft AND as a
-     directive on the critique so the strategist sees what was cut.
+**(a) Page-top `# SEO` block.** Capture as `cowork_page_meta.seo`:
 
-For body / heading / item-body overages: TRIM (paraphrase down to
-the cap, preserving the partner's voice from `stage_1.voice_exemplars`)
-or SPLIT (two short sections instead of one overflowing one).
+```json
+{
+  "raw_block":         "<verbatim markdown of the entire # SEO H1 block>",
+  "primary_keywords":  ["...", "..."],
+  "secondary_keywords":["...", "..."],
+  "local_keywords":    ["...", "..."],
+  "meta_title":        "First Presbyterian Church of Charlotte | Uptown, NC",
+  "meta_description":  "First Presbyterian Church of Charlotte is …",
+  "aeo_snippet":       "First Presbyterian Church of Charlotte is a Presbyterian Church (USA) …"
+}
+```
 
-**(c) Map content into slots**. Per the picked template's
-`cowork_writable_slots`:
-  - `tagline` (eyebrow) ← any short kicker line, if present
-  - `primary_heading` ← the section heading (or partner-supplied h2)
-  - `body` ← the section's descriptive prose (≤400 chars, trim if needed)
-  - `accent_body` ← only on templates that have it (content_video etc.)
-  - `items[]` ← each card / list item / staff member / etc., with
-    `item_heading`, `item_body`, and optional `item_meta` (role,
-    date, location, etc.) per the template's `item_subfields`.
-  - `buttons[]` ← CTAs found in the section (label + url). Max
-    per template's `buttons.max_items`. Map button URLs to fact
-    rows in `facts_pool` when possible (e.g. /give → giving fact).
+Parse each `**PRIMARY KEYWORDS:**`, `**SECONDARY KEYWORDS:**`,
+`**LOCAL KEYWORDS:**`, `**METADATA TITLE:**`, `**METADATA
+DESCRIPTION:**`, `**AEO SMART SNIPPET:**` block — extract the value
+after each label. Trailing parenthetical notes like
+`*(57 characters)*` are partner annotations, drop from the field
+value but preserve the raw block intact. The `raw_block` is the
+audit traceability source — write it verbatim. This page-level
+write is what `web_pages.seo_metadata` will hold after handoff.
 
-**Validate before continuing**: every slot with `required: true`
-in the template's `cowork_writable_slots` MUST have a value. If a
-required slot is empty after binding, either pull from another
-section nearby, OR emit a `required_slot_unfilled` directive on
-the critique and use a placeholder string the strategist can fix.
+**(b) Page-final `## GAPS FLAGGED` block.** Capture as
+`cowork_page_meta.gaps_flagged` — every bullet becomes an entry
+verbatim:
 
-### 3. Score the 5 axes (use the standard rubrics)
+```json
+[
+  { "note": "Say Grace podcast link: Podcast URL and embed player not yet live …", "kind": "partner_flagged" },
+  { "note": "Featured events section: Dynamic vs. manual management to be determined by developer.", "kind": "partner_flagged" }
+]
+```
+
+This block is the partner's OWN flagged gaps — distinct from the
+SKILL-generated critique directives. Preserve every word, every
+sub-bullet. Both land alongside each other in the workspace.
+
+**(c) Section delimiters.** H2 (`## …`) starts a new section that
+runs until the next H2 (or end-of-body). The H2 text becomes the
+section's **display name only** — render it as part of the
+section's heading slot when applicable, but never use it as a
+routing signal for which Brixies layout to pick (Step 3 makes that
+call by content shape alone).
+
+Skip-list — these H2 blocks are page-level metadata, not body
+sections (they get captured at the page level or are pure handoff
+checks):
+
+- `## GLOBAL FOOTER` → captured to `roadmap_state.global_footer`
+  (one per project; see (g) below)
+- `## GAPS FLAGGED` → captured to `cowork_page_meta.gaps_flagged`
+  (see (b))
+- `## Page Visitor Actions` — handoff/QA consistency check. Validate:
+  hero primary/secondary CTAs match Page Visitor Actions; flag
+  `cta_mismatch` if they diverge. Do not create a draft section.
+- Strategic Purpose, Personas, Phase, Slug, Part 1: Strategic Setup,
+  Sources Referenced — strategist scaffolding, skip from draft.
+
+Everything else IS a body section.
+
+**(d) Per-section inline slot markers** — recognize these verbatim
+patterns inside a section body and route to the listed slots. The
+full run after the colon (including punctuation, line breaks,
+markdown links, and emphasis) is preserved character-for-character:
+
+| Pattern | Routes to |
+|---|---|
+| `**H1:** …` | `primary_heading` (hero context) |
+| `**Heading:** …` / `**H2:** …` (inline, NOT the section H2) | `primary_heading` |
+| `**Tagline:** …` | `tagline` |
+| `**CTA 1:** Label (link to /path)` | `buttons[0] = { label, url, kind: "primary" }` |
+| `**CTA 2:** Label (link to /path)` | `buttons[1] = { label, url, kind: "secondary" }` (preserve even when the picked template caps at 1 button) |
+| `**CTA:** Label (…)` | `buttons[…]` — kind unspecified; the layout decides primary positioning |
+| `**Button:** Label (link to /path)` / `*Button: Label (annotation)*` | `buttons[…]`. Any trailing parenthetical annotation is preserved into `cowork_section_meta.button_annotations[i]` |
+| `*[Image: …]*` / `*[Image or video: …]*` | `cowork_section_meta.image_direction` (verbatim, including the partner's stated visual intent) |
+| `*[Map embed: <iframe…>]*` | `cowork_section_meta.embed_directive` (verbatim, **iframe markup and all** — DO NOT escape, decode, or rewrite it) |
+| `*[This section features … events …]*` / `*[Visual links into N pathways:]*` / `*[asset…]*` / any other italic-bracketed designer directive | `cowork_section_meta.dynamic_directive` (or append to `inline_annotations[]` if there's already a dynamic_directive set) |
+| `*Preservation: source-verbatim …*` / `*preservation: …*` | `cowork_section_meta.preservation = "source-verbatim"` |
+| Any other italic-bracketed note `*[…]*` not matched above | append to `cowork_section_meta.inline_annotations[]` as `{ note, near_slot? }` (near_slot = the most recent slot label the note appeared after) |
+
+**(e) Item lists.** When a section's body contains a list of
+`**<Item Heading>** + body paragraph + optional Button:` blocks
+(canonical example from 3249's `## SERVICE TIMES`: `**Contemplative
+Service**` then a multi-line body then two `*Button: …*` lines),
+each entry becomes one `items[i]`:
+
+```json
+{
+  "item_heading":   "Contemplative Service",
+  "item_body":      "Sundays, 9 a.m. | Chapel | September through May …",
+  "item_meta":      "<any annotation that didn't fit elsewhere>",
+  "item_cta_label": "View Bulletin",
+  "item_cta_url":   "https://firstpres-charlotte.org/.../May-3-2026-Contemplative-Bulletin.pdf"
+}
+```
+
+When the item has multiple Buttons (the SERVICE TIMES example has
+TWO per service — View Bulletin + Watch the Livestream), emit one
+item with the FIRST per-item button as `item_cta_label`/`item_cta_url`
+and the rest into `item_meta` as a verbatim `"Also: <label> → <url>"`
+appended block. The strategist sees both in the Rich Companion;
+the layout shows the primary per-card CTA.
+
+Per-item button annotations (the partner's trailing `(right now it
+is set up as an upload to their site, can we replicate this or
+improve…)`) go into `cowork_section_meta.button_annotations` AND
+the item's `item_meta` so they ride with the item.
+
+**(f) Verbatim body slot.** Any text in the section that wasn't
+captured by (d) or (e) lands in `body` (or `accent_body` if the
+section has both a primary descriptive prose block and a follow-up
+emphasis block, e.g. content_video). **No char cap. No paraphrase.
+No truncation.** Preserve:
+
+- Line breaks (paragraph breaks become `\n\n`; single breaks → `\n`)
+- Bulleted lists (as `- …\n- …`)
+- Inline markdown links (`[Label](https://…)`) — the renderer's
+  `styleHyperlinks` pass handles anchor styling at render time
+- Inline emphasis (`**bold**`, `*italic*`)
+- Embedded markdown formatting
+
+The Brixies template's body slot type is `richtext` (the renderer
+treats it as HTML); the handoff translator's `ensureHtml()` will
+wrap plain markdown in `<p>` tags. Do not pre-render to HTML — pass
+the markdown as-is; the translator normalizes it.
+
+**(g) Global footer.** If this is a Type=Footer row OR the page
+contains a top-level `## GLOBAL FOOTER` block (the Homepage in
+3249 has both — they should match; if not, the Footer row wins),
+write the verbatim block to `roadmap_state.global_footer` (one per
+project, shape per `CoworkGlobalFooter` in
+`src/types/database.ts`). Parse the column structure (`### Footer
+Column 1 — <Heading>`, `### Footer Column 2 — <Heading>`, etc.),
+the `### Footer Bottom Bar` row, and the trailing `**FOOTER NOTES
+FOR DEVELOPER:**` bullets. Preserve every link verbatim — the
+footer drives the site-wide nav and one missing URL is a regression
+the partner will notice immediately.
+
+**(h) Capture rules — already-defined markers.** The Capture rules
+section below (NEEDS INPUT / `*pending:*` / `*photo:*` /
+`*Embed (video):*` / suggested-value extraction / hash-anchor CTAs
+/ Labeled sub-bullets) STILL APPLIES verbatim. Do not paraphrase
+the rule book; layer the new markers from (d) on top.
+
+**Validate before continuing.** Every slot with `required: true`
+in the picked template's `cowork_writable_slots` SHOULD have a
+value. If a required slot is empty after binding:
+- Look at the section's inline_annotations / image_direction /
+  dynamic_directive — sometimes the missing piece is captured
+  there and just needs reassigning.
+- If still empty, emit a `required_slot_unfilled` directive on the
+  critique. Do NOT invent a placeholder; leave the slot empty and
+  let the strategist fix it.
+
+**No paraphrase rule.** Delete from your behavior: any temptation
+to "TRIM body to 400 chars" or "shorten this paragraph to fit." The
+audit branch's contract with the partner is verbatim. Char caps
+declared in `cowork_writable_slots` are the visual designer's
+guidance — they do not authorize content destruction. If the body
+exceeds a template's intended visual rhythm, Step 3 picks a more
+spacious layout OR splits the section into siblings; never trims.
+
+### 3. Pick a Brixies layout for each section by CONTENT SHAPE
+
+Section labels (`## HERO SECTION`, `## SERVICE TIMES`,
+`## MISSION SNAPSHOT`, etc.) are display text rendered as the
+section's heading — **never a routing signal**. The pipeline picks
+the Brixies layout family by the structural shape extracted in
+Step 2: cards vs prose vs accordion vs map embed vs CTA vs video
+vs staff list.
+
+Always pick from `canonical_templates.pickable_templates[]` (the
+allow-list of verified templates the handoff translator can bind).
+Emitting a `template_key` not in `pickable_templates` is a hard
+error — the importer rejects it.
+
+**Routing table (deterministic, content-driven):**
+
+| Structural shape extracted in Step 2 | Brixies layout |
+|---|---|
+| First section on a page + has `**H1:**` + `**Tagline:**` + ≥1 CTA + image direction | `hero_homepage` (slug === "/") OR `hero_inner` (every other page) |
+| Hero shape + has `*[Visual links into N pathways:]*` + N bullet links | `hero_inner` with `items[]` built from the bullet list (each `- Label (link to /path)` → `{ item_heading: Label, item_cta_url: /path }`) |
+| Heading + body + N item entries each with heading+body+per-item CTA | `feature_unique` (3 items or fewer) OR `cards_with_cta` (4+ items) |
+| Heading + body + N item entries each with heading+body, **no** per-item CTA | `content_featured_a` |
+| Heading + body + map embed directive (iframe in `embed_directive`) | `contact_section` (content-section-96) |
+| Heading + body + exactly 1 CTA, no items | `cta_callout` (cta-section-52) |
+| Heading + body + exactly 2 CTAs (primary + secondary), no items | `cta_simple` (cta-section-20) |
+| Heading + body + ≥3 paired Q→A blocks | `accordion_faq` |
+| Heading + body + video embed / video CTA + descriptive prose | `content_video` |
+| Heading + chronological items (years, dates, "Step 1"/"Step 2", "Phase 1"/etc.) | `timeline_story` |
+| Heading + N entries each shaped like `**Name**` + role line + bio | `feature_team` |
+| Heading + ≥1 entries shaped like `> quote` + `— Attribution` (text only) | `testimonial_written` |
+| Same as above but with video URL/embed | `testimonial_video` |
+| Heading + ≥1 entries shaped like job posting (title + location + body + apply CTA) | `career_section` |
+| Long prose only — no item structure, no embed, no CTAs (or 1 trailing CTA absorbed into the layout) | `content_image_text_b` |
+
+**Overflow handling (no paraphrase).** When the partner-written
+content's count or volume exceeds a template's natural visual
+rhythm, resolve in this preference order:
+
+1. **SUBSTITUTE template** — pick a template in the same family
+   with more spacious slots. Example: 6 staff entries with
+   `feature_team` (visual cap 2) → currently no `feature_team_grid`
+   variant exists; jump to step 2.
+2. **SPLIT into N sibling sections** — same `template_key`,
+   repeated. 6 staff → 3× `feature_team` sections (2 each). 12 FAQ
+   items → 3× `accordion_faq` sections (4 each). Each split sibling
+   gets its own primary_heading derived from the source content
+   ("Lead Pastors" / "Staff Pastors" / "Support Team" if groupings
+   are evident, otherwise `"<Original Heading> (1 of N)"`).
+
+   **SPLIT marker contract — REQUIRED**: every split sibling stamps
+   two fields on its `_meta`:
+     - `split_from`: a stable string identifying the original
+       Notion section (the original H2 text verbatim).
+     - `split_position`: 1-based index within the split group.
+   Standalone sections leave both fields absent. The handoff
+   endpoint mints ONE `split_group_id` UUID per unique
+   `(notion_page_id, split_from)` pair and stamps it on every
+   web_section in the group — without the marker, the importer
+   has no way to detect the grouping.
+3. **RENDER LONG (fallback)** — if SUBSTITUTE and SPLIT both fail,
+   bind the section with `content_image_text_b` and let the body
+   render at full length. Emit a `layout_no_match` directive on the
+   critique so the strategist can resolve via the workspace variant
+   picker. **NEVER paraphrase.**
+
+If no shape match exists at all (e.g. a section that's pure embed
+markup with no heading), fall back to `content_image_text_b` with
+the embed routed to `embed_directive` and the audit critique notes
+the shape mismatch.
+
+### 4. Score the 5 axes (use the standard rubrics)
 
 Reference `references/audit-criteria.md` (loaded from the
 critique-page skill bundle the strategist also has). Score each axis
@@ -274,21 +457,43 @@ critique-page skill bundle the strategist also has). Score each axis
   (specific staff names without source, made-up service times,
   dollar amounts, denominational claims)?
 
-### 4. Compute overall_band
+### 5. Compute overall_band
 
 Per the rubric in audit-criteria.md:
 - All axes ≥75 with zero blocker directives → `green`
 - Any axis 50-74 OR any warning directive → `yellow`
 - Any axis <50 OR any blocker directive → `red`
 
-### 5. Write THREE artifacts per page
+### 6. Write artifacts per page (verbatim preservation guarantees)
 
-THREE Supabase MCP writes per page. Same `audit_source = 'notion'` on
+Per-page writes via Supabase MCP. Same `audit_source = 'notion'` on
 every `_meta` block so synthesize-critique + the downstream importer
 can tell where these artifacts came from.
 
-**(a) `page_outlines.<slug>`** — the template + slot-binding plan.
-Shape mirrors what outline-page would produce in the standard branch:
+Every audit-branch outline section MUST carry these new `_meta`
+fields (in addition to the long-standing ones) so the handoff
+endpoint can persist what the partner wrote:
+
+- `source_block` — the verbatim raw markdown for THIS section as
+  pulled from Notion (the substring between this section's H2 and
+  the next H2, untouched). Used for audit diffing ("what was in
+  Notion?" vs "what landed in cowork_slot_values?") and re-
+  extraction if the parser evolves.
+- `preservation` — `"source-verbatim"` when the partner used a
+  `*Preservation: …*` marker on the section, else null.
+- `image_direction` — verbatim run from a `*[Image: …]*` marker, or null.
+- `embed_directive` — verbatim run (including raw iframe) from a
+  `*[Map embed: …]*` marker, or null.
+- `dynamic_directive` — verbatim run from a `*[This section features
+  …]*` or `*[Visual links into N pathways:]*` marker, or null.
+- `inline_annotations` — array of `{ note, near_slot? }` for any
+  italic-bracketed designer note not matched to a specific directive.
+- `button_annotations` — array of strings (or nulls), length matches
+  `buttons[]` in cowork_slot_values, capturing trailing-parenthetical
+  notes from per-CTA markers like `*Button: View Bulletin (right now
+  it is set up as an upload to their site…)*`.
+
+**(a) `page_outlines.<slug>`** — the template + slot-binding plan:
 
 ```json
 {
@@ -307,7 +512,21 @@ Shape mirrors what outline-page would produce in the standard branch:
         { "slot": "body",             "source": "notion:<paragraph>" },
         { "slot": "items",            "source": "notion:<card group>" }
       ],
-      "voice_anchor": "<a stage_1.voice_exemplars phrase the section voice should align with>"
+      "voice_anchor": "<a stage_1.voice_exemplars phrase the section voice should align with>",
+      "_meta": {
+        "audit_source":       "notion",
+        "notion_page_id":     "<id>",
+        "notion_url":         "<url>",
+        "source_block":       "<verbatim markdown for this section, character-for-character>",
+        "preservation":       "source-verbatim" | null,
+        "image_direction":    "<verbatim from *[Image: …]*>" | null,
+        "embed_directive":    "<verbatim including iframe markup>" | null,
+        "dynamic_directive":  "<verbatim from *[This section …]*>" | null,
+        "inline_annotations": [{ "note": "<verbatim>", "near_slot": "primary_heading" }],
+        "button_annotations": ["<verbatim trailing paren on buttons[0]>", null],
+        "split_from":         "<original H2>" | null,
+        "split_position":     1
+      }
     }
   ],
   "_meta": {
@@ -513,31 +732,17 @@ skill has hurt the strategist:
    `broken_anchor_link` directive — strategist needs to either
    rename a section or fix the anchor.
 
-4. **Respect template hints written into Notion section headings.**
-   The strategist annotates the structural intent right in the
-   heading. Match these to `pickable_templates`:
-
-   | Notion hint contains | Pick template_key |
-   |---|---|
-   | "Hero" / "Hero Section" | hero_homepage (home) / hero_inner (inner pages) |
-   | "Cards Grid" / "Spotlights" + per-card CTAs | `cards_with_cta` (feature-section-103) |
-   | "Cards Grid" / "Spotlights" without per-card CTAs | `content_featured_a` |
-   | "Quick-Info" / "Band" / "Service Times" | `cta_simple` |
-   | "Newsletter" / "Signup" | `cta_simple` or `cta_callout` |
-   | "Mission" + quote | `content_video` (gives a pull-quote treatment) |
-   | "First-Visit" + paragraph | `content_image_text_b` |
-   | "FAQ" / "Accordion" / "Statement of Faith" | `accordion_faq` |
-   | "Team" / "Staff" / "Leadership" | `feature_team` |
-   | "Testimony" / "Quote" | `testimonial_written` / `testimonial_video` |
-   | "Timeline" / "Story" | `timeline_story` |
-   | "Contact" / "Address" | `contact_section` |
-   | "Final CTA" with ONE button                | `cta_callout` (cta-section-52) |
-   | "Final CTA" with PRIMARY + SECONDARY buttons | `cta_simple` (cta-section-20) |
-
-   If two templates could fit, pick the one with the closer slot
-   shape match. A "Cards Grid" where the source has per-card CTAs
-   MUST pick `cards_with_cta`, not `content_featured_a` — the
-   latter cannot hold the CTA URLs and will silently drop them.
+4. **Layout pick happens in Step 3 — content shape only, never
+   section-label keyword matching.** The earlier "Notion hint
+   keyword → template_key" table is REMOVED from this branch. The
+   partner's section labels (`## HERO SECTION`, `## SERVICE TIMES`,
+   `## MISSION SNAPSHOT`) are display text and become the section's
+   rendered heading; they are NOT a routing signal. Step 3's
+   structural-shape routing table is the only authority on which
+   Brixies layout binds. This avoids the misfires that happen when
+   a partner names a section "## Spotlights" but the content shape
+   is actually a 2-button CTA, or names a section "## Mission" but
+   the content shape is a 5-item testimonials grid.
 
 ```sql
 SELECT roadmap_state_set('<project_id>'::uuid, ARRAY['page_drafts', '<slug>'], '<draft_jsonb>'::jsonb);
@@ -553,10 +758,86 @@ verify, etc.).
 SELECT roadmap_state_set('<project_id>'::uuid, ARRAY['page_critiques', '<slug>'], '<critique_jsonb>'::jsonb);
 ```
 
-Three writes per page in this order: outline → draft → critique
-(outline references drive the draft; the draft drives the critique).
-If a write fails, surface the error and STOP — don't continue to
-the next page until the strategist clears it.
+**(d) `cowork_page_meta.<slug>`** — page-level partner-written
+metadata that lives at the PAGE level (not per-section). Holds the
+verbatim `# SEO` block + page-final `## GAPS FLAGGED` bullets:
+
+```json
+{
+  "seo": {
+    "raw_block": "<verbatim markdown of the # SEO H1 block>",
+    "primary_keywords":   ["..."],
+    "secondary_keywords": ["..."],
+    "local_keywords":     ["..."],
+    "meta_title":         "...",
+    "meta_description":   "...",
+    "aeo_snippet":        "..."
+  },
+  "gaps_flagged": [
+    { "note": "<verbatim bullet from ## GAPS FLAGGED>", "kind": "partner_flagged" }
+  ],
+  "_meta": {
+    "audit_source": "notion",
+    "notion_page_id": "<id>",
+    "notion_url":     "<url>"
+  }
+}
+```
+
+```sql
+SELECT roadmap_state_set('<project_id>'::uuid, ARRAY['cowork_page_meta', '<slug>'], '<page_meta_jsonb>'::jsonb);
+```
+
+Omit fields that the partner didn't write (no `# SEO` block → omit
+`seo`; no `## GAPS FLAGGED` → omit `gaps_flagged`). Skip the write
+entirely if neither is present. The handoff endpoint reads this
+key and writes `web_pages.seo_metadata` + `web_pages.partner_gaps_flagged`.
+
+**(e) `global_footer` (one per project, not per page)** — when a
+Type=Footer row exists OR when a page body contains a top-level
+`## GLOBAL FOOTER` block. Written ONCE across the whole sitemap
+walk (last write wins if multiple sources exist; the Type=Footer
+row should be authoritative):
+
+```json
+{
+  "raw_block": "<verbatim markdown for the entire footer block>",
+  "columns": [
+    {
+      "heading": "Church Identity",
+      "blocks": [
+        { "kind": "identity", "lines": ["First Presbyterian Church of Charlotte", "200 West Trade Street", "..."] }
+      ]
+    },
+    {
+      "heading": "Quick Navigation",
+      "blocks": [
+        { "kind": "links", "label": "Explore",
+          "items": [
+            { "label": "I'm New", "url": "/new" },
+            { "label": "Worship", "url": "/worship" }
+          ] }
+      ]
+    }
+  ],
+  "bottom_bar": "© First Presbyterian Church of Charlotte | …",
+  "footer_notes": [
+    "The Counseling Center footer link (/care#counseling-center) is a permanent anchor link …",
+    "Bulletin Links URL must be preserved exactly. It is used on printed QR codes …"
+  ]
+}
+```
+
+```sql
+SELECT roadmap_state_set('<project_id>'::uuid, ARRAY['global_footer'], '<footer_jsonb>'::jsonb);
+```
+
+Up to FIVE writes per page (outline → draft → critique → page_meta →
+optionally global_footer once across the whole walk). Order:
+outline → draft → critique → page_meta. The global_footer write
+happens once (the Footer row itself OR the first Homepage section
+pass that emits it). If a write fails, surface the error and STOP —
+don't continue to the next page until the strategist clears it.
 
 ## Final report — surface to strategist after ALL pages
 
@@ -605,12 +886,18 @@ reads the report and decides whether to drill in.
 
 ## Hard rules
 
-- THREE Supabase MCP writes per page (outline → draft → critique).
-  Reads via Notion MCP are fine (that's how you walk the DB) — but
-  don't fan out additional `roadmap_state_set` calls per section.
-- Resolve overflow during binding (SPLIT / SUBSTITUTE / TRUNCATE).
-  Don't ship an outline whose section would overflow its template's
-  slot caps — the importer rejects those.
+- Up to FOUR Supabase MCP writes per page: outline → draft →
+  critique → `cowork_page_meta` (when the page has a `# SEO` block
+  and/or `## GAPS FLAGGED` block). Plus ONE project-level
+  `global_footer` write across the whole sitemap walk. Reads via
+  Notion MCP are fine — but don't fan out additional
+  `roadmap_state_set` calls per section.
+- Resolve overflow during binding via SUBSTITUTE / SPLIT only.
+  Never TRUNCATE the partner's content. Never paraphrase. If
+  neither SUBSTITUTE nor SPLIT fits, fall back to
+  `content_image_text_b` and let the body render at full length;
+  emit a `layout_no_match` directive so the strategist sees what
+  exceeded the visual rhythm.
 - Don't invent atom/fact ids in `atoms_used` / `facts_used`. Only
   reference rows that exist in the bundle's `atoms_pool.by_id` /
   `facts_pool.by_id`. Notion-original copy with no source lift

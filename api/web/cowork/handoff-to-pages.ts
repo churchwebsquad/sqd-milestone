@@ -403,9 +403,17 @@ export default async function handler(req: any, res: any) {
   const manifestVersion = (manifestRes.data as any).version as string
   const roadmap   = (project.roadmap_state ?? {}) as Record<string, any>
 
-  const outlines  = (roadmap.page_outlines  ?? {}) as Record<string, any>
-  const drafts    = (roadmap.page_drafts    ?? {}) as Record<string, any>
-  const critiques = (roadmap.page_critiques ?? {}) as Record<string, any>
+  const outlines    = (roadmap.page_outlines    ?? {}) as Record<string, any>
+  const drafts      = (roadmap.page_drafts      ?? {}) as Record<string, any>
+  const critiques   = (roadmap.page_critiques   ?? {}) as Record<string, any>
+  // Audit branch (v77): per-page partner-written metadata (verbatim
+  // # SEO block + page-final ## GAPS FLAGGED bullets) and the project-
+  // wide global_footer extracted from the Notion Type=Footer row or a
+  // ## GLOBAL FOOTER block on the homepage. Both shapes are open jsonb
+  // — the SKILL writes the verbatim source + parsed structure; the
+  // handoff reads it as-is and writes through to the new columns.
+  const pageMeta    = (roadmap.cowork_page_meta ?? {}) as Record<string, any>
+  const globalFooter = (roadmap.global_footer    ?? null) as Record<string, unknown> | null
 
   const allSlugs = new Set<string>([
     ...Object.keys(outlines),
@@ -477,6 +485,17 @@ export default async function handler(req: any, res: any) {
       (critique?._meta?.notion_url as string | undefined) ??
       (outline?.sections?.[0]?._meta?.notion_url as string | undefined) ?? null
 
+    // v77 — page-level partner-written metadata (audit branch).
+    // The SKILL writes this into roadmap_state.cowork_page_meta.<slug>
+    // when the page has a `# SEO` block and/or `## GAPS FLAGGED`
+    // block. Both fields are nullable jsonb on web_pages — leave null
+    // for from-scratch / generated pages.
+    const slugPageMeta = (pageMeta[slug] ?? null) as Record<string, unknown> | null
+    const seoMetadata          = (slugPageMeta?.seo ?? null) as Record<string, unknown> | null
+    const partnerGapsFlagged   = Array.isArray(slugPageMeta?.gaps_flagged)
+      ? (slugPageMeta?.gaps_flagged as Array<Record<string, unknown>>)
+      : null
+
     // Upsert web_pages row
     let pageId: string
     if (existing) {
@@ -489,10 +508,12 @@ export default async function handler(req: any, res: any) {
             overall_band:  critique?.overall_band ?? null,
             directives:    critique?.directives ?? [],
           },
-          audit_source:      auditSourceForPage,
-          notion_url:        notionUrlForPage,
-          cowork_handoff_at: handoffStartedAt,
-          updated_at:        handoffStartedAt,
+          audit_source:         auditSourceForPage,
+          notion_url:           notionUrlForPage,
+          cowork_handoff_at:    handoffStartedAt,
+          updated_at:           handoffStartedAt,
+          seo_metadata:         seoMetadata,
+          partner_gaps_flagged: partnerGapsFlagged,
         })
         .eq('id', existing.id)
       if (updErr) return res.status(500).json({ error: `web_pages update failed for ${slug}: ${updErr.message}` })
@@ -510,13 +531,15 @@ export default async function handler(req: any, res: any) {
             overall_band:  critique?.overall_band ?? null,
             directives:    critique?.directives ?? [],
           },
-          audit_source:        auditSourceForPage,
-          notion_url:          notionUrlForPage,
-          cowork_handoff_at:   handoffStartedAt,
-          web_project_id:      projectId,
-          sort_order:          nextSortOrder++,
-          archived:            false,
-          content_status:      'draft',
+          audit_source:         auditSourceForPage,
+          notion_url:           notionUrlForPage,
+          cowork_handoff_at:    handoffStartedAt,
+          web_project_id:       projectId,
+          sort_order:           nextSortOrder++,
+          archived:             false,
+          content_status:       'draft',
+          seo_metadata:         seoMetadata,
+          partner_gaps_flagged: partnerGapsFlagged,
         })
         .select('id')
         .single()
@@ -616,6 +639,22 @@ export default async function handler(req: any, res: any) {
         return []
       })()
 
+      // v77 — audit-branch verbatim preservation passthrough.
+      // The SKILL writes these on outline._meta (preferred) or
+      // draft._meta (fallback) for each section. Both shapes are
+      // open — defensive `?? null` keeps from-scratch sections
+      // unaffected (they leave the new fields null).
+      const oMeta = (os?._meta ?? {}) as Record<string, unknown>
+      const dMeta = (ds._meta ?? {}) as Record<string, unknown>
+      const pickStr = (key: string): string | null => {
+        const v = oMeta[key] ?? dMeta[key]
+        return typeof v === 'string' && v.length > 0 ? v : null
+      }
+      const pickArr = <T>(key: string): T[] | null => {
+        const v = oMeta[key] ?? dMeta[key]
+        return Array.isArray(v) ? (v as T[]) : null
+      }
+
       const sectionMeta = {
         section_intent_id:      intentId,
         section_intent_text:    os?.section_job ?? '',
@@ -635,6 +674,17 @@ export default async function handler(req: any, res: any) {
         bind_quality:           bind.bind_quality,
         gaps:                   bind.gaps,
         manifest_version:       manifestVersion,
+        // v77 — Notion audit-branch verbatim preservation
+        source_block:           pickStr('source_block'),
+        preservation:           (() => {
+          const v = oMeta.preservation ?? dMeta.preservation
+          return v === 'source-verbatim' ? 'source-verbatim' as const : null
+        })(),
+        image_direction:        pickStr('image_direction'),
+        embed_directive:        pickStr('embed_directive'),
+        dynamic_directive:      pickStr('dynamic_directive'),
+        inline_annotations:     pickArr<{ note: string; near_slot?: string }>('inline_annotations') ?? [],
+        button_annotations:     pickArr<string | null>('button_annotations') ?? [],
       }
 
       sectionRows.push({
@@ -704,6 +754,24 @@ export default async function handler(req: any, res: any) {
   audit.perfect_rate = audit.total_sections > 0
     ? Math.round((audit.perfect_sections / audit.total_sections) * 10000) / 10000
     : 0
+
+  // v77 — project-wide global_footer write (audit branch).
+  // The SKILL parses the Notion Type=Footer row (or the Homepage's
+  // ## GLOBAL FOOTER block) into roadmap_state.global_footer; this
+  // is its one-time-per-project promotion onto strategy_web_projects.
+  // Skipped when no footer was extracted (from-scratch projects).
+  if (globalFooter && typeof globalFooter === 'object') {
+    const { error: footerErr } = await sb.from('strategy_web_projects')
+      .update({ global_footer: globalFooter })
+      .eq('id', projectId)
+    if (footerErr) {
+      // Non-fatal: log into telemetry but don't block the handoff;
+      // sections + pages already landed.
+      (audit as Record<string, unknown>).global_footer_write_error = footerErr.message
+    } else {
+      (audit as Record<string, unknown>).global_footer_written = true
+    }
+  }
 
   // ≥0.90 = success. <0.90 = Claude Code work needed.
   if (audit.total_sections > 0 && audit.perfect_rate < 0.9) {

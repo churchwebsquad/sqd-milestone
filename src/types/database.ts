@@ -1139,7 +1139,42 @@ export interface StrategyWebProject {
   // what's blocking." Surfaced on the side panel + board row.
   status_note:                string | null
 
+  // ── v77 — audit branch global footer ─────────────────────
+  // Partner-written global footer extracted from the Notion DB
+  // (Type=Footer row body, or "## GLOBAL FOOTER" block on Homepage).
+  // One per project, consumed once by the site layout. See
+  // CoworkGlobalFooter for the canonical shape; null pre-audit.
+  global_footer: CoworkGlobalFooter | null
+
   [key: string]: unknown
+}
+
+/** Audit branch — partner-written global footer block extracted
+ *  from Notion. Persisted to strategy_web_projects.global_footer
+ *  by the handoff endpoint. Shape is open so the SKILL can capture
+ *  whatever the partner wrote without losing structure.
+ *
+ *  - `raw_block`: verbatim markdown source (for audit / re-extraction).
+ *  - `columns[]`: parsed column blocks (one per "### Footer Column N"
+ *    heading), each with a heading + arbitrary content blocks.
+ *  - `footer_notes[]`: developer/strategist notes from the trailing
+ *    "FOOTER NOTES FOR DEVELOPER" block (anchors, preserved URLs, etc).
+ *  - `bottom_bar`: the © / address / tagline line below columns.
+ */
+export interface CoworkGlobalFooter {
+  raw_block:     string
+  columns:       Array<{
+    heading:     string
+    blocks:      Array<{
+      kind:      'identity' | 'links' | 'social' | 'newsletter' | 'free_text'
+      label?:    string
+      items?:    Array<{ label: string; url: string }>
+      lines?:    string[]
+      raw?:      string
+    }>
+  }>
+  bottom_bar:    string | null
+  footer_notes:  string[]
 }
 
 /** AI pipeline stages from intake → all pages drafted. */
@@ -1384,7 +1419,34 @@ export interface WebPage {
   /** Timestamp of the most recent handoff write. NULL pre-handoff. */
   cowork_handoff_at: string | null
 
+  // ── v77 — audit branch verbatim SEO + partner-flagged gaps ──
+  /** Partner-authored SEO block extracted verbatim from the page-top
+   *  `# SEO` block in Notion. Lossless — every keyword, the AEO
+   *  snippet, and the raw markdown source are preserved. The existing
+   *  `seo: WebPageSeo` field is the strategist-edited canonical view
+   *  derived from this; never overwrite this verbatim source. */
+  seo_metadata: CoworkSeoMetadata | null
+  /** Partner-authored gap markers from the page-final `## GAPS FLAGGED`
+   *  block in Notion. Surfaced to the strategist alongside the SKILL-
+   *  generated critique directives so partner intent stays visible. */
+  partner_gaps_flagged: Array<{ note: string; kind: 'partner_flagged' }> | null
+
   [key: string]: unknown
+}
+
+/** Audit branch — verbatim partner-written SEO block extracted from
+ *  the page-top `# SEO` H1 block in Notion. Persisted to
+ *  web_pages.seo_metadata. Different from `web_pages.seo`: this is
+ *  the immutable source, that one is the strategist-edited canonical
+ *  view derived from this. */
+export interface CoworkSeoMetadata {
+  raw_block:           string
+  primary_keywords:    string[]
+  secondary_keywords:  string[]
+  local_keywords:      string[]
+  meta_title:          string | null
+  meta_description:    string | null
+  aeo_snippet:         string | null
 }
 
 /** Page-level cowork handoff metadata. Mirrors the shape the handoff
@@ -1640,6 +1702,45 @@ export interface CoworkHandoffSectionMeta {
   }>
   /** Canonical-templates manifest version this section was bound under. */
   manifest_version?:        string
+
+  // ── v77 — Notion audit-branch verbatim preservation ────────────
+  /** Verbatim Notion markdown for this section — the exact substring
+   *  the SKILL parsed slots from. Used for audit diff ("what was in
+   *  Notion?" vs "what landed?") + re-extraction when the parser
+   *  evolves. Always present for audit-branch sections; null for
+   *  from-scratch / generated sections. */
+  source_block?:            string | null
+  /** Partner-marked preservation flag from `*Preservation: source-
+   *  verbatim*` runs in the Notion body. When `source-verbatim`,
+   *  downstream tools (variant swap, translator overrides, AI rewrites)
+   *  MUST NOT paraphrase this section's content. */
+  preservation?:            'source-verbatim' | null
+  /** Partner-written image direction from italic markers like
+   *  `*[Image or video: photo of Pastor Jane …]*`. Preserved
+   *  verbatim — the Brixies image slot stays designer-bound, but
+   *  the partner's stated intent is visible in the Rich Companion
+   *  + the design phase handoff. */
+  image_direction?:         string | null
+  /** Raw embed directive from `*[Map embed: <iframe…>]*` or similar.
+   *  Includes the full iframe markup verbatim so the build can drop
+   *  it in (e.g. Google Maps for the church address). */
+  embed_directive?:         string | null
+  /** Italic block directive like `*[This section features 3 to 4
+   *  upcoming events pulled from the events calendar.]*` —
+   *  copywriter's instruction to the developer about how a section
+   *  should behave (dynamic / manual / placeholder). */
+  dynamic_directive?:       string | null
+  /** Catch-all for italic-bracketed annotations that didn't match a
+   *  specific directive type. Preserves the partner's note verbatim
+   *  + tags which slot it appeared near, for the Rich Companion to
+   *  show "near `primary_heading`: …" hints. */
+  inline_annotations?:      Array<{ note: string; near_slot?: string }>
+  /** Trailing-parenthetical annotations from per-CTA markers like
+   *  `*Button: View Bulletin (right now it is set up as an upload
+   *  to their site, can we replicate this or improve …)*`. One
+   *  entry per button index (or null when that button had no
+   *  annotation). Length matches buttons[] in cowork_slot_values. */
+  button_annotations?:      Array<string | null>
 }
 
 /** Per-field provenance tag. Lives at `web_sections.field_provenance[fieldKey]`.
