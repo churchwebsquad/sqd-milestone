@@ -459,8 +459,8 @@ The drafter MUST emit `source_coverage[]` (one entry per assigned
 source per section, each carrying a full `items[]` walk with every
 item marked `rendered` / `deferred` / `coverage_gap`). Your job is
 to recompute that report against **live inventory** (atoms_pool,
-facts_pool, crawl_topics_pool) and FAIL the critique on any
-unaccounted entry.
+facts_pool, crawl_topics_pool, partner_added_inventory) and FAIL
+the critique on any unaccounted entry.
 
 Procedure:
 
@@ -472,6 +472,20 @@ Procedure:
    `key_phrase` / `contact_block` / `meeting_time` / `faq`. Do NOT
    subset kinds; do NOT truncate the walk. This is the exact bug
    shape that hid Desert Springs's tithe Scriptures.
+
+1b. **Re-walk every routed `partner_added_assignments`.** For each
+   `target_path` the outline routes, look it up in
+   `partner_added_inventory[]` (by `target_path`) and verify the
+   partner's `name` + `description` (and any `attachments` count)
+   land in the section's field_values per the drafter's coverage
+   markers. Also scan `partner_added_inventory[]` for entries whose
+   `bucket_key` is unmistakably this page's (e.g. ways_to_give →
+   /give, care → /care) but that are NOT routed anywhere across
+   the project — those surface as `partner_added_unrouted`
+   directives at severity `blocker`. The Arvada loss (eight
+   partner-written ministry entries silently dropped) was exactly
+   this failure mode at the bundle level; the recompute here
+   catches it at critique time too.
 2. **Cross-foot.** Every leaf in the live items tree must appear in
    the draft's `source_coverage[].items[]` for that
    `(section_intent_id, topic_key)` pair. An item present in

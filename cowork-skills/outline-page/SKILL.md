@@ -470,40 +470,57 @@ to derived phrases, and the drafter writes derived headings while
 preserving the full verbatim text in body. No deferrals needed; no
 template variants needed.
 
-## Three source kinds, three assignment arrays — route by kind, never cross-route
+## Four source kinds, four assignment arrays — route by kind, never cross-route
 
-The allocation routes three kinds of source to each section:
-`kind: 'pillar'` (a content_atoms row), `kind: 'fact'` (a church_facts
-row), `kind: 'crawl_topic'` (a web_project_topics row). Each section's
-output has THREE parallel arrays — one per kind:
+The bundle exposes FOUR kinds of source: `kind: 'pillar'` (a
+content_atoms row), `kind: 'fact'` (a church_facts row),
+`kind: 'crawl_topic'` (a web_project_topics row), and
+`kind: 'partner_added'` (an entry from
+`partner_added_inventory[]` — the partner's "Add something we
+missed" submissions from content collection). Each section's
+output has FOUR parallel arrays — one per kind:
 
-| Allocation `source.kind` | Outline array | Field on each item | What it is |
+| Source kind     | Outline array              | Field on each item | What it is |
 |---|---|---|---|
-| `pillar`      | `atom_assignments`         | `atom_id` (UUID) | A normalized content snippet — header, paragraph, quote, statistic. |
-| `fact`        | `fact_assignments`         | `fact_id` (UUID) | A structured-data row — staff member, service time, address, ministry block. Drafter weaves the row's `data` into the slot. |
-| `crawl_topic` | `crawl_topic_assignments`  | `topic_key` (string) | Existing site content already crawled — passages + items from the partner's current site. Drafter excerpts / rewrites / paraphrases. |
+| `pillar`        | `atom_assignments`         | `atom_id` (UUID) | A normalized content snippet — header, paragraph, quote, statistic. |
+| `fact`          | `fact_assignments`         | `fact_id` (UUID) | A structured-data row — staff member, service time, address, ministry block. Drafter weaves the row's `data` into the slot. |
+| `crawl_topic`   | `crawl_topic_assignments`  | `topic_key` (string) | Existing site content already crawled — passages + items from the partner's current site. Drafter excerpts / rewrites / paraphrases. |
+| `partner_added` | `partner_added_assignments`| `target_path` (string) | Partner-submitted "Add something we missed" entry from content collection. Name + rich description + attachments. **Every entry whose `bucket_key` maps to this page MUST be routed somewhere** — the no-omission contract that Arvada's loss made load-bearing (eight partner ministry entries silently dropped on Arvada's first pass). The drafter walks each routed entry the same way it walks a crawl `program` item. |
 
-**Each source from the allocation lands in EXACTLY ONE array, based on
-its `kind`.** Cross-routing is the failure mode: putting a `fact_id`
-into `atom_assignments[].atom_id`, or a `topic_key` into
-`fact_assignments[].fact_id`, fails the validator with
-`unknown_atom_ref` / `unknown_fact_ref` / `unknown_crawl_topic_ref`
-(an id of one kind isn't in the other kind's inventory).
+**Each source from the bundle lands in EXACTLY ONE array, based on
+its kind.** Cross-routing is the failure mode: putting a `fact_id`
+into `atom_assignments[].atom_id`, or a `target_path` into
+`crawl_topic_assignments[].topic_key`, fails the validator with
+`unknown_atom_ref` / `unknown_fact_ref` / `unknown_crawl_topic_ref` /
+`unknown_partner_added_ref` (an id of one kind isn't in the other
+kind's inventory).
+
+**Bucket → page routing for `partner_added`.** When you outline a
+page, scan `bundle.partner_added_inventory[]` for entries whose
+`bucket_key` clearly belongs to this page (e.g. `ways_to_give` →
+/give; `care` → /care; `kids` → /kids; `global_outreach` →
+/local-global or /missions; `community_groups` → /groups). Route
+each entry to a section as a `partner_added_assignments` entry.
+Entries whose bucket doesn't map to any planned page surface as a
+`directive`-type build flag in `report.notes` so the strategist
+can decide (add a page, fold into an existing page, drop with
+reason).
 
 **Treatment vocabularies differ per kind** because what you do to a
 source depends on its shape:
 
 | Array | Treatment vocabulary |
 |---|---|
-| `atom_assignments`        | `use_as_is` / `lift_phrase` / `compress` / `expand` / `reorder` / `omit` (word-level rewrite of an existing phrase) |
-| `fact_assignments`        | `card_per_row` (one card per fact row) / `embed_field` (one field of `fact.data` → one slot) / `list_items` (rows → bullet list) / `summarize` / `lift_verbatim` / `weave_into_paragraph` |
-| `crawl_topic_assignments` | `excerpt` (verbatim quote from the crawl) / `rewrite` (rewrite in brand voice) / `paraphrase` / `summarize` |
+| `atom_assignments`         | `use_as_is` / `lift_phrase` / `compress` / `expand` / `reorder` / `omit` (word-level rewrite of an existing phrase) |
+| `fact_assignments`         | `card_per_row` (one card per fact row) / `embed_field` (one field of `fact.data` → one slot) / `list_items` (rows → bullet list) / `summarize` / `lift_verbatim` / `weave_into_paragraph` |
+| `crawl_topic_assignments`  | `excerpt` (verbatim quote from the crawl) / `rewrite` (rewrite in brand voice) / `paraphrase` / `summarize` |
+| `partner_added_assignments`| `card_per_entry` (one card per partner entry) / `embed_in_section` (entry's body content lives inside a larger section) / `list_item` (entry surfaces as one row in a bullet/card list). Partner-supplied text is rich (often pasted HTML); preserve verbatim where possible. |
 
 **Section may emit empty arrays for kinds it doesn't consume.** A
-hero section with one pillar atom and no facts/crawl topics:
-`atom_assignments: [{...}]`, `fact_assignments: []`,
-`crawl_topic_assignments: []`. Empty array is fine; missing array
-trips schema validation.
+hero section with one pillar atom and no facts/crawl topics/partner
+adds: `atom_assignments: [{...}]`, `fact_assignments: []`,
+`crawl_topic_assignments: []`, `partner_added_assignments: []`.
+Empty array is fine; missing array trips schema validation.
 
 **Slot coverage is summed across all three arrays.** A section
 archetype that requires slot `items` is COVERED if any of the three

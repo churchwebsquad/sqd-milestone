@@ -1568,7 +1568,7 @@ Final status write: \`{ status: "done" }\` OR \`{ status: "failed", last_error }
     name:         'critique-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  'a627bf51cd50b1fa',
+    contentHash:  '2bcf6f0b91f91b85',
     references:   [
       'cowork-skills/critique-page/references/audit-criteria.md',
     ],
@@ -2017,8 +2017,8 @@ The drafter MUST emit \`source_coverage[]\` (one entry per assigned
 source per section, each carrying a full \`items[]\` walk with every
 item marked \`rendered\` / \`deferred\` / \`coverage_gap\`). Your job is
 to recompute that report against **live inventory** (atoms_pool,
-facts_pool, crawl_topics_pool) and FAIL the critique on any
-unaccounted entry.
+facts_pool, crawl_topics_pool, partner_added_inventory) and FAIL
+the critique on any unaccounted entry.
 
 Procedure:
 
@@ -2030,6 +2030,20 @@ Procedure:
    \`key_phrase\` / \`contact_block\` / \`meeting_time\` / \`faq\`. Do NOT
    subset kinds; do NOT truncate the walk. This is the exact bug
    shape that hid Desert Springs's tithe Scriptures.
+
+1b. **Re-walk every routed \`partner_added_assignments\`.** For each
+   \`target_path\` the outline routes, look it up in
+   \`partner_added_inventory[]\` (by \`target_path\`) and verify the
+   partner's \`name\` + \`description\` (and any \`attachments\` count)
+   land in the section's field_values per the drafter's coverage
+   markers. Also scan \`partner_added_inventory[]\` for entries whose
+   \`bucket_key\` is unmistakably this page's (e.g. ways_to_give →
+   /give, care → /care) but that are NOT routed anywhere across
+   the project — those surface as \`partner_added_unrouted\`
+   directives at severity \`blocker\`. The Arvada loss (eight
+   partner-written ministry entries silently dropped) was exactly
+   this failure mode at the bundle level; the recompute here
+   catches it at critique time too.
 2. **Cross-foot.** Every leaf in the live items tree must appear in
    the draft's \`source_coverage[].items[]\` for that
    \`(section_intent_id, topic_key)\` pair. An item present in
@@ -2503,7 +2517,7 @@ For each candidate, include \`occurrences\` and \`sections\` arrays in the propo
     name:         'draft-page',
     model:        'anthropic/claude-opus-4-8',
     version:      '1.0.0',
-    contentHash:  '1686ffcb85d6a9e2',
+    contentHash:  'b1b02bf35a7ae488',
     references:   [
       'cowork-skills/canonical-templates.json',
     ],
@@ -2589,6 +2603,49 @@ different keys):
       passages, passages_total, passages_truncated, items, ...
     }>
   }
+  /** FOURTH source kind — partner-added inventory from the
+   *  content-collection "Add something we missed" submissions.
+   *  Before bundle v2 these were silently dropped; now every entry
+   *  here MUST land somewhere in the outline → draft → critique
+   *  chain (atoms_used / facts_used / crawl_topics_used has a
+   *  sibling \`partner_added_used: string[]\` that lists \`target_path\`
+   *  values surfaced in the section). Same no-omission contract as
+   *  atoms / facts / crawl_topics — quoting Arvada's loss: eight
+   *  partner-written ministry entries were lost from the pipeline
+   *  because this surface didn't exist. */
+  partner_added_inventory: Array<{
+    /** Bucket the partner was answering in (matches the partner-
+     *  baseline bucket vocabulary, e.g. \`ways_to_give\`, \`care\`,
+     *  \`global_outreach\`, \`local_outreach\`, \`community_groups\`,
+     *  \`kids\`, \`youth\`, etc.). Outline-page routes the bucket to
+     *  a page — usually obvious (ways_to_give → /give, care →
+     *  /care, youth → /youth). */
+    bucket_key:         string
+    /** 'baseline' = answered a specific baseline question (the
+     *  baseline_field_key names which). 'standalone' = partner
+     *  flagged a gap themselves outside any baseline. */
+    source:             'baseline' | 'standalone'
+    baseline_field_key: string | null
+    /** Partner's title for this entry. */
+    name:               string | null
+    /** Partner's rich-text description. WMRichTextEditor output —
+     *  may contain HTML or escaped-HTML pasted from external sources.
+     *  Treat as the same kind of source as a crawl \`program.description\`
+     *  — preserve verbatim quotes; lift names/URLs/specifics; the
+     *  no-fabrication rule applies. */
+    description:        string | null
+    /** Stable id for source_coverage attribution and attachment join. */
+    target_path:        string
+    marked_at:          string | null
+    /** Files the partner uploaded with the entry (rosters, photos,
+     *  CSVs, etc.). The build pipeline picks them up later by
+     *  target_path; the drafter just acknowledges them. */
+    attachments:        Array<{
+      file_name: string; file_path: string;
+      mime_type: string | null; size_bytes: number | null;
+      kind: string; uploaded_at: string
+    }>
+  }>
 }
 \`\`\`
 
@@ -2664,6 +2721,23 @@ of these failed validation.** They were just absent.
    (e.g. "Pastoral Counseling", "Hospital Visits", each counselor,
    each kids age-group, "Fine Arts"). Do not stop at excerpting a
    passage when the items tree has structure beneath.
+
+2b. **\`partner_added_inventory[]\` is the FOURTH source kind — same
+   no-omission contract as crawl items.** When outline-page routes a
+   \`partner_added_assignments[].target_path\` to a section (or when
+   the outline_pattern for a page lists bucket_keys whose
+   \`partner_added_inventory[]\` is non-empty), the drafter MUST treat
+   each entry as a \`program\`-shape source: name + rich description +
+   attachments. These are the partner's OWN flagged additions from
+   content collection ("Add something we missed"). Concrete losses
+   if you drop them: Arvada lost Ways to give, Why Give, Repeated
+   Saying, Global Outreach opportunities, Local Ministry Partners,
+   Justice Partnerships, Prayer Ministry, Recovery Ministry —
+   eight rich partner-written entries that never landed because the
+   bundle previously omitted this surface. Don't replay that. Each
+   entry surfaces in the section as a card / paragraph / item per
+   the section's template, AND lands in \`source_coverage[]\` with
+   \`source_kind: 'partner_added'\`.
 
 3. **No fabricated facts or claims.** Connective, on-voice prose is
    expected, but every factual statement — a number, a frequency, a
@@ -2839,13 +2913,16 @@ of these failed validation.** They were just absent.
    *    routine cap-overage. */
   source_coverage: Array<{
     section_intent_id:   string
-    source_kind:         'atom' | 'fact' | 'crawl_topic'
-    source_ref:          string                              // atom_id / fact_id / topic_key
+    source_kind:         'atom' | 'fact' | 'crawl_topic' | 'partner_added'
+    /** For 'partner_added', this is the \`target_path\`; for others
+     *  it's the atom_id / fact_id / topic_key. */
+    source_ref:          string
     items: Array<{
       kind:              'program' | 'cta' | 'detail' | 'scripture' |
                          'key_phrase' | 'contact_block' | 'meeting_time' |
-                         'faq' | 'fact_field' | 'atom_claim'
-      label:             string                              // human-readable item name (e.g. "Pastoral Counseling", "Tithe — Malachi 3:10")
+                         'faq' | 'fact_field' | 'atom_claim' |
+                         'partner_added_entry' | 'partner_attachment'
+      label:             string                              // human-readable item name (e.g. "Pastoral Counseling", "Tithe — Malachi 3:10", "Prayer Ministry — partner added")
       status:            'rendered' | 'deferred' | 'coverage_gap'
       slot_path?:        string                              // when rendered — where the content landed
       reason?:           string                              // when deferred / coverage_gap — why
@@ -3026,20 +3103,23 @@ If the atom/fact doesn't HAVE specifics, surface in
 \`voice_signal_report.notes\`. Strategist routes back to content
 collection.
 
-## Three source kinds, three usage arrays — track what you weave
+## Four source kinds, four usage arrays — track what you weave
 
-The outline routes three kinds of source per section: \`atom_assignments\`
+The outline routes FOUR kinds of source per section: \`atom_assignments\`
 (pillar atoms from content_atoms), \`fact_assignments\` (church_facts
-rows), \`crawl_topic_assignments\` (web_project_topics keys). Your job
-is to weave each kind into the section's \`copy\` according to its
-treatment, AND to track what you consumed in the parallel \`*_used\`
-arrays:
+rows), \`crawl_topic_assignments\` (web_project_topics keys), and
+\`partner_added_assignments\` (partner "Add something we missed"
+entries — the fourth kind, added after Arvada surfaced silent drops).
+Your job is to weave each kind into the section's \`copy\` according
+to its treatment, AND to track what you consumed in the parallel
+\`*_used\` arrays:
 
 | Outline source | Where to track usage | What "used" means |
 |---|---|---|
-| \`atom_assignments[].atom_id\`         | \`atoms_used: string[]\`         | The atom's body landed somewhere in this section's copy (verbatim if verbatim=true; treatment-shaped otherwise). |
-| \`fact_assignments[].fact_id\`         | \`facts_used: string[]\`         | A field of \`fact.data\` was rendered into a slot value (e.g. a campus address became \`items[0].item_body\`). |
-| \`crawl_topic_assignments[].topic_key\` | \`crawl_topics_used: string[]\` | Content from the crawl topic was excerpted/rewritten/paraphrased into a slot value per the assignment's treatment. |
+| \`atom_assignments[].atom_id\`              | \`atoms_used: string[]\`         | The atom's body landed somewhere in this section's copy (verbatim if verbatim=true; treatment-shaped otherwise). |
+| \`fact_assignments[].fact_id\`              | \`facts_used: string[]\`         | A field of \`fact.data\` was rendered into a slot value (e.g. a campus address became \`items[0].item_body\`). |
+| \`crawl_topic_assignments[].topic_key\`     | \`crawl_topics_used: string[]\`  | Content from the crawl topic was excerpted/rewritten/paraphrased into a slot value per the assignment's treatment. |
+| \`partner_added_assignments[].target_path\` | \`partner_added_used: string[]\` | A partner-added entry from \`partner_added_inventory[]\` was surfaced in the section (name → heading, description → body, attachments noted for downstream build pickup). The \`target_path\` is the stable id. |
 
 **Routing rules (the failure modes — these trip the validator):**
 
@@ -3052,9 +3132,13 @@ arrays:
   even if it visually looks like a fact UUID. The outline tells you
   which kind each id is; preserve it.
 - **Empty array is fine** when a section doesn't consume that kind.
-  \`atoms_used: [], facts_used: ['…'], crawl_topics_used: []\` for a
-  fact-led section that uses no atoms — perfectly valid. Missing
-  array (omitting the key) trips the schema.
+  \`atoms_used: [], facts_used: ['…'], crawl_topics_used: [],
+  partner_added_used: []\` for a fact-led section that uses neither
+  atoms nor crawl content nor partner-added entries — perfectly
+  valid. Missing array (omitting the key) trips the schema.
+- **\`partner_added_used[]\` carries \`target_path\` values**, not
+  UUIDs, e.g. \`"missing:ways_to_give/repeated-saying-3"\`. The bundle's
+  \`partner_added_inventory[]\` is the live source of these ids.
 - **Treatment per kind** comes from the outline's assignment:
   - For facts: \`card_per_row\` (one row → one card heading + supporting
     fields), \`embed_field\` (pull one field into one slot), \`list_items\`
@@ -5019,7 +5103,7 @@ artifact itself is the canonical record; the note is the cliff notes.
     name:         'outline-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  '80e7c49a33f21343',
+    contentHash:  '2c3aa2a5da5b1cf5',
     references:   [
       'cowork-skills/canonical-templates.json',
       'cowork-skills/page-outlines-by-ministry-model.md',
@@ -5479,40 +5563,57 @@ to derived phrases, and the drafter writes derived headings while
 preserving the full verbatim text in body. No deferrals needed; no
 template variants needed.
 
-## Three source kinds, three assignment arrays — route by kind, never cross-route
+## Four source kinds, four assignment arrays — route by kind, never cross-route
 
-The allocation routes three kinds of source to each section:
-\`kind: 'pillar'\` (a content_atoms row), \`kind: 'fact'\` (a church_facts
-row), \`kind: 'crawl_topic'\` (a web_project_topics row). Each section's
-output has THREE parallel arrays — one per kind:
+The bundle exposes FOUR kinds of source: \`kind: 'pillar'\` (a
+content_atoms row), \`kind: 'fact'\` (a church_facts row),
+\`kind: 'crawl_topic'\` (a web_project_topics row), and
+\`kind: 'partner_added'\` (an entry from
+\`partner_added_inventory[]\` — the partner's "Add something we
+missed" submissions from content collection). Each section's
+output has FOUR parallel arrays — one per kind:
 
-| Allocation \`source.kind\` | Outline array | Field on each item | What it is |
+| Source kind     | Outline array              | Field on each item | What it is |
 |---|---|---|---|
-| \`pillar\`      | \`atom_assignments\`         | \`atom_id\` (UUID) | A normalized content snippet — header, paragraph, quote, statistic. |
-| \`fact\`        | \`fact_assignments\`         | \`fact_id\` (UUID) | A structured-data row — staff member, service time, address, ministry block. Drafter weaves the row's \`data\` into the slot. |
-| \`crawl_topic\` | \`crawl_topic_assignments\`  | \`topic_key\` (string) | Existing site content already crawled — passages + items from the partner's current site. Drafter excerpts / rewrites / paraphrases. |
+| \`pillar\`        | \`atom_assignments\`         | \`atom_id\` (UUID) | A normalized content snippet — header, paragraph, quote, statistic. |
+| \`fact\`          | \`fact_assignments\`         | \`fact_id\` (UUID) | A structured-data row — staff member, service time, address, ministry block. Drafter weaves the row's \`data\` into the slot. |
+| \`crawl_topic\`   | \`crawl_topic_assignments\`  | \`topic_key\` (string) | Existing site content already crawled — passages + items from the partner's current site. Drafter excerpts / rewrites / paraphrases. |
+| \`partner_added\` | \`partner_added_assignments\`| \`target_path\` (string) | Partner-submitted "Add something we missed" entry from content collection. Name + rich description + attachments. **Every entry whose \`bucket_key\` maps to this page MUST be routed somewhere** — the no-omission contract that Arvada's loss made load-bearing (eight partner ministry entries silently dropped on Arvada's first pass). The drafter walks each routed entry the same way it walks a crawl \`program\` item. |
 
-**Each source from the allocation lands in EXACTLY ONE array, based on
-its \`kind\`.** Cross-routing is the failure mode: putting a \`fact_id\`
-into \`atom_assignments[].atom_id\`, or a \`topic_key\` into
-\`fact_assignments[].fact_id\`, fails the validator with
-\`unknown_atom_ref\` / \`unknown_fact_ref\` / \`unknown_crawl_topic_ref\`
-(an id of one kind isn't in the other kind's inventory).
+**Each source from the bundle lands in EXACTLY ONE array, based on
+its kind.** Cross-routing is the failure mode: putting a \`fact_id\`
+into \`atom_assignments[].atom_id\`, or a \`target_path\` into
+\`crawl_topic_assignments[].topic_key\`, fails the validator with
+\`unknown_atom_ref\` / \`unknown_fact_ref\` / \`unknown_crawl_topic_ref\` /
+\`unknown_partner_added_ref\` (an id of one kind isn't in the other
+kind's inventory).
+
+**Bucket → page routing for \`partner_added\`.** When you outline a
+page, scan \`bundle.partner_added_inventory[]\` for entries whose
+\`bucket_key\` clearly belongs to this page (e.g. \`ways_to_give\` →
+/give; \`care\` → /care; \`kids\` → /kids; \`global_outreach\` →
+/local-global or /missions; \`community_groups\` → /groups). Route
+each entry to a section as a \`partner_added_assignments\` entry.
+Entries whose bucket doesn't map to any planned page surface as a
+\`directive\`-type build flag in \`report.notes\` so the strategist
+can decide (add a page, fold into an existing page, drop with
+reason).
 
 **Treatment vocabularies differ per kind** because what you do to a
 source depends on its shape:
 
 | Array | Treatment vocabulary |
 |---|---|
-| \`atom_assignments\`        | \`use_as_is\` / \`lift_phrase\` / \`compress\` / \`expand\` / \`reorder\` / \`omit\` (word-level rewrite of an existing phrase) |
-| \`fact_assignments\`        | \`card_per_row\` (one card per fact row) / \`embed_field\` (one field of \`fact.data\` → one slot) / \`list_items\` (rows → bullet list) / \`summarize\` / \`lift_verbatim\` / \`weave_into_paragraph\` |
-| \`crawl_topic_assignments\` | \`excerpt\` (verbatim quote from the crawl) / \`rewrite\` (rewrite in brand voice) / \`paraphrase\` / \`summarize\` |
+| \`atom_assignments\`         | \`use_as_is\` / \`lift_phrase\` / \`compress\` / \`expand\` / \`reorder\` / \`omit\` (word-level rewrite of an existing phrase) |
+| \`fact_assignments\`         | \`card_per_row\` (one card per fact row) / \`embed_field\` (one field of \`fact.data\` → one slot) / \`list_items\` (rows → bullet list) / \`summarize\` / \`lift_verbatim\` / \`weave_into_paragraph\` |
+| \`crawl_topic_assignments\`  | \`excerpt\` (verbatim quote from the crawl) / \`rewrite\` (rewrite in brand voice) / \`paraphrase\` / \`summarize\` |
+| \`partner_added_assignments\`| \`card_per_entry\` (one card per partner entry) / \`embed_in_section\` (entry's body content lives inside a larger section) / \`list_item\` (entry surfaces as one row in a bullet/card list). Partner-supplied text is rich (often pasted HTML); preserve verbatim where possible. |
 
 **Section may emit empty arrays for kinds it doesn't consume.** A
-hero section with one pillar atom and no facts/crawl topics:
-\`atom_assignments: [{...}]\`, \`fact_assignments: []\`,
-\`crawl_topic_assignments: []\`. Empty array is fine; missing array
-trips schema validation.
+hero section with one pillar atom and no facts/crawl topics/partner
+adds: \`atom_assignments: [{...}]\`, \`fact_assignments: []\`,
+\`crawl_topic_assignments: []\`, \`partner_added_assignments: []\`.
+Empty array is fine; missing array trips schema validation.
 
 **Slot coverage is summed across all three arrays.** A section
 archetype that requires slot \`items\` is COVERED if any of the three
@@ -10843,7 +10944,7 @@ artifact itself is the canonical record; the note is the cliff notes.
     name:         'supplemental-page-authoring',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  '0677e2e7eb1f127a',
+    contentHash:  '190435f64164d5e2',
     references:   [
       'cowork-skills/outline-page/SKILL.md',
       'cowork-skills/draft-page/SKILL.md',
@@ -11480,40 +11581,57 @@ to derived phrases, and the drafter writes derived headings while
 preserving the full verbatim text in body. No deferrals needed; no
 template variants needed.
 
-## Three source kinds, three assignment arrays — route by kind, never cross-route
+## Four source kinds, four assignment arrays — route by kind, never cross-route
 
-The allocation routes three kinds of source to each section:
-\`kind: 'pillar'\` (a content_atoms row), \`kind: 'fact'\` (a church_facts
-row), \`kind: 'crawl_topic'\` (a web_project_topics row). Each section's
-output has THREE parallel arrays — one per kind:
+The bundle exposes FOUR kinds of source: \`kind: 'pillar'\` (a
+content_atoms row), \`kind: 'fact'\` (a church_facts row),
+\`kind: 'crawl_topic'\` (a web_project_topics row), and
+\`kind: 'partner_added'\` (an entry from
+\`partner_added_inventory[]\` — the partner's "Add something we
+missed" submissions from content collection). Each section's
+output has FOUR parallel arrays — one per kind:
 
-| Allocation \`source.kind\` | Outline array | Field on each item | What it is |
+| Source kind     | Outline array              | Field on each item | What it is |
 |---|---|---|---|
-| \`pillar\`      | \`atom_assignments\`         | \`atom_id\` (UUID) | A normalized content snippet — header, paragraph, quote, statistic. |
-| \`fact\`        | \`fact_assignments\`         | \`fact_id\` (UUID) | A structured-data row — staff member, service time, address, ministry block. Drafter weaves the row's \`data\` into the slot. |
-| \`crawl_topic\` | \`crawl_topic_assignments\`  | \`topic_key\` (string) | Existing site content already crawled — passages + items from the partner's current site. Drafter excerpts / rewrites / paraphrases. |
+| \`pillar\`        | \`atom_assignments\`         | \`atom_id\` (UUID) | A normalized content snippet — header, paragraph, quote, statistic. |
+| \`fact\`          | \`fact_assignments\`         | \`fact_id\` (UUID) | A structured-data row — staff member, service time, address, ministry block. Drafter weaves the row's \`data\` into the slot. |
+| \`crawl_topic\`   | \`crawl_topic_assignments\`  | \`topic_key\` (string) | Existing site content already crawled — passages + items from the partner's current site. Drafter excerpts / rewrites / paraphrases. |
+| \`partner_added\` | \`partner_added_assignments\`| \`target_path\` (string) | Partner-submitted "Add something we missed" entry from content collection. Name + rich description + attachments. **Every entry whose \`bucket_key\` maps to this page MUST be routed somewhere** — the no-omission contract that Arvada's loss made load-bearing (eight partner ministry entries silently dropped on Arvada's first pass). The drafter walks each routed entry the same way it walks a crawl \`program\` item. |
 
-**Each source from the allocation lands in EXACTLY ONE array, based on
-its \`kind\`.** Cross-routing is the failure mode: putting a \`fact_id\`
-into \`atom_assignments[].atom_id\`, or a \`topic_key\` into
-\`fact_assignments[].fact_id\`, fails the validator with
-\`unknown_atom_ref\` / \`unknown_fact_ref\` / \`unknown_crawl_topic_ref\`
-(an id of one kind isn't in the other kind's inventory).
+**Each source from the bundle lands in EXACTLY ONE array, based on
+its kind.** Cross-routing is the failure mode: putting a \`fact_id\`
+into \`atom_assignments[].atom_id\`, or a \`target_path\` into
+\`crawl_topic_assignments[].topic_key\`, fails the validator with
+\`unknown_atom_ref\` / \`unknown_fact_ref\` / \`unknown_crawl_topic_ref\` /
+\`unknown_partner_added_ref\` (an id of one kind isn't in the other
+kind's inventory).
+
+**Bucket → page routing for \`partner_added\`.** When you outline a
+page, scan \`bundle.partner_added_inventory[]\` for entries whose
+\`bucket_key\` clearly belongs to this page (e.g. \`ways_to_give\` →
+/give; \`care\` → /care; \`kids\` → /kids; \`global_outreach\` →
+/local-global or /missions; \`community_groups\` → /groups). Route
+each entry to a section as a \`partner_added_assignments\` entry.
+Entries whose bucket doesn't map to any planned page surface as a
+\`directive\`-type build flag in \`report.notes\` so the strategist
+can decide (add a page, fold into an existing page, drop with
+reason).
 
 **Treatment vocabularies differ per kind** because what you do to a
 source depends on its shape:
 
 | Array | Treatment vocabulary |
 |---|---|
-| \`atom_assignments\`        | \`use_as_is\` / \`lift_phrase\` / \`compress\` / \`expand\` / \`reorder\` / \`omit\` (word-level rewrite of an existing phrase) |
-| \`fact_assignments\`        | \`card_per_row\` (one card per fact row) / \`embed_field\` (one field of \`fact.data\` → one slot) / \`list_items\` (rows → bullet list) / \`summarize\` / \`lift_verbatim\` / \`weave_into_paragraph\` |
-| \`crawl_topic_assignments\` | \`excerpt\` (verbatim quote from the crawl) / \`rewrite\` (rewrite in brand voice) / \`paraphrase\` / \`summarize\` |
+| \`atom_assignments\`         | \`use_as_is\` / \`lift_phrase\` / \`compress\` / \`expand\` / \`reorder\` / \`omit\` (word-level rewrite of an existing phrase) |
+| \`fact_assignments\`         | \`card_per_row\` (one card per fact row) / \`embed_field\` (one field of \`fact.data\` → one slot) / \`list_items\` (rows → bullet list) / \`summarize\` / \`lift_verbatim\` / \`weave_into_paragraph\` |
+| \`crawl_topic_assignments\`  | \`excerpt\` (verbatim quote from the crawl) / \`rewrite\` (rewrite in brand voice) / \`paraphrase\` / \`summarize\` |
+| \`partner_added_assignments\`| \`card_per_entry\` (one card per partner entry) / \`embed_in_section\` (entry's body content lives inside a larger section) / \`list_item\` (entry surfaces as one row in a bullet/card list). Partner-supplied text is rich (often pasted HTML); preserve verbatim where possible. |
 
 **Section may emit empty arrays for kinds it doesn't consume.** A
-hero section with one pillar atom and no facts/crawl topics:
-\`atom_assignments: [{...}]\`, \`fact_assignments: []\`,
-\`crawl_topic_assignments: []\`. Empty array is fine; missing array
-trips schema validation.
+hero section with one pillar atom and no facts/crawl topics/partner
+adds: \`atom_assignments: [{...}]\`, \`fact_assignments: []\`,
+\`crawl_topic_assignments: []\`, \`partner_added_assignments: []\`.
+Empty array is fine; missing array trips schema validation.
 
 **Slot coverage is summed across all three arrays.** A section
 archetype that requires slot \`items\` is COVERED if any of the three
@@ -11925,6 +12043,49 @@ different keys):
       passages, passages_total, passages_truncated, items, ...
     }>
   }
+  /** FOURTH source kind — partner-added inventory from the
+   *  content-collection "Add something we missed" submissions.
+   *  Before bundle v2 these were silently dropped; now every entry
+   *  here MUST land somewhere in the outline → draft → critique
+   *  chain (atoms_used / facts_used / crawl_topics_used has a
+   *  sibling \`partner_added_used: string[]\` that lists \`target_path\`
+   *  values surfaced in the section). Same no-omission contract as
+   *  atoms / facts / crawl_topics — quoting Arvada's loss: eight
+   *  partner-written ministry entries were lost from the pipeline
+   *  because this surface didn't exist. */
+  partner_added_inventory: Array<{
+    /** Bucket the partner was answering in (matches the partner-
+     *  baseline bucket vocabulary, e.g. \`ways_to_give\`, \`care\`,
+     *  \`global_outreach\`, \`local_outreach\`, \`community_groups\`,
+     *  \`kids\`, \`youth\`, etc.). Outline-page routes the bucket to
+     *  a page — usually obvious (ways_to_give → /give, care →
+     *  /care, youth → /youth). */
+    bucket_key:         string
+    /** 'baseline' = answered a specific baseline question (the
+     *  baseline_field_key names which). 'standalone' = partner
+     *  flagged a gap themselves outside any baseline. */
+    source:             'baseline' | 'standalone'
+    baseline_field_key: string | null
+    /** Partner's title for this entry. */
+    name:               string | null
+    /** Partner's rich-text description. WMRichTextEditor output —
+     *  may contain HTML or escaped-HTML pasted from external sources.
+     *  Treat as the same kind of source as a crawl \`program.description\`
+     *  — preserve verbatim quotes; lift names/URLs/specifics; the
+     *  no-fabrication rule applies. */
+    description:        string | null
+    /** Stable id for source_coverage attribution and attachment join. */
+    target_path:        string
+    marked_at:          string | null
+    /** Files the partner uploaded with the entry (rosters, photos,
+     *  CSVs, etc.). The build pipeline picks them up later by
+     *  target_path; the drafter just acknowledges them. */
+    attachments:        Array<{
+      file_name: string; file_path: string;
+      mime_type: string | null; size_bytes: number | null;
+      kind: string; uploaded_at: string
+    }>
+  }>
 }
 \`\`\`
 
@@ -12000,6 +12161,23 @@ of these failed validation.** They were just absent.
    (e.g. "Pastoral Counseling", "Hospital Visits", each counselor,
    each kids age-group, "Fine Arts"). Do not stop at excerpting a
    passage when the items tree has structure beneath.
+
+2b. **\`partner_added_inventory[]\` is the FOURTH source kind — same
+   no-omission contract as crawl items.** When outline-page routes a
+   \`partner_added_assignments[].target_path\` to a section (or when
+   the outline_pattern for a page lists bucket_keys whose
+   \`partner_added_inventory[]\` is non-empty), the drafter MUST treat
+   each entry as a \`program\`-shape source: name + rich description +
+   attachments. These are the partner's OWN flagged additions from
+   content collection ("Add something we missed"). Concrete losses
+   if you drop them: Arvada lost Ways to give, Why Give, Repeated
+   Saying, Global Outreach opportunities, Local Ministry Partners,
+   Justice Partnerships, Prayer Ministry, Recovery Ministry —
+   eight rich partner-written entries that never landed because the
+   bundle previously omitted this surface. Don't replay that. Each
+   entry surfaces in the section as a card / paragraph / item per
+   the section's template, AND lands in \`source_coverage[]\` with
+   \`source_kind: 'partner_added'\`.
 
 3. **No fabricated facts or claims.** Connective, on-voice prose is
    expected, but every factual statement — a number, a frequency, a
@@ -12175,13 +12353,16 @@ of these failed validation.** They were just absent.
    *    routine cap-overage. */
   source_coverage: Array<{
     section_intent_id:   string
-    source_kind:         'atom' | 'fact' | 'crawl_topic'
-    source_ref:          string                              // atom_id / fact_id / topic_key
+    source_kind:         'atom' | 'fact' | 'crawl_topic' | 'partner_added'
+    /** For 'partner_added', this is the \`target_path\`; for others
+     *  it's the atom_id / fact_id / topic_key. */
+    source_ref:          string
     items: Array<{
       kind:              'program' | 'cta' | 'detail' | 'scripture' |
                          'key_phrase' | 'contact_block' | 'meeting_time' |
-                         'faq' | 'fact_field' | 'atom_claim'
-      label:             string                              // human-readable item name (e.g. "Pastoral Counseling", "Tithe — Malachi 3:10")
+                         'faq' | 'fact_field' | 'atom_claim' |
+                         'partner_added_entry' | 'partner_attachment'
+      label:             string                              // human-readable item name (e.g. "Pastoral Counseling", "Tithe — Malachi 3:10", "Prayer Ministry — partner added")
       status:            'rendered' | 'deferred' | 'coverage_gap'
       slot_path?:        string                              // when rendered — where the content landed
       reason?:           string                              // when deferred / coverage_gap — why
@@ -12362,20 +12543,23 @@ If the atom/fact doesn't HAVE specifics, surface in
 \`voice_signal_report.notes\`. Strategist routes back to content
 collection.
 
-## Three source kinds, three usage arrays — track what you weave
+## Four source kinds, four usage arrays — track what you weave
 
-The outline routes three kinds of source per section: \`atom_assignments\`
+The outline routes FOUR kinds of source per section: \`atom_assignments\`
 (pillar atoms from content_atoms), \`fact_assignments\` (church_facts
-rows), \`crawl_topic_assignments\` (web_project_topics keys). Your job
-is to weave each kind into the section's \`copy\` according to its
-treatment, AND to track what you consumed in the parallel \`*_used\`
-arrays:
+rows), \`crawl_topic_assignments\` (web_project_topics keys), and
+\`partner_added_assignments\` (partner "Add something we missed"
+entries — the fourth kind, added after Arvada surfaced silent drops).
+Your job is to weave each kind into the section's \`copy\` according
+to its treatment, AND to track what you consumed in the parallel
+\`*_used\` arrays:
 
 | Outline source | Where to track usage | What "used" means |
 |---|---|---|
-| \`atom_assignments[].atom_id\`         | \`atoms_used: string[]\`         | The atom's body landed somewhere in this section's copy (verbatim if verbatim=true; treatment-shaped otherwise). |
-| \`fact_assignments[].fact_id\`         | \`facts_used: string[]\`         | A field of \`fact.data\` was rendered into a slot value (e.g. a campus address became \`items[0].item_body\`). |
-| \`crawl_topic_assignments[].topic_key\` | \`crawl_topics_used: string[]\` | Content from the crawl topic was excerpted/rewritten/paraphrased into a slot value per the assignment's treatment. |
+| \`atom_assignments[].atom_id\`              | \`atoms_used: string[]\`         | The atom's body landed somewhere in this section's copy (verbatim if verbatim=true; treatment-shaped otherwise). |
+| \`fact_assignments[].fact_id\`              | \`facts_used: string[]\`         | A field of \`fact.data\` was rendered into a slot value (e.g. a campus address became \`items[0].item_body\`). |
+| \`crawl_topic_assignments[].topic_key\`     | \`crawl_topics_used: string[]\`  | Content from the crawl topic was excerpted/rewritten/paraphrased into a slot value per the assignment's treatment. |
+| \`partner_added_assignments[].target_path\` | \`partner_added_used: string[]\` | A partner-added entry from \`partner_added_inventory[]\` was surfaced in the section (name → heading, description → body, attachments noted for downstream build pickup). The \`target_path\` is the stable id. |
 
 **Routing rules (the failure modes — these trip the validator):**
 
@@ -12388,9 +12572,13 @@ arrays:
   even if it visually looks like a fact UUID. The outline tells you
   which kind each id is; preserve it.
 - **Empty array is fine** when a section doesn't consume that kind.
-  \`atoms_used: [], facts_used: ['…'], crawl_topics_used: []\` for a
-  fact-led section that uses no atoms — perfectly valid. Missing
-  array (omitting the key) trips the schema.
+  \`atoms_used: [], facts_used: ['…'], crawl_topics_used: [],
+  partner_added_used: []\` for a fact-led section that uses neither
+  atoms nor crawl content nor partner-added entries — perfectly
+  valid. Missing array (omitting the key) trips the schema.
+- **\`partner_added_used[]\` carries \`target_path\` values**, not
+  UUIDs, e.g. \`"missing:ways_to_give/repeated-saying-3"\`. The bundle's
+  \`partner_added_inventory[]\` is the live source of these ids.
 - **Treatment per kind** comes from the outline's assignment:
   - For facts: \`card_per_row\` (one row → one card heading + supporting
     fields), \`embed_field\` (pull one field into one slot), \`list_items\`
@@ -13198,8 +13386,8 @@ The drafter MUST emit \`source_coverage[]\` (one entry per assigned
 source per section, each carrying a full \`items[]\` walk with every
 item marked \`rendered\` / \`deferred\` / \`coverage_gap\`). Your job is
 to recompute that report against **live inventory** (atoms_pool,
-facts_pool, crawl_topics_pool) and FAIL the critique on any
-unaccounted entry.
+facts_pool, crawl_topics_pool, partner_added_inventory) and FAIL
+the critique on any unaccounted entry.
 
 Procedure:
 
@@ -13211,6 +13399,20 @@ Procedure:
    \`key_phrase\` / \`contact_block\` / \`meeting_time\` / \`faq\`. Do NOT
    subset kinds; do NOT truncate the walk. This is the exact bug
    shape that hid Desert Springs's tithe Scriptures.
+
+1b. **Re-walk every routed \`partner_added_assignments\`.** For each
+   \`target_path\` the outline routes, look it up in
+   \`partner_added_inventory[]\` (by \`target_path\`) and verify the
+   partner's \`name\` + \`description\` (and any \`attachments\` count)
+   land in the section's field_values per the drafter's coverage
+   markers. Also scan \`partner_added_inventory[]\` for entries whose
+   \`bucket_key\` is unmistakably this page's (e.g. ways_to_give →
+   /give, care → /care) but that are NOT routed anywhere across
+   the project — those surface as \`partner_added_unrouted\`
+   directives at severity \`blocker\`. The Arvada loss (eight
+   partner-written ministry entries silently dropped) was exactly
+   this failure mode at the bundle level; the recompute here
+   catches it at critique time too.
 2. **Cross-foot.** Every leaf in the live items tree must appear in
    the draft's \`source_coverage[].items[]\` for that
    \`(section_intent_id, topic_key)\` pair. An item present in

@@ -55,7 +55,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
   // Parallel load. The bundle is read-only, so a fan-out is safe.
-  const [projRes, atomsRes, factsRes, topicsRes, templatesRes] = await Promise.all([
+  // The content-collection reads (sessions / marks / attachments) are
+  // a chained join: get sessions for this project first, then pull
+  // every mark + every attachment scoped to those session ids.
+  const [projRes, atomsRes, factsRes, topicsRes, templatesRes, ccSessionsRes] = await Promise.all([
     sb.from('strategy_web_projects')
       .select('id, roadmap_state, member, notion_database_id, notion_database_url')
       .eq('id', projectId)
@@ -76,6 +79,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
+    // Partner content-collection sessions for this project. Their IDs
+    // are the join key for marks + attachments below.
+    sb.from('strategy_content_collection_sessions')
+      .select('id')
+      .eq('web_project_id', projectId),
   ])
 
   if (projRes.error)      return res.status(500).json({ error: `project load failed: ${projRes.error.message}` })
@@ -84,6 +92,101 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (factsRes.error)     return res.status(500).json({ error: `facts load failed: ${factsRes.error.message}` })
   if (topicsRes.error)    return res.status(500).json({ error: `topics load failed: ${topicsRes.error.message}` })
   if (templatesRes.error) return res.status(500).json({ error: `templates load failed: ${templatesRes.error.message}` })
+  if (ccSessionsRes.error)
+    return res.status(500).json({ error: `cc sessions load failed: ${ccSessionsRes.error.message}` })
+
+  // ── Partner-added content collection inventory ──────────────────────
+  //
+  // The strategy_content_collection_marks table is where the partner's
+  // "Add something we missed" submissions live. Before this read, the
+  // bundle silently dropped them — the cowork pipeline saw only what
+  // the crawl produced, never what the partner explicitly added. On
+  // Arvada's run, eight rich partner-written entries (Ways to give,
+  // Why Give, Repeated Saying, Global Outreach opportunities, Local
+  // Ministry Partners, Justice Partnerships, Prayer Ministry, Recovery
+  // Ministry) were lost from the cowork inputs entirely. Including
+  // them here makes them a first-class source kind for outline →
+  // draft → critique to route + cover.
+  //
+  // Marks live keyed off `session_id` (one row per partner save). The
+  // load path: project → sessions (loaded above) → marks scoped to
+  // those session ids. Attachments share the same scope + are joined
+  // by `target_path` so each entry surfaces with its uploaded files.
+  const ccSessionIds = ((ccSessionsRes.data ?? []) as Array<{ id: string }>).map(s => s.id)
+  let marksRows: Array<Record<string, unknown>> = []
+  let attRows:   Array<Record<string, unknown>> = []
+  if (ccSessionIds.length > 0) {
+    const [marksRes, attRes] = await Promise.all([
+      sb.from('strategy_content_collection_marks')
+        .select('target_path, target_kind, status, client_note, proposed_program_name, proposed_program_description, marked_at')
+        .in('session_id', ccSessionIds)
+        .like('target_path', 'missing:%')
+        // Soft-deleted entries clear the proposed_program_name; keep
+        // those off the bundle so the partner's "Remove" gesture in
+        // the inventory UI actually removes the row from cowork's
+        // view too. Entries with no name AND no description fall out.
+        .or('proposed_program_name.not.is.null,proposed_program_description.not.is.null'),
+      sb.from('strategy_content_collection_attachments')
+        .select('target_path, file_name, file_path, mime_type, size_bytes, kind, uploaded_at')
+        .in('session_id', ccSessionIds)
+        .like('target_path', 'missing:%'),
+    ])
+    if (marksRes.error) return res.status(500).json({ error: `cc marks load failed: ${marksRes.error.message}` })
+    if (attRes.error)   return res.status(500).json({ error: `cc attachments load failed: ${attRes.error.message}` })
+    marksRows = (marksRes.data ?? []) as Array<Record<string, unknown>>
+    attRows   = (attRes.data   ?? []) as Array<Record<string, unknown>>
+  }
+
+  // Bucket by target_path prefix. Path shapes (from InventoryView):
+  //   missing:<bucket_key>/baseline-<field_key>-<n>   (baseline-tied)
+  //   missing:<bucket_key>/<slug>-<n>                  (standalone)
+  // Bucket key is the only piece the cowork pipeline needs to route
+  // these entries to a page (e.g. ways_to_give → /give, care → /care).
+  // The InventoryView uses the same convention; mirrors stay aligned.
+  const attachmentsByTargetPath: Record<string, Array<Record<string, unknown>>> = {}
+  for (const a of attRows) {
+    const tp = String(a.target_path ?? '')
+    if (!tp) continue
+    ;(attachmentsByTargetPath[tp] ??= []).push({
+      file_name:   a.file_name,
+      file_path:   a.file_path,
+      mime_type:   a.mime_type,
+      size_bytes:  a.size_bytes,
+      kind:        a.kind,
+      uploaded_at: a.uploaded_at,
+    })
+  }
+
+  const partnerAddedInventory = marksRows
+    .map((m): Record<string, unknown> | null => {
+      const path = String(m.target_path ?? '')
+      const match = path.match(/^missing:([^\/]+)\/(.+)$/)
+      if (!match) return null
+      const bucketKey = match[1]
+      const rest      = match[2]
+      // Baseline-tied additions cluster under `baseline-<field_key>-<n>`;
+      // surface the field_key so outline-page knows the partner was
+      // answering a specific baseline question (e.g. ways_to_give's
+      // `online_giving_url` field).
+      const baselineMatch = rest.match(/^baseline-([^-]+(?:-[^-]+)*)-\d+$/)
+      const baselineFieldKey: string | null = baselineMatch ? baselineMatch[1] : null
+      const name = typeof m.proposed_program_name === 'string' ? m.proposed_program_name : null
+      const description = typeof m.proposed_program_description === 'string'
+        ? m.proposed_program_description
+        : typeof m.client_note === 'string' ? m.client_note : null
+      if (!name && !description) return null   // soft-deleted; skip
+      return {
+        bucket_key:         bucketKey,
+        source:             baselineFieldKey ? 'baseline' : 'standalone',
+        baseline_field_key: baselineFieldKey,
+        name,
+        description,
+        target_path:        path,
+        marked_at:          m.marked_at ?? null,
+        attachments:        attachmentsByTargetPath[path] ?? [],
+      }
+    })
+    .filter((x): x is Record<string, unknown> => x != null)
 
   // Partner row for the filename slug — keyed via the project's `member`.
   // Fetched after the main load (depends on projRes.data.member).
@@ -302,6 +405,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     crawl_topics_pool: {
       by_key: crawlByKey,
     },
+    /** Partner-added entries from the content-collection inventory
+     *  ("Add something we missed" submissions). FOURTH source kind
+     *  the cowork pipeline must route + cover, alongside atoms /
+     *  facts / crawl topics. Before this field was wired, the bundle
+     *  silently dropped them (the Arvada loss noted in handoff
+     *  notes) — every partner-written entry here MUST land in an
+     *  outline section's source list + a draft's source_coverage[]
+     *  walk. The `bucket_key` matches the partner-baselines bucket
+     *  vocabulary (e.g. `ways_to_give`, `care`, `global_outreach`,
+     *  `local_outreach`) so the outline router can map a bucket to
+     *  a page; `source: 'baseline'` entries carry a
+     *  `baseline_field_key` naming the specific question the partner
+     *  was answering. Attachments ride with each entry; the build
+     *  pipeline picks them up from `target_path`. */
+    partner_added_inventory: partnerAddedInventory,
   }
 
   res.setHeader('Content-Type', 'application/json; charset=utf-8')

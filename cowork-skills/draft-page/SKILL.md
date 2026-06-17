@@ -95,6 +95,49 @@ different keys):
       passages, passages_total, passages_truncated, items, ...
     }>
   }
+  /** FOURTH source kind — partner-added inventory from the
+   *  content-collection "Add something we missed" submissions.
+   *  Before bundle v2 these were silently dropped; now every entry
+   *  here MUST land somewhere in the outline → draft → critique
+   *  chain (atoms_used / facts_used / crawl_topics_used has a
+   *  sibling `partner_added_used: string[]` that lists `target_path`
+   *  values surfaced in the section). Same no-omission contract as
+   *  atoms / facts / crawl_topics — quoting Arvada's loss: eight
+   *  partner-written ministry entries were lost from the pipeline
+   *  because this surface didn't exist. */
+  partner_added_inventory: Array<{
+    /** Bucket the partner was answering in (matches the partner-
+     *  baseline bucket vocabulary, e.g. `ways_to_give`, `care`,
+     *  `global_outreach`, `local_outreach`, `community_groups`,
+     *  `kids`, `youth`, etc.). Outline-page routes the bucket to
+     *  a page — usually obvious (ways_to_give → /give, care →
+     *  /care, youth → /youth). */
+    bucket_key:         string
+    /** 'baseline' = answered a specific baseline question (the
+     *  baseline_field_key names which). 'standalone' = partner
+     *  flagged a gap themselves outside any baseline. */
+    source:             'baseline' | 'standalone'
+    baseline_field_key: string | null
+    /** Partner's title for this entry. */
+    name:               string | null
+    /** Partner's rich-text description. WMRichTextEditor output —
+     *  may contain HTML or escaped-HTML pasted from external sources.
+     *  Treat as the same kind of source as a crawl `program.description`
+     *  — preserve verbatim quotes; lift names/URLs/specifics; the
+     *  no-fabrication rule applies. */
+    description:        string | null
+    /** Stable id for source_coverage attribution and attachment join. */
+    target_path:        string
+    marked_at:          string | null
+    /** Files the partner uploaded with the entry (rosters, photos,
+     *  CSVs, etc.). The build pipeline picks them up later by
+     *  target_path; the drafter just acknowledges them. */
+    attachments:        Array<{
+      file_name: string; file_path: string;
+      mime_type: string | null; size_bytes: number | null;
+      kind: string; uploaded_at: string
+    }>
+  }>
 }
 ```
 
@@ -170,6 +213,23 @@ of these failed validation.** They were just absent.
    (e.g. "Pastoral Counseling", "Hospital Visits", each counselor,
    each kids age-group, "Fine Arts"). Do not stop at excerpting a
    passage when the items tree has structure beneath.
+
+2b. **`partner_added_inventory[]` is the FOURTH source kind — same
+   no-omission contract as crawl items.** When outline-page routes a
+   `partner_added_assignments[].target_path` to a section (or when
+   the outline_pattern for a page lists bucket_keys whose
+   `partner_added_inventory[]` is non-empty), the drafter MUST treat
+   each entry as a `program`-shape source: name + rich description +
+   attachments. These are the partner's OWN flagged additions from
+   content collection ("Add something we missed"). Concrete losses
+   if you drop them: Arvada lost Ways to give, Why Give, Repeated
+   Saying, Global Outreach opportunities, Local Ministry Partners,
+   Justice Partnerships, Prayer Ministry, Recovery Ministry —
+   eight rich partner-written entries that never landed because the
+   bundle previously omitted this surface. Don't replay that. Each
+   entry surfaces in the section as a card / paragraph / item per
+   the section's template, AND lands in `source_coverage[]` with
+   `source_kind: 'partner_added'`.
 
 3. **No fabricated facts or claims.** Connective, on-voice prose is
    expected, but every factual statement — a number, a frequency, a
@@ -345,13 +405,16 @@ of these failed validation.** They were just absent.
    *    routine cap-overage. */
   source_coverage: Array<{
     section_intent_id:   string
-    source_kind:         'atom' | 'fact' | 'crawl_topic'
-    source_ref:          string                              // atom_id / fact_id / topic_key
+    source_kind:         'atom' | 'fact' | 'crawl_topic' | 'partner_added'
+    /** For 'partner_added', this is the `target_path`; for others
+     *  it's the atom_id / fact_id / topic_key. */
+    source_ref:          string
     items: Array<{
       kind:              'program' | 'cta' | 'detail' | 'scripture' |
                          'key_phrase' | 'contact_block' | 'meeting_time' |
-                         'faq' | 'fact_field' | 'atom_claim'
-      label:             string                              // human-readable item name (e.g. "Pastoral Counseling", "Tithe — Malachi 3:10")
+                         'faq' | 'fact_field' | 'atom_claim' |
+                         'partner_added_entry' | 'partner_attachment'
+      label:             string                              // human-readable item name (e.g. "Pastoral Counseling", "Tithe — Malachi 3:10", "Prayer Ministry — partner added")
       status:            'rendered' | 'deferred' | 'coverage_gap'
       slot_path?:        string                              // when rendered — where the content landed
       reason?:           string                              // when deferred / coverage_gap — why
@@ -532,20 +595,23 @@ If the atom/fact doesn't HAVE specifics, surface in
 `voice_signal_report.notes`. Strategist routes back to content
 collection.
 
-## Three source kinds, three usage arrays — track what you weave
+## Four source kinds, four usage arrays — track what you weave
 
-The outline routes three kinds of source per section: `atom_assignments`
+The outline routes FOUR kinds of source per section: `atom_assignments`
 (pillar atoms from content_atoms), `fact_assignments` (church_facts
-rows), `crawl_topic_assignments` (web_project_topics keys). Your job
-is to weave each kind into the section's `copy` according to its
-treatment, AND to track what you consumed in the parallel `*_used`
-arrays:
+rows), `crawl_topic_assignments` (web_project_topics keys), and
+`partner_added_assignments` (partner "Add something we missed"
+entries — the fourth kind, added after Arvada surfaced silent drops).
+Your job is to weave each kind into the section's `copy` according
+to its treatment, AND to track what you consumed in the parallel
+`*_used` arrays:
 
 | Outline source | Where to track usage | What "used" means |
 |---|---|---|
-| `atom_assignments[].atom_id`         | `atoms_used: string[]`         | The atom's body landed somewhere in this section's copy (verbatim if verbatim=true; treatment-shaped otherwise). |
-| `fact_assignments[].fact_id`         | `facts_used: string[]`         | A field of `fact.data` was rendered into a slot value (e.g. a campus address became `items[0].item_body`). |
-| `crawl_topic_assignments[].topic_key` | `crawl_topics_used: string[]` | Content from the crawl topic was excerpted/rewritten/paraphrased into a slot value per the assignment's treatment. |
+| `atom_assignments[].atom_id`              | `atoms_used: string[]`         | The atom's body landed somewhere in this section's copy (verbatim if verbatim=true; treatment-shaped otherwise). |
+| `fact_assignments[].fact_id`              | `facts_used: string[]`         | A field of `fact.data` was rendered into a slot value (e.g. a campus address became `items[0].item_body`). |
+| `crawl_topic_assignments[].topic_key`     | `crawl_topics_used: string[]`  | Content from the crawl topic was excerpted/rewritten/paraphrased into a slot value per the assignment's treatment. |
+| `partner_added_assignments[].target_path` | `partner_added_used: string[]` | A partner-added entry from `partner_added_inventory[]` was surfaced in the section (name → heading, description → body, attachments noted for downstream build pickup). The `target_path` is the stable id. |
 
 **Routing rules (the failure modes — these trip the validator):**
 
@@ -558,9 +624,13 @@ arrays:
   even if it visually looks like a fact UUID. The outline tells you
   which kind each id is; preserve it.
 - **Empty array is fine** when a section doesn't consume that kind.
-  `atoms_used: [], facts_used: ['…'], crawl_topics_used: []` for a
-  fact-led section that uses no atoms — perfectly valid. Missing
-  array (omitting the key) trips the schema.
+  `atoms_used: [], facts_used: ['…'], crawl_topics_used: [],
+  partner_added_used: []` for a fact-led section that uses neither
+  atoms nor crawl content nor partner-added entries — perfectly
+  valid. Missing array (omitting the key) trips the schema.
+- **`partner_added_used[]` carries `target_path` values**, not
+  UUIDs, e.g. `"missing:ways_to_give/repeated-saying-3"`. The bundle's
+  `partner_added_inventory[]` is the live source of these ids.
 - **Treatment per kind** comes from the outline's assignment:
   - For facts: `card_per_row` (one row → one card heading + supporting
     fields), `embed_field` (pull one field into one slot), `list_items`
