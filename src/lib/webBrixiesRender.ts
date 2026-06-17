@@ -180,13 +180,22 @@ function fixHeroImageFan(root: Element): void {
 function fixHero34BleedStrips(root: Element): void {
   const heroes = Array.from(root.querySelectorAll<HTMLElement>('[data-layer="Hero Section 34"]'))
   for (const hero of heroes) {
-    // Ensure the hero itself clips — already in source, but defensive.
+    // The Hero 34 design depends on horizontal bleed — the image strips
+    // are wider than the artboard and intentionally clip at the edges.
+    // For Hero 34 ONLY (other templates would break if we widened this),
+    // force the hero + every flex ancestor between root and hero to
+    // ALLOW horizontal overflow, so the strips can lay out as a single
+    // row even if a parent container would otherwise constrain them.
     const heroStyle = hero.getAttribute('style') ?? ''
+    // Hero needs overflow:hidden so the bleed clips at the section edge,
+    // not the page edge.
     if (!/overflow\s*:\s*hidden/i.test(heroStyle)) {
       hero.setAttribute('style', appendStyle(heroStyle, 'overflow: hidden'))
     }
 
-    // Image strips: nowrap + center the bleed.
+    // Image strips: nowrap + explicit width to force horizontal layout
+    // regardless of parent width constraints. Brixies engineered these
+    // wider than the artboard on purpose (2026px top, 1512px bottom).
     const strips = Array.from(hero.querySelectorAll<HTMLElement>(
       '[data-layer="Container top images"], [data-layer="Container bot images"]',
     ))
@@ -194,8 +203,35 @@ function fixHero34BleedStrips(root: Element): void {
       let s = strip.getAttribute('style') ?? ''
       // Strip any wrap directive a prior pass appended.
       s = s.replace(/flex-wrap\s*:\s*(?:wrap|wrap-reverse)\s*;?/gi, '')
+      // Strip any width constraint that would force the strip to wrap.
+      // We want the strip to size to its content (the image siblings).
       s = appendStyle(s, 'flex-wrap: nowrap')
+      s = appendStyle(s, 'width: max-content')
+      s = appendStyle(s, 'min-width: max-content')
+      // Defensive: ensure the strip can extend past parent constraints.
+      s = appendStyle(s, 'flex-shrink: 0')
       strip.setAttribute('style', s)
+    }
+
+    // Allow each direct flex ancestor of the strips (within the Hero
+    // section) to overflow horizontally — without this, a parent
+    // Container with overflow:hidden or implicit width clips the strips
+    // before the hero's own overflow:hidden gets to clip them. Only
+    // touches ancestors INSIDE the hero, so other templates' layouts
+    // are untouched.
+    for (const strip of strips) {
+      let anc: HTMLElement | null = strip.parentElement
+      while (anc && anc !== hero) {
+        const aStyle = anc.getAttribute('style') ?? ''
+        if (/display\s*:\s*(?:inline-)?flex/i.test(aStyle)) {
+          let s = aStyle.replace(/overflow-x\s*:\s*hidden\s*;?/gi, '')
+          s = s.replace(/flex-wrap\s*:\s*(?:wrap|wrap-reverse)\s*;?/gi, '')
+          s = appendStyle(s, 'flex-wrap: nowrap')
+          s = appendStyle(s, 'overflow-x: visible')
+          anc.setAttribute('style', s)
+        }
+        anc = anc.parentElement
+      }
     }
 
     // Gradient fade rectangles: keep them above the images.
@@ -533,14 +569,24 @@ function hideUnfilledDecorativeSlots(
     // designer-bound photo/illustration placeholders that the partner
     // expects to see. Examples we MUST preserve: column_list (cards
     // with image), team rows with portraits, video-embed groups,
-    // hero feature-row image strips. The strategist doesn't supply
-    // these — the template's designer did, and the visual identity
-    // depends on them rendering.
-    if (containsImageField((field as WebGroupDef).item_schema)) continue
+    // hero feature-row image strips.
+    //
+    // ALSO never hide a group with an EMPTY item_schema. Brixies uses
+    // this shape for purely-designer-bound asset groups (e.g.
+    // cta-section-52's `image` group has item_schema: []) — the
+    // designer placed the asset in source HTML and there's no user-
+    // input field tied to it. Empty item_schema = "no user-input
+    // shape declared," and the user's rule is: only hide elements
+    // tied to UNPOPULATED user inputs. No user input declared →
+    // not subject to this rule.
+    const itemSchema = (field as WebGroupDef).item_schema
+    if (!Array.isArray(itemSchema) || itemSchema.length === 0) continue
+    if (containsImageField(itemSchema)) continue
 
     const els = root.querySelectorAll(`[data-layer="${cssEscape(layerName)}"]`)
     for (const el of Array.from(els) as HTMLElement[]) {
       if (el.getAttribute('data-substituted') === '1') continue
+      if (hasSubstitutedAncestor(el)) continue
       forceHide(el)
     }
   }
@@ -676,12 +722,33 @@ function hideUnpopulatedSchemaSlots(
     if (!isEmpty) continue
 
     // Hide the rendered element(s) bound to this slot.
+    // Critical: skip any element nested inside a palette-card clone
+    // or a substituted group item — its layer_name belongs to that
+    // child template's schema, NOT this top-level field. Without this
+    // guard the pass collapses every "Description" inside every
+    // rendered card whenever the outer section's description happens
+    // to be empty (e.g. feature-section-2's outer description slot
+    // shadowing the per-card description_card slot inside card-193).
     const els = root.querySelectorAll(`[data-layer="${cssEscape(layerName)}"]`)
     for (const el of Array.from(els) as HTMLElement[]) {
       if (el.getAttribute('data-substituted') === '1') continue
+      if (hasSubstitutedAncestor(el)) continue
       forceHide(el)
     }
   }
+}
+
+/** True if any ancestor of `el` has data-substituted="1" — meaning
+ *  the element lives INSIDE a substituted clone (palette card, group
+ *  item template), so its data-layer belongs to that clone's schema
+ *  scope, not the outer top-level field schema. */
+function hasSubstitutedAncestor(el: Element): boolean {
+  let p: Element | null = el.parentElement
+  while (p) {
+    if (p.getAttribute?.('data-substituted') === '1') return true
+    p = p.parentElement
+  }
+  return false
 }
 
 /** Brixies sources mark design wrappers with `data-layer="Frame NN"`
