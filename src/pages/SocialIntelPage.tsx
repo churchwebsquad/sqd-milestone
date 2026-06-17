@@ -66,13 +66,10 @@ export default function SocialIntelPage() {
     setSaved(false)
 
     try {
-      const res = await fetch('/api/church-intel/generate-social', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ memberId: selectedMember, amNotes: amNotes.trim() || undefined }),
+      const { data, error } = await supabase.functions.invoke('social-intel-generate', {
+        body: { memberId: selectedMember, amNotes: amNotes.trim() || undefined },
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? 'Generation failed')
+      if (error) throw new Error(error.message ?? 'Generation failed')
       setProfile(data.profile)
       setProfileMeta(data.meta ?? null)
       setScreen('profile')
