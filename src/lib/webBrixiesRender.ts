@@ -178,7 +178,16 @@ function fixHeroImageFan(root: Element): void {
  *      `width: 1512px` + the parent's `overflow: hidden` so the bleed
  *      is contained to the section, not the page. */
 function fixHero34BleedStrips(root: Element): void {
-  const heroes = Array.from(root.querySelectorAll<HTMLElement>('[data-layer="Hero Section 34"]'))
+  // The hero IS typically the root element itself, not a descendant —
+  // querySelectorAll doesn't include the root in its scan, so we have
+  // to check it explicitly. Without this, fixHero34BleedStrips quietly
+  // never fired (no descendant matched the selector, so the whole
+  // function was a no-op).
+  const heroes: HTMLElement[] = []
+  if ((root as HTMLElement).getAttribute?.('data-layer') === 'Hero Section 34') {
+    heroes.push(root as HTMLElement)
+  }
+  heroes.push(...Array.from(root.querySelectorAll<HTMLElement>('[data-layer="Hero Section 34"]')))
   for (const hero of heroes) {
     // The Hero 34 design depends on horizontal bleed — the image strips
     // are wider than the artboard and intentionally clip at the edges.
@@ -1300,19 +1309,34 @@ function applySlot(el: Element, slot: WebSlotDef, raw: unknown): void {
     case 'phone':
     case 'datetime': {
       const text = typeof raw === 'string' ? raw : ''
-      setInnerText(el, text)
+      if (text.length > 0) {
+        setInnerText(el, text)
+        // Mark substituted so downstream visibility passes know this
+        // element received real content — without this, the schema-
+        // driven hide pass can't distinguish "filled" from "empty"
+        // for non-CTA slots (only applyCta was marking before).
+        el.setAttribute('data-substituted', '1')
+      }
       return
     }
     case 'richtext': {
       const html = typeof raw === 'string' ? raw : ''
-      el.innerHTML = html || ''
+      if (html.length > 0) {
+        el.innerHTML = html
+        el.setAttribute('data-substituted', '1')
+      }
       return
     }
     case 'cta': {
       return applyCta(el, isCtaShape(raw) ? raw as { label?: string; url?: string } : { label: '', url: '' })
     }
     case 'image': {
-      applyImage(el, typeof raw === 'string' ? raw : '')
+      const src = typeof raw === 'string' ? raw : ''
+      applyImage(el, src)
+      // Only mark substituted when the user supplied a real src;
+      // empty image stays designer-bound (per the "images always render
+      // per template defaults" rule).
+      if (src.length > 0) el.setAttribute('data-substituted', '1')
       return
     }
     default:
