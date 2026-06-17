@@ -1623,6 +1623,23 @@ export interface CoworkHandoffSectionMeta {
    *  audit tab show "split from <original heading>" + lets the
    *  importer group siblings via split_group_id. */
   split_from:               string | null
+  /** Bind verdict from the v2 translator. `perfect` = every required
+   *  Brixies slot populated, no lorem fallbacks; `partial` = at least
+   *  one gap (uniform slot the picked template can't hold, required
+   *  slot cowork didn't fill, button missing label/url, items overflow).
+   *  Partial sections still push — the Rich Companion side panel gives
+   *  the strategist the durable source-of-truth view + variant picker. */
+  bind_quality?:            'perfect' | 'partial'
+  /** Per-gap diagnostic emitted by the v2 translator. Surfaced in the
+   *  cowork audit panel; aggregated into project-level perfect_rate. */
+  gaps?: Array<{
+    kind:     string                            // e.g. 'required_slot_missing', 'uniform_slot_not_supported_by_template'
+    severity: 'info' | 'warning' | 'blocker'
+    detail:   string
+    slot?:    string
+  }>
+  /** Canonical-templates manifest version this section was bound under. */
+  manifest_version?:        string
 }
 
 /** Per-field provenance tag. Lives at `web_sections.field_provenance[fieldKey]`.
