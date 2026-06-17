@@ -162,6 +162,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         site_strategy:        roadmap.site_strategy        ?? null,
         page_allocation_plan: roadmap.page_allocation_plan ?? null,
         critique_rollup:      roadmap.critique_rollup      ?? null,
+        cowork_handoff_audit: roadmap.cowork_handoff_audit ?? null,
         page_outlines_count:  Object.keys(pageOutlines).length,
         page_drafts_count:    Object.keys(pageDrafts).length,
         page_critiques_count: Object.keys(pageCritiques).length,
@@ -485,6 +486,9 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         auditBranch={!!project.notion_database_id}
         notionDatabaseUrl={project.notion_database_url ?? null}
         totalSteps={steps.length}
+        rollupAt={state?.critique_rollup?._meta?.generated_at ?? null}
+        handoffAudit={state?.cowork_handoff_audit ?? null}
+        onHandoffComplete={() => { void loadProjectState() }}
       />
 
       {error && (
@@ -538,7 +542,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
 // Header (readiness summary + refresh)
 // ────────────────────────────────────────────────────────────────────
 
-function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRefresh, refreshing, projectId, auditBranch, notionDatabaseUrl, totalSteps }: {
+function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRefresh, refreshing, projectId, auditBranch, notionDatabaseUrl, totalSteps, rollupAt, handoffAudit, onHandoffComplete }: {
   readiness:        ReadinessReport | null
   readinessLoading: boolean
   overallStats:     { done: number; ready: number; stale: number; cowork: number; waiting: number; firstReadyKey: string | null } | null
@@ -549,6 +553,14 @@ function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRe
   auditBranch:      boolean
   notionDatabaseUrl: string | null
   totalSteps:       number
+  /** synthesize-critique's _meta.generated_at — drives the handoff
+   *  card's "ready to push" state. */
+  rollupAt:         string | null
+  /** roadmap_state.cowork_handoff_audit — telemetry from the last
+   *  handoff run. Lets the card show "last pushed X ago" + telemetry. */
+  handoffAudit:     CoworkPipelineState['cowork_handoff_audit']
+  /** Re-load state after a successful manual push. */
+  onHandoffComplete: () => void
 }) {
   const blockers = readiness?.blockers ?? []
   const warnings = readiness?.warnings ?? []
@@ -614,6 +626,22 @@ function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRe
             )}
           </div>
         </div>
+      )}
+
+      {/* Push-to-Pages card — surfaced when the final cowork step
+          (synthesize-critique) has produced its rollup. The auto-fire
+          hook on critique_rollup.generated_at handles new completions;
+          this card covers projects that completed step 7 BEFORE the
+          handoff was wired, gives explicit re-push controls for edits
+          + retries, and shows the last-pushed telemetry so the
+          strategist sees no-information-loss confirmation. */}
+      {rollupAt && (
+        <PushToPagesCard
+          projectId={projectId}
+          rollupAt={rollupAt}
+          handoffAudit={handoffAudit}
+          onComplete={onHandoffComplete}
+        />
       )}
 
       {/* Timeline notes (AM handoff) — visibility BEFORE pipeline launch */}
@@ -1063,6 +1091,116 @@ function DownloadSkillButton({ skillPath, stepNumber }: { skillPath: string; ste
 // so the cowork session reads in-context instead of running per-page
 // RPC fan-outs. Covers steps 8/9/10 — one bundle, three rounds.
 // ────────────────────────────────────────────────────────────────────
+
+// ────────────────────────────────────────────────────────────────────
+// PushToPagesCard — manual trigger + status for the cowork→pages
+// handoff. The auto-fire useEffect on critique_rollup.generated_at
+// covers fresh completions, but projects that wrapped step 7 BEFORE
+// the handoff was wired need this surface. Also handles re-pushes
+// after cowork re-runs and retries on failure.
+// ────────────────────────────────────────────────────────────────────
+
+function PushToPagesCard({ projectId, rollupAt, handoffAudit, onComplete }: {
+  projectId:    string
+  rollupAt:     string
+  handoffAudit: CoworkPipelineState['cowork_handoff_audit']
+  onComplete:   () => void
+}) {
+  const [pushing, setPushing] = useState(false)
+  const [result, setResult]   = useState<{ ok: boolean; detail: string } | null>(null)
+
+  const lastPushedAt = handoffAudit?.ran_at ?? null
+  const stale        = lastPushedAt ? lastPushedAt < rollupAt : true   // never-pushed OR rollup newer than push
+  const lostInLast   = !!handoffAudit?.any_round_trip_loss
+
+  const push = async (force = false) => {
+    setPushing(true)
+    setResult(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const jwt = session?.access_token
+      if (!jwt) throw new Error('Not signed in — refresh and try again')
+      const r = await fetch('/api/web/cowork/handoff-to-pages', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
+        body:    JSON.stringify({ project_id: projectId, force }),
+      })
+      const body = await r.json().catch(() => ({})) as { ok?: boolean; error?: string; detail?: string; pages?: number; audit?: { total_atoms_preserved?: number; total_facts_preserved?: number; any_round_trip_loss?: boolean }; partner_locked_slugs?: string[] }
+      if (r.status === 409 && body.partner_locked_slugs) {
+        const proceed = confirm(`These pages are in partner review/approval and would be overwritten:\n\n  ${body.partner_locked_slugs.join('\n  ')}\n\nProceed anyway?`)
+        if (proceed) return void push(true)
+        setResult({ ok: false, detail: 'Cancelled — partner-locked pages preserved.' })
+        return
+      }
+      if (!r.ok || !body.ok) {
+        setResult({ ok: false, detail: body.detail ?? body.error ?? `status ${r.status}` })
+        return
+      }
+      const pageCount = body.pages ?? 0
+      const a = body.audit ?? {}
+      const summary = `Pushed ${pageCount} page${pageCount === 1 ? '' : 's'} · ${a.total_atoms_preserved ?? 0} atoms / ${a.total_facts_preserved ?? 0} facts preserved · ${a.any_round_trip_loss ? 'WITH ROUND-TRIP LOSS — check the audit/scan tab' : 'no information loss'}`
+      setResult({ ok: true, detail: summary })
+      onComplete()
+    } catch (e) {
+      setResult({ ok: false, detail: e instanceof Error ? e.message : 'unknown error' })
+    } finally {
+      setPushing(false)
+    }
+  }
+
+  const formatRel = (iso: string) => {
+    const diffMs = Date.now() - new Date(iso).getTime()
+    const mins = Math.floor(diffMs / 60_000)
+    if (mins < 1)    return 'just now'
+    if (mins < 60)   return `${mins} min ago`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24)    return `${hrs} hr${hrs === 1 ? '' : 's'} ago`
+    const days = Math.floor(hrs / 24)
+    return `${days} day${days === 1 ? '' : 's'} ago`
+  }
+
+  return (
+    <div className={`mb-4 rounded-xl border px-4 py-3 ${stale ? 'border-wm-accent/40 bg-wm-accent-tint/40' : 'border-wm-success/30 bg-wm-success-bg'}`}>
+      <div className="flex items-start gap-2.5">
+        <ArrowRight size={14} className="shrink-0 mt-0.5 text-wm-accent-strong" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong mb-1">
+            Cowork → Pages handoff
+          </p>
+          {!lastPushedAt && (
+            <p className="text-[12.5px] text-wm-text leading-snug">
+              Cowork finished. The pages haven't been pushed yet — click below to bridge outlines + drafts + critiques into the Pages workspace. Full provenance preserved.
+            </p>
+          )}
+          {lastPushedAt && stale && (
+            <p className="text-[12.5px] text-wm-text leading-snug">
+              Last pushed <strong>{formatRel(lastPushedAt)}</strong>, but cowork finished <strong>{formatRel(rollupAt)}</strong>. Push again to sync the latest critiques.
+            </p>
+          )}
+          {lastPushedAt && !stale && (
+            <p className="text-[12.5px] text-wm-text leading-snug">
+              Pages are in sync. Last pushed <strong>{formatRel(lastPushedAt)}</strong> — {(handoffAudit?.total_atoms_preserved ?? 0)} atoms / {(handoffAudit?.total_facts_preserved ?? 0)} facts preserved {lostInLast ? <span className="text-wm-danger font-semibold">with round-trip loss (check audit tab)</span> : 'with no information loss'}.
+            </p>
+          )}
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => void push(false)}
+              disabled={pushing}
+              className={`text-[12px] font-semibold px-3 py-1.5 rounded-lg ${stale ? 'bg-wm-accent text-wm-text-on-accent hover:bg-wm-accent-strong' : 'border border-wm-border bg-wm-bg-elevated text-wm-text hover:bg-wm-bg-hover'} disabled:opacity-50 transition-colors inline-flex items-center gap-1.5`}
+            >
+              {pushing ? <Loader2 size={12} className="animate-spin" /> : <ArrowRight size={12} />}
+              {pushing ? 'Pushing…' : (stale ? 'Push to Pages' : 'Re-push (force)')}
+            </button>
+            {result && (
+              <p className={`text-[11px] ${result.ok ? 'text-wm-success' : 'text-wm-danger'}`}>{result.detail}</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function DownloadBundleButton({ projectId }: { projectId: string }) {
   const [downloading, setDownloading] = useState(false)

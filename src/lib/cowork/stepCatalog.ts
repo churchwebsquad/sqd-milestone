@@ -32,6 +32,19 @@ export interface CoworkPipelineState {
   site_strategy:         { _meta?: { generated_at?: string; model?: string } } | null
   page_allocation_plan:  { _meta?: { generated_at?: string; model?: string } } | null
   critique_rollup:       { _meta?: { generated_at?: string; model?: string } } | null
+  /** Telemetry from /api/web/cowork/handoff-to-pages — written when
+   *  the cowork pipeline pushes its three artifacts into web_pages +
+   *  web_sections. Drives the "Push to Pages" button state on the
+   *  CoworkWorkspace header. */
+  cowork_handoff_audit:  {
+    ran_at?:              string
+    branch?:              string
+    pages?:               Record<string, unknown>
+    total_atoms_preserved?:  number
+    total_facts_preserved?:  number
+    total_topics_preserved?: number
+    any_round_trip_loss?: boolean
+  } | null
   /** Strategic-goals snapshot timestamp — upstream of every step that
    *  consumes goals (3, 6, 7, 8, 9, 10, 11). When this is fresher than
    *  the step's own output, the step flips to 'stale'. */
