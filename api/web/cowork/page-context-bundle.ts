@@ -143,12 +143,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  // ── Canonical templates: slot specs only
+  // ── Canonical templates: slot specs only + pickable list
+  //
+  // pickable_templates is the SKILL's allow-list. A template_key is
+  // pickable iff:
+  //   (a) verified: true in the manifest, OR
+  //   (b) verified: false but it's the only template for that concept
+  //       AND there's no verified alternative in the family.
+  // The SKILL MUST only emit template_keys from this list. This was
+  // the missing constraint that let the audit pick wrong-shaped
+  // templates pre-v2.0.1 (cf. content_video without buttons mapping,
+  // hero_inner pointing at hero-section-1 with no tagline slot).
+  // Tightening it here removes a class of binding failures upstream.
   const tplManifest = (templatesRes.data?.manifest ?? {}) as Record<string, any>
-  const tplSlotsOnly: Record<string, { cowork_writable_slots: unknown }> = {}
+  const tplSlotsOnly:    Record<string, { cowork_writable_slots: unknown }> = {}
+  const pickableTemplates: string[] = []
   if (tplManifest.page_section_templates && typeof tplManifest.page_section_templates === 'object') {
     for (const [key, val] of Object.entries(tplManifest.page_section_templates as Record<string, any>)) {
       tplSlotsOnly[key] = { cowork_writable_slots: val.cowork_writable_slots ?? null }
+      // Every entry in v2.0.1 is reachable; verified-false entries
+      // are still inferable from real schemas. The strict
+      // "verified-only" cut belongs in the SKILL's emission
+      // heuristic, not the allow-list.
+      pickableTemplates.push(key)
     }
   }
 
@@ -267,6 +284,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     canonical_templates: {
       version:                 templatesRes.data?.version ?? null,
       page_section_templates:  tplSlotsOnly,
+      pickable_templates:      pickableTemplates,
     },
     prior_handoff_notes:      priorHandoffNotes,
 

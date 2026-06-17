@@ -95,6 +95,7 @@ Bundle keys you consume:
   strategic_goals_approved:   { ... approved-only buckets }
   canonical_templates: {                                     // slot vocab
     page_section_templates: Record<string, { cowork_writable_slots }>
+    pickable_templates:     string[]                          // EMIT ONLY FROM THIS LIST
   }
 
   atoms_pool:        { by_id, by_topic }                    // for source-coverage axis
@@ -167,7 +168,7 @@ section that runs until the next heading at the same level.
 For each section, decide three things — these BECOME the outline +
 draft for the page:
 
-**(a) Pick a `template_key`** from `canonical_templates.page_section_templates`. Match by section role + content shape:
+**(a) Pick a `template_key`** from `canonical_templates.pickable_templates` (the bundle's allow-list of templates whose `uniform_to_brixies` mapping is grounded in real Brixies schemas). Emitting a `template_key` NOT in `pickable_templates` is a hard error — the handoff translator can't bind it. Match by section role + content shape:
 
   - Lead-in / opener at top of page → `hero_homepage` (home only) or `hero_inner` (every other page)
   - Card list / 3-item feature → `content_featured_a` (with palette) or `content_image_text_a`
