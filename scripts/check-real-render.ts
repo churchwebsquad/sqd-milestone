@@ -109,6 +109,15 @@ async function main(): Promise<void> {
     .in('id', tplIds)
   const tplById = new Map((templates as any[]).map(t => [t.id, t]))
 
+  // Card-family templates used by palette groups (item_template_ref:
+  // 'from_palette'). The renderer's expandPaletteGroup looks up the
+  // picked card template via the cardTemplates param — must be loaded
+  // and passed for sections like feature-section-2 to bind correctly.
+  const { data: cardTpls } = await sb.from('web_content_templates')
+    .select('id, family, layer_name, fields, source_html')
+    .eq('family', 'Card')
+  const cardTemplatesById = Object.fromEntries(((cardTpls ?? []) as any[]).map(t => [t.id, t]))
+
   // Load v2.0.1 manifest so we re-derive field_values via the CURRENT
   // translator (not whatever stale state the DB row was written with).
   const { data: manRes } = await sb.schema('strategy').from('cowork_templates')
@@ -155,7 +164,7 @@ async function main(): Promise<void> {
 
     let html: string
     try {
-      html = renderSectionToHtml(tpl, derived as any, {})
+      html = renderSectionToHtml(tpl, derived as any, {}, cardTemplatesById)
     } catch (e) {
       misses.push({ page_slug: slug, intent, template: tpl.id, field: '<render-throw>', expected: String(e).slice(0, 80), context: '' })
       continue

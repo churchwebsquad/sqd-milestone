@@ -480,6 +480,44 @@ function applyTemplateOverrides(
       return out
     }
 
+    case 'feature-section-2': {
+      // Primary cards-grid template (per user direction). Uses palette
+      // card-193 — the safest variant because it has heading + body +
+      // CTA + image per card. The palette card's source HTML carries
+      // BOTH an outer (heading/description) layer AND a nested `card`
+      // group with heading_card/description_card/buttons/image_card.
+      // Mapping:
+      //   cowork item.item_heading        → outer heading + heading_card
+      //   cowork item.item_body           → outer description + description_card
+      //   cowork item.item_cta_label/url  → card.buttons[0].contact_card
+      // image_card stays designer-bound (cowork never writes images).
+      //
+      // Force the palette pick to card-193 via the
+      // {__palette_template_id, items} wrapper expandPaletteGroup
+      // recognizes — this overrides whatever default
+      // referenced_template_id the schema declared.
+      const cardItems = items.map(it => {
+        const ctaLabel = typeof it.item_cta_label === 'string' ? it.item_cta_label : ''
+        const ctaUrl   = sanitizeUrl(it.item_cta_url)
+        const cardInner: Record<string, unknown> = {
+          heading_card:     String(it.item_heading ?? ''),
+          description_card: ensureHtml(String(it.item_body ?? '')),
+        }
+        if (ctaLabel) {
+          cardInner.buttons = [{ contact_card: ctaLabel, url: ctaUrl }]
+        }
+        return {
+          // Outer card slots (rendered above the inner card content)
+          heading:     String(it.item_heading ?? ''),
+          description: ensureHtml(String(it.item_body ?? '')),
+          // Inner card group — one inner card per outer card (single_instance_hint)
+          card:        [cardInner],
+        }
+      })
+      out.card = { __palette_template_id: 'card-193', items: cardItems }
+      return out
+    }
+
     case 'content-section-96': {
       // counter_contain[]{counter[].description, counter_description}
       out.counter_contain = items.map(it => ({
