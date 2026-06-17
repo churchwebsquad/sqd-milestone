@@ -85,13 +85,26 @@ export function isHtmlAlready(value: unknown): boolean {
   return /^<(p|ul|ol|li|h\d|div|blockquote|figure|table|section|article)[\s>]/i.test(value.trim())
 }
 
-/** True if a string is (or starts with) a `[NEEDS INPUT: ...]` marker.
- *  These are explicit strategist placeholders for missing data —
- *  never substitute, never fabricate. Visible-text slots keep them
- *  verbatim; url slots return empty so the rendered href doesn't
- *  become a literal "[NEEDS INPUT: maps link]" link. */
+/** True if a string is a strategist gap marker that must never be
+ *  treated as final content. Recognized shapes (matching the audit
+ *  SKILL's verbatim-preservation rule):
+ *    - `[NEEDS INPUT: ...]`           — explicit placeholder
+ *    - `\[NEEDS INPUT: ...\]`         — escaped-bracket variant
+ *    - `*pending: ...*`               — italicized strategist note
+ *    - `*photo: [NEEDS INPUT: ...]*`  — per-item asset marker
+ *    - `*image: [NEEDS INPUT: ...]*`  — same, image variant
+ *
+ *  Visible-text slots keep these verbatim so the strategist sees the
+ *  gap; URL slots return empty (sanitizeUrl) so the rendered href
+ *  doesn't become a broken literal-text link. */
 export function isNeedsInput(value: unknown): boolean {
-  return typeof value === 'string' && /^\s*\[NEEDS INPUT\b/i.test(value)
+  if (typeof value !== 'string') return false
+  const s = value.trim()
+  return (
+    /^\\?\[NEEDS INPUT\b/i.test(s) ||
+    /^\*pending\s*:/i.test(s) ||
+    /^\*(?:photo|image)\s*:\s*\\?\[NEEDS INPUT\b/i.test(s)
+  )
 }
 
 /** Sanitize a URL field: blank out `[NEEDS INPUT: ...]` so it doesn't

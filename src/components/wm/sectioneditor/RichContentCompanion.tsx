@@ -47,8 +47,19 @@ interface Props {
   onChange: (patch: Partial<WebSection>) => void
 }
 
-interface ButtonRow { label: string; url: string }
-interface ItemRow   { item_heading: string; item_body: string; item_meta: string }
+interface ButtonRow { label: string; url: string; kind?: 'primary' | 'secondary' }
+interface ItemRow   {
+  item_heading:    string
+  item_body:       string
+  item_meta:       string
+  /** Optional per-item CTA — preserved when the picked template
+   *  supports per-card buttons (e.g. cards_with_cta /
+   *  feature-section-103). Cowork captures these from Notion
+   *  cards-grid sections; the Companion exposes them so the
+   *  strategist can add/edit URLs manually. */
+  item_cta_label?: string
+  item_cta_url?:   string
+}
 
 interface CoworkSlotValues {
   tagline?:         string
@@ -157,9 +168,21 @@ export function RichContentCompanion({ section, template, onChange }: Props) {
     if (body)           out.body            = body
     if (accentBody)     out.accent_body     = accentBody
     const cleanItems = items
-      .map(i => ({ item_heading: i.item_heading.trim(), item_body: i.item_body.trim(), item_meta: i.item_meta.trim() }))
-      .filter(i => i.item_heading || i.item_body || i.item_meta)
-    if (cleanItems.length > 0) out.items = cleanItems
+      .map(i => {
+        const row: Record<string, string> = {
+          item_heading: i.item_heading.trim(),
+          item_body:    i.item_body.trim(),
+          item_meta:    i.item_meta.trim(),
+        }
+        // Per-item CTA fields are optional; only persist when filled.
+        const ctaLabel = (i.item_cta_label ?? '').trim()
+        const ctaUrl   = (i.item_cta_url   ?? '').trim()
+        if (ctaLabel) row.item_cta_label = ctaLabel
+        if (ctaUrl)   row.item_cta_url   = ctaUrl
+        return row
+      })
+      .filter(i => i.item_heading || i.item_body || i.item_meta || i.item_cta_label || i.item_cta_url)
+    if (cleanItems.length > 0) out.items = cleanItems as ItemRow[]
     const cleanButtons = buttons
       .map(b => ({ label: b.label.trim(), url: b.url.trim() }))
       .filter(b => b.label || b.url)
@@ -365,6 +388,28 @@ export function RichContentCompanion({ section, template, onChange }: Props) {
                       placeholder="Item meta (optional)"
                       className="w-full px-1.5 py-1 text-[10.5px] text-wm-text-muted rounded border border-wm-border-subtle focus:border-wm-accent focus:outline-none"
                     />
+                    {/* Per-item CTA — only applies when the picked
+                        template supports per-card buttons. The fields
+                        always render so the strategist can add a CTA
+                        + then swap the template to one that holds it. */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] font-bold text-wm-text-subtle min-w-[28px]">CTA</span>
+                      <input
+                        type="text"
+                        value={it.item_cta_label ?? ''}
+                        onChange={e => setItems(arr => arr.map((x, i) => i === idx ? { ...x, item_cta_label: e.target.value } : x))}
+                        placeholder="Button label (optional)"
+                        className="flex-1 px-1.5 py-1 text-[10.5px] rounded border border-wm-border-subtle focus:border-wm-accent focus:outline-none"
+                        maxLength={30}
+                      />
+                      <input
+                        type="text"
+                        value={it.item_cta_url ?? ''}
+                        onChange={e => setItems(arr => arr.map((x, i) => i === idx ? { ...x, item_cta_url: e.target.value } : x))}
+                        placeholder="URL"
+                        className="flex-[2] px-1.5 py-1 text-[10px] text-wm-text-muted rounded border border-wm-border-subtle focus:border-wm-accent focus:outline-none"
+                      />
+                    </div>
                   </div>
                 ))}
                 <button

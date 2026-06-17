@@ -129,8 +129,26 @@ That's it. No per-section RPC fan-out.
   sections: Array<{
     section_intent_id: string                 // preserve from outline
     template_key:      string                  // preserve from outline
-    /** Slot → drafted value. Keys MUST match
-     *  canonical_templates[template_key].slots[*].name exactly. */
+    /** Slot → drafted value. Keys MUST match the closed uniform
+     *  slot vocabulary: tagline, primary_heading, body, accent_body,
+     *  items[], buttons[]. The downstream translator
+     *  (composeFieldValuesForBrixies) re-derives the Brixies-shaped
+     *  field_values per the canonical-templates manifest.
+     *
+     *  items[] subfields:
+     *    { item_heading, item_body, item_meta?,
+     *      item_cta_label?, item_cta_url? }
+     *  Per-item CTAs are captured when the source has them (cards-
+     *  grid sections, ministry spotlights). They're optional: the
+     *  translator routes them into the picked template's per-card
+     *  button slot when supported, drops them when not (and the
+     *  audit picks a template that supports them when present).
+     *
+     *  buttons[] subfields:
+     *    { label, url, kind?: 'primary' | 'secondary' }
+     *  Capture EVERY button the section calls for, not just one.
+     *  Primary+Secondary CTAs on a final-CTA section are two
+     *  separate entries with `kind` set. */
     field_values:      Record<string, unknown>
     /** Per-slot drafter notes. critique-page reads these. */
     voice_notes_by_slot: Record<string, string>   // optional but encouraged
@@ -181,6 +199,20 @@ You imitate. You do not invent.
    atom doesn't fit the slot's max_chars, you MUST surface it as a
    `deferred_slot` and let the outline come back with a different
    template. Verbatim wins over slot.
+
+   **`[NEEDS INPUT: ...]` markers are semantic, not starter copy.**
+   When source content (atom body, fact data, crawl passage, or a
+   strategist note) contains a `[NEEDS INPUT: ...]` bracket — even
+   if it offers starter options like "[NEEDS INPUT: Ben Folman —
+   three starter directions to react to: 'A Church for Arvada.' /
+   'Rooted Here in Arvada.' / 'Faith That Stays in Arvada.']" — the
+   bracket payload lands in the slot VERBATIM. Never substitute one
+   of the starter options as if it were final copy; never paraphrase
+   the bracket text. The downstream translator + Rich Content
+   Companion recognize the marker and handle it (visible text shows
+   the gap; url slots blank the href so it doesn't render a literal-
+   text link). Strategist sees what's pending; cowork doesn't
+   fabricate.
 
 3. **Anti-exemplars are non-negotiable bans.** Scan every drafted
    value against `stage_1.voice_anti_exemplars[].phrase`. ANY hit =

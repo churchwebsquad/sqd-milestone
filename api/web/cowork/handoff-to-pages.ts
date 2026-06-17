@@ -721,22 +721,24 @@ export default async function handler(req: any, res: any) {
   }
 
   if (refusalEntries.length > 0) {
-    // Append to handoff_refusal_log (jsonb array). Use UPDATE w/ jsonb concat.
-    const { error: logErr } = await sb.rpc('append_handoff_refusal_log', {
-      p_project_id: projectId,
-      p_entries:    refusalEntries,
-    }).catch(() => ({ error: null }))
-    if (logErr) {
-      // Fallback: read-modify-write
-      const { data: cur } = await sb.from('strategy_web_projects')
-        .select('handoff_refusal_log')
-        .eq('id', projectId)
-        .maybeSingle()
-      const existing = ((cur as any)?.handoff_refusal_log ?? []) as unknown[]
-      await sb.from('strategy_web_projects')
-        .update({ handoff_refusal_log: [...existing, ...refusalEntries] })
-        .eq('id', projectId)
-    }
+    // Append to handoff_refusal_log, but CAP the total at 500 entries
+    // so the jsonb column doesn't grow unbounded across many handoff
+    // re-runs. Older entries get dropped (FIFO) — Claude Code only
+    // needs recent ones to spot patterns. Read-modify-write keeps
+    // the cap enforcement in one place.
+    const REFUSAL_LOG_CAP = 500
+    const { data: cur } = await sb.from('strategy_web_projects')
+      .select('handoff_refusal_log')
+      .eq('id', projectId)
+      .maybeSingle()
+    const existing = ((cur as any)?.handoff_refusal_log ?? []) as unknown[]
+    const merged = [...existing, ...refusalEntries]
+    const trimmed = merged.length > REFUSAL_LOG_CAP
+      ? merged.slice(merged.length - REFUSAL_LOG_CAP)
+      : merged
+    await sb.from('strategy_web_projects')
+      .update({ handoff_refusal_log: trimmed })
+      .eq('id', projectId)
   }
 
   return res.status(200).json({

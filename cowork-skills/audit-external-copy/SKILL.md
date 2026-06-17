@@ -383,16 +383,29 @@ The audit's whole reason for existing is that the partner provided
 copy. Lifting it 1:1 IS the win condition. The most common ways this
 skill has hurt the strategist:
 
-1. **`[NEEDS INPUT: ...]` placeholders are not content — preserve
-   verbatim.** When a Notion section has copy like
-   `**Tagline:** [NEEDS INPUT: Ben Folman — three starter directions
-   to react to: 'A Church for Arvada.' / 'Rooted Here in Arvada.' /
-   'Faith That Stays in Arvada.']`, put the FULL bracket payload
-   into the slot exactly as written. Never pick one of the starter
-   options as if it were final copy. Never paraphrase the bracket
-   text. The handoff renderer recognizes `[NEEDS INPUT: ...]` and
-   handles it (visible text stays so the strategist sees the gap;
-   url slots blank the href so it doesn't become a broken link).
+1. **Strategist-placed gap markers are not content — preserve
+   verbatim.** Recognized marker shapes (treat the entire run as
+   ONE atomic string):
+   - `[NEEDS INPUT: ...]` — explicit placeholder for missing data.
+     Often carries starter options ("react to: 'A.' / 'B.' / 'C.'")
+     — those are prompts to the client, NOT picks. Never substitute
+     one option as final copy.
+   - `*pending: ...*` — italicized strategist note (e.g. `*pending:
+     confirm email domain*`). Belongs in `item_meta` or appended to
+     the slot it annotates.
+   - `*photo: [NEEDS INPUT: ...]*`, `*image: [NEEDS INPUT: ...]*`
+     — per-item asset placeholders for staff bios, cards, etc.
+     Preserve in `item_meta`; do NOT route into the image slot
+     (cowork never fills image slots — those stay
+     Brixies-designer-bound).
+   - `\[NEEDS INPUT\]` / `\[NEEDS INPUT: ...\]` — same as above
+     when Notion has escaped the brackets in markdown.
+
+   The handoff renderer recognizes these via `isNeedsInput()` in
+   coworkToBrixies.ts: visible text shows the marker so the
+   strategist sees the gap; URL slots blank the href so it doesn't
+   become a broken literal-text link. NEVER substitute, paraphrase,
+   or summarize a marker. NEVER drop it.
 
 2. **Capture every CTA — primary, secondary, AND per-item.** Notion
    sections often have multiple CTAs:
