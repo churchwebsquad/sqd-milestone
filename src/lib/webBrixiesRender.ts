@@ -458,13 +458,14 @@ function hideEmptyButtonShells(root: Element): void {
   for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-layer]'))) {
     if (!isButtonShellLayer(el)) continue
     if (hasNestedButtonShell(el)) continue
-    if (hasMeaningfulContent(el)) continue
+    if (hasButtonText(el)) continue                  // real text content → keep
+    if (el.getAttribute('data-substituted') === '1') continue  // applyCta bound it
     forceHide(el)
   }
 
   // Pass 2 — raw <button> tags lacking content
   for (const el of Array.from(root.querySelectorAll<HTMLElement>('button'))) {
-    if (hasMeaningfulContent(el)) continue
+    if (hasButtonText(el)) continue
     forceHide(el)
   }
 
@@ -480,22 +481,22 @@ function hideEmptyButtonShells(root: Element): void {
   }
 }
 
-/** Hide decorative top-level groups + image slots that the strategist's
- *  bind doesn't fill. Without this pass, Brixies templates render their
- *  designer-time defaults (3 checkmark circles for feature_element, 3
- *  cube icons for description_items, an image placeholder square for
- *  card_icon, etc.) — which the partner reads as "the layout has empty
- *  holes."
+/** Hide decorative TEXT-ONLY top-level groups that cowork doesn't fill.
  *
- *  Rules (conservative — only hide what's clearly decorative):
- *  - Top-level group with `default_count > 0` and EMPTY field_values
- *    entry → hide every element whose data-layer matches its layer_name.
- *  - Top-level image slot with EMPTY field_values entry, where the
- *    rendered element still carries Brixies-default content (no real
- *    src) → hide.
- *  - Buttons/contact slots are EXCLUDED — they have their own pass
- *    (hideEmptyButtonShells) which understands the contact-nested
- *    wrapping pattern. */
+ *  Scope (deliberately narrow — easy to revert if any side effect):
+ *  - Top-level group with default_count > 0 AND empty field_values entry
+ *    AND item_schema contains ONLY text/richtext/cta fields (no image,
+ *    no nested groups carrying image fields) → hide.
+ *  - Image slots: NEVER hidden. Images are template-design defaults; the
+ *    strategist doesn't fill them at this stage and the partner expects
+ *    the designed placeholder to render. Same rule for video/embed
+ *    groups — anything with an image-typed leaf in its schema stays.
+ *  - Button-family layers: skipped here, handled by hideEmptyButtonShells
+ *    (which understands the contact-nested wrapping).
+ *
+ *  The targets are specifically things like feature_element's 3 checkmark
+ *  circles + description_items' 3 cube icons — pure design decoration
+ *  that has no analog in cowork's content vocabulary. */
 function hideUnfilledDecorativeSlots(
   root: Element,
   fields: ReadonlyArray<WebFieldDef> | undefined | null,
@@ -503,45 +504,50 @@ function hideUnfilledDecorativeSlots(
 ): void {
   if (!fields) return
   for (const field of fields) {
+    if (field.kind !== 'group') continue
     const layerName = (field as { layer_name?: string }).layer_name ?? field.key
     if (!layerName) continue
+
     const lc = layerName.toLowerCase()
-    // Skip button-family layers — they're handled by hideEmptyButtonShells.
+    // Skip button-family layers (existing hideEmptyButtonShells handles).
     if (lc.includes('button') || lc === 'contact' || lc.includes('buttons')) continue
 
-    if (field.kind === 'group') {
-      const userItems = values[field.key]
-      const hasUserContent = Array.isArray(userItems) && userItems.length > 0
-      if (hasUserContent) continue
-      // Only hide groups that have a designer-time default rendering
-      // (default_count > 0). Groups with default_count: 0 would already
-      // render no children — nothing to hide.
-      const defaultCount = (field as { default_count?: number }).default_count ?? 0
-      if (defaultCount <= 0) continue
-      // Find every element matching this group's layer_name and hide.
-      // For nested groups the inner clones inherit the layer of their
-      // schema slot, so a single querySelectorAll catches the
-      // top-level group container.
-      const els = root.querySelectorAll(`[data-layer="${cssEscape(layerName)}"]`)
-      for (const el of Array.from(els) as HTMLElement[]) {
-        // Don't hide elements that got marked data-substituted="1" —
-        // those received real content via the substitution pass.
-        if (el.getAttribute('data-substituted') === '1') continue
-        forceHide(el)
-      }
-      continue
-    }
+    // Skip if the strategist's bind has content for this group.
+    const userItems = values[field.key]
+    if (Array.isArray(userItems) && userItems.length > 0) continue
 
-    if (field.kind === 'slot' && field.type === 'image') {
-      const v = values[field.key]
-      if (typeof v === 'string' && v.trim() !== '') continue   // user supplied a real src
-      const els = root.querySelectorAll(`[data-layer="${cssEscape(layerName)}"]`)
-      for (const el of Array.from(els) as HTMLElement[]) {
-        if (el.getAttribute('data-substituted') === '1') continue
-        forceHide(el)
-      }
+    // Only hide groups that ACTUALLY render defaults.
+    const defaultCount = (field as { default_count?: number }).default_count ?? 0
+    if (defaultCount <= 0) continue
+
+    // Critical guard: never hide a group whose item_schema contains
+    // an image-typed field (directly or nested). Those groups render
+    // designer-bound photo/illustration placeholders that the partner
+    // expects to see. Examples we MUST preserve: column_list (cards
+    // with image), team rows with portraits, video-embed groups,
+    // hero feature-row image strips. The strategist doesn't supply
+    // these — the template's designer did, and the visual identity
+    // depends on them rendering.
+    if (containsImageField((field as WebGroupDef).item_schema)) continue
+
+    const els = root.querySelectorAll(`[data-layer="${cssEscape(layerName)}"]`)
+    for (const el of Array.from(els) as HTMLElement[]) {
+      if (el.getAttribute('data-substituted') === '1') continue
+      forceHide(el)
     }
   }
+}
+
+/** True when the field array contains an image-typed slot anywhere
+ *  in its tree (including nested groups). Used to recognize "this
+ *  group renders design-time assets we must not hide." */
+function containsImageField(schema: ReadonlyArray<WebFieldDef> | undefined | null): boolean {
+  if (!Array.isArray(schema)) return false
+  for (const f of schema) {
+    if (f.kind === 'slot' && f.type === 'image') return true
+    if (f.kind === 'group' && containsImageField((f as WebGroupDef).item_schema)) return true
+  }
+  return false
 }
 
 /** Minimal CSS attribute-value escape — enough for layer_name values
@@ -571,6 +577,18 @@ function hasMeaningfulContent(el: Element): boolean {
   if ((el.textContent ?? '').trim().length > 0) return true
   if (el.querySelector('img, svg, video, picture, iframe, input') !== null) return true
   return false
+}
+
+/** Stricter check for BUTTONS specifically: only the presence of
+ *  TEXT counts. A decorative SVG arrow / icon inside a button shell
+ *  is NOT meaningful content — Brixies templates ship every button
+ *  with a small chevron / arrow SVG even when the label is empty,
+ *  and those empty shells render as a black rectangle the partner
+ *  reads as "broken button." Real partner-bound buttons either have
+ *  text OR get marked data-substituted="1" by applyCta (which the
+ *  caller checks separately). */
+function hasButtonText(el: Element): boolean {
+  return (el.textContent ?? '').trim().length > 0
 }
 
 function hasMeaningfulHref(a: HTMLAnchorElement): boolean {
