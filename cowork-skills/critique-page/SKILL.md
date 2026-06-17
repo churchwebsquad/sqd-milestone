@@ -248,6 +248,28 @@ hits. The verdict's `confidence_band` is computed from the 5 axes.
 }
 ```
 
+## Execution speed — spawn subagents per page when possible
+
+Each page's critique is independent of every other page's critique.
+That's exactly the shape parallel subagents fit.
+
+- **When subagent dispatch is available:** spawn one subagent per
+  page (or per batch of 3-5 pages). Each subagent does ONE page's
+  critique end-to-end: load outline + draft (one targeted SELECT
+  per page — never `SELECT roadmap_state`), run the 5-axis scoring
+  + mechanical scan + source-coverage recompute, persist via the
+  column-free pattern. Main session orchestrates + collects the
+  bands for the final rollup hint.
+- **When subagents aren't available:** process pages sequentially
+  and persist each critique AS IT'S DONE. Don't hold the full
+  per-page draft + the source pools in head across pages — load
+  per-page context, score, persist, drop.
+
+The historic failure mode here is the session "thinking" for 30+
+minutes because it tried to keep all pages' drafts in scope
+simultaneously. Per-page scope = much smaller per-call payload =
+much shorter thinking time.
+
 ## Confidence-band rules
 
 - **green** — All 5 axes ≥ 80. Mechanical scan: zero hits across

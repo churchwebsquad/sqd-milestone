@@ -8,9 +8,9 @@ description: |
   intelligent cross-page sorter — informed by church-website patterns
   (ministry-model templates) AND the partner's actual content + goals
   + persona journeys, NOT just the existing site's structure.
-model: anthropic/claude-fable-5
+model: anthropic/claude-opus-4-8
 allowed-tools: Read
-version: '1.0.0'
+version: '1.1.0'
 references:
   - ../page-outlines-by-ministry-model.md
   - ../canonical-templates.json
@@ -353,6 +353,63 @@ them.
 
 If a check fails, fix it and re-run the audit before involving the
 strategist.
+
+## Execution speed — keep per-call work small (read this BEFORE planning)
+
+The historic failure mode on this step is the strategist's session
+"thinking" for 30+ minutes without producing visible output. Cause:
+the model tries to allocate ALL pages (20+) in a single inference
+pass, holding every atom + fact + crawl topic + partner_added entry
+in head simultaneously. With adaptive thinking on, that's many
+minutes of internal deliberation before any text appears.
+
+Three rules to keep this step under 10 minutes wall-clock:
+
+1. **Process pages incrementally, NOT all at once.** Walk
+   `sitemap_pages` in order. For each page: spawn a quick decision
+   loop (its sections, its source picks, its journey role), emit
+   the page's allocation as compact JSON to scratch in your
+   working notes, then move to the next page. Do NOT attempt to
+   hold all 20+ pages' allocations in head before any output. You
+   keep them in working notes (in-conversation) and persist them
+   ONCE at the end via the column-free chunked-write.
+
+2. **Use subagents for true parallelism when possible.** When your
+   environment supports Task / subagent dispatch, spawn N subagents
+   in parallel, each handling a non-overlapping subset of pages.
+   Pattern:
+   - Subagent A: pages 1-5 (homepage + I'm New + Worship + …)
+   - Subagent B: pages 6-10
+   - Subagent C: pages 11-15
+   - Subagent D: pages 16-20
+   Each subagent receives the bundle inputs + the assigned page
+   slugs + the global allocation context (acf_plan, persona_journeys
+   for THEIR pages, source IDs already claimed by other subagents).
+   Main session orchestrates + consolidates. 4-5x wall-clock win on
+   a 20-page sitemap.
+
+3. **Don't re-read the entire bundle every time.** Skim the bundle
+   ONCE at session start. Extract: `sitemap_pages` (the list to
+   walk), `strategic_goals_approved.content_and_allocation` (the
+   gates), `acf_plan.atom_routes` + `acf_plan.fact_routes` (the
+   source→cell map), `partner_added_inventory` (the bucket→page
+   map). For each page in your walk, look up only the atoms/facts/
+   crawl topics relevant to that page's bucket / category / persona
+   — not the whole pool. The bundle's by_id + by_topic indexes
+   are there for this; use them.
+
+If you find yourself "still thinking" 5+ minutes into a single page's
+allocation, STOP and re-anchor:
+- What's the page's primary persona? (One lookup in site_strategy.)
+- What's its bucket / category in acf_plan? (One lookup.)
+- What atoms + facts + crawl topics + partner_added entries are
+  pre-routed to that bucket / persona? (Filter, don't enumerate.)
+- Compose section_intents from those filtered sources only.
+
+The strategic call lives in *picking sections × treatments × verbatim
+bands per page*, not in re-evaluating which atom belongs where (acf_plan
+already did that). Treat acf_plan + persona_journeys as authoritative
+inputs, not as drafts to second-guess.
 
 ## Review format
 

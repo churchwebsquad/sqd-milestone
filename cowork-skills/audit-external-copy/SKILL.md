@@ -153,6 +153,35 @@ and you shouldn't be running).
 
 ## Walk the sitemap autonomously
 
+### Execution speed — spawn subagents per page when possible
+
+This step writes 3 (sometimes 5) artifacts per page across a full
+sitemap. Serial processing of 14 pages × ~5 artifacts = 70+ MCP
+calls + 14 Notion fetches + the LLM thinking each artifact through.
+The historic failure is "session thinking for 30+ minutes" on a
+mid-sized sitemap because the model tries to hold every page's
+audit context in head simultaneously.
+
+- **When your environment supports Task / subagent dispatch:**
+  spawn one subagent per page (or per batch of 3-5 pages). Each
+  subagent does ONE page from start to finish: Notion fetch →
+  section split → template bind → 5-axis score → persist all
+  artifacts via the column-free pattern (see §Persist). Main
+  session orchestrates + reads back the handoff notes. Massive
+  wall-clock win because Notion fetches + persists run in
+  parallel instead of serial.
+- **When subagents aren't available:** process pages sequentially
+  but persist each page's artifacts AS THEY'RE COMPLETED (don't
+  accumulate). If the session interrupts mid-walk, the next
+  session resumes from the next un-audited page without redoing
+  work. The column-free pattern is cheap and idempotent.
+
+Either way: keep per-page context small. For each page, the only
+inputs you need are: that page's Notion body + the bundle's
+canonical_templates + atoms_pool + facts_pool + stage_1 +
+strategic_goals. You do NOT need other pages' Notion content in
+scope while auditing this page.
+
 ### 1. List the Notion DB pages, filter by Type, derive slug map
 
 Call Notion MCP `query_database(database_id=notion_audit_branch.database_id)`

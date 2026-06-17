@@ -76,6 +76,30 @@ You have the full page list in the attached project bundle at
 `sitemap_pages`. Walk it in `nav_order`. Don't prompt the strategist
 for the next slug; just look up the next entry in-context.
 
+### Execution speed — spawn subagents per page when possible
+
+The historic failure mode on this step is the session "thinking"
+for 30+ minutes on a 20-page sitemap because it tries to keep
+allocation context for ALL pages in head simultaneously. Don't.
+
+- **When your environment supports Task / subagent dispatch:**
+  spawn one subagent per page (or per batch of 3-5 pages). Each
+  subagent does ONE page's outline from start to finish: load
+  allocation → resolve sources → pick template per section → bind
+  slots → produce outline JSON → persist via the column-free
+  pattern (see §Persist). Main session orchestrates + reads back
+  the handoff notes. 4-5x wall-clock win on a 20-page sitemap.
+- **When subagents aren't available:** process pages sequentially
+  but keep per-page context small — load ONLY that page's
+  allocation entry + the source IDs it routes, not the whole
+  bundle, in your working scope. The bundle's by_id + by_topic
+  indexes are there to make per-source lookup cheap.
+
+Persist each page's outline AS IT'S DONE (the column-free pattern
+is cheap and idempotent — see §Persist). Don't accumulate 20 pages
+in head before writing the first. Each persisted page hands the
+drafter a starting point even if the session interrupts mid-walk.
+
 ## Your input — read from the attached project bundle, NOT from MCP
 
 The strategist attached **`cowork-pipeline.<partner>.project-bundle.json`**

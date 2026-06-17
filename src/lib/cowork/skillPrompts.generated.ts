@@ -53,7 +53,7 @@ export const COWORK_SKILL_BUNDLES: Record<CoworkSkillName, CoworkSkillBundle> = 
     name:         'audit-external-copy',
     model:        'anthropic/claude-opus-4-7',
     version:      '2.0.0',
-    contentHash:  'ee8e3dfb976b30bf',
+    contentHash:  '5271eee9824ad393',
     references:   [
       'cowork-skills/critique-page/references/audit-criteria.md',
     ],
@@ -190,6 +190,35 @@ which would mean the project hasn't opted into the audit branch
 and you shouldn't be running).
 
 ## Walk the sitemap autonomously
+
+### Execution speed — spawn subagents per page when possible
+
+This step writes 3 (sometimes 5) artifacts per page across a full
+sitemap. Serial processing of 14 pages × ~5 artifacts = 70+ MCP
+calls + 14 Notion fetches + the LLM thinking each artifact through.
+The historic failure is "session thinking for 30+ minutes" on a
+mid-sized sitemap because the model tries to hold every page's
+audit context in head simultaneously.
+
+- **When your environment supports Task / subagent dispatch:**
+  spawn one subagent per page (or per batch of 3-5 pages). Each
+  subagent does ONE page from start to finish: Notion fetch →
+  section split → template bind → 5-axis score → persist all
+  artifacts via the column-free pattern (see §Persist). Main
+  session orchestrates + reads back the handoff notes. Massive
+  wall-clock win because Notion fetches + persists run in
+  parallel instead of serial.
+- **When subagents aren't available:** process pages sequentially
+  but persist each page's artifacts AS THEY'RE COMPLETED (don't
+  accumulate). If the session interrupts mid-walk, the next
+  session resumes from the next un-audited page without redoing
+  work. The column-free pattern is cheap and idempotent.
+
+Either way: keep per-page context small. For each page, the only
+inputs you need are: that page's Notion body + the bundle's
+canonical_templates + atoms_pool + facts_pool + stage_1 +
+strategic_goals. You do NOT need other pages' Notion content in
+scope while auditing this page.
 
 ### 1. List the Notion DB pages, filter by Type, derive slug map
 
@@ -1668,7 +1697,7 @@ Final status write: \`{ status: "done" }\` OR \`{ status: "failed", last_error }
     name:         'critique-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  '4e4bded71bad3801',
+    contentHash:  'd12b296af70e7ce4',
     references:   [
       'cowork-skills/critique-page/references/audit-criteria.md',
     ],
@@ -1905,6 +1934,28 @@ hits. The verdict's \`confidence_band\` is computed from the 5 axes.
   _meta: ArtifactMeta
 }
 \`\`\`
+
+## Execution speed — spawn subagents per page when possible
+
+Each page's critique is independent of every other page's critique.
+That's exactly the shape parallel subagents fit.
+
+- **When subagent dispatch is available:** spawn one subagent per
+  page (or per batch of 3-5 pages). Each subagent does ONE page's
+  critique end-to-end: load outline + draft (one targeted SELECT
+  per page — never \`SELECT roadmap_state\`), run the 5-axis scoring
+  + mechanical scan + source-coverage recompute, persist via the
+  column-free pattern. Main session orchestrates + collects the
+  bands for the final rollup hint.
+- **When subagents aren't available:** process pages sequentially
+  and persist each critique AS IT'S DONE. Don't hold the full
+  per-page draft + the source pools in head across pages — load
+  per-page context, score, persist, drop.
+
+The historic failure mode here is the session "thinking" for 30+
+minutes because it tried to keep all pages' drafts in scope
+simultaneously. Per-page scope = much smaller per-call payload =
+much shorter thinking time.
 
 ## Confidence-band rules
 
@@ -2682,7 +2733,7 @@ For each candidate, include \`occurrences\` and \`sections\` arrays in the propo
     name:         'draft-page',
     model:        'anthropic/claude-opus-4-8',
     version:      '1.0.0',
-    contentHash:  '50dd28ce9d3bf275',
+    contentHash:  'c7398a7bef3fa170',
     references:   [
       'cowork-skills/canonical-templates.json',
     ],
@@ -3143,6 +3194,29 @@ url per card) AND render them in the in-chat copy review.
 Rendering only the carousel shell = strategists see a hole and
 ask "where are the cards?" — that's the same loss as omitting
 crawl items.
+
+## Execution speed — subagent parallelism within the 5-page batch
+
+The 5-page batch workflow above is sequenced in conversation so the
+strategist can revise mid-batch. But the DRAFTING work for each
+page is independent — different sources, different sections, no
+cross-page dependency at draft time. When subagent dispatch is
+available, parallelize:
+
+- **Subagent per page within the batch.** Each subagent reads the
+  outline for its page + the relevant atom/fact/crawl-topic bodies,
+  produces the draft sections + source_coverage[] + voice_signal_report.
+  Main session collects all 5 drafts and shows them to the strategist
+  together (the 🔒/✍️ render).
+- Persist each page's draft IMMEDIATELY after the strategist signs
+  off — don't wait for the next page. The column-free pattern
+  (§Persist) is cheap and idempotent.
+
+When subagents aren't available, process pages sequentially but
+keep per-page context tight: load ONLY that page's outline + the
+source bodies it routes. The historic failure mode is "session
+thinking for 30+ minutes" because the drafter held all 5 outlines +
+the entire content pool in head simultaneously.
 
 ## Voice discipline
 
@@ -5316,7 +5390,7 @@ artifact itself is the canonical record; the note is the cliff notes.
     name:         'outline-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  '14722cb111c6ffe8',
+    contentHash:  'd9a3feb0bb9098a5',
     references:   [
       'cowork-skills/canonical-templates.json',
       'cowork-skills/page-outlines-by-ministry-model.md',
@@ -5381,6 +5455,30 @@ Loaded from \`roadmap_state.strategic_goals\` (\`status='approved'\` only):
 You have the full page list in the attached project bundle at
 \`sitemap_pages\`. Walk it in \`nav_order\`. Don't prompt the strategist
 for the next slug; just look up the next entry in-context.
+
+### Execution speed — spawn subagents per page when possible
+
+The historic failure mode on this step is the session "thinking"
+for 30+ minutes on a 20-page sitemap because it tries to keep
+allocation context for ALL pages in head simultaneously. Don't.
+
+- **When your environment supports Task / subagent dispatch:**
+  spawn one subagent per page (or per batch of 3-5 pages). Each
+  subagent does ONE page's outline from start to finish: load
+  allocation → resolve sources → pick template per section → bind
+  slots → produce outline JSON → persist via the column-free
+  pattern (see §Persist). Main session orchestrates + reads back
+  the handoff notes. 4-5x wall-clock win on a 20-page sitemap.
+- **When subagents aren't available:** process pages sequentially
+  but keep per-page context small — load ONLY that page's
+  allocation entry + the source IDs it routes, not the whole
+  bundle, in your working scope. The bundle's by_id + by_topic
+  indexes are there to make per-source lookup cheap.
+
+Persist each page's outline AS IT'S DONE (the column-free pattern
+is cheap and idempotent — see §Persist). Don't accumulate 20 pages
+in head before writing the first. Each persisted page hands the
+drafter a starting point even if the session interrupts mid-walk.
 
 ## Your input — read from the attached project bundle, NOT from MCP
 
@@ -8021,9 +8119,9 @@ Return JSON matching \`CoworkParseFactsResult\` (see
   },
   'plan-cross-page-allocation': {
     name:         'plan-cross-page-allocation',
-    model:        'anthropic/claude-fable-5',
-    version:      '1.0.0',
-    contentHash:  'b03efc438246735b',
+    model:        'anthropic/claude-opus-4-8',
+    version:      '1.1.0',
+    contentHash:  'bc132ceaae50c9d7',
     references:   [
       'cowork-skills/page-outlines-by-ministry-model.md',
       'cowork-skills/canonical-templates.json',
@@ -8365,6 +8463,63 @@ them.
 
 If a check fails, fix it and re-run the audit before involving the
 strategist.
+
+## Execution speed — keep per-call work small (read this BEFORE planning)
+
+The historic failure mode on this step is the strategist's session
+"thinking" for 30+ minutes without producing visible output. Cause:
+the model tries to allocate ALL pages (20+) in a single inference
+pass, holding every atom + fact + crawl topic + partner_added entry
+in head simultaneously. With adaptive thinking on, that's many
+minutes of internal deliberation before any text appears.
+
+Three rules to keep this step under 10 minutes wall-clock:
+
+1. **Process pages incrementally, NOT all at once.** Walk
+   \`sitemap_pages\` in order. For each page: spawn a quick decision
+   loop (its sections, its source picks, its journey role), emit
+   the page's allocation as compact JSON to scratch in your
+   working notes, then move to the next page. Do NOT attempt to
+   hold all 20+ pages' allocations in head before any output. You
+   keep them in working notes (in-conversation) and persist them
+   ONCE at the end via the column-free chunked-write.
+
+2. **Use subagents for true parallelism when possible.** When your
+   environment supports Task / subagent dispatch, spawn N subagents
+   in parallel, each handling a non-overlapping subset of pages.
+   Pattern:
+   - Subagent A: pages 1-5 (homepage + I'm New + Worship + …)
+   - Subagent B: pages 6-10
+   - Subagent C: pages 11-15
+   - Subagent D: pages 16-20
+   Each subagent receives the bundle inputs + the assigned page
+   slugs + the global allocation context (acf_plan, persona_journeys
+   for THEIR pages, source IDs already claimed by other subagents).
+   Main session orchestrates + consolidates. 4-5x wall-clock win on
+   a 20-page sitemap.
+
+3. **Don't re-read the entire bundle every time.** Skim the bundle
+   ONCE at session start. Extract: \`sitemap_pages\` (the list to
+   walk), \`strategic_goals_approved.content_and_allocation\` (the
+   gates), \`acf_plan.atom_routes\` + \`acf_plan.fact_routes\` (the
+   source→cell map), \`partner_added_inventory\` (the bucket→page
+   map). For each page in your walk, look up only the atoms/facts/
+   crawl topics relevant to that page's bucket / category / persona
+   — not the whole pool. The bundle's by_id + by_topic indexes
+   are there for this; use them.
+
+If you find yourself "still thinking" 5+ minutes into a single page's
+allocation, STOP and re-anchor:
+- What's the page's primary persona? (One lookup in site_strategy.)
+- What's its bucket / category in acf_plan? (One lookup.)
+- What atoms + facts + crawl topics + partner_added entries are
+  pre-routed to that bucket / persona? (Filter, don't enumerate.)
+- Compose section_intents from those filtered sources only.
+
+The strategic call lives in *picking sections × treatments × verbatim
+bands per page*, not in re-evaluating which atom belongs where (acf_plan
+already did that). Treat acf_plan + persona_journeys as authoritative
+inputs, not as drafts to second-guess.
 
 ## Review format
 
@@ -11376,7 +11531,7 @@ artifact itself is the canonical record; the note is the cliff notes.
     name:         'supplemental-page-authoring',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  '1b4458b325e144c5',
+    contentHash:  '4f57514c169fe67a',
     references:   [
       'cowork-skills/outline-page/SKILL.md',
       'cowork-skills/draft-page/SKILL.md',
@@ -11674,6 +11829,30 @@ Loaded from \`roadmap_state.strategic_goals\` (\`status='approved'\` only):
 You have the full page list in the attached project bundle at
 \`sitemap_pages\`. Walk it in \`nav_order\`. Don't prompt the strategist
 for the next slug; just look up the next entry in-context.
+
+### Execution speed — spawn subagents per page when possible
+
+The historic failure mode on this step is the session "thinking"
+for 30+ minutes on a 20-page sitemap because it tries to keep
+allocation context for ALL pages in head simultaneously. Don't.
+
+- **When your environment supports Task / subagent dispatch:**
+  spawn one subagent per page (or per batch of 3-5 pages). Each
+  subagent does ONE page's outline from start to finish: load
+  allocation → resolve sources → pick template per section → bind
+  slots → produce outline JSON → persist via the column-free
+  pattern (see §Persist). Main session orchestrates + reads back
+  the handoff notes. 4-5x wall-clock win on a 20-page sitemap.
+- **When subagents aren't available:** process pages sequentially
+  but keep per-page context small — load ONLY that page's
+  allocation entry + the source IDs it routes, not the whole
+  bundle, in your working scope. The bundle's by_id + by_topic
+  indexes are there to make per-source lookup cheap.
+
+Persist each page's outline AS IT'S DONE (the column-free pattern
+is cheap and idempotent — see §Persist). Don't accumulate 20 pages
+in head before writing the first. Each persisted page hands the
+drafter a starting point even if the session interrupts mid-walk.
 
 ## Your input — read from the attached project bundle, NOT from MCP
 
@@ -13004,6 +13183,29 @@ Rendering only the carousel shell = strategists see a hole and
 ask "where are the cards?" — that's the same loss as omitting
 crawl items.
 
+## Execution speed — subagent parallelism within the 5-page batch
+
+The 5-page batch workflow above is sequenced in conversation so the
+strategist can revise mid-batch. But the DRAFTING work for each
+page is independent — different sources, different sections, no
+cross-page dependency at draft time. When subagent dispatch is
+available, parallelize:
+
+- **Subagent per page within the batch.** Each subagent reads the
+  outline for its page + the relevant atom/fact/crawl-topic bodies,
+  produces the draft sections + source_coverage[] + voice_signal_report.
+  Main session collects all 5 drafts and shows them to the strategist
+  together (the 🔒/✍️ render).
+- Persist each page's draft IMMEDIATELY after the strategist signs
+  off — don't wait for the next page. The column-free pattern
+  (§Persist) is cheap and idempotent.
+
+When subagents aren't available, process pages sequentially but
+keep per-page context tight: load ONLY that page's outline + the
+source bodies it routes. The historic failure mode is "session
+thinking for 30+ minutes" because the drafter held all 5 outlines +
+the entire content pool in head simultaneously.
+
 ## Voice discipline
 
 You imitate. You do not invent.
@@ -13807,6 +14009,28 @@ hits. The verdict's \`confidence_band\` is computed from the 5 axes.
   _meta: ArtifactMeta
 }
 \`\`\`
+
+## Execution speed — spawn subagents per page when possible
+
+Each page's critique is independent of every other page's critique.
+That's exactly the shape parallel subagents fit.
+
+- **When subagent dispatch is available:** spawn one subagent per
+  page (or per batch of 3-5 pages). Each subagent does ONE page's
+  critique end-to-end: load outline + draft (one targeted SELECT
+  per page — never \`SELECT roadmap_state\`), run the 5-axis scoring
+  + mechanical scan + source-coverage recompute, persist via the
+  column-free pattern. Main session orchestrates + collects the
+  bands for the final rollup hint.
+- **When subagents aren't available:** process pages sequentially
+  and persist each critique AS IT'S DONE. Don't hold the full
+  per-page draft + the source pools in head across pages — load
+  per-page context, score, persist, drop.
+
+The historic failure mode here is the session "thinking" for 30+
+minutes because it tried to keep all pages' drafts in scope
+simultaneously. Per-page scope = much smaller per-call payload =
+much shorter thinking time.
 
 ## Confidence-band rules
 

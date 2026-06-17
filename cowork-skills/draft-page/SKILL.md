@@ -471,6 +471,29 @@ Rendering only the carousel shell = strategists see a hole and
 ask "where are the cards?" — that's the same loss as omitting
 crawl items.
 
+## Execution speed — subagent parallelism within the 5-page batch
+
+The 5-page batch workflow above is sequenced in conversation so the
+strategist can revise mid-batch. But the DRAFTING work for each
+page is independent — different sources, different sections, no
+cross-page dependency at draft time. When subagent dispatch is
+available, parallelize:
+
+- **Subagent per page within the batch.** Each subagent reads the
+  outline for its page + the relevant atom/fact/crawl-topic bodies,
+  produces the draft sections + source_coverage[] + voice_signal_report.
+  Main session collects all 5 drafts and shows them to the strategist
+  together (the 🔒/✍️ render).
+- Persist each page's draft IMMEDIATELY after the strategist signs
+  off — don't wait for the next page. The column-free pattern
+  (§Persist) is cheap and idempotent.
+
+When subagents aren't available, process pages sequentially but
+keep per-page context tight: load ONLY that page's outline + the
+source bodies it routes. The historic failure mode is "session
+thinking for 30+ minutes" because the drafter held all 5 outlines +
+the entire content pool in head simultaneously.
+
 ## Voice discipline
 
 You imitate. You do not invent.
