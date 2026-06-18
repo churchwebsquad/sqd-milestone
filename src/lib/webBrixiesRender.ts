@@ -94,8 +94,38 @@ export function renderSectionToHtml(
   fixCta52ImageList(root)
   fixFeatureSection61Stacking(root)
   fixContentSection89Wrap(root)
+  fixTeamSection14Wrap(root)
 
   return root.outerHTML
+}
+
+/** Team Section 14 lays its `Card team` items inside a `Row grid` flex
+ *  row with `display: inline-flex` and no wrap. With more than 3 staff
+ *  members in a single Row grid the cards squeeze beyond a readable
+ *  minimum. Force flex-wrap on Row grid and fix each Card team to
+ *  exactly 1/3 of the row width minus its share of the 30px gap, so
+ *  3 cards fit cleanly and the 4th flows to row 2. */
+function fixTeamSection14Wrap(root: Element): void {
+  const sections: HTMLElement[] = []
+  if ((root as HTMLElement).getAttribute?.('data-layer') === 'Team Section 14') {
+    sections.push(root as HTMLElement)
+  }
+  sections.push(...Array.from(root.querySelectorAll<HTMLElement>('[data-layer="Team Section 14"]')))
+  for (const sec of sections) {
+    const rows = Array.from(sec.querySelectorAll<HTMLElement>('[data-layer="Row grid"]'))
+    for (const row of rows) {
+      const existing = row.getAttribute('style') ?? ''
+      row.setAttribute('style', `${existing};flex-wrap: wrap`)
+    }
+    const cards = Array.from(sec.querySelectorAll<HTMLElement>('[data-layer="Card team"]'))
+    for (const card of cards) {
+      const existing = card.getAttribute('style') ?? ''
+      // Override `flex: 1 1 0` (which stretches each card equally so 6
+      // cards take 1/6 each) with `flex: 0 1 calc(...)` so each card
+      // is exactly 1/3 width minus its share of the 30px gap.
+      card.setAttribute('style', `${existing};flex: 0 1 calc((100% - 60px) / 3)`)
+    }
+  }
 }
 
 /** Content Section 89 ships with a 3-column item layout where the
