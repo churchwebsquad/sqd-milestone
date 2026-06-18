@@ -1727,6 +1727,11 @@ function PageEditor({
               <span className="text-[18px] leading-none">+</span>
               Add section
             </button>
+
+            {/* Dev notes — page-scoped, never shown on partner-visible
+                surfaces (preview, partner review). Surfaced in the Dev
+                Handoff rollup per page. */}
+            <DevNotesBlock page={page} onChange={onPageChange} />
             </>
           )}
         </div>
@@ -1956,6 +1961,58 @@ function PageEditor({
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Dev notes block ──────────────────────────────────────────────────
+//
+// Free-form per-page notes for the dev team. Lives at the bottom of
+// the page editor canvas. NOT rendered on partner-visible surfaces
+// (page preview, partner reviews) — only the page editor and the
+// Dev Handoff rollup read web_pages.dev_notes.
+
+function DevNotesBlock({
+  page, onChange,
+}: {
+  page: WebPage
+  onChange: () => Promise<void> | void
+}) {
+  const initial = typeof page.dev_notes === 'string' ? page.dev_notes : ''
+  const [draft, setDraft] = useState(initial)
+  const [savingNotes, setSavingNotes] = useState(false)
+  const [dirty, setDirty] = useState(false)
+
+  useEffect(() => { setDraft(initial); setDirty(false) }, [page.id, initial])
+
+  const save = async () => {
+    if (!dirty) return
+    setSavingNotes(true)
+    await supabase.from('web_pages').update({ dev_notes: draft.trim() ? draft : null }).eq('id', page.id)
+    setSavingNotes(false); setDirty(false)
+    await onChange()
+  }
+
+  return (
+    <div className="mt-6 rounded-xl border border-wm-border/60 bg-wm-bg-elevated/40 p-4">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Dev notes</p>
+          <p className="text-[11px] text-wm-text-muted leading-snug">
+            For the dev team only — won't appear in the page preview or partner review.
+            Rolled up per page in Dev Handoff.
+          </p>
+        </div>
+        {savingNotes && <Loader2 size={11} className="animate-spin text-wm-text-subtle shrink-0" />}
+      </div>
+      <textarea
+        value={draft}
+        onChange={(e) => { setDraft(e.target.value); setDirty(true) }}
+        onBlur={() => void save()}
+        placeholder="Page-scoped notes for the developer (caveats, special routing, embed quirks, redirect needs, etc.)"
+        rows={4}
+        className="w-full rounded-md border border-wm-border bg-wm-bg px-3 py-2 text-[12px] text-wm-text placeholder-wm-text-subtle outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20 font-mono leading-relaxed resize-y"
+      />
     </div>
   )
 }

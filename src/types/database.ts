@@ -1431,6 +1431,13 @@ export interface WebPage {
    *  generated critique directives so partner intent stays visible. */
   partner_gaps_flagged: Array<{ note: string; kind: 'partner_flagged' }> | null
 
+  /** Free-form dev-only notes per page. Edited from a textarea at the
+   *  bottom of the page editor. NEVER rendered on partner-visible
+   *  surfaces (page preview, partner review). The Dev Handoff workspace
+   *  rolls these up across every page so the dev team gets a per-page
+   *  punch list as part of the launch checklist. */
+  dev_notes: string | null
+
   [key: string]: unknown
 }
 

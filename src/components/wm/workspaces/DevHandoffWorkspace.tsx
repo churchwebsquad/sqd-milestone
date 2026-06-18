@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Cog, Download, FileText, AlertCircle, Globe, Link as LinkIcon, ExternalLink, AlertTriangle, FolderOpen, Server } from 'lucide-react'
+import { Cog, Download, FileText, AlertCircle, Globe, Link as LinkIcon, ExternalLink, AlertTriangle, FolderOpen, Server, StickyNote } from 'lucide-react'
 import { WMButton } from '../Button'
 import { WMCard } from '../Card'
 import { supabase } from '../../../lib/supabase'
@@ -68,6 +68,13 @@ interface PageSeoRow {
   seo:      WebPageSeo | null
 }
 
+interface DevNotesRow {
+  pageId:   string
+  pageName: string
+  pageSlug: string
+  notes:    string
+}
+
 export function DevHandoffWorkspace({ project }: Props) {
   const spec: DesignSystemSpec = useMemo(
     () => parseDesignSystemSpec(project.design_system) ?? emptyDesignSystemSpec(),
@@ -78,6 +85,7 @@ export function DevHandoffWorkspace({ project }: Props) {
   // per page and walk every CTA slot across the project.
   const [seoRows, setSeoRows] = useState<PageSeoRow[]>([])
   const [ctaRows, setCtaRows] = useState<CtaRow[]>([])
+  const [devNotesRows, setDevNotesRows] = useState<DevNotesRow[]>([])
   const [seoCtaLoading, setSeoCtaLoading] = useState(true)
   // Software-in-use, surfaced from roadmap_state.strategic_goals (Phase 3).
   // Shown prominently at the top so the dev knows what integrations
@@ -105,11 +113,11 @@ export function DevHandoffWorkspace({ project }: Props) {
       setSeoCtaLoading(true)
       const { data: pageRows } = await supabase
         .from('web_pages')
-        .select('id, name, slug, seo')
+        .select('id, name, slug, seo, dev_notes')
         .eq('web_project_id', project.id)
         .eq('archived', false)
         .order('sort_order')
-      const pages = (pageRows ?? []) as Array<Pick<WebPage, 'id' | 'name' | 'slug' | 'seo'>>
+      const pages = (pageRows ?? []) as Array<Pick<WebPage, 'id' | 'name' | 'slug' | 'seo' | 'dev_notes'>>
 
       const pageIds = pages.map(p => p.id)
       // Dev handoff enumerates ACTUAL page implementations, not the
@@ -142,6 +150,14 @@ export function DevHandoffWorkspace({ project }: Props) {
         pageId: p.id, pageName: p.name, pageSlug: p.slug, seo: p.seo ?? null,
       })))
       setCtaRows(extractCtaInventory({ pages, sections, templates }))
+      setDevNotesRows(
+        pages
+          .filter(p => typeof p.dev_notes === 'string' && p.dev_notes.trim().length > 0)
+          .map(p => ({
+            pageId: p.id, pageName: p.name, pageSlug: p.slug,
+            notes: (p.dev_notes ?? '').trim(),
+          })),
+      )
       setSeoCtaLoading(false)
     })()
   }, [project.id])
@@ -373,6 +389,45 @@ export function DevHandoffWorkspace({ project }: Props) {
               <CtaInventoryTable rows={ctaRows} />
             )}
           </WMCard>
+
+          {/* ── Dev notes per page ──────────────────────────────── */}
+          <WMCard padding="loose">
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+                  <StickyNote size={13} />
+                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
+                    Dev notes per page
+                  </h2>
+                </div>
+                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+                  Free-form notes the strategist left at the bottom of each
+                  page editor — caveats, special routing, embed quirks,
+                  redirects, anything the dev needs to know before building
+                  that page. Authored in the Pages tab and surfaced here so
+                  the dev team has a single rolled-up punch list.
+                </p>
+              </div>
+              <WMButton
+                variant="primary"
+                size="md"
+                iconLeft={<Download size={13} />}
+                onClick={() => downloadDevNotesMarkdown(projectSlug, project.name, devNotesRows)}
+                disabled={devNotesRows.length === 0 || seoCtaLoading}
+              >
+                Download notes
+              </WMButton>
+            </div>
+            {seoCtaLoading ? (
+              <p className="text-[12px] text-wm-text-subtle">Loading…</p>
+            ) : devNotesRows.length === 0 ? (
+              <p className="text-[12px] text-wm-text-subtle italic">
+                No dev notes yet. Add them at the bottom of each page in the Pages tab.
+              </p>
+            ) : (
+              <DevNotesPerPage rows={devNotesRows} />
+            )}
+          </WMCard>
         </div>
       </div>
     </div>
@@ -380,6 +435,27 @@ export function DevHandoffWorkspace({ project }: Props) {
 }
 
 // ── Sub-views ──────────────────────────────────────────────────────
+
+function DevNotesPerPage({ rows }: { rows: DevNotesRow[] }) {
+  return (
+    <ul className="space-y-3">
+      {rows.map(r => (
+        <li
+          key={r.pageId}
+          className="rounded-lg border border-wm-border/60 bg-wm-bg-elevated/40 p-3"
+        >
+          <div className="flex items-baseline justify-between gap-3 mb-1.5">
+            <p className="font-semibold text-wm-text text-[12px]">{r.pageName}</p>
+            <p className="text-[10px] text-wm-text-subtle font-mono shrink-0">/{r.pageSlug}</p>
+          </div>
+          <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-wm-text-muted m-0">
+            {r.notes}
+          </pre>
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 function SeoSummaryTable({ rows }: { rows: PageSeoRow[] }) {
   return (
@@ -714,6 +790,26 @@ function downloadSeoMarkdown(projectSlug: string, projectName: string, rows: Pag
     lines.push('')
   }
   triggerDownload(`${projectSlug}-seo.md`, lines.join('\n'), 'text/markdown')
+}
+
+function downloadDevNotesMarkdown(projectSlug: string, projectName: string, rows: DevNotesRow[]): void {
+  const lines: string[] = [
+    `# ${projectName} — Dev notes per page`,
+    '',
+    `Per-page notes left by the strategist for the dev team. Pulled from`,
+    `\`web_pages.dev_notes\` on ${new Date().toLocaleString()}.`,
+    '',
+  ]
+  for (const r of rows) {
+    lines.push(`## ${r.pageName}`)
+    lines.push(`Slug: \`/${r.pageSlug}\``)
+    lines.push('')
+    lines.push(r.notes)
+    lines.push('')
+    lines.push('---')
+    lines.push('')
+  }
+  triggerDownload(`${projectSlug}-dev-notes.md`, lines.join('\n'), 'text/markdown')
 }
 
 function downloadCtaCsv(projectSlug: string, rows: CtaRow[]): void {
