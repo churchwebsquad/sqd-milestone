@@ -1529,7 +1529,7 @@ function substituteElement(
   if (layer) {
     const field = lookup(binding, layer)
     if (field?.kind === 'slot' && !filled.has(field.key)) {
-      if (!isDecorativeNumericPlaceholder(el, field)) {
+      if (!isDecorativeNumericPlaceholder(el, field, values[field.key])) {
         applySlot(el, field, values[field.key])
         filled.add(field.key)
         // Image slots may live on a frame `<div>` that ALSO contains
@@ -1544,7 +1544,7 @@ function substituteElement(
     } else if (itemContext) {
       const itemField = lookup(itemContext.binding, layer)
       if (itemField?.kind === 'slot' && !filled.has(itemField.key)) {
-        if (!isDecorativeNumericPlaceholder(el, itemField)) {
+        if (!isDecorativeNumericPlaceholder(el, itemField, itemContext.values[itemField.key])) {
           applySlot(el, itemField, itemContext.values[itemField.key])
           filled.add(itemField.key)
           if (!(itemField.type === 'image' && el.tagName.toLowerCase() !== 'img')) return
@@ -1566,8 +1566,14 @@ function substituteElement(
  *  match the schema's heading slot, but only the substantive one should
  *  receive the user's copy. Detect placeholders by their existing text:
  *  pure 1-3 digit numbers, or "Step 01" patterns. */
-function isDecorativeNumericPlaceholder(el: Element, slot: WebSlotDef): boolean {
+function isDecorativeNumericPlaceholder(el: Element, slot: WebSlotDef, value?: unknown): boolean {
   if (slot.type !== 'text' && slot.type !== 'richtext') return false
+  // Respect strategist intent: if a real value is supplied for this
+  // slot, bind it regardless of how decorative the default text looks.
+  // Without this, card-284's `step` slot (layer "Step", default "Step 01")
+  // matched the decorative-number heuristic and silently refused to
+  // accept the strategist's edited value.
+  if (typeof value === 'string' && value.trim().length > 0) return false
   const txt = (el.textContent ?? '').trim()
   if (!txt) return false
   return /^\d{1,3}$/.test(txt) || /^Step\s+\d{1,3}$/i.test(txt)
