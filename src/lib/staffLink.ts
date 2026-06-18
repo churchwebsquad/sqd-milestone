@@ -192,7 +192,178 @@ export async function ensurePerStaffPage(
   return { pageId: (inserted as { id: string }).id, pageSlug: (inserted as { slug: string }).slug, isNew: true }
 }
 
-/** Append a Single Team Section 6 section to the per-staff page with
+/** One staff update extracted from a section's field_values. The
+ *  syncStaffLinkOnSave path produces these per linked card / section
+ *  and propagates them to church_facts + every other linked section
+ *  in the project. */
+export interface StaffUpdate {
+  factId: string
+  name:   string
+  role:   string
+  bio:    string
+}
+
+/** Extract one StaffUpdate per linked card / section from the given
+ *  field_values, based on the bound template's shape.
+ *
+ *  - team-section-14: walks row_grid → card_team. One update per card
+ *    that has a non-blank _staff_fact_id. Card fields:
+ *      team_name        → name
+ *      team_position    → role
+ *      team_description → bio
+ *  - single-team-section-6: a single update from the top-level fields
+ *    if _staff_fact_id is set. Top-level fields:
+ *      heading     → name
+ *      tagline     → role
+ *      description → bio
+ *  - any other template_id returns []. */
+export function extractStaffUpdates(
+  templateId: string | null,
+  fieldValues: Record<string, unknown>,
+): StaffUpdate[] {
+  if (!templateId) return []
+  if (templateId === 'team-section-14') {
+    const out: StaffUpdate[] = []
+    const rowGrid = Array.isArray(fieldValues.row_grid) ? (fieldValues.row_grid as Array<Record<string, unknown>>) : []
+    for (const row of rowGrid) {
+      const cards = Array.isArray(row?.card_team) ? (row.card_team as Array<Record<string, unknown>>) : []
+      for (const cell of cards) {
+        const factId = typeof cell._staff_fact_id === 'string' ? cell._staff_fact_id : ''
+        if (!factId) continue
+        out.push({
+          factId,
+          name: String(cell.team_name ?? '').trim(),
+          role: String(cell.team_position ?? '').trim(),
+          bio:  typeof cell.team_description === 'string' ? cell.team_description : '',
+        })
+      }
+    }
+    return out
+  }
+  if (templateId === 'single-team-section-6') {
+    const factId = typeof fieldValues._staff_fact_id === 'string' ? fieldValues._staff_fact_id : ''
+    if (!factId) return []
+    return [{
+      factId,
+      name: String(fieldValues.heading ?? '').trim(),
+      role: String(fieldValues.tagline ?? '').trim(),
+      bio:  typeof fieldValues.description === 'string' ? fieldValues.description : '',
+    }]
+  }
+  return []
+}
+
+/** Apply a list of StaffUpdates to a section's field_values, returning
+ *  a new field_values object when ANY change lands. Returns null when
+ *  the section either references none of the updates' factIds or the
+ *  values were already identical (no-op write). */
+export function applyStaffUpdatesToSection(
+  templateId: string | null,
+  fieldValues: Record<string, unknown>,
+  updates: StaffUpdate[],
+): Record<string, unknown> | null {
+  if (updates.length === 0 || !templateId) return null
+  const byFactId = new Map(updates.map(u => [u.factId, u]))
+
+  if (templateId === 'team-section-14') {
+    let changed = false
+    const next = { ...fieldValues }
+    const rowGrid = Array.isArray(next.row_grid) ? [...(next.row_grid as Array<Record<string, unknown>>)] : []
+    for (let r = 0; r < rowGrid.length; r++) {
+      const row = { ...(rowGrid[r] ?? {}) }
+      const cards = Array.isArray(row.card_team) ? [...(row.card_team as Array<Record<string, unknown>>)] : []
+      let rowChanged = false
+      for (let c = 0; c < cards.length; c++) {
+        const cell = cards[c] ?? {}
+        const factId = typeof cell._staff_fact_id === 'string' ? cell._staff_fact_id : ''
+        const upd = factId ? byFactId.get(factId) : undefined
+        if (!upd) continue
+        const nextCell: Record<string, unknown> = { ...cell }
+        let cellChanged = false
+        if (upd.name && nextCell.team_name        !== upd.name) { nextCell.team_name        = upd.name; cellChanged = true }
+        if (upd.role && nextCell.team_position    !== upd.role) { nextCell.team_position    = upd.role; cellChanged = true }
+        if (upd.bio  && nextCell.team_description !== upd.bio)  { nextCell.team_description = upd.bio;  cellChanged = true }
+        if (cellChanged) {
+          cards[c] = nextCell
+          rowChanged = true
+        }
+      }
+      if (rowChanged) {
+        row.card_team = cards
+        rowGrid[r] = row
+        changed = true
+      }
+    }
+    if (!changed) return null
+    next.row_grid = rowGrid
+    return next
+  }
+
+  if (templateId === 'single-team-section-6') {
+    const factId = typeof fieldValues._staff_fact_id === 'string' ? fieldValues._staff_fact_id : ''
+    const upd = factId ? byFactId.get(factId) : undefined
+    if (!upd) return null
+    const next = { ...fieldValues }
+    let changed = false
+    if (upd.name && next.heading     !== upd.name) { next.heading     = upd.name; changed = true }
+    if (upd.role && next.tagline     !== upd.role) { next.tagline     = upd.role; changed = true }
+    if (upd.bio  && next.description !== upd.bio)  { next.description = upd.bio;  changed = true }
+    return changed ? next : null
+  }
+
+  return null
+}
+
+/** Two-way sync entry point — call from the page editor's
+ *  updateSection() RIGHT BEFORE persisting the local row. Steps:
+ *    1. Extract StaffUpdates from the local section's new values.
+ *    2. Write each one to church_facts.data via updateStaffFact.
+ *    3. Find every OTHER section in the project linking those same
+ *       fact_ids and propagate the new name/role/bio into their
+ *       field_values (in the right schema shape per template).
+ *  Returns nothing — failures are logged but never throw so the
+ *  primary save path stays robust. */
+export async function syncStaffLinkOnSave(
+  sb:               SupabaseClient,
+  projectId:        string,
+  selfSectionId:    string,
+  selfTemplateId:   string | null,
+  selfFieldValues:  Record<string, unknown>,
+): Promise<void> {
+  try {
+    const updates = extractStaffUpdates(selfTemplateId, selfFieldValues)
+    if (updates.length === 0) return
+
+    // 1. Write each update to church_facts.data
+    await Promise.all(updates.map(u =>
+      updateStaffFact(sb, u.factId, { name: u.name, role: u.role, bio: u.bio })
+    ))
+
+    // 2. Find every other section in the project — keep the query
+    // simple, filter in JS rather than building a complex jsonb query.
+    const { data: peerRows } = await sb
+      .from('web_sections')
+      .select('id, content_template_id, field_values, web_page_id, web_pages!inner(web_project_id)')
+      .eq('web_pages.web_project_id', projectId)
+      .neq('id', selfSectionId)
+    const peers = (peerRows ?? []) as Array<{
+      id: string
+      content_template_id: string | null
+      field_values: Record<string, unknown> | null
+    }>
+
+    // 3. Patch each peer that references any of our fact ids
+    for (const peer of peers) {
+      const peerValues = (peer.field_values ?? {}) as Record<string, unknown>
+      const patched = applyStaffUpdatesToSection(peer.content_template_id, peerValues, updates)
+      if (!patched) continue
+      const { error } = await sb.from('web_sections').update({ field_values: patched }).eq('id', peer.id)
+      if (error) console.error('[staff-link sync] peer update failed', peer.id, error)
+    }
+  } catch (e) {
+    console.error('[staff-link sync] failed', e)
+  }
+}
  *  the staff_fact_id embedded in field_values so the renderer + the
  *  edit panel know which church_facts row to mirror. Returns the new
  *  section's id so the caller can store it back on the Team 14 item. */

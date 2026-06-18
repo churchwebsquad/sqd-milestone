@@ -54,6 +54,7 @@ import { useSectionDetailPublisher } from '../sectioneditor/SectionEditingContex
 import { ProjectPagesProvider } from '../sectioneditor/ProjectPagesContext'
 import { ProjectIdProvider } from '../sectioneditor/ProjectIdContext'
 import { SectionClipboardProvider, useSectionClipboard } from '../sectioneditor/SectionClipboard'
+import { syncStaffLinkOnSave } from '../../../lib/staffLink'
 import {
   fieldValuesToDocHtml, docHtmlToFieldValues, reconcileFieldValuesAcrossTemplates,
   computeUnmappedValues, computeDroppedDeepPaths,
@@ -951,6 +952,26 @@ function PageEditor({
     setSections(prev => prev.map(s => s.id === sectionId ? { ...s, ...effectivePatch } : s))
     await supabase.from('web_sections').update(effectivePatch).eq('id', sectionId)
     void markEdited()
+
+    // Staff link two-way sync — if this section's bound template has
+    // staff cards (Team 14 or Single Team Section 6) AND the patch
+    // touched field_values, propagate any linked-staff updates through
+    // church_facts to every other section in the project that points
+    // at the same staff_fact_id. Fire-and-forget — errors are logged
+    // but don't block the primary save.
+    if (effectivePatch.field_values) {
+      const current = sections.find(s => s.id === sectionId)
+      const templateId = current?.content_template_id ?? null
+      if (templateId === 'team-section-14' || templateId === 'single-team-section-6') {
+        void syncStaffLinkOnSave(
+          supabase,
+          project.id,
+          sectionId,
+          templateId,
+          effectivePatch.field_values as Record<string, unknown>,
+        )
+      }
+    }
   }
 
   const archiveSection = async (sectionId: string) => {
