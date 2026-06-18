@@ -95,8 +95,79 @@ export function renderSectionToHtml(
   fixFeatureSection61Stacking(root)
   fixContentSection89Wrap(root)
   fixTeamSection14Wrap(root)
+  fixTeamSection14LinkedCards(root, values, template.id ?? '')
 
   return root.outerHTML
+}
+
+/** Team Section 14 staff link — Phase 2.
+ *
+ *  When the section's _staff_link.display_mode is 'linked', each
+ *  Card team item that carries a _staff_page_slug becomes a clickable
+ *  anchor pointing at /staff/<slug>, and its inline bio paragraph
+ *  (the team_description rendered into "Team description") is force-
+ *  hidden. Cards without a slug stay as inline bio cards.
+ *
+ *  Card-to-data alignment: substituteElement clones the Card team
+ *  template in DOM order, mapping clone[i] to values.row_grid[r].
+ *  card_team[c] in row-major order. We rebuild the same cursor here
+ *  so we can read the per-card _staff_fact_id + _staff_page_slug
+ *  off the field_values shape. */
+function fixTeamSection14LinkedCards(
+  root: Element,
+  values: Record<string, unknown>,
+  templateId: string,
+): void {
+  if (templateId !== 'team-section-14') return
+  const staffLink = (values._staff_link ?? {}) as { display_mode?: string }
+  if (staffLink.display_mode !== 'linked') return
+
+  // Enumerate cards in row-major order — same as the renderer's
+  // expandGroup traversal.
+  const cursors: Array<{ slug: string | null }> = []
+  const rowGrid = Array.isArray(values.row_grid) ? (values.row_grid as Array<Record<string, unknown>>) : []
+  for (const row of rowGrid) {
+    const cards = Array.isArray(row?.card_team) ? (row.card_team as Array<Record<string, unknown>>) : []
+    for (const cell of cards) {
+      const slug = typeof cell._staff_page_slug === 'string' ? cell._staff_page_slug : null
+      cursors.push({ slug })
+    }
+  }
+
+  // Find Card team elements in the rendered tree. They were cloned by
+  // expandGroup and now live as siblings inside Row grid containers.
+  const cardEls = Array.from(root.querySelectorAll<HTMLElement>('[data-layer="Card team"]'))
+  for (let i = 0; i < cardEls.length && i < cursors.length; i++) {
+    const card = cardEls[i]
+    const cursor = cursors[i]
+    if (!cursor.slug) continue
+
+    // Hide the inline bio paragraph. The Team 14 source HTML labels
+    // the bio as "Team description". When the bio is linked out,
+    // showing the same content on both the card and the per-staff
+    // page is redundant; the card should read like a directory
+    // entry, not a full bio.
+    const bio = card.querySelector<HTMLElement>('[data-layer="Team description"]')
+    if (bio) forceHide(bio)
+
+    // Wrap the card's children in an <a href="/staff/<slug>"> so the
+    // entire card becomes a click target to the bio page. Avoid
+    // double-wrapping if a previous pass already inserted an anchor.
+    if (!card.querySelector(':scope > a[data-staff-link="1"]')) {
+      const a = root.ownerDocument!.createElement('a')
+      a.setAttribute('href', `/${cursor.slug}`)
+      a.setAttribute('data-staff-link', '1')
+      a.style.textDecoration = 'none'
+      a.style.color = 'inherit'
+      a.style.display = 'flex'
+      a.style.flexDirection = 'column'
+      a.style.gap = '30px'
+      a.style.width = '100%'
+      a.style.cursor = 'pointer'
+      while (card.firstChild) a.appendChild(card.firstChild)
+      card.appendChild(a)
+    }
+  }
 }
 
 /** Team Section 14 lays its `Card team` items inside a `Row grid` flex

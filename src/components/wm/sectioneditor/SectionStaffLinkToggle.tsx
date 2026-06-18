@@ -125,19 +125,16 @@ export function SectionStaffLinkToggle({ section, projectId, onPatch }: Props) {
         const factId = await findOrCreateStaffFact(supabase, projectId, {
           name: card.name, role: card.role, bio: card.bio,
         })
-        const { pageSlug } = await ensurePerStaffPage(supabase, projectId, card.name)
-        const { data: pageRow } = await supabase
-          .from('web_pages')
-          .select('id')
-          .eq('web_project_id', projectId)
-          .eq('slug', pageSlug)
-          .single()
-        const pageId = (pageRow as { id: string } | null)?.id
-        if (!pageId) throw new Error(`failed to resolve page id for ${pageSlug}`)
+        const { pageId, pageSlug } = await ensurePerStaffPage(supabase, projectId, card.name)
         await appendSingleTeamSection(supabase, pageId, factId, {
           name: card.name, role: card.role, bio: card.bio,
         })
-        next = patchCard(next, card.rowIdx, card.cardIdx, { _staff_fact_id: factId })
+        // Store the slug alongside the fact id so Phase 2's renderer
+        // can build the per-card anchor href without a runtime lookup.
+        next = patchCard(next, card.rowIdx, card.cardIdx, {
+          _staff_fact_id:   factId,
+          _staff_page_slug: pageSlug,
+        })
         linkedCountLocal++
       }
       onPatch(next)
