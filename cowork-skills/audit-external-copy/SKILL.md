@@ -317,6 +317,33 @@ markdown links, and emphasis) is preserved character-for-character:
 | `*Preservation: source-verbatim …*` / `*preservation: …*` | `cowork_section_meta.preservation = "source-verbatim"` |
 | Any other italic-bracketed note `*[…]*` not matched above | append to `cowork_section_meta.inline_annotations[]` as `{ note, near_slot? }` (near_slot = the most recent slot label the note appeared after) |
 
+**Hero H1 default — page name carries the heading.** If the first
+section on a `Page` / `Nav+Page` row is hero-shaped (Step 3's
+routing table maps it to `hero_homepage` / `hero_inner`) and the
+section has NO explicit `**H1:**` directive, set `primary_heading`
+to the page's display name verbatim — the Notion page Title (or
+the slug_map title that maps to its slug). Examples: a "Plan A
+Visit" page → `primary_heading: "Plan A Visit"`; a "Kids" page →
+`primary_heading: "Kids"`; a "Students" page →
+`primary_heading: "Students"`; an "Outreach" page →
+`primary_heading: "Outreach"`. The `**Tagline:**` directive
+(when present) carries the punchy draw-you-in hook; H1 is the
+label.
+
+The only times the H1 should differ from the page name:
+- The partner wrote an explicit `**H1:**` in Notion — that wins.
+- The page is the homepage AND a `# SEO` block names a brand
+  primary heading the partner clearly intended as the
+  visitor-facing H1.
+- The page name is generic ("Page 12") — degrade gracefully and
+  emit a `hero_h1_needs_partner_input` directive instead of using
+  the placeholder.
+
+Record the default on the section's `_meta.hero_h1_source` field —
+one of `"notion_directive"`, `"page_name_default"`, or
+`"seo_brand_heading"`. The strategist can flip this in the
+workspace if the 1-in-10 case applies.
+
 **(e) Item lists.** When a section's body contains a list of
 `**<Item Heading>** + body paragraph + optional Button:` blocks
 (canonical example from 3249's `## SERVICE TIMES`: `**Contemplative
@@ -433,20 +460,40 @@ error — the importer rejects it.
 | Heading + ≥1 entries shaped like job posting (title + location + body + apply CTA) | `career_section` |
 | Long prose only — no item structure, no embed, no CTAs (or 1 trailing CTA absorbed into the layout) | `content_image_text_b` |
 
-**Overflow handling (no paraphrase).** When the partner-written
-content's count or volume exceeds a template's natural visual
-rhythm, resolve in this preference order:
+**Overflow handling (no paraphrase, no needless splitting).** When
+the partner-written content's count or volume exceeds a template's
+natural visual rhythm, resolve in this preference order:
 
-1. **SUBSTITUTE template** — pick a template in the same family
-   with more spacious slots. Example: 6 staff entries with
-   `feature_team` (visual cap 2) → currently no `feature_team_grid`
-   variant exists; jump to step 2.
-2. **SPLIT into N sibling sections** — same `template_key`,
-   repeated. 6 staff → 3× `feature_team` sections (2 each). 12 FAQ
-   items → 3× `accordion_faq` sections (4 each). Each split sibling
-   gets its own primary_heading derived from the source content
-   ("Lead Pastors" / "Staff Pastors" / "Support Team" if groupings
-   are evident, otherwise `"<Original Heading> (1 of N)"`).
+1. **STRETCH items[] (DEFAULT)** — keep ALL items in ONE section,
+   exceed the template's `max_items` value, and let the Brixies
+   layout expand to absorb the extra cards. `max_items` in
+   `canonical_templates` is a VISUAL RHYTHM DEFAULT, not a hard
+   structural cap; the renderer handles 5 / 7 / 12 items in a
+   layout whose default suggests 3. Stamp the override on the
+   section's `_meta.item_count_overrides`:
+     ```json
+     {"_meta": {"item_count_overrides": {"items": 7}, "item_count_default": 3}}
+     ```
+   The critique sees this and treats the section as authorized, not
+   over-cap. Use STRETCH for: 5 cards on a 3-default `cards_with_cta`,
+   8 sub-ministries on a 6-default `feature_unique`, 4 staff on a
+   2-default `feature_team`. **Do not split just because the cap
+   says 2.**
+2. **SUBSTITUTE template** — pick a template in the same family
+   with more spacious slots if one exists. Example: a long-prose
+   block currently bound to `content_image_text_b` could swap to a
+   richer text-only variant if one is in `pickable_templates`. Only
+   pick from `pickable_templates[]` — never invent a template_key.
+3. **SPLIT into N sibling sections (LAST RESORT)** — only when
+   STRETCH genuinely breaks the layout (e.g. > 24 items where the
+   underlying grid wraps badly) AND the source content has a
+   natural grouping (Lead vs Staff vs Support, or chronological
+   buckets) that justifies the visual break. **NEVER split just to
+   honor `max_items`.** When you do split: same `template_key`,
+   repeated. Each split sibling gets its own primary_heading
+   derived from the source content ("Lead Pastors" / "Staff
+   Pastors" / "Support Team" if groupings are evident, otherwise
+   `"<Original Heading> (1 of N)"`).
 
    **SPLIT marker contract — REQUIRED**: every split sibling stamps
    two fields on its `_meta`:
@@ -458,11 +505,11 @@ rhythm, resolve in this preference order:
    `(notion_page_id, split_from)` pair and stamps it on every
    web_section in the group — without the marker, the importer
    has no way to detect the grouping.
-3. **RENDER LONG (fallback)** — if SUBSTITUTE and SPLIT both fail,
-   bind the section with `content_image_text_b` and let the body
-   render at full length. Emit a `layout_no_match` directive on the
-   critique so the strategist can resolve via the workspace variant
-   picker. **NEVER paraphrase.**
+4. **RENDER LONG (fallback)** — if STRETCH + SUBSTITUTE + SPLIT
+   all fail, bind the section with `content_image_text_b` and let
+   the body render at full length. Emit a `layout_no_match`
+   directive on the critique so the strategist can resolve via the
+   workspace variant picker. **NEVER paraphrase.**
 
 If no shape match exists at all (e.g. a section that's pure embed
 markup with no heading), fall back to `content_image_text_b` with

@@ -572,9 +572,9 @@ The outline's slot_bindings carry a `treatment` flag from allocation:
 
 | treatment | what to do |
 |---|---|
-| `use_as_is` | Atom body goes in unchanged. Mandatory for verbatim atoms. If atom body exceeds slot max_chars, fail to `deferred_slot`. |
+| `use_as_is` | Atom body goes in unchanged. Mandatory for verbatim atoms. If atom body exceeds slot max_chars on a PROSE slot (`body`/`description`/`quote`/`accent_body`/`richtext`), auto-apply `cap_overrides[]` for that slot and proceed — the verbatim line is sacred. On a SHORT slot (`primary_heading`/`tagline`/`cta_label`), fail to `deferred_slot` (the outline should have routed it to a prose slot upstream). |
 | `lift_phrase` | The atom contains the right phrase but in context — lift the phrase, drop the surrounding. Note which phrase in `voice_notes_by_slot`. |
-| `compress` | Atom body too long for slot. Compress while preserving claims. Track compression in `voice_signal_report.compression_notes`. NO claim gets cut without justification. |
+| `compress` | Atom body too long for slot AND the strategist authorized compression (treatment came from allocation, not from a verbatim source). Compress while preserving claims. Track compression in `voice_signal_report.compression_notes`. NO claim gets cut without justification. NEVER compress a `verbatim: true` atom — that contradicts the verbatim contract. |
 | `expand` | Atom body too short, slot wants more. Add ONLY adjacent context already in the atom or stage_1 — do NOT invent new claims. |
 | `reorder` | Atom body's points are good but in wrong order for this slot's emphasis. Reorder, preserve every claim. |
 
@@ -739,20 +739,32 @@ under the 8 KB single-literal threshold the combined batch write
 relies on.
 
 **Per-slot `max_chars` is NOT always a hard cap.** The canonical
-values in `canonical_templates` are conservative defaults. Some
-Brixies/Bricks layouts comfortably hold much more — the clearest
+values in `canonical_templates` are visual-rhythm defaults. The
+Brixies layouts absorb longer prose without breaking — the clearest
 case is the image-left/text-right long-form content section
 (strategist's "section 16", mapped to `content_image_text_b`)
 which holds full multi-paragraph bios (~950+ chars) in its `body`.
-DO NOT trim church-supplied long-form content to force it under
-400 when the strategist has confirmed the layout supports it.
-Mechanism: when the strategist authorizes, add the slot to that
-section's `cap_overrides: ["body"]` array. The self-validator
-skips the cap check for that slot AND records the override on the
-artifact so critique-page treats it as authorized, not a
-violation. Drafter NEVER self-grants a cap override; only the
-strategist authorizes; only for slots whose layout supports it
-(NEVER headings, taglines, CTA labels — those clip).
+
+**Partner verbatim content is NEVER truncated to meet a char cap.**
+This is the load-bearing rule: any slot binding whose source has
+`treatment: 'use_as_is'`, `treatment: 'lift_phrase'`, or
+`verbatim: true` gets an auto-applied `cap_overrides[]` entry for
+PROSE SLOTS (`body`, `description`, `quote`, `accent_body`,
+`richtext`). The drafter self-grants the override for verbatim
+prose; the self-validator skips the cap check; critique-page treats
+it as authorized. No strategist signal required for verbatim prose.
+
+**Strategist-authorized cap overrides** still apply for non-verbatim
+prose where the strategist has confirmed the layout supports more —
+add the slot to that section's `cap_overrides: ["body"]` array via
+the workspace.
+
+**SHORT slots remain clipped.** NEVER auto-stretch a
+`primary_heading`, `tagline`, or `cta_label` — these clip visually
+and the outline-page validator should have routed long verbatim
+content to a prose slot upstream. If a heading-class slot is
+already over-cap on arrival, fail to `deferred_slot` and surface in
+the report.
 
 **Batch write — column-free chunk pattern (load-bearing).**
 

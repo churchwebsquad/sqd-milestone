@@ -349,23 +349,62 @@ a swap mid-draft, the swap round-trips to outline-page (re-fire).
 | CTA banner | `cta_simple` / `cta_callout` | A CTA banner is a SHORT, end-of-page call-out ("Got questions?", "Plan a Visit"). Use **once per page, at the end**. `cta_callout` = 1 button; `cta_simple` = primary + secondary. **DO NOT scatter `cta_callout`/`cta_simple` mid-page.** Mid-page content with a button belongs in `content_featured_b` (featured content + button) or a standard content section with a build-directive link. **The pastor bio does NOT belong in `cta_callout` — that's a content container failure mode the drafter has hit twice now.** |
 | Quote / written testimony | `testimonial_written` | Quote + attribution. |
 | Video testimony | `testimonial_video` | Quote + attribution + embedded video. |
-| Staff / leadership | `feature_team` | 2-item layout. SPLIT into siblings when the staff list is larger. |
+| Staff / leadership | `feature_team` | 2-item DEFAULT visual rhythm — STRETCH (keep one section, exceed the count) preferred over SPLIT. The layout absorbs more cards; only SPLIT when staff have a natural grouping (Lead vs Support) that justifies the visual break. **Do NOT split just because the default is 2.** |
 | Contact / address / map | `contact_section` | When the content has a map embed (`*[Map embed: <iframe…>]*`) or an address block, this template binds it cleanly. |
 | FAQ / accordion | `accordion_faq` | ≥3 Q&A pairs. Split when the items exceed the visual rhythm. |
 
-**Fixed-count card capacities (memorize):**
+**Default card counts (NOT hard caps — STRETCH is allowed):**
 
-- `content_image_text_a` / `content_image_text_b` — up to 3 plain (non-Card) text blocks.
-- `content_featured_a` — 3 cards.
-- `feature_tabbed` — 4 cards.
-- `feature_unique` / `feature_team` — 2 items.
+- `content_image_text_a` / `content_image_text_b` — 3 plain (non-Card) text blocks (default).
+- `content_featured_a` — 3 cards (default).
+- `feature_tabbed` — 4 cards (default).
+- `feature_unique` / `feature_team` — 2 items (default).
 - `feature_card_carousel_proxy` — N cards (no fixed cap; the layout renders from a listing/CPT).
 
-Pick the FIXED template that matches the real card count;
-escalate to `feature_card_carousel_proxy` only when the count
-exceeds the largest fixed template (4) OR the set is
-dynamic/seasonal. Forcing 8 ministries down to 3 cards drops
-content the church gave us.
+These are VISUAL RHYTHM defaults, not structural maximums. The
+Brixies layouts absorb extra cards. STRETCH (keep one section,
+exceed the default count, stamp `_meta.item_count_overrides`) is
+the preferred path when the partner's card count is 1-2 over the
+default. Escalate to `feature_card_carousel_proxy` when the count
+is 6+ AND the set is uniform enough for a grid, OR when the set
+is dynamic/seasonal. Forcing 8 ministries down to 3 cards drops
+content the church gave us; splitting 4 staff into 2 sections of
+2 just because the default is 2 introduces unnecessary visual
+fragmentation.
+
+## Hero H1 default — page name carries the heading
+
+For the first section of every page (the hero), `primary_heading`
+DEFAULTS to the page's display name verbatim. The tagline carries
+the punchy draw-you-in hook; H1 is the page label.
+
+Examples:
+- "Plan A Visit" page → `primary_heading: "Plan A Visit"`,
+  `tagline: "<punchy hook from voice atoms>"`
+- "Kids" page → `primary_heading: "Kids"`,
+  `tagline: "<the welcoming-the-family voice atom>"`
+- "Students" page → `primary_heading: "Students"`, etc.
+- "Outreach" page → `primary_heading: "Outreach"`, etc.
+
+Bind the hero `primary_heading` slot as a `directive` pointing to
+`page.display_name` (or as a `merge_token`-style binding if your
+outline schema has one for page name). The drafter writes the page
+name verbatim. The hero `tagline` slot gets the punchy line —
+that's where voice atoms / hook atoms land.
+
+The 1-in-10 cases where the H1 SHOULD differ from the page name:
+- The strategist explicitly tagged a different H1 via outline
+  annotation (`hero_h1_override`).
+- A voice atom or pillar atom is a uniquely sacred heading-class
+  phrase that BELONGS as the H1 (rare — usually those land in
+  body/quote slots per the verbatim-atoms decision tree above).
+- The page is a true brand landing page where a brand line is the
+  established H1.
+
+Stamp `_meta.hero_h1_source` on the hero section: one of
+`"page_name_default"`, `"strategist_override"`, `"sacred_atom"`,
+or `"brand_line"`. The strategist sees this in the Rich Companion
+and can flip it if the rare case applies.
 
 ## Slot-binding discipline
 
@@ -452,20 +491,18 @@ INCORRECT outline output (will trip `voice_atom_in_assignments`):
 - `atom_assignments` includes `{atom_id: 'be43f59d-…',
   slot_hint: 'primary_heading'}` — voice atom in assignments = fail.
 
-## Verbatim atoms — pick a slot that can hold the body, or surface it
+## Verbatim atoms — pick a slot that can hold the body, or stretch the cap
 
-Verbatim atoms (`verbatim: true`) MUST be routed to a slot whose
-`max_chars` can hold the body length. The validator checks
-`atom.body.length <= slot.max_chars` at outline time and fails
-`verbatim_atom_exceeds_slot_cap` on any binding where the verbatim
-body wouldn't fit. This regresses a rule the allocation SKILL already
-states ("a heading source must be a short, lift-able phrase — flag
-if not"): the outline layer is where the rule has to be enforced as
-code because outline is where slot-binding happens.
+Verbatim atoms (`verbatim: true`) get a slot that can hold their
+full body — partner-supplied text is never trimmed to meet a
+`max_chars` recommendation. `max_chars` in `canonical_templates` is
+a VISUAL RHYTHM default the designer can choose to honor; for prose
+slots (`body`, `description`, `quote`, `accent_body`, etc.) the
+Brixies layout absorbs longer text without breaking. For SHORT
+slots (`primary_heading`, `tagline`, `cta_label`) clipping IS a
+visual problem — those need the decision tree below.
 
-**The decision tree (banked 2026-06-13 strategist decision: long
-partner-sacred lines belong in body/quote slots with a derived short
-heading — DO NOT add long-heading template variants):**
+**The decision tree:**
 
 1. Can the verbatim body fit a `body`, `quote`, or other long-cap
    slot on the chosen archetype? Look beyond `primary_heading` /
@@ -479,9 +516,20 @@ heading — DO NOT add long-heading template variants):**
    in a body/quote slot?
    - YES → switch archetype. The flow_role is the constraint;
      the archetype is the lever.
-3. None of the above?
-   - Declare in `unresolved_inputs[]` with what+where pair. Last
-     resort.
+3. None of the above? — STRETCH the cap.
+   - For PROSE slots (`body`/`description`/`quote`/`accent_body`/
+     `richtext`): bind the verbatim atom and emit a
+     `cap_overrides[]` entry on the section naming the slot. The
+     drafter honors it without strategist authorization because
+     PARTNER VERBATIM CONTENT IS NEVER TRUNCATED. The critique
+     treats this as authorized.
+   - For SHORT slots (`primary_heading`/`tagline`/`cta_label`):
+     declare in `unresolved_inputs[]` with what+where pair (truly
+     last resort — the visitor would see clipped headings).
+
+**The strategic distinction.** Truncation is forbidden for partner
+verbatim content; clipping is a real visual hazard only for the
+short heading-class slots. Prose slots stretch silently.
 
 **The derived-heading pattern.** When you route a long verbatim atom
 to a body slot, the heading slot still needs SOMETHING — that's where
