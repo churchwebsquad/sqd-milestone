@@ -45,6 +45,7 @@ import { WMStatusPill } from './StatusPill'
 import { SectionDetailsPanel } from './sectioneditor/SectionDetailsPanel'
 import { SnippetFocusProvider } from './sectioneditor/SnippetFocusContext'
 import { useSectionDetail } from './sectioneditor/SectionEditingContext'
+import { ProjectIdProvider } from './sectioneditor/ProjectIdContext'
 import { SnippetsWorkspace } from './workspaces/SnippetsWorkspace'
 import { VoiceWorkspace } from './workspaces/VoiceWorkspace'
 import { HeuristicsWorkspace } from './workspaces/HeuristicsWorkspace'
@@ -187,6 +188,7 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
 
       <div className="flex-1 overflow-y-auto bg-wm-bg-elevated min-h-0">
         {tab === 'section' && sectionDetail && (
+          <ProjectIdProvider projectId={projectId}>
           <SnippetFocusProvider>
             <SectionDetailsPanel
               section={sectionDetail.section}
@@ -208,6 +210,7 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
               onCommentsChange={sectionDetail.onCommentsChange}
             />
           </SnippetFocusProvider>
+          </ProjectIdProvider>
         )}
         {tab === 'snippets' && (project
           ? <SnippetsWorkspace project={project} onChange={onProjectChange ?? (async () => { await loadCounts() })} />
