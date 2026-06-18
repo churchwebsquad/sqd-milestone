@@ -31,6 +31,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
+// @ts-ignore — dotenv not in devDependencies; installed at runtime
 import 'dotenv/config'
 
 interface CheckRow {

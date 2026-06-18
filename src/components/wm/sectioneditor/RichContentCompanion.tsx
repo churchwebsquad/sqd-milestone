@@ -103,7 +103,7 @@ export function RichContentCompanion({ section, template, onChange }: Props) {
     if (manifest != null) return
     setManifestLoading(true)
     void (async () => {
-      const { data } = await supabase
+      const { data } = await (supabase as any)
         .schema('strategy')
         .from('cowork_templates')
         .select('manifest')
@@ -182,7 +182,7 @@ export function RichContentCompanion({ section, template, onChange }: Props) {
         return row
       })
       .filter(i => i.item_heading || i.item_body || i.item_meta || i.item_cta_label || i.item_cta_url)
-    if (cleanItems.length > 0) out.items = cleanItems as ItemRow[]
+    if (cleanItems.length > 0) out.items = cleanItems as unknown as ItemRow[]
     const cleanButtons = buttons
       .map(b => ({ label: b.label.trim(), url: b.url.trim() }))
       .filter(b => b.label || b.url)
@@ -194,11 +194,12 @@ export function RichContentCompanion({ section, template, onChange }: Props) {
     if (!currentEntry) return
     setSaving(true)
     const slotValues = buildSlotValues()
-    const bind = composeFieldValuesForBrixies(slotValues, currentEntry)
+    const slotValuesRec = slotValues as unknown as Record<string, unknown>
+    const bind = composeFieldValuesForBrixies(slotValuesRec, currentEntry)
     onChange({
-      cowork_slot_values:  slotValues,
+      cowork_slot_values:  slotValuesRec,
       field_values:        bind.field_values,
-      source_field_values: slotValues,
+      source_field_values: slotValuesRec,
       cowork_section_meta: {
         ...(meta ?? {}),
         bind_quality: bind.bind_quality,
@@ -212,12 +213,13 @@ export function RichContentCompanion({ section, template, onChange }: Props) {
     if (!newEntry.template_id) return
     setSwitching(newEntry.template_id)
     const slotValues = buildSlotValues()
-    const bind = composeFieldValuesForBrixies(slotValues, newEntry)
+    const slotValuesRec = slotValues as unknown as Record<string, unknown>
+    const bind = composeFieldValuesForBrixies(slotValuesRec, newEntry)
     onChange({
       content_template_id: newEntry.template_id,
-      cowork_slot_values:  slotValues,
+      cowork_slot_values:  slotValuesRec,
       field_values:        bind.field_values,
-      source_field_values: slotValues,
+      source_field_values: slotValuesRec,
       cowork_section_meta: {
         ...(meta ?? {}),
         bind_quality: bind.bind_quality,

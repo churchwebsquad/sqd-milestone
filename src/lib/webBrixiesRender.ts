@@ -20,6 +20,7 @@
  *     image placeholders is stripped so the rendered iframe doesn't
  *     show the design tool's empty-state dimensions.
  */
+/// <reference lib="dom" />
 import type {
   WebContentTemplate, WebFieldDef, WebSlotDef, WebGroupDef,
 } from '../types/database'
@@ -775,10 +776,11 @@ function isAllHidden(els: HTMLElement[]): boolean {
  *  (outside any group container, e.g. a hero photo or content-section
  *  Image 1 area) are NOT touched by this pass; hideUnfilledDecorative
  *  Slots already exempts them. */
-function hideUnsubstitutedItemClones(
+// @ts-ignore — kept for future use, not yet wired into the render pipeline
+function _hideUnsubstitutedItemClones(
   root: Element,
   fields: ReadonlyArray<WebFieldDef> | undefined | null,
-  values: Record<string, unknown>,
+  _values: Record<string, unknown>,
 ): void {
   if (!fields) return
   for (const field of fields) {
@@ -922,7 +924,8 @@ function hasSubstitutedAncestor(el: Element): boolean {
  *    are untouched.
  *  - An empty Frame stays IF any descendant is substituted, has real
  *    text, OR contains a real (non-placeholder) <img>/<video>. */
-function hideEmptyNumberedFrames(root: Element): void {
+// @ts-ignore — kept for future use, not yet wired into the render pipeline
+function _hideEmptyNumberedFrames(root: Element): void {
   const els = root.querySelectorAll('[data-layer]')
   for (const el of Array.from(els) as HTMLElement[]) {
     const layer = el.getAttribute('data-layer') ?? ''

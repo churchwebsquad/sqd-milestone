@@ -3,6 +3,7 @@
  * renders all the synthetic markers. */
 /* eslint-disable no-console, @typescript-eslint/no-explicit-any */
 
+// @ts-ignore — jsdom not in devDependencies; installed at runtime
 import { JSDOM } from 'jsdom'
 import { createClient } from '@supabase/supabase-js'
 import { readFileSync, existsSync } from 'node:fs'

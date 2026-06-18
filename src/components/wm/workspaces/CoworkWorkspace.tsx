@@ -1564,7 +1564,7 @@ function CcPage2Resolver({ issue, projectId, onResolved }: {
         .maybeSingle()
       if (cancelled) return
       if (err) setError(err.message)
-      setSessionId(data?.id ?? null)
+      setSessionId((data as any)?.id ?? null)
       setLoading(false)
     })()
     return () => { cancelled = true }

@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 /* Per-template shape trials, derived from each schema's item_schema. */
 /* eslint-disable no-console, @typescript-eslint/no-explicit-any */
+// @ts-ignore — jsdom not in devDependencies; installed at runtime
 import { JSDOM } from 'jsdom'
 import { createClient } from '@supabase/supabase-js'
 import { readFileSync, existsSync } from 'node:fs'
@@ -44,8 +45,8 @@ async function main() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY!
   const sb = createClient(url, key, { auth: { persistSession: false } })
 
-  const H='MARK_HEAD', T='MARK_TAG', B='MARK_BODY', BTN='MARK_BTN'
-  const I1H='MARK_I1H', I1B='MARK_I1B', I2H='MARK_I2H', I2B='MARK_I2B', I3H='MARK_I3H', I3B='MARK_I3B'
+  const H='MARK_HEAD', B='MARK_BODY', BTN='MARK_BTN'
+  const I1H='MARK_I1H', I1B='MARK_I1B', I2H='MARK_I2H', I2B='MARK_I2B'
 
   console.log(`\n=== faq-section-10 ===`)
   // Schema: accordion_left.item_schema = [{key:text,type:text}, {key:text,type:richtext}]

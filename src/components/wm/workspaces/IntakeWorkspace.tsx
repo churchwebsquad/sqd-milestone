@@ -476,7 +476,7 @@ function IntakeRow({
 
   const handleRemove = async (doc: WebIntakeDocument) => {
     if (!confirm(`Remove "${doc.filename}"?`)) return
-    await supabase.from('web_intake_documents').update({ archived: true }).eq('id', doc.id)
+    await (supabase as any).from('web_intake_documents').update({ archived: true }).eq('id', doc.id)
     await removeAttachment(doc.storage_path, INTAKE_BUCKET)
     await onChange()
   }
@@ -570,7 +570,7 @@ function IntakeRow({
           placeholder="https://www.notion.so/…"
           initialValue={project.strategy_brief_notion_url ?? ''}
           onSave={async (v) => {
-            await supabase
+            await (supabase as any)
               .from('strategy_web_projects')
               .update({ strategy_brief_notion_url: v.trim() || null })
               .eq('id', project.id)
@@ -584,7 +584,7 @@ function IntakeRow({
           placeholder="https://live.standards.site/…"
           initialValue={project.external_brand_guide_url ?? ''}
           onSave={async (v) => {
-            await supabase
+            await (supabase as any)
               .from('strategy_web_projects')
               .update({ external_brand_guide_url: v.trim() || null })
               .eq('id', project.id)
