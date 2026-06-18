@@ -93,8 +93,41 @@ export function renderSectionToHtml(
   fixContent53Overlap(root)
   fixCta52ImageList(root)
   fixFeatureSection61Stacking(root)
+  fixContentSection89Wrap(root)
 
   return root.outerHTML
+}
+
+/** Content Section 89 ships with a 3-column item layout where the
+ *  `List` container uses `display: inline-flex` (no wrap) and each
+ *  `Column list` item uses `flex: 1 1 0`. With exactly 3 items it
+ *  looks correct; with 4+ items (STRETCH overflow path), the columns
+ *  squish horizontally into one row instead of wrapping to a new row.
+ *
+ *  Fix: enable wrapping on List, and fix each Column list item to
+ *  exactly 1/3 of available width minus the gap so a 4th item flows
+ *  to row 2. Mirrors the canonical 3-per-row design intent. */
+function fixContentSection89Wrap(root: Element): void {
+  const sections: HTMLElement[] = []
+  if ((root as HTMLElement).getAttribute?.('data-layer') === 'Content Section 89') {
+    sections.push(root as HTMLElement)
+  }
+  sections.push(...Array.from(root.querySelectorAll<HTMLElement>('[data-layer="Content Section 89"]')))
+  for (const sec of sections) {
+    const lists = Array.from(sec.querySelectorAll<HTMLElement>('[data-layer="List"]'))
+    for (const list of lists) {
+      const existing = list.getAttribute('style') ?? ''
+      list.setAttribute('style', `${existing};flex-wrap: wrap`)
+    }
+    const items = Array.from(sec.querySelectorAll<HTMLElement>('[data-layer="Column list"]'))
+    for (const item of items) {
+      const existing = item.getAttribute('style') ?? ''
+      // Override `flex: 1 1 0` → `flex: 0 0 calc(...)` so each item is
+      // exactly 1/3 width minus its share of the 13.3px gap. Place after
+      // the existing rule so it wins via cascade order.
+      item.setAttribute('style', `${existing};flex: 0 0 calc((100% - 26.6px) / 3)`)
+    }
+  }
 }
 
 /** Feature Section 61 ships with a full-width `Background overlap`
