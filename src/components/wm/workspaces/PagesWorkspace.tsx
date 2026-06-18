@@ -1795,7 +1795,7 @@ function PageEditor({
         subtitle={bindingSection
           ? (extractSuggestedFamily(bindingSection.notes) ?? page.name)
           : page.name}
-        kindFilter={['content', 'media', 'post_template'] as readonly WebTemplateKind[]}
+        kindFilter={['content', 'media', 'post_template', 'functional'] as readonly WebTemplateKind[]}
         familyFilter={bindingSection && extractSuggestedFamily(bindingSection.notes)
           ? [extractSuggestedFamily(bindingSection.notes)!]
           : undefined}
