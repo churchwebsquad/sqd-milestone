@@ -1631,6 +1631,14 @@ function applySlot(el: Element, slot: WebSlotDef, raw: unknown): void {
       if (text.length > 0) {
         setInnerText(el, text)
         el.setAttribute('data-substituted', '1')
+      } else if (slot.default_value && slot.default_value.length > 0) {
+        // Empty user value + schema declares a default → use the default.
+        // Common case: a Location slot whose default_value is
+        // `{{city_state}}` falls back to the church's city/state. The
+        // post-substitute resolveSnippetsInTree pass replaces the token
+        // with its actual value from the project's snippet map.
+        setInnerText(el, slot.default_value)
+        el.setAttribute('data-substituted', '1')
       } else {
         // Empty text-class slot: hide the element so the Brixies source's
         // layer-name placeholder (e.g. the literal word "Tagline" on a
@@ -1647,6 +1655,9 @@ function applySlot(el: Element, slot: WebSlotDef, raw: unknown): void {
       const html = typeof raw === 'string' ? raw : ''
       if (html.length > 0) {
         el.innerHTML = html
+        el.setAttribute('data-substituted', '1')
+      } else if (slot.default_value && slot.default_value.length > 0) {
+        el.innerHTML = slot.default_value
         el.setAttribute('data-substituted', '1')
       } else {
         forceHide(el as HTMLElement)
