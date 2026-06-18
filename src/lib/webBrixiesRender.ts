@@ -1459,11 +1459,16 @@ function applySlot(el: Element, slot: WebSlotDef, raw: unknown): void {
       const text = typeof raw === 'string' ? raw : ''
       if (text.length > 0) {
         setInnerText(el, text)
-        // Mark substituted so downstream visibility passes know this
-        // element received real content — without this, the schema-
-        // driven hide pass can't distinguish "filled" from "empty"
-        // for non-CTA slots (only applyCta was marking before).
         el.setAttribute('data-substituted', '1')
+      } else {
+        // Empty text-class slot: hide the element so the Brixies source's
+        // layer-name placeholder (e.g. the literal word "Tagline" on a
+        // data-layer="Tagline" element inside card-193) doesn't render.
+        // hideUnpopulatedSchemaSlots can't reach here because palette-
+        // card descendants are out of its scope — handle it inline. We
+        // hide regardless of nesting depth: the slot is in this item's
+        // schema and the value is empty, so the layer should not render.
+        forceHide(el as HTMLElement)
       }
       return
     }
@@ -1472,6 +1477,8 @@ function applySlot(el: Element, slot: WebSlotDef, raw: unknown): void {
       if (html.length > 0) {
         el.innerHTML = html
         el.setAttribute('data-substituted', '1')
+      } else {
+        forceHide(el as HTMLElement)
       }
       return
     }
