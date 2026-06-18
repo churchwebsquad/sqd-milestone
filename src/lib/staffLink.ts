@@ -364,6 +364,8 @@ export async function syncStaffLinkOnSave(
     console.error('[staff-link sync] failed', e)
   }
 }
+
+/** Append a Single Team Section 6 to the given per-staff page, with
  *  the staff_fact_id embedded in field_values so the renderer + the
  *  edit panel know which church_facts row to mirror. Returns the new
  *  section's id so the caller can store it back on the Team 14 item. */
