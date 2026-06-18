@@ -19,8 +19,6 @@ import {
 } from 'lucide-react'
 import { SlotEditor } from './SlotEditor'
 import { GroupEditor } from './GroupEditor'
-import { StaffLinkToggle } from './StaffLinkToggle'
-import { useProjectId } from './ProjectIdContext'
 import type { WMSnippetOption } from '../RichTextEditor'
 import type { WebGroupDef, WebFieldDef, WebContentTemplate } from '../../../types/database'
 
@@ -198,14 +196,6 @@ function CardCell({
   const [open, setOpen] = useState(idx < 2)  // first couple expanded
   const visible = leafSchema.filter(isEditableLeafField)
 
-  // Detect Team Section 14 card_team cells so we can render the
-  // staff-link toggle above the slots. The flat-grid cell shape
-  // (no leafKey indirection) means _display_mode + _staff_fact_id
-  // live directly on the cell bag, so the toggle's read/patch
-  // pair maps cleanly to readSlot/writeSlot.
-  const projectId = useProjectId()
-  const isStaffCard = leafSchema.some(f => f.kind === 'slot' && f.key === 'team_name')
-
   return (
     <div>
       <div className="flex items-center gap-1 group/cell">
@@ -231,21 +221,6 @@ function CardCell({
       </div>
       {open && (
         <div className="mt-2 space-y-2.5">
-          {isStaffCard && projectId && (
-            <StaffLinkToggle
-              item={{
-                team_name:        readSlot('team_name'),
-                team_position:    readSlot('team_position'),
-                team_description: readSlot('team_description'),
-                _display_mode:    cell._display_mode,
-                _staff_fact_id:   cell._staff_fact_id,
-              }}
-              onPatch={(patch) => {
-                for (const [k, v] of Object.entries(patch)) writeSlot(k, v)
-              }}
-              projectId={projectId}
-            />
-          )}
           {visible.map((field, i) => {
             if (field.kind === 'slot') {
               return (

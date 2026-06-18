@@ -30,6 +30,8 @@ import { CommentActions } from './CommentActions'
 import { FeedbackCard } from '../feedback/FeedbackCard'
 import { SaveToLibraryButton } from './SaveToLibraryButton'
 import { ProjectPagesProvider } from './ProjectPagesContext'
+import { useProjectId } from './ProjectIdContext'
+import { SectionStaffLinkToggle } from './SectionStaffLinkToggle'
 import { summarizeSlotPresence } from '../../../lib/webBrixiesLayoutParser'
 import { supabase } from '../../../lib/supabase'
 import {
@@ -94,6 +96,9 @@ export function SectionDetailsPanel({
   const setValue = (key: string, v: unknown) => {
     onChange({ field_values: { ...values, [key]: v } })
   }
+  // Project id for features that touch project-scoped rows (e.g. the
+  // section-level staff link toggle on Team Section 14).
+  const projectId = useProjectId()
   // Remount key — kept for downstream callers that bump it after an
   // out-of-band value swap (e.g. an external paste tool); harmless
   // when nothing bumps it. The pre-removal use case (bind-health
@@ -224,6 +229,18 @@ export function SectionDetailsPanel({
             workflow anymore. Sections that exceed a layout's natural
             character budget render long without trim; that's a
             strategist judgment call, not an automated nudge. */}
+
+        {/* Section-level staff link toggle — visible only when this
+            section is bound to team-section-14. One toggle controls
+            every staff card in the section: flipping batches the
+            link flow over all cards at once. */}
+        {template?.id === 'team-section-14' && projectId && (
+          <SectionStaffLinkToggle
+            section={section}
+            projectId={projectId}
+            onPatch={(nextValues) => onChange({ field_values: nextValues })}
+          />
+        )}
 
         {/* Field editors */}
         {template && visibleFields.length > 0 && (
