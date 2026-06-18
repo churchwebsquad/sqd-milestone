@@ -117,6 +117,11 @@ const STATUS_LABELS: Record<WebPage['content_status'], string> = {
 export function PagesWorkspace({ project, onChange }: Props) {
   const [params, setParams] = useSearchParams()
   const [pages, setPages] = useState<WebPage[]>([])
+  /** Per-staff bio pages (slug LIKE 'staff/%'). Loaded separately so
+   *  they don't pollute the main pages list but stay accessible via
+   *  the "Linked staff pages" collapsible at the bottom of the
+   *  sidebar (Phase 4). */
+  const [staffPages, setStaffPages] = useState<WebPage[]>([])
   const [loading, setLoading] = useState(true)
   const [activePage, setActivePage] = useState<WebPage | null>(null)
   const [snippets, setSnippets] = useState<readonly WMSnippetOption[]>([])
@@ -165,15 +170,25 @@ export function PagesWorkspace({ project, onChange }: Props) {
       .select('*')
       .eq('web_project_id', project.id)
       .eq('archived', false)
-      // Hide per-staff bio pages from the workspace sidebar. They're
-      // routable on the rendered site (e.g. /staff/lewis-galloway) and
-      // referenced from Team 14 cards in "linked" display_mode, but
+      // Hide per-staff bio pages from the main workspace sidebar.
+      // They're routable on the rendered site (e.g. /staff/lewis-galloway)
+      // and referenced from Team 14 cards in "linked" display_mode, but
       // they shouldn't clutter the page list — strategist edits them
-      // via the "Linked staff pages" surface (Phase 4) or by clicking
-      // through from the Team 14 item editor.
+      // via the "Linked staff pages" collapsible at the bottom of
+      // the sidebar or by clicking through from a Team 14 card.
       .not('slug', 'like', 'staff/%')
       .order('sort_order')
     setPages((data ?? []) as WebPage[])
+    // Load the hidden per-staff pages into a separate list so the
+    // collapsible at the bottom of PageList can show them on demand.
+    const { data: staffData } = await supabase
+      .from('web_pages')
+      .select('*')
+      .eq('web_project_id', project.id)
+      .eq('archived', false)
+      .like('slug', 'staff/%')
+      .order('name')
+    setStaffPages((staffData ?? []) as WebPage[])
     setLoading(false)
   }
 
@@ -282,6 +297,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
           )}
           <PageList
             pages={pages}
+            staffPages={staffPages}
             loading={loading}
             activeId={activePage?.id ?? null}
             selectedIds={selectedIds}
@@ -384,11 +400,15 @@ export function PagesWorkspace({ project, onChange }: Props) {
 // ── Page list ─────────────────────────────────────────────────────────
 
 function PageList({
-  pages, loading, activeId, selectedIds,
+  pages, staffPages, loading, activeId, selectedIds,
   onSelect, onToggleSelection, onArchive, onAddPageInPhase,
   pageReviewCounts,
 }: {
   pages: WebPage[]
+  /** Per-staff bio pages (slug LIKE 'staff/%'). Rendered in a
+   *  collapsible at the bottom of the sidebar so the strategist can
+   *  navigate to them without cluttering the main list. */
+  staffPages: WebPage[]
   loading: boolean
   activeId: string | null
   selectedIds: Set<string>
@@ -399,6 +419,7 @@ function PageList({
   pageReviewCounts: Record<string, import('../../../lib/webReviews').PageReviewCounts>
 }) {
   const selectionActive = selectedIds.size > 0
+  const [staffOpen, setStaffOpen] = useState(false)
 
   if (loading) {
     return (
@@ -487,6 +508,57 @@ function PageList({
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Linked staff pages — collapsible section listing the hidden
+          /staff/<slug> bio pages so the strategist can edit them
+          without navigating by URL. Empty when no staff are linked. */}
+      {staffPages.length > 0 && (
+        <div className="mt-4 border-t border-wm-border/40 pt-3">
+          <button
+            type="button"
+            onClick={() => setStaffOpen(v => !v)}
+            className="w-full px-4 mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle hover:text-wm-text-muted transition-colors"
+          >
+            <span>Linked staff pages · {staffPages.length}</span>
+            {staffOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          </button>
+          {staffOpen && (
+            <div className="space-y-0.5">
+              {staffPages.map(sp => (
+                <div
+                  key={sp.id}
+                  className={[
+                    'group relative flex items-center border-l-2 transition-colors',
+                    sp.id === activeId
+                      ? 'bg-wm-bg-selected border-wm-accent'
+                      : 'border-transparent hover:bg-wm-bg-hover',
+                  ].join(' ')}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onSelect(sp.id)}
+                    className="min-w-0 flex-1 text-left px-4 py-1.5 flex items-center gap-2"
+                  >
+                    <FileText size={11} className="text-wm-text-subtle shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12px] text-wm-text truncate">{sp.name}</p>
+                      <p className="text-[10px] text-wm-text-subtle font-mono truncate">/{sp.slug}</p>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onArchive(sp.id) }}
+                    className="shrink-0 pr-2 py-1.5 text-wm-text-subtle hover:text-wm-danger opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Archive page"
+                  >
+                    <Archive size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
