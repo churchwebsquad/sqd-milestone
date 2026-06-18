@@ -652,13 +652,50 @@ function hideEmptyButtonShells(root: Element): void {
   // wrapper-like layer and hide it if it has no visible (non-hidden)
   // button descendants left + no own text. This catches the
   // "floating black box where no button was added" symptom.
+  //
+  // Card 67 + others ship `data-icon="True"` button shells where a
+  // decorative SVG arrow sits next to the Contact label. When Contact
+  // is empty and gets hidden in Pass 1, the arrow SVG remained the
+  // only visible descendant and kept the wrapper alive — visitor saw
+  // a black box with just an arrow. `hasMeaningfulButtonContent`
+  // ignores icon-only/SVG-only descendants so the wrapper falls
+  // through to forceHide.
   for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-layer]'))) {
     const layer = (el.getAttribute('data-layer') ?? '').toLowerCase()
     if (!/buttons?$|container buttons?$|button group/i.test(layer)) continue
-    if (hasVisibleChild(el)) continue
+    if (hasMeaningfulButtonContent(el)) continue
     if (hasButtonText(el)) continue
     forceHide(el)
   }
+}
+
+/** Like `hasVisibleChild` but treats decorative icon-only descendants
+ *  as not-meaningful for button shell purposes. A button wrapper with
+ *  only a hidden Contact label + an unfilled SVG arrow icon should
+ *  count as empty — the visitor sees nothing actionable, just a
+ *  black box with an arrow. Real content = visible text, an <img>
+ *  with src, an <input>, or a <video> with src. */
+function hasMeaningfulButtonContent(el: Element): boolean {
+  for (const c of Array.from(el.querySelectorAll('*'))) {
+    const node = c as HTMLElement
+    const s = node.getAttribute?.('style') ?? ''
+    if (/display\s*:\s*none/i.test(s)) continue
+    const tag = node.tagName.toLowerCase()
+    // Decorative SVG / icon wrappers don't count as meaningful.
+    if (tag === 'svg' || tag === 'path' || tag === 'g') continue
+    if (node.hasAttribute('data-svg-wrapper')) continue
+    const layer = (node.getAttribute('data-layer') ?? '').toLowerCase()
+    if (layer === 'icon' || /icon$|^icon /.test(layer)) continue
+    // Real text inside this descendant.
+    if ((node.textContent ?? '').trim().length > 0) return true
+    // Real <img> with src counts.
+    if (tag === 'img') {
+      const src = (node.getAttribute('src') ?? '').trim()
+      if (src && !/^(data:image\/svg|placehold\.co|placeholder)/i.test(src)) return true
+    }
+    if (tag === 'input' || tag === 'video' || tag === 'iframe') return true
+  }
+  return false
 }
 
 /** True if `el` has at least one descendant whose computed display
