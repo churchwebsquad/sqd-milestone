@@ -109,35 +109,90 @@ async function notionPageContent(pageId: string, notionToken: string): Promise<s
 
 // ── Dropbox helpers ───────────────────────────────────────────────────────────
 
-async function dropboxSearch(query: string, dropboxToken: string): Promise<string> {
+interface DropboxFile {
+  path: string;
+  name: string;
+  size: number;
+}
+
+interface DropboxBrandAsset {
+  fileListing: string;
+  brandPdfs: Array<{ name: string; base64: string }>;
+}
+
+const DROPBOX_DOWNLOAD_URL = "https://content.dropboxapi.com/2/files/download";
+const BRAND_GUIDE_PATTERN  = /brand|guide|identity|style|logo|visual/i;
+const MAX_PDF_BYTES        = 20 * 1024 * 1024; // 20 MB
+
+async function dropboxSearch(query: string, dropboxToken: string): Promise<DropboxBrandAsset> {
+  const empty: DropboxBrandAsset = { fileListing: "", brandPdfs: [] };
   try {
     const res = await fetch(DROPBOX_SEARCH_URL, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${dropboxToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        query,
-        options: { max_results: 20, file_status: "active" },
-      }),
+      headers: { Authorization: `Bearer ${dropboxToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ query, options: { max_results: 20, file_status: "active" } }),
     });
     if (!res.ok) {
-      console.warn("[social-intel] Dropbox search HTTP", res.status);
-      return "";
+      console.warn("[social-intel] Dropbox search HTTP", res.status, await res.text());
+      return empty;
     }
     const data = await res.json();
-    const matches = data.matches ?? [];
-    if (!matches.length) return "";
-    return matches
-      .map((m: Record<string, unknown>) => {
-        const meta = (m.metadata as Record<string, unknown>)?.metadata as Record<string, unknown> ?? {};
-        return `- ${meta.path_display ?? meta.name ?? "unknown"}`;
+    const matches: Record<string, unknown>[] = data.matches ?? [];
+    if (!matches.length) return empty;
+
+    const files: DropboxFile[] = matches
+      .map((m) => {
+        const meta = ((m.metadata as Record<string, unknown>)?.metadata ?? {}) as Record<string, unknown>;
+        return {
+          path: (meta.path_display ?? meta.path_lower ?? "") as string,
+          name: (meta.name ?? "") as string,
+          size: (meta.size ?? 0) as number,
+        };
       })
-      .join("\n");
+      .filter((f) => f.path);
+
+    const fileListing = files.map((f) => `- ${f.path}`).join("\n");
+
+    // Download PDFs that look like brand guides (up to 2 files)
+    const brandPdfFiles = files.filter(
+      (f) => f.name.toLowerCase().endsWith(".pdf") && BRAND_GUIDE_PATTERN.test(f.name) && f.size <= MAX_PDF_BYTES
+    ).slice(0, 2);
+
+    const brandPdfs = (
+      await Promise.all(
+        brandPdfFiles.map(async (f) => {
+          try {
+            const dlRes = await fetch(DROPBOX_DOWNLOAD_URL, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${dropboxToken}`,
+                "Dropbox-API-Arg": JSON.stringify({ path: f.path }),
+              },
+            });
+            if (!dlRes.ok) {
+              console.warn("[social-intel] Dropbox download failed for", f.path, dlRes.status);
+              return null;
+            }
+            const buffer = await dlRes.arrayBuffer();
+            const bytes   = new Uint8Array(buffer);
+            // Encode to base64
+            let binary = "";
+            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+            const base64 = btoa(binary);
+            console.log(`[social-intel] Downloaded brand PDF: ${f.name} (${Math.round(bytes.length / 1024)}KB)`);
+            return { name: f.name, base64 };
+          } catch (e) {
+            console.warn("[social-intel] Dropbox download error for", f.path, e);
+            return null;
+          }
+        })
+      )
+    ).filter((x): x is { name: string; base64: string } => x !== null);
+
+    return { fileListing, brandPdfs };
   } catch (e) {
     console.warn("[social-intel] Dropbox search failed:", e);
-    return "";
+    return empty;
   }
 }
 
@@ -246,7 +301,7 @@ Deno.serve(async (req) => {
 
     dropboxToken
       ? dropboxSearch(churchName, dropboxToken)
-      : Promise.resolve("DROPBOX_ACCESS_TOKEN not set — flag for Josh."),
+      : Promise.resolve({ fileListing: "DROPBOX_ACCESS_TOKEN not set — flag for Josh.", brandPdfs: [] }),
 
     websiteUrl
       ? (async () => {
@@ -320,7 +375,8 @@ NOTION — Pages/docs found for this church:
 ${notionResults || "No Notion pages found for this church name."}
 
 DROPBOX — Files found for this church:
-${dropboxResults || "No Dropbox files found."}
+${dropboxResults.fileListing || "No Dropbox files found."}
+${dropboxResults.brandPdfs.length > 0 ? `Brand guide PDFs downloaded and included as documents: ${dropboxResults.brandPdfs.map(p => p.name).join(", ")}` : "No brand guide PDFs downloaded."}
 
 CONFIRMED SOCIAL LINKS (from our database + website scrape):
 ${socialLinks || "No links found — research via web_search."}
@@ -457,7 +513,18 @@ After researching, return ONLY this JSON:
       max_tokens: 8000,
       tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 10 }],
       system: systemPrompt,
-      messages: [{ role: "user", content: userPrompt }],
+      messages: [{
+        role: "user",
+        content: [
+          // Prepend any brand guide PDFs downloaded from Dropbox as document blocks
+          ...dropboxResults.brandPdfs.map(pdf => ({
+            type: "document",
+            source: { type: "base64", media_type: "application/pdf", data: pdf.base64 },
+            title: `Brand Guide: ${pdf.name}`,
+          })),
+          { type: "text", text: userPrompt },
+        ],
+      }],
     }),
   });
 
@@ -499,6 +566,7 @@ After researching, return ONLY this JSON:
         supabase: true,
         notion: !!notionToken,
         dropbox: !!dropboxToken,
+        dropboxBrandPdfsRead: dropboxResults.brandPdfs.map(p => p.name),
         firecrawl: !!websiteUrl,
       },
     },
