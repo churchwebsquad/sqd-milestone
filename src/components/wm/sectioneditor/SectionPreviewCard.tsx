@@ -15,10 +15,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   GripVertical, MoreHorizontal, Trash2, RotateCw, Archive,
-  ArrowUp, ArrowDown, MessageSquare,
+  ArrowUp, ArrowDown, MessageSquare, Copy, ChevronRight,
 } from 'lucide-react'
 import { renderSectionToHtml, type SnippetMap } from '../../../lib/webBrixiesRender'
 import type { WebContentTemplate, WebSection } from '../../../types/database'
+
+/** Minimal page reference for the "Duplicate to page" submenu. */
+export interface DuplicateTargetPage {
+  id:   string
+  name: string
+  slug: string
+}
 
 const BRIXIES_VIEWPORT_PX = 1512
 
@@ -47,12 +54,22 @@ interface Props {
   onChangeVariant: () => void
   onUnbind: () => void
   onRemove: () => void
+  /** Duplicate this section directly below itself on the SAME page. */
+  onDuplicateHere?: () => void
+  /** Duplicate this section to ANOTHER page in the project (appended at
+   *  the end of that page). Only renders the menu submenu when both the
+   *  callback AND `availablePages` are provided. */
+  onDuplicateToPage?: (targetPageId: string) => void
+  /** Other pages in the project (excluding the current page). When
+   *  provided, the "Duplicate to page…" menu submenu shows them. */
+  availablePages?: ReadonlyArray<DuplicateTargetPage>
 }
 
 export function SectionPreviewCard({
   section, template, index, total, selected, snippetMap, cardTemplates, bindQuality,
   reviewCounts,
   onSelect, onMoveUp, onMoveDown, onChangeVariant, onUnbind, onRemove,
+  onDuplicateHere, onDuplicateToPage, availablePages,
 }: Props) {
   const html = useMemo(() => {
     if (!template) return null
@@ -97,6 +114,9 @@ export function SectionPreviewCard({
         onChangeVariant={onChangeVariant}
         onUnbind={onUnbind}
         onRemove={onRemove}
+        onDuplicateHere={onDuplicateHere}
+        onDuplicateToPage={onDuplicateToPage}
+        availablePages={availablePages}
       />
       {template && html ? (
         <ScaledIframe html={html} title={template.layer_name} />
@@ -112,6 +132,7 @@ export function SectionPreviewCard({
 function SectionStrip({
   section: _section, template, index, total, bindQuality, selected, reviewCounts,
   onMoveUp, onMoveDown, onChangeVariant, onUnbind, onRemove,
+  onDuplicateHere, onDuplicateToPage, availablePages,
 }: {
   section: WebSection
   template: WebContentTemplate | null
@@ -130,8 +151,12 @@ function SectionStrip({
   onChangeVariant: () => void
   onUnbind: () => void
   onRemove: () => void
+  onDuplicateHere?: () => void
+  onDuplicateToPage?: (targetPageId: string) => void
+  availablePages?: ReadonlyArray<DuplicateTargetPage>
 }) {
   const [actionsOpen, setActionsOpen] = useState(false)
+  const [pagesSubmenuOpen, setPagesSubmenuOpen] = useState(false)
 
   return (
     <div
@@ -196,11 +221,48 @@ function SectionStrip({
           </ActionButton>
           {actionsOpen && (
             <>
-              <div className="fixed inset-0 z-10" onClick={() => setActionsOpen(false)} />
-              <div className="absolute right-0 mt-1 w-48 rounded-md border border-wm-border bg-wm-bg-elevated shadow-lg z-20 py-1">
+              <div className="fixed inset-0 z-10" onClick={() => { setActionsOpen(false); setPagesSubmenuOpen(false) }} />
+              <div className="absolute right-0 mt-1 w-56 rounded-md border border-wm-border bg-wm-bg-elevated shadow-lg z-20 py-1">
                 <ActionMenuItem onClick={() => { setActionsOpen(false); onChangeVariant() }} icon={<RotateCw size={11} />}>
                   Change variant…
                 </ActionMenuItem>
+                {onDuplicateHere && (
+                  <ActionMenuItem onClick={() => { setActionsOpen(false); onDuplicateHere() }} icon={<Copy size={11} />}>
+                    Duplicate here
+                  </ActionMenuItem>
+                )}
+                {onDuplicateToPage && availablePages && availablePages.length > 0 && (
+                  <div
+                    className="relative"
+                    onMouseEnter={() => setPagesSubmenuOpen(true)}
+                    onMouseLeave={() => setPagesSubmenuOpen(false)}
+                  >
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setPagesSubmenuOpen(o => !o) }}
+                      className="w-full text-left px-3 py-1.5 text-[12px] inline-flex items-center gap-2 text-wm-text hover:bg-wm-bg-hover transition-colors"
+                    >
+                      <Copy size={11} />
+                      <span className="flex-1">Duplicate to page…</span>
+                      <ChevronRight size={11} className="text-wm-text-subtle" />
+                    </button>
+                    {pagesSubmenuOpen && (
+                      <div className="absolute top-0 right-full mr-1 w-56 max-h-64 overflow-y-auto rounded-md border border-wm-border bg-wm-bg-elevated shadow-lg py-1">
+                        {availablePages.map(p => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setActionsOpen(false); setPagesSubmenuOpen(false); onDuplicateToPage(p.id) }}
+                            className="w-full text-left px-3 py-1.5 text-[12px] hover:bg-wm-bg-hover transition-colors block"
+                          >
+                            <p className="font-semibold text-wm-text truncate">{p.name}</p>
+                            <p className="text-[10px] text-wm-text-subtle font-mono truncate">/{p.slug}</p>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {template && (
                   <ActionMenuItem onClick={() => { setActionsOpen(false); onUnbind() }} icon={<Archive size={11} />}>
                     Unbind to freehand

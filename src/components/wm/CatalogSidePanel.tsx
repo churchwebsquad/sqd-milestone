@@ -12,7 +12,7 @@
  */
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { Search, Check, Sparkles, X, Star } from 'lucide-react'
+import { Search, Check, Sparkles, X, Star, Layers } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { WMFlyoutPanel } from './FlyoutPanel'
 import { WMButton } from './Button'
@@ -53,6 +53,13 @@ export interface WMCatalogSidePanelProps {
    *  badge so the strategist can spot site picks at a glance. */
   siteLibraryIds?: ReadonlySet<string>
 
+  /** Template ids currently bound on ANY active page in this project.
+   *  Drives the "Active on site" filter chip + a small badge on each
+   *  matching card so the strategist can quickly find variants already
+   *  in use elsewhere on the site (e.g. "I want the events layout from
+   *  the home page"). */
+  activeOnSiteIds?: ReadonlySet<string>
+
   /** Optional subtitle to show under each template card — used to
    *  surface the AI / deterministic rationale for the rank. Keyed by
    *  template id. */
@@ -72,7 +79,7 @@ export function WMCatalogSidePanel({
   kindFilter, familyFilter,
   mode, selectedIds = [], maxSelections,
   onSelect,
-  rankedIds, siteLibraryIds, cardSubtitles, onRequestAIRank, aiRanking,
+  rankedIds, siteLibraryIds, activeOnSiteIds, cardSubtitles, onRequestAIRank, aiRanking,
 }: WMCatalogSidePanelProps) {
   const [rows, setRows] = useState<WebContentTemplate[]>([])
   const [loading, setLoading] = useState(false)
@@ -83,12 +90,18 @@ export function WMCatalogSidePanel({
   // whenever `familyFilter` is supplied; strategist can toggle off via
   // the chip in the header to browse the full catalog.
   const [familyFilterActive, setFamilyFilterActive] = useState(true)
+  // Whether the "Active on site" filter is currently active. Starts off
+  // so the catalog shows the full set; strategist toggles on to narrow
+  // to templates already in use elsewhere on the site.
+  const [activeOnSiteFilter, setActiveOnSiteFilter] = useState(false)
 
   useEffect(() => {
     if (!open) return
     setDraftSelection([...selectedIds])
     // Re-enable family filter every time the panel opens.
     setFamilyFilterActive(true)
+    // Reset the Active-on-site filter so a fresh open shows the full catalog.
+    setActiveOnSiteFilter(false)
     let cancelled = false
     setLoading(true)
     void (async () => {
@@ -122,6 +135,7 @@ export function WMCatalogSidePanel({
         })
         if (!matches) return false
       }
+      if (activeOnSiteFilter && activeOnSiteIds && !activeOnSiteIds.has(r.id)) return false
       if (!q) return true
       return `${r.family} ${r.layer_name} ${r.id}`.toLowerCase().includes(q)
     })
@@ -145,7 +159,7 @@ export function WMCatalogSidePanel({
       }
       return 0
     })
-  }, [rows, query, kindFilter, familyFilter, familyFilterActive, rankedIds, siteLibraryIds])
+  }, [rows, query, kindFilter, familyFilter, familyFilterActive, activeOnSiteFilter, activeOnSiteIds, rankedIds, siteLibraryIds])
 
   const handleCardClick = async (id: string) => {
     if (mode === 'single') {
@@ -202,28 +216,51 @@ export function WMCatalogSidePanel({
         </div>
         {/* Active family-filter chip — toggle off to browse the full catalog
             when the suggested family doesn't match anything in the DB. */}
-        {familyFilter && familyFilter.length > 0 && (
+        {((familyFilter && familyFilter.length > 0) || (activeOnSiteIds && activeOnSiteIds.size > 0)) && (
           <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-            <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Family:</span>
-            {familyFilter.map(f => (
+            {familyFilter && familyFilter.length > 0 && (
+              <>
+                <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Family:</span>
+                {familyFilter.map(f => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setFamilyFilterActive(v => !v)}
+                    className={[
+                      'inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] transition-colors',
+                      familyFilterActive
+                        ? 'bg-wm-accent-tint text-wm-accent-strong border border-wm-accent/30'
+                        : 'bg-wm-bg-hover text-wm-text-muted border border-wm-border line-through',
+                    ].join(' ')}
+                    title={familyFilterActive ? 'Click to show all families' : 'Click to re-apply family filter'}
+                  >
+                    {f}
+                    {familyFilterActive && <X size={10} />}
+                  </button>
+                ))}
+                {!familyFilterActive && (
+                  <span className="text-[10px] text-wm-text-subtle italic">showing all families</span>
+                )}
+              </>
+            )}
+            {activeOnSiteIds && activeOnSiteIds.size > 0 && (
               <button
-                key={f}
                 type="button"
-                onClick={() => setFamilyFilterActive(v => !v)}
+                onClick={() => setActiveOnSiteFilter(v => !v)}
                 className={[
                   'inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] transition-colors',
-                  familyFilterActive
-                    ? 'bg-wm-accent-tint text-wm-accent-strong border border-wm-accent/30'
-                    : 'bg-wm-bg-hover text-wm-text-muted border border-wm-border line-through',
+                  activeOnSiteFilter
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-300'
+                    : 'bg-wm-bg-hover text-wm-text-muted border border-wm-border hover:bg-wm-bg-elevated',
                 ].join(' ')}
-                title={familyFilterActive ? 'Click to show all families' : 'Click to re-apply family filter'}
+                title={activeOnSiteFilter
+                  ? 'Showing only templates already in use on this site'
+                  : 'Filter to templates already in use on this site'}
               >
-                {f}
-                {familyFilterActive && <X size={10} />}
+                <Layers size={10} />
+                Active on site ({activeOnSiteIds.size})
+                {activeOnSiteFilter && <X size={10} />}
               </button>
-            ))}
-            {!familyFilterActive && (
-              <span className="text-[10px] text-wm-text-subtle italic">showing all families</span>
             )}
           </div>
         )}
@@ -271,6 +308,7 @@ export function WMCatalogSidePanel({
             {visible.map((t, idx) => {
               const isSelected = draftSelection.includes(t.id)
               const isSiteLibrary = !!siteLibraryIds?.has(t.id)
+              const isActiveOnSite = !!activeOnSiteIds?.has(t.id)
               // Inject section headers (full-width grid rows) so the
               // strategist can see where the site-library tier ends and
               // the broader catalog begins. The boundaries fall between
@@ -331,6 +369,14 @@ export function WMCatalogSidePanel({
                       <p className="text-[10px] text-wm-text-subtle truncate">{t.family}</p>
                       <WMStatusPill tone="neutral" size="sm">{t.kind}</WMStatusPill>
                     </div>
+                    {isActiveOnSite && (
+                      <p
+                        className="text-[10px] mt-1 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-300 font-bold uppercase tracking-widest"
+                        title="This template is already bound on at least one page in this project"
+                      >
+                        <Layers size={9} /> Active on site
+                      </p>
+                    )}
                     {cardSubtitles?.[t.id] && (
                       <p className="text-[10px] text-wm-accent-strong italic mt-1.5 line-clamp-2" title={cardSubtitles[t.id]}>
                         {cardSubtitles[t.id]}

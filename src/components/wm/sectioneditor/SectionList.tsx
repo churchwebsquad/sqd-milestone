@@ -6,7 +6,7 @@
  * affordances appear between sections on hover.
  */
 import { Plus } from 'lucide-react'
-import { SectionPreviewCard } from './SectionPreviewCard'
+import { SectionPreviewCard, type DuplicateTargetPage } from './SectionPreviewCard'
 import type { SnippetMap } from '../../../lib/webBrixiesRender'
 import type { WebContentTemplate, WebSection } from '../../../types/database'
 
@@ -33,6 +33,12 @@ interface Props {
   onRemove: (id: string) => void
   onInsertBefore: (idx: number) => void
   onInsertAfter: () => void
+  /** Duplicate a section to a new position on the SAME page (right below itself). */
+  onDuplicateHere?: (id: string) => void
+  /** Duplicate a section to ANOTHER page in the project (appended at the end). */
+  onDuplicateToPage?: (id: string, targetPageId: string) => void
+  /** Pages available as duplicate targets (excluding the current page). */
+  availablePages?: ReadonlyArray<DuplicateTargetPage>
 }
 
 export function SectionList({
@@ -40,6 +46,7 @@ export function SectionList({
   reviewCountsBySection,
   onSelect, onMoveSection, onChangeVariant, onUnbind, onRemove,
   onInsertBefore, onInsertAfter,
+  onDuplicateHere, onDuplicateToPage, availablePages,
 }: Props) {
   if (sections.length === 0) {
     return (
@@ -81,6 +88,9 @@ export function SectionList({
             onChangeVariant={() => onChangeVariant(section)}
             onUnbind={() => onUnbind(section.id)}
             onRemove={() => onRemove(section.id)}
+            onDuplicateHere={onDuplicateHere ? () => onDuplicateHere(section.id) : undefined}
+            onDuplicateToPage={onDuplicateToPage ? (targetPageId) => onDuplicateToPage(section.id, targetPageId) : undefined}
+            availablePages={availablePages}
           />
         </div>
       ))}

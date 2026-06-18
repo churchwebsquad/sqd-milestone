@@ -710,6 +710,37 @@ function PageEditor({
   }
   useEffect(() => { void loadSections() }, [page.id])
 
+  // Project-wide set of content_template_ids currently bound on ANY
+  // active page in this project. Drives the catalog's "Active on this
+  // site" filter so the strategist can quickly find variants already
+  // in use elsewhere on the site. Re-loaded when the user opens the
+  // catalog (cheap query — selects one tiny column).
+  const [activeOnSiteIds, setActiveOnSiteIds] = useState<ReadonlySet<string>>(new Set())
+  const loadActiveOnSiteIds = async () => {
+    const { data: rows } = await supabase
+      .from('web_sections')
+      .select('content_template_id, web_page_id, web_pages!inner(archived, web_project_id)')
+      .eq('web_pages.web_project_id', project.id)
+      .eq('web_pages.archived', false)
+      .not('content_template_id', 'is', null)
+    const ids = new Set<string>()
+    for (const r of (rows ?? []) as Array<{ content_template_id: string | null }>) {
+      if (r.content_template_id) ids.add(r.content_template_id)
+    }
+    setActiveOnSiteIds(ids)
+  }
+  useEffect(() => { void loadActiveOnSiteIds() }, [project.id, sections.length])
+
+  // Other pages in the project that a section can be duplicated TO.
+  // Filter out the current page (no point listing it as a target — the
+  // "Duplicate here" menu item handles same-page duplication) and any
+  // archived pages.
+  const duplicateTargetPages = useMemo(() => {
+    return projectPages
+      .filter(p => p.id !== page.id && !p.archived)
+      .map(p => ({ id: p.id, name: p.name, slug: p.slug }))
+  }, [projectPages, page.id])
+
   // After sections load, honor any ?section= deep link from the
   // review queue / feedback rail.
   useEffect(() => {
@@ -872,6 +903,66 @@ function PageEditor({
     if (!confirm('Remove this section?')) return
     await supabase.from('web_sections').delete().eq('id', sectionId)
     await loadSections()
+    void markEdited()
+  }
+
+  /** Copy a section to another page (or the same page if targetPageId
+   *  equals the current page). Preserves template binding + every
+   *  bound value: field_values, cowork_slot_values, cowork_section_meta,
+   *  source_field_values, field_provenance, content_status, notes. The
+   *  new row gets a fresh id + sort_order at the end of the target page. */
+  const duplicateSection = async (sourceSectionId: string, targetPageId: string) => {
+    const source = sections.find(s => s.id === sourceSectionId)
+    if (!source) return
+    const sameTargetPage = targetPageId === page.id
+    let nextOrder: number
+    if (sameTargetPage) {
+      // Insert directly below the source: bump all sections after the
+      // source up by 1, then place the dup at source.sort_order + 1.
+      const insertAt = source.sort_order + 1
+      const afterIds = sections.filter(s => s.sort_order >= insertAt).map(s => s.id)
+      if (afterIds.length > 0) {
+        await Promise.all(afterIds.map(id => {
+          const s = sections.find(x => x.id === id)!
+          return supabase.from('web_sections').update({ sort_order: s.sort_order + 1 }).eq('id', id)
+        }))
+      }
+      nextOrder = insertAt
+    } else {
+      // Append to the end of the target page.
+      const { data: tail } = await supabase
+        .from('web_sections')
+        .select('sort_order')
+        .eq('web_page_id', targetPageId)
+        .order('sort_order', { ascending: false })
+        .limit(1)
+      nextOrder = ((tail?.[0]?.sort_order ?? 0) as number) + 1
+    }
+    const payload: Partial<WebSection> = {
+      web_page_id:         targetPageId,
+      content_template_id: source.content_template_id,
+      field_values:        source.field_values,
+      sort_order:          nextOrder,
+    }
+    // Copy optional cowork-side fields if present so a duplicated
+    // section keeps its Notion provenance + design directives.
+    if ('cowork_slot_values' in source && source.cowork_slot_values != null) {
+      ;(payload as Record<string, unknown>).cowork_slot_values = source.cowork_slot_values
+    }
+    if ('cowork_section_meta' in source && source.cowork_section_meta != null) {
+      ;(payload as Record<string, unknown>).cowork_section_meta = source.cowork_section_meta
+    }
+    if ('source_field_values' in source && (source as Record<string, unknown>).source_field_values != null) {
+      ;(payload as Record<string, unknown>).source_field_values = (source as Record<string, unknown>).source_field_values
+    }
+    if ('field_provenance' in source && (source as Record<string, unknown>).field_provenance != null) {
+      ;(payload as Record<string, unknown>).field_provenance = (source as Record<string, unknown>).field_provenance
+    }
+    if (source.notes != null) (payload as Record<string, unknown>).notes = source.notes
+    await supabase.from('web_sections').insert(payload as never)
+    if (sameTargetPage) {
+      await loadSections()
+    }
     void markEdited()
   }
 
@@ -1463,6 +1554,9 @@ function PageEditor({
               onRemove={(id) => void archiveSection(id)}
               onInsertBefore={() => setPickerOpen(true)}
               onInsertAfter={() => setPickerOpen(true)}
+              onDuplicateHere={(id) => void duplicateSection(id, page.id)}
+              onDuplicateToPage={(id, targetPageId) => void duplicateSection(id, targetPageId)}
+              availablePages={duplicateTargetPages}
             />
             {/* Bottom-of-page add affordance. Always visible (even
                 when there are no sections yet) so the strategist
@@ -1489,6 +1583,7 @@ function PageEditor({
         subtitle={page.name}
         kindFilter={['content', 'media', 'post_template'] as readonly WebTemplateKind[]}
         siteLibraryIds={siteLibraryIds}
+        activeOnSiteIds={activeOnSiteIds}
         mode="single"
         onSelect={async (ids) => {
           try {
@@ -1516,6 +1611,7 @@ function PageEditor({
         mode="single"
         rankedIds={bindRanking.map(r => r.template.id)}
         siteLibraryIds={siteLibraryIds}
+        activeOnSiteIds={activeOnSiteIds}
         cardSubtitles={Object.fromEntries(bindRanking.map(r => [r.template.id, r.rationale]))}
         onRequestAIRank={
           (bindingSection && findBriefSection(pageBrief, extractSectionIdFromNotes(bindingSection.notes)))
