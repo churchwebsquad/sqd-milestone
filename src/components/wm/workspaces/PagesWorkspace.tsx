@@ -163,6 +163,13 @@ export function PagesWorkspace({ project, onChange }: Props) {
       .select('*')
       .eq('web_project_id', project.id)
       .eq('archived', false)
+      // Hide per-staff bio pages from the workspace sidebar. They're
+      // routable on the rendered site (e.g. /staff/lewis-galloway) and
+      // referenced from Team 14 cards in "linked" display_mode, but
+      // they shouldn't clutter the page list — strategist edits them
+      // via the "Linked staff pages" surface (Phase 4) or by clicking
+      // through from the Team 14 item editor.
+      .not('slug', 'like', 'staff/%')
       .order('sort_order')
     setPages((data ?? []) as WebPage[])
     setLoading(false)
