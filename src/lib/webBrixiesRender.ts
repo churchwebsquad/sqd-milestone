@@ -42,16 +42,23 @@ export function renderSectionToHtml(
   ;(doc as { __cardTemplates?: Record<string, WebContentTemplate> }).__cardTemplates = cardTemplates ?? {}
 
   const topByLayer = indexByLayer(template.fields)
-  // Pre-pass: top-level groups whose layer is NESTED inside another
-  // top-level group's element (e.g. Feature 66's `tab_button` hoisted
-  // to top level but the source's Tab buttons live inside each Tab)
-  // must be substituted first. Otherwise the outer group's expansion
-  // walks INTO the inner group's elements, sees a layer name like
-  // "Heading" that matches the outer item_schema, and clobbers the
-  // outer slot's match. Pre-substituting marks them with
-  // data-substituted="1", and substituteElement skips marked subtrees.
-  preprocessNestedTopLevelGroups(root, template.fields, values)
-  substituteElement(root, topByLayer, values, /* itemContext */ null)
+  // Preview-locked templates skip substitution entirely. applySlot's
+  // empty-value branch force-hides any unfilled text element, which
+  // would strip the Brixies designer's lorem ipsum cards — exactly
+  // what preview-locking is meant to preserve.
+  const isPreviewLocked = PREVIEW_LOCKED_TEMPLATE_IDS.has(template.id ?? '')
+  if (!isPreviewLocked) {
+    // Pre-pass: top-level groups whose layer is NESTED inside another
+    // top-level group's element (e.g. Feature 66's `tab_button` hoisted
+    // to top level but the source's Tab buttons live inside each Tab)
+    // must be substituted first. Otherwise the outer group's expansion
+    // walks INTO the inner group's elements, sees a layer name like
+    // "Heading" that matches the outer item_schema, and clobbers the
+    // outer slot's match. Pre-substituting marks them with
+    // data-substituted="1", and substituteElement skips marked subtrees.
+    preprocessNestedTopLevelGroups(root, template.fields, values)
+    substituteElement(root, topByLayer, values, /* itemContext */ null)
+  }
 
   if (snippetMap) resolveSnippetsInTree(root, snippetMap)
   stripAspectRatioText(root)
@@ -61,13 +68,9 @@ export function renderSectionToHtml(
   fixDecorativeAbsoluteStacking(root)
   wrapOverflowingFlexContainers(root)
   styleHyperlinks(root)
-  // Preview-locked templates: keep the Brixies designer's lorem ipsum
-  // visible instead of neutralizing/hiding it. Used when a section's
-  // content is dev-bound (e.g., single-event-section-4 renders the
-  // event detail at runtime from CMS post fields) so the strategist
-  // has no editable surface and the placeholder cards stay visible as
-  // a clear "this is dev-bound" preview signal.
-  const isPreviewLocked = PREVIEW_LOCKED_TEMPLATE_IDS.has(template.id ?? '')
+  // Preview-locked templates also skip the post-substitute strip
+  // passes — neutralizing lorem / hiding unfilled groups would undo
+  // the demo preview the section is meant to render.
   if (!isPreviewLocked) {
     neutralizeLoremPlaceholders(root)
     neutralizeDefaultButtonLabels(root)
