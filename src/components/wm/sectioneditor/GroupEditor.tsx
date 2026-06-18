@@ -19,6 +19,8 @@ import type { WMSnippetOption } from '../RichTextEditor'
 import type { WebGroupDef, WebFieldDef, WebContentTemplate } from '../../../types/database'
 import { useSectionClipboard } from './SectionClipboard'
 import { mapToTargetItem, describeMapping } from './sectionClipboardMapper'
+import { StaffLinkToggle } from './StaffLinkToggle'
+import { useProjectId } from './ProjectIdContext'
 
 interface Props {
   group: WebGroupDef
@@ -303,6 +305,7 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardT
                 onMoveUp={() => moveItem(idx, -1)}
                 onMoveDown={() => moveItem(idx, 1)}
                 cardTemplates={cardTemplates}
+                groupLayerName={group.layer_name ?? group.key}
               />
             </li>
           ))}
@@ -595,6 +598,7 @@ function isSingleSlotList(group: WebGroupDef): boolean {
 function ItemCard({
   item, idx, total, schema, semantics, snippets, depth, isOpen,
   onToggle, onPatch, onRemove, onMoveUp, onMoveDown, cardTemplates,
+  groupLayerName,
 }: {
   item: Record<string, unknown>
   idx: number
@@ -610,10 +614,20 @@ function ItemCard({
   onMoveUp: () => void
   onMoveDown: () => void
   cardTemplates?: Record<string, WebContentTemplate>
+  /** Parent group's layer_name — used to detect Team-14 Card team
+   *  items so we can render the staff-link toggle on them. */
+  groupLayerName?: string
 }) {
   const preview = buildItemPreview(item, schema)
   const itemLabel = `${semantics.itemLabel} ${idx + 1}`
   const visibleSchema = schema.filter(isEditableSchemaField)
+  // Show the staff-link toggle on Team Section 14 card items. Detected
+  // by the parent group's layer_name being "Card team" plus a sanity
+  // check on the schema (must have a team_name + team_description
+  // slot — otherwise the toggle has no shared bio to mirror).
+  const projectId = useProjectId()
+  const isCardTeamItem = (groupLayerName ?? '').trim().toLowerCase() === 'card team'
+    && schema.some(f => f.kind === 'slot' && f.key === 'team_name')
 
   return (
     <div>
@@ -643,6 +657,13 @@ function ItemCard({
       </div>
       {isOpen && (
         <div className="mt-2 space-y-2.5">
+          {isCardTeamItem && projectId && (
+            <StaffLinkToggle
+              item={item}
+              onPatch={onPatch}
+              projectId={projectId}
+            />
+          )}
           {visibleSchema.map((field, i) => {
             if (field.kind === 'slot') {
               return (

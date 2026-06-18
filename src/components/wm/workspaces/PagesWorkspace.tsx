@@ -52,6 +52,7 @@ import { WMSegmentedToggle } from '../SegmentedToggle'
 import { SectionList } from '../sectioneditor/SectionList'
 import { useSectionDetailPublisher } from '../sectioneditor/SectionEditingContext'
 import { ProjectPagesProvider } from '../sectioneditor/ProjectPagesContext'
+import { ProjectIdProvider } from '../sectioneditor/ProjectIdContext'
 import { SectionClipboardProvider, useSectionClipboard } from '../sectioneditor/SectionClipboard'
 import {
   fieldValuesToDocHtml, docHtmlToFieldValues, reconcileFieldValuesAcrossTemplates,
@@ -240,6 +241,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
 
   return (
     <SnippetsContext.Provider value={snippets}>
+      <ProjectIdProvider projectId={project.id}>
       <ProjectPagesProvider pages={pages.map(p => ({ id: p.id, name: p.name, slug: p.slug }))}>
       <SectionClipboardProvider>
       <div className="flex" style={{ minHeight: 'calc(100vh - var(--wm-header-h, 88px))' }}>
@@ -373,6 +375,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
       />
       </SectionClipboardProvider>
       </ProjectPagesProvider>
+      </ProjectIdProvider>
     </SnippetsContext.Provider>
   )
 }
