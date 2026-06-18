@@ -63,13 +63,16 @@ interface Props {
   /** Other pages in the project (excluding the current page). When
    *  provided, the "Duplicate to page…" menu submenu shows them. */
   availablePages?: ReadonlyArray<DuplicateTargetPage>
+  /** Snapshot this section's content to the project clipboard so it
+   *  can be pasted as an item into another section's group. */
+  onCopyToClipboard?: () => void
 }
 
 export function SectionPreviewCard({
   section, template, index, total, selected, snippetMap, cardTemplates, bindQuality,
   reviewCounts,
   onSelect, onMoveUp, onMoveDown, onChangeVariant, onUnbind, onRemove,
-  onDuplicateHere, onDuplicateToPage, availablePages,
+  onDuplicateHere, onDuplicateToPage, availablePages, onCopyToClipboard,
 }: Props) {
   const html = useMemo(() => {
     if (!template) return null
@@ -117,6 +120,7 @@ export function SectionPreviewCard({
         onDuplicateHere={onDuplicateHere}
         onDuplicateToPage={onDuplicateToPage}
         availablePages={availablePages}
+        onCopyToClipboard={onCopyToClipboard}
       />
       {template && html ? (
         <ScaledIframe html={html} title={template.layer_name} />
@@ -132,7 +136,7 @@ export function SectionPreviewCard({
 function SectionStrip({
   section: _section, template, index, total, bindQuality, selected, reviewCounts,
   onMoveUp, onMoveDown, onChangeVariant, onUnbind, onRemove,
-  onDuplicateHere, onDuplicateToPage, availablePages,
+  onDuplicateHere, onDuplicateToPage, availablePages, onCopyToClipboard,
 }: {
   section: WebSection
   template: WebContentTemplate | null
@@ -154,6 +158,7 @@ function SectionStrip({
   onDuplicateHere?: () => void
   onDuplicateToPage?: (targetPageId: string) => void
   availablePages?: ReadonlyArray<DuplicateTargetPage>
+  onCopyToClipboard?: () => void
 }) {
   const [actionsOpen, setActionsOpen] = useState(false)
   const [pagesSubmenuOpen, setPagesSubmenuOpen] = useState(false)
@@ -262,6 +267,14 @@ function SectionStrip({
                       </div>
                     )}
                   </div>
+                )}
+                {onCopyToClipboard && (
+                  <ActionMenuItem
+                    onClick={() => { setActionsOpen(false); onCopyToClipboard() }}
+                    icon={<Copy size={11} />}
+                  >
+                    Copy content
+                  </ActionMenuItem>
                 )}
                 {template && (
                   <ActionMenuItem onClick={() => { setActionsOpen(false); onUnbind() }} icon={<Archive size={11} />}>

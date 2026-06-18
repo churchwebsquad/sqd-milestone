@@ -39,6 +39,8 @@ interface Props {
   onDuplicateToPage?: (id: string, targetPageId: string) => void
   /** Pages available as duplicate targets (excluding the current page). */
   availablePages?: ReadonlyArray<DuplicateTargetPage>
+  /** Snapshot a section's content to the project clipboard. */
+  onCopyToClipboard?: (id: string) => void
 }
 
 export function SectionList({
@@ -46,7 +48,7 @@ export function SectionList({
   reviewCountsBySection,
   onSelect, onMoveSection, onChangeVariant, onUnbind, onRemove,
   onInsertBefore, onInsertAfter,
-  onDuplicateHere, onDuplicateToPage, availablePages,
+  onDuplicateHere, onDuplicateToPage, availablePages, onCopyToClipboard,
 }: Props) {
   if (sections.length === 0) {
     return (
@@ -91,6 +93,7 @@ export function SectionList({
             onDuplicateHere={onDuplicateHere ? () => onDuplicateHere(section.id) : undefined}
             onDuplicateToPage={onDuplicateToPage ? (targetPageId) => onDuplicateToPage(section.id, targetPageId) : undefined}
             availablePages={availablePages}
+            onCopyToClipboard={onCopyToClipboard ? () => onCopyToClipboard(section.id) : undefined}
           />
         </div>
       ))}

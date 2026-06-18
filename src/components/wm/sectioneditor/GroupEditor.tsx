@@ -11,12 +11,14 @@
  */
 import { useState } from 'react'
 import {
-  ChevronDown, ChevronRight, Plus, Trash2, ArrowUp, ArrowDown, Check,
+  ChevronDown, ChevronRight, Plus, Trash2, ArrowUp, ArrowDown, Check, Clipboard,
 } from 'lucide-react'
 import { SlotEditor } from './SlotEditor'
 import type { SlotAiContext } from './SlotEditor'
 import type { WMSnippetOption } from '../RichTextEditor'
 import type { WebGroupDef, WebFieldDef, WebContentTemplate } from '../../../types/database'
+import { useSectionClipboard } from './SectionClipboard'
+import { mapToTargetItem, describeMapping } from './sectionClipboardMapper'
 
 interface Props {
   group: WebGroupDef
@@ -140,6 +142,42 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardT
   )
   const suppressAdd = isFixed || isImageShapedGroup
 
+  // Section clipboard — when the strategist has copied another
+  // section's content, surface a "Paste from clipboard" button next
+  // to "Add item". Only when the group can accept items AND the
+  // group's item_schema isn't empty (we need slots to map values into).
+  const { clipboard, notePaste } = useSectionClipboard()
+  const canPaste = !suppressAdd
+    && itemSchema.length > 0
+    && clipboard !== null
+    && clipboard.sourceFieldValues != null
+  // Compute the planned mapping so we can show a tooltip with the
+  // slot targets the strategist is about to fill.
+  const plannedMapping = canPaste && clipboard
+    ? describeMapping(clipboard.sourceFieldValues, clipboard.sourceTemplateFields, itemSchema as WebFieldDef[])
+    : []
+  const pasteFromClipboard = () => {
+    if (!clipboard) return
+    const newItem = mapToTargetItem(
+      clipboard.sourceFieldValues,
+      clipboard.sourceTemplateFields,
+      itemSchema as WebFieldDef[],
+    )
+    const newIdx = items.length
+    onChange([...items, newItem])
+    setExpanded(prev => {
+      const next = new Set(prev)
+      next.add(newIdx)
+      return next
+    })
+    // Signal the workspace to surface the "archive source?" confirm.
+    notePaste({
+      sourceSectionId: clipboard.sourceSectionId,
+      sourceLayerName: clipboard.sourceLayerName,
+      targetSummary:   `${groupTitle} #${newIdx + 1}`,
+    })
+  }
+
   // For fixed (single-instance) groups, unwrap: render the one item's
   // fields directly without the group's card/header. Without this the
   // user sees a "No items yet — click Add item" hint that has no Add
@@ -191,16 +229,33 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardT
         ].join(' ')}>
           {groupTitle}{items.length > 0 ? ` · ${items.length}` : ''}
         </p>
-        {!suppressAdd && (
-          <button
-            type="button"
-            onClick={addItem}
-            className="inline-flex items-center gap-1 h-6 px-2 rounded-md text-[10px] font-semibold bg-wm-accent-tint text-wm-accent-strong border border-wm-accent/30 hover:bg-wm-accent/15 transition-colors"
-          >
-            <Plus size={11} />
-            {semantics.addLabel}
-          </button>
-        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {canPaste && (
+            <button
+              type="button"
+              onClick={pasteFromClipboard}
+              title={
+                plannedMapping.length > 0
+                  ? `Paste "${clipboard?.sourceLayerName}" — fills: ${plannedMapping.map(m => m.targetLabel).join(', ')}`
+                  : `Paste "${clipboard?.sourceLayerName}"`
+              }
+              className="inline-flex items-center gap-1 h-6 px-2 rounded-md text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100 transition-colors"
+            >
+              <Clipboard size={11} />
+              Paste from clipboard
+            </button>
+          )}
+          {!suppressAdd && (
+            <button
+              type="button"
+              onClick={addItem}
+              className="inline-flex items-center gap-1 h-6 px-2 rounded-md text-[10px] font-semibold bg-wm-accent-tint text-wm-accent-strong border border-wm-accent/30 hover:bg-wm-accent/15 transition-colors"
+            >
+              <Plus size={11} />
+              {semantics.addLabel}
+            </button>
+          )}
+        </div>
       </div>
 
       {items.length === 0 ? (

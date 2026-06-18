@@ -52,6 +52,7 @@ import { WMSegmentedToggle } from '../SegmentedToggle'
 import { SectionList } from '../sectioneditor/SectionList'
 import { useSectionDetailPublisher } from '../sectioneditor/SectionEditingContext'
 import { ProjectPagesProvider } from '../sectioneditor/ProjectPagesContext'
+import { SectionClipboardProvider, useSectionClipboard } from '../sectioneditor/SectionClipboard'
 import {
   fieldValuesToDocHtml, docHtmlToFieldValues, reconcileFieldValuesAcrossTemplates,
   computeUnmappedValues, computeDroppedDeepPaths,
@@ -233,6 +234,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
   return (
     <SnippetsContext.Provider value={snippets}>
       <ProjectPagesProvider pages={pages.map(p => ({ id: p.id, name: p.name, slug: p.slug }))}>
+      <SectionClipboardProvider>
       <div className="flex" style={{ minHeight: 'calc(100vh - var(--wm-header-h, 88px))' }}>
         {/* Page list (left) — sticky so it stays in view while the
             editor canvas scrolls. */}
@@ -362,6 +364,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
         onConfirm={executeArchive}
         onCancel={() => { if (!archiving) setArchiveConfirm(null) }}
       />
+      </SectionClipboardProvider>
       </ProjectPagesProvider>
     </SnippetsContext.Provider>
   )
@@ -753,6 +756,34 @@ function PageEditor({
     const t = setTimeout(() => setDuplicateToast(null), 4000)
     return () => clearTimeout(t)
   }, [duplicateToast])
+
+  // Section clipboard — copy a section's content into a project-scoped
+  // clipboard so it can be pasted as a card/tab item under another
+  // section. Toast appears after copy until the strategist pastes
+  // (or explicitly clears).
+  const {
+    clipboard,
+    copy: copyToClipboard,
+    clear: clearClipboard,
+    pasteOffer,
+    acknowledgePaste,
+  } = useSectionClipboard()
+  const copySectionToClipboard = (sectionId: string) => {
+    const s = sections.find(x => x.id === sectionId)
+    if (!s) return
+    const tpl = s.content_template_id ? templates[s.content_template_id] : null
+    copyToClipboard(s, tpl ?? null)
+  }
+  // After a successful paste, ask whether to archive the source
+  // section. Calling notePaste in GroupEditor sets pasteOffer here.
+  const handleArchiveAfterPaste = async (archive: boolean) => {
+    if (archive && pasteOffer) {
+      await supabase.from('web_sections').delete().eq('id', pasteOffer.sourceSectionId)
+      await loadSections()
+      void markEdited()
+    }
+    acknowledgePaste()
+  }
 
   // After sections load, honor any ?section= deep link from the
   // review queue / feedback rail.
@@ -1579,6 +1610,7 @@ function PageEditor({
               onDuplicateHere={(id) => void duplicateSection(id, page.id)}
               onDuplicateToPage={(id, targetPageId) => void duplicateSection(id, targetPageId)}
               availablePages={duplicateTargetPages}
+              onCopyToClipboard={copySectionToClipboard}
             />
             {/* Bottom-of-page add affordance. Always visible (even
                 when there are no sections yet) so the strategist
@@ -1728,6 +1760,67 @@ function PageEditor({
           }
         }}
       />
+
+      {/* Post-paste archive confirm. Set by GroupEditor via the
+          clipboard context's notePaste(); strategist picks Keep or
+          Archive for the source section. */}
+      {pasteOffer && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-deep-plum/40 backdrop-blur-sm">
+          <div className="max-w-md rounded-2xl bg-wm-bg-elevated shadow-xl border border-wm-border p-5">
+            <div className="flex items-start gap-3">
+              <div className="shrink-0 grid place-items-center w-9 h-9 rounded-full bg-emerald-50 text-emerald-700">
+                <Copy size={16} />
+              </div>
+              <div className="flex-1">
+                <p className="text-[15px] font-bold text-wm-text">Content pasted</p>
+                <p className="text-[12px] text-wm-text-muted mt-1 leading-snug">
+                  <span className="font-semibold text-wm-text">{pasteOffer.sourceLayerName}</span> was added to{' '}
+                  <span className="font-semibold text-wm-text">{pasteOffer.targetSummary}</span>.
+                  Do you want to archive the original section now?
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <WMButton variant="ghost" size="sm" onClick={() => void handleArchiveAfterPaste(false)}>
+                Keep original
+              </WMButton>
+              <WMButton variant="primary" size="sm" onClick={() => void handleArchiveAfterPaste(true)}>
+                Archive original
+              </WMButton>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Section clipboard toast — sticks until paste/clear so the
+          strategist always knows there's content waiting to drop into
+          a group on this (or another) page. */}
+      {clipboard && clipboard.sourcePageId === page.id && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-4 right-4 z-50 max-w-sm rounded-2xl bg-deep-plum text-white shadow-xl border border-primary-purple/40 px-4 py-3 flex items-start gap-3 animate-[fadeIn_0.2s_ease-out]"
+        >
+          <div className="shrink-0 mt-0.5 grid place-items-center w-7 h-7 rounded-full bg-primary-purple/30">
+            <Copy size={14} className="text-lavender" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold leading-snug">Content copied</p>
+            <p className="text-xs text-white/85 mt-0.5 leading-snug">
+              <span className="font-semibold">{clipboard.sourceLayerName}</span>
+              {' '}is on the clipboard. Open a group editor on any section, then click <span className="font-semibold">Paste from clipboard</span>.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={clearClipboard}
+            aria-label="Clear clipboard"
+            className="text-white/60 hover:text-white shrink-0 -mr-1 -mt-1 p-1"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Duplicate-section confirmation toast. Auto-dismisses after 4s
           via the effect above; user can also click X to close early. */}
