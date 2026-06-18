@@ -92,8 +92,34 @@ export function renderSectionToHtml(
   fixHero34BleedStrips(root)
   fixContent53Overlap(root)
   fixCta52ImageList(root)
+  fixFeatureSection61Stacking(root)
 
   return root.outerHTML
+}
+
+/** Feature Section 61 ships with a full-width `Background overlap`
+ *  div positioned absolutely at top:0 (the black header band) and a
+ *  sibling `Container` div holding the heading + cards. The Container
+ *  has no `position` set, so it lays in normal flow and falls BEHIND
+ *  the absolutely-positioned background per CSS stacking rules. The
+ *  visible result: cards and heading vanish under the black band.
+ *
+ *  Fix: bump Container to `position: relative` + `z-index: 1` so it
+ *  stacks above the background. Background overlap stays at z-index
+ *  auto (effectively 0). Scoped to feature-section-61's layer name. */
+function fixFeatureSection61Stacking(root: Element): void {
+  const sections: HTMLElement[] = []
+  if ((root as HTMLElement).getAttribute?.('data-layer') === 'Feature section 61') {
+    sections.push(root as HTMLElement)
+  }
+  sections.push(...Array.from(root.querySelectorAll<HTMLElement>('[data-layer="Feature section 61"]')))
+  for (const sec of sections) {
+    const containers = Array.from(sec.querySelectorAll<HTMLElement>(':scope > [data-layer="Container"]'))
+    for (const container of containers) {
+      const existing = container.getAttribute('style') ?? ''
+      container.setAttribute('style', `${existing};position: relative;z-index: 1`)
+    }
+  }
 }
 
 /** CTA Section 52 ships its 6 polaroid images as absolute-positioned
