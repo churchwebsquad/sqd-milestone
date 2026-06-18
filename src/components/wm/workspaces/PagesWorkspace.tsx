@@ -523,6 +523,23 @@ function EmptyEditor({
   )
 }
 
+/** Normalize a partner-typed slug into a URL-safe form:
+ *  lowercase, kebab-case, no spaces or special chars. Leading slash
+ *  on the home page ("/") is preserved as-is; everything else strips
+ *  leading/trailing slashes and runs of dashes. Empty input collapses
+ *  to the previous draft (caller handles empty separately). */
+function normalizeSlug(raw: string): string {
+  const trimmed = (raw ?? '').trim()
+  if (trimmed === '/') return '/'
+  return trimmed
+    .toLowerCase()
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/[^a-z0-9\-_/]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
 /** Best-effort HTML serialization of a section's field_values when
  *  unbinding to freehand and there's no overflow stash to fall back on.
  *  Walks the template's slots in order, emitting headings for heading-
@@ -760,10 +777,12 @@ function PageEditor({
   }, [bindingSection, pageBrief])
 
   const saveTitleSlug = async () => {
+    const cleanSlug = normalizeSlug(slugDraft)
     setSavingTitle(true)
+    if (cleanSlug !== slugDraft) setSlugDraft(cleanSlug)
     await supabase
       .from('web_pages')
-      .update({ name: titleDraft.trim(), slug: slugDraft.trim() })
+      .update({ name: titleDraft.trim(), slug: cleanSlug })
       .eq('id', page.id)
     setSavingTitle(false); setTitleDirty(false)
     await onPageChange()
@@ -1330,14 +1349,17 @@ function PageEditor({
         onBlur={() => { if (titleDirty) void saveTitleSlug() }}
         className="w-full text-3xl font-bold text-wm-text bg-transparent outline-none focus:bg-wm-bg-hover rounded px-1 -mx-1 py-0.5 transition-colors"
       />
-      <div className="mt-1 flex items-center gap-1 text-[12px] text-wm-text-subtle">
-        <span>/</span>
+      <div className="mt-1 flex items-center gap-2 text-[12px] text-wm-text-subtle">
+        <label className="text-[10px] uppercase tracking-wider font-semibold text-wm-text-subtle/80">URL</label>
+        <span className="text-wm-text-muted">/</span>
         <input
           type="text"
           value={slugDraft}
           onChange={e => { setSlugDraft(e.target.value); setTitleDirty(true) }}
           onBlur={() => { if (titleDirty) void saveTitleSlug() }}
-          className="bg-transparent outline-none focus:bg-wm-bg-hover rounded px-1 -mx-1 py-0.5 transition-colors text-wm-text-muted min-w-0 flex-1"
+          placeholder="page-slug"
+          title="Click to edit. Lowercase letters, numbers, and dashes only."
+          className="bg-wm-bg-elevated border border-wm-border/60 hover:border-wm-accent/40 focus:border-wm-accent focus:bg-wm-bg outline-none rounded px-2 py-0.5 transition-colors text-wm-text font-mono text-[12px] min-w-0 flex-1 max-w-md"
         />
         {savingTitle && <Loader2 size={11} className="animate-spin" />}
       </div>
