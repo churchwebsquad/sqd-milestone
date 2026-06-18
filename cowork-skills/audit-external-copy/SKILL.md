@@ -451,7 +451,7 @@ error — the importer rejects it.
 | Heading + body + map embed directive (iframe in `embed_directive`) | `contact_section` (content-section-96) |
 | Heading + body + exactly 1 CTA, no items | `cta_callout` (cta-section-52) |
 | Heading + body + exactly 2 CTAs (primary + secondary), no items | `cta_simple` (cta-section-20) |
-| Heading + body + ≥3 paired Q→A blocks | `accordion_faq` |
+| Heading + body + ≥3 paired Q→A blocks | `accordion_faq` (faq-section-10). Each Q→A pair becomes one item shaped `{title: "<question verbatim>", description: "<answer verbatim>"}`. Split items roughly half-and-half between `accordion_right` (default 2) and `accordion_left` (default 3) groups — that's how the layout's two-column design absorbs them. NEVER emit `{text}` items — that's a stale shape from the broken pre-2026-06 schema and will not render. |
 | Heading + body + video embed / video CTA + descriptive prose | `content_video` |
 | Heading + chronological items (years, dates, "Step 1"/"Step 2", "Phase 1"/etc.) | `timeline_story` |
 | Heading + N entries each shaped like `**Name**` + role line + bio | `feature_team` |
