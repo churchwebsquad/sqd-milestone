@@ -61,24 +61,33 @@ export function renderSectionToHtml(
   fixDecorativeAbsoluteStacking(root)
   wrapOverflowingFlexContainers(root)
   styleHyperlinks(root)
-  neutralizeLoremPlaceholders(root)
-  neutralizeDefaultButtonLabels(root)
-  hideEmptyButtonShells(root)
-  // Last cleanup pass: hide decorative groups + image slots the
-  // strategist's content doesn't fill. Brixies templates ship every
-  // group with default_count > 0 so designer previews look "complete"
-  // — but for cowork sections those defaults render as empty cube
-  // icons / checkmark circles / placeholder squares, which the user
-  // reads as "the layout is broken." Hide them after substitution.
-  hideUnfilledDecorativeSlots(root, template.fields, values)
-  // Generic schema-driven visibility: for every USER-INPUT slot in
-  // the template (text/richtext/cta), if the strategist didn't fill
-  // it, hide its rendered element. For GROUPS, hide the entire
-  // container when no items are bound. Walks the schema recursively
-  // so nested item_schemas are covered. Designer-bound assets
-  // (image slots, image-containing groups) are NEVER hidden — those
-  // are template-design defaults.
-  hideUnpopulatedSchemaSlots(root, template.fields, values)
+  // Preview-locked templates: keep the Brixies designer's lorem ipsum
+  // visible instead of neutralizing/hiding it. Used when a section's
+  // content is dev-bound (e.g., single-event-section-4 renders the
+  // event detail at runtime from CMS post fields) so the strategist
+  // has no editable surface and the placeholder cards stay visible as
+  // a clear "this is dev-bound" preview signal.
+  const isPreviewLocked = PREVIEW_LOCKED_TEMPLATE_IDS.has(template.id ?? '')
+  if (!isPreviewLocked) {
+    neutralizeLoremPlaceholders(root)
+    neutralizeDefaultButtonLabels(root)
+    hideEmptyButtonShells(root)
+    // Last cleanup pass: hide decorative groups + image slots the
+    // strategist's content doesn't fill. Brixies templates ship every
+    // group with default_count > 0 so designer previews look "complete"
+    // — but for cowork sections those defaults render as empty cube
+    // icons / checkmark circles / placeholder squares, which the user
+    // reads as "the layout is broken." Hide them after substitution.
+    hideUnfilledDecorativeSlots(root, template.fields, values)
+    // Generic schema-driven visibility: for every USER-INPUT slot in
+    // the template (text/richtext/cta), if the strategist didn't fill
+    // it, hide its rendered element. For GROUPS, hide the entire
+    // container when no items are bound. Walks the schema recursively
+    // so nested item_schemas are covered. Designer-bound assets
+    // (image slots, image-containing groups) are NEVER hidden — those
+    // are template-design defaults.
+    hideUnpopulatedSchemaSlots(root, template.fields, values)
+  }
   // Hard-coded layout fix for Hero 44 (and any other Brixies template
   // using the `data-layer="Image fan"` convention). Image bind data
   // never feeds these — they're decorative — so we force a canonical
@@ -96,8 +105,59 @@ export function renderSectionToHtml(
   fixContentSection89Wrap(root)
   fixTeamSection14Wrap(root)
   fixTeamSection14LinkedCards(root, values, template.id ?? '')
+  fixCategoryFilter4Visibility(root, values, template.id ?? '')
 
   return root.outerHTML
+}
+
+/** Template ids whose source HTML's demo content (lorem ipsum,
+ *  placeholder cards, designer-bound preview rows) should NOT be
+ *  neutralized or hidden by the generic strip passes. Used when the
+ *  section is dev-bound at runtime (CMS post template, archive grid
+ *  filtered by the WP loop, etc.) so the strategist has no editable
+ *  surface and the placeholder content is the intentional preview. */
+const PREVIEW_LOCKED_TEMPLATE_IDS = new Set<string>([
+  'single-event-section-4',
+])
+
+/** Category Filter 4 — per-section visibility + label substitution.
+ *
+ *  The schema exposes 4 boolean toggles (one per filter) + 3 text
+ *  labels. Booleans don't naturally feed substituteElement because no
+ *  HTML element carries a `data-layer="* visibility"` marker — they're
+ *  display flags consumed here.
+ *
+ *  Semantics:
+ *    - show_X is true (or undefined, default-on) → leave Filter
+ *      wrapper [X] visible
+ *    - show_X is false                          → force-hide the
+ *      Filter wrapper [X] container
+ *
+ *  Labels (search_label, category_label, tag_label, sort_label) are
+ *  substituted upstream by substituteElement via their layer_name
+ *  matches ("Search heading" / "Category heading" / etc.).  This
+ *  function only handles visibility. */
+function fixCategoryFilter4Visibility(
+  root: Element,
+  values: Record<string, unknown>,
+  templateId: string,
+): void {
+  if (templateId !== 'category-filter-4') return
+  const visibility: Array<{ key: string; layer: string }> = [
+    { key: 'show_search',   layer: 'Filter wrapper [Search]'   },
+    { key: 'show_category', layer: 'Filter wrapper [Category]' },
+    { key: 'show_tag',      layer: 'Filter wrapper [Tag]'      },
+    { key: 'show_sort',     layer: 'Filter wrapper [Sort]'     },
+  ]
+  for (const { key, layer } of visibility) {
+    // Undefined / null = default-on (designer-shipped state).  Only
+    // an explicit `false` hides the filter so the strategist has to
+    // opt out of a filter, not opt in.
+    if (values[key] === false) {
+      const el = root.querySelector<HTMLElement>(`[data-layer="${layer}"]`)
+      if (el) forceHide(el)
+    }
+  }
 }
 
 /** Team Section 14 staff link — Phase 2.

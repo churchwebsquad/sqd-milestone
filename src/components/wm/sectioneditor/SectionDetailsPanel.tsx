@@ -86,6 +86,15 @@ interface Props {
   onCommentsChange?: () => Promise<void>
 }
 
+/** Template ids that render dev-bound content at runtime (CMS post
+ *  template loop, archive query, etc.). The strategist gets no
+ *  editable fields — just a notice — and the renderer keeps the
+ *  Brixies designer's lorem ipsum visible as an intentional preview.
+ *  Keep in sync with PREVIEW_LOCKED_TEMPLATE_IDS in webBrixiesRender. */
+const PREVIEW_LOCKED_TEMPLATE_IDS = new Set<string>([
+  'single-event-section-4',
+])
+
 export function SectionDetailsPanel({
   section, template, snippets, cardTemplates, pages,
   onChange, onClose, onChangeVariant, onUnbind, onRemove,
@@ -242,8 +251,25 @@ export function SectionDetailsPanel({
           />
         )}
 
+        {/* Preview-locked templates: skip the field editor entirely
+            and show a short notice so the strategist sees why the
+            section has no editable content. Used for templates that
+            render dev-bound content at runtime (e.g. single-event-
+            section-4: the WP post-template loop owns the body). */}
+        {template && PREVIEW_LOCKED_TEMPLATE_IDS.has(template.id) && (
+          <Section title="Preview-locked" defaultOpen>
+            <div className="rounded-md border border-wm-border bg-wm-bg-elevated/60 p-3 text-[12px] text-wm-text-muted leading-snug">
+              This template is preview-locked. The actual content is
+              bound at dev/runtime (post-template loop, archive query,
+              etc.) — the placeholder cards above are intentional.
+              Nothing to edit here. If you need editable content, swap
+              this section to a different variant.
+            </div>
+          </Section>
+        )}
+
         {/* Field editors */}
-        {template && visibleFields.length > 0 && (
+        {template && !PREVIEW_LOCKED_TEMPLATE_IDS.has(template.id) && visibleFields.length > 0 && (
           <Section title="Fields" defaultOpen>
             <div key={`fields-${fieldsRemountKey}`} className="space-y-3">
               {visibleFields.map((field, idx) => {

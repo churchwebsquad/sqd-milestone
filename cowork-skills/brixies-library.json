@@ -4606,6 +4606,26 @@
       "is_published": true
     },
     {
+      "id": "category-filter-4",
+      "layer_name": "Category Filter 4",
+      "family": "Category Filter",
+      "kind": "functional",
+      "variant": "4",
+      "preview_image_url": "https://wttgwoxlezqoyzmesekt.supabase.co/storage/v1/object/public/brand-assets/web-templates/category-filter-4.jpg",
+      "paired_post_template": null,
+      "paired_url_pattern": null,
+      "fields": [
+        { "key": "show_search",    "kind": "slot", "type": "boolean", "label": "Show search",          "layer_name": "Search visibility",   "default_value": "true" },
+        { "key": "show_category",  "kind": "slot", "type": "boolean", "label": "Show category filter", "layer_name": "Category visibility", "default_value": "true" },
+        { "key": "category_label", "kind": "slot", "type": "text",    "label": "Category label",       "layer_name": "Category heading",    "max_chars": 30, "default_value": "Category Filter" },
+        { "key": "show_tag",       "kind": "slot", "type": "boolean", "label": "Show tag filter",      "layer_name": "Tag visibility",      "default_value": "true" },
+        { "key": "tag_label",      "kind": "slot", "type": "text",    "label": "Tag label",            "layer_name": "Tag heading",         "max_chars": 30, "default_value": "Tag Filter" },
+        { "key": "show_sort",      "kind": "slot", "type": "boolean", "label": "Show sort",            "layer_name": "Sort visibility",     "default_value": "true" },
+        { "key": "sort_label",     "kind": "slot", "type": "text",    "label": "Sort label",           "layer_name": "Sort heading",        "max_chars": 30, "default_value": "Sort by" }
+      ],
+      "is_published": true
+    },
+    {
       "id": "content-section-1",
       "layer_name": "Content Section 1",
       "family": "Content Section",

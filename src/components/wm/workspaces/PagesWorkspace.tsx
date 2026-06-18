@@ -711,6 +711,11 @@ function PageEditor({
   const [cardTemplates, setCardTemplates] = useState<Record<string, WebContentTemplate>>({})
   const [loadingSections, setLoadingSections] = useState(true)
   const [pickerOpen, setPickerOpen] = useState(false)
+  // When the strategist drops a listing template (e.g. Category
+  // Filter 4) we open a small prompt asking whether to also create
+  // the paired single-* page. State holds the listing template id —
+  // null when no prompt is open.
+  const [singlePairPrompt, setSinglePairPrompt] = useState<string | null>(null)
   // Edit ↔ Preview mode for the page editor body. Edit is the live-
   // assembly canvas; Preview renders the full page via the bound
   // templates' source_html with current copy substituted (iframe).
@@ -973,6 +978,12 @@ function PageEditor({
       sort_order: maxOrder + 1,
     })
     await loadSections()
+    // Category Filter 4 is a listing/archive layout. The strategist
+    // almost always also needs a single-* detail page (Single Event /
+    // Single Sermon) so the per-item route is accounted for in the
+    // dev handoff. Defer to a small prompt so they can pick which
+    // (or skip).
+    if (templateId === 'category-filter-4') setSinglePairPrompt(templateId)
   }
 
   /** Add a freehand TipTap-only section. User-facing escape hatch when
@@ -1743,7 +1754,7 @@ function PageEditor({
         onClose={() => setPickerOpen(false)}
         title="Add a section"
         subtitle={page.name}
-        kindFilter={['content', 'media', 'post_template'] as readonly WebTemplateKind[]}
+        kindFilter={['content', 'media', 'post_template', 'functional'] as readonly WebTemplateKind[]}
         siteLibraryIds={siteLibraryIds}
         activeOnSiteIds={activeOnSiteIds}
         mode="single"
@@ -1757,6 +1768,24 @@ function PageEditor({
           }
         }}
       />
+
+      {/* Single-page pair prompt — fires after a listing section is added
+          (e.g. Category Filter 4) to suggest the matching single-* page
+          so the per-item route is accounted for in the dev handoff. */}
+      {singlePairPrompt && (
+        <SinglePairPrompt
+          listingTemplateId={singlePairPrompt}
+          projectId={project.id}
+          existingPages={projectPages}
+          phase={page.phase}
+          onClose={() => setSinglePairPrompt(null)}
+          onCreated={async () => {
+            setSinglePairPrompt(null)
+            await onProjectChange?.()
+            await onPageChange()
+          }}
+        />
+      )}
 
       {/* Catalog picker — bind a section to a Brixies template / change variant. */}
       <WMCatalogSidePanel
@@ -2013,6 +2042,128 @@ function DevNotesBlock({
         rows={4}
         className="w-full rounded-md border border-wm-border bg-wm-bg px-3 py-2 text-[12px] text-wm-text placeholder-wm-text-subtle outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20 font-mono leading-relaxed resize-y"
       />
+    </div>
+  )
+}
+
+// ── Single-page pair prompt ──────────────────────────────────────────
+//
+// When the strategist drops a listing layout (e.g. Category Filter 4)
+// onto a page, the per-item single-* page is almost always also part
+// of the build. Rather than auto-creating one variant, ask: Event,
+// Sermon, or Skip. On pick, create a blank page bound to the matching
+// single-* template at the project's home phase (or the current
+// listing page's phase) so the route shows up in the dev handoff.
+
+interface PairTarget {
+  label:        string
+  singleSlug:   string
+  singleName:   string
+  templateId:   string
+}
+
+const PAIR_TARGETS_BY_LISTING: Record<string, PairTarget[]> = {
+  'category-filter-4': [
+    { label: 'Event',  singleSlug: 'event',  singleName: 'Single Event',  templateId: 'single-event-section-4' },
+    { label: 'Sermon', singleSlug: 'sermon', singleName: 'Single Sermon', templateId: 'single-event-section-4' },
+  ],
+}
+
+function SinglePairPrompt({
+  listingTemplateId, projectId, existingPages, phase, onClose, onCreated,
+}: {
+  listingTemplateId: string
+  projectId:         string
+  existingPages:     WebPage[]
+  phase:             string
+  onClose:           () => void
+  onCreated:         () => Promise<void> | void
+}) {
+  const targets = PAIR_TARGETS_BY_LISTING[listingTemplateId] ?? []
+  const [busy,  setBusy]  = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const createPair = async (target: PairTarget) => {
+    setError(null); setBusy(target.label)
+    // Slug collisions: if /<single>/ already exists on the project,
+    // append -2, -3 etc. so the dev never accidentally clobbers a
+    // hand-authored single page.
+    const taken = new Set(existingPages.map(p => p.slug))
+    let slug = target.singleSlug
+    let n = 2
+    while (taken.has(slug)) { slug = `${target.singleSlug}-${n++}` }
+
+    const maxOrder = existingPages
+      .filter(p => p.phase === phase)
+      .reduce((m, p) => Math.max(m, p.sort_order), 0)
+
+    const { data: insertedPage, error: pageErr } = await supabase
+      .from('web_pages')
+      .insert({
+        web_project_id: projectId,
+        name:           target.singleName,
+        slug,
+        phase,
+        sort_order:     maxOrder + 1,
+      })
+      .select('id')
+      .single()
+    if (pageErr || !insertedPage) { setBusy(null); setError(pageErr?.message ?? 'Page insert failed'); return }
+
+    const { error: secErr } = await supabase.from('web_sections').insert({
+      web_page_id:         insertedPage.id,
+      content_template_id: target.templateId,
+      field_values:        {},
+      sort_order:          1,
+    })
+    setBusy(null)
+    if (secErr) { setError(secErr.message); return }
+    await onCreated()
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-wm-text/30 backdrop-blur-[1px] animate-wm-fade-in"
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        className="bg-wm-bg-elevated rounded-lg border border-wm-border shadow-2xl w-full max-w-md p-5 animate-wm-slide-in-up"
+      >
+        <h3 className="text-[15px] font-semibold text-wm-text mb-1">Also add a single-item page?</h3>
+        <p className="text-[12px] text-wm-text-muted leading-snug mb-4">
+          You added a filtered listing. Most listings pair with a
+          single-item detail page so the per-item route is accounted
+          for in the dev handoff. The new page is created blank — no
+          content matching, the dev binds it to the WP post template
+          at build time.
+        </p>
+        <div className="space-y-2">
+          {targets.map(t => (
+            <button
+              key={t.label}
+              type="button"
+              onClick={() => void createPair(t)}
+              disabled={busy !== null}
+              className="w-full inline-flex items-center justify-between gap-2 h-10 px-3 rounded-md border border-wm-border bg-wm-bg hover:bg-wm-accent-tint hover:border-wm-accent transition-colors text-[13px] font-semibold text-wm-text disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <span>Add a Single {t.label} page</span>
+              <span className="text-[11px] font-mono text-wm-text-subtle">/{t.singleSlug}</span>
+            </button>
+          ))}
+        </div>
+        {error && <p className="mt-3 text-[11px] text-wm-warn">{error}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy !== null}
+            className="h-8 px-3 rounded-md text-[12px] font-semibold text-wm-text-muted hover:bg-wm-bg-hover transition-colors"
+          >
+            Skip
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
