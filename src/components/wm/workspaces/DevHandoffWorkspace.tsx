@@ -54,6 +54,11 @@ interface CtaRow {
   cta:         CtaValue
   /** null when valid, otherwise the validation error message. */
   validationError: string | null
+  /** True when this row was extracted from an inline `<a>` / markdown
+   *  link inside a body/richtext slot rather than a structured button
+   *  slot. Surfaced as a badge in the inventory so the dev team can
+   *  audit them alongside button CTAs. */
+  isInline?:       boolean
 }
 
 interface PageSeoRow {
@@ -492,6 +497,11 @@ function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
                     <span className="inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 bg-lavender-tint text-primary-purple border border-primary-purple/20">
                       {CTA_KIND_LABELS[c.cta.kind]}
                     </span>
+                    {c.isInline && (
+                      <span className="ml-1 inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-300/60" title="Embedded link inside body copy, not a structured CTA button">
+                        Inline
+                      </span>
+                    )}
                     {target === '_blank' && (
                       <span className="ml-1 inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 bg-wm-bg-hover text-wm-text-subtle border border-wm-border">
                         New tab
@@ -537,44 +547,80 @@ function extractCtaInventory(opts: {
     const sectionLabel = template?.layer_name ?? `Section · ${s.sort_order + 1}`
     const values = (s.field_values ?? {}) as Record<string, unknown>
     walkFieldsForCtas(template?.fields ?? [], values, (entry) => {
-      const cta = normalizeCtaValue(entry.rawValue)
-      rows.push({
-        pageId:          s.web_page_id,
-        pageName:        page.name,
-        pageSlug:         page.slug,
-        sectionId:       s.id,
-        sectionLabel,
-        fieldKey:        entry.fieldKey,
-        fieldLabel:      entry.fieldLabel,
-        cta,
-        validationError: validateCta(cta, slugSet),
-      })
+      if (entry.kind === 'button') {
+        const cta = normalizeCtaValue(entry.rawValue)
+        rows.push({
+          pageId:          s.web_page_id,
+          pageName:        page.name,
+          pageSlug:        page.slug,
+          sectionId:       s.id,
+          sectionLabel,
+          fieldKey:        entry.fieldKey,
+          fieldLabel:      entry.fieldLabel,
+          cta,
+          validationError: validateCta(cta, slugSet),
+        })
+        return
+      }
+      // entry.kind === 'inline' — each inline link inside the body/
+      // richtext slot is its own row, sharing the slot's fieldKey but
+      // distinguished by `isInline` + index in fieldLabel.
+      for (const [idx, link] of entry.inlineLinks.entries()) {
+        const cta = normalizeCtaValue({ label: link.label, url: link.url })
+        rows.push({
+          pageId:          s.web_page_id,
+          pageName:        page.name,
+          pageSlug:        page.slug,
+          sectionId:       s.id,
+          sectionLabel,
+          fieldKey:        `${entry.fieldKey}.inline.${idx}`,
+          fieldLabel:      `${entry.fieldLabel} › inline link${entry.inlineLinks.length > 1 ? ` #${idx + 1}` : ''}`,
+          cta,
+          validationError: validateCta(cta, slugSet),
+          isInline:        true,
+        })
+      }
     })
   }
   return rows
 }
 
-/** Recursive walker for template field schemas. Calls `onCta` for every
- *  button-shaped slot (type='cta', or type='text' with scope='button',
- *  or a text slot labelled like a button) with the raw bound value
- *  from the section's field_values (including group items). The
- *  caller is responsible for normalizing the raw value via
- *  normalizeCtaValue. */
+type WalkEntry =
+  | { kind: 'button'; fieldKey: string; fieldLabel: string; rawValue: unknown }
+  | { kind: 'inline'; fieldKey: string; fieldLabel: string; inlineLinks: Array<{ label: string; url: string }> }
+
+/** Recursive walker for template field schemas. Calls `onCta` for:
+ *   - every button-shaped slot (type='cta', or type='text' with scope=
+ *     'button', or a text slot labelled like a button), and
+ *   - every text/richtext slot whose bound value contains inline anchors
+ *     (markdown `[label](url)` or HTML `<a href="…">label</a>`). Each
+ *     inline link is surfaced separately so the dev team's CTA audit
+ *     catches body-embedded links alongside structured buttons. */
 function walkFieldsForCtas(
   fields: WebFieldDef[],
   values: Record<string, unknown>,
-  onCta: (entry: { fieldKey: string; fieldLabel: string; rawValue: unknown }) => void,
+  onCta: (entry: WalkEntry) => void,
   pathPrefix: string = '',
   labelPrefix: string = '',
 ): void {
   for (const f of fields) {
     if (f.kind === 'slot') {
-      if (!isButtonShapedSlot(f)) continue
-      onCta({
-        fieldKey:   `${pathPrefix}${f.key}`,
-        fieldLabel: labelPrefix ? `${labelPrefix} › ${f.layer_name ?? f.key}` : (f.layer_name ?? f.key),
-        rawValue:   values[f.key],
-      })
+      const fieldKey   = `${pathPrefix}${f.key}`
+      const fieldLabel = labelPrefix ? `${labelPrefix} › ${f.layer_name ?? f.key}` : (f.layer_name ?? f.key)
+      if (isButtonShapedSlot(f)) {
+        onCta({ kind: 'button', fieldKey, fieldLabel, rawValue: values[f.key] })
+        continue
+      }
+      // Text/richtext: scan for inline anchors.
+      if (f.type === 'text' || f.type === 'richtext' || f.type === 'url') {
+        const raw = values[f.key]
+        if (typeof raw === 'string' && raw.length > 0) {
+          const inlineLinks = extractInlineLinks(raw)
+          if (inlineLinks.length > 0) {
+            onCta({ kind: 'inline', fieldKey, fieldLabel, inlineLinks })
+          }
+        }
+      }
       continue
     }
     if (f.kind === 'group') {
@@ -592,6 +638,40 @@ function walkFieldsForCtas(
       })
     }
   }
+}
+
+/** Extract every inline link from a body/richtext value. Supports both:
+ *   - HTML anchors: `<a href="url">label</a>` (what the renderer stores
+ *     for richtext slots after handoff translation)
+ *   - Markdown links: `[label](url)` (what cowork drafts often produce
+ *     before the translator's ensureHtml() wraps them)
+ *  Whitespace is normalized; empty/blank labels degrade gracefully to
+ *  the URL itself so the dev table still has something to show.
+ *  Filters out anchors with no href or with `href="#"` since those
+ *  aren't actionable destinations the dev team needs to audit. */
+function extractInlineLinks(text: string): Array<{ label: string; url: string }> {
+  const out: Array<{ label: string; url: string }> = []
+  // 1. HTML <a href="…">label</a> — handles single + double quotes,
+  // case-insensitive attribute name, allows other attributes around it.
+  const htmlRe = /<a\s+[^>]*href\s*=\s*(?:"([^"]+)"|'([^']+)')[^>]*>([\s\S]*?)<\/a>/gi
+  let m: RegExpExecArray | null
+  while ((m = htmlRe.exec(text)) !== null) {
+    const url = (m[1] ?? m[2] ?? '').trim()
+    if (!url || url === '#') continue
+    const label = (m[3] ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() || url
+    out.push({ label, url })
+  }
+  // 2. Markdown [label](url) — be tolerant of nested brackets in label
+  // by using a lazy match; the trailing `)` matches the first close-paren.
+  // Skip image-style `![label](url)` (those are media, not links).
+  const mdRe = /(^|[^!])\[([^\]]+)\]\(([^)]+)\)/g
+  while ((m = mdRe.exec(text)) !== null) {
+    const url = (m[3] ?? '').trim()
+    if (!url || url === '#') continue
+    const label = (m[2] ?? '').replace(/\s+/g, ' ').trim() || url
+    out.push({ label, url })
+  }
+  return out
 }
 
 function downloadSeoMarkdown(projectSlug: string, projectName: string, rows: PageSeoRow[]): void {
@@ -639,14 +719,16 @@ function downloadSeoMarkdown(projectSlug: string, projectName: string, rows: Pag
 function downloadCtaCsv(projectSlug: string, rows: CtaRow[]): void {
   const cells = (s: string) => `"${s.replace(/"/g, '""')}"`
   const csv: string[] = [
-    ['Page', 'Slug', 'Section', 'Field', 'Label', 'Kind', 'URL', 'Target', 'Status']
+    ['Page', 'Slug', 'Section', 'Field', 'Label', 'Kind', 'Source', 'URL', 'Target', 'Status']
       .map(cells).join(','),
   ]
   for (const r of rows) {
     const target = r.cta.target ?? defaultTargetFor(r.cta.kind)
     csv.push([
       r.pageName, `/${r.pageSlug}`, r.sectionLabel, r.fieldLabel || r.fieldKey,
-      r.cta.label, CTA_KIND_LABELS[r.cta.kind], r.cta.url,
+      r.cta.label, CTA_KIND_LABELS[r.cta.kind],
+      r.isInline ? 'inline body link' : 'button',
+      r.cta.url,
       target === '_blank' ? 'new tab' : 'same tab',
       r.validationError ?? 'ok',
     ].map(cells).join(','))
