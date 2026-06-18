@@ -2,16 +2,19 @@
 //
 // Builds a Social Church Intel Profile for a given church member ID.
 // Flow:
-//   1. Pull church record from Supabase (name, website, AM, instagram, facebook)
-//   2. FireCrawl scrapes the church website to extract all social links
-//   3. Claude researches each social platform and builds the 8-section profile
+//   1. Pull church record from Supabase (core fields, brand guide, milestone history, contacts)
+//   2. Search Notion for any pages/docs mentioning the church
+//   3. Search Dropbox for any files/folders for the church (graceful if token missing)
+//   4. FireCrawl scrapes the church website to extract social links + content
+//   5. Claude receives everything and builds the 8-section profile with web_search for socials
 //
-// Secrets required (set in Supabase dashboard → Edge Functions → Secrets):
+// Secrets required:
 //   ANTHROPIC_API_KEY
 //   FIRECRAWL_API_KEY
-// Built-in (auto-available in all Edge Functions):
-//   SUPABASE_URL
-//   SUPABASE_SERVICE_ROLE_KEY
+//   NOTION_TOKEN          (already set — shared with strategy-notion function)
+//   DROPBOX_ACCESS_TOKEN  (optional — skipped gracefully if absent)
+// Built-in:
+//   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -22,16 +25,133 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_API_URL   = "https://api.anthropic.com/v1/messages";
 const FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v1/scrape";
+const NOTION_API_BASE      = "https://api.notion.com/v1";
+const NOTION_VERSION       = "2022-06-28";
+const DROPBOX_SEARCH_URL   = "https://api.dropboxapi.com/2/files/search_v2";
+
+// ── Notion helpers ────────────────────────────────────────────────────────────
+
+async function notionSearch(query: string, notionToken: string): Promise<string> {
+  try {
+    const res = await fetch(`${NOTION_API_BASE}/search`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${notionToken}`,
+        "Notion-Version": NOTION_VERSION,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query, page_size: 10 }),
+    });
+    if (!res.ok) return "";
+    const data = await res.json();
+    const results = data.results ?? [];
+    if (!results.length) return "";
+
+    const lines: string[] = [];
+    for (const page of results) {
+      const title = extractNotionTitle(page);
+      const url   = page.url ?? "";
+      const type  = page.object ?? "";
+      const lastEdited = page.last_edited_time ?? "";
+      lines.push(`- [${type}] ${title} (${lastEdited}) ${url}`);
+
+      // Pull block content for pages (first 30 blocks = enough for context)
+      if (page.object === "page") {
+        const content = await notionPageContent(page.id, notionToken);
+        if (content) lines.push(`  Content: ${content.slice(0, 800)}`);
+      }
+    }
+    return lines.join("\n");
+  } catch (e) {
+    console.warn("[social-intel] Notion search failed:", e);
+    return "";
+  }
+}
+
+function extractNotionTitle(page: Record<string, unknown>): string {
+  const props = (page.properties as Record<string, unknown>) ?? {};
+  for (const key of ["Name", "Title", "title", "name"]) {
+    const prop = props[key] as Record<string, unknown> | undefined;
+    if (!prop) continue;
+    const titleArr = (prop.title ?? prop.rich_text) as Array<{ plain_text?: string }> | undefined;
+    if (Array.isArray(titleArr)) return titleArr.map(t => t.plain_text ?? "").join("") || "(untitled)";
+  }
+  return "(untitled)";
+}
+
+async function notionPageContent(pageId: string, notionToken: string): Promise<string> {
+  try {
+    const res = await fetch(`${NOTION_API_BASE}/blocks/${pageId}/children?page_size=30`, {
+      headers: {
+        Authorization: `Bearer ${notionToken}`,
+        "Notion-Version": NOTION_VERSION,
+      },
+    });
+    if (!res.ok) return "";
+    const data = await res.json();
+    const blocks = data.results ?? [];
+    return blocks
+      .map((b: Record<string, unknown>) => {
+        const type = b.type as string;
+        const block = (b[type] as Record<string, unknown>) ?? {};
+        const richText = (block.rich_text ?? block.text) as Array<{ plain_text?: string }> | undefined;
+        if (Array.isArray(richText)) return richText.map(t => t.plain_text ?? "").join("");
+        return "";
+      })
+      .filter(Boolean)
+      .join(" ");
+  } catch {
+    return "";
+  }
+}
+
+// ── Dropbox helpers ───────────────────────────────────────────────────────────
+
+async function dropboxSearch(query: string, dropboxToken: string): Promise<string> {
+  try {
+    const res = await fetch(DROPBOX_SEARCH_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${dropboxToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query,
+        options: { max_results: 20, file_status: "active" },
+      }),
+    });
+    if (!res.ok) {
+      console.warn("[social-intel] Dropbox search HTTP", res.status);
+      return "";
+    }
+    const data = await res.json();
+    const matches = data.matches ?? [];
+    if (!matches.length) return "";
+    return matches
+      .map((m: Record<string, unknown>) => {
+        const meta = (m.metadata as Record<string, unknown>)?.metadata as Record<string, unknown> ?? {};
+        return `- ${meta.path_display ?? meta.name ?? "unknown"}`;
+      })
+      .join("\n");
+  } catch (e) {
+    console.warn("[social-intel] Dropbox search failed:", e);
+    return "";
+  }
+}
+
+// ── Main handler ──────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { status: 200, headers: corsHeaders });
 
-  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-  const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
-  const supabaseUrl  = Deno.env.get("SUPABASE_URL");
-  const supabaseKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const anthropicKey  = Deno.env.get("ANTHROPIC_API_KEY");
+  const firecrawlKey  = Deno.env.get("FIRECRAWL_API_KEY");
+  const notionToken   = Deno.env.get("NOTION_TOKEN");
+  const dropboxToken  = Deno.env.get("DROPBOX_ACCESS_TOKEN");
+  const supabaseUrl   = Deno.env.get("SUPABASE_URL");
+  const supabaseKey   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
   if (!anthropicKey) return json({ error: "ANTHROPIC_API_KEY secret not set" }, 500);
   if (!firecrawlKey) return json({ error: "FIRECRAWL_API_KEY secret not set" }, 500);
@@ -40,7 +160,6 @@ Deno.serve(async (req) => {
 
   let memberId: number;
   let amNotes: string | undefined;
-
   try {
     const body = await req.json();
     memberId = Number(body.memberId);
@@ -50,8 +169,15 @@ Deno.serve(async (req) => {
     return json({ error: "Invalid JSON body" }, 400);
   }
 
-  // ── 1. Pull church record from Supabase ────────────────────────────
-  const [{ data: progressData }, { data: acctData }] = await Promise.all([
+  // ── 1. Supabase — pull everything we have on this church ──────────────────
+
+  const [
+    { data: progressData },
+    { data: acctData },
+    { data: brandGuideData },
+    { data: milestonesData },
+    { data: contactsData },
+  ] = await Promise.all([
     supabase
       .from("strategy_account_progress")
       .select("member, church_name, church_website, css_rep")
@@ -64,58 +190,99 @@ Deno.serve(async (req) => {
       .eq("account", memberId)
       .limit(1)
       .maybeSingle(),
+    supabase
+      .from("prf_brand_guides")
+      .select("*")
+      .eq("member", memberId)
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("strategy_milestone_submissions")
+      .select("milestone_name, squad, submitted_at, submitter_name, notes")
+      .eq("member", memberId)
+      .order("submitted_at", { ascending: false })
+      .limit(20),
+    supabase
+      .from("clickup_users")
+      .select("username, email, account_id")
+      .eq("account_id", memberId)
+      .is("employee", null),
   ]);
 
   if (!progressData) return json({ error: `No church found for member ${memberId}` }, 404);
 
-  const churchName = (progressData as Record<string, unknown>).church_name as string ?? "Unknown Church";
-  const websiteUrl = (progressData as Record<string, unknown>).church_website as string ?? "";
-  const amName     = (progressData as Record<string, unknown>).css_rep as string ?? "";
+  const rec = progressData as Record<string, unknown>;
+  const churchName = rec.church_name as string ?? "Unknown Church";
+  const websiteUrl = rec.church_website as string ?? "";
+  const amName     = rec.css_rep as string ?? "";
   const igFromDb   = (acctData as Record<string, unknown> | null)?.instagram as string ?? "";
   const fbFromDb   = (acctData as Record<string, unknown> | null)?.facebook  as string ?? "";
 
-  // ── 2. FireCrawl: scrape website to extract social links ───────────
-  let crawledMarkdown = "";
+  // Format Supabase context for the prompt
+  const brandGuideText = brandGuideData
+    ? `Brand guide on file: ${JSON.stringify(brandGuideData).slice(0, 1000)}`
+    : "No brand guide on file in Supabase.";
+
+  const milestonesText = (milestonesData ?? []).length > 0
+    ? "Milestone/delivery history:\n" + (milestonesData ?? [])
+        .map((m: Record<string, unknown>) =>
+          `  - ${m.submitted_at ? String(m.submitted_at).slice(0, 10) : "?"} | ${m.squad} | ${m.milestone_name}${m.submitter_name ? ` (by ${m.submitter_name})` : ""}${m.notes ? ` — ${m.notes}` : ""}`)
+        .join("\n")
+    : "No milestone submissions on file.";
+
+  const contactsText = (contactsData ?? []).length > 0
+    ? "Partner contacts on file:\n" + (contactsData ?? [])
+        .map((c: Record<string, unknown>) => `  - ${c.username ?? ""} <${c.email ?? ""}>`)
+        .join("\n")
+    : "No partner contacts on file.";
+
+  // ── 2. Notion + Dropbox + FireCrawl — run in parallel ────────────────────
+
+  const [notionResults, dropboxResults, crawlResult] = await Promise.all([
+
+    notionToken
+      ? notionSearch(churchName, notionToken)
+      : Promise.resolve("NOTION_TOKEN not set — skipped."),
+
+    dropboxToken
+      ? dropboxSearch(churchName, dropboxToken)
+      : Promise.resolve("DROPBOX_ACCESS_TOKEN not set — flag for Josh."),
+
+    websiteUrl
+      ? (async () => {
+          try {
+            const scrapeRes = await fetch(FIRECRAWL_SCRAPE_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${firecrawlKey}` },
+              body: JSON.stringify({ url: websiteUrl, formats: ["markdown", "links"], onlyMainContent: false }),
+            });
+            if (!scrapeRes.ok) return { markdown: "", links: [] };
+            const d = await scrapeRes.json();
+            const page = d?.data ?? d;
+            return { markdown: (page?.markdown ?? "") as string, links: (page?.links ?? []) as string[] };
+          } catch {
+            return { markdown: "", links: [] };
+          }
+        })()
+      : Promise.resolve({ markdown: "", links: [] }),
+  ]);
+
+  // Extract social links from crawl
   let instagram = igFromDb;
   let facebook  = fbFromDb;
   let youtube   = "";
   let tiktok    = "";
 
-  if (websiteUrl) {
-    try {
-      const scrapeRes = await fetch(FIRECRAWL_SCRAPE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${firecrawlKey}` },
-        body: JSON.stringify({
-          url: websiteUrl,
-          formats: ["markdown", "links"],
-          onlyMainContent: false,
-        }),
-      });
+  const crawlText = crawlResult.markdown + "\n" + crawlResult.links.join("\n");
+  const extractLink = (pattern: RegExp): string => {
+    const m = crawlText.match(pattern);
+    return m ? m[0].replace(/[).,;]+$/, "") : "";
+  };
+  if (!instagram) instagram = extractLink(/https?:\/\/(?:www\.)?instagram\.com\/[\w\-.]+/i);
+  if (!facebook)  facebook  = extractLink(/https?:\/\/(?:www\.)?facebook\.com\/[\w\-./]+/i);
+  youtube  = extractLink(/https?:\/\/(?:www\.)?youtube\.com\/(?:@[\w\-.]+|channel\/[\w\-]+|c\/[\w\-]+)/i);
+  tiktok   = extractLink(/https?:\/\/(?:www\.)?tiktok\.com\/@[\w\-.]+/i);
 
-      if (scrapeRes.ok) {
-        const scrapeData = await scrapeRes.json();
-        const page = scrapeData?.data ?? scrapeData;
-        crawledMarkdown = page?.markdown ?? "";
-        const allLinks: string[] = Array.isArray(page?.links) ? page.links : [];
-        const allText = crawledMarkdown + "\n" + allLinks.join("\n");
-
-        const extractLink = (pattern: RegExp): string => {
-          const m = allText.match(pattern);
-          return m ? m[0].replace(/[).,;]+$/, "") : "";
-        };
-
-        if (!instagram) instagram = extractLink(/https?:\/\/(?:www\.)?instagram\.com\/[\w\-.]+/i);
-        if (!facebook)  facebook  = extractLink(/https?:\/\/(?:www\.)?facebook\.com\/[\w\-./]+/i);
-        youtube  = extractLink(/https?:\/\/(?:www\.)?youtube\.com\/(?:@[\w\-.]+|channel\/[\w\-]+|c\/[\w\-]+)/i);
-        tiktok   = extractLink(/https?:\/\/(?:www\.)?tiktok\.com\/@[\w\-.]+/i);
-      }
-    } catch (e) {
-      console.warn("[social-intel-generate] FireCrawl scrape failed, continuing:", e);
-    }
-  }
-
-  // ── 3. Claude builds the 8-section profile ─────────────────────────
   const socialLinks = [
     websiteUrl && `Website: ${websiteUrl}`,
     instagram  && `Instagram: ${instagram}`,
@@ -124,40 +291,58 @@ Deno.serve(async (req) => {
     tiktok     && `TikTok: ${tiktok}`,
   ].filter(Boolean).join("\n");
 
+  // ── 3. Claude builds the profile from everything ──────────────────────────
+
   const today = new Date().toISOString().slice(0, 10);
 
   const systemPrompt = `You are a church social media research assistant for Church Media Squad.
 Your job is to research a church thoroughly and build a Social Church Intel Profile.
-Every insight must come from something real you found — never fill gaps with generic church language.
-You MUST respond with ONLY a valid JSON object. No introduction, no explanation, no markdown fences, no text before or after the JSON.`;
+You have access to internal CMS data (Supabase, Notion, Dropbox) AND can search the web.
+Every insight must come from something real — never fill gaps with generic church language.
+You MUST respond with ONLY a valid JSON object. No introduction, no explanation, no markdown fences.`;
 
-  const userPrompt = `Build a Social Church Intel Profile for this church:
+  const userPrompt = `Build a Social Church Intel Profile for this church.
 
 Church Name: ${churchName}
 Partnership ID: ${memberId}
 Account Manager: ${amName || "Not assigned"}
-${amNotes ? `AM Notes: ${amNotes}` : ""}
+${amNotes ? `AM Notes (from form): ${amNotes}` : ""}
 
-CONFIRMED SOCIAL LINKS (use these directly):
-${socialLinks || "No links found — research using web_search based on the church name."}
+═══ INTERNAL CMS DATA ═══
 
-WEBSITE CONTENT (extracted from their site):
-${crawledMarkdown ? crawledMarkdown.slice(0, 8000) : "No website content available."}
+${brandGuideText}
 
----
+${milestonesText}
 
-RESEARCH INSTRUCTIONS:
-Using the social links above, research each platform thoroughly via web_search:
+${contactsText}
+
+NOTION — Pages/docs found for this church:
+${notionResults || "No Notion pages found for this church name."}
+
+DROPBOX — Files found for this church:
+${dropboxResults || "No Dropbox files found."}
+
+CONFIRMED SOCIAL LINKS (from our database + website scrape):
+${socialLinks || "No links found — research via web_search."}
+
+WEBSITE CONTENT (scraped):
+${crawlResult.markdown ? crawlResult.markdown.slice(0, 6000) : "No website content available."}
+
+═══ RESEARCH INSTRUCTIONS ═══
+
+Using the internal data above PLUS web_search, research each platform thoroughly:
 
 Instagram — caption style and tone, CTA patterns (pull actual language from real posts), hashtag usage, what content gets engagement, how formal or casual they are.
 
 Facebook — how they write compared to Instagram, post length, how they open and close, what their audience responds to.
 
-YouTube — current sermon series name and week number, pastor's teaching style and energy on camera, whether there is usable worship footage.
+YouTube — current sermon series name and week number, pastor's teaching style, whether there is usable worship footage.
 
-Website — how they describe themselves, pastor and key staff names, upcoming events with dates, what series they're in, anything notable about their About or Beliefs page.
+Website + Notion docs — how they describe themselves, pastor and key staff names, upcoming events with dates, what series they're in, what CMS has already delivered to them (from milestone history), any strategy notes.
 
-After researching, build the profile with exactly these 8 sections as a JSON object:
+Use the Dropbox file list to note what brand assets or deliverables we have on file for them.
+
+After researching, return ONLY this JSON:
 
 {
   "church_overview": {
@@ -179,6 +364,13 @@ After researching, build the profile with exactly these 8 sections as a JSON obj
     "upcoming_events": [],
     "recent_changes": "",
     "am_notes": ""
+  },
+  "cms_history": {
+    "milestones_completed": [],
+    "last_delivery": "",
+    "brand_guide_on_file": "",
+    "dropbox_assets_noted": "",
+    "notion_notes_summary": ""
   },
   "brand_voice": {
     "tone_summary": "",
@@ -271,29 +463,25 @@ After researching, build the profile with exactly these 8 sections as a JSON obj
 
   if (!anthropicRes.ok) {
     const errText = await anthropicRes.text();
-    console.error("[social-intel-generate] Anthropic error:", errText);
+    console.error("[social-intel] Anthropic error:", errText);
     return json({ error: "AI generation failed", details: errText }, 502);
   }
 
   const anthropicData = await anthropicRes.json();
 
-  // Extract text from response (may include tool_use blocks between web searches)
   let rawText = "";
   for (const block of anthropicData.content ?? []) {
     if (block.type === "text") rawText += block.text;
   }
-
-  // Strip <cite> tags injected by web_search
   rawText = rawText.replace(/<cite[^>]*>.*?<\/cite>/gs, "").trim();
 
-  // Parse JSON
   let profile: unknown;
   try {
     profile = JSON.parse(rawText);
   } catch {
     const match = rawText.match(/\{[\s\S]*\}/);
     if (!match) {
-      console.error("[social-intel-generate] No JSON in response:", rawText.slice(0, 500));
+      console.error("[social-intel] No JSON in response:", rawText.slice(0, 500));
       return json({ error: "AI did not return valid JSON", raw: rawText.slice(0, 500) }, 502);
     }
     try {
@@ -305,7 +493,15 @@ After researching, build the profile with exactly these 8 sections as a JSON obj
 
   return json({
     profile,
-    meta: { churchName, memberId, instagram, facebook, youtube, tiktok, websiteUrl },
+    meta: {
+      churchName, memberId, instagram, facebook, youtube, tiktok, websiteUrl,
+      sourcesUsed: {
+        supabase: true,
+        notion: !!notionToken,
+        dropbox: !!dropboxToken,
+        firecrawl: !!websiteUrl,
+      },
+    },
   }, 200);
 });
 

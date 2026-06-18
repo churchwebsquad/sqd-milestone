@@ -21,6 +21,13 @@ interface SocialIntelProfile {
     recent_changes?: string
     am_notes?: string
   }
+  cms_history?: {
+    milestones_completed?: string[]
+    last_delivery?: string
+    brand_guide_on_file?: string
+    dropbox_assets_noted?: string
+    notion_notes_summary?: string
+  }
   brand_voice?: {
     tone_summary?: string
     attributes?: { name?: string; definition?: string; use?: string[]; avoid?: string[] }[]
@@ -135,6 +142,7 @@ function asArr(val: unknown): string[] {
 export default function SocialIntelProfileView({ profile }: Props) {
   const ov = profile.church_overview ?? {}
   const now = profile.whats_happening_now ?? {}
+  const cms = profile.cms_history ?? {}
   const voice = profile.brand_voice ?? {}
   const del = profile.deliverables ?? {}
   const perf = profile.what_performs_well ?? {}
@@ -191,6 +199,33 @@ export default function SocialIntelProfileView({ profile }: Props) {
             )}
             {now.recent_changes && <Field label="Recent Changes" value={now.recent_changes} />}
             {now.am_notes && <Field label="AM Notes" value={now.am_notes} />}
+          </div>
+        </Section>
+      )}
+
+      {/* CMS History */}
+      {(cms.last_delivery || cms.brand_guide_on_file || (cms.milestones_completed ?? []).length > 0 || cms.notion_notes_summary || cms.dropbox_assets_noted) && (
+        <Section title="CMS History">
+          <div className="bg-[#F9F5F1] rounded-xl p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {asArr(cms.milestones_completed).length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-[#513DE5] uppercase tracking-wider mb-1">Milestones Completed</p>
+                <ul className="list-disc list-inside space-y-1">
+                  {asArr(cms.milestones_completed).map((m, i) => <li key={i} className="text-sm">{m}</li>)}
+                </ul>
+              </div>
+            )}
+            <div>
+              <Field label="Last Delivery" value={cms.last_delivery} />
+              <Field label="Brand Guide on File" value={cms.brand_guide_on_file} />
+              <Field label="Dropbox Assets" value={cms.dropbox_assets_noted} />
+            </div>
+            {cms.notion_notes_summary && (
+              <div className="md:col-span-2">
+                <p className="text-xs font-semibold text-[#513DE5] uppercase tracking-wider mb-1">Notion Notes</p>
+                <p className="text-sm text-[#341756] leading-relaxed">{cms.notion_notes_summary}</p>
+              </div>
+            )}
           </div>
         </Section>
       )}
