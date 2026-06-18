@@ -1342,6 +1342,45 @@ function preprocessNestedTopLevelGroups(
   }
   if (groupMatches.size < 2) return
 
+  // Filter out matches that BELONG TO another top-level group's inner
+  // item-schema. Canonical case (Feature Section 61): the outer `buttons`
+  // group and the inner `card.buttons_card` slot both use layer_name
+  // "Buttons". The matched Buttons element inside Card's subtree
+  // CONCEPTUALLY belongs to the card's `buttons_card` slot (handled by
+  // expandGroup → substituteElement when the card group expands), not
+  // to the outer buttons group. Without this filter, preprocess removes
+  // the Card's Buttons element while distributing the outer group's
+  // items — Card's subtree then loses one of its slot layers and
+  // findRichestItemTemplate ties Card with Frame 106, picking the
+  // smaller Frame 106 as the cloned item template. The visible bug:
+  // Card wrapper gets replaced with bare Frame 106 (no card box). */
+  for (const [g, gEls] of Array.from(groupMatches.entries())) {
+    const gLayer = (g.layer_name ?? g.key).trim().toLowerCase()
+    const filtered: Element[] = []
+    for (const el of gEls) {
+      let claimedByInner = false
+      for (const [other, otherEls] of groupMatches) {
+        if (other === g) continue
+        if (!Array.isArray(other.item_schema)) continue
+        const innerHasLayer = other.item_schema.some(f => {
+          const layer = (f.layer_name ?? f.key).trim().toLowerCase()
+          return layer === gLayer
+        })
+        if (!innerHasLayer) continue
+        for (const otherEl of otherEls) {
+          if (otherEl !== el && otherEl.contains(el)) { claimedByInner = true; break }
+        }
+        if (claimedByInner) break
+      }
+      if (!claimedByInner) filtered.push(el)
+    }
+    if (filtered.length !== gEls.length) {
+      if (filtered.length === 0) groupMatches.delete(g)
+      else groupMatches.set(g, filtered)
+    }
+  }
+  if (groupMatches.size < 2) return
+
   // Three patterns trigger preprocess fan-out:
   //
   // A. FULLY NESTED (gEls.length >= 1, every match inside another
