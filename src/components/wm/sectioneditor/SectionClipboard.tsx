@@ -86,8 +86,21 @@ export function SectionClipboardProvider({ children }: { children: ReactNode }) 
   )
 }
 
+/** No-op fallback for when GroupEditor (or other consumers) render
+ *  outside a SectionClipboardProvider — e.g. catalog previews,
+ *  freehand sandboxes. Returns an empty clipboard + no-op mutators
+ *  so the consumer's `canPaste` check naturally evaluates false and
+ *  the paste UI stays hidden. Without this fallback the hook threw
+ *  on every catalog render. */
+const NOOP_CTX: ClipboardCtx = {
+  clipboard:        null,
+  copy:             () => {},
+  clear:            () => {},
+  notePaste:        () => {},
+  pasteOffer:       null,
+  acknowledgePaste: () => {},
+}
+
 export function useSectionClipboard(): ClipboardCtx {
-  const ctx = useContext(Ctx)
-  if (!ctx) throw new Error('useSectionClipboard called outside SectionClipboardProvider')
-  return ctx
+  return useContext(Ctx) ?? NOOP_CTX
 }
