@@ -32,7 +32,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FileText, Loader2, Plus, Trash2, Eye, Edit3, Upload, Archive, MoreHorizontal,
-  ChevronDown, MessageSquare, ArrowRight,
+  ChevronDown, MessageSquare, ArrowRight, Copy, X,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { loadEditorSnippets } from '../../../lib/webSnippets'
@@ -741,6 +741,19 @@ function PageEditor({
       .map(p => ({ id: p.id, name: p.name, slug: p.slug }))
   }, [projectPages, page.id])
 
+  // Toast for duplicate-section confirmation. Set by duplicateSection()
+  // after the insert succeeds; auto-dismisses after 4 seconds.
+  const [duplicateToast, setDuplicateToast] = useState<{
+    sectionName: string
+    targetPageName: string
+    sameTargetPage: boolean
+  } | null>(null)
+  useEffect(() => {
+    if (!duplicateToast) return
+    const t = setTimeout(() => setDuplicateToast(null), 4000)
+    return () => clearTimeout(t)
+  }, [duplicateToast])
+
   // After sections load, honor any ?section= deep link from the
   // review queue / feedback rail.
   useEffect(() => {
@@ -964,6 +977,15 @@ function PageEditor({
       await loadSections()
     }
     void markEdited()
+    // Surface a brief confirmation. Section name comes from the bound
+    // template's layer_name (e.g. "Feature Section 2"); falls back to
+    // "Freehand section" when unbound. Target page name comes from the
+    // projectPages list.
+    const tpl = source.content_template_id ? templates[source.content_template_id] : null
+    const sectionName = tpl?.layer_name ?? 'Freehand section'
+    const targetPage = projectPages.find(p => p.id === targetPageId)
+    const targetPageName = targetPage?.name ?? 'this page'
+    setDuplicateToast({ sectionName, targetPageName, sameTargetPage })
   }
 
   /** Pure computation of the next field_values for binding `section` to
@@ -1706,6 +1728,38 @@ function PageEditor({
           }
         }}
       />
+
+      {/* Duplicate-section confirmation toast. Auto-dismisses after 4s
+          via the effect above; user can also click X to close early. */}
+      {duplicateToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-4 right-4 z-50 max-w-sm rounded-2xl bg-deep-plum text-white shadow-xl border border-primary-purple/40 px-4 py-3 flex items-start gap-3 animate-[fadeIn_0.2s_ease-out]"
+        >
+          <div className="shrink-0 mt-0.5 grid place-items-center w-7 h-7 rounded-full bg-primary-purple/30">
+            <Copy size={14} className="text-lavender" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold leading-snug">Section duplicated</p>
+            <p className="text-xs text-white/85 mt-0.5 leading-snug">
+              <span className="font-semibold">{duplicateToast.sectionName}</span>
+              {' '}was copied to{' '}
+              <span className="font-semibold">{duplicateToast.targetPageName}</span>
+              {duplicateToast.sameTargetPage && <span className="text-white/60 italic"> (this page)</span>}
+              .
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDuplicateToast(null)}
+            aria-label="Dismiss"
+            className="text-white/60 hover:text-white shrink-0 -mr-1 -mt-1 p-1"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
