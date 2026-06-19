@@ -440,6 +440,13 @@ export default function PortalReviewPage() {
 
   const requestedCount = myComments.filter(c => c.kind === 'requested').length
   const generalCount   = myComments.filter(c => c.kind === 'comment').length
+  // Internal reviews are a different surface from partner reviews:
+  // - Comments / notes ARE NEVER cross-visible (each review_id has its
+  //   own comment scope; loadMyComments filters by data.review.id).
+  // - Copy across the page is tuned to whichever audience the token
+  //   belongs to. Partners get partner-facing language; squad members
+  //   get collaboration-focused language.
+  const isInternalReview = data.review.kind === 'internal'
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-lavender-tint/40 via-cream to-cream">
@@ -447,11 +454,18 @@ export default function PortalReviewPage() {
       <header className="border-b border-lavender bg-white/80 backdrop-blur sticky top-0 z-30">
         <div className="max-w-[1440px] mx-auto px-4 py-3 flex items-center gap-3 flex-wrap">
           <div className="min-w-0 flex-1">
-            <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple flex items-center gap-1.5">
               {data.project.name}
+              {isInternalReview && (
+                <span className="inline-flex items-center text-[9px] font-bold rounded-full px-1.5 py-0.5 bg-deep-plum text-white tracking-widest">
+                  INTERNAL · SQUAD ONLY
+                </span>
+              )}
             </p>
             <h1 className="text-[20px] font-semibold text-deep-plum truncate">
-              {data.project.church_name ?? data.project.name} Wireframes: Copy Review
+              {isInternalReview
+                ? `${data.project.church_name ?? data.project.name} — Internal Squad Review`
+                : `${data.project.church_name ?? data.project.name} Wireframes: Copy Review`}
             </h1>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -468,38 +482,70 @@ export default function PortalReviewPage() {
         </div>
       </header>
 
-      {/* Intro block — partner-facing overview. Sits at the top of the
-          review surface so the first thing the partner reads is what
-          they're being asked to do, what's locked vs editable, and
-          what happens after they finish. */}
+      {/* Intro block — copy is tuned per review kind. Partner-token
+          loads see partner-facing welcome copy; internal-token loads
+          see squad-collaboration copy with an emphatic 'internal'
+          banner so a squad member never confuses a partner review
+          link with the staff-only one. */}
       <div className="max-w-[1440px] mx-auto px-4 pt-6">
-        <div className="rounded-2xl bg-white border border-lavender px-5 py-5 shadow-sm">
-          <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple mb-1">
-            Welcome
-          </p>
-          <h2 className="text-[22px] font-semibold text-deep-plum mb-3" style={{ fontFamily: 'Georgia, serif' }}>
-            Your Copy Review
-          </h2>
-          <div className="space-y-2.5 text-[13.5px] text-deep-plum/90 leading-relaxed max-w-3xl">
-            <p>
-              Take a few minutes to review the pages below and share any
-              edits, questions, or feedback you have. For now, focus on
-              the words and messaging — we're not worried about the
-              design or layout just yet.
+        {isInternalReview ? (
+          <div className="rounded-2xl bg-deep-plum text-white px-5 py-5 shadow-sm">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-lavender mb-1">
+              Internal · Squad only
             </p>
-            <p>
-              Once approved, this copy will be finalized and handed off
-              to your designer and developer. Then we'll move into the
-              exciting part: bringing your brand to life through your
-              website design!
-            </p>
-            <p>
-              When all feedback is in for your church and you're ready to
-              move on to the next milestone, click{' '}
-              <span className="font-semibold">Approve Copy &amp; Finalize Milestone</span>.
-            </p>
+            <h2 className="text-[22px] font-semibold mb-3" style={{ fontFamily: 'Georgia, serif' }}>
+              Squad Review — Internal Critique
+            </h2>
+            <div className="space-y-2.5 text-[13.5px] text-white/90 leading-relaxed max-w-3xl">
+              <p>
+                This is a private review for the Web Squad. Everything
+                you leave here stays internal — the partner never sees
+                this view, and your notes don't appear on their copy
+                review surface.
+              </p>
+              <p>
+                Use it to collaborate before sending the copy to the
+                partner: catch voice drift, factual gaps, missing CTAs,
+                or anything that needs a second pair of eyes. Tag a
+                teammate by sharing this link with them — they'll land
+                on the same page and can add their own notes.
+              </p>
+              <p>
+                When the squad is aligned and the copy is ready for the
+                partner, head back to the Review tab in Site Manager
+                and close this round out.
+              </p>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="rounded-2xl bg-white border border-lavender px-5 py-5 shadow-sm">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple mb-1">
+              Welcome
+            </p>
+            <h2 className="text-[22px] font-semibold text-deep-plum mb-3" style={{ fontFamily: 'Georgia, serif' }}>
+              Your Copy Review
+            </h2>
+            <div className="space-y-2.5 text-[13.5px] text-deep-plum/90 leading-relaxed max-w-3xl">
+              <p>
+                Take a few minutes to review the pages below and share any
+                edits, questions, or feedback you have. For now, focus on
+                the words and messaging — we're not worried about the
+                design or layout just yet.
+              </p>
+              <p>
+                Once approved, this copy will be finalized and handed off
+                to your designer and developer. Then we'll move into the
+                exciting part: bringing your brand to life through your
+                website design!
+              </p>
+              <p>
+                When all feedback is in for your church and you're ready to
+                move on to the next milestone, click{' '}
+                <span className="font-semibold">Approve Copy &amp; Finalize Milestone</span>.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="max-w-[1440px] mx-auto px-4 py-6 flex gap-4 items-start">
@@ -556,9 +602,9 @@ export default function PortalReviewPage() {
           <div className="mt-4 rounded-xl bg-white border border-lavender px-3 py-2.5">
             <p className="text-[11px] font-semibold text-deep-plum mb-1">How this works</p>
             <p className="text-[11px] text-purple-gray leading-snug">
-              Click on any section to leave a comment or request specific edits.
-              Your feedback will be shared with your Web Squad after the
-              review is completed.
+              {isInternalReview
+                ? 'Click any section to leave squad notes or flag edits before the partner sees this. Everything here stays internal.'
+                : 'Click on any section to leave a comment or request specific edits. Your feedback will be shared with your Web Squad after the review is completed.'}
             </p>
           </div>
         </aside>
@@ -596,6 +642,7 @@ export default function PortalReviewPage() {
             templates={data.templates}
             finishedAt={finishedAt}
             finishing={finishing}
+            isInternalReview={isInternalReview}
             onJumpToSection={(pageId, sectionId) => {
               setActivePageId(pageId)
               queueMicrotask(() => {
@@ -630,7 +677,7 @@ export default function PortalReviewPage() {
 
 function FeedbackTracker({
   comments, pages, sectionsByPage, templates, finishedAt, finishing,
-  onJumpToSection, onFinish, onApprove,
+  isInternalReview, onJumpToSection, onFinish, onApprove,
 }: {
   comments: WebReviewComment[]
   pages: WebPage[]
@@ -638,6 +685,10 @@ function FeedbackTracker({
   templates: Record<string, WebContentTemplate>
   finishedAt: string | null
   finishing: boolean
+  /** True when the loaded review is kind='internal'. Branches the
+   *  tracker's labels + the bottom-of-rail CTA so squad members see
+   *  collaboration-focused copy instead of partner-finalization copy. */
+  isInternalReview: boolean
   onJumpToSection: (pageId: string, sectionId: string) => void
   onFinish: () => Promise<void>
   onApprove: (finalNote: string) => Promise<void>
@@ -687,14 +738,20 @@ function FeedbackTracker({
   return (
     <div className="rounded-2xl bg-white border border-lavender shadow-sm overflow-hidden">
       <div className="px-3 py-3 border-b border-lavender">
-        <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">Team feedback</p>
+        <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">
+          {isInternalReview ? 'Squad feedback' : 'Team feedback'}
+        </p>
         <p className="text-[13px] font-semibold text-deep-plum">
           {comments.length === 0
             ? 'No items yet'
-            : `${comments.length} item${comments.length === 1 ? '' : 's'} from your team`}
+            : isInternalReview
+              ? `${comments.length} squad note${comments.length === 1 ? '' : 's'}`
+              : `${comments.length} item${comments.length === 1 ? '' : 's'} from your team`}
         </p>
         <p className="text-[10.5px] text-purple-gray mt-0.5 leading-snug">
-          Everything you and your teammates have submitted on this review.
+          {isInternalReview
+            ? 'Notes from the Web Squad — partner never sees this rail.'
+            : 'Everything you and your teammates have submitted on this review.'}
         </p>
       </div>
       <div className="max-h-[55vh] overflow-y-auto">
@@ -757,10 +814,11 @@ function FeedbackTracker({
             a reassurance + share button. The text doubles as a hint
             that progress is auto-saved. */}
         <SaveProgressButton commentCount={comments.length} />
-        {/* Request feedback from another staff member — copies the
-            current review URL so the partner can hand it to a
-            teammate. */}
-        <ShareReviewLinkButton />
+        {/* Share — invite another teammate to leave feedback on the
+            same review. Different label per kind so the partner sees
+            partner-staff language and squad members see squad
+            language. */}
+        <ShareReviewLinkButton isInternalReview={isInternalReview} />
         <button
           type="button"
           onClick={() => {
@@ -771,7 +829,7 @@ function FeedbackTracker({
           className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-deep-plum text-white text-[12px] font-semibold px-4 py-2.5 hover:bg-primary-purple transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {finishing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-          Approve Copy & Finalize Milestone
+          {isInternalReview ? 'Finish squad review' : 'Approve Copy & Finalize Milestone'}
         </button>
       </div>
 
@@ -822,10 +880,12 @@ function SaveProgressButton({ commentCount }: { commentCount: number }) {
   )
 }
 
-/** Lets the partner copy the current review URL so they can hand it
- *  to a teammate at their church. The link stays valid as long as the
- *  review is open. Clicking copies + briefly flips to "Link copied". */
-function ShareReviewLinkButton() {
+/** Lets the user copy the current review URL so they can hand it to
+ *  a teammate. Label branches by kind: partner reviews say "another
+ *  staff member" (their staff at the partner church), internal
+ *  reviews say "another squad member" (the Web Squad). The link
+ *  stays valid as long as the review is open. */
+function ShareReviewLinkButton({ isInternalReview }: { isInternalReview: boolean }) {
   const [copied, setCopied] = useState(false)
   useEffect(() => {
     if (!copied) return
@@ -837,7 +897,6 @@ function ShareReviewLinkButton() {
       await navigator.clipboard.writeText(window.location.href)
       setCopied(true)
     } catch {
-      // Fallback for older browsers where clipboard API is gated.
       window.prompt('Copy this review link to share with a teammate:', window.location.href)
     }
   }
@@ -855,7 +914,9 @@ function ShareReviewLinkButton() {
       ) : (
         <>
           <MessageSquarePlus size={12} />
-          Request feedback from another staff member
+          {isInternalReview
+            ? 'Invite another squad member to review'
+            : 'Request feedback from another staff member'}
         </>
       )}
     </button>
