@@ -913,21 +913,48 @@ function FigmaStyleGuideSection({
   // List the project's used templates so the designer knows what to
   // bring into Figma (with sane counts + family grouping).
   const [used, setUsed] = useState<WebContentTemplate[]>([])
+  // Per-template usage map: template_id → unique page names + total
+  // instance count. Surfaced under each row in the checklist so the
+  // designer sees the actual on-page context, not just the family
+  // rollup. Templates from chrome bindings (header/footer/megamenu)
+  // get a synthetic '(project chrome)' entry so they're still
+  // distinguishable from per-page sections.
+  const [usageByTemplate, setUsageByTemplate] = useState<
+    Record<string, { pageNames: string[]; instances: number; isChrome: boolean }>
+  >({})
   const [loading, setLoading] = useState(true)
   const loadUsed = useCallback(async () => {
     // Design handoff enumerates ACTUAL page implementations + chrome
     // bindings (header/footer/megamenu/offcanvas) — never the curated
     // library wholesale. If a library pick was never placed on a real
     // page, the designer doesn't need to prep it in Figma.
+    //
+    // Skip archived pages: removed pages still own their sections,
+    // but the designer/dev shouldn't need to prep templates that
+    // only appear on a removed page. Surface a separate count for
+    // any chrome bindings (project-level header/footer/megamenu) so
+    // the per-template usage row can label them differently from
+    // per-page sections.
     setLoading(true)
     const { data: sectionRows } = await supabase
       .from('web_sections')
-      .select('content_template_id, web_pages!inner(web_project_id)')
+      .select('content_template_id, web_pages!inner(name, archived, web_project_id)')
       .eq('web_pages.web_project_id', projectId)
+      .eq('web_pages.archived', false)
       .not('content_template_id', 'is', null)
-    const ids = new Set<string>()
-    for (const r of (sectionRows ?? []) as Array<{ content_template_id: string | null }>) {
-      if (r.content_template_id) ids.add(r.content_template_id)
+    type Row = { content_template_id: string | null; web_pages: { name: string } | { name: string }[] | null }
+    const usage = new Map<string, { pageNames: Set<string>; instances: number; isChrome: boolean }>()
+    for (const r of (sectionRows ?? []) as Row[]) {
+      const tplId = r.content_template_id
+      if (!tplId) continue
+      // PostgREST returns the joined row as an object OR an array
+      // depending on the relationship cardinality; normalize both.
+      const pageObj = Array.isArray(r.web_pages) ? r.web_pages[0] : r.web_pages
+      const pageName = pageObj?.name ?? '(unnamed page)'
+      const entry = usage.get(tplId) ?? { pageNames: new Set<string>(), instances: 0, isChrome: false }
+      entry.pageNames.add(pageName)
+      entry.instances += 1
+      usage.set(tplId, entry)
     }
     const { data: project } = await supabase
       .from('strategy_web_projects')
@@ -935,23 +962,40 @@ function FigmaStyleGuideSection({
       .eq('id', projectId)
       .maybeSingle()
     if (project) {
-      if (project.primary_header_template_id) ids.add(project.primary_header_template_id)
-      if (project.primary_footer_template_id) ids.add(project.primary_footer_template_id)
-      for (const id of (project.megamenu_template_ids ?? []) as string[]) ids.add(id)
-      for (const id of (project.offcanvas_template_ids ?? []) as string[]) ids.add(id)
+      const chromeIds: string[] = []
+      if (project.primary_header_template_id) chromeIds.push(project.primary_header_template_id)
+      if (project.primary_footer_template_id) chromeIds.push(project.primary_footer_template_id)
+      for (const id of (project.megamenu_template_ids ?? []) as string[]) chromeIds.push(id)
+      for (const id of (project.offcanvas_template_ids ?? []) as string[]) chromeIds.push(id)
+      for (const id of chromeIds) {
+        const entry = usage.get(id) ?? { pageNames: new Set<string>(), instances: 0, isChrome: false }
+        entry.isChrome = true
+        usage.set(id, entry)
+      }
     }
-    if (ids.size === 0) {
+    const ids = [...usage.keys()]
+    if (ids.length === 0) {
       setUsed([])
+      setUsageByTemplate({})
       setLoading(false)
       return
     }
     const { data: tpls } = await supabase
       .from('web_content_templates')
       .select('id, layer_name, family, preview_image_url')
-      .in('id', [...ids])
+      .in('id', ids)
       .order('family')
       .order('layer_name')
     setUsed((tpls ?? []) as WebContentTemplate[])
+    const flat: Record<string, { pageNames: string[]; instances: number; isChrome: boolean }> = {}
+    for (const [id, entry] of usage.entries()) {
+      flat[id] = {
+        pageNames: [...entry.pageNames].sort((a, b) => a.localeCompare(b)),
+        instances: entry.instances,
+        isChrome: entry.isChrome,
+      }
+    }
+    setUsageByTemplate(flat)
     setLoading(false)
   }, [projectId])
   useEffect(() => { void loadUsed() }, [loadUsed])
@@ -1044,6 +1088,7 @@ function FigmaStyleGuideSection({
         loading={loading}
         used={used}
         byFamily={byFamily}
+        usageByTemplate={usageByTemplate}
         loadedIds={spec.figma?.loaded_template_ids ?? []}
         onToggle={(id, next) => {
           const current = new Set(spec.figma?.loaded_template_ids ?? [])
@@ -1067,12 +1112,41 @@ function FigmaStyleGuideSection({
   )
 }
 
+/** Human-readable "where this template lands on the site" label.
+ *
+ *  - Pure chrome bindings (header/footer/megamenu/offcanvas) render
+ *    as "Project chrome" so the designer knows they're not tied to
+ *    any one page.
+ *  - Per-page bindings list the pages by name. Truncate to the first
+ *    5 to avoid blowing out the row height; remainder shown as
+ *    "+N more".
+ *  - Total instance count surfaces in parens when > 1 so the
+ *    designer sees "this layout appears multiple times" without
+ *    having to count the page list. */
+function buildUsageLabel(usage: { pageNames: string[]; instances: number; isChrome: boolean }): string | null {
+  const parts: string[] = []
+  if (usage.pageNames.length > 0) {
+    const headPages = usage.pageNames.slice(0, 5)
+    const tail = usage.pageNames.length - headPages.length
+    const pages = headPages.join(', ') + (tail > 0 ? ` +${tail} more` : '')
+    const inst = usage.instances > usage.pageNames.length
+      ? ` (${usage.instances} instances)`
+      : ''
+    parts.push(`Used on: ${pages}${inst}`)
+  }
+  if (usage.isChrome) {
+    parts.push(usage.pageNames.length > 0 ? 'and project chrome' : 'Project chrome (header / footer / megamenu)')
+  }
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function TemplateLoadChecklist({
-  loading, used, byFamily, loadedIds, onToggle, onSetAll,
+  loading, used, byFamily, usageByTemplate, loadedIds, onToggle, onSetAll,
 }: {
   loading: boolean
   used: WebContentTemplate[]
   byFamily: Array<[string, WebContentTemplate[]]>
+  usageByTemplate: Record<string, { pageNames: string[]; instances: number; isChrome: boolean }>
   loadedIds: string[]
   onToggle: (id: string, next: boolean) => void
   onSetAll: (ids: string[], next: boolean) => void
@@ -1135,21 +1209,32 @@ function TemplateLoadChecklist({
                 <ul className="divide-y divide-wm-border/40">
                   {tpls.map(t => {
                     const checked = loadedSet.has(t.id)
+                    const usage = usageByTemplate[t.id]
+                    const pageLabel = usage
+                      ? buildUsageLabel(usage)
+                      : null
                     return (
                       <li key={t.id}>
-                        <label className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-wm-bg-hover/40 transition-colors">
+                        <label className="flex items-start gap-2 px-3 py-1.5 cursor-pointer hover:bg-wm-bg-hover/40 transition-colors">
                           <input
                             type="checkbox"
                             checked={checked}
                             onChange={(e) => onToggle(t.id, e.target.checked)}
-                            className="accent-wm-accent cursor-pointer"
+                            className="accent-wm-accent cursor-pointer mt-[3px]"
                           />
-                          <span className={[
-                            'text-[11px] font-mono',
-                            checked ? 'text-wm-text-subtle line-through' : 'text-wm-text',
-                          ].join(' ')}>
-                            {t.layer_name}
-                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className={[
+                              'text-[11px] font-mono',
+                              checked ? 'text-wm-text-subtle line-through' : 'text-wm-text',
+                            ].join(' ')}>
+                              {t.layer_name}
+                            </p>
+                            {pageLabel && (
+                              <p className="text-[10px] text-wm-text-muted leading-snug mt-0.5">
+                                {pageLabel}
+                              </p>
+                            )}
+                          </div>
                         </label>
                       </li>
                     )
