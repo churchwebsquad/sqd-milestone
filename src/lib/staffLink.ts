@@ -83,6 +83,13 @@ export async function findOrCreateStaffFact(
   if (seed.role)       data.role       = seed.role
   if (seed.bio)        data.bio        = seed.bio
   if (seed.avatar_url) data.avatar_url = seed.avatar_url
+  // NOTE: we deliberately don't write display_label here. PostgREST's
+  // schema cache has been flaky around church_facts and rejected
+  // writes that referenced display_label with PGRST204 even when the
+  // column exists in Postgres. data.name is the source of truth — the
+  // display_label column is a sync-side convenience that updateStaffFact
+  // can backfill once the cache is healthy. Keep this write minimal so
+  // the staff toggle doesn't break on schema-cache drift.
   const { data: inserted, error: insErr } = await sb
     .from('church_facts')
     .insert({
@@ -90,7 +97,6 @@ export async function findOrCreateStaffFact(
       topic:             'staff',
       data,
       source_kind:       'workspace_link',
-      display_label:     cleanName,
       is_snippet:        false,
     })
     .select('id')
@@ -139,7 +145,9 @@ export async function updateStaffFact(
     if (v == null) continue
     next[k] = v
   }
-  await sb.from('church_facts').update({ data: next, display_label: String(next.name ?? '') }).eq('id', factId)
+  // See findOrCreateStaffFact: skip display_label to avoid PGRST204
+  // on stale schema caches. data.name is the canonical source.
+  await sb.from('church_facts').update({ data: next }).eq('id', factId)
 }
 
 /** Find or create the per-staff bio page (`slug = staff/<kebab-name>`).

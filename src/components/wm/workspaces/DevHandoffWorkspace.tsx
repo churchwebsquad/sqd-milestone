@@ -91,6 +91,10 @@ export function DevHandoffWorkspace({ project }: Props) {
   // Shown prominently at the top so the dev knows what integrations
   // the build has to plug into BEFORE reading the rest.
   const [softwareInUse, setSoftwareInUse]   = useState<{ value: string; status: string } | null>(null)
+  // Content collection page 2 form answers — surfaced on Dev Handoff
+  // under 'Content Inventory: Technical Details'. The cowork session
+  // is keyed on web_project_id; if multiple, take the most recent.
+  const [contentSession, setContentSession] = useState<Record<string, unknown> | null>(null)
   useEffect(() => {
     void (async () => {
       const { data } = await supabase
@@ -105,6 +109,18 @@ export function DevHandoffWorkspace({ project }: Props) {
       } else {
         setSoftwareInUse(null)
       }
+      // Content collection page 2 — events / sermons / groups / blog /
+      // domain / hosting / discipleship-pathway answers the strategist
+      // submitted via the cowork form. One row per project; latest
+      // wins if there's more than one.
+      const { data: cc } = await supabase
+        .from('strategy_content_collection_sessions')
+        .select('*')
+        .eq('web_project_id', project.id)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      setContentSession(cc as Record<string, unknown> | null)
     })()
   }, [project.id])
 
@@ -146,9 +162,15 @@ export function DevHandoffWorkspace({ project }: Props) {
         for (const t of (tplRows ?? []) as WebContentTemplate[]) templates[t.id] = t
       }
 
-      setSeoRows(pages.map(p => ({
-        pageId: p.id, pageName: p.name, pageSlug: p.slug, seo: p.seo ?? null,
-      })))
+      // /staff/* are per-staff bio pages auto-created by the team-link
+       // toggle. They share the source-of-truth bio with the parent
+       // team section and don't carry their own SEO/AEO/GEO — drop
+       // them from the SEO export to keep the dev-facing doc clean.
+      setSeoRows(pages
+        .filter(p => !p.slug.startsWith('staff/'))
+        .map(p => ({
+          pageId: p.id, pageName: p.name, pageSlug: p.slug, seo: p.seo ?? null,
+        })))
       setCtaRows(extractCtaInventory({ pages, sections, templates }))
       setDevNotesRows(
         pages
@@ -222,6 +244,51 @@ export function DevHandoffWorkspace({ project }: Props) {
               </div>
             </WMCard>
           )}
+
+          {/* ── Dev notes per page (moved to top per strategist) ── */}
+          <WMCard padding="loose">
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+                  <StickyNote size={13} />
+                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
+                    Dev notes per page
+                  </h2>
+                </div>
+                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+                  Free-form notes the strategist left at the bottom of each
+                  page editor — caveats, special routing, embed quirks,
+                  redirects, anything the dev needs to know before building
+                  that page. Authored in the Pages tab and rolled up here.
+                </p>
+              </div>
+              <WMButton
+                variant="primary"
+                size="md"
+                iconLeft={<Download size={13} />}
+                onClick={() => downloadDevNotesMarkdown(projectSlug, project.name, devNotesRows)}
+                disabled={devNotesRows.length === 0 || seoCtaLoading}
+              >
+                Download notes
+              </WMButton>
+            </div>
+            {seoCtaLoading ? (
+              <p className="text-[12px] text-wm-text-subtle">Loading…</p>
+            ) : devNotesRows.length === 0 ? (
+              <p className="text-[12px] text-wm-text-subtle italic">
+                No dev notes yet. Add them at the bottom of each page in the Pages tab.
+              </p>
+            ) : (
+              <DevNotesPerPage rows={devNotesRows} />
+            )}
+          </WMCard>
+
+          {/* ── Content Inventory: Technical Details ───────────── */}
+          {/* Page 2 of the strategist's cowork content-collection form
+              (events / sermons / groups / blog / domain / hosting /
+              discipleship pathway). All the technical context the dev
+              team needs before they bind sections to CMS post types. */}
+          <ContentInventoryTechnicalCard session={contentSession} />
 
           {/* ── Organized images folder ────────────────────────── */}
           {/* Authored on the Design Handoff tab; mirrored here so the dev
@@ -354,80 +421,46 @@ export function DevHandoffWorkspace({ project }: Props) {
             )}
           </WMCard>
 
-          {/* ── CTA inventory ────────────────────────────────────── */}
+          {/* ── CTA inventory (collapsed by default; pages roll up) ── */}
           <WMCard padding="loose">
-            <div className="flex items-start justify-between gap-4 mb-3">
-              <div>
-                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
-                  <LinkIcon size={13} />
-                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
-                    CTA inventory
-                  </h2>
+            <details className="group">
+              <summary className="cursor-pointer list-none flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+                    <LinkIcon size={13} />
+                    <h2 className="text-[13px] font-bold uppercase tracking-widest">
+                      View CTA inventory list
+                    </h2>
+                  </div>
+                  <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+                    Every CTA across the site grouped by page. Entries with
+                    no URL set are dropped (those are partner placeholders,
+                    not real routes). Useful for the dev team's button-
+                    routing audit at launch.
+                  </p>
                 </div>
-                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
-                  Every CTA across the site — page, section, label, and
-                  destination URL. Useful for the dev team's button-routing
-                  audit and the launch checklist (broken links / missing
-                  targets).
-                </p>
+                <WMButton
+                  variant="primary"
+                  size="md"
+                  iconLeft={<Download size={13} />}
+                  onClick={(e: React.MouseEvent) => { e.preventDefault(); downloadCtaCsv(projectSlug, ctaRows.filter(r => r.cta.url && r.cta.url.trim())) }}
+                  disabled={ctaRows.length === 0 || seoCtaLoading}
+                >
+                  Download CSV
+                </WMButton>
+              </summary>
+              <div className="mt-3">
+                {seoCtaLoading ? (
+                  <p className="text-[12px] text-wm-text-subtle">Loading…</p>
+                ) : ctaRows.filter(r => r.cta.url && r.cta.url.trim()).length === 0 ? (
+                  <p className="text-[12px] text-wm-text-subtle italic">No CTAs with destinations bound yet.</p>
+                ) : (
+                  <CtaInventoryTable rows={ctaRows.filter(r => r.cta.url && r.cta.url.trim())} />
+                )}
               </div>
-              <WMButton
-                variant="primary"
-                size="md"
-                iconLeft={<Download size={13} />}
-                onClick={() => downloadCtaCsv(projectSlug, ctaRows)}
-                disabled={ctaRows.length === 0 || seoCtaLoading}
-              >
-                Download CSV
-              </WMButton>
-            </div>
-            {seoCtaLoading ? (
-              <p className="text-[12px] text-wm-text-subtle">Loading…</p>
-            ) : ctaRows.length === 0 ? (
-              <p className="text-[12px] text-wm-text-subtle italic">No CTAs bound on any section yet.</p>
-            ) : (
-              <CtaInventoryTable rows={ctaRows} />
-            )}
+            </details>
           </WMCard>
 
-          {/* ── Dev notes per page ──────────────────────────────── */}
-          <WMCard padding="loose">
-            <div className="flex items-start justify-between gap-4 mb-3">
-              <div>
-                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
-                  <StickyNote size={13} />
-                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
-                    Dev notes per page
-                  </h2>
-                </div>
-                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
-                  Free-form notes the strategist left at the bottom of each
-                  page editor — caveats, special routing, embed quirks,
-                  redirects, anything the dev needs to know before building
-                  that page. Authored in the Pages tab and surfaced here so
-                  the dev team has a single rolled-up punch list.
-                </p>
-              </div>
-              <WMButton
-                variant="primary"
-                size="md"
-                iconLeft={<Download size={13} />}
-                onClick={() => downloadDevNotesMarkdown(projectSlug, project.name, devNotesRows)}
-                disabled={devNotesRows.length === 0 || seoCtaLoading}
-              >
-                Download notes
-              </WMButton>
-            </div>
-            {seoCtaLoading ? (
-              <p className="text-[12px] text-wm-text-subtle">Loading…</p>
-            ) : devNotesRows.length === 0 ? (
-              <p className="text-[12px] text-wm-text-subtle italic">
-                No dev notes yet. Add them at the bottom of each page in the Pages tab.
-              </p>
-            ) : (
-              <DevNotesPerPage rows={devNotesRows} />
-            )}
-          </WMCard>
         </div>
       </div>
     </div>
@@ -435,6 +468,127 @@ export function DevHandoffWorkspace({ project }: Props) {
 }
 
 // ── Sub-views ──────────────────────────────────────────────────────
+
+/** Content Inventory: Technical Details card. Surfaces the page-2
+ *  cowork content-collection form answers (events / sermons / groups
+ *  / blog / domain / hosting / discipleship pathway) for the dev team.
+ *  Empty-string + null values are skipped so the dev sees only fields
+ *  the strategist actually filled in. */
+function ContentInventoryTechnicalCard({ session }: { session: Record<string, unknown> | null }) {
+  // Field order + labels for the technical-details rollup. Grouped by
+  // CMS post type so the dev can scan event/sermon/group/blog/domain
+  // sections without hunting through one long list.
+  const groups: Array<{ heading: string; fields: Array<{ key: string; label: string }> }> = [
+    { heading: 'Events', fields: [
+      { key: 'events_display_preference',        label: 'Display preference' },
+      { key: 'events_display_format',            label: 'Display format' },
+      { key: 'events_external_url',              label: 'External URL' },
+      { key: 'events_wordpress_source_of_truth', label: 'WordPress source of truth' },
+      { key: 'events_wordpress_frustration',     label: 'WordPress frustration' },
+      { key: 'events_wordpress_recurring_needed',label: 'Recurring events needed?' },
+    ]},
+    { heading: 'Sermons', fields: [
+      { key: 'sermons_display_preference',       label: 'Display preference' },
+      { key: 'sermons_external_url',             label: 'External URL' },
+      { key: 'sermon_archive_features',          label: 'Archive features' },
+      { key: 'sermon_filters_text',              label: 'Filters' },
+      { key: 'sermon_youtube_playlist_exists',   label: 'YouTube playlist exists?' },
+      { key: 'sermon_youtube_playlist_url',      label: 'YouTube playlist URL' },
+    ]},
+    { heading: 'Groups', fields: [
+      { key: 'groups_display_preference',        label: 'Display preference' },
+      { key: 'groups_external_url',              label: 'External URL' },
+      { key: 'groups_wordpress_source_of_truth', label: 'WordPress source of truth' },
+      { key: 'groups_wordpress_frustration',     label: 'WordPress frustration' },
+    ]},
+    { heading: 'Blog', fields: [
+      { key: 'blog_handling',          label: 'Handling' },
+      { key: 'blog_existing_url',      label: 'Existing URL' },
+      { key: 'blog_new_description',   label: 'New blog description' },
+      { key: 'blog_new_filters',       label: 'Filters' },
+    ]},
+    { heading: 'Ministries & Discipleship', fields: [
+      { key: 'ministries_to_grow',         label: 'Ministries to grow' },
+      { key: 'ministries_list_html',       label: 'Ministries list (HTML)' },
+      { key: 'discipleship_pathway_html',  label: 'Discipleship pathway (HTML)' },
+    ]},
+    { heading: 'Site-wide', fields: [
+      { key: 'cms_managed_types',                label: 'CMS-managed post types' },
+      { key: 'high_maintenance_pages_context',   label: 'High-maintenance pages context' },
+      { key: 'merch_store_url',                  label: 'Merch store URL' },
+      { key: 'additional_context',               label: 'Additional context' },
+    ]},
+    { heading: 'Domain & Hosting', fields: [
+      { key: 'domain_registrar_url',          label: 'Domain registrar URL' },
+      { key: 'domain_credential_method',      label: 'Credential method' },
+      { key: 'domain_invite_confirmed',       label: 'Invite confirmed?' },
+      { key: 'domain_one_password_invite_url',label: '1Password invite URL' },
+      { key: 'hosting_approved',              label: 'Hosting approved?' },
+    ]},
+  ]
+
+  const fmt = (v: unknown): string | null => {
+    if (v == null) return null
+    if (typeof v === 'string') return v.trim() || null
+    if (typeof v === 'boolean') return v ? 'Yes' : 'No'
+    if (Array.isArray(v)) return v.length === 0 ? null : v.join(', ')
+    return JSON.stringify(v)
+  }
+
+  const renderedGroups = session ? groups.map(g => ({
+    ...g,
+    rows: g.fields
+      .map(f => ({ ...f, value: fmt(session[f.key]) }))
+      .filter(r => r.value != null),
+  })).filter(g => g.rows.length > 0) : []
+
+  return (
+    <WMCard padding="loose">
+      <div className="flex items-start justify-between gap-4 mb-3">
+        <div>
+          <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+            <FileText size={13} />
+            <h2 className="text-[13px] font-bold uppercase tracking-widest">
+              Content Inventory: Technical Details
+            </h2>
+          </div>
+          <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+            Page-2 answers from the strategist's cowork content-collection
+            form. Tells the dev how the church wants events, sermons,
+            groups, blog, and domain/hosting set up before any post-type
+            wiring begins.
+          </p>
+        </div>
+      </div>
+      {!session ? (
+        <p className="text-[12px] text-wm-text-subtle italic">
+          Content-collection session not started. Have the strategist
+          complete page 2 of the Crawl &amp; Inventory workflow.
+        </p>
+      ) : renderedGroups.length === 0 ? (
+        <p className="text-[12px] text-wm-text-subtle italic">
+          Session exists but page 2 has no answers yet.
+        </p>
+      ) : (
+        <div className="space-y-4">
+          {renderedGroups.map(g => (
+            <div key={g.heading} className="rounded border border-wm-border/60 bg-wm-bg-elevated/40 p-3">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-wm-accent-strong mb-2">{g.heading}</p>
+              <dl className="space-y-2">
+                {g.rows.map(r => (
+                  <div key={r.key} className="grid grid-cols-[160px_1fr] gap-3 items-start">
+                    <dt className="text-[11px] font-semibold text-wm-text-muted">{r.label}</dt>
+                    <dd className="text-[12px] text-wm-text whitespace-pre-wrap break-words">{r.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          ))}
+        </div>
+      )}
+    </WMCard>
+  )
+}
 
 function DevNotesPerPage({ rows }: { rows: DevNotesRow[] }) {
   return (
@@ -505,6 +659,17 @@ function SeoSummaryTable({ rows }: { rows: PageSeoRow[] }) {
 function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
   const brokenCount = rows.filter(r => r.validationError != null).length
 
+  // Group rows by page (alphabetical by name).  Each page becomes its
+  // own header + table so the dev team can step through page-by-page
+  // instead of scanning one flat list.
+  const byPage = new Map<string, { pageName: string; pageSlug: string; rows: CtaRow[] }>()
+  for (const r of rows) {
+    const key = r.pageId
+    if (!byPage.has(key)) byPage.set(key, { pageName: r.pageName, pageSlug: r.pageSlug, rows: [] })
+    byPage.get(key)!.rows.push(r)
+  }
+  const pages = [...byPage.values()].sort((a, b) => a.pageName.localeCompare(b.pageName))
+
   return (
     <div className="space-y-3">
       {/* Summary bar — at-a-glance count of broken links so the dev
@@ -520,19 +685,25 @@ function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
         </div>
       )}
 
-      <div className="overflow-x-auto -mx-2">
+      <div className="space-y-4">
+      {pages.map(p => (
+        <div key={p.pageSlug} className="rounded border border-wm-border/60 bg-wm-bg-elevated/40 p-3">
+          <div className="flex items-baseline justify-between gap-3 mb-2">
+            <p className="text-[12px] font-bold text-wm-text">{p.pageName}</p>
+            <p className="text-[10px] text-wm-text-subtle font-mono">/{p.pageSlug} · {p.rows.length} CTA{p.rows.length === 1 ? '' : 's'}</p>
+          </div>
+          <div className="overflow-x-auto -mx-2">
         <table className="w-full text-[11px] border-collapse">
           <thead>
             <tr className="text-left text-wm-text-subtle">
               <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Route</th>
               <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Button label</th>
               <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Kind</th>
-              <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Page</th>
               <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Section</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((c, idx) => {
+            {p.rows.map((c, idx) => {
               const target = c.cta.target ?? defaultTargetFor(c.cta.kind)
               const broken = c.validationError != null
               return (
@@ -584,10 +755,6 @@ function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
                       </span>
                     )}
                   </td>
-                  <td className="px-2 py-2">
-                    <p className="font-semibold text-wm-text">{c.pageName}</p>
-                    <p className="text-[10px] text-wm-text-subtle font-mono">/{c.pageSlug}</p>
-                  </td>
                   <td className="px-2 py-2 max-w-[200px] align-top">
                     <p className="text-wm-text break-words" title={c.sectionLabel}>{c.sectionLabel}</p>
                     {c.fieldLabel && c.fieldLabel !== c.fieldKey && (
@@ -599,6 +766,9 @@ function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
             })}
           </tbody>
         </table>
+          </div>
+        </div>
+      ))}
       </div>
     </div>
   )

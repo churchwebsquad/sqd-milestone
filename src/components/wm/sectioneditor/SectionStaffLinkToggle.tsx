@@ -21,6 +21,12 @@
  */
 import { useState } from 'react'
 import { Loader2, UserPlus, X, AlertTriangle, UserCheck } from 'lucide-react'
+import { supabase } from '../../../lib/supabase'
+import {
+  findOrCreateStaffFact,
+  ensurePerStaffPage,
+  appendSingleTeamSection,
+} from '../../../lib/staffLink'
 import type { WebSection } from '../../../types/database'
 
 interface Props {
@@ -98,26 +104,53 @@ export function SectionStaffLinkToggle({ section, projectId, onPatch }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<FlipResult | null>(null)
 
-  const flipToLinked = () => {
-    // Per the latest direction: don't create per-staff pages or
-    // church_facts rows here. The strategist's intent in flipping to
-    // "linked" is purely to signal "these cards will become click-
-    // throughs to single staff pages at the WP build" — the actual
-    // single-staff page is handled by the dev team's post-template
-    // loop, not by this app. So this is a flag-only toggle.
+  const flipToLinked = async () => {
     setError(null)
     setResult(null)
-    const nonBlankCards = cards.filter(c => c.name)
-    const skippedNames = cards
-      .filter(c => !c.name)
-      .map(c => `(card ${c.rowIdx + 1}.${c.cardIdx + 1})`)
-    onPatch({ ...values, _staff_link: { display_mode: 'linked' } })
-    setResult({
-      linkedCount:  nonBlankCards.length,
-      skippedCount: skippedNames.length,
-      skippedNames,
-    })
-    setStage('done')
+    setStage('flipping')
+    let next = { ...values, _staff_link: { display_mode: 'linked' } } as Record<string, unknown>
+    let linkedCountLocal = 0
+    const skippedNames: string[] = []
+    try {
+      for (const card of cards) {
+        if (!card.name) {
+          skippedNames.push(`(card ${card.rowIdx + 1}.${card.cardIdx + 1})`)
+          continue
+        }
+        if (card.factId) {
+          // Already linked — skip the create step but still count.
+          linkedCountLocal++
+          continue
+        }
+        const factId = await findOrCreateStaffFact(supabase, projectId, {
+          name: card.name, role: card.role, bio: card.bio,
+        })
+        const { pageId, pageSlug } = await ensurePerStaffPage(supabase, projectId, card.name)
+        await appendSingleTeamSection(supabase, pageId, factId, {
+          name: card.name, role: card.role, bio: card.bio,
+        })
+        next = patchCard(next, card.rowIdx, card.cardIdx, {
+          _staff_fact_id:   factId,
+          _staff_page_slug: pageSlug,
+        })
+        linkedCountLocal++
+      }
+      onPatch(next)
+      setResult({ linkedCount: linkedCountLocal, skippedCount: skippedNames.length, skippedNames })
+      setStage('done')
+    } catch (e: unknown) {
+      console.error('[staff-link] section flip failed', e)
+      // Surface Supabase PostgrestError messages too (they aren't
+      // Error instances) so 'unknown error' stops masking the actual
+      // failure for the strategist.
+      const msg = e instanceof Error
+        ? e.message
+        : (typeof e === 'object' && e !== null && 'message' in e)
+          ? String((e as { message: unknown }).message)
+          : 'unknown error'
+      setError(msg)
+      setStage('error')
+    }
   }
 
   const flipToInline = () => {
