@@ -117,7 +117,16 @@ export function SectionDetailsPanel({
 
   const presence = template ? summarizeSlotPresence(template, values) : null
   const fields: WebFieldDef[] = template?.fields ?? []
-  const visibleFields = fields.filter(isEditableField)
+  // Internal review mode focuses the reviewer on content that's
+  // actually present — an empty Tagline row is noise when the goal
+  // is "comment on what's there." Tighten the visible-fields filter
+  // when activeInternalReview is set: drop empty leaf slots, drop
+  // groups with no bound items. The strategist view keeps the full
+  // editor (empty fields are how they fill them in).
+  const inReviewMode = activeInternalReview != null
+  const visibleFields = fields
+    .filter(isEditableField)
+    .filter(f => !inReviewMode || !isFieldEmptyForReview(f, values))
 
   // Grounding context the AI suggest-copy button passes to the edge
   // function so it can write on-brand, in-context copy. siblings
@@ -617,6 +626,43 @@ function humanizeSlotPath(parts: ReadonlyArray<string>): string {
 }
 
 // ── Visibility rules ────────────────────────────────────────────────
+
+/** Review-mode emptiness check — drop fields with no actual content
+ *  so internal reviewers focus on commenting what's there.
+ *  - text/url/email/phone/datetime: empty / whitespace-only string
+ *  - richtext: empty after stripping tags + &nbsp;
+ *  - cta: no label AND no url
+ *  - boolean: always render (toggles aren't "empty" per se)
+ *  - image: never empty in this view (image fields are already
+ *    hidden from the editor by isEditableField)
+ *  - group: zero items bound */
+function isFieldEmptyForReview(field: WebFieldDef, values: Record<string, unknown>): boolean {
+  if (field.kind === 'group') {
+    const raw = values[field.key]
+    return !Array.isArray(raw) || raw.length === 0
+  }
+  // slot
+  const raw = values[field.key]
+  if (raw == null) return true
+  if (field.type === 'cta') {
+    if (typeof raw === 'object' && raw !== null) {
+      const cta = raw as { label?: unknown; url?: unknown }
+      const label = typeof cta.label === 'string' ? cta.label.trim() : ''
+      const url   = typeof cta.url   === 'string' ? cta.url.trim()   : ''
+      return label.length === 0 && url.length === 0
+    }
+    return true
+  }
+  if (field.type === 'boolean') return false
+  if (typeof raw !== 'string') return false
+  const trimmed = raw.trim()
+  if (trimmed.length === 0) return true
+  if (field.type === 'richtext') {
+    const stripped = trimmed.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
+    return stripped.length === 0
+  }
+  return false
+}
 
 /** Hide non-editable fields from the panel — image slots, image
  *  groups, and groups that are decorative (single-instance with empty

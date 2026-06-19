@@ -225,12 +225,15 @@ export default function PortalReviewPage() {
         // Pick the first page by default
         setActivePageId(pages[0]?.id ?? null)
 
-        // Partner name: prefer localStorage, fall back to whatever the
-        // review has stored, fall back to prompting.
+        // Partner name: ALWAYS prompt on a fresh browser session. We
+        // intentionally do NOT fall back to review.partner_name —
+        // that field stores the FIRST visitor's name and was leaking
+        // identity to every teammate who opened the link afterward.
+        // localStorage is per-browser, so each teammate gets their
+        // own identity prompt on their first visit and we remember
+        // it locally for return visits.
         const stored = window.localStorage.getItem(`partner_review_${token}_name`)
-        const reviewName = (review as WebReview).partner_name
-        if (stored)             setPartnerName(stored)
-        else if (reviewName)    setPartnerName(reviewName)
+        if (stored) setPartnerName(stored)
         // else: leave null — name modal will show
 
       } catch (e) {
@@ -287,13 +290,11 @@ export default function PortalReviewPage() {
           if (!trimmed) return
           window.localStorage.setItem(`partner_review_${token}_name`, trimmed)
           setPartnerName(trimmed)
-          // First partner to identify themselves — record on the review row.
-          if (!data.review.partner_name) {
-            await supabase
-              .from('web_reviews')
-              .update({ partner_name: trimmed } as never)
-              .eq('id', data.review.id)
-          }
+          // Don't write partner_name back to web_reviews — it would
+          // identify every subsequent visitor on this same link as
+          // the first person who claimed it. Each browser stores its
+          // own identity in localStorage; the review row stays
+          // anonymous so any teammate gets their own prompt.
         }}
         projectName={data.project.name}
       />

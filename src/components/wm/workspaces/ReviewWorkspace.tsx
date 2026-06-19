@@ -279,7 +279,7 @@ export function ReviewWorkspace({ project }: Props) {
               size="sm"
               onClick={() => setForceEditor(true)}
             >
-              Open editor
+              Add internal review feedback
             </WMButton>
           )}
           <WMButton
