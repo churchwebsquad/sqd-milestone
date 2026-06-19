@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+// @ts-ignore — jsdom not in devDependencies; installed at runtime
 import { JSDOM } from 'jsdom'
 import { createClient } from '@supabase/supabase-js'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'

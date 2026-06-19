@@ -47,6 +47,8 @@ export interface ManifestEntry {
   verified:         boolean
   palette_ref?:     string | null
   notes?:           string
+  family?:          string
+  concept?:         string
 }
 
 export interface BindResult {

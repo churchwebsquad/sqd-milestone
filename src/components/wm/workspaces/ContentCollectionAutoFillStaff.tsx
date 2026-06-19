@@ -113,9 +113,9 @@ export function ContentCollectionAutoFillStaff({
           ? s.value.filter(v => typeof v === 'string')
           : typeof s.value === 'string' ? s.value.split(',').map(v => v.trim()).filter(Boolean) : []
       }
-      const { error: updErr } = await supabase
+      const { error: updErr } = await (supabase as any)
         .from('strategy_content_collection_sessions')
-        .update({ [s.field]: coerced as never })
+        .update({ [s.field]: coerced })
         .eq('id', sessionId)
       if (updErr) throw updErr
       setDismissed(prev => new Set(prev).add(s.field))

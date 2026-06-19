@@ -17,6 +17,7 @@ import IntelAuditToolPage from './pages/IntelAuditToolPage'
 import SrpDashboardPage from './pages/SrpDashboardPage'
 import SrpWorkflowPage from './pages/SrpWorkflowPage'
 import SrpPromptSettingsPage from './pages/SrpPromptSettingsPage'
+import SocialIntelPage from './pages/SocialIntelPage'
 import LoginPage from './pages/LoginPage'
 import SubmitFormPage from './pages/SubmitFormPage'
 import TemplateEditorPage from './pages/TemplateEditorPage'
@@ -153,6 +154,7 @@ export default function App() {
             <Route path="/social/srp/:sessionId" element={<SrpWorkflowPage />} />
             <Route path="/social/srp/prompts" element={<SrpPromptSettingsPage />} />
             <Route path="/social/intel" element={<IntelAuditToolPage />} />
+            <Route path="/social/social-intel" element={<SocialIntelPage />} />
             <Route path="/social/prompts" element={<Navigate to="/social/srp/prompts" replace />} />
             <Route path="/social/planner" element={<ComingSoonPage title="Planning Calendar" />} />
 

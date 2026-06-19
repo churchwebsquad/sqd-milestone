@@ -23,7 +23,8 @@
  * informational only — the extractor uses SHAPE first, then content,
  * then key names as a final tie-breaker.
  */
-import { normalizeCtaValue, isButtonShapedSlot, type CtaValue } from './cta'
+import { normalizeCtaValue, isButtonShapedSlot } from './cta'
+import type { CtaValue } from '../types/database'
 import type {
   WebContentTemplate, WebFieldDef, WebSlotDef, WebGroupDef,
 } from '../types/database'
