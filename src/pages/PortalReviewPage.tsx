@@ -108,11 +108,15 @@ export default function PortalReviewPage() {
     void (async () => {
       setLoading(true)
       try {
+        // Token resolves to either a partner or internal review.
+        // Internal reviews now generate tokens too so strategists can
+        // share an internal-only review link with teammates the same
+        // way they share partner links. The UI is the same surface —
+        // the only difference is which review row carries it.
         const { data: review, error: rErr } = await supabase
           .from('web_reviews')
           .select('*')
           .eq('partner_token', token)
-          .eq('kind', 'partner')
           .maybeSingle()
         if (rErr) throw new Error(rErr.message)
         if (!review)            { setError('This review link is invalid.'); return }

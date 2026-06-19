@@ -50,6 +50,7 @@ export function ReviewWorkspace({ project }: Props) {
   const [loading, setLoading] = useState(true)
   const [requestModalOpen, setRequestModalOpen] = useState(false)
   const [partnerLinkCopied, setPartnerLinkCopied] = useState(false)
+  const [internalLinkCopied, setInternalLinkCopied] = useState(false)
 
   // Filter + tab state for the kanban.
   const [activeTab, setActiveTab] = useState<string>('all')
@@ -144,14 +145,29 @@ export function ReviewWorkspace({ project }: Props) {
   const handleStartInternal = async (fromRequestId?: string) => {
     // Use startReview directly so we can pass fromRequestId — the
     // shared hook's wrapper doesn't accept request linkage today.
+    //
+    // Internal reviews now generate a shareable token (mirroring
+    // partner reviews) so the strategist can hand the link to a
+    // teammate. Copy on success + flip the button to 'Link copied'
+    // for 2.5s. Skip the auto-drill-into-editor — copying a link
+    // signals sharing, not editing; the user can step into the
+    // editor on their own from this same tab.
     const res = await startReview({
       projectId: project.id, kind: 'internal', fromRequestId,
     })
     if (res.ok) {
       await load()
-      // After starting an internal review the user almost always
-      // wants to enter the editor immediately — drill in.
-      setForceEditor(true)
+      const token = res.data?.partner_token
+      if (token) {
+        const url = `${window.location.origin}/portal/review/${token}`
+        try {
+          await navigator.clipboard.writeText(url)
+          setInternalLinkCopied(true)
+          setTimeout(() => setInternalLinkCopied(false), 2500)
+        } catch {
+          window.prompt('Internal review link — paste it to a teammate:', url)
+        }
+      }
     }
   }
 
@@ -283,12 +299,18 @@ export function ReviewWorkspace({ project }: Props) {
             <WMButton
               variant="secondary"
               size="sm"
-              iconLeft={actions.busy ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+              iconLeft={
+                actions.busy ? <Loader2 size={11} className="animate-spin" /> :
+                internalLinkCopied ? <Check size={11} /> :
+                <Plus size={11} />
+              }
               onClick={() => void handleStartInternal()}
               disabled={actions.busy}
-              title="Open a fresh internal review round on this project. Multiple staff can contribute to the same round."
+              title="Open a fresh internal review round and copy a shareable link to your clipboard."
             >
-              Start internal review {nextInternalRoundLabel(state)}
+              {internalLinkCopied
+                ? 'Internal link copied'
+                : `Start internal review ${nextInternalRoundLabel(state)}`}
             </WMButton>
           )}
           <WMButton

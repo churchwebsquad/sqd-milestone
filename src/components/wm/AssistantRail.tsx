@@ -308,6 +308,7 @@ function FeedbackTab({
   const [mutating, setMutating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [partnerLinkCopied, setPartnerLinkCopied] = useState(false)
+  const [internalLinkCopied, setInternalLinkCopied] = useState(false)
   const [requestModalOpen, setRequestModalOpen] = useState(false)
 
   // Feedback UI state — round tab selection + assignee filter.
@@ -412,16 +413,41 @@ function FeedbackTab({
     }
   }
 
-  /** Start an internal review for the current user. Per the per-user
-   *  semantics, each staff has at most one open internal review on a
-   *  project; we no-op if they've already got one running. */
+  /** Get-or-start an internal review and copy its link — same flow
+   *  as handleGetPartnerLink, just for the internal review kind so
+   *  strategists can share an internal-only review URL with their
+   *  teammates. Each staff has at most one open internal review on
+   *  a project; reuses the existing token when one is open. */
   const handleStartInternal = async () => {
     setMutating(true)
     setError(null)
-    const res = await startReview({ projectId, kind: 'internal' })
+    let token: string | null = null
+    const existing = state?.open_reviews.find(r => r.kind === 'internal') ?? null
+    if (existing?.partner_token) {
+      token = existing.partner_token
+    } else {
+      const res = await startReview({ projectId, kind: 'internal' })
+      if (!res.ok) {
+        setError(res.error ?? 'Failed to start internal review.')
+        setMutating(false)
+        return
+      }
+      token = res.data?.partner_token ?? null
+      await load()
+    }
     setMutating(false)
-    if (res.ok) await load()
-    else setError(res.error ?? 'Failed to start internal review.')
+    if (!token) {
+      setError("Internal review started but no link was issued — refresh and try again.")
+      return
+    }
+    const url = `${window.location.origin}/portal/review/${token}`
+    try {
+      await navigator.clipboard.writeText(url)
+      setInternalLinkCopied(true)
+      setTimeout(() => setInternalLinkCopied(false), 2500)
+    } catch {
+      setError(`Couldn't copy to clipboard — link is ${url}`)
+    }
   }
 
   const handleClose = async (reviewId: string) => {
@@ -513,12 +539,16 @@ function FeedbackTab({
           <WMButton
             variant="secondary"
             size="sm"
-            iconLeft={mutating ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+            iconLeft={
+              mutating ? <Loader2 size={11} className="animate-spin" /> :
+              internalLinkCopied ? <Check size={11} /> :
+              <Plus size={11} />
+            }
             onClick={() => void handleStartInternal()}
             disabled={mutating}
             className="w-full justify-center"
           >
-            Start an internal review
+            {internalLinkCopied ? 'Link copied' : 'Start an internal review'}
           </WMButton>
         )}
         <WMButton

@@ -292,7 +292,11 @@ export async function startReview(opts: {
    *  request flips to 'started'. */
   fromRequestId?: string
 }): Promise<ReviewMutationResult<WebReview>> {
-  const partner_token = opts.kind === 'partner' ? crypto.randomUUID().replace(/-/g, '') : null
+  // Always generate a token. Internal reviews used to skip this, but
+  // strategists need a shareable link to share with teammates the
+  // same way partner reviews work. The column has a unique index;
+  // collisions on a 32-char hex are astronomically improbable.
+  const partner_token = crypto.randomUUID().replace(/-/g, '')
   const { data: user } = await supabase.auth.getUser()
   const starterName = await resolveStaffName(user?.user?.email ?? null)
   const { data, error } = await supabase
