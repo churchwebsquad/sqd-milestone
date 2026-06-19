@@ -522,17 +522,22 @@ function PageList({
         <div>{pages.map(renderPageRow)}</div>
       )}
 
-      {/* Staff pages — always-visible group at the bottom of the
+      {/* Staff pages — collapsed accordion at the bottom of the
           sidebar. /staff/<slug> bio pages share their bio with the
-          parent Team Section but are routable on the rendered site,
-          so they need their own group, not a collapsible. */}
+          parent Team Section but are routable on the rendered site;
+          for big teams (40+ staff), a flat group pushes the main
+          pages off-screen, so this is closed by default. */}
       {staffPages.length > 0 && (
-        <div className="mt-3 border-t border-wm-border/40 pt-2">
-          <p className="px-4 mb-1 text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
-            Staff pages · {staffPages.length}
-          </p>
+        <details className="mt-3 border-t border-wm-border/40 pt-2 group">
+          <summary className="cursor-pointer list-none px-4 mb-1 flex items-center justify-between gap-1 text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle hover:text-wm-text-muted transition-colors">
+            <span>Staff pages · {staffPages.length}</span>
+            <ChevronDown
+              size={11}
+              className="shrink-0 transition-transform group-open:rotate-180"
+            />
+          </summary>
           <div>{staffPages.map(renderPageRow)}</div>
-        </div>
+        </details>
       )}
     </div>
   )
