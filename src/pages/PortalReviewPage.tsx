@@ -547,9 +547,9 @@ export default function PortalReviewPage() {
           <div className="mt-4 rounded-xl bg-white border border-lavender px-3 py-2.5">
             <p className="text-[11px] font-semibold text-deep-plum mb-1">How this works</p>
             <p className="text-[11px] text-purple-gray leading-snug">
-              Click any section to leave a comment or request specific edits.
-              Your feedback goes to the team — nothing changes on the live
-              site until they review it.
+              Click on any section to leave a comment or request specific edits.
+              Your feedback will be shared with your Web Squad after the
+              review is completed.
             </p>
           </div>
         </aside>

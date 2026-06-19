@@ -83,13 +83,13 @@ export async function findOrCreateStaffFact(
   if (seed.role)       data.role       = seed.role
   if (seed.bio)        data.bio        = seed.bio
   if (seed.avatar_url) data.avatar_url = seed.avatar_url
-  // NOTE: we deliberately don't write display_label here. PostgREST's
+  // NOTE: we deliberately keep this insert MINIMAL. PostgREST's
   // schema cache has been flaky around church_facts and rejected
-  // writes that referenced display_label with PGRST204 even when the
-  // column exists in Postgres. data.name is the source of truth — the
-  // display_label column is a sync-side convenience that updateStaffFact
-  // can backfill once the cache is healthy. Keep this write minimal so
-  // the staff toggle doesn't break on schema-cache drift.
+  // writes that touched both display_label (PGRST204) and is_snippet
+  // even when the columns exist in Postgres. data.name is the source
+  // of truth — display_label is a sync-side convenience and
+  // is_snippet defaults at the DB level. Keep the toggle alive on
+  // schema-cache drift by only writing required columns.
   const { data: inserted, error: insErr } = await sb
     .from('church_facts')
     .insert({
@@ -97,7 +97,6 @@ export async function findOrCreateStaffFact(
       topic:             'staff',
       data,
       source_kind:       'workspace_link',
-      is_snippet:        false,
     })
     .select('id')
     .single()
