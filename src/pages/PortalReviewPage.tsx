@@ -33,6 +33,7 @@ import {
   Send, X, Check, ImagePlus, Trash2, Inbox, PartyPopper, AlertTriangle,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { resolveStaffName } from '../lib/webReviews'
 import { uploadAttachment } from '../lib/attachmentUpload'
 import { PagePreview } from '../components/wm/PagePreview'
 import { WMRichTextEditor } from '../components/wm/RichTextEditor'
@@ -83,6 +84,15 @@ export default function PortalReviewPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [partnerName, setPartnerName] = useState<string | null>(null)
+  /** For internal-kind reviews only: the Supabase auth user + their
+   *  resolved staff name. Internal reviews require sign-in (attribution
+   *  comes from auth, never from a free-text name modal). For partner
+   *  reviews this stays null. */
+  const [staffUser, setStaffUser] = useState<{ id: string; email: string } | null>(null)
+  /** Set after the auth check completes for an internal review whose
+   *  visitor isn't signed in. The render branch then shows a sign-in
+   *  prompt instead of the review surface. */
+  const [needsSignIn, setNeedsSignIn] = useState(false)
   const [activePageId, setActivePageId] = useState<string | null>(null)
   const [draft, setDraft] = useState<DraftComment | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -225,16 +235,32 @@ export default function PortalReviewPage() {
         // Pick the first page by default
         setActivePageId(pages[0]?.id ?? null)
 
-        // Partner name: ALWAYS prompt on a fresh browser session. We
-        // intentionally do NOT fall back to review.partner_name —
-        // that field stores the FIRST visitor's name and was leaking
-        // identity to every teammate who opened the link afterward.
-        // localStorage is per-browser, so each teammate gets their
-        // own identity prompt on their first visit and we remember
-        // it locally for return visits.
-        const stored = window.localStorage.getItem(`partner_review_${token}_name`)
-        if (stored) setPartnerName(stored)
-        // else: leave null — name modal will show
+        // Identity resolution branches on review.kind:
+        //
+        // - Internal reviews: require Supabase auth. Attribution is
+        //   always the signed-in staff member — no name modal. If
+        //   not signed in, the page renders a sign-in prompt instead
+        //   of the review surface.
+        // - Partner reviews: per-browser-session name modal (current
+        //   behavior). The review row never stores any one visitor's
+        //   name, so multiple teammates on the same link each pick
+        //   their own identity on first visit.
+        const reviewKind = (review as WebReview).kind
+        if (reviewKind === 'internal') {
+          const { data: u } = await supabase.auth.getUser()
+          const authed = u?.user
+          if (!authed) {
+            setNeedsSignIn(true)
+          } else {
+            const name = await resolveStaffName(authed.email ?? null)
+            setStaffUser({ id: authed.id, email: authed.email ?? '' })
+            setPartnerName(name ?? authed.email ?? 'Squad member')
+          }
+        } else {
+          const stored = window.localStorage.getItem(`partner_review_${token}_name`)
+          if (stored) setPartnerName(stored)
+          // else: leave null — partner name modal will show
+        }
 
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load review.')
@@ -282,6 +308,34 @@ export default function PortalReviewPage() {
       </FullScreen>
     )
   }
+  // Internal-review sign-in gate. Anyone with the link gets
+  // attribution from Supabase auth, never from a free-text name —
+  // protects squad-only feedback from drive-by partner visits and
+  // ensures every comment on an internal review is tied to a real
+  // staff identity.
+  if (needsSignIn) {
+    const here = window.location.pathname + window.location.search
+    return (
+      <FullScreen>
+        <div className="rounded-2xl bg-white border border-lavender px-6 py-6 max-w-md text-center shadow-sm">
+          <p className="text-[12px] font-bold uppercase tracking-widest text-primary-purple mb-1">
+            Squad sign-in required
+          </p>
+          <h2 className="text-[16px] font-semibold text-deep-plum mb-2">Internal review</h2>
+          <p className="text-[12.5px] text-purple-gray leading-snug mb-4">
+            This is a private review for the Web Squad. Sign in with your
+            squad account so your comments are attributed to you.
+          </p>
+          <a
+            href={`/login?next=${encodeURIComponent(here)}`}
+            className="inline-flex items-center justify-center rounded-full bg-deep-plum text-white text-[12px] font-semibold px-4 py-2 hover:bg-primary-purple transition-colors"
+          >
+            Sign in to review
+          </a>
+        </div>
+      </FullScreen>
+    )
+  }
   if (!partnerName) {
     return (
       <NameCaptureModal
@@ -316,6 +370,20 @@ export default function PortalReviewPage() {
     if (!draft) return
     setSubmitting(true)
     try {
+      // Author attribution branches on review.kind:
+      //  - internal: signed-in staff (author_user_id + author_external_name)
+      //  - partner:  external name only (no auth required)
+      const isInternal = data.review.kind === 'internal'
+      const authorFields = isInternal
+        ? {
+            author_kind:         'staff' as const,
+            author_user_id:      staffUser?.id ?? null,
+            author_external_name: partnerName,
+          }
+        : {
+            author_kind:         'partner' as const,
+            author_external_name: partnerName,
+          }
       const inserts: Array<Record<string, unknown>> = []
       if (draft.body.trim()) {
         inserts.push({
@@ -323,8 +391,7 @@ export default function PortalReviewPage() {
           web_page_id:         draft.section.web_page_id,
           web_section_id:      draft.section.id,
           field_key:           null,
-          author_kind:         'partner',
-          author_external_name: partnerName,
+          ...authorFields,
           kind:                'comment',
           body:                draft.body.trim(),
         })
@@ -336,8 +403,7 @@ export default function PortalReviewPage() {
           web_page_id:         draft.section.web_page_id,
           web_section_id:      draft.section.id,
           field_key:           s.field_key,
-          author_kind:         'partner',
-          author_external_name: partnerName,
+          ...authorFields,
           kind:                'requested',
           body:                null,
           original_value:      s.original_value,
@@ -819,18 +885,40 @@ function FeedbackTracker({
             partner-staff language and squad members see squad
             language. */}
         <ShareReviewLinkButton isInternalReview={isInternalReview} />
-        <button
-          type="button"
-          onClick={() => {
-            if (comments.length === 0) setApproveModalOpen(true)
-            else void onFinish()
-          }}
-          disabled={finishing}
-          className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-deep-plum text-white text-[12px] font-semibold px-4 py-2.5 hover:bg-primary-purple transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {finishing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-          {isInternalReview ? 'Finish squad review' : 'Approve Copy & Finalize Milestone'}
-        </button>
+        {isInternalReview ? (
+          // Internal reviews are NOT finalized from here. Multiple
+          // squad members leave feedback under the same round and
+          // the round closes from Site Manager → Review when the
+          // project lead bumps the project status. This is a
+          // personal "I'm done for now" affordance: no DB write,
+          // just nav back to Site Manager.
+          <a
+            href="/"
+            className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-deep-plum text-white text-[12px] font-semibold px-4 py-2.5 hover:bg-primary-purple transition-colors"
+          >
+            <Check size={12} />
+            I'm done reviewing
+          </a>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              if (comments.length === 0) setApproveModalOpen(true)
+              else void onFinish()
+            }}
+            disabled={finishing}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-deep-plum text-white text-[12px] font-semibold px-4 py-2.5 hover:bg-primary-purple transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {finishing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+            Approve Copy & Finalize Milestone
+          </button>
+        )}
+        {isInternalReview && (
+          <p className="text-[10.5px] text-purple-gray text-center leading-snug mt-1">
+            The round closes when the project lead changes the
+            project status from Site Manager.
+          </p>
+        )}
       </div>
 
       {approveModalOpen && (

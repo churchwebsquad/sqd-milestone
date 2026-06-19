@@ -271,7 +271,7 @@ export async function loadProjectReviewEdits(projectId: string): Promise<WebRevi
 
 /** Resolve the current user's display name via the employees table.
  *  Falls back to the auth email when no employee row matches. */
-async function resolveStaffName(email: string | null | undefined): Promise<string | null> {
+export async function resolveStaffName(email: string | null | undefined): Promise<string | null> {
   if (!email) return null
   const { data: emp } = await supabase
     .from('employees')

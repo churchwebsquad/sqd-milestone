@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Loader2, Plus, Copy, Check, UserPlus, Inbox, X,
+  Loader2, Plus, Copy, Check, UserPlus, Inbox, X, Trash2,
 } from 'lucide-react'
 import {
   loadProjectReviewState, loadProjectReviewEdits, listReviewRequests,
@@ -133,6 +133,28 @@ export function ReviewWorkspace({ project }: Props) {
   const activeInternal = state?.open_reviews
     .filter(r => r.kind === 'internal')
     .sort((a, b) => b.round_number - a.round_number)[0] ?? null
+
+  const activePartner = state?.open_reviews
+    .filter(r => r.kind === 'partner')
+    .sort((a, b) => b.round_number - a.round_number)[0] ?? null
+
+  /** Hard-delete an open review. Cascades to web_review_comments +
+   *  web_review_edits via FKs. Used to wipe a round that was started
+   *  by mistake or got into a bad state. Closing a review (different
+   *  action, lives on the kanban) preserves history; this one
+   *  doesn't. */
+  const handleDeleteReview = async (reviewId: string, kind: 'internal' | 'partner') => {
+    const label = kind === 'internal' ? 'internal review round' : 'partner review'
+    if (!window.confirm(
+      `Delete this ${label}? Every comment + edit attached to it is removed. This can't be undone.`,
+    )) return
+    const { error } = await supabase.from('web_reviews').delete().eq('id', reviewId)
+    if (error) {
+      window.alert(`Couldn't delete the review: ${error.message}`)
+      return
+    }
+    await load()
+  }
 
   const myEmail = user?.email?.toLowerCase().trim() ?? ''
   const pendingForMe = requests.filter(
@@ -303,7 +325,27 @@ export function ReviewWorkspace({ project }: Props) {
               >
                 {internalLinkCopied ? 'Link copied' : 'Copy internal review link'}
               </WMButton>
+              <WMButton
+                variant="secondary"
+                size="sm"
+                iconLeft={<Trash2 size={11} />}
+                onClick={() => void handleDeleteReview(activeInternal.id, 'internal')}
+                title="Delete this internal review round. Cascades to all attached comments + edits — can't be undone."
+              >
+                Delete round
+              </WMButton>
             </>
+          )}
+          {activePartner && (
+            <WMButton
+              variant="secondary"
+              size="sm"
+              iconLeft={<Trash2 size={11} />}
+              onClick={() => void handleDeleteReview(activePartner.id, 'partner')}
+              title="Delete this partner review. Cascades to all attached comments — can't be undone."
+            >
+              Delete partner review
+            </WMButton>
           )}
           <WMButton
             variant="secondary"
