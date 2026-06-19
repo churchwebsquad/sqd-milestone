@@ -723,18 +723,27 @@ export default function PortalReviewPage() {
       </div>
 
       {/* Comment drawer */}
-      {draft && !finishedAt && (
-        <CommentDrawer
-          draft={draft}
-          setDraft={setDraft}
-          submitting={submitting}
-          onCancel={() => setDraft(null)}
-          onSubmit={submit}
-          template={draft.section.content_template_id ? data.templates[draft.section.content_template_id] ?? null : null}
-          existingForSection={myComments.filter(c => c.web_section_id === draft.section.id)}
-          snippetMap={data.snippetMap}
-        />
-      )}
+      {draft && !finishedAt && (() => {
+        // Partner-facing label: "Section N" based on the section's
+        // position on its page (1-indexed by sort_order). Sections
+        // are already sorted in data.sectionsByPage at load time.
+        const onPage = data.sectionsByPage[draft.section.web_page_id] ?? []
+        const idx = onPage.findIndex(s => s.id === draft.section.id)
+        const partnerSectionLabel = idx >= 0 ? `Section ${idx + 1}` : 'Section'
+        return (
+          <CommentDrawer
+            draft={draft}
+            setDraft={setDraft}
+            submitting={submitting}
+            onCancel={() => setDraft(null)}
+            onSubmit={submit}
+            template={draft.section.content_template_id ? data.templates[draft.section.content_template_id] ?? null : null}
+            existingForSection={myComments.filter(c => c.web_section_id === draft.section.id)}
+            snippetMap={data.snippetMap}
+            sectionLabel={partnerSectionLabel}
+          />
+        )
+      })()}
     </div>
   )
 }
@@ -835,8 +844,20 @@ function FeedbackTracker({
                 </p>
                 <ul className="space-y-1">
                   {items.map(c => {
-                    const sec = c.web_section_id ? sectionById.get(c.web_section_id) : null
-                    const tpl = sec?.content_template_id ? templates[sec.content_template_id] : null
+                    // Partner-facing section label: chronological
+                    // position on the page ("Section 3") rather than
+                    // the Brixies layer name ("Hero Section 55"),
+                    // which is build-time jargon to a partner.
+                    const onPage = sectionsByPage[page.id] ?? []
+                    const idx = c.web_section_id
+                      ? onPage.findIndex(s => s.id === c.web_section_id)
+                      : -1
+                    const sectionLabel = idx >= 0 ? `Section ${idx + 1}` : 'Section'
+                    // Tag label: "comment" stays, "requested" /
+                    // "suggested" both surface as "Edit" — partners
+                    // don't differentiate between an inline edit and
+                    // a structured suggestion in their head.
+                    const kindLabel = c.kind === 'comment' ? 'Comment' : 'Edit'
                     return (
                       <li key={c.id}>
                         <button
@@ -847,14 +868,14 @@ function FeedbackTracker({
                           <div className="flex items-center gap-1.5">
                             <span className={[
                               'shrink-0 inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5',
-                              c.kind === 'requested' ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                              : c.kind === 'suggested' ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                              : 'bg-lavender-tint text-primary-purple border border-primary-purple/20',
+                              c.kind === 'requested' || c.kind === 'suggested'
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                : 'bg-lavender-tint text-primary-purple border border-primary-purple/20',
                             ].join(' ')}>
-                              {c.kind}
+                              {kindLabel}
                             </span>
                             <span className="text-[11px] text-deep-plum font-semibold truncate">
-                              {tpl?.layer_name ?? 'Section'}
+                              {sectionLabel}
                             </span>
                           </div>
                           <p className="text-[11px] text-purple-gray truncate mt-0.5">
@@ -1126,7 +1147,7 @@ function NameCaptureModal({
 
 function CommentDrawer({
   draft, setDraft, submitting, onCancel, onSubmit, template,
-  existingForSection, snippetMap: _snippetMap,
+  existingForSection, snippetMap: _snippetMap, sectionLabel: overrideLabel,
 }: {
   draft: DraftComment
   setDraft: (d: DraftComment | null) => void
@@ -1136,6 +1157,10 @@ function CommentDrawer({
   template: WebContentTemplate | null
   existingForSection: WebReviewComment[]
   snippetMap: SnippetMap
+  /** Partner-facing section label override, e.g. "Section 3". Falls
+   *  back to the bound template's layer_name when not supplied (used
+   *  in non-partner contexts where the Brixies name is meaningful). */
+  sectionLabel?: string
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -1185,7 +1210,11 @@ function CommentDrawer({
   const setAttachment = (f: File | null) => setDraft({ ...draft, attachment: f })
 
   const canSubmit = (draft.body.trim() || draft.suggestions.some(s => s.proposed_value.trim())) && !submitting
-  const sectionLabel = template?.layer_name ?? 'Freehand section'
+  // Partner-facing surface: prefer the position-based override
+  // ("Section 3") if the caller provided one. The Brixies layer name
+  // ("Hero Section 55") is a build-time label that doesn't mean
+  // anything to a partner reviewing their copy.
+  const sectionLabel = overrideLabel ?? template?.layer_name ?? 'Freehand section'
 
   return (
     <>
@@ -1198,7 +1227,6 @@ function CommentDrawer({
           <div className="min-w-0 flex-1">
             <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">Comment on</p>
             <h2 className="text-[16px] font-semibold text-deep-plum truncate">{sectionLabel}</h2>
-            <p className="text-[11px] text-purple-gray">{template?.family ?? ''}</p>
           </div>
           <button
             type="button"
