@@ -11,7 +11,10 @@
       "Read(//Users/ashleyfox/Documents/Claude/Projects/Web 2.0/Brixies/_HTML/Filter/**)",
       "Bash(cp src/types/database.ts /tmp/database.ts.bak)",
       "Bash(perl -i -pe 's/^\\\\s*\\\\[key: string\\\\]: unknown\\\\s*\\\\n//gm' src/types/database.ts)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(python3 -c ' *)",
+      "Bash(npx eslint *)",
+      "Bash(git add *)"
     ]
   }
 }
