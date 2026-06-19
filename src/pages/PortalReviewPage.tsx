@@ -532,15 +532,15 @@ export default function PortalReviewPage() {
                   {mainPages.map(renderRow)}
                 </nav>
                 {staffPages.length > 0 && (
-                  <details className="mt-4 group">
-                    <summary className="cursor-pointer list-none flex items-center justify-between gap-1 px-2 mb-2 text-[10px] uppercase tracking-widest font-bold text-primary-purple hover:text-deep-plum transition-colors">
+                  <details className="mt-4 rounded-lg bg-lavender-tint/50 border border-primary-purple/15 group">
+                    <summary className="cursor-pointer list-none px-3 py-2 flex items-center justify-between gap-2 text-[11px] uppercase tracking-widest font-bold text-primary-purple hover:bg-lavender-tint/80 rounded-lg transition-colors">
                       <span>Staff pages · {staffPages.length}</span>
                       <ChevronDown
-                        size={11}
+                        size={13}
                         className="shrink-0 transition-transform group-open:rotate-180"
                       />
                     </summary>
-                    <nav className="space-y-0.5">
+                    <nav className="px-1 pb-2 space-y-0.5">
                       {staffPages.map(renderRow)}
                     </nav>
                   </details>

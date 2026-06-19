@@ -526,17 +526,19 @@ function PageList({
           sidebar. /staff/<slug> bio pages share their bio with the
           parent Team Section but are routable on the rendered site;
           for big teams (40+ staff), a flat group pushes the main
-          pages off-screen, so this is closed by default. */}
+          pages off-screen, so this is closed by default.
+          Wrapped in a tinted card so the toggle reads as
+          interactive — the bare chevron was too subtle. */}
       {staffPages.length > 0 && (
-        <details className="mt-3 border-t border-wm-border/40 pt-2 group">
-          <summary className="cursor-pointer list-none px-4 mb-1 flex items-center justify-between gap-1 text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle hover:text-wm-text-muted transition-colors">
+        <details className="mt-3 mx-2 rounded-md bg-wm-accent-tint/40 border border-wm-accent-tint group">
+          <summary className="cursor-pointer list-none px-3 py-2 flex items-center justify-between gap-2 text-[11px] uppercase tracking-widest font-bold text-wm-accent-strong hover:bg-wm-accent-tint/60 rounded-md transition-colors">
             <span>Staff pages · {staffPages.length}</span>
             <ChevronDown
-              size={11}
+              size={13}
               className="shrink-0 transition-transform group-open:rotate-180"
             />
           </summary>
-          <div>{staffPages.map(renderPageRow)}</div>
+          <div className="pb-1">{staffPages.map(renderPageRow)}</div>
         </details>
       )}
     </div>
