@@ -36,9 +36,6 @@ export function PagePreview({ sections, templates, cardTemplates, snippetMap, on
 
   return (
     <div className="max-w-[1280px] mx-auto px-4 pb-12">
-      <p className="text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle mb-3 text-center">
-        Live preview · Brixies render with current copy
-      </p>
       <div className="space-y-1 rounded-xl overflow-hidden border border-wm-border bg-wm-bg-elevated shadow-sm">
         {sections.map((section, idx) => {
           const template = section.content_template_id
