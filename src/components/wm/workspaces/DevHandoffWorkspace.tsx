@@ -27,7 +27,8 @@ import { WMCard } from '../Card'
 import { supabase } from '../../../lib/supabase'
 import {
   parseDesignSystemSpec, emptyDesignSystemSpec, toAcssGvmJson,
-  ACSS_ROLES,
+  generateAcssShades,
+  ACSS_ROLES, ACSS_SHADE_STEPS,
   type DesignSystemSpec,
 } from '../../../lib/designSystemSpec'
 import {
@@ -384,6 +385,9 @@ export function DevHandoffWorkspace({ project }: Props) {
             </details>
           </WMCard>
 
+          {/* ── ACSS variable preview ──────────────────────────── */}
+          <AcssVariablePreviewCard spec={spec} />
+
           {/* ── SEO / AEO / GEO ─────────────────────────────────── */}
           <WMCard padding="loose">
             <div className="flex items-start justify-between gap-4 mb-3">
@@ -421,44 +425,40 @@ export function DevHandoffWorkspace({ project }: Props) {
             )}
           </WMCard>
 
-          {/* ── CTA inventory (collapsed by default; pages roll up) ── */}
+          {/* ── CTA inventory ─────────────────────────────────────── */}
           <WMCard padding="loose">
-            <details className="group">
-              <summary className="cursor-pointer list-none flex items-start justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
-                    <LinkIcon size={13} />
-                    <h2 className="text-[13px] font-bold uppercase tracking-widest">
-                      View CTA inventory list
-                    </h2>
-                  </div>
-                  <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
-                    Every CTA across the site grouped by page. Entries with
-                    no URL set are dropped (those are partner placeholders,
-                    not real routes). Useful for the dev team's button-
-                    routing audit at launch.
-                  </p>
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+                  <LinkIcon size={13} />
+                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
+                    CTA inventory
+                  </h2>
                 </div>
-                <WMButton
-                  variant="primary"
-                  size="md"
-                  iconLeft={<Download size={13} />}
-                  onClick={(e: React.MouseEvent) => { e.preventDefault(); downloadCtaCsv(projectSlug, ctaRows.filter(r => r.cta.url && r.cta.url.trim())) }}
-                  disabled={ctaRows.length === 0 || seoCtaLoading}
-                >
-                  Download CSV
-                </WMButton>
-              </summary>
-              <div className="mt-3">
-                {seoCtaLoading ? (
-                  <p className="text-[12px] text-wm-text-subtle">Loading…</p>
-                ) : ctaRows.filter(r => r.cta.url && r.cta.url.trim()).length === 0 ? (
-                  <p className="text-[12px] text-wm-text-subtle italic">No CTAs with destinations bound yet.</p>
-                ) : (
-                  <CtaInventoryTable rows={ctaRows.filter(r => r.cta.url && r.cta.url.trim())} />
-                )}
+                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+                  Every CTA across the site grouped by page. Entries with
+                  no URL set are dropped (those are partner placeholders,
+                  not real routes). Useful for the dev team's button-
+                  routing audit at launch.
+                </p>
               </div>
-            </details>
+              <WMButton
+                variant="primary"
+                size="md"
+                iconLeft={<Download size={13} />}
+                onClick={() => downloadCtaCsv(projectSlug, ctaRows.filter(r => r.cta.url && r.cta.url.trim()))}
+                disabled={ctaRows.length === 0 || seoCtaLoading}
+              >
+                Download CSV
+              </WMButton>
+            </div>
+            {seoCtaLoading ? (
+              <p className="text-[12px] text-wm-text-subtle">Loading…</p>
+            ) : ctaRows.filter(r => r.cta.url && r.cta.url.trim()).length === 0 ? (
+              <p className="text-[12px] text-wm-text-subtle italic">No CTAs with destinations bound yet.</p>
+            ) : (
+              <CtaInventoryTable rows={ctaRows.filter(r => r.cta.url && r.cta.url.trim())} />
+            )}
           </WMCard>
 
         </div>
@@ -468,6 +468,96 @@ export function DevHandoffWorkspace({ project }: Props) {
 }
 
 // ── Sub-views ──────────────────────────────────────────────────────
+
+/** Per-role ACSS shade preview, dev-handoff edition. Same data the
+ *  Design tab's tonal preview shows, but with the hex value rendered
+ *  visibly under every swatch (no hover-to-read) and the role's
+ *  anchor (medium step) highlighted with a stronger ring + label.
+ *  Helps the dev verify what got exported into the GVM JSON without
+ *  bouncing back to the Design tab. */
+function AcssVariablePreviewCard({ spec }: { spec: DesignSystemSpec }) {
+  const filledRoles = useMemo(() => {
+    return ACSS_ROLES
+      .map(role => {
+        const anchorId = spec.role_shades[role]?.medium
+        if (!anchorId) return null
+        const anchor = spec.brand_anchors.find(a => a.id === anchorId)
+        if (!anchor) return null
+        return { role, anchor, scale: generateAcssShades(anchor.hex) }
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null)
+  }, [spec.role_shades, spec.brand_anchors])
+
+  if (filledRoles.length === 0) return null
+
+  return (
+    <WMCard padding="loose">
+      <div className="mb-3">
+        <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+          <FileText size={13} />
+          <h2 className="text-[13px] font-bold uppercase tracking-widest">
+            ACSS variable preview
+          </h2>
+        </div>
+        <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+          The full 7-step shade scale per role — exactly what the ACSS
+          JSON exports. Each role's <span className="font-semibold">anchor</span>{' '}
+          (the medium step) is the brand color the strategist picked;
+          the surrounding shades are HSL-stepped from that anchor at
+          ACSS Pro's standard lightness targets (95 / 85 / 65 / 50 /
+          35 / 25 / 10).
+        </p>
+      </div>
+      <div className="space-y-4">
+        {filledRoles.map(({ role, anchor, scale }) => (
+          <div key={role} className="rounded border border-wm-border bg-wm-bg-elevated/40 p-3">
+            <div className="flex items-baseline gap-2 mb-2">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-wm-text">--{role}</p>
+              <p className="text-[11px] text-wm-text-muted">→ {anchor.name}</p>
+              <p className="ml-auto text-[10.5px] font-mono text-wm-text-subtle">
+                anchor {anchor.hex.toUpperCase()}
+              </p>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {ACSS_SHADE_STEPS.map(step => {
+                const sh = scale[step]
+                const isAnchor = step === 'medium'
+                const tokenName = isAnchor ? `--${role}` : `--${role}-${step}`
+                return (
+                  <div
+                    key={step}
+                    className={[
+                      'flex flex-col items-stretch rounded-md overflow-hidden border',
+                      isAnchor
+                        ? 'border-wm-accent-strong ring-2 ring-wm-accent-strong/30'
+                        : 'border-wm-border',
+                    ].join(' ')}
+                    style={{ width: 76 }}
+                    title={tokenName}
+                  >
+                    <div className="h-12" style={{ background: sh.hex }} />
+                    <div className={[
+                      'px-1 py-1 text-center',
+                      isAnchor ? 'bg-wm-accent-tint/80' : 'bg-wm-bg-elevated',
+                    ].join(' ')}>
+                      <p className={[
+                        'text-[9px] font-mono uppercase tracking-widest',
+                        isAnchor ? 'text-wm-accent-strong font-bold' : 'text-wm-text-subtle',
+                      ].join(' ')}>
+                        {isAnchor ? 'Anchor' : step}
+                      </p>
+                      <p className="text-[9.5px] font-mono text-wm-text mt-0.5">{sh.hex.toUpperCase()}</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </WMCard>
+  )
+}
 
 /** Content Inventory: Technical Details card. Surfaces the page-2
  *  cowork content-collection form answers (events / sermons / groups
