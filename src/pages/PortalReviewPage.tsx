@@ -855,7 +855,12 @@ function CommentDrawer({
   const editableFields = useMemo(() => {
     if (!template) return [] as EditableLeaf[]
     const values = (draft.section.field_values ?? {}) as Record<string, unknown>
+    // Drop fields with no current value before showing them to the
+    // partner. An empty "Current: (empty)" row is noise — the
+    // partner can't critique what isn't there. If they want to add
+    // content that isn't bound, that's a separate conversation.
     return flattenTemplateFields(template.fields ?? [], values)
+      .filter(leaf => !isLeafEmpty(leaf))
   }, [template, draft.section.field_values])
 
   const setBody = (body: string) => setDraft({ ...draft, body })
@@ -1120,6 +1125,36 @@ interface EditableLeaf {
   itemLabel?: string
   fieldType:  FieldSuggestion['field_type']
   current:    unknown
+}
+
+/** True when a leaf has no meaningful current value for the partner
+ *  to critique. Hides the leaf from "Suggest specific edits" — empty
+ *  rows are noise to a partner who's reviewing the rendered page.
+ *  - text / richtext: empty string, whitespace-only, or pure-empty
+ *    HTML (e.g. "<p></p>" / "<p><br></p>")
+ *  - cta: no label AND no url */
+function isLeafEmpty(leaf: EditableLeaf): boolean {
+  const v = leaf.current
+  if (v == null) return true
+  if (leaf.fieldType === 'cta') {
+    if (typeof v === 'object' && v !== null) {
+      const cta = v as { label?: unknown; url?: unknown }
+      const label = typeof cta.label === 'string' ? cta.label.trim() : ''
+      const url   = typeof cta.url   === 'string' ? cta.url.trim()   : ''
+      return label.length === 0 && url.length === 0
+    }
+    return true
+  }
+  if (typeof v !== 'string') return false
+  const trimmed = v.trim()
+  if (trimmed.length === 0) return true
+  if (leaf.fieldType === 'richtext') {
+    // Strip every tag and check if any actual text/space remains.
+    // Catches "<p></p>", "<p><br></p>", "<div></div>", etc.
+    const stripped = trimmed.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
+    return stripped.length === 0
+  }
+  return false
 }
 
 function flattenTemplateFields(

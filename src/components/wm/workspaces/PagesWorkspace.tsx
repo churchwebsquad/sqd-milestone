@@ -405,9 +405,8 @@ function PageList({
   pageReviewCounts,
 }: {
   pages: WebPage[]
-  /** Per-staff bio pages (slug LIKE 'staff/%'). Rendered in a
-   *  collapsible at the bottom of the sidebar so the strategist can
-   *  navigate to them without cluttering the main list. */
+  /** Per-staff bio pages (slug LIKE 'staff/%'). Grouped under their
+   *  own header so they're easy to spot among the main page list. */
   staffPages: WebPage[]
   loading: boolean
   activeId: string | null
@@ -419,21 +418,86 @@ function PageList({
   pageReviewCounts: Record<string, import('../../../lib/webReviews').PageReviewCounts>
 }) {
   const selectionActive = selectedIds.size > 0
-  const [staffOpen, setStaffOpen] = useState(false)
 
   if (loading) {
     return (
-      <div className="p-4 space-y-2">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="h-10 rounded-md bg-wm-bg-hover animate-pulse" />
+      <div className="p-4 space-y-1">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="h-7 rounded bg-wm-bg-hover animate-pulse" />
         ))}
       </div>
     )
   }
 
+  // One render shape for both the main list and the /staff/* group.
+  // Tighter than the prior card — single line, slug becomes secondary
+  // text on hover only (truncates with the row), edit count rides
+  // the right edge.
+  const renderPageRow = (p: WebPage) => {
+    const isSelected = selectedIds.has(p.id)
+    const isActive   = p.id === activeId
+    const counts     = pageReviewCounts[p.id]
+    const editCount  = counts ? counts.open_total + counts.resolved_total : 0
+    return (
+      <div
+        key={p.id}
+        className={[
+          'group relative flex items-center border-l-2 transition-colors',
+          isActive
+            ? 'bg-wm-bg-selected border-wm-accent'
+            : isSelected
+              ? 'bg-wm-ai-bg/30 border-transparent'
+              : 'border-transparent hover:bg-wm-bg-hover',
+        ].join(' ')}
+      >
+        <label className={[
+          'shrink-0 pl-3 cursor-pointer flex items-center justify-center transition-opacity',
+          selectionActive || isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+        ].join(' ')}>
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelection(p.id)}
+            className="accent-wm-accent cursor-pointer"
+            aria-label={`Select ${p.name}`}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => onSelect(p.id)}
+          className="min-w-0 flex-1 text-left px-2 py-1 flex items-center gap-1.5"
+          title={`/${p.slug}`}
+        >
+          <span className="text-[12.5px] font-medium text-wm-text truncate">{p.name}</span>
+          {editCount > 0 && (
+            <span
+              className="shrink-0 inline-flex items-center text-[10px] font-semibold text-wm-accent-strong"
+              title={`${editCount} partner edit${editCount === 1 ? '' : 's'} on this page`}
+            >
+              · {editCount} edit{editCount === 1 ? '' : 's'}
+            </span>
+          )}
+          <span className="ml-auto shrink-0">
+            <WMStatusPill tone={STATUS_TONES[p.content_status]} size="sm">
+              {STATUS_LABELS[p.content_status] ?? p.content_status}
+            </WMStatusPill>
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onArchive(p.id) }}
+          className="shrink-0 pr-2 py-1 text-wm-text-subtle hover:text-wm-danger opacity-0 group-hover:opacity-100 transition-opacity"
+          title="Archive page"
+        >
+          <Archive size={11} />
+        </button>
+      </div>
+    )
+  }
+
   return (
-    <div className="py-3 flex-1">
-      <div className="px-4 mb-2 flex items-center justify-between gap-2">
+    <div className="py-2 flex-1">
+      <div className="px-4 mb-1 flex items-center justify-between gap-2">
         <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
           Pages{pages.length > 0 ? ` · ${pages.length}` : ''}
         </p>
@@ -450,115 +514,24 @@ function PageList({
         <button
           type="button"
           onClick={() => onAddPageInPhase('1')}
-          className="mx-3 block w-[calc(100%-1.5rem)] rounded-md border border-dashed border-wm-border bg-wm-bg p-2.5 text-[11px] text-wm-text-muted hover:border-wm-border-focus hover:text-wm-text transition-colors"
+          className="mx-3 block w-[calc(100%-1.5rem)] rounded-md border border-dashed border-wm-border bg-wm-bg p-2 text-[11px] text-wm-text-muted hover:border-wm-border-focus hover:text-wm-text transition-colors"
         >
           + Add a page
         </button>
       ) : (
-        <div className="space-y-0.5">
-          {pages.map(p => {
-            const isSelected = selectedIds.has(p.id)
-            return (
-              <div
-                key={p.id}
-                className={[
-                  'group relative flex items-center border-l-2 transition-colors',
-                  p.id === activeId
-                    ? 'bg-wm-bg-selected border-wm-accent'
-                    : isSelected
-                      ? 'bg-wm-ai-bg/30 border-transparent'
-                      : 'border-transparent hover:bg-wm-bg-hover',
-                ].join(' ')}
-              >
-                <label className={[
-                  'shrink-0 pl-3 py-2 cursor-pointer flex items-center justify-center transition-opacity',
-                  selectionActive || isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-                ].join(' ')}>
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => onToggleSelection(p.id)}
-                    className="accent-wm-accent cursor-pointer"
-                    aria-label={`Select ${p.name}`}
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={() => onSelect(p.id)}
-                  className="min-w-0 flex-1 text-left px-2 py-2 flex items-center gap-2"
-                >
-                  <FileText size={13} className="text-wm-text-subtle shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-medium text-wm-text truncate">{p.name}</p>
-                    <p className="text-[10px] text-wm-text-subtle truncate">/{p.slug}</p>
-                  </div>
-                  <PageReviewBadge counts={pageReviewCounts[p.id]} />
-                  <WMStatusPill tone={STATUS_TONES[p.content_status]} size="sm">
-                    {STATUS_LABELS[p.content_status] ?? p.content_status}
-                  </WMStatusPill>
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); onArchive(p.id) }}
-                  className="shrink-0 pr-2 py-2 text-wm-text-subtle hover:text-wm-danger opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="Archive page"
-                >
-                  <Archive size={12} />
-                </button>
-              </div>
-            )
-          })}
-        </div>
+        <div>{pages.map(renderPageRow)}</div>
       )}
 
-      {/* Linked staff pages — collapsible section listing the hidden
-          /staff/<slug> bio pages so the strategist can edit them
-          without navigating by URL. Empty when no staff are linked. */}
+      {/* Staff pages — always-visible group at the bottom of the
+          sidebar. /staff/<slug> bio pages share their bio with the
+          parent Team Section but are routable on the rendered site,
+          so they need their own group, not a collapsible. */}
       {staffPages.length > 0 && (
-        <div className="mt-4 border-t border-wm-border/40 pt-3">
-          <button
-            type="button"
-            onClick={() => setStaffOpen(v => !v)}
-            className="w-full px-4 mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle hover:text-wm-text-muted transition-colors"
-          >
-            <span>Linked staff pages · {staffPages.length}</span>
-            {staffOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          </button>
-          {staffOpen && (
-            <div className="space-y-0.5">
-              {staffPages.map(sp => (
-                <div
-                  key={sp.id}
-                  className={[
-                    'group relative flex items-center border-l-2 transition-colors',
-                    sp.id === activeId
-                      ? 'bg-wm-bg-selected border-wm-accent'
-                      : 'border-transparent hover:bg-wm-bg-hover',
-                  ].join(' ')}
-                >
-                  <button
-                    type="button"
-                    onClick={() => onSelect(sp.id)}
-                    className="min-w-0 flex-1 text-left px-4 py-1.5 flex items-center gap-2"
-                  >
-                    <FileText size={11} className="text-wm-text-subtle shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[12px] text-wm-text truncate">{sp.name}</p>
-                      <p className="text-[10px] text-wm-text-subtle font-mono truncate">/{sp.slug}</p>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); onArchive(sp.id) }}
-                    className="shrink-0 pr-2 py-1.5 text-wm-text-subtle hover:text-wm-danger opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Archive page"
-                  >
-                    <Archive size={11} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="mt-3 border-t border-wm-border/40 pt-2">
+          <p className="px-4 mb-1 text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
+            Staff pages · {staffPages.length}
+          </p>
+          <div>{staffPages.map(renderPageRow)}</div>
         </div>
       )}
     </div>
