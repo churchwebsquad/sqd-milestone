@@ -128,7 +128,12 @@ export default function PortalReviewPage() {
         ])
         if (pErr) throw new Error(pErr.message)
         if (!project) { setError('Project not found.'); return }
-        const pages = (pageRows ?? []) as WebPage[]
+        // Hide template-placeholder pages (e.g. {single-staff},
+        // {single-event}, {single-sermon}) — these are routing
+        // stand-ins for the dev's WP post-template loop, not real
+        // copy the partner reviews.
+        const pages = ((pageRows ?? []) as WebPage[])
+          .filter(p => !p.name.startsWith('{') && !p.slug.startsWith('{'))
 
         // Sections for every page
         const pageIds = pages.map(p => p.id)
@@ -458,15 +463,47 @@ export default function PortalReviewPage() {
         </div>
       </header>
 
+      {/* Intro block — partner-facing overview. Sits at the top of the
+          review surface so the first thing the partner reads is what
+          they're being asked to do, what's locked vs editable, and
+          what happens after they finish. */}
+      <div className="max-w-[1440px] mx-auto px-4 pt-6">
+        <div className="rounded-2xl bg-white border border-lavender px-5 py-5 shadow-sm">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple mb-1">
+            Welcome
+          </p>
+          <h2 className="text-[22px] font-semibold text-deep-plum mb-3" style={{ fontFamily: 'Georgia, serif' }}>
+            Your Copy Review
+          </h2>
+          <div className="space-y-2.5 text-[13.5px] text-deep-plum/90 leading-relaxed max-w-3xl">
+            <p>
+              Take a few minutes to review the pages below and share any
+              edits, questions, or feedback you have. For now, focus on
+              the words and messaging — we're not worried about the
+              design or layout just yet.
+            </p>
+            <p>
+              Once approved, this copy will be finalized and handed off
+              to your designer and developer. Then we'll move into the
+              exciting part: bringing your brand to life through your
+              website design!
+            </p>
+            <p>
+              When all feedback is in for your church and you're ready to
+              move on to the next milestone, click{' '}
+              <span className="font-semibold">Approve Copy &amp; Finalize Milestone</span>.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="max-w-[1440px] mx-auto px-4 py-6 flex gap-4 items-start">
         {/* Page nav */}
         <aside className="w-60 shrink-0 sticky top-[88px]">
-          <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple mb-2 px-2">
-            Pages · {data.pages.length}
-          </p>
-          <nav className="space-y-0.5">
-            {data.pages.map(p => {
-              const sectionCount = (data.sectionsByPage[p.id] ?? []).length
+          {(() => {
+            const mainPages = data.pages.filter(p => !p.slug.startsWith('staff/'))
+            const staffPages = data.pages.filter(p => p.slug.startsWith('staff/'))
+            const renderRow = (p: WebPage) => {
               const active = p.id === activePageId
               return (
                 <button
@@ -474,26 +511,39 @@ export default function PortalReviewPage() {
                   type="button"
                   onClick={() => setActivePageId(p.id)}
                   className={[
-                    'w-full text-left rounded-lg px-3 py-2 transition-colors flex items-center gap-2',
+                    'w-full text-left rounded-md px-2.5 py-1.5 transition-colors flex items-center gap-2',
                     active
                       ? 'bg-deep-plum text-white'
-                      : 'bg-white border border-lavender text-deep-plum hover:border-primary-purple',
+                      : 'text-deep-plum hover:bg-lavender-tint/50',
                   ].join(' ')}
+                  title={`/${p.slug}`}
                 >
-                  <FileText size={13} className="shrink-0 opacity-80" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-semibold truncate">{p.name}</p>
-                    <p className={[
-                      'text-[10px] truncate',
-                      active ? 'text-white/70' : 'text-purple-gray',
-                    ].join(' ')}>
-                      /{p.slug} · {sectionCount} section{sectionCount === 1 ? '' : 's'}
-                    </p>
-                  </div>
+                  <FileText size={12} className="shrink-0 opacity-80" />
+                  <span className="text-[12.5px] font-semibold truncate">{p.name}</span>
                 </button>
               )
-            })}
-          </nav>
+            }
+            return (
+              <>
+                <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple mb-2 px-2">
+                  Pages · {mainPages.length}
+                </p>
+                <nav className="space-y-0.5">
+                  {mainPages.map(renderRow)}
+                </nav>
+                {staffPages.length > 0 && (
+                  <div className="mt-4">
+                    <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple mb-2 px-2">
+                      Staff pages · {staffPages.length}
+                    </p>
+                    <nav className="space-y-0.5">
+                      {staffPages.map(renderRow)}
+                    </nav>
+                  </div>
+                )}
+              </>
+            )
+          })()}
           <div className="mt-4 rounded-xl bg-white border border-lavender px-3 py-2.5">
             <p className="text-[11px] font-semibold text-deep-plum mb-1">How this works</p>
             <p className="text-[11px] text-purple-gray leading-snug">
@@ -628,11 +678,14 @@ function FeedbackTracker({
   return (
     <div className="rounded-2xl bg-white border border-lavender shadow-sm overflow-hidden">
       <div className="px-3 py-3 border-b border-lavender">
-        <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">Your feedback</p>
+        <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">Team feedback</p>
         <p className="text-[13px] font-semibold text-deep-plum">
           {comments.length === 0
             ? 'No items yet'
-            : `${comments.length} item${comments.length === 1 ? '' : 's'} saved`}
+            : `${comments.length} item${comments.length === 1 ? '' : 's'} from your team`}
+        </p>
+        <p className="text-[10.5px] text-purple-gray mt-0.5 leading-snug">
+          Everything you and your teammates have submitted on this review.
         </p>
       </div>
       <div className="max-h-[55vh] overflow-y-auto">
@@ -690,7 +743,15 @@ function FeedbackTracker({
           </ul>
         )}
       </div>
-      <div className="px-3 py-3 border-t border-lavender bg-cream/40">
+      <div className="px-3 py-3 border-t border-lavender bg-cream/40 space-y-2">
+        {/* Save progress — comments save on submit, so this is purely
+            a reassurance + share button. The text doubles as a hint
+            that progress is auto-saved. */}
+        <SaveProgressButton commentCount={comments.length} />
+        {/* Request feedback from another staff member — copies the
+            current review URL so the partner can hand it to a
+            teammate. */}
+        <ShareReviewLinkButton />
         <button
           type="button"
           onClick={() => {
@@ -701,7 +762,7 @@ function FeedbackTracker({
           className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-deep-plum text-white text-[12px] font-semibold px-4 py-2.5 hover:bg-primary-purple transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {finishing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-          Complete Review & Send Feedback
+          Approve Copy & Finalize Milestone
         </button>
       </div>
 
@@ -719,9 +780,82 @@ function FeedbackTracker({
   )
 }
 
-/** Surfaced when the partner clicks "Complete Review" without leaving
- *  any feedback — prompts them to either confirm an as-is approval or
- *  go back and add feedback. */
+/** Reassurance button: comments persist the moment the partner hits
+ *  Save Feedback inside the drawer, so this isn't a write — it
+ *  surfaces a "you're safe to come back later" confirmation. Tapping
+ *  briefly turns into a checkmark with copy that includes the saved
+ *  item count, then resets after a few seconds. */
+function SaveProgressButton({ commentCount }: { commentCount: number }) {
+  const [confirmed, setConfirmed] = useState(false)
+  useEffect(() => {
+    if (!confirmed) return
+    const t = setTimeout(() => setConfirmed(false), 2400)
+    return () => clearTimeout(t)
+  }, [confirmed])
+  return (
+    <button
+      type="button"
+      onClick={() => setConfirmed(true)}
+      className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-white text-deep-plum text-[12px] font-semibold px-4 py-2 border border-lavender hover:border-primary-purple hover:bg-lavender-tint/30 transition-colors"
+    >
+      {confirmed ? (
+        <>
+          <Check size={12} className="text-emerald-600" />
+          Progress saved · {commentCount} item{commentCount === 1 ? '' : 's'} on file
+        </>
+      ) : (
+        <>
+          <Inbox size={12} />
+          Save progress
+        </>
+      )}
+    </button>
+  )
+}
+
+/** Lets the partner copy the current review URL so they can hand it
+ *  to a teammate at their church. The link stays valid as long as the
+ *  review is open. Clicking copies + briefly flips to "Link copied". */
+function ShareReviewLinkButton() {
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (!copied) return
+    const t = setTimeout(() => setCopied(false), 2400)
+    return () => clearTimeout(t)
+  }, [copied])
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+      setCopied(true)
+    } catch {
+      // Fallback for older browsers where clipboard API is gated.
+      window.prompt('Copy this review link to share with a teammate:', window.location.href)
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-white text-deep-plum text-[12px] font-semibold px-4 py-2 border border-lavender hover:border-primary-purple hover:bg-lavender-tint/30 transition-colors"
+    >
+      {copied ? (
+        <>
+          <Check size={12} className="text-emerald-600" />
+          Link copied — paste it to a teammate
+        </>
+      ) : (
+        <>
+          <MessageSquarePlus size={12} />
+          Request feedback from another staff member
+        </>
+      )}
+    </button>
+  )
+}
+
+/** Surfaced when the partner clicks "Approve Copy & Finalize Milestone"
+ *  without leaving any feedback — prompts them to either confirm an
+ *  as-is approval or go back and add feedback. */
 function NoFeedbackApproveModal({
   finishing, onCancel, onApprove,
 }: {
