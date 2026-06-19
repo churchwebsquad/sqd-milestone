@@ -274,13 +274,36 @@ export function ReviewWorkspace({ project }: Props) {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {activeInternal && (
-            <WMButton
-              variant="secondary"
-              size="sm"
-              onClick={() => setForceEditor(true)}
-            >
-              Add internal review feedback
-            </WMButton>
+            <>
+              <WMButton
+                variant="secondary"
+                size="sm"
+                onClick={() => setForceEditor(true)}
+              >
+                Add internal review feedback
+              </WMButton>
+              {/* Same surface the partner sees, scoped to the internal
+                  review by token. Lets the strategist hand the link to
+                  a teammate so they can leave their own feedback. */}
+              <WMButton
+                variant="secondary"
+                size="sm"
+                iconLeft={internalLinkCopied ? <Check size={11} /> : <Copy size={11} />}
+                onClick={async () => {
+                  if (!activeInternal.partner_token) return
+                  const url = `${window.location.origin}/portal/review/${activeInternal.partner_token}`
+                  try {
+                    await navigator.clipboard.writeText(url)
+                    setInternalLinkCopied(true)
+                    setTimeout(() => setInternalLinkCopied(false), 2500)
+                  } catch {
+                    window.prompt('Internal review link — paste it to a teammate:', url)
+                  }
+                }}
+              >
+                {internalLinkCopied ? 'Link copied' : 'Copy internal review link'}
+              </WMButton>
+            </>
           )}
           <WMButton
             variant="secondary"

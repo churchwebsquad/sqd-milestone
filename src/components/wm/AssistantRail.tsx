@@ -155,20 +155,45 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
   // only applies to the simple list tabs.
   const showSearchBox = tab === 'feedback' || tab === 'audit'
 
+  // The Review workspace puts the strategist in feedback-only mode —
+  // they're commenting on existing content, not authoring. Hide the
+  // authoring-side rail tabs (Snippets / Voice / Heuristics / Audit)
+  // so the rail focuses on the section + feedback context they need.
+  const inReviewMode = activeTab === 'review'
+
+  // If review mode hides the currently-selected tab, fall back to
+  // Feedback so the rail body never goes blank.
+  useEffect(() => {
+    if (!inReviewMode) return
+    if (tab === 'snippets' || tab === 'voice' || tab === 'heuristics' || tab === 'audit') {
+      setTab('feedback')
+    }
+  }, [inReviewMode, tab])
+
   return (
     <div className="h-full flex flex-col text-sm">
       <div className="flex items-center border-b border-wm-border bg-wm-bg">
         {sectionTabAvailable && (
           <RailTabButton tab="section" active={tab} setTab={setTab} icon={<SquarePen size={13} />} label="Section" />
         )}
-        <RailTabButton tab="snippets"   active={tab} setTab={setTab} icon={<Tag size={13} />}            count={counts.snippets} label="Snippets" />
-        <RailTabButton tab="voice"      active={tab} setTab={setTab} icon={<Mic size={13} />}            label="Voice" />
-        <RailTabButton tab="heuristics" active={tab} setTab={setTab} icon={<BookOpen size={13} />}       label="Heuristics" />
+        {/* Snippets / Voice / Heuristics / Audit are authoring tools.
+            On the Review tab the strategist is in feedback mode, not
+            authoring, and those tabs are noise. Feedback + SEO stay
+            because they're directly useful while reviewing. */}
+        {!inReviewMode && (
+          <>
+            <RailTabButton tab="snippets"   active={tab} setTab={setTab} icon={<Tag size={13} />}            count={counts.snippets} label="Snippets" />
+            <RailTabButton tab="voice"      active={tab} setTab={setTab} icon={<Mic size={13} />}            label="Voice" />
+            <RailTabButton tab="heuristics" active={tab} setTab={setTab} icon={<BookOpen size={13} />}       label="Heuristics" />
+          </>
+        )}
         <RailTabButton tab="feedback"   active={tab} setTab={setTab} icon={<MessageSquare size={13} />}  count={counts.feedback} label="Feedback" />
         {tabUsesSectionContext && activePageId && (
           <RailTabButton tab="seo"      active={tab} setTab={setTab} icon={<Globe size={13} />}          label="SEO" />
         )}
-        <RailTabButton tab="audit"      active={tab} setTab={setTab} icon={<AlertTriangle size={13} />}  count={counts.audit} label="Audit" />
+        {!inReviewMode && (
+          <RailTabButton tab="audit"    active={tab} setTab={setTab} icon={<AlertTriangle size={13} />}  count={counts.audit} label="Audit" />
+        )}
       </div>
 
       {showSearchBox && (
