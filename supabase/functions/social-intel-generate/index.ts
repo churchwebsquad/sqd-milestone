@@ -3,16 +3,16 @@
 // Builds a Social Church Intel Profile for a given church member ID.
 // Flow:
 //   1. Pull church record from Supabase (core fields, brand guide, milestone history, contacts)
-//   2. Search Notion for any pages/docs mentioning the church
-//   3. Search Dropbox for any files/folders for the church (graceful if token missing)
+//   2. Fetch extracted brand profile from Squad API (real colors, fonts, logos from Dropbox)
+//   3. Search Notion for any pages/docs mentioning the church
 //   4. FireCrawl scrapes the church website to extract social links + content
 //   5. Claude receives everything and builds the 8-section profile with web_search for socials
 //
 // Secrets required:
 //   ANTHROPIC_API_KEY
 //   FIRECRAWL_API_KEY
+//   SQUAD_API_KEY         — Squad API key (Authorization: Bearer)
 //   NOTION_TOKEN          (already set — shared with strategy-notion function)
-//   DROPBOX_ACCESS_TOKEN  (optional — skipped gracefully if absent)
 // Built-in:
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
@@ -25,11 +25,11 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const ANTHROPIC_API_URL   = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_API_URL    = "https://api.anthropic.com/v1/messages";
 const FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v1/scrape";
 const NOTION_API_BASE      = "https://api.notion.com/v1";
 const NOTION_VERSION       = "2022-06-28";
-const DROPBOX_SEARCH_URL   = "https://api.dropboxapi.com/2/files/search_v2";
+const SQUAD_API_BASE       = "https://api.thesqd.com";
 
 // ── Notion helpers ────────────────────────────────────────────────────────────
 
@@ -107,92 +107,118 @@ async function notionPageContent(pageId: string, notionToken: string): Promise<s
   }
 }
 
-// ── Dropbox helpers ───────────────────────────────────────────────────────────
+// ── Squad API — brand profile ─────────────────────────────────────────────────
 
-interface DropboxFile {
-  path: string;
-  name: string;
-  size: number;
+interface SquadBrandColor  { hex: string; name: string | null; role: string | null }
+interface SquadBrandFont   { role: string; family: string; styles: string[]; adobe_url: string | null }
+interface SquadBrandLogo   { file_name: string; url: string; meta: Record<string, unknown> }
+interface SquadBrandProfile {
+  colors: SquadBrandColor[];
+  fonts:  SquadBrandFont[];
+  logos:  SquadBrandLogo[];
+  notes:  string | null;
+  card_url: string | null;
+  status: string;
 }
 
-interface DropboxBrandAsset {
-  fileListing: string;
-  brandPdfs: Array<{ name: string; base64: string }>;
-}
-
-const DROPBOX_DOWNLOAD_URL = "https://content.dropboxapi.com/2/files/download";
-const BRAND_GUIDE_PATTERN  = /brand|guide|identity|style|logo|visual/i;
-const MAX_PDF_BYTES        = 20 * 1024 * 1024; // 20 MB
-
-async function dropboxSearch(query: string, dropboxToken: string): Promise<DropboxBrandAsset> {
-  const empty: DropboxBrandAsset = { fileListing: "", brandPdfs: [] };
+async function fetchBrandProfile(accountId: number, squadApiKey: string): Promise<SquadBrandProfile | null> {
   try {
-    const res = await fetch(DROPBOX_SEARCH_URL, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${dropboxToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ query, options: { max_results: 20, file_status: "active" } }),
+    const res = await fetch(`${SQUAD_API_BASE}/v1/image-gen/branding/${accountId}`, {
+      headers: { Authorization: `Bearer ${squadApiKey}` },
     });
+    if (res.status === 404) return null; // No brand profile extracted yet — not an error
     if (!res.ok) {
-      console.warn("[social-intel] Dropbox search HTTP", res.status, await res.text());
-      return empty;
+      console.warn("[social-intel] Squad brand API HTTP", res.status);
+      return null;
     }
-    const data = await res.json();
-    const matches: Record<string, unknown>[] = data.matches ?? [];
-    if (!matches.length) return empty;
-
-    const files: DropboxFile[] = matches
-      .map((m) => {
-        const meta = ((m.metadata as Record<string, unknown>)?.metadata ?? {}) as Record<string, unknown>;
-        return {
-          path: (meta.path_display ?? meta.path_lower ?? "") as string,
-          name: (meta.name ?? "") as string,
-          size: (meta.size ?? 0) as number,
-        };
-      })
-      .filter((f) => f.path);
-
-    const fileListing = files.map((f) => `- ${f.path}`).join("\n");
-
-    // Download PDFs that look like brand guides (up to 2 files)
-    const brandPdfFiles = files.filter(
-      (f) => f.name.toLowerCase().endsWith(".pdf") && BRAND_GUIDE_PATTERN.test(f.name) && f.size <= MAX_PDF_BYTES
-    ).slice(0, 2);
-
-    const brandPdfs = (
-      await Promise.all(
-        brandPdfFiles.map(async (f) => {
-          try {
-            const dlRes = await fetch(DROPBOX_DOWNLOAD_URL, {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${dropboxToken}`,
-                "Dropbox-API-Arg": JSON.stringify({ path: f.path }),
-              },
-            });
-            if (!dlRes.ok) {
-              console.warn("[social-intel] Dropbox download failed for", f.path, dlRes.status);
-              return null;
-            }
-            const buffer = await dlRes.arrayBuffer();
-            const bytes   = new Uint8Array(buffer);
-            // Encode to base64
-            let binary = "";
-            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-            const base64 = btoa(binary);
-            console.log(`[social-intel] Downloaded brand PDF: ${f.name} (${Math.round(bytes.length / 1024)}KB)`);
-            return { name: f.name, base64 };
-          } catch (e) {
-            console.warn("[social-intel] Dropbox download error for", f.path, e);
-            return null;
-          }
-        })
-      )
-    ).filter((x): x is { name: string; base64: string } => x !== null);
-
-    return { fileListing, brandPdfs };
+    return await res.json() as SquadBrandProfile;
   } catch (e) {
-    console.warn("[social-intel] Dropbox search failed:", e);
-    return empty;
+    console.warn("[social-intel] Squad brand API failed:", e);
+    return null;
+  }
+}
+
+function formatBrandProfile(brand: SquadBrandProfile | null): string {
+  if (!brand) return "Squad Brand API: No response.";
+  const lines: string[] = [`Status: ${brand.status}`];
+  if (brand.colors.length) {
+    lines.push("Colors:");
+    for (const c of brand.colors) {
+      lines.push(`  ${c.hex}${c.name ? ` — ${c.name}` : ""}${c.role ? ` (${c.role})` : ""}`);
+    }
+  } else {
+    lines.push("Colors: none found");
+  }
+  if (brand.fonts.length) {
+    lines.push("Fonts:");
+    for (const f of brand.fonts) {
+      lines.push(`  ${f.family}${f.styles.length ? ` ${f.styles.join(", ")}` : ""} — ${f.role}${f.adobe_url ? ` [${f.adobe_url}]` : ""}`);
+    }
+  } else {
+    lines.push("Fonts: none found");
+  }
+  if (brand.logos.length) {
+    lines.push(`Logos on file: ${brand.logos.map(l => l.file_name).join(", ")}`);
+  }
+  if (brand.notes) lines.push(`Notes: ${brand.notes}`);
+  return lines.join("\n");
+}
+
+// ── Brand fallback — extract colors/fonts from website HTML ──────────────────
+
+function extractBrandFromHtml(html: string): { colors: string[]; fonts: string[] } {
+  const colors: string[] = [];
+  const fonts: string[] = [];
+
+  // Google Fonts links → font family names
+  const gfMatches = html.matchAll(/family=([^&"'\s]+)/g);
+  for (const m of gfMatches) {
+    const name = decodeURIComponent(m[1]).replace(/[+:]/g, " ").split(" ").slice(0, 3).join(" ").trim();
+    if (name && !fonts.includes(name)) fonts.push(name);
+  }
+
+  // meta theme-color
+  const themeMatch = html.match(/<meta[^>]+name=["']theme-color["'][^>]+content=["'](#[0-9a-fA-F]{3,6})["']/i)
+    ?? html.match(/content=["'](#[0-9a-fA-F]{3,6})["'][^>]+name=["']theme-color["']/i);
+  if (themeMatch) colors.push(themeMatch[1] + " (meta theme-color)");
+
+  // CSS custom properties  --color-*, --brand-*, --primary*, --secondary*
+  const cssVarMatches = html.matchAll(/--(?:color|brand|primary|secondary|accent)[^:]*:\s*(#[0-9a-fA-F]{3,6})/gi);
+  const cssColors = new Set<string>();
+  for (const m of cssVarMatches) {
+    cssColors.add(m[1].toLowerCase());
+  }
+  // Inline or style-block hex colors that appear 3+ times (recurring = likely brand)
+  const hexCounts = new Map<string, number>();
+  for (const m of html.matchAll(/#([0-9a-fA-F]{6})\b/g)) {
+    const h = "#" + m[1].toLowerCase();
+    hexCounts.set(h, (hexCounts.get(h) ?? 0) + 1);
+  }
+  for (const [hex, count] of hexCounts) {
+    if (count >= 3 && !["#ffffff", "#000000", "#f5f5f5", "#333333", "#666666"].includes(hex)) {
+      cssColors.add(hex);
+    }
+  }
+  colors.push(...Array.from(cssColors).slice(0, 8));
+
+  return { colors, fonts };
+}
+
+// ── Brand fallback — scrape prf_brand_guides URL via Firecrawl ───────────────
+
+async function scrapeBrandGuideUrl(url: string, firecrawlKey: string): Promise<string> {
+  try {
+    const res = await fetch(FIRECRAWL_SCRAPE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${firecrawlKey}` },
+      body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true }),
+    });
+    if (!res.ok) return "";
+    const d = await res.json();
+    const page = d?.data ?? d;
+    return (page?.markdown ?? "").slice(0, 3000) as string;
+  } catch {
+    return "";
   }
 }
 
@@ -204,7 +230,7 @@ Deno.serve(async (req) => {
   const anthropicKey  = Deno.env.get("ANTHROPIC_API_KEY");
   const firecrawlKey  = Deno.env.get("FIRECRAWL_API_KEY");
   const notionToken   = Deno.env.get("NOTION_TOKEN");
-  const dropboxToken  = Deno.env.get("DROPBOX_ACCESS_TOKEN");
+  const squadApiKey   = Deno.env.get("SQUAD_API_KEY");
   const supabaseUrl   = Deno.env.get("SUPABASE_URL");
   const supabaseKey   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
@@ -291,17 +317,17 @@ Deno.serve(async (req) => {
         .join("\n")
     : "No partner contacts on file.";
 
-  // ── 2. Notion + Dropbox + FireCrawl — run in parallel ────────────────────
+  // ── 2. Squad brand API + Notion + FireCrawl — run in parallel ───────────────
 
-  const [notionResults, dropboxResults, crawlResult] = await Promise.all([
+  const [brandProfile, notionResults, crawlResult] = await Promise.all([
+
+    squadApiKey
+      ? fetchBrandProfile(memberId, squadApiKey)
+      : Promise.resolve(null),
 
     notionToken
       ? notionSearch(churchName, notionToken)
       : Promise.resolve("NOTION_TOKEN not set — skipped."),
-
-    dropboxToken
-      ? dropboxSearch(churchName, dropboxToken)
-      : Promise.resolve({ fileListing: "DROPBOX_ACCESS_TOKEN not set — flag for Josh.", brandPdfs: [] }),
 
     websiteUrl
       ? (async () => {
@@ -346,13 +372,67 @@ Deno.serve(async (req) => {
     tiktok     && `TikTok: ${tiktok}`,
   ].filter(Boolean).join("\n");
 
+  // ── 2b. Brand fallback chain ─────────────────────────────────────────────
+  // If Squad Brand API returned nothing useful (null, or partial with no fonts/colors),
+  // try: (1) scrape the prf_brand_guides URL, (2) extract from website HTML.
+
+  const squadHasColors = brandProfile && brandProfile.colors.length > 0;
+  const squadHasFonts  = brandProfile && brandProfile.fonts.length > 0;
+  const needsFallback  = !squadHasColors || !squadHasFonts;
+
+  let brandGuideFallbackText = "";
+  let websiteBrandFallback: { colors: string[]; fonts: string[] } = { colors: [], fonts: [] };
+
+  if (needsFallback && firecrawlKey) {
+    // Fallback 1: scrape the brand guide URL from prf_brand_guides if we have one
+    const brandGuideUrl = (brandGuideData as Record<string, unknown> | null)?.url as string | undefined
+      ?? (brandGuideData as Record<string, unknown> | null)?.guide_url as string | undefined;
+
+    if (brandGuideUrl) {
+      console.log("[social-intel] Brand fallback 1: scraping prf_brand_guides URL");
+      brandGuideFallbackText = await scrapeBrandGuideUrl(brandGuideUrl, firecrawlKey);
+    }
+
+    // Fallback 2: extract colors/fonts from website HTML
+    if (crawlResult.markdown) {
+      console.log("[social-intel] Brand fallback 2: extracting from website HTML");
+      websiteBrandFallback = extractBrandFromHtml(crawlResult.markdown);
+    }
+  }
+
+  // Build the combined brand context string for the prompt
+  const squadBrandText = formatBrandProfile(brandProfile);
+  const fallbackSections: string[] = [];
+
+  if (!squadHasColors || !squadHasFonts) {
+    if (brandGuideFallbackText) {
+      fallbackSections.push(`BRAND GUIDE FALLBACK (scraped from prf_brand_guides URL):\n${brandGuideFallbackText}`);
+    }
+    const wbColors = websiteBrandFallback.colors.filter(Boolean);
+    const wbFonts  = websiteBrandFallback.fonts.filter(Boolean);
+    if (wbColors.length || wbFonts.length) {
+      const lines = ["WEBSITE HTML FALLBACK (extracted from CSS/Google Fonts):"];
+      if (wbColors.length) lines.push("  Colors found: " + wbColors.join(", "));
+      if (wbFonts.length)  lines.push("  Fonts found: "  + wbFonts.join(", "));
+      fallbackSections.push(lines.join("\n"));
+    }
+  }
+
+  const fullBrandContext = [
+    `SQUAD BRAND PROFILE (from Squad Brand API — primary source):\n${squadBrandText}`,
+    ...fallbackSections,
+    fallbackSections.length > 0
+      ? "NOTE: Use Squad Brand API data first. Fill any gaps from the fallback sources above, labeling the source."
+      : "",
+  ].filter(Boolean).join("\n\n");
+
   // ── 3. Claude builds the profile from everything ──────────────────────────
 
   const today = new Date().toISOString().slice(0, 10);
 
   const systemPrompt = `You are a church social media research assistant for Church Media Squad.
 Your job is to research a church thoroughly and build a Social Church Intel Profile.
-You have access to internal CMS data (Supabase, Notion, Dropbox) AND can search the web.
+You have access to internal CMS data (Supabase, Notion, Squad brand API) AND can search the web.
 Every insight must come from something real — never fill gaps with generic church language.
 You MUST respond with ONLY a valid JSON object. No introduction, no explanation, no markdown fences.`;
 
@@ -374,9 +454,7 @@ ${contactsText}
 NOTION — Pages/docs found for this church:
 ${notionResults || "No Notion pages found for this church name."}
 
-DROPBOX — Files found for this church:
-${dropboxResults.fileListing || "No Dropbox files found."}
-${dropboxResults.brandPdfs.length > 0 ? `Brand guide PDFs downloaded and included as documents: ${dropboxResults.brandPdfs.map(p => p.name).join(", ")}` : "No brand guide PDFs downloaded."}
+${fullBrandContext}
 
 CONFIRMED SOCIAL LINKS (from our database + website scrape):
 ${socialLinks || "No links found — research via web_search."}
@@ -396,7 +474,32 @@ YouTube — current sermon series name and week number, pastor's teaching style,
 
 Website + Notion docs — how they describe themselves, pastor and key staff names, upcoming events with dates, what series they're in, what CMS has already delivered to them (from milestone history), any strategy notes.
 
-Use the Dropbox file list to note what brand assets or deliverables we have on file for them.
+Use the Squad brand profile above for exact colors, fonts, and logo details — do not guess these from the website.
+
+═══ DESIGN NOTES INSTRUCTIONS ═══
+
+The design_notes section must be sourced exclusively from the SQUAD BRAND PROFILE data above — never guess colors or fonts from the website or logos.
+
+primary_colors / accent_colors — Use the exact hex values from the Squad Brand API. If status is "partial" or the error field says colors were sampled from a logo rather than a full brand guide, note that in visual_style: "Colors sourced from Squad Brand API (logo sample only — no full brand guide on file)." If a full brand guide was found, say "Colors sourced from Squad Brand API."
+
+font_suggestions — Use only fonts listed in the Squad Brand API response. If fonts array is empty, write "Not identified in Squad Brand API — request brand guide from church."
+
+brand_profile_source — Always set this to "Squad Brand API" regardless of whether the data is full or partial.
+
+═══ BRAND VOICE INSTRUCTIONS ═══
+
+The brand_voice section is the most important part of this profile. Write it like a professional social media strategist who has studied this church deeply.
+
+tone_summary — Write 2-3 sentences describing the overall voice in plain English. Give it a memorable label (e.g. "family formal warmth", "bold and pastoral"). Describe how it feels to read their content, what makes them distinct, and what implicit promise the voice makes to their audience. Be specific — do not write generic things like "friendly and engaging."
+
+attributes — Write 3-4 named voice attributes. Each attribute needs:
+  - name: A short, memorable label (e.g. "Family Formal", "Biblically Rooted")
+  - definition: 1-2 sentences explaining what this attribute means for this church specifically
+  - write_with_this_in_mind: 1-2 sentences of concrete copywriting guidance — what to do and what to avoid when writing in this voice
+  - use: 6-10 specific words or short phrases this church actually uses or should use
+  - avoid: 6-10 words, phrases, or patterns that would feel off-brand for this church
+
+casual_to_formal_spectrum — One sentence placing them on the spectrum (e.g. "Sits at a 6/10 on the formal scale — warmer than a seminary but more grounded than a megachurch hype account.")
 
 After researching, return ONLY this JSON:
 
@@ -425,13 +528,13 @@ After researching, return ONLY this JSON:
     "milestones_completed": [],
     "last_delivery": "",
     "brand_guide_on_file": "",
-    "dropbox_assets_noted": "",
+    "brand_profile_source": "",
     "notion_notes_summary": ""
   },
   "brand_voice": {
     "tone_summary": "",
     "attributes": [
-      { "name": "", "definition": "", "use": [], "avoid": [] }
+      { "name": "", "definition": "", "write_with_this_in_mind": "", "use": [], "avoid": [] }
     ],
     "casual_to_formal_spectrum": "",
     "cta_patterns": [],
@@ -513,18 +616,7 @@ After researching, return ONLY this JSON:
       max_tokens: 8000,
       tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 10 }],
       system: systemPrompt,
-      messages: [{
-        role: "user",
-        content: [
-          // Prepend any brand guide PDFs downloaded from Dropbox as document blocks
-          ...dropboxResults.brandPdfs.map(pdf => ({
-            type: "document",
-            source: { type: "base64", media_type: "application/pdf", data: pdf.base64 },
-            title: `Brand Guide: ${pdf.name}`,
-          })),
-          { type: "text", text: userPrompt },
-        ],
-      }],
+      messages: [{ role: "user", content: userPrompt }],
     }),
   });
 
@@ -565,8 +657,7 @@ After researching, return ONLY this JSON:
       sourcesUsed: {
         supabase: true,
         notion: !!notionToken,
-        dropbox: !!dropboxToken,
-        dropboxBrandPdfsRead: dropboxResults.brandPdfs.map(p => p.name),
+        brandProfileLoaded: !!brandProfile,
         firecrawl: !!websiteUrl,
       },
     },
