@@ -974,19 +974,27 @@ function FigmaStyleGuideSection({
       }
     }
     const ids = [...usage.keys()]
-    if (ids.length === 0) {
-      setUsed([])
-      setUsageByTemplate({})
-      setLoading(false)
-      return
-    }
-    const { data: tpls } = await supabase
-      .from('web_content_templates')
-      .select('id, layer_name, family, preview_image_url')
-      .in('id', ids)
-      .order('family')
-      .order('layer_name')
-    setUsed((tpls ?? []) as WebContentTemplate[])
+    const dbTpls: WebContentTemplate[] = ids.length > 0
+      ? ((await supabase
+          .from('web_content_templates')
+          .select('id, layer_name, family, preview_image_url')
+          .in('id', ids)
+          .order('family')
+          .order('layer_name')).data as WebContentTemplate[] | null ?? [])
+      : []
+    // Synthetic nav checklist items — these aren't bound templates,
+    // but every Figma style guide needs them prepped (desktop nav,
+    // mobile nav, offcanvas / mega menu). Surfacing them on the
+    // same checklist keeps the designer's "what do I need to load"
+    // punch list in one place; the synthetic ids ride alongside
+    // real template ids in spec.figma.loaded_template_ids so the
+    // checked state persists.
+    const navChecklist: WebContentTemplate[] = [
+      { id: '__nav_desktop',   layer_name: 'Desktop Navigation',           family: 'Navigation' } as WebContentTemplate,
+      { id: '__nav_mobile',    layer_name: 'Mobile Navigation',            family: 'Navigation' } as WebContentTemplate,
+      { id: '__nav_offcanvas', layer_name: 'Offcanvas / Mega Menu',        family: 'Navigation' } as WebContentTemplate,
+    ]
+    setUsed([...dbTpls, ...navChecklist])
     const flat: Record<string, { pageNames: string[]; instances: number; isChrome: boolean }> = {}
     for (const [id, entry] of usage.entries()) {
       flat[id] = {
