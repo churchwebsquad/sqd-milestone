@@ -1259,9 +1259,28 @@ function hasMeaningfulContent(el: Element): boolean {
  *  and those empty shells render as a black rectangle the partner
  *  reads as "broken button." Real partner-bound buttons either have
  *  text OR get marked data-substituted="1" by applyCta (which the
- *  caller checks separately). */
+ *  caller checks separately).
+ *
+ *  Walks only VISIBLE descendants — descendants with `display: none`
+ *  in their inline style are treated as if they weren't there. This
+ *  matters because `applySlot` hides empty text slots with display:
+ *  none rather than stripping their text, so a button wrapper whose
+ *  Contact label was hidden by applySlot still carries the Brixies
+ *  source's default label ("Booking now") inside its hidden subtree.
+ *  Naively using `textContent` would let those wrappers slip through. */
 function hasButtonText(el: Element): boolean {
-  return (el.textContent ?? '').trim().length > 0
+  for (const node of Array.from(el.childNodes)) {
+    if (node.nodeType === 3 /* TEXT_NODE */
+        && (node.textContent ?? '').trim().length > 0) {
+      return true
+    }
+  }
+  for (const child of Array.from(el.children)) {
+    const style = (child as Element).getAttribute?.('style') ?? ''
+    if (/display\s*:\s*none/i.test(style)) continue
+    if (hasButtonText(child)) return true
+  }
+  return false
 }
 
 function hasMeaningfulHref(a: HTMLAnchorElement): boolean {
