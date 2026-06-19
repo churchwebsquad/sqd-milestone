@@ -109,8 +109,30 @@ export function renderSectionToHtml(
   fixTeamSection14Wrap(root)
   fixTeamSection14LinkedCards(root, values, template.id ?? '')
   fixCategoryFilter4Visibility(root, values, template.id ?? '')
+  fixSingleTeamSection6EmptyContact(root, values, template.id ?? '')
 
   return root.outerHTML
+}
+
+/** Single Team Section 6 ships with a decorative "Contact Us" block
+ *  whose list_item group has default_count: 3 — three rows of
+ *  map-pin icon + address text. When the strategist doesn't bind
+ *  list_item, applySlot hides each row's Info text (empty value) but
+ *  the map-pin SVGs stay visible, leaving a column of floating icons
+ *  next to nothing. Hide the whole Contact list wrapper when there
+ *  are no user-bound list items so the column collapses cleanly. */
+function fixSingleTeamSection6EmptyContact(
+  root: Element,
+  values: Record<string, unknown>,
+  templateId: string,
+): void {
+  if (templateId !== 'single-team-section-6') return
+  const items = Array.isArray(values.list_item)
+    ? (values.list_item as Array<Record<string, unknown>>)
+    : []
+  if (items.length > 0) return
+  const contactList = root.querySelector<HTMLElement>('[data-layer="Contact list"]')
+  if (contactList) forceHide(contactList)
 }
 
 /** Template ids whose source HTML's demo content (lorem ipsum,
