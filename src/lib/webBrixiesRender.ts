@@ -110,8 +110,37 @@ export function renderSectionToHtml(
   fixTeamSection14LinkedCards(root, values, template.id ?? '')
   fixCategoryFilter4Visibility(root, values, template.id ?? '')
   fixSingleTeamSection6EmptyContact(root, values, template.id ?? '')
+  fixHero102Controls(root, template.id ?? '')
 
   return root.outerHTML
+}
+
+/** Hero Section 102 ships its slider Controls block as an absolutely-
+ *  positioned bar with a baked-in `left: 552.4px` offset that only
+ *  centers on the 1512px Brixies artboard. In responsive viewports
+ *  (the partner review iframe is ~1280px wide) the offset pulls the
+ *  progress bar visibly to one side. Re-center the bar at runtime so
+ *  it sits in the bottom-center of the hero regardless of width.
+ *  Also pin it to the bottom via `bottom: 30px` instead of a fixed
+ *  `top: 907px` (which only matches the artboard's hero height). */
+function fixHero102Controls(root: Element, templateId: string): void {
+  if (templateId !== 'hero-section-102') return
+  const controls = root.querySelector<HTMLElement>('[data-layer="Controls"]')
+  if (!controls) return
+  const existing = controls.getAttribute('style') ?? ''
+  // Strip the baked-in left + top so our centering rules win — both
+  // are pixel-anchored to the 1512×982 artboard and don't translate
+  // to live render widths.
+  const cleaned = existing
+    .replace(/(?:^|;)\s*left\s*:\s*[^;]+;?/gi, ';')
+    .replace(/(?:^|;)\s*top\s*:\s*[^;]+;?/gi, ';')
+    .replace(/;{2,}/g, ';')
+    .replace(/^\s*;\s*/, '')
+    .trim()
+  controls.setAttribute(
+    'style',
+    `${cleaned}${cleaned && !cleaned.endsWith(';') ? ';' : ''}left:50%;right:auto;transform:translateX(-50%);bottom:30px;top:auto`,
+  )
 }
 
 /** Single Team Section 6 ships with a decorative "Contact Us" block
