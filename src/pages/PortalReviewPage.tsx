@@ -29,7 +29,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
-  ChevronRight, FileText, Loader2, MessageSquarePlus, Paperclip,
+  ChevronDown, ChevronRight, FileText, Loader2, MessageSquarePlus, Paperclip,
   Send, X, Check, ImagePlus, Trash2, Inbox, PartyPopper, AlertTriangle,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -532,14 +532,18 @@ export default function PortalReviewPage() {
                   {mainPages.map(renderRow)}
                 </nav>
                 {staffPages.length > 0 && (
-                  <div className="mt-4">
-                    <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple mb-2 px-2">
-                      Staff pages · {staffPages.length}
-                    </p>
+                  <details className="mt-4 group">
+                    <summary className="cursor-pointer list-none flex items-center justify-between gap-1 px-2 mb-2 text-[10px] uppercase tracking-widest font-bold text-primary-purple hover:text-deep-plum transition-colors">
+                      <span>Staff pages · {staffPages.length}</span>
+                      <ChevronDown
+                        size={11}
+                        className="shrink-0 transition-transform group-open:rotate-180"
+                      />
+                    </summary>
                     <nav className="space-y-0.5">
                       {staffPages.map(renderRow)}
                     </nav>
-                  </div>
+                  </details>
                 )}
               </>
             )
