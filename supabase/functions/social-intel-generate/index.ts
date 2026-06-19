@@ -230,9 +230,10 @@ Deno.serve(async (req) => {
   const anthropicKey  = Deno.env.get("ANTHROPIC_API_KEY");
   const firecrawlKey  = Deno.env.get("FIRECRAWL_API_KEY");
   const notionToken   = Deno.env.get("NOTION_TOKEN");
-  const squadApiKey   = Deno.env.get("SQUAD_API_KEY");
   const supabaseUrl   = Deno.env.get("SUPABASE_URL");
   const supabaseKey   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  // Squad API accepts either a dedicated API key or the user's Supabase JWT
+  const squadApiKey   = Deno.env.get("SQUAD_API_KEY") ?? req.headers.get("authorization")?.replace("Bearer ", "") ?? undefined;
 
   if (!anthropicKey) return json({ error: "ANTHROPIC_API_KEY secret not set" }, 500);
   if (!firecrawlKey) return json({ error: "FIRECRAWL_API_KEY secret not set" }, 500);
