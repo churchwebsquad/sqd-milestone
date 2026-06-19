@@ -120,7 +120,16 @@ export function renderSectionToHtml(
  *  list_item, applySlot hides each row's Info text (empty value) but
  *  the map-pin SVGs stay visible, leaving a column of floating icons
  *  next to nothing. Hide the whole Contact list wrapper when there
- *  are no user-bound list items so the column collapses cleanly. */
+ *  are no user-bound list items so the column collapses cleanly.
+ *
+ *  Also hides the unbound TOP-LEVEL `data-layer="Inner info"` element
+ *  — the source HTML uses it as the "UX Design" subtitle under the
+ *  staff member's name, but the schema only binds an `Inner info`
+ *  slot inside the inner_container_content group. So substituteElement
+ *  never touches the top-level one and "UX Design" leaks through. We
+ *  scope the lookup to direct children of "Heading container" so we
+ *  don't accidentally hide the nested-in-group Inner infos that the
+ *  renderer DOES bind. */
 function fixSingleTeamSection6EmptyContact(
   root: Element,
   values: Record<string, unknown>,
@@ -130,9 +139,20 @@ function fixSingleTeamSection6EmptyContact(
   const items = Array.isArray(values.list_item)
     ? (values.list_item as Array<Record<string, unknown>>)
     : []
-  if (items.length > 0) return
-  const contactList = root.querySelector<HTMLElement>('[data-layer="Contact list"]')
-  if (contactList) forceHide(contactList)
+  if (items.length === 0) {
+    const contactList = root.querySelector<HTMLElement>('[data-layer="Contact list"]')
+    if (contactList) forceHide(contactList)
+  }
+  // Top-level Inner info ("UX Design" placeholder).  Schema doesn't
+  // expose this slot at the top level, so it always renders the
+  // designer default — hide unconditionally on this template.
+  const headingContainers = Array.from(root.querySelectorAll<HTMLElement>('[data-layer="Heading container"]'))
+  for (const hc of headingContainers) {
+    const innerInfo = Array.from(hc.children).find(
+      c => (c as HTMLElement).getAttribute?.('data-layer') === 'Inner info',
+    ) as HTMLElement | undefined
+    if (innerInfo) forceHide(innerInfo)
+  }
 }
 
 /** Template ids whose source HTML's demo content (lorem ipsum,
