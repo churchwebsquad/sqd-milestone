@@ -138,23 +138,10 @@ export function ReviewWorkspace({ project }: Props) {
     .filter(r => r.kind === 'partner')
     .sort((a, b) => b.round_number - a.round_number)[0] ?? null
 
-  /** Hard-delete an open review. Cascades to web_review_comments +
-   *  web_review_edits via FKs. Used to wipe a round that was started
-   *  by mistake or got into a bad state. Closing a review (different
-   *  action, lives on the kanban) preserves history; this one
-   *  doesn't. */
-  const handleDeleteReview = async (reviewId: string, kind: 'internal' | 'partner') => {
-    const label = kind === 'internal' ? 'internal review round' : 'partner review'
-    if (!window.confirm(
-      `Delete this ${label}? Every comment + edit attached to it is removed. This can't be undone.`,
-    )) return
-    const { error } = await supabase.from('web_reviews').delete().eq('id', reviewId)
-    if (error) {
-      window.alert(`Couldn't delete the review: ${error.message}`)
-      return
-    }
-    await load()
-  }
+  // Per-round delete now lives on each kanban column's ••• menu
+  // (FeedbackBoardColumn → BoardActionsMenu). The standalone
+  // handleDeleteReview that used to sit here was redundant once the
+  // menu was added.
 
   const myEmail = user?.email?.toLowerCase().trim() ?? ''
   const pendingForMe = requests.filter(
@@ -295,58 +282,14 @@ export function ReviewWorkspace({ project }: Props) {
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {activeInternal && (
-            <>
-              <WMButton
-                variant="secondary"
-                size="sm"
-                onClick={() => setForceEditor(true)}
-              >
-                Add internal review feedback
-              </WMButton>
-              {/* Same surface the partner sees, scoped to the internal
-                  review by token. Lets the strategist hand the link to
-                  a teammate so they can leave their own feedback. */}
-              <WMButton
-                variant="secondary"
-                size="sm"
-                iconLeft={internalLinkCopied ? <Check size={11} /> : <Copy size={11} />}
-                onClick={async () => {
-                  if (!activeInternal.partner_token) return
-                  const url = `${window.location.origin}/portal/review/${activeInternal.partner_token}`
-                  try {
-                    await navigator.clipboard.writeText(url)
-                    setInternalLinkCopied(true)
-                    setTimeout(() => setInternalLinkCopied(false), 2500)
-                  } catch {
-                    window.prompt('Internal review link — paste it to a teammate:', url)
-                  }
-                }}
-              >
-                {internalLinkCopied ? 'Link copied' : 'Copy internal review link'}
-              </WMButton>
-              <WMButton
-                variant="secondary"
-                size="sm"
-                iconLeft={<Trash2 size={11} />}
-                onClick={() => void handleDeleteReview(activeInternal.id, 'internal')}
-                title="Delete this internal review round. Cascades to all attached comments + edits — can't be undone."
-              >
-                Delete round
-              </WMButton>
-            </>
-          )}
-          {activePartner && (
-            <WMButton
-              variant="secondary"
-              size="sm"
-              iconLeft={<Trash2 size={11} />}
-              onClick={() => void handleDeleteReview(activePartner.id, 'partner')}
-              title="Delete this partner review. Cascades to all attached comments — can't be undone."
-            >
-              Delete partner review
-            </WMButton>
-          )}
+          {/* Per-round actions (copy link, close, delete, add my
+              feedback) live on each kanban column's ••• menu now —
+              the global top bar was ambiguous about WHICH round those
+              buttons applied to. The top bar keeps only the 'start
+              fresh' actions + Request a review.
+              When an open partner review exists, 'Get partner review
+              link' COPIES its token; otherwise it CREATES one. The
+              column menu has a per-board copy too. */}
           <WMButton
             variant="secondary"
             size="sm"
@@ -358,7 +301,7 @@ export function ReviewWorkspace({ project }: Props) {
             onClick={() => void handleGetPartnerLink()}
             disabled={actions.busy}
           >
-            {partnerLinkCopied ? 'Link copied' : 'Get partner review link'}
+            {partnerLinkCopied ? 'Link copied' : activePartner ? 'Copy partner review link' : 'Start partner review'}
           </WMButton>
           {!activeInternal && (
             <WMButton
@@ -455,6 +398,20 @@ export function ReviewWorkspace({ project }: Props) {
           }}
           onChanged={load}
           filter={commentFilter}
+          onOpenEditor={(reviewId) => {
+            // The drill-down editor binds to the most recent open
+            // internal review on the project. If the user picks an
+            // older round from a column menu, log + still drop them
+            // into the active editor — the kanban itself surfaces
+            // the round-scoped comments alongside.
+            if (activeInternal && reviewId !== activeInternal.id) {
+              console.warn(
+                '[review] internal editor opens the most recent open round;',
+                'picked', reviewId, 'but active is', activeInternal.id,
+              )
+            }
+            setForceEditor(true)
+          }}
         />
       )}
 
