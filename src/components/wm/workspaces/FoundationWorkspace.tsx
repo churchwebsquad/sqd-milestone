@@ -25,7 +25,7 @@ interface Props {
 
 export function FoundationWorkspace({ project, onChange }: Props) {
   return (
-    <div className="space-y-6">
+    <div className="px-6 md:px-8 py-6 space-y-6">
       <SectionHeader
         id="foundation-core-messages"
         icon={<MessageSquareQuote size={14} className="text-wm-text-muted" />}
