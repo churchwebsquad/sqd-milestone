@@ -11,6 +11,7 @@ allowed-tools: Read
 version: '1.0.0'
 references:
   - ../canonical-templates.json
+  - ../references/high-band-lift-rubric.md
 ---
 
 # Draft Page
@@ -21,6 +22,61 @@ you which slot gets which atom/fact, with what treatment. You write the
 prose.
 
 You are the only skill that uses Fable 5. Voice is the lever. Use it.
+
+## High-band lift mode (read FIRST when band is 'high')
+
+When this section's `intended_verbatim_band === 'high'`, **read
+`../references/high-band-lift-rubric.md` immediately**. Your
+behavior is "polisher + UX flow expert," not "author from scratch."
+
+Six-step flow for each high-band section:
+
+1. **Copy-paste verbatim** from the cited crawl atom's `body`
+   (markdown of the source page). This is the rubric — start from
+   the partner's actual words.
+2. **Identify gaps from strategic goals.** Does the source content
+   address the persona this section is meant to reach? If a homepage
+   "Wherever you are with faith" section is supposed to surface
+   New-to-faith / Families / Longtime-believers personas but the
+   source page doesn't address them, you fill the gap with light
+   AI-authored prose.
+3. **Identify removals.** Allocation may have routed some content
+   from this source page to OTHER pages (cross-page allocation). The
+   section reflects only what should land here.
+4. **Restructure for the chosen template.** Section-planner picked
+   the template; reshape the lifted prose to fit (e.g., paragraph →
+   3 card_team items, or one long body → heading + bullet list).
+5. **Voice pass (skip if `voice_lock: 'strict'` on the section's
+   `_meta`).** When voice-locked: ONLY grammar / pronoun /
+   consolidation / reorder + adding bottom-of-section CTA. When NOT
+   voice-locked: light alignment to `voice_and_tone` — short
+   sentence-by-sentence diff edits, no rewrites that change the
+   bag-of-words.
+6. **Stamp `source_excerpt_id`** on each slot value pointing to the
+   crawl atom row used. Critique reads this to verify the lift
+   actually landed.
+
+In-band polish operations (do not blow the verbatim ratio):
+
+- Grammar fixes (commas, possessives)
+- Pronoun swaps (we → you, you → we)
+- Sentence consolidation (3 sentences → 2)
+- Reordering sentences within a section
+- Replacing weak verbs (discover → find)
+- Voice alignment phrase-by-phrase (skip if voice_lock='strict')
+- Adding transition sentences
+- Removing dated references (COVID notices, year-locked promos)
+
+When strategy conflicts with lifted copy: **strategy wins**, ratio
+takes the hit, log the override in `section.verbatim_overrides[]`.
+
+## High-band brixies cap rule
+
+When restructuring a lifted source into a card-shaped layout
+(feature-section-2 / accordion-faq / multi-tab features), render
+**all relevant items** — do NOT truncate to `default_count`. Word
+caps tolerate +2; if you're +100 over a slot's `max_chars`, ping the
+outline to consider a different template family.
 
 ## Strategic Goals — inputs you MUST consume
 

@@ -91,7 +91,20 @@ For each term in `voice_card.banned_terms`, scan body for exact word boundary ma
 
 ### 10. max_chars
 
-For each filled field_values entry, compare length to the bound template field's `max_chars`. Strict — exceeded by even 1 char = fail.
+For each filled field_values entry, compare length to the bound
+template field's `max_chars`. Tolerance bands:
+
+- **+2 words / +12 chars** over `max_chars` → pass with a soft
+  note. Brixies caps are display-time guidelines; a 2-word overrun
+  almost always wraps cleanly.
+- **+2 words to +100 chars** → warn but do not fail. Flag in
+  `directives[]` with severity `info`.
+- **+100 chars and up** → fail. Pick a different template family
+  next outline pass (or restructure the section so the slot fits).
+
+This relaxation applies to ALL slots. The "exceeded by even 1 char =
+fail" rule was producing forced-merge work the strategist had to undo
+when the partner's actual copy naturally landed slightly long.
 
 ### 11. Required slots filled
 

@@ -15,6 +15,7 @@ references:
   - ../page-outlines-by-ministry-model.md
   - ../canonical-templates.json
   - references/storybrand-and-flow.md
+  - ../references/high-band-lift-rubric.md
 ---
 
 # Plan Cross-Page Allocation
@@ -38,7 +39,43 @@ Two reference files load every run:
 
 Load them BEFORE looking at the project sources.
 
-## What you are NOT doing
+## High-band lift mode (read BEFORE the rest of this skill)
+
+When `copy_approach.derived.intended_verbatim_band === 'high'`,
+your behavior changes substantively. **Read
+`../references/high-band-lift-rubric.md` IMMEDIATELY** — it carries
+the lift-first rules, FPC template-selection rubric, voice-lock
+pattern, and brixies cap relaxation policy.
+
+Quick summary of what changes at `high`:
+
+1. **Lift-first from crawl atoms.** The `atoms_pool.by_id` now
+   includes `source_kind='crawl'` rows whose `body` is the full
+   markdown of a source page on the partner's existing site. These
+   are your rubric, not your background. Each new sitemap page gets
+   mapped to the matching crawl page (by slug + topic similarity).
+2. **Allocation matrix, not orphan pool.** Every section of every
+   crawled source page must be either placed in your `allocations[]`
+   OR routed to `unresolved_sources[]` with a documented rationale.
+   No silent drops.
+3. **Voice-lock auto-detect.** Pages whose slug or title matches
+   `about | history | who-we-are | beliefs | statement-of-faith |
+   what-we-believe | our-convictions | denomination | our-story`
+   get stamped with `voice_lock: 'strict'` on every allocation
+   entry. Downstream skills skip voice pass on these.
+4. **Brixies template caps are advisory for card-grid + accordion +
+   multi-tab families.** Pick by layout intent + the FPC gold rubric;
+   don't bias toward "fits in default_count." Card grids → feature-2;
+   long-copy paired cards → feature-66; 2-up image splits →
+   feature-22.
+
+Mid/low band: existing behavior. The high-band reference still
+informs your template-selection rubric — the FPC patterns are good
+defaults regardless of band.
+
+## What you are NOT doing (mid/low band — strategic restructure)
+
+When the band is `mid` or `low`:
 
 - You are NOT preserving the existing site's structure. If the
   partner's old site has "Our service is 75 minutes long" as a

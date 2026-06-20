@@ -319,6 +319,28 @@ Deno.serve(async (req) => {
         });
       } catch (e) { console.error("copy-fixing failed:", e); }
 
+      // Atomize the crawl into content_atoms with source_kind='crawl'
+      // so the outline/draft pipeline can lift verbatim from the
+      // partner's existing copy when they're on the `high` band.
+      //
+      // EdgeRuntime.waitUntil keeps the in-flight fetch alive after
+      // we return our response — without it, Deno's runtime may kill
+      // the request once the handler exits. Atomize isn't on the
+      // response critical path; the function is idempotent so a
+      // transient failure can be retried via the backfill script.
+      try {
+        const atomizePromise = fetch(`${supabaseUrl}/functions/v1/atomize-crawl-into-atoms`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${supabaseKey}` },
+          body: JSON.stringify({ project_id: payload.project_id }),
+        }).catch((e) => console.error("atomize-crawl-into-atoms fire failed:", e));
+        // deno-lint-ignore no-explicit-any
+        const er = (globalThis as any).EdgeRuntime;
+        if (er && typeof er.waitUntil === "function") {
+          er.waitUntil(atomizePromise);
+        }
+      } catch (e) { console.error("atomize-crawl-into-atoms invoke failed:", e); }
+
       return json({ success: true, crawl_job_id: crawlJob.id, pages_crawled: contentItems.length }, 200);
     } catch (err) {
       await supabase.schema("web-hub").from("crawl_jobs").update({ status: "failed", error_message: err.message }).eq("id", crawlJob.id);

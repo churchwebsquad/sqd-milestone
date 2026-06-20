@@ -13,6 +13,7 @@ version: '1.0.0'
 references:
   - ../canonical-templates.json
   - ../page-outlines-by-ministry-model.md
+  - ../references/high-band-lift-rubric.md
 ---
 
 # Outline Page
@@ -21,6 +22,32 @@ You design ONE page. The plan-cross-page-allocation skill already
 decided what content goes on this page. Your job is the next layer
 down: **for each section_intent in the allocation, pick a canonical
 template + map the allocated atoms/facts into the template's slots.**
+
+## High-band lift mode (read BEFORE picking templates)
+
+When this page's allocation entries carry `intended_verbatim_band:
+'high'`, **read `../references/high-band-lift-rubric.md` first**.
+
+Key behaviors:
+
+1. **Primary source page lift.** Each allocation entry that came
+   from a crawl atom carries `source_url_lift` (the URL of the
+   matching `content_atoms` row with `source_kind='crawl'`). That
+   atom's `body` is the page rubric you anchor on for this section.
+   Pick a template that matches the rhythm of that source content
+   (e.g., a list of ministries in markdown → feature-section-2 card
+   grid; a Q&A pattern in markdown → faq-section-10).
+2. **FPC gold rubric.** Use the template-archetype table in the
+   reference (homepage hero-102, inner hero-41, etc.) as the
+   canonical pattern lookup. Don't bias template selection by
+   `default_count` for card-grid families — caps are advisory there.
+3. **Voice lock.** If the allocation entry carries
+   `voice_lock: 'strict'`, stamp it on the outline section's
+   `_meta`. Draft-page reads it and skips the voice pass for that
+   section.
+4. **Cards rule.** Short-copy 3-column grid → feature-section-2.
+   Long-copy paired card → feature-section-66. 2-up image split →
+   feature-section-22.
 
 You are NOT picking from raw Brixies. You are picking from
 `canonical-templates.json` — the template manifest that hides Brixies

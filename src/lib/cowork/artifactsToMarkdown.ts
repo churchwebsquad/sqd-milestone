@@ -510,7 +510,12 @@ export function pageAllocationPlanToMarkdown(raw: unknown): string {
     sections.push(`## Allocations (${allocations.length})${NL2}${pageBlocks.join(NL2)}`)
   }
 
-  // Unresolved sources — content the model deliberately didn't place
+  // Unresolved sources — content the model deliberately didn't place.
+  // Per Ashley's #26 (high-band-lift design): when this is non-empty,
+  // surface a partner-friendly copy-paste prompt the strategist can
+  // hand to cowork so the orphans find homes. Treat as a workflow
+  // nudge, not a soft warning — these MUST be resolved before final
+  // critique.
   const unresolved: any[] = Array.isArray(p.unresolved_sources) ? p.unresolved_sources : []
   if (unresolved.length > 0) {
     const items = unresolved.map((u: any) => {
@@ -520,7 +525,15 @@ export function pageAllocationPlanToMarkdown(raw: unknown): string {
       const detail = u.detail ? `${NL}  ${u.detail}` : ''
       return `- \`${u.kind}\` ${refShort} — *${u.reason ?? 'unspecified'}*${detail}`
     })
-    sections.push(`## Unresolved sources (${unresolved.length})${NL2}${items.join(NL)}`)
+    const prompt =
+      `> **Copy-paste prompt for cowork** — paste this to your cowork session ` +
+      `to resolve the ${unresolved.length} item${unresolved.length === 1 ? '' : 's'} below:` +
+      `${NL2}> Help me decide where each of these source sections from the old site ` +
+      `should land on the new sitemap. For each, pick a destination page slug ` +
+      `from the project sitemap, mark as \`intentionally_dropped\` with a rationale, ` +
+      `or flag for strategist review. Update \`roadmap_state.page_allocation_plan\` ` +
+      `accordingly.`
+    sections.push(`## Needs allocation (${unresolved.length})${NL2}${prompt}${NL2}${items.join(NL)}`)
   }
 
   // Build directives — recommended_page atoms routed to dev-handoff
