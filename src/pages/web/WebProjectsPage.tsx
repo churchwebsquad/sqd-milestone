@@ -20,6 +20,10 @@ import { SettingsWorkspace } from '../../components/wm/workspaces/SettingsWorksp
 import { WMSegmentedToggle } from '../../components/wm/SegmentedToggle'
 import { BoardView } from '../../components/wm/manager/BoardView'
 import { ScheduleView } from '../../components/wm/manager/ScheduleView'
+import { PhaseBoardView } from '../../components/wm/manager/PhaseBoardView'
+import { WaterfallView } from '../../components/wm/manager/WaterfallView'
+import { CalendarView } from '../../components/wm/manager/CalendarView'
+import { DevCapacityBanner } from '../../components/wm/manager/DevCapacityBanner'
 import { FilterChip } from '../../components/wm/manager/FilterChip'
 import { SalesQuoteCard } from '../../components/wm/manager/SalesQuoteCard'
 import { PaceDashboard } from '../../components/wm/manager/PaceDashboard'
@@ -27,7 +31,7 @@ import { useProjectsWithHealth } from '../../hooks/useProjectsWithHealth'
 import type { ProjectRowVM } from '../../hooks/useProjectsWithHealth'
 import type { ProjectSubStatus, WebProjectPhase } from '../../types/database'
 
-type ManagerView = 'board' | 'schedule'
+type ManagerView = 'board' | 'phase-board' | 'schedule' | 'waterfall' | 'calendar'
 
 const PHASE_FILTERS: WebProjectPhase[] = [
   'intake', 'content', 'design', 'dev', 'review', 'launched',
@@ -47,7 +51,11 @@ const SUB_LABEL: Record<ProjectSubStatus, string> = {
 export default function WebProjectsPage() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
-  const view: ManagerView = (params.get('view') === 'schedule' ? 'schedule' : 'board')
+  const view: ManagerView = ((): ManagerView => {
+    const v = params.get('view')
+    if (v === 'schedule' || v === 'phase-board' || v === 'waterfall' || v === 'calendar') return v
+    return 'board'
+  })()
   const showArchived = params.get('archived') === '1'
   const phaseFilter = (params.get('phase') || '').split(',').filter(Boolean) as WebProjectPhase[]
   const subFilter   = (params.get('health') || '').split(',').filter(Boolean) as ProjectSubStatus[]
@@ -186,14 +194,23 @@ export default function WebProjectsPage() {
           <SalesQuoteCard rows={rows} />
         </div>
 
+        {/* Dev capacity outlook — answers "is dev overbooked?" at a glance.
+            Per Ashley's call: dev is the most constrained resource, so it
+            gets a permanent banner; content/design capacity is visible
+            inside per-project planning when needed. */}
+        <DevCapacityBanner rows={rows} />
+
         {/* Toolbar: view toggle + search + archived */}
         <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
           <WMSegmentedToggle<ManagerView>
             active={view}
             onChange={(v) => setParam('view', v === 'board' ? null : v)}
             options={[
-              { key: 'board',    label: 'Board' },
-              { key: 'schedule', label: 'Schedule' },
+              { key: 'board',       label: 'Board' },
+              { key: 'phase-board', label: 'Phases' },
+              { key: 'schedule',    label: 'Schedule' },
+              { key: 'waterfall',   label: 'Waterfall' },
+              { key: 'calendar',    label: 'Calendar' },
             ]}
           />
 
@@ -293,6 +310,14 @@ export default function WebProjectsPage() {
           />
         )}
 
+        {view === 'phase-board' && (
+          <PhaseBoardView
+            rows={visible}
+            loading={loading}
+            onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
+          />
+        )}
+
         {view === 'schedule' && (
           <ScheduleView
             rows={visible}
@@ -304,6 +329,22 @@ export default function WebProjectsPage() {
                 .eq('id', id)
               await refetch()
             }}
+          />
+        )}
+
+        {view === 'waterfall' && (
+          <WaterfallView
+            rows={visible}
+            loading={loading}
+            onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
+          />
+        )}
+
+        {view === 'calendar' && (
+          <CalendarView
+            rows={visible}
+            loading={loading}
+            onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
           />
         )}
 

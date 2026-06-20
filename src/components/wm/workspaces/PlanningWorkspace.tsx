@@ -23,7 +23,7 @@
  * parent re-fetches the project row.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, ExternalLink, AlertTriangle } from 'lucide-react'
 import { WMCard } from '../Card'
 import { WMStatusPill } from '../StatusPill'
 import { FeasibilityPanel } from '../manager/FeasibilityPanel'
@@ -35,6 +35,10 @@ import {
   PHASE_ORDER,
   type HealthMilestoneRow,
 } from '../../../lib/webProjectHealth'
+import {
+  deriveSizeTier, hourRangeForTier, sprintForDate,
+  type ProjectSizeTier,
+} from '../../../lib/webPlanningMath'
 import { computeDevQueue, type QueueSlot } from '../../../lib/webDevQueue'
 import {
   inferProgressFromTasks,
@@ -81,6 +85,17 @@ export function PlanningWorkspace({ project, onChange }: Props) {
   const [inference, setInference] = useState<PhaseInference | null>(null)
   const [savingKey, setSavingKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /** Live page count, used to auto-derive the size tier (small/medium/
+   *  large) which drives the hours-target range. Loaded once on mount;
+   *  refreshed when the page list changes via the strategist's edits
+   *  isn't critical here — the strategist sees stale-but-close. */
+  const [pageCount, setPageCount] = useState<number | null>(null)
+  /** ClickUp Website list URL — surfaced as a deep-link button on the
+   *  status hero so the strategist can jump out to ClickUp in one click.
+   *  Computed from the same folder/list lookup ClickUpTasksSummary
+   *  uses below. Null when the project doesn't have a Website list
+   *  bound. */
+  const [clickUpListUrl, setClickUpListUrl] = useState<string | null>(null)
 
   // Local edit buffer driven off the project prop. Re-syncs when the
   // parent's project ref changes (after onChange refetch).
@@ -172,6 +187,9 @@ export function PlanningWorkspace({ project, onChange }: Props) {
           .limit(1)
         const listId = (lists?.[0] as { id: number } | undefined)?.id ?? null
         if (listId) {
+          // Stash the deep-link URL — same shape ClickUp lists use,
+          // pinned to the ChurchMediaSquad team id.
+          setClickUpListUrl(`https://app.clickup.com/1235435/v/li/${listId}`)
           const { data: tasks } = await supabase
             .from('task_details' as 'tasks')
             .select('task_name, current_status, time_estimate_minutes, task_archived')
@@ -181,6 +199,14 @@ export function PlanningWorkspace({ project, onChange }: Props) {
           }
         }
       }
+
+      // ── Live page count for the size tier ─────────────────────
+      const { count } = await supabase
+        .from('web_pages')
+        .select('id', { count: 'exact', head: true })
+        .eq('web_project_id', project.id)
+        .eq('archived', false)
+      if (!cancelled) setPageCount(count ?? 0)
     })()
     return () => { cancelled = true }
   }, [project.id, project.member])
@@ -262,6 +288,32 @@ export function PlanningWorkspace({ project, onChange }: Props) {
     }
   }, [project.id, onChange])
 
+  // ── Status hero computations ──────────────────────────────────
+  // Derive tier from sitemap page count. Override = anything stored
+  // in dev_hours_estimate that doesn't match the tier's base; we show
+  // both numbers so the strategist sees what we'd recommend vs what
+  // they committed to.
+  const sizeTier: ProjectSizeTier = useMemo(() => deriveSizeTier(pageCount), [pageCount])
+  const hourRange = useMemo(() => hourRangeForTier(sizeTier), [sizeTier])
+  const currentSprint = useMemo(() => sprintForDate(new Date()), [])
+  /** Allocations in the current 2-week sprint window. */
+  const sprintAllocations = useMemo(() => {
+    return allocations.filter(a =>
+      a.week_starting >= currentSprint.startISO &&
+      a.week_starting <= currentSprint.endISO
+    )
+  }, [allocations, currentSprint])
+  const sprintHours = sprintAllocations.reduce((sum, a) => sum + (a.hours ?? 0), 0)
+  /** Days until launch (negative if past). null when no launch_date set. */
+  const daysToLaunch = useMemo(() => {
+    if (!draft.launch_date) return null
+    const target = fromIsoDate(draft.launch_date)
+    if (!target) return null
+    return Math.round((target.getTime() - Date.now()) / 86_400_000)
+  }, [draft.launch_date])
+  /** Current phase label — what the strategist sees in the ribbon. */
+  const currentPhase = (computed?.phase ?? 'intake') as typeof PHASE_ORDER[number]
+
   return (
     <div className="p-6 md:p-8">
       <div className="max-w-4xl mx-auto space-y-5">
@@ -287,6 +339,125 @@ export function PlanningWorkspace({ project, onChange }: Props) {
             {error}
           </div>
         )}
+
+        {/* Status hero — at-a-glance command center for this project.
+            Phase ribbon, hours range vs target, current sprint, risk,
+            and the ClickUp deep link. Renders ABOVE the editable
+            fields so the strategist gets the operational picture
+            before tweaking inputs. */}
+        <WMCard padding="loose">
+          <div className="space-y-4">
+            {/* Phase ribbon */}
+            <div>
+              <SectionLabel>Phase</SectionLabel>
+              <div className="flex items-center gap-1 mt-1.5">
+                {PHASE_ORDER.map((p, idx) => {
+                  const isCurrent = p === currentPhase
+                  const isPast = PHASE_ORDER.indexOf(currentPhase) > idx
+                  return (
+                    <div key={p} className="flex items-center gap-1 flex-1 min-w-0">
+                      <div
+                        className={[
+                          'rounded-md px-2 py-1.5 flex-1 min-w-0 text-center transition-colors',
+                          isCurrent
+                            ? 'bg-wm-accent text-white font-semibold'
+                            : isPast
+                              ? 'bg-wm-success-bg text-wm-success border border-wm-success/30'
+                              : 'bg-wm-bg-hover text-wm-text-muted border border-wm-border',
+                        ].join(' ')}
+                      >
+                        <p className="text-[10.5px] uppercase tracking-widest truncate">
+                          {PHASE_LABEL[p]}
+                        </p>
+                        {isCurrent && (
+                          <p className="text-[10px] opacity-80 mt-0.5">
+                            {Math.round((effectiveProgress[p] ?? 0) * 100)}%
+                          </p>
+                        )}
+                      </div>
+                      {idx < PHASE_ORDER.length - 1 && (
+                        <span className="text-wm-text-subtle text-[10px] shrink-0">→</span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Launch target + countdown */}
+              <Stat
+                label="Launch target"
+                value={draft.launch_date ?? '—'}
+                hint={
+                  daysToLaunch == null
+                    ? 'No launch date set'
+                    : daysToLaunch < 0
+                      ? `${Math.abs(daysToLaunch)} day${Math.abs(daysToLaunch) === 1 ? '' : 's'} past`
+                      : `${daysToLaunch} day${daysToLaunch === 1 ? '' : 's'} out`
+                }
+              />
+
+              {/* Hours target as range */}
+              <Stat
+                label={`Hours target · ${tierLabel(sizeTier)}`}
+                value={
+                  draft.dev_hours_estimate != null
+                    ? `${draft.dev_hours_estimate}h`
+                    : `${hourRange.base}h`
+                }
+                hint={
+                  pageCount == null
+                    ? `~20 pgs est. · likely ${hourRange.likely}h · complex ${hourRange.complex}h`
+                    : `${pageCount} pages · likely ${hourRange.likely}h · complex ${hourRange.complex}h`
+                }
+              />
+
+              {/* Current sprint allocation */}
+              <Stat
+                label={`Sprint · ${currentSprint.label}`}
+                value={`${sprintHours}h`}
+                hint={
+                  sprintAllocations.length === 0
+                    ? 'No allocation this sprint'
+                    : `${sprintAllocations.length} week${sprintAllocations.length === 1 ? '' : 's'} of dev`
+                }
+              />
+            </div>
+
+            {/* Risk line — surface the single most actionable issue
+                from computeProjectHealth. Reasons array is empty when
+                the project is on-track. */}
+            {computed && computed.reasons.length > 0 && (
+              <div className="rounded-md border border-wm-warn/40 bg-wm-warn-bg px-3 py-2 flex items-start gap-2">
+                <AlertTriangle size={13} className="text-wm-warn shrink-0 mt-0.5" />
+                <div className="min-w-0 flex-1 text-[12px] text-wm-warn">
+                  {computed.reasons[0]}
+                  {computed.reasons.length > 1 && (
+                    <span className="opacity-70 ml-1">
+                      (+{computed.reasons.length - 1} more — see Projected below)
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ClickUp deep link */}
+            {clickUpListUrl && (
+              <div className="flex justify-end">
+                <a
+                  href={clickUpListUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-wm-accent-strong hover:underline"
+                >
+                  <ExternalLink size={12} />
+                  Open in ClickUp
+                </a>
+              </div>
+            )}
+          </div>
+        </WMCard>
 
         {/* Schedule */}
         <WMCard padding="loose">
@@ -566,6 +737,17 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
       {children}
     </p>
   )
+}
+
+/** Tier label for the hours-target stat. Translates the internal
+ *  ProjectSizeTier enum into something the strategist reads as a
+ *  noun ("Small · 30h") not a programming token. */
+function tierLabel(tier: ProjectSizeTier): string {
+  switch (tier) {
+    case 'small':  return 'Small (<18 pages)'
+    case 'medium': return 'Medium (18-21 pages)'
+    case 'large':  return 'Large (22+ pages)'
+  }
 }
 
 function FieldDate({
