@@ -164,6 +164,12 @@ interface BindResult {
   field_values: Record<string, unknown>
   bind_quality: 'perfect' | 'partial'
   gaps:         Array<{ kind: string; severity: 'info' | 'warning' | 'blocker'; detail: string; slot?: string }>
+  /** Cowork-emitted content that didn't have a binding home in the
+   *  picked template. Surfaced on cowork_section_meta.dropped_content
+   *  so the strategist can recover it without re-running cowork —
+   *  typically because the template_key picked doesn't have an items
+   *  group (e.g. feature_card_carousel_proxy → feature-section-6). */
+  dropped_content?: Record<string, unknown>
 }
 
 // ── Translator ────────────────────────────────────────────────────
@@ -277,6 +283,7 @@ function composeFieldValuesForBrixies(
 ): BindResult {
   const fv: Record<string, unknown> = {}
   const gaps: BindResult['gaps'] = []
+  const droppedContent: Record<string, unknown> = {}
   const map = entry.uniform_to_brixies
   const richtextKeys = new Set(entry.richtext_keys ?? [])
 
@@ -388,15 +395,31 @@ function composeFieldValuesForBrixies(
   }
 
   // ── Items ──────────────────────────────────────────────────────
-  if (Array.isArray(slotValues.items) && slotValues.items.length > 0) {
-    const coworkItems = slotValues.items as Array<Record<string, unknown>>
+  // Accept both canonical `items` and the legacy `build_cards` alias —
+  // older drafts (and the `feature_card_carousel_proxy` template family)
+  // emit cards under `build_cards`. The translator treats them
+  // identically. Without this alias the carousel content silently
+  // dropped on Real Life's About page.
+  const rawItems = Array.isArray(slotValues.items)        ? slotValues.items
+                : Array.isArray(slotValues.build_cards)   ? slotValues.build_cards
+                                                          : null
+  if (Array.isArray(rawItems) && rawItems.length > 0) {
+    const coworkItems = rawItems as Array<Record<string, unknown>>
     if (map.items == null) {
+      // BLOCKER, not warning: the bind looks "successful" until you
+      // open the page and the cards/items are gone. Raise loudly so
+      // the refusal log + Pages workspace status show that this
+      // section needs a different template_key. Stashing the dropped
+      // content into the section_meta so the strategist can recover
+      // it without re-running cowork.
       gaps.push({
         kind: 'uniform_slot_not_supported_by_template',
-        severity: 'warning',
-        detail: `cowork emitted ${coworkItems.length} item(s) but template '${entry.template_id}' has no items slot`,
+        severity: 'blocker',
+        detail: `cowork emitted ${coworkItems.length} item(s) but template '${entry.template_id}' has no items slot. Pick a template_key whose Brixies schema has a card/items group (e.g. feature-section-2/14/28/73). Dropped item content is preserved on the section meta so the strategist can recover it without re-running cowork.`,
         slot: 'items',
       })
+      // Stash the unbindable content so the strategist can recover it.
+      droppedContent.items = coworkItems
     } else {
       const { field: singleField, subfields, split } = map.items
       const subH = subfields.item_heading
@@ -489,7 +512,12 @@ function composeFieldValuesForBrixies(
   const bind_quality: 'perfect' | 'partial' =
     gaps.length === 0 ? 'perfect' : 'partial'
 
-  return { field_values: fv, bind_quality, gaps }
+  return {
+    field_values: fv,
+    bind_quality,
+    gaps,
+    dropped_content: Object.keys(droppedContent).length > 0 ? droppedContent : undefined,
+  }
 }
 
 // ── Handler ───────────────────────────────────────────────────────
@@ -829,6 +857,13 @@ export default async function handler(req: any, res: any) {
         dynamic_directive:      pickStr('dynamic_directive'),
         inline_annotations:     pickArr<{ note: string; near_slot?: string }>('inline_annotations') ?? [],
         button_annotations:     pickArr<string | null>('button_annotations') ?? [],
+        // Content the translator couldn't bind to a real Brixies slot
+        // (typically because cowork picked a template whose schema
+        // has no group for the emitted shape — e.g. 6 card items
+        // emitted against feature-section-6 which only has a buttons
+        // group). Persisting here so the strategist can recover the
+        // text without re-running the cowork pipeline.
+        dropped_content:        bind.dropped_content ?? null,
       }
 
       sectionRows.push({
