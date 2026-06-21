@@ -108,18 +108,78 @@ function normalizeCoworkSlotValues(section: CoworkDraftSection): Record<string, 
     }
     if (Array.isArray(section.slots)) {
       const out: Record<string, unknown> = {}
+      // Pack pseudo-slot keys like `items[0]`, `items[1]`, `body[1]`
+      // into proper arrays. Arvada-era cowork emits this shape — a
+      // flat slots[] descriptor list where multi-row content uses
+      // bracket-indexed names instead of a real array. Without the
+      // packing, the translator looks for `slotValues.items` and
+      // finds nothing (all 5 belief cards / 7 ministry items
+      // silently dropped on Arvada Vineyard).
+      const indexed = new Map<string, Map<number, unknown>>()
       for (const s of section.slots) {
         if (!s || typeof s !== 'object' || typeof s.slot !== 'string') continue
         const value = s.text ?? s.value ?? null
-        if (s.slot === 'buttons') continue
-        out[s.slot] = value
+        if (s.slot === 'buttons') continue   // handled via cta_targets
+        const m = s.slot.match(/^([a-z_]+)\[(\d+)\]$/i)
+        if (m) {
+          const [, name, idx] = m
+          if (!indexed.has(name)) indexed.set(name, new Map())
+          indexed.get(name)!.set(Number(idx), value)
+        } else {
+          out[s.slot] = value
+        }
       }
+      // Flush indexed pseudo-slots into proper arrays.
+      for (const [name, byIdx] of indexed) {
+        const arr: unknown[] = []
+        const sortedKeys = [...byIdx.keys()].sort((a, b) => a - b)
+        for (const k of sortedKeys) arr[k] = byIdx.get(k)
+        const compact = arr.filter(v => v != null && v !== '')
+        if (name === 'items') {
+          // Items in this legacy shape are strings like
+          // "Title: Body". The translator's splitConflatedItem
+          // will split heading + body when binding.
+          out.items = compact.map(v => ({ item_body: v }))
+        } else if (name === 'body') {
+          // body[0]/body[1] — concatenate as multi-paragraph body.
+          out.body = compact.map(String).join('\n\n')
+        } else {
+          out[name] = compact
+        }
+      }
+      // cta_targets[] carries every CTA the section author authored.
+      // Some templates use them as TOP-LEVEL buttons; others use them
+      // as per-item CTAs (one per card). Match by count:
+      //   • N items + N cta_targets    → all per-item CTAs
+      //   • N items + (N+1) cta_targets → first is primary button,
+      //     rest are per-item
+      //   • Otherwise                   → all top-level buttons
       if (Array.isArray(section.cta_targets) && section.cta_targets.length > 0) {
-        out.buttons = section.cta_targets.map((t, i) => ({
-          label: t.label,
-          url:   t.target,
-          kind:  (i === 0 ? 'primary' : 'secondary') as 'primary' | 'secondary',
-        }))
+        const items = Array.isArray(out.items) ? out.items as Array<Record<string, unknown>> : []
+        const ctas  = section.cta_targets
+        if (items.length > 0 && (ctas.length === items.length || ctas.length === items.length + 1)) {
+          const offset = ctas.length - items.length        // 0 or 1
+          if (offset === 1) {
+            out.buttons = [{
+              label: ctas[0].label,
+              url:   ctas[0].target,
+              kind:  'primary' as const,
+            }]
+          }
+          for (let i = 0; i < items.length; i++) {
+            const cta = ctas[i + offset]
+            if (!cta) continue
+            items[i].item_cta_label = cta.label
+            items[i].item_cta_url   = cta.target
+          }
+        } else {
+          // Fall back to all-buttons mode.
+          out.buttons = ctas.map((t, i) => ({
+            label: t.label,
+            url:   t.target,
+            kind:  (i === 0 ? 'primary' : 'secondary') as 'primary' | 'secondary',
+          }))
+        }
       }
       return out
     }
