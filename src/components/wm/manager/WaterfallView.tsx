@@ -303,6 +303,7 @@ function SprintRow({
             const tier = deriveSizeTier(pc)
             const baseH = baseHoursForTier(tier)
             const range = hourRangeForTier(tier)
+            const activity = r.activity   // memoized once by the hook
             return (
               <button
                 key={r.id}
@@ -317,6 +318,9 @@ function SprintRow({
                   </p>
                   <ChevronRight size={11} className="text-wm-text-subtle shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
+                <p className="text-[10.5px] text-wm-text-muted leading-tight truncate mb-1">
+                  {activity.oneLiner}
+                </p>
                 <div className="flex items-center gap-1.5 flex-wrap mb-1">
                   <WMStatusPill tone={SUB_TONE[r.health.subStatus]} size="sm">
                     {SUB_LABEL[r.health.subStatus]}

@@ -23,6 +23,7 @@ import {
   type ClickUpTaskRow,
   type PhaseInference,
 } from '../lib/webPhaseInference'
+import { buildCurrentActivity, type CurrentActivity } from '../lib/webCurrentActivity'
 import type {
   StrategyWebProject,
   StrategyDevWeeklyAllocation,
@@ -59,6 +60,13 @@ export interface ProjectRowVM extends StrategyWebProject {
    *  chips in the Schedule view; ordered by due_date_after asc
    *  (nulls last). Empty when no ClickUp folder is matched. */
   devTasks:              DevTaskRow[]
+  /** Consolidated current-activity signal (cowork + copy engine +
+   *  milestones + ClickUp). Computed once per project here so the
+   *  five view components that render it (Board / Phases / Waterfall
+   *  / Calendar / List) don't each re-fire the walker on every
+   *  paint. The Planning workspace re-computes locally with edit-
+   *  buffer draft state. */
+  activity:              CurrentActivity
 }
 
 const COMPLETE = new Set(['complete', 'closed', 'done'])
@@ -336,6 +344,10 @@ export function useProjectsWithHealth(options?: {
           queueSlot: queueSlot ?? undefined,
           inferredDevRemainingHours: infH,
         })
+        const devTasks = devTasksByMember.get(p.member) ?? []
+        const activity = buildCurrentActivity({
+          project: p, milestones, devTasks, inference: inferenceRow,
+        })
         return {
           ...p,
           church_name: churchByMember.get(p.member) ?? null,
@@ -345,7 +357,8 @@ export function useProjectsWithHealth(options?: {
           health,
           queueSlot,
           inference: inferenceRow,
-          devTasks: devTasksByMember.get(p.member) ?? [],
+          devTasks,
+          activity,
         }
       })
 

@@ -5,14 +5,24 @@
  * view (relative-time labels), Schedule view (week column generation),
  * and the health math (weeks-to-launch, calendar gap).
  *
- * Convention: weeks start on Sunday to match the CSV the launch
- * schedule was authored in. `weekStart(d)` is idempotent for any d.
+ * Convention: weeks start on **Monday**, matching the actual
+ * strategy_dev_weekly_allocations.week_starting values the allocation
+ * grid persists. (An earlier comment claimed Sunday alignment; that
+ * was inconsistent with the data.) `weekStart(d)` is idempotent.
  */
 
-/** Local-time Sunday on or before `d`, with H/M/S/ms zeroed. */
+/** Local-time Monday on or before `d`, with H/M/S/ms zeroed.
+ *  Matches the Monday-aligned `week_starting` keys saved by the
+ *  allocation grid in PlanningWorkspace. */
 export function weekStart(d: Date): Date {
   const out = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-  out.setDate(out.getDate() - out.getDay())
+  // getDay() returns 0=Sun, 1=Mon...6=Sat. Snap back to Monday:
+  //   Sun (0) → 6 days back to previous Monday
+  //   Mon (1) → 0 days (already Mon)
+  //   Tue+    → (dow - 1) days back
+  const dow = out.getDay()
+  const offset = dow === 0 ? -6 : 1 - dow
+  out.setDate(out.getDate() + offset)
   return out
 }
 

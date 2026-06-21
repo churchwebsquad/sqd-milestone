@@ -23,6 +23,9 @@ import { ScheduleView } from '../../components/wm/manager/ScheduleView'
 import { PhaseBoardView } from '../../components/wm/manager/PhaseBoardView'
 import { WaterfallView } from '../../components/wm/manager/WaterfallView'
 import { CalendarView } from '../../components/wm/manager/CalendarView'
+import { ListView } from '../../components/wm/manager/ListView'
+import { CapacityForecastView } from '../../components/wm/manager/CapacityForecastView'
+import { NeedsAttentionStrip } from '../../components/wm/manager/NeedsAttentionStrip'
 import { DevCapacityBanner } from '../../components/wm/manager/DevCapacityBanner'
 import { FilterChip } from '../../components/wm/manager/FilterChip'
 import { SalesQuoteCard } from '../../components/wm/manager/SalesQuoteCard'
@@ -31,7 +34,7 @@ import { useProjectsWithHealth } from '../../hooks/useProjectsWithHealth'
 import type { ProjectRowVM } from '../../hooks/useProjectsWithHealth'
 import type { ProjectSubStatus, WebProjectPhase } from '../../types/database'
 
-type ManagerView = 'board' | 'phase-board' | 'schedule' | 'waterfall' | 'calendar'
+type ManagerView = 'list' | 'board' | 'phase-board' | 'schedule' | 'waterfall' | 'calendar' | 'forecast'
 
 const PHASE_FILTERS: WebProjectPhase[] = [
   'intake', 'content', 'design', 'dev', 'review', 'launched',
@@ -53,9 +56,11 @@ export default function WebProjectsPage() {
   const [params, setParams] = useSearchParams()
   const view: ManagerView = ((): ManagerView => {
     const v = params.get('view')
-    if (v === 'schedule' || v === 'phase-board' || v === 'waterfall' || v === 'calendar') return v
-    return 'board'
+    if (v === 'board' || v === 'schedule' || v === 'phase-board' || v === 'waterfall' || v === 'calendar' || v === 'forecast') return v
+    return 'list'   // new default — step-aware row list
   })()
+  /** Bulk-reorder mode toggles drag handles on the list view. */
+  const reorderMode = params.get('reorder') === '1'
   const showArchived = params.get('archived') === '1'
   const phaseFilter = (params.get('phase') || '').split(',').filter(Boolean) as WebProjectPhase[]
   const subFilter   = (params.get('health') || '').split(',').filter(Boolean) as ProjectSubStatus[]
@@ -200,17 +205,29 @@ export default function WebProjectsPage() {
             inside per-project planning when needed. */}
         <DevCapacityBanner rows={rows} />
 
+        {/* Needs-attention digest — what should I look at right now?
+            Composes consolidator + feasibility + stall + capacity. */}
+        <div className="mt-3 mb-4">
+          <NeedsAttentionStrip
+            rows={rows}
+            onOpenProject={(id) => navigate(`/web/${id}?tab=planning`)}
+            onOpenSprint={(startISO) => navigate(`/web?view=waterfall&sprint=${startISO}`)}
+          />
+        </div>
+
         {/* Toolbar: view toggle + search + archived */}
         <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
           <WMSegmentedToggle<ManagerView>
             active={view}
-            onChange={(v) => setParam('view', v === 'board' ? null : v)}
+            onChange={(v) => setParam('view', v === 'list' ? null : v)}
             options={[
+              { key: 'list',        label: 'List' },
               { key: 'board',       label: 'Board' },
               { key: 'phase-board', label: 'Phases' },
               { key: 'schedule',    label: 'Schedule' },
               { key: 'waterfall',   label: 'Waterfall' },
               { key: 'calendar',    label: 'Calendar' },
+              { key: 'forecast',    label: 'Forecast' },
             ]}
           />
 
@@ -288,6 +305,46 @@ export default function WebProjectsPage() {
           </div>
         )}
 
+        {view === 'list' && (
+          <>
+            {/* Bulk reorder toggle — sits above the list. When on,
+                rows show drag handles + onPriorityChange shuffles
+                the priority_order column. */}
+            <div className="mb-2 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setParam('reorder', reorderMode ? null : '1')}
+                className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-colors ${reorderMode ? 'bg-wm-accent text-white border-wm-accent' : 'bg-wm-bg-elevated text-wm-text-muted border-wm-border hover:border-wm-accent'}`}
+              >
+                {reorderMode ? '✓ Bulk reorder on' : 'Bulk reorder'}
+              </button>
+            </div>
+            <ListView
+              rows={visible}
+              loading={loading}
+              onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
+              reorderMode={reorderMode}
+              query={query}
+              onPriorityChange={async (movedId, targetOrder) => {
+                // Drop the moved project at targetOrder, shift others.
+                const ordered = [...visible].sort(
+                  (a, b) => (a.priority_order ?? 999) - (b.priority_order ?? 999),
+                )
+                const sansMoved = ordered.filter(r => r.id !== movedId)
+                const movedIdx = Math.max(0, Math.min(sansMoved.length, targetOrder - 1))
+                sansMoved.splice(movedIdx, 0, ordered.find(r => r.id === movedId)!)
+                const updates = sansMoved.map((r, i) =>
+                  supabase.from('strategy_web_projects')
+                    .update({ priority_order: i + 1, updated_at: new Date().toISOString() })
+                    .eq('id', r.id),
+                )
+                await Promise.all(updates)
+                await refetch()
+              }}
+            />
+          </>
+        )}
+
         {view === 'board' && (
           <BoardView
             rows={visible}
@@ -342,6 +399,14 @@ export default function WebProjectsPage() {
 
         {view === 'calendar' && (
           <CalendarView
+            rows={visible}
+            loading={loading}
+            onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
+          />
+        )}
+
+        {view === 'forecast' && (
+          <CapacityForecastView
             rows={visible}
             loading={loading}
             onSelect={(id) => navigate(`/web/${id}?tab=planning`)}

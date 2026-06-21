@@ -163,6 +163,9 @@ function ProjectRow({
   const churchLine  = row.church_name
     ? `${row.church_name} · #${row.member}`
     : `Member #${row.member}`
+  // Consolidated step-aware activity — surfaces "where it is" below
+  // the phase pill. Memoized once per project upstream by the hook.
+  const activity = row.activity
   return (
     <li
       draggable={draggable}
@@ -217,11 +220,16 @@ function ProjectRow({
             </p>
           </div>
 
-          {/* Phase pill */}
+          {/* Phase pill + step descriptor — step name is the new info
+              the old board was missing. Stacked so phase stays
+              scannable at a glance and step provides depth. */}
           <div className="min-w-0">
             <WMStatusPill tone={PHASE_TONE[phase] ?? 'neutral'} size="sm">
               {PHASE_LABEL[phase] ?? phase}
             </WMStatusPill>
+            <p className="text-[10px] text-wm-text-muted truncate mt-0.5">
+              {activity.oneLiner}
+            </p>
           </div>
 
           {/* Sub-status pill */}

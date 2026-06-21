@@ -23,11 +23,18 @@
  * parent re-fetches the project row.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Loader2, ExternalLink, AlertTriangle } from 'lucide-react'
+import { Loader2, AlertTriangle } from 'lucide-react'
 import { WMCard } from '../Card'
 import { WMStatusPill } from '../StatusPill'
 import { FeasibilityPanel } from '../manager/FeasibilityPanel'
 import { ClickUpTasksSummary } from '../manager/ClickUpTasksSummary'
+import { CurrentActivityBar } from '../planning/CurrentActivityBar'
+import { StepTimeline } from '../planning/StepTimeline'
+import { ManualStatusEditor } from '../planning/ManualStatusEditor'
+import { FeasibilityChip } from '../planning/FeasibilityChip'
+import { PriorityCascadePreview, type CascadeRow } from '../planning/PriorityCascadePreview'
+import { PartnerSyncBlock } from '../planning/PartnerSyncBlock'
+import { ProvenanceBadge } from '../planning/ProvenanceBadge'
 import { supabase } from '../../../lib/supabase'
 import {
   computeProjectHealth,
@@ -46,13 +53,18 @@ import {
   type ClickUpTaskRow,
   type PhaseInference,
 } from '../../../lib/webPhaseInference'
-import { fromIsoDate } from '../../../lib/dateRange'
+import { buildCurrentActivity } from '../../../lib/webCurrentActivity'
+import { detectStall } from '../../../lib/webStallDetector'
+import { evaluateLaunchFeasibility } from '../../../lib/webFeasibility'
+import { buildPartnerSyncString } from '../../../lib/webPartnerSyncString'
+import { fromIsoDate, daysBetween } from '../../../lib/dateRange'
 import type {
   StrategyWebProject,
   WebProjectPhase,
   PhaseEstimates,
   PhaseProgress,
   ProjectSubStatus,
+  ManualSubStatus,
 } from '../../../types/database'
 
 interface Props {
@@ -107,7 +119,11 @@ export function PlanningWorkspace({ project, onChange }: Props) {
     phase_progress:         (project.phase_progress as PhaseProgress) ?? {},
     manual_remaining_hours: project.manual_remaining_hours ?? null,
     status_note:            project.status_note ?? null,
+    manual_sub_status:      project.manual_sub_status ?? null,
+    status_reason:          project.status_reason ?? null,
   })
+  const [statusPanelOpen, setStatusPanelOpen] = useState(false)
+  const [priorityDraft, setPriorityDraft] = useState<number | null>(project.priority_order ?? null)
 
   useEffect(() => {
     setDraft({
@@ -118,7 +134,10 @@ export function PlanningWorkspace({ project, onChange }: Props) {
       phase_progress:         (project.phase_progress as PhaseProgress) ?? {},
       manual_remaining_hours: project.manual_remaining_hours ?? null,
       status_note:            project.status_note ?? null,
+      manual_sub_status:      project.manual_sub_status ?? null,
+      status_reason:          project.status_reason ?? null,
     })
+    setPriorityDraft(project.priority_order ?? null)
   }, [project])
 
   // Load the allocations + milestone submissions once per project,
@@ -269,6 +288,79 @@ export function PlanningWorkspace({ project, onChange }: Props) {
     inferredDevRemainingHours: inferredDevHours,
   }), [project, draft, effectiveProgress, milestones, allocations, queueSlot, inferredDevHours])
 
+  // ── Consolidated activity, stall, feasibility, cascade ────────
+  const activity = useMemo(() => buildCurrentActivity({
+    project: {
+      ...project,
+      manual_sub_status: draft.manual_sub_status,
+      status_reason:     draft.status_reason,
+      status_changed_at: project.status_changed_at,
+    },
+    milestones,
+    devTasks: [],
+    inference,
+  }), [project, draft.manual_sub_status, draft.status_reason, milestones, inference])
+
+  const stall = useMemo(() => detectStall({
+    project: { ...project, manual_sub_status: draft.manual_sub_status, status_reason: draft.status_reason },
+    activity,
+    today: new Date(),
+  }), [project, draft.manual_sub_status, draft.status_reason, activity])
+
+  /** Feasibility chip — inline on the launch_date input. Reads competing
+   *  hours from queueRows so the check accounts for every project in
+   *  the queue. */
+  const feasibility = useMemo(() => {
+    if (!draft.launch_date) return null
+    const competing = new Map<string, number>()
+    // queueRows is a shallow shape that doesn't include allocations,
+    // so we approximate "competing hours" from each project's
+    // dev_hours_estimate / 4 weeks. Good enough for an inline chip;
+    // the digest uses a more accurate per-week sum.
+    return evaluateLaunchFeasibility({
+      targetISO: draft.launch_date.slice(0, 10),
+      pageCount,
+      overrideHours: draft.dev_hours_estimate ?? null,
+      competingHoursByWeek: competing,
+      thisProjectHoursByWeek: new Map(allocations.map(a => [a.week_starting, a.hours])),
+    })
+  }, [draft.launch_date, draft.dev_hours_estimate, pageCount, allocations])
+
+  /** Cascade preview — when priorityDraft differs from saved, compute
+   *  the projection delta for every other queued project. */
+  const cascadeRows: CascadeRow[] = useMemo(() => {
+    if (priorityDraft === project.priority_order || queueRows.length === 0) return []
+    const today = new Date()
+    const beforeQueue = computeDevQueue(queueRows, DEFAULT_DEV_CAPACITY, today)
+    const overlay = queueRows.map(r =>
+      r.id === project.id ? { ...r, priority_order: priorityDraft } : r,
+    )
+    const afterQueue = computeDevQueue(overlay, DEFAULT_DEV_CAPACITY, today)
+    const out: CascadeRow[] = []
+    for (const r of queueRows) {
+      if (r.id === project.id) continue
+      const before = beforeQueue.get(r.id)?.devStartDate ?? null
+      const after  = afterQueue.get(r.id)?.devStartDate ?? null
+      if (!before && !after) continue
+      const beforeISO = before ? before.toISOString().slice(0, 10) : null
+      const afterISO  = after  ? after.toISOString().slice(0, 10)  : null
+      const delta = before && after ? daysBetween(before, after) : 0
+      if (delta === 0 && before === after) continue
+      out.push({
+        projectId:   r.id,
+        projectName: (r as { name?: string }).name ?? r.id.slice(0, 8),
+        beforeISO, afterISO, deltaDays: delta,
+      })
+    }
+    return out
+  }, [priorityDraft, project.priority_order, project.id, queueRows])
+
+  const partnerSyncString = useMemo(() => buildPartnerSyncString({
+    project: { ...project, name: project.name },
+    activity,
+    partnerName: null,
+  }), [project, activity])
+
   const save = useCallback(async <K extends keyof typeof draft>(
     key: K, value: (typeof draft)[K],
   ) => {
@@ -340,131 +432,190 @@ export function PlanningWorkspace({ project, onChange }: Props) {
           </div>
         )}
 
-        {/* Status hero — at-a-glance command center for this project.
-            Phase ribbon, hours range vs target, current sprint, risk,
-            and the ClickUp deep link. Renders ABOVE the editable
-            fields so the strategist gets the operational picture
-            before tweaking inputs. */}
+        {/* Current activity bar — consolidator-driven single-line
+            "where is this project" surface. Replaces the old phase
+            ribbon. Shows the most-specific signal (copy engine /
+            cowork step / milestone / ClickUp tasks) with provenance. */}
+        <CurrentActivityBar
+          activity={activity}
+          stall={stall}
+          clickUpUrl={clickUpListUrl}
+          openStepHref={
+            // Route to the right surface based on the active signal.
+            activity.signal === 'copy_engine' || activity.signal === 'cowork_step'
+              ? `/web/${project.id}?tab=cowork`
+            : activity.signal === 'clickup_tasks' && clickUpListUrl
+              ? clickUpListUrl
+              : null
+          }
+          onResume={async () => {
+            await save('manual_sub_status', null)
+            await save('status_reason', null)
+          }}
+          onDismissStall={async () => {
+            // stalled_dismissed_until lives on the project row but is
+            // not part of the local edit draft — write straight to
+            // Supabase and let onChange refetch.
+            const until = new Date()
+            until.setDate(until.getDate() + 7)
+            try {
+              const { error: e } = await supabase
+                .from('strategy_web_projects')
+                .update({ stalled_dismissed_until: until.toISOString() })
+                .eq('id', project.id)
+              if (e) throw new Error(e.message)
+              void onChange()
+            } catch (e) {
+              setError(e instanceof Error ? e.message : 'Dismiss failed')
+            }
+          }}
+          onOpenStatusPanel={() => setStatusPanelOpen(true)}
+        />
+
+        {/* Manual status editor — slides in when user clicks "Set
+            status" on the activity bar. Auto-stamps changed_at +
+            changed_by from the Supabase session. */}
+        {statusPanelOpen && (
+          <ManualStatusEditor
+            current={draft.manual_sub_status}
+            reason={draft.status_reason}
+            changedAt={project.status_changed_at ?? null}
+            changedBy={project.status_changed_by ?? null}
+            onSave={async (status, reason) => {
+              // Bubble Supabase errors via throw so the editor's
+              // own error UI shows them; the editor will keep the
+              // panel open on failure.
+              const { data: { user } } = await supabase.auth.getUser()
+              const employeeId = user?.email ?? user?.id ?? null
+              const now = new Date().toISOString()
+              const { error: e } = await supabase
+                .from('strategy_web_projects')
+                .update({
+                  manual_sub_status: status,
+                  status_reason:     reason,
+                  status_changed_at: status ? now : null,
+                  status_changed_by: status ? employeeId : null,
+                })
+                .eq('id', project.id)
+              if (e) throw new Error(e.message)
+              // Mirror into local draft so the activity bar reflects
+              // the change before the parent refetch lands.
+              setDraft(prev => ({
+                ...prev,
+                manual_sub_status: status,
+                status_reason:     reason,
+              }))
+              setStatusPanelOpen(false)
+              void onChange()
+            }}
+            onCancel={() => setStatusPanelOpen(false)}
+          />
+        )}
+
+        {/* Step timeline — vertical full-pathway view with phase →
+            milestone → cowork-sub-step nesting. Replaces the
+            ribbon's "all phases on one line" with operational depth. */}
+        <StepTimeline
+          project={project}
+          milestones={milestones}
+          activity={activity}
+          effectiveProgress={effectiveProgress}
+        />
+
+        {/* Partner-sync block — strategist-language one-liner the AM
+            copies into Slack/email/ClickUp before a partner call. */}
+        <PartnerSyncBlock text={partnerSyncString} />
+
+        {/* Operational summary card — launch / hours-tier / sprint
+            allocation. All three carry provenance badges so the user
+            sees auto-derived vs manual override. */}
         <WMCard padding="loose">
-          <div className="space-y-4">
-            {/* Phase ribbon */}
-            <div>
-              <SectionLabel>Phase</SectionLabel>
-              <div className="flex items-center gap-1 mt-1.5">
-                {PHASE_ORDER.map((p, idx) => {
-                  const isCurrent = p === currentPhase
-                  const isPast = PHASE_ORDER.indexOf(currentPhase) > idx
-                  return (
-                    <div key={p} className="flex items-center gap-1 flex-1 min-w-0">
-                      <div
-                        className={[
-                          'rounded-md px-2 py-1.5 flex-1 min-w-0 text-center transition-colors',
-                          isCurrent
-                            ? 'bg-wm-accent text-white font-semibold'
-                            : isPast
-                              ? 'bg-wm-success-bg text-wm-success border border-wm-success/30'
-                              : 'bg-wm-bg-hover text-wm-text-muted border border-wm-border',
-                        ].join(' ')}
-                      >
-                        <p className="text-[10.5px] uppercase tracking-widest truncate">
-                          {PHASE_LABEL[p]}
-                        </p>
-                        {isCurrent && (
-                          <p className="text-[10px] opacity-80 mt-0.5">
-                            {Math.round((effectiveProgress[p] ?? 0) * 100)}%
-                          </p>
-                        )}
-                      </div>
-                      {idx < PHASE_ORDER.length - 1 && (
-                        <span className="text-wm-text-subtle text-[10px] shrink-0">→</span>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Launch target + countdown */}
-              <Stat
-                label="Launch target"
-                value={draft.launch_date ?? '—'}
-                hint={
-                  daysToLaunch == null
-                    ? 'No launch date set'
-                    : daysToLaunch < 0
-                      ? `${Math.abs(daysToLaunch)} day${Math.abs(daysToLaunch) === 1 ? '' : 's'} past`
-                      : `${daysToLaunch} day${daysToLaunch === 1 ? '' : 's'} out`
-                }
-              />
-
-              {/* Hours target as range */}
-              <Stat
-                label={`Hours target · ${tierLabel(sizeTier)}`}
-                value={
-                  draft.dev_hours_estimate != null
-                    ? `${draft.dev_hours_estimate}h`
-                    : `${hourRange.base}h`
-                }
-                hint={
-                  pageCount == null
-                    ? `~20 pgs est. · likely ${hourRange.likely}h · complex ${hourRange.complex}h`
-                    : `${pageCount} pages · likely ${hourRange.likely}h · complex ${hourRange.complex}h`
-                }
-              />
-
-              {/* Current sprint allocation */}
-              <Stat
-                label={`Sprint · ${currentSprint.label}`}
-                value={`${sprintHours}h`}
-                hint={
-                  sprintAllocations.length === 0
-                    ? 'No allocation this sprint'
-                    : `${sprintAllocations.length} week${sprintAllocations.length === 1 ? '' : 's'} of dev`
-                }
-              />
-            </div>
-
-            {/* Risk line — surface the single most actionable issue
-                from computeProjectHealth. riskReasons always has at
-                least one entry ("On baseline plan." on healthy
-                projects), so we suppress the line on the boilerplate
-                fallback and only render when a substantive risk
-                exists. */}
-            {computed && computed.riskReasons.length > 0
-              && computed.riskReasons[0] !== 'On baseline plan.'
-              && computed.riskReasons[0] !== 'Launched' && (
-              <div className="rounded-md border border-wm-warn/40 bg-wm-warn-bg px-3 py-2 flex items-start gap-2">
-                <AlertTriangle size={13} className="text-wm-warn shrink-0 mt-0.5" />
-                <div className="min-w-0 flex-1 text-[12px] text-wm-warn">
-                  {computed.riskReasons[0]}
-                  {computed.riskReasons.length > 1 && (
-                    <span className="opacity-70 ml-1">
-                      (+{computed.riskReasons.length - 1} more — see Projected below)
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* ClickUp deep link */}
-            {clickUpListUrl && (
-              <div className="flex justify-end">
-                <a
-                  href={clickUpListUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-wm-accent-strong hover:underline"
-                >
-                  <ExternalLink size={12} />
-                  Open in ClickUp
-                </a>
-              </div>
-            )}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Stat
+              label={
+                <span className="inline-flex items-center gap-1.5">
+                  Launch target
+                  <ProvenanceBadge provenance={{
+                    mode: draft.launch_date ? 'manual' : 'fallback',
+                    sourceLabel: draft.launch_date ? 'Strategist-set' : 'No date',
+                    detail: 'web_projects.launch_date',
+                  }} />
+                </span>
+              }
+              value={draft.launch_date ?? '—'}
+              hint={
+                daysToLaunch == null
+                  ? 'No launch date set'
+                  : daysToLaunch < 0
+                    ? `${Math.abs(daysToLaunch)} day${Math.abs(daysToLaunch) === 1 ? '' : 's'} past`
+                    : `${daysToLaunch} day${daysToLaunch === 1 ? '' : 's'} out`
+              }
+            />
+            <Stat
+              label={
+                <span className="inline-flex items-center gap-1.5">
+                  Hours · {tierLabel(sizeTier)}
+                  <ProvenanceBadge provenance={{
+                    mode: draft.dev_hours_estimate != null ? 'manual' : pageCount && pageCount > 0 ? 'auto' : 'fallback',
+                    sourceLabel: draft.dev_hours_estimate != null
+                      ? 'Strategist override'
+                      : pageCount && pageCount > 0
+                        ? `Tier derived from ${pageCount} pages`
+                        : 'Default tier (sitemap pending)',
+                    detail: 'Tier = deriveSizeTier(page_count). Override = web_projects.dev_hours_estimate.',
+                  }} />
+                </span>
+              }
+              value={
+                draft.dev_hours_estimate != null
+                  ? `${draft.dev_hours_estimate}h`
+                  : `${hourRange.base}h`
+              }
+              hint={
+                pageCount == null || pageCount === 0
+                  ? `~20 pgs est. · likely ${hourRange.likely}h · complex ${hourRange.complex}h`
+                  : `${pageCount} pages · likely ${hourRange.likely}h · complex ${hourRange.complex}h`
+              }
+            />
+            <Stat
+              label={
+                <span className="inline-flex items-center gap-1.5">
+                  Sprint · {currentSprint.label}
+                  <ProvenanceBadge provenance={{
+                    mode: 'auto',
+                    sourceLabel: 'Sum of weekly allocations',
+                    detail: 'strategy_dev_weekly_allocations, current 2-week sprint window',
+                  }} />
+                </span>
+              }
+              value={`${sprintHours}h`}
+              hint={
+                sprintAllocations.length === 0
+                  ? 'No allocation this sprint'
+                  : `${sprintAllocations.length} week${sprintAllocations.length === 1 ? '' : 's'} of dev`
+              }
+            />
           </div>
+
+          {computed && computed.riskReasons.length > 0
+            && computed.riskReasons[0] !== 'On baseline plan.'
+            && computed.riskReasons[0] !== 'Launched' && (
+            <div className="mt-3 rounded-md border border-wm-warn/40 bg-wm-warn-bg px-3 py-2 flex items-start gap-2">
+              <AlertTriangle size={13} className="text-wm-warn shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1 text-[12px] text-wm-warn">
+                {computed.riskReasons[0]}
+                {computed.riskReasons.length > 1 && (
+                  <span className="opacity-70 ml-1">
+                    (+{computed.riskReasons.length - 1} more — see Projected below)
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </WMCard>
 
-        {/* Schedule */}
+        {/* Schedule — launch / priority / hours with inline feasibility
+            chip on launch and cascade preview on priority changes. */}
         <WMCard padding="loose">
           <SectionLabel>Schedule</SectionLabel>
           <div className="grid grid-cols-3 gap-3">
@@ -476,9 +627,19 @@ export function PlanningWorkspace({ project, onChange }: Props) {
             />
             <FieldNumber
               label="Priority"
-              value={draft.priority_order}
+              value={priorityDraft}
               min={1}
-              onCommit={(v) => save('priority_order', v)}
+              // Track the typed value as a separate draft so the
+              // cascade preview can recompute against the candidate
+              // before it commits — but only when the user actually
+              // pauses typing (blur), not on every keystroke. The
+              // useMemo dep on priorityDraft keeps the queue
+              // recompute cheap because it only fires when the value
+              // settles.
+              onCommit={(v) => {
+                setPriorityDraft(v)
+                void save('priority_order', v)
+              }}
               saving={savingKey === 'priority_order'}
             />
             <FieldNumber
@@ -490,6 +651,30 @@ export function PlanningWorkspace({ project, onChange }: Props) {
               saving={savingKey === 'dev_hours_estimate'}
             />
           </div>
+
+          {/* Inline feasibility chip on the launch date. */}
+          {feasibility && (
+            <div className="mt-3">
+              <FeasibilityChip
+                result={feasibility}
+                onApplySuggestion={(iso) => save('launch_date', iso)}
+              />
+            </div>
+          )}
+
+          {/* Cascade preview — only visible while priorityDraft differs
+              from saved value. */}
+          {priorityDraft !== project.priority_order && cascadeRows.length > 0 && (
+            <div className="mt-3 rounded-md border border-wm-accent/30 bg-wm-accent/5 p-3">
+              <PriorityCascadePreview
+                rows={cascadeRows}
+                title="Impact preview — projected dev-start shift for other queued projects"
+              />
+              <p className="text-[10.5px] text-wm-text-subtle italic mt-2">
+                Auto-computed by re-running computeDevQueue with the candidate priority.
+              </p>
+            </div>
+          )}
         </WMCard>
 
         {/* Phase budget */}
@@ -782,11 +967,14 @@ function FieldDate({
 }
 
 function FieldNumber({
-  label, value, onCommit, saving, min, step = 1, compact = false,
+  label, value, onCommit, onDraftChange, saving, min, step = 1, compact = false,
 }: {
   label: string
   value: number | null
   onCommit: (v: number | null) => void
+  /** Optional — called on every keystroke so the cascade preview can
+   *  recompute before the user blurs. */
+  onDraftChange?: (v: number | null) => void
   saving?: boolean
   min?: number
   step?: number
@@ -807,7 +995,13 @@ function FieldNumber({
         value={v}
         min={min}
         step={step}
-        onChange={e => setV(e.target.value)}
+        onChange={e => {
+          setV(e.target.value)
+          if (onDraftChange) {
+            const next = e.target.value.trim() === '' ? null : Number(e.target.value)
+            onDraftChange(Number.isFinite(next as number) ? next : null)
+          }
+        }}
         onBlur={() => {
           const next = v.trim() === '' ? null : Number(v)
           if (next !== value) onCommit(Number.isFinite(next as number) ? next : null)
@@ -847,19 +1041,21 @@ function FieldTextArea({
 }
 
 function Stat({
-  label, value, tone = 'default',
+  label, value, hint, tone = 'default',
 }: {
-  label: string
+  label: React.ReactNode
   value: string
+  hint?: string
   tone?: 'default' | 'danger'
 }) {
   return (
     <div>
-      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">{label}</p>
+      <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">{label}</div>
       <p className={[
         'text-[13px] font-semibold mt-0.5',
         tone === 'danger' ? 'text-wm-danger' : 'text-wm-text',
       ].join(' ')}>{value}</p>
+      {hint && <p className="text-[10.5px] text-wm-text-subtle mt-0.5">{hint}</p>}
     </div>
   )
 }

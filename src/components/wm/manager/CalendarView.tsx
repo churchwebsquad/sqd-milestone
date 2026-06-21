@@ -41,6 +41,7 @@ interface CellMarker {
   projectId: string
   label: string
   phase?: WebProjectPhase
+  stepHint?: string
 }
 
 export function CalendarView({ rows, loading, onSelect }: Props) {
@@ -53,14 +54,18 @@ export function CalendarView({ rows, loading, onSelect }: Props) {
   const markersByDay = useMemo(() => {
     const map = new Map<string, CellMarker[]>()
     for (const r of rows) {
-      // Hard launch date.
+      // Hard launch date — include the consolidator's step descriptor
+      // so the tooltip reads "Launch — First Pres (Step 8/11: Outline
+      // page · 3/12)" instead of bare name. Activity memoized upstream.
       if (r.launch_date) {
         const key = r.launch_date
+        const activity = r.activity
         if (!map.has(key)) map.set(key, [])
         map.get(key)!.push({
           kind: 'launch',
           projectId: r.id,
           label: r.church_name ?? r.name,
+          stepHint: activity.oneLiner,
         })
       }
       // Soft review targets — derived from current phase + a phase-start
@@ -94,7 +99,10 @@ export function CalendarView({ rows, loading, onSelect }: Props) {
     const year  = cursor.getFullYear()
     const month = cursor.getMonth()
     const firstOfMonth = new Date(year, month, 1)
-    const lead = firstOfMonth.getDay()  // 0=Sun (codebase convention is Sunday-aligned weeks)
+    // Codebase convention is Monday-aligned weeks (see dateRange.weekStart).
+    // Sun (0) → 6 days back to land on previous Monday; Mon (1) → 0; etc.
+    const dow = firstOfMonth.getDay()
+    const lead = dow === 0 ? 6 : dow - 1
     const start = new Date(year, month, 1 - lead)
     const out: Array<{ date: Date; iso: string; inMonth: boolean; isToday: boolean }> = []
     const todayISO = toIsoDate(new Date())
@@ -176,7 +184,7 @@ export function CalendarView({ rows, loading, onSelect }: Props) {
 
       {/* Weekday header — hidden below sm in favor of agenda fallback */}
       <div className="hidden sm:grid grid-cols-7 gap-1 text-[10.5px] uppercase tracking-widest text-wm-text-subtle font-semibold px-1">
-        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
           <div key={d} className="py-1">{d}</div>
         ))}
       </div>
@@ -199,7 +207,7 @@ export function CalendarView({ rows, loading, onSelect }: Props) {
                     key={`${m.kind}-${m.projectId}-${m.round ?? ''}`}
                     type="button"
                     onClick={() => onSelect(m.projectId)}
-                    aria-label={m.kind === 'launch' ? `Launch — ${m.label}` : `${m.round} review target for ${m.label}`}
+                    aria-label={m.kind === 'launch' ? `Launch — ${m.label}${m.stepHint ? ` (${m.stepHint})` : ''}` : `${m.round} review target for ${m.label}`}
                     className={`text-left rounded-sm px-2 py-1 text-[11px] font-semibold truncate transition-colors ${
                       m.kind === 'launch'
                         ? 'bg-emerald-500 text-white hover:bg-emerald-600'
@@ -264,8 +272,8 @@ export function CalendarView({ rows, loading, onSelect }: Props) {
                         type="button"
                         onClick={() => onSelect(m.projectId)}
                         className="text-left rounded-sm bg-emerald-500 text-white px-1.5 py-0.5 text-[10px] font-semibold truncate hover:bg-emerald-600 transition-colors"
-                        aria-label={`Launch — ${m.label}`}
-                        title={`Launch — ${m.label}`}
+                        aria-label={`Launch — ${m.label}${m.stepHint ? ` (${m.stepHint})` : ''}`}
+                        title={`Launch — ${m.label}${m.stepHint ? `\n${m.stepHint}` : ''}`}
                       >
                         🚀 {m.label}
                       </button>

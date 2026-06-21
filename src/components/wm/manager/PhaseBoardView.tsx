@@ -134,38 +134,46 @@ export function PhaseBoardView({ rows, loading, onSelect }: Props) {
                   No projects here
                 </p>
               ) : (
-                items.map(r => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => onSelect(r.id)}
-                    aria-label={`Open planning for ${r.church_name ?? r.name}`}
-                    className="w-full text-left rounded-md border border-wm-border bg-wm-bg px-2.5 py-2 hover:border-wm-accent hover:shadow-sm transition-all group"
-                  >
-                    <div className="flex items-start justify-between gap-1.5 mb-1">
-                      <p className="text-[12px] font-semibold text-wm-text leading-tight truncate flex-1">
-                        {r.church_name ?? r.name}
-                      </p>
-                      <ChevronRight size={11} className="text-wm-text-subtle shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <WMStatusPill tone={SUB_TONE[r.health.subStatus]} size="sm">
-                        {SUB_LABEL[r.health.subStatus]}
-                      </WMStatusPill>
-                      {r.priority_order != null && (
-                        <span className="text-[10px] font-mono text-wm-text-subtle">
-                          #{r.priority_order}
-                        </span>
-                      )}
-                    </div>
-                    {r.launch_date && (
-                      <div className="mt-1.5 flex items-center gap-1 text-[10.5px] text-wm-text-muted">
-                        <Clock size={9} className="text-wm-text-subtle" />
-                        <span>{formatLaunchShort(r.launch_date)}</span>
+                items.map(r => {
+                  const activity = r.activity   // memoized once by the hook
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => onSelect(r.id)}
+                      aria-label={`Open planning for ${r.church_name ?? r.name}`}
+                      className="w-full text-left rounded-md border border-wm-border bg-wm-bg px-2.5 py-2 hover:border-wm-accent hover:shadow-sm transition-all group"
+                    >
+                      <div className="flex items-start justify-between gap-1.5 mb-1">
+                        <p className="text-[12px] font-semibold text-wm-text leading-tight truncate flex-1">
+                          {r.church_name ?? r.name}
+                        </p>
+                        <ChevronRight size={11} className="text-wm-text-subtle shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
-                    )}
-                  </button>
-                ))
+                      {/* Step-aware "where it is" line — the consolidator
+                          output. Was previously hidden behind phase color. */}
+                      <p className="text-[10.5px] text-wm-text-muted leading-tight truncate mb-1">
+                        {activity.oneLiner}
+                      </p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <WMStatusPill tone={SUB_TONE[r.health.subStatus]} size="sm">
+                          {SUB_LABEL[r.health.subStatus]}
+                        </WMStatusPill>
+                        {r.priority_order != null && (
+                          <span className="text-[10px] font-mono text-wm-text-subtle">
+                            #{r.priority_order}
+                          </span>
+                        )}
+                      </div>
+                      {r.launch_date && (
+                        <div className="mt-1.5 flex items-center gap-1 text-[10.5px] text-wm-text-muted">
+                          <Clock size={9} className="text-wm-text-subtle" />
+                          <span>{formatLaunchShort(r.launch_date)}</span>
+                        </div>
+                      )}
+                    </button>
+                  )
+                })
               )}
             </div>
           </div>

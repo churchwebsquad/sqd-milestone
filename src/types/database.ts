@@ -1146,8 +1146,29 @@ export interface StrategyWebProject {
   // CoworkGlobalFooter for the canonical shape; null pre-audit.
   global_footer: CoworkGlobalFooter | null
 
+  // ── v79 — manual planning status + dismissals ─────────────
+  // AM-set override that beats the computed sub_status. When set,
+  // projection treats the project as paused so dev capacity frees up.
+  // Values: 'in_progress' | 'waiting_partner' | 'blocked' | 'paused'
+  // | null (= use computed). Reason + auto-stamps surface in the
+  // needs-attention digest and risk panel.
+  manual_sub_status:        ManualSubStatus | null
+  status_reason:            string | null
+  status_changed_at:        string | null    // ISO timestamptz
+  status_changed_by:        string | null    // employee_id
+  /** When a stall warning was dismissed, the timestamp the dismissal
+   *  expires. Lets the user silence a known-slow step without
+   *  losing the signal forever. */
+  stalled_dismissed_until:  string | null    // ISO timestamptz
+
   [key: string]: unknown
 }
+
+export type ManualSubStatus =
+  | 'in_progress'
+  | 'waiting_partner'
+  | 'blocked'
+  | 'paused'
 
 /** Audit branch — partner-written global footer block extracted
  *  from Notion. Persisted to strategy_web_projects.global_footer
