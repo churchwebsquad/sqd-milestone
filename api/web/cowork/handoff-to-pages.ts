@@ -104,20 +104,51 @@ interface CoworkDraftSection {
  *  meant from-scratch projects bound to empty templates while
  *  audit-branch projects worked — a silent visual failure. */
 /** Remap a `build_cards` entry's field names to the canonical item
- *  subfields the binder expects. Cowork's feature_card_carousel_proxy
- *  archetype emits `{name, description, cta_label, cta_target}`; the
- *  binder reads `item_heading / item_body / item_cta_label / item_cta_url`.
- *  Without this remap, name + cta_target are silently dropped during
- *  bind, which is how Arvada Missions lost Compassion + Convoy
- *  (heading missing, URL missing — only description + cta_label landed). */
+ *  subfields the binder expects. Cowork emits build_cards in multiple
+ *  shapes depending on archetype:
+ *
+ *    A. Canonical (ministry):  {name, description, cta_label, cta_target}
+ *    B. Counselor:             {name, email, phone, location}
+ *    C. Volunteer:             {role, team, cta_label, cta_target, description}
+ *
+ *  Without remap, B's email/phone/location were silently dropped; C's
+ *  role/team never reached item_heading and the card rendered empty.
+ *  This handler:
+ *   • surfaces name → item_heading (fallback role for shape C)
+ *   • surfaces description → item_body (or composes one from contact
+ *     fields when only email/phone/location are present)
+ *   • surfaces cta_label / cta_target → item_cta_label / item_cta_url
+ *   • surfaces team → item_meta when present alongside role */
 function remapBuildCard(card: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...card }
-  if (out.name && !out.item_heading && !out.heading && !out.title) {
-    out.item_heading = out.name
+
+  // Heading: prefer existing → name → role
+  if (!out.item_heading && !out.heading && !out.title) {
+    if (out.name)      out.item_heading = out.name
+    else if (out.role) out.item_heading = out.role
   }
-  if (out.description && !out.item_body && !out.body) {
-    out.item_body = out.description
+
+  // Meta: team name lands here when present (volunteer cards)
+  if (!out.item_meta && !out.meta && out.team) {
+    out.item_meta = out.team
   }
+
+  // Body: description as-is, or compose from contact fields for
+  // counselor-shape cards. Lines stack vertically as plain HTML so
+  // the rendered card has something to show even when description
+  // is absent.
+  if (!out.item_body && !out.body) {
+    if (out.description) {
+      out.item_body = out.description
+    } else {
+      const contactLines: string[] = []
+      if (typeof out.email    === 'string' && out.email)    contactLines.push(`<p>${escapeHtml(out.email)}</p>`)
+      if (typeof out.phone    === 'string' && out.phone)    contactLines.push(`<p>${escapeHtml(out.phone)}</p>`)
+      if (typeof out.location === 'string' && out.location) contactLines.push(`<p>${escapeHtml(out.location)}</p>`)
+      if (contactLines.length > 0) out.item_body = contactLines.join('\n')
+    }
+  }
+
   if (out.cta_label && !out.item_cta_label) {
     out.item_cta_label = out.cta_label
   }
@@ -419,8 +450,17 @@ function wrapVideoUrlAsIframe(url: string): string {
  *  if cowork emitted both heading + body cleanly, we never touch them.
  *  Also skip when the candidate split would leave one side empty.
  */
-function splitConflatedItem(it: Record<string, unknown>): Record<string, unknown> {
+function splitConflatedItem(
+  it: Record<string, unknown>,
+  options?: { hasMetaDestination?: boolean },
+): Record<string, unknown> {
   const out = { ...it }
+  // When the destination template has no item_meta slot, Pattern 1's
+  // "Name | Role" split silently destroys the right half. Better to
+  // preserve the full heading verbatim. Arvada care/s5 counselor list:
+  // "Ryan Ahlenius | Lumen Counseling" → split into name + org, but
+  // card-193 has no item_meta destination, so the org disappeared.
+  const hasMetaDestination = options?.hasMetaDestination !== false
   const rawH = typeof out.item_heading === 'string' ? out.item_heading
              : typeof out.heading === 'string'      ? out.heading
              : typeof out.title === 'string'        ? out.title
@@ -434,7 +474,9 @@ function splitConflatedItem(it: Record<string, unknown>): Record<string, unknown
              : ''
 
   // Pattern 1 — heading carries `Name - Role` and meta is empty.
-  if (rawH && !rawM) {
+  // Only applies when the destination template has a meta slot to
+  // receive the right half; otherwise the split is destructive.
+  if (rawH && !rawM && hasMetaDestination) {
     // Match ` - `, ` – `, ` — `, ` | ` — the canonical role-separator
     // shapes. Require spaces on both sides so we don't false-split
     // hyphenated names ("Mary-Kate") or punctuation-heavy content.
@@ -577,7 +619,8 @@ function composeFromCoworkAliasMap(
       // cowork emitted as paragraph + cards.
       if (map.body) {
         const folded = items.map(it => {
-          const enriched = splitConflatedItem(it)
+          // No meta destination on this fold path — body is the only target.
+          const enriched = splitConflatedItem(it, { hasMetaDestination: false })
           const h = String(enriched.item_heading ?? enriched.heading ?? enriched.title ?? '').trim()
           const b = String(enriched.item_body ?? enriched.body ?? enriched.description ?? '').trim()
           const bodyHtml = b ? (isHtmlAlready(b) ? b : ensureHtml(b)) : ''
@@ -604,9 +647,12 @@ function composeFromCoworkAliasMap(
       droppedContent.items = items
     } else {
       const composeRow = (it: Record<string, unknown>): Record<string, unknown> => {
-        const enriched = splitConflatedItem(it)
-        const row: Record<string, unknown> = {}
         const subs = map.items!.subfields
+        // Pass the destination shape so splitConflatedItem doesn't
+        // destroy "Name | Org" headings when the template has no
+        // meta slot (e.g. card-193, used by feature-section-2 / -82).
+        const enriched = splitConflatedItem(it, { hasMetaDestination: !!subs.item_meta })
+        const row: Record<string, unknown> = {}
         if (subs.item_heading) {
           const v = enriched.item_heading ?? enriched.heading ?? enriched.title ?? ''
           row[subs.item_heading] = String(v)
@@ -688,7 +734,19 @@ function composeFromCoworkAliasMap(
           const inner = (r as Record<string, unknown>)[innerField]
           return Array.isArray(inner) ? (inner[0] as Record<string, unknown>) : r
         })
-        const wrapsReferencedTemplate = Boolean(map.items.referenced_template_id)
+        // Pattern disambiguation by the inner group's seed count:
+        //   default_count > 1 → outer is a VISUAL WRAPPER (team-section-14
+        //   row_grid expects rows of 3 card_team members). Pack ALL
+        //   items into ONE outer entry's inner array so Bricks' grid
+        //   CSS handles responsive wrapping.
+        //   default_count <= 1 (or set via referenced_template_id, which
+        //   always implies 1-per-instance because each outer entry is a
+        //   separate referenced-template instance) → ONE OUTER PER ITEM.
+        //   content-section-89's column_list and feature-section-2's
+        //   card (referencing card-193) both follow this rule.
+        const isVisualRowWrapper =
+          (map.items.inner_group_default_count ?? 1) > 1
+          && !map.items.referenced_template_id
         if (map.items.split) {
           const [aKey, bKey] = map.items.split.groups
           const groupA: Array<Record<string, unknown>> = []
@@ -700,19 +758,19 @@ function composeFromCoworkAliasMap(
             flatRows.slice(0, half).forEach(r => groupA.push(r))
             flatRows.slice(half).forEach(r => groupB.push(r))
           }
-          if (wrapsReferencedTemplate) {
-            fv[aKey] = groupA.map(r => ({ [innerField]: [r] }))
-            fv[bKey] = groupB.map(r => ({ [innerField]: [r] }))
-          } else {
+          if (isVisualRowWrapper) {
             fv[aKey] = [{ [innerField]: groupA }]
             fv[bKey] = [{ [innerField]: groupB }]
+          } else {
+            fv[aKey] = groupA.map(r => ({ [innerField]: [r] }))
+            fv[bKey] = groupB.map(r => ({ [innerField]: [r] }))
           }
-        } else if (wrapsReferencedTemplate) {
-          // Pattern A — one outer entry per item.
-          fv[map.items.field] = flatRows.map(r => ({ [innerField]: [r] }))
-        } else {
-          // Pattern B — all items in one outer row.
+        } else if (isVisualRowWrapper) {
+          // All items in one outer row (team-section-14 pattern).
           fv[map.items.field] = [{ [innerField]: flatRows }]
+        } else {
+          // One outer entry per item (default — column_list, card-193 ref).
+          fv[map.items.field] = flatRows.map(r => ({ [innerField]: [r] }))
         }
       } else if (map.items.split) {
         // Distribute across two parallel groups (accordion_left + _right).
@@ -991,7 +1049,7 @@ function composeFieldValuesForBrixies(
         // partner-facing layout. Detect the common shapes and split.
         // The rescue NEVER touches values that arrive already-split
         // (when both item_heading + item_body are populated).
-        const enriched = splitConflatedItem(it)
+        const enriched = splitConflatedItem(it, { hasMetaDestination: subM != null })
         const row: Record<string, unknown> = {}
         if (subH != null) {
           const v = enriched.item_heading ?? enriched.heading ?? enriched.title ?? ''
