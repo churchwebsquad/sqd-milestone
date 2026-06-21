@@ -426,16 +426,21 @@ export function PlanningWorkspace({ project, onChange }: Props) {
             </div>
 
             {/* Risk line — surface the single most actionable issue
-                from computeProjectHealth. Reasons array is empty when
-                the project is on-track. */}
-            {computed && computed.reasons.length > 0 && (
+                from computeProjectHealth. riskReasons always has at
+                least one entry ("On baseline plan." on healthy
+                projects), so we suppress the line on the boilerplate
+                fallback and only render when a substantive risk
+                exists. */}
+            {computed && computed.riskReasons.length > 0
+              && computed.riskReasons[0] !== 'On baseline plan.'
+              && computed.riskReasons[0] !== 'Launched' && (
               <div className="rounded-md border border-wm-warn/40 bg-wm-warn-bg px-3 py-2 flex items-start gap-2">
                 <AlertTriangle size={13} className="text-wm-warn shrink-0 mt-0.5" />
                 <div className="min-w-0 flex-1 text-[12px] text-wm-warn">
-                  {computed.reasons[0]}
-                  {computed.reasons.length > 1 && (
+                  {computed.riskReasons[0]}
+                  {computed.riskReasons.length > 1 && (
                     <span className="opacity-70 ml-1">
-                      (+{computed.reasons.length - 1} more — see Projected below)
+                      (+{computed.riskReasons.length - 1} more — see Projected below)
                     </span>
                   )}
                 </div>
