@@ -56,7 +56,23 @@ export const maxDuration = 60
 interface CoworkDraftSection {
   section_intent_id?: string
   template_key?:      string
-  slot_values?:       Record<string, unknown>
+  // Cowork's three historic emission shapes for slot data. The handoff
+  // normalizes all three into a flat dict before binding (see
+  // normalizeCoworkSlotValues). NEVER read these directly — use the
+  // normalizer so SHAPE inconsistencies don't silently bind empty
+  // templates (the bug that bricked Real Life Church + Arvada).
+  slot_values?:       Record<string, unknown>   // audit-external-copy SKILL
+  field_values?:      Record<string, unknown>   // draft-page SKILL (current)
+  slots?:             Array<{
+    slot: string
+    text?: unknown
+    value?: unknown
+    provenance?: string
+    source_refs?: string[]
+  }>                                            // older from-scratch shape (Arvada)
+  // Auxiliary fields older drafts use to express buttons/items
+  // outside the main slot dict.
+  cta_targets?:       Array<{ label: string; target: string }>
   atoms_used?:        string[]
   facts_used?:        string[]
   crawl_topics_used?: string[]
@@ -65,6 +81,57 @@ interface CoworkDraftSection {
   voice_notes?:       string | null
   actual_verbatim_ratio?: number | null
   _meta?: Record<string, any>
+}
+
+/** Normalize whatever shape the cowork draft emitted into a flat
+ *  Record<slot, value> dict the translator can bind. Three shapes
+ *  have shipped over the lifetime of the pipeline:
+ *
+ *    1. `slot_values: { primary_heading, body, buttons[], … }`
+ *       — audit-external-copy SKILL (verbatim Notion ingest).
+ *    2. `field_values: { primary_heading, body, buttons[], … }`
+ *       — current draft-page SKILL (from-scratch authoring).
+ *    3. `slots: [{slot: 'primary_heading', text: '…'}, …]`
+ *       — older from-scratch shape (Arvada and similar). Buttons
+ *       arrive separately via `cta_targets[]` so we splice them in.
+ *
+ *  Without this normalizer the handoff only read shape #1, which
+ *  meant from-scratch projects bound to empty templates while
+ *  audit-branch projects worked — a silent visual failure. */
+function normalizeCoworkSlotValues(section: CoworkDraftSection): Record<string, unknown> {
+  // Shape #1 — slot_values dict.
+  if (section.slot_values && typeof section.slot_values === 'object' && !Array.isArray(section.slot_values)) {
+    return section.slot_values
+  }
+  // Shape #2 — field_values dict.
+  if (section.field_values && typeof section.field_values === 'object' && !Array.isArray(section.field_values)) {
+    return section.field_values
+  }
+  // Shape #3 — slots[] descriptors. Flatten to {slot: text}; the
+  // translator only needs the text. Splice cta_targets[] in as the
+  // canonical buttons[] array shape so the translator's button
+  // path (hero / cta_callout / cta_simple) lights up correctly.
+  if (Array.isArray(section.slots)) {
+    const out: Record<string, unknown> = {}
+    for (const s of section.slots) {
+      if (!s || typeof s !== 'object' || typeof s.slot !== 'string') continue
+      const value = s.text ?? s.value ?? null
+      // Skip the 'buttons' pseudo-slot — older shape only put the
+      // primary button's LABEL in slot.text, with the URL in
+      // source_refs[0]. cta_targets[] is the canonical source.
+      if (s.slot === 'buttons') continue
+      out[s.slot] = value
+    }
+    if (Array.isArray(section.cta_targets) && section.cta_targets.length > 0) {
+      out.buttons = section.cta_targets.map((t, i) => ({
+        label: t.label,
+        url:   t.target,
+        kind:  (i === 0 ? 'primary' : 'secondary') as 'primary' | 'secondary',
+      }))
+    }
+    return out
+  }
+  return {}
 }
 
 interface ManifestEntry {
@@ -575,6 +642,11 @@ export default async function handler(req: any, res: any) {
       const cs = critiqueSections.find(c => c.section_intent_id === intentId) ?? critiqueSections[i] ?? null
 
       const templateKey = ds.template_key ?? os?.template_key
+      // Normalize once per section. Reading ds.slot_values directly
+      // would miss shapes #2 (field_values) and #3 (slots[]), bricking
+      // any non-audit-branch project.
+      const normalizedSlots = normalizeCoworkSlotValues(ds)
+
       if (!templateKey) {
         // Section has no template — flag and skip web_section creation
         // for this row (cowork emitted a malformed section).
@@ -585,7 +657,7 @@ export default async function handler(req: any, res: any) {
           template_key: null,
           gaps: ['section_emitted_with_no_template_key'],
           root_cause_hypothesis: 'cowork audit SKILL emitted a section without template_key; tighten SKILL emission contract',
-          preserved_content: ds.slot_values ?? {},
+          preserved_content: normalizedSlots,
         })
         continue
       }
@@ -598,13 +670,13 @@ export default async function handler(req: any, res: any) {
           template_key: templateKey,
           gaps: [`template_key '${templateKey}' not in canonical manifest`],
           root_cause_hypothesis: 'cowork audit SKILL picked a template_key not in canonical-templates v2.0.0; SKILL prompt + manifest are out of sync',
-          preserved_content: ds.slot_values ?? {},
+          preserved_content: normalizedSlots,
         })
         continue
       }
 
       // Translator call — never throws
-      const bind = composeFieldValuesForBrixies(ds.slot_values ?? {}, entry)
+      const bind = composeFieldValuesForBrixies(normalizedSlots, entry)
 
       // SPLIT marker (audit-branch overflow)
       const splitFrom = (os?._meta?.split_from as string | undefined) ?? (ds._meta?.split_from as string | undefined) ?? null
@@ -691,8 +763,11 @@ export default async function handler(req: any, res: any) {
         web_page_id:         pageId,
         content_template_id: entry.template_id,
         field_values:        bind.field_values,
-        cowork_slot_values:  ds.slot_values ?? {},        // BIT-FOR-BIT durable
-        source_field_values: ds.slot_values ?? {},        // for the existing variant-swap engine
+        // cowork_slot_values is the BIT-FOR-BIT durable record + the
+        // input the variant-swap engine reads. Use the normalized dict
+        // so a future re-bind doesn't have to re-detect the shape.
+        cowork_slot_values:  normalizedSlots,
+        source_field_values: normalizedSlots,
         cowork_section_meta: sectionMeta,
         sort_order:          i,
         content_status:      'draft',
@@ -717,7 +792,7 @@ export default async function handler(req: any, res: any) {
           template_id:            entry.template_id,
           gaps:                   bind.gaps,
           root_cause_hypothesis:  inferRootCause(bind.gaps, entry),
-          preserved_content:      ds.slot_values ?? {},
+          preserved_content:      normalizedSlots,
         })
       }
     }
