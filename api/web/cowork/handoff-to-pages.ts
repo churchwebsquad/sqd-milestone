@@ -527,12 +527,37 @@ function composeFromCoworkAliasMap(
   if (Array.isArray(rawItems) && rawItems.length > 0) {
     const items = rawItems as Array<Record<string, unknown>>
     if (!map.items) {
-      gaps.push({
-        kind: 'uniform_slot_not_supported_by_template',
-        severity: 'blocker',
-        detail: `cowork emitted ${items.length} item(s) but template '${brixies.id}' (key '${templateKey}') has no items group in its alias map. Pick a template whose Brixies schema has a cards/items group.`,
-        slot: 'items',
-      })
+      // No items group on this template. Recover by folding the items
+      // into the body as a definition-list-style HTML fragment so the
+      // content survives the bind. This is the Arvada plan-a-visit/s2
+      // case: manifest picked content_image_text_b for a section that
+      // cowork emitted as paragraph + cards.
+      if (map.body) {
+        const folded = items.map(it => {
+          const enriched = splitConflatedItem(it)
+          const h = String(enriched.item_heading ?? enriched.heading ?? enriched.title ?? '').trim()
+          const b = String(enriched.item_body ?? enriched.body ?? enriched.description ?? '').trim()
+          const bodyHtml = b ? (isHtmlAlready(b) ? b : ensureHtml(b)) : ''
+          if (h && bodyHtml) return `<p><strong>${escapeHtml(h)}</strong></p>\n${bodyHtml}`
+          if (h)             return `<p><strong>${escapeHtml(h)}</strong></p>`
+          return bodyHtml
+        }).filter(Boolean).join('\n')
+        const existingBody = typeof fv[map.body] === 'string' ? fv[map.body] as string : ''
+        fv[map.body] = existingBody ? `${existingBody}\n${folded}` : folded
+        gaps.push({
+          kind: 'items_folded_into_body',
+          severity: 'warning',
+          detail: `Template '${brixies.id}' has no items group; folded ${items.length} item(s) into the body field. Consider repointing the manifest to a template with a cards group.`,
+          slot: 'items',
+        })
+      } else {
+        gaps.push({
+          kind: 'uniform_slot_not_supported_by_template',
+          severity: 'blocker',
+          detail: `cowork emitted ${items.length} item(s) but template '${brixies.id}' (key '${templateKey}') has neither an items group nor a body field to fold into. Pick a template whose Brixies schema has a cards/items group.`,
+          slot: 'items',
+        })
+      }
       droppedContent.items = items
     } else {
       const composeRow = (it: Record<string, unknown>): Record<string, unknown> => {
@@ -633,14 +658,9 @@ function composeFromCoworkAliasMap(
         } else {
           fv[map.items.field] = packed
         }
-        if (typeof map.items.max_items === 'number' && items.length > map.items.max_items) {
-          gaps.push({
-            kind: 'items_overflow',
-            severity: 'warning',
-            detail: `${items.length} items emitted; template '${brixies.id}' caps at ${map.items.max_items} (extras still rendered)`,
-            slot: 'items',
-          })
-        }
+        // No overflow warning. Bricks repeater groups have no native
+        // cap; `max_items` in the alias map reflects the template's
+        // SEED count, not a hard limit. Items bind regardless.
       } else if (map.items.split) {
         // Distribute across two parallel groups (accordion_left + _right).
         const groupA: Array<Record<string, unknown>> = []
@@ -658,16 +678,7 @@ function composeFromCoworkAliasMap(
       } else {
         fv[map.items.field] = composedRows
       }
-
-      // Overflow surface (informational)
-      if (typeof map.items.max_items === 'number' && items.length > map.items.max_items) {
-        gaps.push({
-          kind: 'items_overflow',
-          severity: 'warning',
-          detail: `${items.length} items emitted; template '${brixies.id}' caps at ${map.items.max_items} (extras still rendered)`,
-          slot: 'items',
-        })
-      }
+      // No items_overflow warning — Bricks repeaters have no hard cap.
     }
   }
 
@@ -717,8 +728,11 @@ function composeFromCoworkAliasMap(
     }
   }
 
+  // Warnings are informational (content still bound, e.g. items folded
+  // into body, items count exceeds the template's default repeater
+  // count). Only blockers downgrade bind_quality.
   const bind_quality: 'perfect' | 'partial' =
-    gaps.length === 0 ? 'perfect' : 'partial'
+    gaps.some(g => g.severity === 'blocker') ? 'partial' : 'perfect'
 
   return {
     field_values: fv,
@@ -958,17 +972,7 @@ function composeFieldValuesForBrixies(
         })
       }
 
-      // Item count vs template cap
-      const itemsSpec = entry.cowork_writable_slots?.items
-      const maxItems = itemsSpec?.max_items
-      if (typeof maxItems === 'number' && coworkItems.length > maxItems) {
-        gaps.push({
-          kind: 'items_overflow',
-          severity: 'warning',
-          detail: `${coworkItems.length} items emitted; template '${entry.template_id}' caps at ${maxItems} (extras still rendered)`,
-          slot: 'items',
-        })
-      }
+      // No items_overflow warning here either (legacy manifest path).
     }
   }
 
@@ -986,8 +990,11 @@ function composeFieldValuesForBrixies(
     }
   }
 
+  // Warnings are informational (content still bound, e.g. items folded
+  // into body, items count exceeds the template's default repeater
+  // count). Only blockers downgrade bind_quality.
   const bind_quality: 'perfect' | 'partial' =
-    gaps.length === 0 ? 'perfect' : 'partial'
+    gaps.some(g => g.severity === 'blocker') ? 'partial' : 'perfect'
 
   return {
     field_values: fv,
@@ -1511,8 +1518,8 @@ function inferRootCause(
   if (gaps.some(g => g.kind === 'button_missing_url' || g.kind === 'button_missing_label')) {
     return 'Cowork emitted button with missing label or url (often a [NEEDS INPUT] placeholder). Tighten SKILL: require both subfields on every button.'
   }
-  if (gaps.some(g => g.kind === 'items_overflow')) {
-    return `Item count exceeds template '${entry.template_id}' cap. SKILL should SPLIT the section across multiple template instances OR SUBSTITUTE a higher-cap template.`
+  if (gaps.some(g => g.kind === 'items_folded_into_body')) {
+    return `Cowork emitted cards but the manifest routed this section to a template with no items group. Items were folded into the body as a fallback (no content lost). For best fidelity, change the manifest to pick a cards-bearing template for the SKILL archetype that produced this section.`
   }
   return 'See gaps[] for detail. Investigate per-template binding logic.'
 }
