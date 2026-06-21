@@ -252,6 +252,29 @@ export function CrawlWorkspace({ project }: Props) {
     setFiring(false)
   }
 
+  /** Crawl more pages: keep the existing crawl_results, expand with
+   *  new pages that weren't grabbed before. Excludes every URL the
+   *  prior crawl already grabbed + any path prefix with 2+ pages
+   *  (so post-style enumerations like /kids-resources/* don't eat
+   *  the new cap again). Result appends to the existing job row. */
+  const fireExpand = async () => {
+    if (!confirm('Crawl more pages? The existing crawl stays put; this expansion adds new pages while excluding anything already grabbed (and post-style repeat slugs).')) return
+    setFiring(true)
+    setError(null)
+    const { data, error: err } = await supabase.rpc('web_crawl_expand', {
+      p_web_project_id: project.id,
+    })
+    if (err) {
+      setError(err.message)
+    } else if (data && !(data as { ok: boolean }).ok) {
+      setError((data as { error: string }).error)
+    } else {
+      await load()
+      setWatching(true)
+    }
+    setFiring(false)
+  }
+
   if (loading) {
     return (
       <div className="min-h-[200px] grid place-items-center text-wm-text-muted">
@@ -581,16 +604,27 @@ export function CrawlWorkspace({ project }: Props) {
             <h2 className="text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle">
               Crawl runs ({jobs.length})
             </h2>
-            <button
-              type="button"
-              onClick={fireRecrawl}
-              disabled={firing}
-              className="inline-flex items-center gap-1.5 rounded-md border border-wm-border bg-wm-bg-elevated text-wm-text text-[11px] font-semibold px-2.5 py-1 hover:border-wm-accent hover:text-wm-accent transition-colors disabled:opacity-60"
-              title="Wipe the current intent + start a fresh crawl. Existing runs stay in history."
-            >
-              {firing ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-              Re-crawl
-            </button>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={fireExpand}
+                disabled={firing}
+                className="inline-flex items-center gap-1.5 rounded-md border border-wm-accent bg-wm-accent-bg text-wm-accent text-[11px] font-semibold px-2.5 py-1 hover:bg-wm-accent hover:text-white transition-colors disabled:opacity-60"
+                title="Add more pages to the current crawl. Skips URLs already grabbed + post-style repeat slugs (e.g. /kids-resources/*). Keeps the existing inventory."
+              >
+                {firing ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                Crawl more pages
+              </button>
+              <button
+                type="button"
+                onClick={fireRecrawl}
+                disabled={firing}
+                className="inline-flex items-center gap-1.5 rounded-md border border-wm-border bg-wm-bg-elevated text-wm-text-muted text-[11px] font-semibold px-2.5 py-1 hover:border-wm-warning hover:text-wm-warning transition-colors disabled:opacity-60"
+                title="Wipe the current crawl + start fresh. The existing inventory is replaced — use 'Crawl more pages' instead if you want to keep it."
+              >
+                Re-crawl from scratch
+              </button>
+            </div>
           </div>
           {jobs.map(job => {
             // Sub-page chip: distinguish partner-triggered crawls

@@ -44,22 +44,87 @@ Deno.serve(async (req) => {
     const payload = await req.json();
     const maxPages = payload.max_pages ?? 25;
     const maxDepth = payload.max_depth ?? 2;
-    const excludePaths = Array.isArray(payload.exclude_paths) && payload.exclude_paths.length > 0
+    let excludePaths = Array.isArray(payload.exclude_paths) && payload.exclude_paths.length > 0
       ? payload.exclude_paths : DEFAULT_EXCLUDE_PATHS;
 
     if (!payload.project_id || !payload.target_url) {
       return json({ error: "Missing required fields" }, 400);
     }
 
-    const { data: crawlJob, error: crawlJobError } = await supabase
-      .schema("web-hub").from("crawl_jobs")
-      .insert({
-        project_id: payload.project_id, target_url: payload.target_url,
-        status: "in_progress", pages_crawled: 0,
-        max_pages: maxPages, max_depth: maxDepth,
-        started_at: new Date().toISOString(),
-      }).select().single();
-    if (crawlJobError) return json({ error: "Failed to create crawl job", details: crawlJobError.message }, 500);
+    // EXPAND mode — append new pages to an existing crawl job instead
+    // of creating a new one. Caller passes expand_into_job_id; we read
+    // its crawl_results, derive exclude rules from the URLs already
+    // grabbed, and run a fresh crawl whose pages get appended to that
+    // job. Use case: an initial crawl filled its page cap with post
+    // detail pages (kids-resources/*, mbs-messages/*) and missed core
+    // pages (staff, volunteers). Expansion mode lets the strategist
+    // pick up the missing pages without losing the existing data.
+    let existingJob = null;
+    if (typeof payload.expand_into_job_id === "string") {
+      const { data: ej, error: ejErr } = await supabase
+        .schema("web-hub").from("crawl_jobs")
+        .select("id, project_id, target_url, status, crawl_results, max_pages")
+        .eq("id", payload.expand_into_job_id).maybeSingle();
+      if (ejErr || !ej) return json({ error: "expand_into_job not found", details: ejErr?.message }, 404);
+      if (ej.status !== "complete") {
+        return json({ error: "expand_into_job is not complete — wait for the prior crawl first" }, 409);
+      }
+      existingJob = ej;
+      // Build excludePaths from the existing crawl's URLs + heavy
+      // prefixes. Every URL already grabbed becomes an exact-match
+      // regex so Firecrawl skips it. Every path prefix that has ≥2
+      // pages becomes a wildcard exclude so post-style enumerations
+      // (e.g. /kids-resources/<slug>) don't keep eating the cap.
+      const existingPages = Array.isArray(ej.crawl_results) ? ej.crawl_results : [];
+      const exactPaths = new Set();
+      const prefixCounts = new Map();
+      for (const p of existingPages) {
+        const u = p?.url || p?.metadata?.sourceURL || "";
+        let path = "";
+        try { path = new URL(u).pathname.replace(/\/$/, ""); } catch { continue; }
+        if (path) exactPaths.add(path);
+        const segs = path.split("/").filter(Boolean);
+        if (segs.length >= 1) {
+          const first = "/" + segs[0];
+          prefixCounts.set(first, (prefixCounts.get(first) || 0) + 1);
+        }
+      }
+      const exactExcludes = [...exactPaths].map(p => `^${escapeRegex(p)}/?$`);
+      const prefixExcludes = [];
+      for (const [prefix, count] of prefixCounts.entries()) {
+        if (count >= 2) prefixExcludes.push(`^${escapeRegex(prefix)}/[^/]+/?$`);
+      }
+      excludePaths = [...new Set([...excludePaths, ...exactExcludes, ...prefixExcludes])];
+    }
+
+    // Either reuse the existing crawl job (expand mode) or insert a new one.
+    let crawlJob;
+    if (existingJob) {
+      // Bump max_pages on the existing job so the UI shows the
+      // new ceiling. The new crawl's `limit` is whatever the
+      // caller passed (default 25); the prior pages are preserved.
+      const { data: updated, error: upErr } = await supabase
+        .schema("web-hub").from("crawl_jobs")
+        .update({
+          status: "in_progress",
+          max_pages: (existingJob.max_pages ?? 25) + maxPages,
+          error_message: null,
+        })
+        .eq("id", existingJob.id).select().single();
+      if (upErr) return json({ error: "Failed to mark expand job in_progress", details: upErr.message }, 500);
+      crawlJob = updated;
+    } else {
+      const { data: inserted, error: insErr } = await supabase
+        .schema("web-hub").from("crawl_jobs")
+        .insert({
+          project_id: payload.project_id, target_url: payload.target_url,
+          status: "in_progress", pages_crawled: 0,
+          max_pages: maxPages, max_depth: maxDepth,
+          started_at: new Date().toISOString(),
+        }).select().single();
+      if (insErr) return json({ error: "Failed to create crawl job", details: insErr.message }, 500);
+      crawlJob = inserted;
+    }
 
     const fireCrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY");
     if (!fireCrawlApiKey) {
@@ -305,9 +370,23 @@ Deno.serve(async (req) => {
             stillFailedAfterStealth.length > 0 && `${stillFailedAfterStealth.length} pages still unreachable after stealth retry.`,
             stillFailedAfterStealth.length > 0 && `Affected URLs (first 3): ${stillFailedAfterStealth.slice(0, 3).map(f => f.url).join(', ')}`,
           ].filter(Boolean).join(' ');
+      // Expand mode merges new pages with the existing crawl_results
+      // (dedupe by URL — Firecrawl shouldn't return excluded URLs,
+      // but belt-and-suspenders). Fresh-crawl mode just writes the
+      // new array directly.
+      let mergedItems = contentItems;
+      if (existingJob) {
+        const priorPages = Array.isArray(existingJob.crawl_results) ? existingJob.crawl_results : [];
+        const seenUrls = new Set(priorPages.map(p => p?.url || p?.metadata?.sourceURL).filter(Boolean));
+        const additions = contentItems.filter(p => {
+          const u = p?.url || p?.metadata?.sourceURL;
+          return u && !seenUrls.has(u);
+        });
+        mergedItems = [...priorPages, ...additions];
+      }
       await supabase.schema("web-hub").from("crawl_jobs").update({
-        status: "complete", pages_crawled: contentItems.length,
-        completed_at: new Date().toISOString(), crawl_results: contentItems, duration_seconds: durSec,
+        status: "complete", pages_crawled: mergedItems.length,
+        completed_at: new Date().toISOString(), crawl_results: mergedItems, duration_seconds: durSec,
         error_message: errorMessage,
       }).eq("id", crawlJob.id);
 
@@ -353,6 +432,12 @@ Deno.serve(async (req) => {
 
 function json(body, status) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+// Escape regex metacharacters in a string so it can be used as a
+// literal-match prefix inside Firecrawl's excludePaths (regex strings).
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // Crawl-time snippet extraction. Limited to high-confidence URL-pattern

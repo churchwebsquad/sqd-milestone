@@ -310,8 +310,23 @@ function splitConflatedItem(it: Record<string, unknown>): Record<string, unknown
     // hyphenated names ("Mary-Kate") or punctuation-heavy content.
     const m = rawH.match(/^(.{2,80}?)\s+[-–—|]\s+(.{2,140})$/)
     if (m && m[1].trim() && m[2].trim()) {
-      out.item_heading = m[1].trim()
-      out.item_meta    = m[2].trim()
+      const left  = m[1].trim()
+      const right = m[2].trim()
+      // Refuse to split when the dash is INSIDE a parenthetical run:
+      // `Real Life Kids (Birth - 5th Grade)` would otherwise lose the
+      // closing paren. Count unbalanced parens on the left half;
+      // if there's an unclosed `(`, the dash is inside an aside.
+      const opens = (left.match(/\(/g) ?? []).length
+      const closes = (left.match(/\)/g) ?? []).length
+      const insideParen = opens > closes
+      // Also refuse when the right half has parens or slashes — a
+      // "role" segment (Lead Pastor, Worship Director) doesn't carry
+      // those; if it does, the dash is probably mid-clause prose.
+      const rightLooksLikeRole = !/[()/]/.test(right)
+      if (!insideParen && rightLooksLikeRole) {
+        out.item_heading = left
+        out.item_meta    = right
+      }
     }
   }
 
