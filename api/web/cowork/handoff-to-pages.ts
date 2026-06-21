@@ -623,44 +623,42 @@ function composeFromCoworkAliasMap(
 
       const composedRows = items.map(composeRow)
 
-      // Nested-group row packing. When the outer group expects each
-      // row to contain MULTIPLE inner rows (team-section-14:
-      // row_grid → card_team default_count=3), pack the produced
-      // rows into chunks. Each chunk becomes one outer row carrying
-      // a card_team[] array of N items. Without this, 8 staff
-      // produce 8 single-item rows instead of 3 packed rows.
-      if (map.items.inner_group_field && (map.items.inner_group_default_count ?? 1) > 1) {
+      // Nested-group packing. When the outer group is a wrapper
+      // (team-section-14: row_grid containing card_team), put ALL
+      // items into ONE outer row's inner array and let Bricks' grid
+      // CSS handle responsive wrapping. The previous behavior chunked
+      // by `inner_group_default_count` (the template's seed count),
+      // which produced "3 + 3 + 1" team rows for a 7-person team —
+      // never what the strategist wants. Bricks repeaters have no
+      // native cap; treat the seed count as a default, not a rule.
+      if (map.items.inner_group_field) {
         const innerField = map.items.inner_group_field
-        const chunkSize  = map.items.inner_group_default_count!
         const flatRows = composedRows.map(r => {
           // composeRow already wrapped each row in { [innerField]: [row] }.
-          // Unwrap so we can re-chunk.
+          // Unwrap so we can re-pack.
           const inner = (r as Record<string, unknown>)[innerField]
           return Array.isArray(inner) ? (inner[0] as Record<string, unknown>) : r
         })
-        const packed: Array<Record<string, unknown>> = []
-        for (let i = 0; i < flatRows.length; i += chunkSize) {
-          packed.push({ [innerField]: flatRows.slice(i, i + chunkSize) })
-        }
+        const packed: Array<Record<string, unknown>> = [{ [innerField]: flatRows }]
         if (map.items.split) {
+          // Splits are uncommon with nested groups, but preserve the
+          // contract: the inner array gets halved/alternated across
+          // the two outer groups.
+          const [aKey, bKey] = map.items.split.groups
           const groupA: Array<Record<string, unknown>> = []
           const groupB: Array<Record<string, unknown>> = []
-          const [aKey, bKey] = map.items.split.groups
           if (map.items.split.rule === 'alternate') {
-            packed.forEach((r, idx) => { (idx % 2 === 0 ? groupA : groupB).push(r) })
+            flatRows.forEach((r, idx) => { (idx % 2 === 0 ? groupA : groupB).push(r) })
           } else {
-            const half = Math.ceil(packed.length / 2)
-            packed.slice(0, half).forEach(r => groupA.push(r))
-            packed.slice(half).forEach(r => groupB.push(r))
+            const half = Math.ceil(flatRows.length / 2)
+            flatRows.slice(0, half).forEach(r => groupA.push(r))
+            flatRows.slice(half).forEach(r => groupB.push(r))
           }
-          fv[aKey] = groupA
-          fv[bKey] = groupB
+          fv[aKey] = [{ [innerField]: groupA }]
+          fv[bKey] = [{ [innerField]: groupB }]
         } else {
           fv[map.items.field] = packed
         }
-        // No overflow warning. Bricks repeater groups have no native
-        // cap; `max_items` in the alias map reflects the template's
-        // SEED count, not a hard limit. Items bind regardless.
       } else if (map.items.split) {
         // Distribute across two parallel groups (accordion_left + _right).
         const groupA: Array<Record<string, unknown>> = []
