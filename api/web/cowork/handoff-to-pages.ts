@@ -173,6 +173,7 @@ interface ItemsAlias {
   /** When the row content lives nested inside another group
    *  (team-section-14: row_grid → card_team subfields). */
   inner_group_field?: string
+  inner_group_default_count?: number
 }
 
 interface CoworkAliasMap {
@@ -448,7 +449,50 @@ function composeFromCoworkAliasMap(
 
       const composedRows = items.map(composeRow)
 
-      if (map.items.split) {
+      // Nested-group row packing. When the outer group expects each
+      // row to contain MULTIPLE inner rows (team-section-14:
+      // row_grid → card_team default_count=3), pack the produced
+      // rows into chunks. Each chunk becomes one outer row carrying
+      // a card_team[] array of N items. Without this, 8 staff
+      // produce 8 single-item rows instead of 3 packed rows.
+      if (map.items.inner_group_field && (map.items.inner_group_default_count ?? 1) > 1) {
+        const innerField = map.items.inner_group_field
+        const chunkSize  = map.items.inner_group_default_count!
+        const flatRows = composedRows.map(r => {
+          // composeRow already wrapped each row in { [innerField]: [row] }.
+          // Unwrap so we can re-chunk.
+          const inner = (r as Record<string, unknown>)[innerField]
+          return Array.isArray(inner) ? (inner[0] as Record<string, unknown>) : r
+        })
+        const packed: Array<Record<string, unknown>> = []
+        for (let i = 0; i < flatRows.length; i += chunkSize) {
+          packed.push({ [innerField]: flatRows.slice(i, i + chunkSize) })
+        }
+        if (map.items.split) {
+          const groupA: Array<Record<string, unknown>> = []
+          const groupB: Array<Record<string, unknown>> = []
+          const [aKey, bKey] = map.items.split.groups
+          if (map.items.split.rule === 'alternate') {
+            packed.forEach((r, idx) => { (idx % 2 === 0 ? groupA : groupB).push(r) })
+          } else {
+            const half = Math.ceil(packed.length / 2)
+            packed.slice(0, half).forEach(r => groupA.push(r))
+            packed.slice(half).forEach(r => groupB.push(r))
+          }
+          fv[aKey] = groupA
+          fv[bKey] = groupB
+        } else {
+          fv[map.items.field] = packed
+        }
+        if (typeof map.items.max_items === 'number' && items.length > map.items.max_items) {
+          gaps.push({
+            kind: 'items_overflow',
+            severity: 'warning',
+            detail: `${items.length} items emitted; template '${brixies.id}' caps at ${map.items.max_items} (extras still rendered)`,
+            slot: 'items',
+          })
+        }
+      } else if (map.items.split) {
         // Distribute across two parallel groups (accordion_left + _right).
         const groupA: Array<Record<string, unknown>> = []
         const groupB: Array<Record<string, unknown>> = []

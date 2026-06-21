@@ -94,6 +94,11 @@ interface ItemsAlias {
    *  team-section-14: row_grid → card_team subfields), the bind has
    *  to wrap each row in the inner group's name before writing. */
   inner_group_field?: string
+  /** How many items pack into each row when inner_group_field is
+   *  set. Drawn from the inner group's `default_count`. team-section-14
+   *  has card_team.default_count=3 so 8 staff become 3 rows
+   *  ([3, 3, 2]). When absent, each item is its own row. */
+  inner_group_default_count?: number
 }
 
 interface CoworkAliasMap {
@@ -315,12 +320,14 @@ function deriveAliasMap(
       // the inner_group_field at bind time.
       let workingInner = inner
       let inner_group_field: string | undefined
+      let inner_group_default_count: number | undefined
       const innerGroups = inner.filter(s => s.kind === 'group')
       const innerNonDecorativeSlots = inner.filter(s =>
         s.kind === 'slot' && s.type !== 'image' && s.type !== 'cta',
       )
       if (innerGroups.length === 1 && innerNonDecorativeSlots.length === 0) {
         inner_group_field = innerGroups[0].key
+        inner_group_default_count = innerGroups[0].default_count
         workingInner = innerGroups[0].item_schema ?? []
       }
 
@@ -332,6 +339,7 @@ function deriveAliasMap(
           referenced_template_id: f.referenced_template_id,
           max_items: f.default_count,
           ...(inner_group_field ? { inner_group_field } : {}),
+          ...(inner_group_default_count ? { inner_group_default_count } : {}),
         }
         break
       }
