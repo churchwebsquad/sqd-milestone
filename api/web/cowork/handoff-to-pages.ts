@@ -73,6 +73,11 @@ interface CoworkDraftSection {
   // Auxiliary fields older drafts use to express buttons/items
   // outside the main slot dict.
   cta_targets?:       Array<{ label: string; target: string }>
+  /** Per-card array emitted as a root-level sibling by cowork's
+   *  feature_card_carousel_proxy / cards_with_cta archetypes. Each
+   *  entry uses {name, description, cta_label, cta_target} — the
+   *  normalizer remaps them to canonical item subfields. */
+  build_cards?:       Array<Record<string, unknown>>
   atoms_used?:        string[]
   facts_used?:        string[]
   crawl_topics_used?: string[]
@@ -98,6 +103,30 @@ interface CoworkDraftSection {
  *  Without this normalizer the handoff only read shape #1, which
  *  meant from-scratch projects bound to empty templates while
  *  audit-branch projects worked — a silent visual failure. */
+/** Remap a `build_cards` entry's field names to the canonical item
+ *  subfields the binder expects. Cowork's feature_card_carousel_proxy
+ *  archetype emits `{name, description, cta_label, cta_target}`; the
+ *  binder reads `item_heading / item_body / item_cta_label / item_cta_url`.
+ *  Without this remap, name + cta_target are silently dropped during
+ *  bind, which is how Arvada Missions lost Compassion + Convoy
+ *  (heading missing, URL missing — only description + cta_label landed). */
+function remapBuildCard(card: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...card }
+  if (out.name && !out.item_heading && !out.heading && !out.title) {
+    out.item_heading = out.name
+  }
+  if (out.description && !out.item_body && !out.body) {
+    out.item_body = out.description
+  }
+  if (out.cta_label && !out.item_cta_label) {
+    out.item_cta_label = out.cta_label
+  }
+  if (out.cta_target && !out.item_cta_url && !out.cta_url) {
+    out.item_cta_url = out.cta_target
+  }
+  return out
+}
+
 function normalizeCoworkSlotValues(section: CoworkDraftSection): Record<string, unknown> {
   const raw: Record<string, unknown> = (() => {
     if (section.slot_values && typeof section.slot_values === 'object' && !Array.isArray(section.slot_values)) {
@@ -147,6 +176,16 @@ function normalizeCoworkSlotValues(section: CoworkDraftSection): Record<string, 
           out[name] = compact
         }
       }
+      // build_cards[] is the carousel-proxy archetype's sibling array
+      // for per-card content. Same shape cowork emits in slot_values /
+      // field_values, but as a root-level sibling here. Surface as
+      // items[] so the binder sees them.
+      if (Array.isArray(section.build_cards) && section.build_cards.length > 0 && !out.items) {
+        out.items = section.build_cards.map(c =>
+          remapBuildCard((c && typeof c === 'object') ? c as Record<string, unknown> : { item_body: String(c ?? '') }),
+        )
+      }
+
       // cta_targets[] carries every CTA the section author authored.
       // Some templates use them as TOP-LEVEL buttons; others use them
       // as per-item CTAs (one per card). Match by count:
@@ -189,8 +228,12 @@ function normalizeCoworkSlotValues(section: CoworkDraftSection): Record<string, 
   // persisted cowork_slot_values + the Rich Companion display the
   // canonical names. Without this, Rich Companion's ITEMS panel
   // shows count=0 because the data lives under `build_cards`.
+  // Also remap each card's field names so the binder finds heading
+  // and URL on entries that came via slot_values / field_values.
   if (Array.isArray(raw.build_cards) && !raw.items) {
-    raw.items = raw.build_cards
+    raw.items = (raw.build_cards as Array<unknown>).map(c =>
+      remapBuildCard((c && typeof c === 'object') ? c as Record<string, unknown> : { item_body: String(c ?? '') }),
+    )
     delete raw.build_cards
   }
   return raw
@@ -690,6 +733,19 @@ function composeFromCoworkAliasMap(
       }
       // No items_overflow warning — Bricks repeaters have no hard cap.
     }
+  } else if (map.items) {
+    // Template declares an items group but cowork emitted nothing.
+    // Without this, bind_quality reads "perfect" on a section whose
+    // entire card deck went missing (Arvada Missions partners). Flag
+    // it as a warning so the strategist can investigate upstream
+    // (typically the cowork SKILL chose an archetype that didn't
+    // emit build_cards, or the cowork output dropped them).
+    gaps.push({
+      kind: 'items_expected_but_none_emitted',
+      severity: 'warning',
+      detail: `Template '${brixies.id}' has an items group but cowork emitted no items. Check the cowork draft for this section — its archetype likely emits cards under build_cards/slots[] but none made it into cowork_slot_values.`,
+      slot: 'items',
+    })
   }
 
   // ── Buttons ────────────────────────────────────────────────────
