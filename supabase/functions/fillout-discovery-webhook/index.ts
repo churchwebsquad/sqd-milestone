@@ -59,12 +59,34 @@ Deno.serve(async (req) => {
     const payload = await req.json();
     const flat = normalizePayload(payload);
 
+    // Reject empty payloads — between 2026-05-30 and 2026-06-19, the
+    // webhook silently inserted 11 stub rows with raw_payload={} and
+    // every column NULL because normalizePayload returned an empty
+    // object (FillOut sent a shape neither branch recognized, OR sent
+    // an empty body). The partner showed "no submission" because the
+    // member couldn't be resolved on a record with no contact data.
+    // Now we log the raw request body so the shape is visible, and
+    // refuse to insert when there's nothing to store.
+    if (!flat || Object.keys(flat).length === 0) {
+      console.warn(`[FillOut Webhook] Empty payload — refusing to insert. Raw body:`, JSON.stringify(payload).slice(0, 4000));
+      return j({ ok: false, reason: "empty_payload", note: "Payload normalization yielded no fields; see function logs for the raw body shape." }, 422);
+    }
+
     // Log unmapped keys to make schema drift visible. Anything not in
     // KEY_MAP lands in raw_payload but doesn't get a typed column.
     const mapped = mapToColumns(flat);
     const unmappedKeys = Object.keys(flat).filter(k => !(k in KEY_MAP) && !SKIP_KEYS.has(k));
     if (unmappedKeys.length > 0) {
       console.warn(`[FillOut Webhook] Unmapped keys (will land only in raw_payload):`, unmappedKeys);
+    }
+
+    // Reject when normalization produced fields but NONE map to typed
+    // columns — that's schema drift (form labels changed). The row
+    // would still get raw_payload but member resolution would fail
+    // because no primary_contact_email / Church Name would be present.
+    if (Object.keys(mapped).length === 0) {
+      console.warn(`[FillOut Webhook] No KEY_MAP matches. Flat keys:`, Object.keys(flat).slice(0, 50));
+      return j({ ok: false, reason: "no_mapped_fields", flat_keys: Object.keys(flat).slice(0, 50) }, 422);
     }
 
     // Try to link to a member.
