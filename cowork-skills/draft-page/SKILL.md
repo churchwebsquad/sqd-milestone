@@ -395,6 +395,25 @@ of these failed validation.** They were just absent.
      *  button slot when supported, drops them when not (and the
      *  audit picks a template that supports them when present).
      *
+     *  IMPORTANT — DO NOT CONFLATE FIELDS.
+     *  Each subfield is its own slot. Never pack multiple slots into
+     *  one string. Specifically:
+     *   - Staff rosters: emit `item_heading: "Thad Harless"` +
+     *     `item_meta: "Lead Pastor"`. NEVER pack as
+     *     `item_heading: "Thad Harless - Lead Pastor"` — the renderer
+     *     shows name and title in separate slots; conflating leaves
+     *     one slot empty and the section reads broken.
+     *   - Mission-triad / values: emit
+     *     `item_heading: "Connect in Love"` +
+     *     `item_body: "Building genuine relationships..."`.
+     *     NEVER pack as `item_body: "Connect in Love: Building..."`.
+     *   - Accordion FAQ: emit `item_heading: "<question>"` +
+     *     `item_body: "<answer>"`. NEVER emit just an item_body that
+     *     starts with the question.
+     *  The handoff has a rescue-splitter for common delimiters
+     *  (` - `, ` – `, ` | `, `: `) but it's a fallback for legacy
+     *  drafts. New drafts MUST emit clean splits.
+     *
      *  buttons[] subfields:
      *    { label, url, kind?: 'primary' | 'secondary' }
      *  Capture EVERY button the section calls for, not just one.

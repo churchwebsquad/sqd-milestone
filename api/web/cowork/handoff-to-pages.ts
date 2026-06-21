@@ -201,6 +201,70 @@ function isHtmlAlready(value: unknown): boolean {
   return /^<(p|ul|ol|li|h\d|div|blockquote|figure|table|section|article)[\s>]/i.test(value.trim())
 }
 
+/** Rescue-split for items where cowork conflated multiple fields
+ *  into a single string. Returns a NEW object with the split applied;
+ *  the input is untouched.
+ *
+ *  Two patterns survive this in real cowork output:
+ *    1. `item_heading: "Thad Harless - Lead Pastor"`  — name + role
+ *       split by ` - ` / ` – ` / ` | `. The right side becomes
+ *       `item_meta` (the title/role subfield in feature_team templates).
+ *    2. `item_body: "Connect in Love: Building genuine relationships..."`
+ *       — heading + prose split by the FIRST `: ` when the prefix is
+ *       under ~50 chars (looks like a label, not a sentence with a
+ *       random colon mid-thought).
+ *
+ *  Splits ONLY when the destination field would otherwise be empty —
+ *  if cowork emitted both heading + body cleanly, we never touch them.
+ *  Also skip when the candidate split would leave one side empty.
+ */
+function splitConflatedItem(it: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...it }
+  const rawH = typeof out.item_heading === 'string' ? out.item_heading
+             : typeof out.heading === 'string'      ? out.heading
+             : typeof out.title === 'string'        ? out.title
+             : ''
+  const rawB = typeof out.item_body === 'string' ? out.item_body
+             : typeof out.body === 'string'      ? out.body
+             : typeof out.description === 'string' ? out.description
+             : ''
+  const rawM = typeof out.item_meta === 'string' ? out.item_meta
+             : typeof out.meta === 'string'      ? out.meta
+             : ''
+
+  // Pattern 1 — heading carries `Name - Role` and meta is empty.
+  if (rawH && !rawM) {
+    // Match ` - `, ` – `, ` — `, ` | ` — the canonical role-separator
+    // shapes. Require spaces on both sides so we don't false-split
+    // hyphenated names ("Mary-Kate") or punctuation-heavy content.
+    const m = rawH.match(/^(.{2,80}?)\s+[-–—|]\s+(.{2,140})$/)
+    if (m && m[1].trim() && m[2].trim()) {
+      out.item_heading = m[1].trim()
+      out.item_meta    = m[2].trim()
+    }
+  }
+
+  // Pattern 2 — body carries `Label: Body` and heading is empty.
+  if (rawB && !rawH) {
+    // First `: ` only. The label half must be reasonably short
+    // (<=50 chars) so we don't break a sentence whose subordinate
+    // clause happens to contain a colon.
+    const idx = rawB.indexOf(': ')
+    if (idx > 0 && idx <= 50) {
+      const left  = rawB.slice(0, idx).trim()
+      const right = rawB.slice(idx + 2).trim()
+      // Require the left side to NOT contain sentence punctuation
+      // (that's how we know it's a label, not a clause).
+      if (left && right && !/[.?!]/.test(left)) {
+        out.item_heading = left
+        out.item_body    = right
+      }
+    }
+  }
+
+  return out
+}
+
 /** The translator. Reads cowork uniform slot_values + a v2.0.0
  *  manifest entry; produces a Brixies-shaped field_values + a
  *  bind_quality verdict + gap list. NEVER throws — partial bindings
@@ -340,19 +404,27 @@ function composeFieldValuesForBrixies(
       const subM = subfields.item_meta
 
       const composeItem = (it: Record<string, unknown>): Record<string, unknown> => {
+        // Rescue split — cowork sometimes packs `Name - Role` or
+        // `Heading: Body` into ONE of item_heading / item_body, leaving
+        // the other field empty. The renderer then shows a name with
+        // a blank title underneath, which reads as broken on the
+        // partner-facing layout. Detect the common shapes and split.
+        // The rescue NEVER touches values that arrive already-split
+        // (when both item_heading + item_body are populated).
+        const enriched = splitConflatedItem(it)
         const row: Record<string, unknown> = {}
         if (subH != null) {
-          const v = it.item_heading ?? it.heading ?? it.title ?? ''
+          const v = enriched.item_heading ?? enriched.heading ?? enriched.title ?? ''
           row[subH] = String(v)
         }
         if (subB != null) {
-          const v = it.item_body ?? it.body ?? it.description ?? ''
+          const v = enriched.item_body ?? enriched.body ?? enriched.description ?? ''
           row[subB] = richtextKeys.has(subB)
             ? (isHtmlAlready(v) ? v : ensureHtml(v))
             : String(v)
         }
         if (subM != null) {
-          const v = it.item_meta ?? it.meta ?? ''
+          const v = enriched.item_meta ?? enriched.meta ?? ''
           row[subM] = String(v)
         }
         return row
