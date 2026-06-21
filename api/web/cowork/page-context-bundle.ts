@@ -127,7 +127,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // view too. Entries with no name AND no description fall out.
         .or('proposed_program_name.not.is.null,proposed_program_description.not.is.null'),
       sb.from('strategy_content_collection_attachments')
-        .select('target_path, file_name, file_path, mime_type, size_bytes, kind, uploaded_at')
+        .select('id, target_path, file_name, file_path, mime_type, size_bytes, kind, uploaded_at, parsed_at, parsed_destination, parsed_rows_count, parse_error')
         .in('session_id', ccSessionIds)
         .like('target_path', 'missing:%'),
     ])
@@ -147,13 +147,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   for (const a of attRows) {
     const tp = String(a.target_path ?? '')
     if (!tp) continue
+    // Derive a single parse_status flag so the SKILL doesn't have to
+    // join across four columns. Possible values:
+    //   parsed    — content lives in church_facts / content_atoms,
+    //               reachable via source_attachment_id (or via the
+    //               existing atoms_pool / facts_pool that this bundle
+    //               already includes).
+    //   pending   — uploaded but the ingestor hasn't run yet.
+    //   failed    — parser tried, write failed (parse_error set).
+    //   unsupported — mime not yet handled (pdf/docx/xlsx in v1).
+    //   rejected  — strategist rejected the draft rows.
+    const parsedAt          = a.parsed_at as string | null
+    const parsedDestination = a.parsed_destination as string | null
+    const parseError        = a.parse_error as string | null
+    let parseStatus: 'parsed' | 'pending' | 'failed' | 'unsupported' | 'rejected'
+    if (!parsedAt)                                                          parseStatus = 'pending'
+    else if (parseError)                                                    parseStatus = 'failed'
+    else if (parsedDestination === 'unsupported')                           parseStatus = 'unsupported'
+    else if (parsedDestination === 'rejected')                              parseStatus = 'rejected'
+    else if (parsedDestination === 'church_facts'
+          || parsedDestination === 'content_atoms')                         parseStatus = 'parsed'
+    else                                                                    parseStatus = 'failed'
     ;(attachmentsByTargetPath[tp] ??= []).push({
-      file_name:   a.file_name,
-      file_path:   a.file_path,
-      mime_type:   a.mime_type,
-      size_bytes:  a.size_bytes,
-      kind:        a.kind,
-      uploaded_at: a.uploaded_at,
+      attachment_id:      a.id,
+      file_name:          a.file_name,
+      file_path:          a.file_path,
+      mime_type:          a.mime_type,
+      size_bytes:         a.size_bytes,
+      kind:               a.kind,
+      uploaded_at:        a.uploaded_at,
+      parse_status:       parseStatus,
+      parsed_destination: parsedDestination,
+      parsed_rows_count:  a.parsed_rows_count,
+      parse_error:        parseError,
     })
   }
 
@@ -175,6 +201,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? m.proposed_program_description
         : typeof m.client_note === 'string' ? m.client_note : null
       if (!name && !description) return null   // soft-deleted; skip
+      const attachments = attachmentsByTargetPath[path] ?? []
+      // Summary roll-up: lets the SKILL branch in one line without
+      // re-scanning the per-file array. When parse_status='parsed' for
+      // all attachments, the rows live in church_facts/content_atoms
+      // and are already included via the bundle's facts_pool /
+      // atoms_pool. When any are pending/failed/unsupported, the
+      // outline-page SKILL should flag the bucket as incomplete
+      // rather than render an empty section.
+      const attachmentSummary = attachments.length === 0
+        ? null
+        : {
+            total:        attachments.length,
+            parsed:       attachments.filter(a => a.parse_status === 'parsed').length,
+            pending:      attachments.filter(a => a.parse_status === 'pending').length,
+            failed:       attachments.filter(a => a.parse_status === 'failed').length,
+            unsupported:  attachments.filter(a => a.parse_status === 'unsupported').length,
+            rejected:     attachments.filter(a => a.parse_status === 'rejected').length,
+          }
       return {
         bucket_key:         bucketKey,
         source:             baselineFieldKey ? 'baseline' : 'standalone',
@@ -183,7 +227,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         description,
         target_path:        path,
         marked_at:          m.marked_at ?? null,
-        attachments:        attachmentsByTargetPath[path] ?? [],
+        attachments,
+        attachment_summary: attachmentSummary,
       }
     })
     .filter((x): x is Record<string, unknown> => x != null)

@@ -25,6 +25,7 @@ import { fetchIntakeStatus } from '../../../lib/webIntake'
 import { CrawlWorkspace } from './CrawlWorkspace'
 import { CrawlInventory } from './CrawlInventory'
 import { ContentCollectionResponsesPanel } from './ContentCollectionResponsesPanel'
+import { PartnerUploadReview } from '../inventory/PartnerUploadReview'
 import type { IntakeRowStatus, IntakeStatus } from '../../../lib/webIntake'
 import type { StrategyWebProject, WebIntakeCategory, WebIntakeDocument } from '../../../types/database'
 
@@ -285,6 +286,13 @@ export function IntakeWorkspace({ project, onChange }: Props) {
             inventory so staff sees the partner's voice alongside the
             crawl's findings. Hides itself if no session exists. */}
         <ContentCollectionResponsesPanel projectId={project.id} />
+
+        {/* Partner Uploads — files the partner attached via "Add
+            something we missed." Each is ingested into church_facts
+            (CSVs) or content_atoms (text docs); strategist approves
+            the drafts here before they enter the content pool. Hides
+            itself when no uploads exist. */}
+        <PartnerUploadReview projectId={project.id} />
 
         {/* Crawl Inventory — topic-bucketed view of crawled content
             (voice signals on narrative topics, structured items on

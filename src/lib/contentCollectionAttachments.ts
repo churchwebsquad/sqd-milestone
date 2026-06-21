@@ -107,7 +107,45 @@ export async function uploadContentCollectionFile(input: UploadInput): Promise<U
     return { ok: false, error: insertErr?.message ?? 'Failed to record attachment' }
   }
 
+  // Fire-and-forget: kick off the ingest job so the file content
+  // gets parsed into church_facts / content_atoms instead of sitting
+  // as an opaque marker. Don't await — the upload's success doesn't
+  // depend on parser completion; the strategist review UI surfaces
+  // pending / failed states later.
+  void triggerIngestPartnerUpload((row as AttachmentMetadata).id)
+
   return { ok: true, attachment: row as AttachmentMetadata }
+}
+
+/** Kick off the ingest-partner-upload edge function for an attachment.
+ *  Best-effort — failures here don't block the upload. The strategist
+ *  review UI surfaces unparsed attachments so nothing falls silently.
+ *
+ *  The endpoint requires either a Supabase user JWT (staff/partner
+ *  session) or an INGEST_AUTH_TOKEN server-side header. From the
+ *  browser we send the current session's access token; partners
+ *  uploading via the public Content Collection page have anon-key
+ *  auth — for those, the row is queued (parsed_at stays null) and
+ *  the strategist review UI or the backfill script picks them up. */
+export async function triggerIngestPartnerUpload(
+  attachmentId: string,
+  opts?: { force?: boolean },
+): Promise<void> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    const headers: Record<string, string> = { 'content-type': 'application/json' }
+    if (session?.access_token) {
+      headers.authorization = `Bearer ${session.access_token}`
+    }
+    await fetch('/api/web/cowork/ingest-partner-upload', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ attachment_id: attachmentId, force: opts?.force ?? false }),
+      keepalive: true,
+    })
+  } catch {
+    /* swallow — parser status remains null until manual retry */
+  }
 }
 
 /** Build a public URL for an attachment file. The bucket is public so
