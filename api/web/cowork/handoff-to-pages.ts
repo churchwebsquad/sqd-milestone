@@ -99,39 +99,41 @@ interface CoworkDraftSection {
  *  meant from-scratch projects bound to empty templates while
  *  audit-branch projects worked — a silent visual failure. */
 function normalizeCoworkSlotValues(section: CoworkDraftSection): Record<string, unknown> {
-  // Shape #1 — slot_values dict.
-  if (section.slot_values && typeof section.slot_values === 'object' && !Array.isArray(section.slot_values)) {
-    return section.slot_values
-  }
-  // Shape #2 — field_values dict.
-  if (section.field_values && typeof section.field_values === 'object' && !Array.isArray(section.field_values)) {
-    return section.field_values
-  }
-  // Shape #3 — slots[] descriptors. Flatten to {slot: text}; the
-  // translator only needs the text. Splice cta_targets[] in as the
-  // canonical buttons[] array shape so the translator's button
-  // path (hero / cta_callout / cta_simple) lights up correctly.
-  if (Array.isArray(section.slots)) {
-    const out: Record<string, unknown> = {}
-    for (const s of section.slots) {
-      if (!s || typeof s !== 'object' || typeof s.slot !== 'string') continue
-      const value = s.text ?? s.value ?? null
-      // Skip the 'buttons' pseudo-slot — older shape only put the
-      // primary button's LABEL in slot.text, with the URL in
-      // source_refs[0]. cta_targets[] is the canonical source.
-      if (s.slot === 'buttons') continue
-      out[s.slot] = value
+  const raw: Record<string, unknown> = (() => {
+    if (section.slot_values && typeof section.slot_values === 'object' && !Array.isArray(section.slot_values)) {
+      return { ...section.slot_values }
     }
-    if (Array.isArray(section.cta_targets) && section.cta_targets.length > 0) {
-      out.buttons = section.cta_targets.map((t, i) => ({
-        label: t.label,
-        url:   t.target,
-        kind:  (i === 0 ? 'primary' : 'secondary') as 'primary' | 'secondary',
-      }))
+    if (section.field_values && typeof section.field_values === 'object' && !Array.isArray(section.field_values)) {
+      return { ...section.field_values }
     }
-    return out
+    if (Array.isArray(section.slots)) {
+      const out: Record<string, unknown> = {}
+      for (const s of section.slots) {
+        if (!s || typeof s !== 'object' || typeof s.slot !== 'string') continue
+        const value = s.text ?? s.value ?? null
+        if (s.slot === 'buttons') continue
+        out[s.slot] = value
+      }
+      if (Array.isArray(section.cta_targets) && section.cta_targets.length > 0) {
+        out.buttons = section.cta_targets.map((t, i) => ({
+          label: t.label,
+          url:   t.target,
+          kind:  (i === 0 ? 'primary' : 'secondary') as 'primary' | 'secondary',
+        }))
+      }
+      return out
+    }
+    return {}
+  })()
+  // Canonicalize aliased keys onto the uniform vocabulary so the
+  // persisted cowork_slot_values + the Rich Companion display the
+  // canonical names. Without this, Rich Companion's ITEMS panel
+  // shows count=0 because the data lives under `build_cards`.
+  if (Array.isArray(raw.build_cards) && !raw.items) {
+    raw.items = raw.build_cards
+    delete raw.build_cards
   }
-  return {}
+  return raw
 }
 
 // ── Schema-driven binding contract ────────────────────────────────
@@ -155,13 +157,19 @@ interface BrixiesFieldDef {
   default_count?: number
 }
 
+interface NestedCtaAlias {
+  in_group:    string
+  label_field: string
+  url_field?:  string
+  nesting:     'flat' | 'contact'
+}
 interface ItemsAlias {
   field:     string
   subfields: {
     item_heading?:    string
     item_body?:       string
     item_meta?:       string
-    item_cta_label?:  string
+    item_cta_label?:  string | NestedCtaAlias
     item_cta_url?:    string
     item_image?:      string
   }
@@ -370,12 +378,17 @@ function composeFromCoworkAliasMap(
     if (v == null || v === '') continue
     const dest = map[uniformKey]
     if (!dest) {
+      // Stash unbindable scalar content so the strategist can
+      // recover it (e.g. tagline emitted but feature-section-2 has
+      // no tagline slot). The Pages workspace can surface this via
+      // cowork_section_meta.dropped_content.
       gaps.push({
         kind: 'uniform_slot_not_supported_by_template',
         severity: 'warning',
         detail: `cowork emitted '${uniformKey}' but template '${brixies.id}' has no destination field`,
         slot: uniformKey,
       })
+      droppedContent[uniformKey] = v
       continue
     }
     if (richtextKeys.has(dest)) {
@@ -426,12 +439,29 @@ function composeFromCoworkAliasMap(
           const lbl = enriched.item_cta_label ?? enriched.cta_label ?? ''
           if (lbl) {
             const url = enriched.item_cta_url ?? enriched.cta_url ?? ''
-            // Card-family CTA subfields take the shape { url, label }
-            row[subs.item_cta_label] = subs.item_cta_url && subs.item_cta_url !== subs.item_cta_label
-              ? String(lbl)
-              : { url: String(url), label: String(lbl) }
-            if (subs.item_cta_url && subs.item_cta_url !== subs.item_cta_label) {
-              row[subs.item_cta_url] = String(url)
+            if (typeof subs.item_cta_label === 'object') {
+              // Nested CTA: card-193 style, where the per-card button
+              // lives one level deeper inside the card's own buttons
+              // group. Write row.<in_group> = [{ <label_field>: { url, label } }]
+              // (contact nesting) or [{ <label_field>: label, <url_field>: url }]
+              // (flat nesting).
+              const cta = subs.item_cta_label
+              const entry = cta.nesting === 'contact'
+                ? { [cta.label_field]: { url: String(url), label: String(lbl) } }
+                : {
+                    [cta.label_field]: String(lbl),
+                    ...(cta.url_field ? { [cta.url_field]: String(url) } : {}),
+                  }
+              row[cta.in_group] = [entry]
+            } else {
+              // Flat CTA — typical Card variants pack url+label into
+              // a single subfield like { url, label }.
+              row[subs.item_cta_label] = subs.item_cta_url && subs.item_cta_url !== subs.item_cta_label
+                ? String(lbl)
+                : { url: String(url), label: String(lbl) }
+              if (subs.item_cta_url && subs.item_cta_url !== subs.item_cta_label) {
+                row[subs.item_cta_url] = String(url)
+              }
             }
           }
         }

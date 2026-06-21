@@ -73,13 +73,34 @@ interface FieldDef {
   referenced_family?: string
 }
 
+interface NestedCtaAlias {
+  /** The nested group name inside an item's schema (typically
+   *  'buttons'). Per-card CTAs live one level deeper than other
+   *  subfields. */
+  in_group: string
+  /** The subfield key inside the nested group that receives the
+   *  button label (e.g. 'contact_card'). */
+  label_field: string
+  /** Optional subfield key for the URL when distinct. Most Brixies
+   *  card variants pack url+label into a single 'contact_card' /
+   *  'cta' value as { url, label }. */
+  url_field?: string
+  /** Whether the nested group wraps each row in a `contact` key
+   *  ({ contact_card: { url, label } }) or writes flat. Mirrors the
+   *  top-level buttons.nesting semantics. */
+  nesting: 'flat' | 'contact'
+}
+
 interface ItemsAlias {
   field:        string
   subfields: {
     item_heading?:    string
     item_body?:       string
     item_meta?:       string
-    item_cta_label?:  string
+    /** When per-card CTAs live in a flat slot, use string. When they
+     *  live in a nested group (card-193's `buttons.item_schema[contact_card]`),
+     *  use NestedCtaAlias. */
+    item_cta_label?:  string | NestedCtaAlias
     item_cta_url?:    string
     item_image?:      string
   }
@@ -354,13 +375,44 @@ function buildItemSubfields(inner: FieldDef[]): ItemsAlias['subfields'] {
   for (const s of inner) {
     if (s.kind !== 'slot') continue
     const alias = aliasForItemSubfield(s)
-    if (alias && !out[alias]) out[alias] = s.key
+    if (alias === 'item_cta_label' && !out.item_cta_label) {
+      out.item_cta_label = s.key as string
+    } else if (alias && !out[alias]) {
+      ;(out as any)[alias] = s.key
+    }
   }
   // Item CTA URL — when an item_cta_label exists, look for a sibling
   // URL slot (often same key + '_url' suffix or any 'url'-named slot).
   if (out.item_cta_label && !out.item_cta_url) {
     const u = inner.find(s => s.kind === 'slot' && (s.key.toLowerCase().includes('url') || s.key.toLowerCase().includes('link')))
     if (u) out.item_cta_url = u.key
+  }
+  // Nested CTA branch — card-193 style: a 'buttons' group lives
+  // INSIDE the card item_schema, with its own item_schema carrying
+  // the label subfield (e.g. contact_card). When no flat CTA slot
+  // was found above, descend one level here.
+  if (!out.item_cta_label) {
+    for (const s of inner) {
+      if (s.kind !== 'group') continue
+      const sk = s.key.toLowerCase()
+      const looksLikeButtons = (sk === 'buttons' || sk === 'cta' || sk.includes('button'))
+      if (!looksLikeButtons) continue
+      const nestedInner = Array.isArray(s.item_schema) ? s.item_schema : []
+      if (nestedInner.length === 0) continue
+      // First slot inside the nested group is the label field. When
+      // it's a single 'contact_card' / 'cta_card' subfield, nesting
+      // 'contact' applies (renderer wraps as { contact_card: { url, label } }).
+      const labelSlot = nestedInner.find(x => x.kind === 'slot') ?? nestedInner[0]
+      const lk = labelSlot.key.toLowerCase()
+      const isContactLike = lk.startsWith('contact') || lk.startsWith('cta') || labelSlot.type === 'cta'
+      const nested: NestedCtaAlias = {
+        in_group: s.key,
+        label_field: labelSlot.key,
+        nesting: isContactLike ? 'contact' : 'flat',
+      }
+      out.item_cta_label = nested
+      break
+    }
   }
   return out
 }
