@@ -623,27 +623,30 @@ function composeFromCoworkAliasMap(
 
       const composedRows = items.map(composeRow)
 
-      // Nested-group packing. When the outer group is a wrapper
-      // (team-section-14: row_grid containing card_team), put ALL
-      // items into ONE outer row's inner array and let Bricks' grid
-      // CSS handle responsive wrapping. The previous behavior chunked
-      // by `inner_group_default_count` (the template's seed count),
-      // which produced "3 + 3 + 1" team rows for a 7-person team —
-      // never what the strategist wants. Bricks repeaters have no
-      // native cap; treat the seed count as a default, not a rule.
+      // Nested-group packing. Two distinct patterns share the same
+      // `inner_group_field` shape; we disambiguate by presence of
+      // `referenced_template_id`:
+      //
+      //   A. Referenced-template wrapper (feature-section-2 → card-193):
+      //      Each outer item is its OWN instance of a referenced
+      //      template whose content lives inside a wrapping group.
+      //      Wrap EACH item individually: outer[] = [{ inner: [item] }, ...].
+      //
+      //   B. Visual-row wrapper (team-section-14: row_grid → card_team):
+      //      The outer group is a visual wrapper; put ALL items into
+      //      ONE outer row's inner array and let Bricks' grid CSS
+      //      handle responsive wrapping. (Chunking by the template's
+      //      seed count produced "3 + 3 + 1" team rows for a 7-person
+      //      team — never the intent.)
       if (map.items.inner_group_field) {
         const innerField = map.items.inner_group_field
         const flatRows = composedRows.map(r => {
           // composeRow already wrapped each row in { [innerField]: [row] }.
-          // Unwrap so we can re-pack.
           const inner = (r as Record<string, unknown>)[innerField]
           return Array.isArray(inner) ? (inner[0] as Record<string, unknown>) : r
         })
-        const packed: Array<Record<string, unknown>> = [{ [innerField]: flatRows }]
+        const wrapsReferencedTemplate = Boolean(map.items.referenced_template_id)
         if (map.items.split) {
-          // Splits are uncommon with nested groups, but preserve the
-          // contract: the inner array gets halved/alternated across
-          // the two outer groups.
           const [aKey, bKey] = map.items.split.groups
           const groupA: Array<Record<string, unknown>> = []
           const groupB: Array<Record<string, unknown>> = []
@@ -654,10 +657,19 @@ function composeFromCoworkAliasMap(
             flatRows.slice(0, half).forEach(r => groupA.push(r))
             flatRows.slice(half).forEach(r => groupB.push(r))
           }
-          fv[aKey] = [{ [innerField]: groupA }]
-          fv[bKey] = [{ [innerField]: groupB }]
+          if (wrapsReferencedTemplate) {
+            fv[aKey] = groupA.map(r => ({ [innerField]: [r] }))
+            fv[bKey] = groupB.map(r => ({ [innerField]: [r] }))
+          } else {
+            fv[aKey] = [{ [innerField]: groupA }]
+            fv[bKey] = [{ [innerField]: groupB }]
+          }
+        } else if (wrapsReferencedTemplate) {
+          // Pattern A — one outer entry per item.
+          fv[map.items.field] = flatRows.map(r => ({ [innerField]: [r] }))
         } else {
-          fv[map.items.field] = packed
+          // Pattern B — all items in one outer row.
+          fv[map.items.field] = [{ [innerField]: flatRows }]
         }
       } else if (map.items.split) {
         // Distribute across two parallel groups (accordion_left + _right).

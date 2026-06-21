@@ -221,6 +221,7 @@ function collectInnerSchema(f: FieldDef): FieldDef[] {
 function deriveAliasMap(
   tpl: Template,
   resolveReferencedSchema: (refId: string) => FieldDef[] | null,
+  resolveReferencedWrapper: (refId: string) => string | null,
 ): CoworkAliasMap {
   const map: CoworkAliasMap = {}
   if (!Array.isArray(tpl.fields)) return map
@@ -361,6 +362,16 @@ function deriveAliasMap(
         workingInner = innerGroups[0].item_schema ?? []
       }
 
+      // When the outer group references a template whose content is
+      // wrapped in its own group (card-193, card-213), surface that
+      // wrapper key so the handoff wraps each bound item correctly.
+      // resolveReferencedSchema() pre-unwraps this group for subfield
+      // detection, so we ask the wrapper resolver separately.
+      if (!inner_group_field && f.referenced_template_id) {
+        const refWrapper = resolveReferencedWrapper(f.referenced_template_id)
+        if (refWrapper) inner_group_field = refWrapper
+      }
+
       const subs = buildItemSubfields(workingInner)
       if (subs.item_heading || subs.item_body) {
         map.items = {
@@ -453,11 +464,22 @@ async function main() {
     if (cardGroup?.item_schema) return cardGroup.item_schema
     return t.fields
   }
+  // Mirror of resolveReferencedSchema that returns the WRAPPER GROUP
+  // key (e.g. 'card' for card-193) so the alias map can capture the
+  // nesting required at bind time. Returns null when the referenced
+  // template has no single wrapper.
+  const resolveReferencedWrapper = (refId: string): string | null => {
+    const t = byId.get(refId)
+    if (!t || !Array.isArray(t.fields)) return null
+    const groups = t.fields.filter(f => f.kind === 'group')
+    if (groups.length === 1) return groups[0].key
+    return null
+  }
 
   let tallies = { covered: 0, partial: 0, empty: 0 }
   const updates: Array<{ id: string; map: CoworkAliasMap }> = []
   for (const t of templates) {
-    const map = deriveAliasMap(t, resolveReferencedSchema)
+    const map = deriveAliasMap(t, resolveReferencedSchema, resolveReferencedWrapper)
     const hasContent = !!(map.primary_heading || map.body || map.items || map.buttons)
     const isCovered  = !!(map.primary_heading && (map.body || map.items || map.buttons))
     if (isCovered)        tallies.covered++
