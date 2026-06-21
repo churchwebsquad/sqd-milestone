@@ -127,6 +127,10 @@ interface CoworkAliasMap {
   tagline?:         string
   body?:            string
   accent_body?:     string
+  /** Video / embed slot. When cowork emits `embed_url` (iframe HTML
+   *  or a YouTube/Vimeo URL), the handoff writes it to this Brixies
+   *  field. Added v82 for testimonial_video + content_video. */
+  embed_url?:       string
   items?: ItemsAlias
   buttons?: {
     field:     string
@@ -159,6 +163,10 @@ function aliasForSlot(f: FieldDef): keyof CoworkAliasMap | null {
   if (k === 'accent_description' && f.type === 'richtext')  return 'accent_body'
   // Allowance: plain-text 'description' counts as body when no richtext desc exists.
   if (k === 'description' && f.type === 'text')             return 'body'
+  // Video / embed slots — added v82. A slot named 'video_embed' /
+  // 'video' / 'embed' / 'iframe' carries the embed URL or iframe HTML.
+  if (k === 'video_embed' || k === 'video' || k === 'embed' || k === 'iframe' || k === 'video_url')
+    return 'embed_url'
   return null
 }
 
@@ -226,6 +234,7 @@ function deriveAliasMap(
     else if (alias === 'tagline'         && !map.tagline)         map.tagline         = f.key
     else if (alias === 'body'            && !map.body)            map.body            = f.key
     else if (alias === 'accent_body'     && !map.accent_body)     map.accent_body     = f.key
+    else if (alias === 'embed_url'       && !map.embed_url)       map.embed_url       = f.key
   }
 
   // Pass 2 — single CTA slot acts as a single-button bucket. Common

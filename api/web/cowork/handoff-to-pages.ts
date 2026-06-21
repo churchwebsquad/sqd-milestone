@@ -189,6 +189,10 @@ interface CoworkAliasMap {
   tagline?:         string
   body?:            string
   accent_body?:     string
+  /** Video / embed slot. When cowork emits `embed_url` (iframe HTML
+   *  or YouTube/Vimeo URL), the handoff writes it here. Added v82 for
+   *  testimonial_video / content_video. */
+  embed_url?:       string
   items?: ItemsAlias
   buttons?: {
     field:     string
@@ -270,6 +274,29 @@ function escapeHtml(s: string): string {
 function isHtmlAlready(value: unknown): boolean {
   if (typeof value !== 'string') return false
   return /^<(p|ul|ol|li|h\d|div|blockquote|figure|table|section|article)[\s>]/i.test(value.trim())
+}
+
+/** Wrap a bare YouTube / Vimeo URL in a responsive iframe so Brixies
+ *  can render it. YouTube watch URLs and short URLs are normalized to
+ *  the `/embed/<id>` path; Vimeo to `player.vimeo.com/video/<id>`.
+ *  Anything else falls through as a plain link inside a <p>. */
+function wrapVideoUrlAsIframe(url: string): string {
+  const trimmed = url.trim()
+  // YouTube — watch, share, shorts
+  const yt = trimmed.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([\w-]{6,})/i)
+  if (yt) {
+    const id = yt[1]
+    return `<div class="video-embed"><iframe src="https://www.youtube.com/embed/${id}" title="YouTube video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`
+  }
+  // Vimeo
+  const vm = trimmed.match(/vimeo\.com\/(?:video\/)?(\d{6,})/i)
+  if (vm) {
+    const id = vm[1]
+    return `<div class="video-embed"><iframe src="https://player.vimeo.com/video/${id}" title="Vimeo video" frameborder="0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe></div>`
+  }
+  // Unknown host — leave the URL in an anchor; partner can swap to
+  // an iframe later if needed.
+  return `<p><a href="${escapeHtml(trimmed)}" target="_blank" rel="noopener noreferrer">${escapeHtml(trimmed)}</a></p>`
 }
 
 /** Rescue-split for items where cowork conflated multiple fields
@@ -388,7 +415,13 @@ function composeFromCoworkAliasMap(
   }
 
   // ── Scalars ────────────────────────────────────────────────────
-  for (const uniformKey of ['tagline', 'primary_heading', 'body', 'accent_body'] as const) {
+  // `embed_url` is iframe HTML or a video URL; the template's
+  // video_embed field is richtext-typed so the wrap-in-<p> path
+  // would mangle iframe markup. The bind below treats embed_url
+  // specially — it passes the value through verbatim when it
+  // looks like HTML (starts with `<`), and wraps in a YouTube
+  // embed when it's a bare URL.
+  for (const uniformKey of ['tagline', 'primary_heading', 'body', 'accent_body', 'embed_url'] as const) {
     const v = slotValues[uniformKey]
     if (v == null || v === '') continue
     const dest = map[uniformKey]
@@ -406,7 +439,18 @@ function composeFromCoworkAliasMap(
       droppedContent[uniformKey] = v
       continue
     }
-    if (richtextKeys.has(dest)) {
+    if (uniformKey === 'embed_url') {
+      // Video / embed slot — pass iframe markup through verbatim;
+      // expand bare YouTube / Vimeo URLs into a responsive iframe.
+      const s = String(v).trim()
+      if (s.startsWith('<')) {
+        fv[dest] = s
+      } else if (/^https?:\/\//i.test(s)) {
+        fv[dest] = wrapVideoUrlAsIframe(s)
+      } else {
+        fv[dest] = s
+      }
+    } else if (richtextKeys.has(dest)) {
       fv[dest] = typeof v === 'string'
         ? (isHtmlAlready(v) ? v : ensureHtml(v))
         : ensureHtml(String(v))
