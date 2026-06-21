@@ -134,6 +134,62 @@ function normalizeCoworkSlotValues(section: CoworkDraftSection): Record<string, 
   return {}
 }
 
+// ── Schema-driven binding contract ────────────────────────────────
+// Per-template alias map derived from the Brixies fields[] schema.
+// Single source of truth for "which Brixies field receives which
+// cowork uniform slot". Replaces the per-template uniform_to_brixies
+// block that used to live in the strategy.cowork_templates manifest.
+
+interface BrixiesTemplate {
+  id:     string
+  fields: BrixiesFieldDef[] | null
+  cowork_alias_map: CoworkAliasMap | null
+}
+
+interface BrixiesFieldDef {
+  key:    string
+  kind:   'slot' | 'group'
+  type?:  string
+  item_schema?: BrixiesFieldDef[]
+  referenced_template_id?: string
+  default_count?: number
+}
+
+interface ItemsAlias {
+  field:     string
+  subfields: {
+    item_heading?:    string
+    item_body?:       string
+    item_meta?:       string
+    item_cta_label?:  string
+    item_cta_url?:    string
+    item_image?:      string
+  }
+  referenced_template_id?: string
+  max_items?: number
+  /** When set, items distribute across two parallel groups
+   *  (faq-section-10 accordion_left + accordion_right). */
+  split?: { groups: string[]; rule: 'alternate' | 'halve' }
+  /** When the row content lives nested inside another group
+   *  (team-section-14: row_grid → card_team subfields). */
+  inner_group_field?: string
+}
+
+interface CoworkAliasMap {
+  primary_heading?: string
+  tagline?:         string
+  body?:            string
+  accent_body?:     string
+  items?: ItemsAlias
+  buttons?: {
+    field:     string
+    subfields: { label?: string; url?: string }
+    nesting:   'flat' | 'contact' | 'cta_slot'
+    max_items?: number
+    is_slot?:  boolean
+  }
+}
+
 interface ManifestEntry {
   template_id:           string
   cowork_writable_slots: Record<string, { max_chars?: number; max_items?: number; required?: boolean }>
@@ -271,12 +327,240 @@ function splitConflatedItem(it: Record<string, unknown>): Record<string, unknown
   return out
 }
 
-/** The translator. Reads cowork uniform slot_values + a v2.0.0
- *  manifest entry; produces a Brixies-shaped field_values + a
- *  bind_quality verdict + gap list. NEVER throws — partial bindings
- *  return with gaps; the caller decides what to do with the section.
- *  Returns `field_values` that matches the renderer's expected shape
- *  per the verified Phase 0 working examples. */
+// ── Schema-driven translator (v81+) ───────────────────────────────
+//
+// Source of truth: web_content_templates.cowork_alias_map (auto-
+// derived by scripts/derive-cowork-aliases.ts from each Brixies
+// template's fields[] schema). The legacy manifest-driven translator
+// below (composeFieldValuesForBrixies) is retained only for refusal
+// fallbacks; new sections bind through this path.
+
+function composeFromCoworkAliasMap(
+  slotValues: Record<string, unknown>,
+  brixies:    BrixiesTemplate,
+  templateKey: string,
+  requiredSlots: string[],
+): BindResult {
+  const fv: Record<string, unknown> = {}
+  const gaps: BindResult['gaps'] = []
+  const droppedContent: Record<string, unknown> = {}
+  const map = brixies.cowork_alias_map
+
+  if (!map) {
+    gaps.push({
+      kind: 'no_cowork_alias_map',
+      severity: 'blocker',
+      detail: `Brixies template '${brixies.id}' has no cowork_alias_map. Run scripts/derive-cowork-aliases.ts --apply to populate it.`,
+    })
+    return { field_values: {}, bind_quality: 'partial', gaps, dropped_content: { _raw: slotValues } }
+  }
+
+  // Compute richtext keys live from the schema rather than carrying a
+  // separate list. Any top-level slot of type='richtext' is richtext;
+  // group subfields handled inside the items branch.
+  const richtextKeys = new Set<string>()
+  for (const f of brixies.fields ?? []) {
+    if (f.kind === 'slot' && f.type === 'richtext') richtextKeys.add(f.key)
+  }
+
+  // ── Scalars ────────────────────────────────────────────────────
+  for (const uniformKey of ['tagline', 'primary_heading', 'body', 'accent_body'] as const) {
+    const v = slotValues[uniformKey]
+    if (v == null || v === '') continue
+    const dest = map[uniformKey]
+    if (!dest) {
+      gaps.push({
+        kind: 'uniform_slot_not_supported_by_template',
+        severity: 'warning',
+        detail: `cowork emitted '${uniformKey}' but template '${brixies.id}' has no destination field`,
+        slot: uniformKey,
+      })
+      continue
+    }
+    if (richtextKeys.has(dest)) {
+      fv[dest] = typeof v === 'string'
+        ? (isHtmlAlready(v) ? v : ensureHtml(v))
+        : ensureHtml(String(v))
+    } else {
+      fv[dest] = String(v)
+    }
+  }
+
+  // ── Items ──────────────────────────────────────────────────────
+  // Accept both canonical `items` and the legacy `build_cards` alias.
+  const rawItems = Array.isArray(slotValues.items)      ? slotValues.items
+                : Array.isArray(slotValues.build_cards) ? slotValues.build_cards
+                                                        : null
+  if (Array.isArray(rawItems) && rawItems.length > 0) {
+    const items = rawItems as Array<Record<string, unknown>>
+    if (!map.items) {
+      gaps.push({
+        kind: 'uniform_slot_not_supported_by_template',
+        severity: 'blocker',
+        detail: `cowork emitted ${items.length} item(s) but template '${brixies.id}' (key '${templateKey}') has no items group in its alias map. Pick a template whose Brixies schema has a cards/items group.`,
+        slot: 'items',
+      })
+      droppedContent.items = items
+    } else {
+      const composeRow = (it: Record<string, unknown>): Record<string, unknown> => {
+        const enriched = splitConflatedItem(it)
+        const row: Record<string, unknown> = {}
+        const subs = map.items!.subfields
+        if (subs.item_heading) {
+          const v = enriched.item_heading ?? enriched.heading ?? enriched.title ?? ''
+          row[subs.item_heading] = String(v)
+        }
+        if (subs.item_body) {
+          const v = enriched.item_body ?? enriched.body ?? enriched.description ?? ''
+          row[subs.item_body] = String(v)   // richtext handling on item subfields
+            && (richtextSubfield(brixies, map.items!.field, subs.item_body, map.items!.inner_group_field)
+                ? (isHtmlAlready(v) ? v : ensureHtml(String(v)))
+                : String(v))
+        }
+        if (subs.item_meta) {
+          const v = enriched.item_meta ?? enriched.meta ?? ''
+          row[subs.item_meta] = String(v)
+        }
+        if (subs.item_cta_label) {
+          const lbl = enriched.item_cta_label ?? enriched.cta_label ?? ''
+          if (lbl) {
+            const url = enriched.item_cta_url ?? enriched.cta_url ?? ''
+            // Card-family CTA subfields take the shape { url, label }
+            row[subs.item_cta_label] = subs.item_cta_url && subs.item_cta_url !== subs.item_cta_label
+              ? String(lbl)
+              : { url: String(url), label: String(lbl) }
+            if (subs.item_cta_url && subs.item_cta_url !== subs.item_cta_label) {
+              row[subs.item_cta_url] = String(url)
+            }
+          }
+        }
+        if (subs.item_image) {
+          const img = enriched.item_image
+          if (img) row[subs.item_image] = img
+        }
+        // If the items live nested inside another group (e.g.
+        // row_grid → card_team), wrap the row in that group's name.
+        if (map.items!.inner_group_field) {
+          return { [map.items!.inner_group_field]: [row] }
+        }
+        return row
+      }
+
+      const composedRows = items.map(composeRow)
+
+      if (map.items.split) {
+        // Distribute across two parallel groups (accordion_left + _right).
+        const groupA: Array<Record<string, unknown>> = []
+        const groupB: Array<Record<string, unknown>> = []
+        const [aKey, bKey] = map.items.split.groups
+        if (map.items.split.rule === 'alternate') {
+          composedRows.forEach((r, idx) => { (idx % 2 === 0 ? groupA : groupB).push(r) })
+        } else {
+          const half = Math.ceil(composedRows.length / 2)
+          composedRows.slice(0, half).forEach(r => groupA.push(r))
+          composedRows.slice(half).forEach(r => groupB.push(r))
+        }
+        fv[aKey] = groupA
+        fv[bKey] = groupB
+      } else {
+        fv[map.items.field] = composedRows
+      }
+
+      // Overflow surface (informational)
+      if (typeof map.items.max_items === 'number' && items.length > map.items.max_items) {
+        gaps.push({
+          kind: 'items_overflow',
+          severity: 'warning',
+          detail: `${items.length} items emitted; template '${brixies.id}' caps at ${map.items.max_items} (extras still rendered)`,
+          slot: 'items',
+        })
+      }
+    }
+  }
+
+  // ── Buttons ────────────────────────────────────────────────────
+  const rawButtons = Array.isArray(slotValues.buttons) ? slotValues.buttons : null
+  if (Array.isArray(rawButtons) && rawButtons.length > 0) {
+    const buttons = rawButtons as Array<Record<string, unknown>>
+    if (!map.buttons) {
+      gaps.push({
+        kind: 'uniform_slot_not_supported_by_template',
+        severity: 'warning',
+        detail: `cowork emitted ${buttons.length} button(s) but template '${brixies.id}' has no buttons field in its alias map`,
+        slot: 'buttons',
+      })
+      droppedContent.buttons = buttons
+    } else {
+      const composedButtons = buttons.map(b => {
+        const label = String(b.label ?? '')
+        const url   = String(b.url   ?? '')
+        if (map.buttons!.nesting === 'contact') {
+          // { contact: { url, label } } shape — same field key carries both
+          return { [map.buttons!.subfields.label ?? 'contact']: { url, label } }
+        }
+        return {
+          [map.buttons!.subfields.label ?? 'label']: label,
+          [map.buttons!.subfields.url   ?? 'url']:   url,
+        }
+      })
+      if (map.buttons.is_slot) {
+        // Single CTA slot (e.g. cta-section-52). Write ONE button.
+        fv[map.buttons.field] = { url: String(buttons[0].url ?? ''), label: String(buttons[0].label ?? '') }
+      } else {
+        fv[map.buttons.field] = composedButtons
+      }
+    }
+  }
+
+  // ── Required slots check ───────────────────────────────────────
+  for (const reqKey of requiredSlots) {
+    if (fv[reqKey] == null || fv[reqKey] === '') {
+      gaps.push({
+        kind: 'required_slot_missing',
+        severity: 'blocker',
+        detail: `template '${brixies.id}' requires '${reqKey}' but binding produced no value`,
+        slot: reqKey,
+      })
+    }
+  }
+
+  const bind_quality: 'perfect' | 'partial' =
+    gaps.length === 0 ? 'perfect' : 'partial'
+
+  return {
+    field_values: fv,
+    bind_quality,
+    gaps,
+    dropped_content: Object.keys(droppedContent).length > 0 ? droppedContent : undefined,
+  }
+}
+
+/** Is the given subfield key richtext-typed inside the items group? */
+function richtextSubfield(
+  brixies: BrixiesTemplate, groupField: string, subKey: string,
+  innerGroupField: string | undefined,
+): boolean {
+  if (!Array.isArray(brixies.fields)) return false
+  const grp = brixies.fields.find(f => f.key === groupField && f.kind === 'group')
+  if (!grp) return false
+  const direct = grp.item_schema ?? []
+  // Resolve inner group when applicable
+  let schema: BrixiesFieldDef[] = direct
+  if (innerGroupField) {
+    const inner = direct.find(f => f.key === innerGroupField && f.kind === 'group')
+    if (inner?.item_schema) schema = inner.item_schema
+  }
+  // Also resolve referenced_template_id implicitly (the bind-time
+  // schema is the parent's; richtext detection on the parent is fine
+  // because the parent stores the data inline).
+  const sub = schema.find(f => f.key === subKey)
+  return sub?.type === 'richtext'
+}
+
+/** Legacy translator (manifest-driven). Kept for the refusal fallback
+ *  path + early audit-branch sections that still resolve to the
+ *  manifest's uniform_to_brixies map. New bindings should route
+ *  through composeFromCoworkAliasMap above. */
 function composeFieldValuesForBrixies(
   slotValues: Record<string, unknown>,
   entry: ManifestEntry,
@@ -544,7 +828,12 @@ export default async function handler(req: any, res: any) {
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
   // ── Load everything ─────────────────────────────────────────────
-  const [projRes, manifestRes, existingPagesRes] = await Promise.all([
+  // The manifest is the picker-side resolution: template_key → template_id
+  // + richtext_keys + required_slots. The actual translation contract
+  // (which Brixies field receives which cowork uniform slot) lives on
+  // web_content_templates.cowork_alias_map — one source of truth derived
+  // from the Brixies schema itself (scripts/derive-cowork-aliases.ts).
+  const [projRes, manifestRes, existingPagesRes, brixiesRes] = await Promise.all([
     sb.from('strategy_web_projects')
       .select('id, name, member, roadmap_state, notion_database_id, notion_database_url')
       .eq('id', projectId)
@@ -558,15 +847,22 @@ export default async function handler(req: any, res: any) {
       .select('id, slug, sort_order, phase, content_status, cowork_handoff_at')
       .eq('web_project_id', projectId)
       .eq('archived', false),
+    sb.from('web_content_templates')
+      .select('id, fields, cowork_alias_map')
+      .eq('is_published', true),
   ])
 
   if (projRes.error || !projRes.data)     return res.status(404).json({ error: `project ${projectId} not found: ${projRes.error?.message}` })
   if (manifestRes.error || !manifestRes.data) return res.status(500).json({ error: `canonical templates manifest missing: ${manifestRes.error?.message}` })
   if (existingPagesRes.error)             return res.status(500).json({ error: `web_pages load failed: ${existingPagesRes.error.message}` })
+  if (brixiesRes.error)                   return res.status(500).json({ error: `web_content_templates load failed: ${brixiesRes.error.message}` })
 
   const project   = projRes.data as any
   const manifest  = (manifestRes.data as any).manifest as { page_section_templates: Record<string, ManifestEntry> }
   const templates = manifest?.page_section_templates ?? {}
+  const brixiesByTemplateId = new Map<string, BrixiesTemplate>(
+    ((brixiesRes.data ?? []) as BrixiesTemplate[]).map(t => [t.id, t]),
+  )
   const manifestVersion = (manifestRes.data as any).version as string
   const roadmap   = (project.roadmap_state ?? {}) as Record<string, any>
 
@@ -775,8 +1071,16 @@ export default async function handler(req: any, res: any) {
         continue
       }
 
-      // Translator call — never throws
-      const bind = composeFieldValuesForBrixies(normalizedSlots, entry)
+      // Translator — schema-driven. Resolves the Brixies template via
+      // the manifest's template_key → template_id mapping, then reads
+      // that template's own cowork_alias_map for the binding contract.
+      // Falls back to the legacy manifest-driven translator only when
+      // the Brixies template can't be found in web_content_templates
+      // (likely a stale manifest entry).
+      const brixiesTpl = brixiesByTemplateId.get(entry.template_id)
+      const bind = brixiesTpl
+        ? composeFromCoworkAliasMap(normalizedSlots, brixiesTpl, templateKey, entry.required_slots ?? [])
+        : composeFieldValuesForBrixies(normalizedSlots, entry)
 
       // SPLIT marker (audit-branch overflow)
       const splitFrom = (os?._meta?.split_from as string | undefined) ?? (ds._meta?.split_from as string | undefined) ?? null
