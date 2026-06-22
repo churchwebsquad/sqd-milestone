@@ -476,6 +476,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
   return (
     <div className="p-6 max-w-[960px] mx-auto">
       <Header
+        projectId={project.id}
         readiness={readiness}
         readinessLoading={readinessLoading}
         overallStats={overallStats}
@@ -552,7 +553,12 @@ export function CoworkWorkspace({ project, onChange }: Props) {
 // Header (readiness summary + refresh)
 // ────────────────────────────────────────────────────────────────────
 
-function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRefresh, refreshing, auditBranch, notionDatabaseUrl, totalSteps }: {
+function Header({ projectId, readiness, readinessLoading, overallStats, timelineNotes, onRefresh, refreshing, auditBranch, notionDatabaseUrl, totalSteps }: {
+  /** Used by each ReadinessIssueRow's resolver to write back to the
+   *  correct project. The PushToPagesCard moved out of the header in
+   *  the Design Handoff polish batch (item #3); projectId stayed
+   *  because readiness rows still need it to clear flags. */
+  projectId:        string
   readiness:        ReadinessReport | null
   readinessLoading: boolean
   overallStats:     { done: number; ready: number; stale: number; cowork: number; waiting: number; firstReadyKey: string | null } | null
