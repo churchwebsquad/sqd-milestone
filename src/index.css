@@ -1,4 +1,6 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+/* DM Sans is preloaded in index.html so it's available on first
+ * paint — no @import here (it would push the font fetch behind CSS
+ * parsing and cause a FOUT to Inter on slow connections). */
 @import "tailwindcss";
 
 @theme {
@@ -79,7 +81,7 @@
   --color-verif-verified-fg: #047857;
 
   /* Typography */
-  --font-sans: 'DM Sans', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-sans: 'DM Sans', system-ui, -apple-system, sans-serif;
   --font-serif: Georgia, serif;
 
   /* ── Web Manager module ────────────────────────────────────────────

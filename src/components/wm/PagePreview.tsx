@@ -170,7 +170,7 @@ function buildIframeDoc(html: string): string {
 <meta charset="utf-8">
 <style>
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; font-family: Inter, system-ui, -apple-system, sans-serif; color: #1a1a2e; background: #fff; }
+  html, body { margin: 0; padding: 0; font-family: 'DM Sans', system-ui, -apple-system, sans-serif; color: #1a1a2e; background: #fff; }
   body { width: 1512px; }
   img { max-width: 100%; height: auto; }
   a { color: inherit; text-decoration: none; }

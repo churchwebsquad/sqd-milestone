@@ -7,7 +7,12 @@
     <title>Milestone Communications — Church Media Squad</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <!-- DM Sans is the single source of truth for sans-serif body
+         + UI type. Loading from index.html (vs the CSS @import) so
+         the font fetch starts on first paint, not after CSS parses,
+         which prevents the brief FOUT where some staff saw Inter
+         (an older font choice) before DM Sans landed. -->
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div id="root"></div>

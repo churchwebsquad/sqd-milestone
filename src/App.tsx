@@ -210,7 +210,7 @@ function BrandPortalLanding() {
       style={{
         background: 'linear-gradient(135deg, #341756 0%, #513DE5 100%)',
         color: '#F9F5F1',
-        fontFamily: '"Work Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: 'var(--font-sans)',
       }}
     >
       <div className="max-w-lg text-center">
