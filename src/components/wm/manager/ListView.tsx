@@ -242,8 +242,18 @@ function ListRow({ enriched, onSelect, reorderMode, onDragStart, onDragOver, onD
             )}
           </div>
 
-          {/* Status */}
-          <div className="shrink-0">
+          {/* Status — hover for the "why" (risk reasons or the manual
+              override reason that drove this pill). */}
+          <div
+            className="shrink-0"
+            title={
+              isManual && row.status_reason
+                ? `Manual: ${row.status_reason}`
+                : (row.health.riskReasons ?? []).length > 0
+                  ? `Why: ${row.health.riskReasons.join(' · ')}`
+                  : 'Live status from computeProjectHealth'
+            }
+          >
             <WMStatusPill tone={subTone} size="sm">
               {subLabel}
             </WMStatusPill>

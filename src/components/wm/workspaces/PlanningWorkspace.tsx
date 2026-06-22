@@ -11,12 +11,21 @@
  * Sections:
  *   • Header pill — live sub-status from computeProjectHealth
  *   • Schedule — launch_date, priority_order, dev_hours_estimate
- *   • Phase budget — per-phase hour baselines (5 fields)
- *   • Phase progress — % complete slider per phase
- *   • Override + status note — manual_remaining_hours + status_note
+ *   • Project Settings — page count + velocity levers (v89; drives
+ *     predicted dev hours)
+ *   • Manual override — manual_remaining_hours (beats everything)
+ *   • Dev Queue Position — where this project sits in priority order
  *   • Projected — computed launch projection + risk reasons
+ *   • Weekly allocations — pin specific weeks (writes
+ *     strategy_dev_weekly_allocations)
  *   • Feasibility — target-date analyzer (FeasibilityPanel)
  *   • ClickUp · Website list — ClickUpTasksSummary
+ *
+ * The 5-phase Phase Budget + Phase Progress cards were dropped — with
+ * the content pipeline shipping full-site copy in a day and Brixies
+ * design accelerating after, dev is the only phase that meaningfully
+ * consumes the launch budget. Phase math collapses to the single
+ * "dev hours" number from computeDevHoursTotal.
  *
  * Saves field-by-field on blur using the same setValue pattern the
  * other workspaces use. onChange() fires after every save so the
@@ -43,9 +52,8 @@ import {
   type HealthMilestoneRow,
 } from '../../../lib/webProjectHealth'
 import {
-  deriveSizeTier, hourRangeForTier, sprintForDate,
+  sprintForDate,
   computeDevHoursTotal,
-  type ProjectSizeTier,
 } from '../../../lib/webPlanningMath'
 import { computeDevQueue, type QueueSlot } from '../../../lib/webDevQueue'
 import {
@@ -71,11 +79,6 @@ import type {
 interface Props {
   project:  StrategyWebProject
   onChange: () => void | Promise<void>
-}
-
-const PHASE_LABEL: Record<WebProjectPhase, string> = {
-  intake: 'Intake', content: 'Copywriting', design: 'Design',
-  dev: 'Dev', review: 'Final review', launched: 'Launched',
 }
 
 const SUB_LABEL: Record<ProjectSubStatus, string> = {
@@ -399,8 +402,6 @@ export function PlanningWorkspace({ project, onChange }: Props) {
   // in dev_hours_estimate that doesn't match the tier's base; we show
   // both numbers so the strategist sees what we'd recommend vs what
   // they committed to.
-  const sizeTier: ProjectSizeTier = useMemo(() => deriveSizeTier(pageCount), [pageCount])
-  const hourRange = useMemo(() => hourRangeForTier(sizeTier), [sizeTier])
   const currentSprint = useMemo(() => sprintForDate(new Date()), [])
   /** Allocations in the current 2-week sprint window. */
   const sprintAllocations = useMemo(() => {
@@ -442,19 +443,34 @@ export function PlanningWorkspace({ project, onChange }: Props) {
     <div className="p-6 md:p-8">
       <div className="max-w-4xl mx-auto space-y-5">
         <header className="flex items-start justify-between gap-3 flex-wrap">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs font-bold text-wm-accent-strong uppercase tracking-widest mb-1">Planning</p>
             <h1 className="text-2xl font-semibold text-wm-text">Scheduling + capacity</h1>
             <p className="text-sm text-wm-text-muted mt-1 max-w-xl">
-              Tune the launch date, hours, and per-phase progress. The
-              feasibility check + computed projection update live as
-              you edit.
+              Set launch date + page count + Novamira / assist levers. The
+              feasibility check + queue projection update live as you edit.
             </p>
           </div>
           {computed && (
-            <WMStatusPill tone={SUB_TONE[computed.subStatus]} size="md">
-              {SUB_LABEL[computed.subStatus]}
-            </WMStatusPill>
+            <div
+              className="flex flex-col items-end gap-1 shrink-0"
+              title={
+                computed.riskReasons.length > 0
+                  ? `Why: ${computed.riskReasons.join(' · ')}`
+                  : 'Live status from computeProjectHealth'
+              }
+            >
+              <WMStatusPill tone={SUB_TONE[computed.subStatus]} size="md">
+                {SUB_LABEL[computed.subStatus]}
+              </WMStatusPill>
+              {computed.riskReasons.length > 0
+                && computed.riskReasons[0] !== 'On baseline plan.'
+                && computed.riskReasons[0] !== 'Launched' && (
+                <p className="text-[10px] text-wm-text-muted italic max-w-xs text-right leading-snug">
+                  {computed.riskReasons[0]}
+                </p>
+              )}
+            </div>
           )}
         </header>
 
@@ -558,11 +574,12 @@ export function PlanningWorkspace({ project, onChange }: Props) {
             copies into Slack/email/ClickUp before a partner call. */}
         <PartnerSyncBlock text={partnerSyncString} />
 
-        {/* Operational summary card — launch / hours-tier / sprint
-            allocation. All three carry provenance badges so the user
-            sees auto-derived vs manual override. */}
+        {/* Operational summary — launch target + sprint allocation.
+            The Hours stat used to live here with old tier-based math.
+            That moved to the Project Settings card below, which uses
+            the new computeDevHoursTotal with full derivation. */}
         <WMCard padding="loose">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Stat
               label={
                 <span className="inline-flex items-center gap-1.5">
@@ -581,32 +598,6 @@ export function PlanningWorkspace({ project, onChange }: Props) {
                   : daysToLaunch < 0
                     ? `${Math.abs(daysToLaunch)} day${Math.abs(daysToLaunch) === 1 ? '' : 's'} past`
                     : `${daysToLaunch} day${daysToLaunch === 1 ? '' : 's'} out`
-              }
-            />
-            <Stat
-              label={
-                <span className="inline-flex items-center gap-1.5">
-                  Hours · {tierLabel(sizeTier)}
-                  <ProvenanceBadge provenance={{
-                    mode: draft.dev_hours_estimate != null ? 'manual' : pageCount && pageCount > 0 ? 'auto' : 'fallback',
-                    sourceLabel: draft.dev_hours_estimate != null
-                      ? 'Strategist override'
-                      : pageCount && pageCount > 0
-                        ? `Tier derived from ${pageCount} pages`
-                        : 'Default tier (sitemap pending)',
-                    detail: 'Tier = deriveSizeTier(page_count). Override = web_projects.dev_hours_estimate.',
-                  }} />
-                </span>
-              }
-              value={
-                draft.dev_hours_estimate != null
-                  ? `${draft.dev_hours_estimate}h`
-                  : `${hourRange.base}h`
-              }
-              hint={
-                pageCount == null || pageCount === 0
-                  ? `~20 pgs est. · likely ${hourRange.likely}h · complex ${hourRange.complex}h`
-                  : `${pageCount} pages · likely ${hourRange.likely}h · complex ${hourRange.complex}h`
               }
             />
             <Stat
@@ -675,7 +666,7 @@ export function PlanningWorkspace({ project, onChange }: Props) {
               saving={savingKey === 'priority_order'}
             />
             <FieldNumber
-              label="Total dev hours"
+              label="Total dev hours (override)"
               value={draft.dev_hours_estimate}
               min={0}
               step={1}
@@ -683,6 +674,10 @@ export function PlanningWorkspace({ project, onChange }: Props) {
               saving={savingKey === 'dev_hours_estimate'}
             />
           </div>
+          <p className="text-[10.5px] text-wm-text-subtle italic mt-2">
+            Total dev hours = manual override. Leave blank to use the {devHoursLive.total}h
+            predicted by Project Settings below ({devHoursLive.note}).
+          </p>
 
           {/* Inline feasibility chip on the launch date. */}
           {feasibility && (
@@ -785,130 +780,11 @@ export function PlanningWorkspace({ project, onChange }: Props) {
           </div>
         </WMCard>
 
-        {/* Phase budget */}
+        {/* Manual override — single field. Status reason ("why") lives
+            on the Manual Status Editor (Sub-Status block) above. */}
         <WMCard padding="loose">
-          <SectionLabel>Phase budget (hours)</SectionLabel>
-          <p className="text-[11px] text-wm-text-muted mb-2">
-            Per-phase hour baselines. When all are zero, the health
-            math falls back to Total dev hours distributed across
-            remaining phases.
-          </p>
-          <div className="grid grid-cols-5 gap-2">
-            {PHASE_ORDER.filter(p => p !== 'launched').map(p => (
-              <FieldNumber
-                key={p}
-                label={PHASE_LABEL[p]}
-                value={draft.phase_estimates[p] ?? null}
-                min={0}
-                step={1}
-                compact
-                onCommit={(v) => {
-                  const next: PhaseEstimates = { ...draft.phase_estimates }
-                  if (v == null || v === 0) delete next[p]
-                  else next[p] = v
-                  void save('phase_estimates', next)
-                }}
-                saving={savingKey === 'phase_estimates'}
-              />
-            ))}
-          </div>
-        </WMCard>
-
-        {/* Phase progress */}
-        <WMCard padding="loose">
-          <SectionLabel>Phase progress</SectionLabel>
-          <p className="text-[11px] text-wm-text-muted mb-2">
-            ClickUp tasks drive these by default — completed-hours over
-            total-hours per phase. Drag a slider to override; leave it
-            untouched to let ClickUp keep it fresh.
-          </p>
-          {inference && (
-            <p className="text-[11px] text-wm-accent mb-2">
-              Inferred from {inference.totalTasks} ClickUp tasks ·
-              {' '}{Math.round(inference.remainingMinutes / 60)}h remaining
-            </p>
-          )}
-          <div className="space-y-2">
-            {PHASE_ORDER.filter(p => p !== 'launched').map(p => {
-              const manualSet  = draft.phase_progress[p] != null
-              const inferred   = inference?.perPhase[p] ?? null
-              const effective  = manualSet
-                ? Number(draft.phase_progress[p])
-                : (inferred ?? 0)
-              const pct = Math.round(effective * 100)
-              return (
-                <div key={p} className="flex items-center gap-3">
-                  <span className="text-[12px] font-semibold text-wm-text w-28 shrink-0">
-                    {PHASE_LABEL[p]}
-                  </span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={5}
-                    value={pct}
-                    onChange={(e) => {
-                      const v = Number(e.target.value) / 100
-                      const next: PhaseProgress = { ...draft.phase_progress }
-                      // Don't delete on 0 — explicit "0%" should override
-                      // a non-zero inferred value. Clearing is via the
-                      // "Use ClickUp value" button below.
-                      next[p] = v
-                      setDraft(prev => ({ ...prev, phase_progress: next }))
-                    }}
-                    onMouseUp={() => save('phase_progress', draft.phase_progress)}
-                    onTouchEnd={() => save('phase_progress', draft.phase_progress)}
-                    className="flex-1 accent-wm-accent"
-                  />
-                  <span className="text-[11px] font-mono tabular-nums text-wm-text-muted w-10 text-right">
-                    {pct}%
-                  </span>
-                  {manualSet ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next: PhaseProgress = { ...draft.phase_progress }
-                        delete next[p]
-                        setDraft(prev => ({ ...prev, phase_progress: next }))
-                        void save('phase_progress', next)
-                      }}
-                      title="Stop overriding — let ClickUp drive this phase"
-                      className="text-[10px] text-wm-text-muted hover:text-wm-accent underline shrink-0"
-                    >
-                      use clickup
-                    </button>
-                  ) : inferred != null ? (
-                    <span className="text-[10px] text-wm-text-subtle shrink-0" title="From ClickUp tasks">
-                      auto
-                    </span>
-                  ) : <span className="w-12 shrink-0" />}
-                </div>
-              )
-            })}
-          </div>
-          {inference && inference.unclassifiedNames.length > 0 && (
-            <details className="mt-3">
-              <summary className="text-[11px] text-wm-text-muted cursor-pointer">
-                {inference.unclassifiedNames.length} unclassified task{inference.unclassifiedNames.length === 1 ? '' : 's'}
-              </summary>
-              <ul className="mt-1 ml-3 space-y-0.5 text-[11px] text-wm-text-subtle">
-                {inference.unclassifiedNames.slice(0, 8).map((n, i) => (
-                  <li key={i}>• {n}</li>
-                ))}
-                {inference.unclassifiedNames.length > 8 && (
-                  <li className="italic">
-                    +{inference.unclassifiedNames.length - 8} more
-                  </li>
-                )}
-              </ul>
-            </details>
-          )}
-        </WMCard>
-
-        {/* Manual override + status note */}
-        <WMCard padding="loose">
-          <SectionLabel>Manual override + status note</SectionLabel>
-          <div className="grid grid-cols-2 gap-3 mb-3">
+          <SectionLabel>Manual override</SectionLabel>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <FieldNumber
               label="Manual remaining hours"
               value={draft.manual_remaining_hours}
@@ -917,18 +793,13 @@ export function PlanningWorkspace({ project, onChange }: Props) {
               onCommit={(v) => save('manual_remaining_hours', v)}
               saving={savingKey === 'manual_remaining_hours'}
             />
-            <div className="grid place-items-center text-[10px] text-wm-text-muted italic px-2">
-              When set, this beats the phase math entirely. Use it when
-              you just know how much is left.
-            </div>
+            <p className="text-[11px] text-wm-text-muted italic self-center">
+              Beats every other estimate (Project Settings math, ClickUp inference, dev_hours_estimate). Leave blank to use the computed total.
+              {inference && (
+                <> ClickUp currently infers <span className="font-mono">{Math.round(inference.remainingMinutes / 60)}h</span> remaining across {inference.totalTasks} tasks.</>
+              )}
+            </p>
           </div>
-          <FieldTextArea
-            label="Status note"
-            placeholder="Where this project is right now in plain language — what's done, what's pending, what's blocking."
-            value={draft.status_note}
-            onCommit={(v) => save('status_note', v)}
-            saving={savingKey === 'status_note'}
-          />
         </WMCard>
 
         {/* Dev queue — sequential capacity walk across the org */}
@@ -1037,17 +908,6 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** Tier label for the hours-target stat. Translates the internal
- *  ProjectSizeTier enum into something the strategist reads as a
- *  noun ("Small · 30h") not a programming token. */
-function tierLabel(tier: ProjectSizeTier): string {
-  switch (tier) {
-    case 'small':  return 'Small (<18 pages)'
-    case 'medium': return 'Medium (18-21 pages)'
-    case 'large':  return 'Large (22+ pages)'
-  }
-}
-
 function FieldDate({
   label, value, onCommit, saving,
 }: {
@@ -1143,34 +1003,6 @@ function LeverToggle({
         </span>
         {hint && <p className="text-[11px] text-wm-text-muted leading-snug">{hint}</p>}
       </div>
-    </label>
-  )
-}
-
-function FieldTextArea({
-  label, value, placeholder, onCommit, saving,
-}: {
-  label: string
-  value: string | null
-  placeholder?: string
-  onCommit: (v: string | null) => void
-  saving?: boolean
-}) {
-  const [v, setV] = useState(value ?? '')
-  useEffect(() => { setV(value ?? '') }, [value])
-  return (
-    <label className="block">
-      <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle flex items-center gap-1">
-        {label} {saving && <Loader2 size={9} className="animate-spin" />}
-      </span>
-      <textarea
-        value={v}
-        onChange={e => setV(e.target.value)}
-        onBlur={() => { if (v !== (value ?? '')) onCommit(v.trim() === '' ? null : v) }}
-        placeholder={placeholder}
-        rows={3}
-        className="mt-1 w-full text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated focus:border-wm-accent focus:outline-none resize-vertical leading-snug"
-      />
     </label>
   )
 }

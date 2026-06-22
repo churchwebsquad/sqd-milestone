@@ -18,53 +18,31 @@ import { ChevronDown, ChevronRight, Library, MessageCircle, Plus, Search, Settin
 import { supabase } from '../../lib/supabase'
 import { SettingsWorkspace } from '../../components/wm/workspaces/SettingsWorkspace'
 import { WMSegmentedToggle } from '../../components/wm/SegmentedToggle'
-import { BoardView } from '../../components/wm/manager/BoardView'
-import { ScheduleView } from '../../components/wm/manager/ScheduleView'
-import { PhaseBoardView } from '../../components/wm/manager/PhaseBoardView'
-import { WaterfallView } from '../../components/wm/manager/WaterfallView'
-import { CalendarView } from '../../components/wm/manager/CalendarView'
 import { ListView } from '../../components/wm/manager/ListView'
-import { CapacityForecastView } from '../../components/wm/manager/CapacityForecastView'
+import { WeekHourGrid } from '../../components/wm/manager/WeekHourGrid'
 import { NeedsAttentionStrip } from '../../components/wm/manager/NeedsAttentionStrip'
 import { NewProspectSimulator } from '../../components/wm/manager/NewProspectSimulator'
 import { DevCapacityBanner } from '../../components/wm/manager/DevCapacityBanner'
-import { FilterChip } from '../../components/wm/manager/FilterChip'
-import { SalesQuoteCard } from '../../components/wm/manager/SalesQuoteCard'
-import { PaceDashboard } from '../../components/wm/manager/PaceDashboard'
 import { useProjectsWithHealth } from '../../hooks/useProjectsWithHealth'
 import type { ProjectRowVM } from '../../hooks/useProjectsWithHealth'
-import type { ProjectSubStatus, WebProjectPhase } from '../../types/database'
 
-type ManagerView = 'list' | 'board' | 'phase-board' | 'schedule' | 'waterfall' | 'calendar' | 'forecast'
-
-const PHASE_FILTERS: WebProjectPhase[] = [
-  'intake', 'content', 'design', 'dev', 'review', 'launched',
-]
-const SUB_FILTERS: ProjectSubStatus[] = [
-  'on_track', 'ahead', 'off_track', 'blocked', 'complete',
-]
-const PHASE_LABEL: Record<WebProjectPhase, string> = {
-  intake: 'Intake', content: 'Copywriting', design: 'Design',
-  dev: 'Dev', review: 'Final review', launched: 'Launched',
-}
-const SUB_LABEL: Record<ProjectSubStatus, string> = {
-  on_track: 'On track', ahead: 'Ahead', off_track: 'Off track',
-  blocked: 'Blocked', complete: 'Complete',
-}
+// Two surfaces: a per-project List for priority + launch date shuffling,
+// and a Week-Hour Grid for visualizing the cap. Everything else
+// (Board/Phases/Schedule/Waterfall/Calendar/Forecast) is folded into
+// these two — phase boards added cognitive load without driving the
+// "where do my dev hours go this week" question.
+type ManagerView = 'list' | 'grid'
 
 export default function WebProjectsPage() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const view: ManagerView = ((): ManagerView => {
     const v = params.get('view')
-    if (v === 'board' || v === 'schedule' || v === 'phase-board' || v === 'waterfall' || v === 'calendar' || v === 'forecast') return v
-    return 'list'   // new default — step-aware row list
+    return v === 'grid' ? 'grid' : 'list'
   })()
   /** Bulk-reorder mode toggles drag handles on the list view. */
   const reorderMode = params.get('reorder') === '1'
   const showArchived = params.get('archived') === '1'
-  const phaseFilter = (params.get('phase') || '').split(',').filter(Boolean) as WebProjectPhase[]
-  const subFilter   = (params.get('health') || '').split(',').filter(Boolean) as ProjectSubStatus[]
   const query       = params.get('q') ?? ''
 
   const [createOpen, setCreateOpen] = useState(false)
@@ -72,35 +50,20 @@ export default function WebProjectsPage() {
 
   const { rows, loading, error, refetch } = useProjectsWithHealth({ includeArchived: showArchived })
 
-  // Filter / search before passing to the view.
+  // Filter / search before passing to the view. Phase + health filters
+  // were dropped — the List view already shows phase + health pills
+  // and the WeekHourGrid renders every active project. Search covers
+  // ad-hoc lookups.
   const visible = useMemo<ProjectRowVM[]>(() => {
     const q = query.trim().toLowerCase()
     return rows.filter(r => {
       if (!showArchived && r.archived) return false
       if (showArchived && !r.archived) return false
-      if (phaseFilter.length > 0 && !phaseFilter.includes(r.current_phase as WebProjectPhase)) return false
-      if (subFilter.length > 0 && !subFilter.includes(r.health.subStatus)) return false
       if (!q) return true
       const hay = [r.church_name, r.name, String(r.member)].filter(Boolean).join(' ').toLowerCase()
       return hay.includes(q)
     })
-  }, [rows, query, showArchived, phaseFilter, subFilter])
-
-  const phaseCounts = useMemo(() => {
-    const out: Record<string, number> = {}
-    for (const r of rows) {
-      const p = r.current_phase || 'intake'
-      out[p] = (out[p] ?? 0) + 1
-    }
-    return out
-  }, [rows])
-  const subCounts = useMemo(() => {
-    const out: Record<string, number> = {}
-    for (const r of rows) {
-      out[r.health.subStatus] = (out[r.health.subStatus] ?? 0) + 1
-    }
-    return out
-  }, [rows])
+  }, [rows, query, showArchived])
 
   const archivedCount = rows.filter(r => r.archived).length
 
@@ -109,13 +72,6 @@ export default function WebProjectsPage() {
     if (value === null || value === '') next.delete(key)
     else next.set(key, value)
     setParams(next, { replace: true })
-  }
-  const toggleInList = (key: string, value: string) => {
-    const current = (params.get(key) || '').split(',').filter(Boolean)
-    const next = current.includes(value)
-      ? current.filter(v => v !== value)
-      : [...current, value]
-    setParam(key, next.join(',') || null)
   }
 
   return (
@@ -188,22 +144,9 @@ export default function WebProjectsPage() {
           </div>
         )}
 
-        {/* Team pace strip — collapsible. Most-recent + forward-
-            looking signals + drill-downs into the at-risk filter. */}
-        <div className="mb-3">
-          <PaceDashboard rows={rows} />
-        </div>
-
-        {/* Sales-quote one-liner — only renders when there's launched-
-            project history to baseline from. */}
-        <div className="mb-4">
-          <SalesQuoteCard rows={rows} />
-        </div>
-
         {/* Dev capacity outlook — answers "is dev overbooked?" at a glance.
-            Per Ashley's call: dev is the most constrained resource, so it
-            gets a permanent banner; content/design capacity is visible
-            inside per-project planning when needed. */}
+            The WeekHourGrid below shows the per-project breakdown; this
+            banner is the headline summary. */}
         <DevCapacityBanner rows={rows} />
 
         {/* Needs-attention digest — what should I look at right now?
@@ -223,19 +166,18 @@ export default function WebProjectsPage() {
           <NewProspectSimulator rows={rows} />
         </div>
 
-        {/* Toolbar: view toggle + search + archived */}
+        {/* Toolbar: view toggle + search + archived.
+            Two surfaces only — List (per-project priority + launch) and
+            Week-Hour Grid (per-week capacity). The old 7-view toggle
+            (Board/Phases/Schedule/Waterfall/Calendar/Forecast) added
+            cognitive load without driving the dev-hour question. */}
         <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
           <WMSegmentedToggle<ManagerView>
             active={view}
             onChange={(v) => setParam('view', v === 'list' ? null : v)}
             options={[
-              { key: 'list',        label: 'List' },
-              { key: 'board',       label: 'Board' },
-              { key: 'phase-board', label: 'Phases' },
-              { key: 'schedule',    label: 'Schedule' },
-              { key: 'waterfall',   label: 'Waterfall' },
-              { key: 'calendar',    label: 'Calendar' },
-              { key: 'forecast',    label: 'Forecast' },
+              { key: 'list', label: 'List' },
+              { key: 'grid', label: 'Week-Hour Grid' },
             ]}
           />
 
@@ -271,36 +213,6 @@ export default function WebProjectsPage() {
               Archived ({archivedCount})
             </label>
           )}
-        </div>
-
-        {/* Filter chips */}
-        <div className="mb-4 flex flex-col gap-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[10px] uppercase tracking-widest font-bold text-purple-gray shrink-0">Phase</span>
-            {PHASE_FILTERS.map(p => (
-              <FilterChip
-                key={p}
-                active={phaseFilter.includes(p)}
-                onToggle={() => toggleInList('phase', p)}
-                count={phaseCounts[p] ?? 0}
-              >
-                {PHASE_LABEL[p]}
-              </FilterChip>
-            ))}
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[10px] uppercase tracking-widest font-bold text-purple-gray shrink-0">Health</span>
-            {SUB_FILTERS.map(s => (
-              <FilterChip
-                key={s}
-                active={subFilter.includes(s)}
-                onToggle={() => toggleInList('health', s)}
-                count={subCounts[s] ?? 0}
-              >
-                {SUB_LABEL[s]}
-              </FilterChip>
-            ))}
-          </div>
         </div>
 
         <p className="text-xs text-purple-gray mb-3">
@@ -353,72 +265,8 @@ export default function WebProjectsPage() {
           </>
         )}
 
-        {view === 'board' && (
-          <BoardView
-            rows={visible}
-            loading={loading}
-            onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
-            onReorder={async (orderedIds) => {
-              // Renumber priority_order 1..N for the reordered set.
-              // Touches every reordered row; the rest keep their
-              // existing priority (queue position is derived from
-              // the column on next refetch). Optimistic UI via
-              // immediate refetch after the batch update lands.
-              const updates = orderedIds.map((id, i) =>
-                supabase.from('strategy_web_projects')
-                  .update({ priority_order: i + 1, updated_at: new Date().toISOString() })
-                  .eq('id', id),
-              )
-              await Promise.all(updates)
-              await refetch()
-            }}
-          />
-        )}
-
-        {view === 'phase-board' && (
-          <PhaseBoardView
-            rows={visible}
-            loading={loading}
-            onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
-          />
-        )}
-
-        {view === 'schedule' && (
-          <ScheduleView
-            rows={visible}
-            loading={loading}
-            onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
-            onUpdateDevHours={async (id, hours) => {
-              await supabase.from('strategy_web_projects')
-                .update({ dev_hours_estimate: hours, updated_at: new Date().toISOString() })
-                .eq('id', id)
-              await refetch()
-            }}
-          />
-        )}
-
-        {view === 'waterfall' && (
-          <WaterfallView
-            rows={visible}
-            loading={loading}
-            onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
-          />
-        )}
-
-        {view === 'calendar' && (
-          <CalendarView
-            rows={visible}
-            loading={loading}
-            onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
-          />
-        )}
-
-        {view === 'forecast' && (
-          <CapacityForecastView
-            rows={visible}
-            loading={loading}
-            onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
-          />
+        {view === 'grid' && (
+          <WeekHourGrid rows={visible} capacityPerWeek={35} />
         )}
 
       </div>
