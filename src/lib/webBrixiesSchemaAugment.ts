@@ -295,7 +295,7 @@ function injectHeroTagline(
     `text-align: ${align}`,
     'color: #6B5CE7',                 // brand Purple Mid — distinguishes from heading
     'font-size: 14px',
-    'font-family: Inter',
+    "font-family: 'DM Sans'",
     'font-weight: 600',
     'line-height: 22px',
     'letter-spacing: 0.08em',

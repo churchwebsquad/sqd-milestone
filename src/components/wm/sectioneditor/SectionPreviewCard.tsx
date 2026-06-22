@@ -433,9 +433,13 @@ function buildIframeDoc(html: string): string {
 <html>
 <head>
 <meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; font-family: 'DM Sans', system-ui, -apple-system, sans-serif; color: #1a1a2e; background: #fff; }
+  html, body, h1, h2, h3, h4, h5, h6, p, span, div, a, li, td, th, button { font-family: 'DM Sans', system-ui, -apple-system, sans-serif; }
+  html, body { margin: 0; padding: 0; color: #1a1a2e; background: #fff; }
   body { width: 1512px; }
   img { max-width: 100%; height: auto; }
   a { color: inherit; text-decoration: none; }
