@@ -270,6 +270,9 @@ export function InternalReviewWorkspace({
       activeInternalReview: review,
       sectionComments:      reviewState?.comments.filter(c => c.web_section_id === selectedSection.id) ?? [],
       onCommentsChange:     refreshAfterCommentAction,
+      // ONLY the Review tab tightens the field set so the AM stays
+      // focused on what's there. Pages tab leaves this unset.
+      restrictEmptyFields:  true,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSection, selectedTemplate, snippets, cardTemplates, reviewState, review])

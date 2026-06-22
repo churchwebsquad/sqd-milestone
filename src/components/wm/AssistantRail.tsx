@@ -233,6 +233,7 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
               sectionComments={sectionDetail.sectionComments}
               reviewsById={sectionDetail.reviewsById}
               onCommentsChange={sectionDetail.onCommentsChange}
+              restrictEmptyFields={sectionDetail.restrictEmptyFields}
             />
           </SnippetFocusProvider>
           </ProjectIdProvider>

@@ -56,6 +56,11 @@ export interface SectionDetail {
   project?: import('../../../types/database').StrategyWebProject
   libraryTemplatesById?: Record<string, Pick<import('../../../types/database').WebContentTemplate, 'id' | 'layer_name'>>
   onLibraryChange?: () => Promise<void>
+  /** When true, the SectionDetailsPanel hides empty optional fields to
+   *  keep the AM focused on what's there. Set ONLY by
+   *  InternalReviewWorkspace; PagesWorkspace must leave this unset so
+   *  the web department can always edit every field. */
+  restrictEmptyFields?: boolean
 }
 
 interface ContextValue {

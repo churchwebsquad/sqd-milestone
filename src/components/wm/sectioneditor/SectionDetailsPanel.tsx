@@ -84,6 +84,14 @@ interface Props {
   /** Called after a comment is created or resolved so the parent
    *  workspace reloads the review state. */
   onCommentsChange?: () => Promise<void>
+  /** When true, hide empty optional fields to keep the reviewer
+   *  focused on what's there. Set ONLY by InternalReviewWorkspace —
+   *  the Pages workspace must always render the full editor so the
+   *  web department can execute edits regardless of review state.
+   *  Required slots, headings, CTA slots, button/CTA groups, and
+   *  palette-referenced (cards) groups are still surfaced so the
+   *  reviewer can flag missing content. */
+  restrictEmptyFields?: boolean
 }
 
 /** Template ids that render dev-bound content at runtime (CMS post
@@ -100,6 +108,7 @@ export function SectionDetailsPanel({
   onChange, onClose, onChangeVariant, onUnbind, onRemove,
   project, libraryTemplatesById, onLibraryChange,
   activeInternalReview, sectionComments, reviewsById, onCommentsChange,
+  restrictEmptyFields = false,
 }: Props) {
   const values = (section.field_values ?? {}) as Record<string, unknown>
   const setValue = (key: string, v: unknown) => {
@@ -120,10 +129,16 @@ export function SectionDetailsPanel({
   // Internal review mode focuses the reviewer on content that's
   // actually present — an empty Tagline row is noise when the goal
   // is "comment on what's there." Tighten the visible-fields filter
-  // when activeInternalReview is set: drop empty leaf slots, drop
-  // groups with no bound items. The strategist view keeps the full
-  // editor (empty fields are how they fill them in).
-  const inReviewMode = activeInternalReview != null
+  // ONLY when the parent (InternalReviewWorkspace) opts in via
+  // restrictEmptyFields. The Pages workspace must always render the
+  // full editor so the web department can execute edits regardless
+  // of whether a review is open — historically this filter ran on
+  // ALL surfaces because activeInternalReview was non-null on Pages
+  // too, which was the source of the "buttons + cards disappeared"
+  // emergency. Heading slots, required slots, CTA slots/groups, and
+  // palette-referenced (cards) groups stay visible even in review
+  // mode so the AM can still flag missing content.
+  const inReviewMode = restrictEmptyFields
   const visibleFields = fields
     .filter(isEditableField)
     .filter(f => !inReviewMode || !isFieldEmptyForReview(f, values))
@@ -638,21 +653,45 @@ function humanizeSlotPath(parts: ReadonlyArray<string>): string {
  *  - group: zero items bound */
 function isFieldEmptyForReview(field: WebFieldDef, values: Record<string, unknown>): boolean {
   if (field.kind === 'group') {
+    // Palette-referenced groups (cards on feature-section-2 etc.)
+    // ALWAYS show — they're the headline content of the section and
+    // their stored shape is `{ items: [...], __palette_template_id }`
+    // (an object, not an array), so the old Array.isArray check
+    // erroneously hid them even when items were present.
+    if (field.item_template_ref) return false
+    // CTA / button groups always show — the AM may want to flag
+    // "this section needs a CTA" even when no button is saved.
+    if (isButtonOrCtaGroup(field)) return false
     const raw = values[field.key]
+    // Detect emptiness across both shapes the codebase has produced:
+    //   - plain array `[{...}, {...}]`
+    //   - palette envelope `{ items: [{...}], __palette_template_id }`
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      const items = (raw as { items?: unknown }).items
+      return !Array.isArray(items) || items.length === 0
+    }
     return !Array.isArray(raw) || raw.length === 0
   }
   // slot
-  const raw = values[field.key]
-  if (raw == null) return true
+  // Always show required slots, headings (heading_level set), and
+  // CTA slots. These three categories together cover the signals the
+  // AM needs to comment on even when the field is blank.
+  if (field.required === true) return false
+  if (typeof field.heading_level === 'number') return false
   if (field.type === 'cta') {
+    const raw = values[field.key]
     if (typeof raw === 'object' && raw !== null) {
       const cta = raw as { label?: unknown; url?: unknown }
       const label = typeof cta.label === 'string' ? cta.label.trim() : ''
       const url   = typeof cta.url   === 'string' ? cta.url.trim()   : ''
-      return label.length === 0 && url.length === 0
+      // Empty CTAs are still surfaced — an AM should be able to flag
+      // a missing CTA the same way they flag a missing heading.
+      void label; void url
     }
-    return true
+    return false
   }
+  const raw = values[field.key]
+  if (raw == null) return true
   if (field.type === 'boolean') return false
   if (typeof raw !== 'string') return false
   const trimmed = raw.trim()
@@ -662,6 +701,14 @@ function isFieldEmptyForReview(field: WebFieldDef, values: Record<string, unknow
     return stripped.length === 0
   }
   return false
+}
+
+/** Match groups whose key or layer name reads as a CTA container.
+ *  Used by review-mode filtering so empty CTA groups stay visible —
+ *  AMs should be able to flag a missing button on a section. */
+function isButtonOrCtaGroup(group: WebGroupDef): boolean {
+  const blob = `${group.key} ${group.layer_name ?? ''}`.toLowerCase()
+  return /\b(button|buttons|cta|ctas|action|actions)\b/.test(blob)
 }
 
 /** Hide non-editable fields from the panel — image slots, image
