@@ -428,9 +428,12 @@ function escapeAttr(s: string): string {
   return s.replace(/"/g, '&quot;')
 }
 
-/** Walk the scraped markdown and produce 1-2 cowork-shape sections.
- *  Defaults: H1 + lead → hero, everything else → one content section
- *  with auto-extracted CTAs. */
+/** Walk the scraped markdown and produce N cowork-shape sections.
+ *  Defaults: H1 + lead → hero, then ONE content_image_text_b section
+ *  per H2 block (the original spec produced one big mush, which buried
+ *  the structure the partner already authored). Per-block CTAs stay
+ *  with their section; site-nav junk H2s ("About", "Connect", footer
+ *  links) are dropped before any section gets emitted. */
 function segmentMarkdown(rawMd: string, pageTitle: string): SegmentedSection[] {
   const md = stripImages(rawMd)
   const lines = md.split(/\r?\n/)
@@ -446,9 +449,7 @@ function segmentMarkdown(rawMd: string, pageTitle: string): SegmentedSection[] {
   // Lead paragraph = first non-empty paragraph AFTER the heading.
   let leadEndIdx = firstHeadingIdx + 1
   const leadBuf: string[] = []
-  // Skip blank lines after the heading.
   while (leadEndIdx < lines.length && !lines[leadEndIdx].trim()) leadEndIdx++
-  // Read until next blank line OR next heading.
   while (leadEndIdx < lines.length) {
     const l = lines[leadEndIdx]
     if (!l.trim()) break
@@ -458,20 +459,56 @@ function segmentMarkdown(rawMd: string, pageTitle: string): SegmentedSection[] {
   }
   const leadText = leadBuf.join(' ').trim()
 
-  // Remainder = everything from leadEndIdx onwards (after lead paragraph).
-  const remainderMd = lines.slice(leadEndIdx).join('\n').trim()
-
-  // Pull buttons out of BOTH the lead and the remainder. Top-of-page
-  // CTAs go on the hero; trailing CTAs follow the long-prose section.
+  // Pull buttons out of the lead first — site-wide nav buttons usually
+  // appear AFTER the page content, so anything attached to the lead is
+  // legitimately a hero CTA.
   const { body: leadBodyClean, buttons: heroButtons } = extractButtons(leadText)
-  const { body: remainderClean, buttons: remainderButtons } = extractButtons(remainderMd)
+
+  // The remainder is everything from leadEndIdx onwards. Walk it,
+  // splitting on H2 boundaries — each H2 starts a new content block.
+  const remainderLines = lines.slice(leadEndIdx)
+  const h2Blocks: Array<{ heading: string; bodyLines: string[] }> = []
+  let currentHeading: string | null = null
+  let currentBody: string[] = []
+  for (const raw of remainderLines) {
+    const h2 = raw.match(/^##\s+(.+?)\s*#*$/)
+    if (h2) {
+      // Flush previous block when we hit a new H2.
+      if (currentHeading !== null) {
+        h2Blocks.push({ heading: currentHeading, bodyLines: currentBody })
+      }
+      currentHeading = h2[1].trim()
+      currentBody = []
+    } else {
+      currentBody.push(raw)
+    }
+  }
+  if (currentHeading !== null) {
+    h2Blocks.push({ heading: currentHeading, bodyLines: currentBody })
+  }
+
+  // Filter junk H2 blocks. Common pattern: scraped pages include the
+  // site nav as a trailing run of standalone heading-only H2s ("About",
+  // "Connect", "Friends & Partners") plus a site-name brand H2. They
+  // have no body content of their own — dropping them is safe because
+  // a real content section always has prose under its heading.
+  const cleanBlocks = h2Blocks.filter(b => {
+    const bodyMd = b.bodyLines.join('\n').trim()
+    // Drop entirely if no body text. Single-line H2-only blocks are
+    // always site nav (a real content H2 introduces at least one
+    // paragraph beneath itself).
+    if (!bodyMd) return false
+    // Drop when the body is only links + filler — that's a nav menu
+    // disguised as a section ("More" → list of nav links).
+    const bodyMinusLinks = bodyMd.replace(/\[[^\]]+\]\([^)]+\)/g, '').replace(/[\s\-*•·|→]+/g, '')
+    if (bodyMinusLinks.length < 8) return false
+    return true
+  })
 
   const sections: SegmentedSection[] = []
 
-  // Hero section — primary_heading + body + (optional) buttons
-  const heroSlots: Record<string, unknown> = {
-    primary_heading: heroHeading,
-  }
+  // Hero
+  const heroSlots: Record<string, unknown> = { primary_heading: heroHeading }
   if (leadBodyClean) heroSlots.body = leadBodyClean
   if (heroButtons.length > 0) {
     heroSlots.buttons = heroButtons.map((b, i) => ({
@@ -481,46 +518,52 @@ function segmentMarkdown(rawMd: string, pageTitle: string): SegmentedSection[] {
   }
   sections.push({ template_key: 'hero_inner', slot_values: heroSlots })
 
-  // Long prose section — only if there's substantial content after the lead.
-  if (remainderClean.length > 0) {
-    const bodyHtml = markdownToHtml(remainderClean)
-    const proseSlots: Record<string, unknown> = {
-      primary_heading: extractFirstHeadingFromRemainder(remainderClean) ?? '',
-      body: bodyHtml,
+  // One content section per H2 block. Buttons stay with their parent
+  // block — the per-block extractButtons call routes them correctly.
+  for (const block of cleanBlocks) {
+    const blockMd = block.bodyLines.join('\n').trim()
+    const { body: bodyClean, buttons } = extractButtons(blockMd)
+    if (!bodyClean && buttons.length === 0) continue   // empty after CTA strip
+    const slots: Record<string, unknown> = {
+      primary_heading: block.heading,
     }
-    if (!proseSlots.primary_heading) delete proseSlots.primary_heading
-    if (remainderButtons.length > 0) {
-      proseSlots.buttons = remainderButtons.map((b, i) => ({
+    if (bodyClean) slots.body = markdownToHtml(bodyClean)
+    if (buttons.length > 0) {
+      slots.buttons = buttons.map((b, i) => ({
         label: b.label, url: b.url,
         kind: i === 0 ? 'primary' : 'secondary',
       }))
     }
-    sections.push({ template_key: 'content_image_text_b', slot_values: proseSlots })
-  } else if (remainderButtons.length > 0) {
-    // Pure-CTA tail block — no body, just trailing buttons. Use cta_callout.
-    sections.push({
-      template_key: 'cta_callout',
-      slot_values: {
-        primary_heading: 'Take the next step',
-        buttons: remainderButtons.map((b, i) => ({
+    sections.push({ template_key: 'content_image_text_b', slot_values: slots })
+  }
+
+  // No-H2 case: page is a single flat block. Keep the original
+  // behavior — one content_image_text_b under the hero.
+  if (cleanBlocks.length === 0) {
+    const remainderMd = remainderLines.join('\n').trim()
+    const { body: remainderClean, buttons: remainderButtons } = extractButtons(remainderMd)
+    if (remainderClean.length > 0) {
+      const slots: Record<string, unknown> = { body: markdownToHtml(remainderClean) }
+      if (remainderButtons.length > 0) {
+        slots.buttons = remainderButtons.map((b, i) => ({
           label: b.label, url: b.url,
           kind: i === 0 ? 'primary' : 'secondary',
-        })),
-      },
-    })
+        }))
+      }
+      sections.push({ template_key: 'content_image_text_b', slot_values: slots })
+    } else if (remainderButtons.length > 0) {
+      sections.push({
+        template_key: 'cta_callout',
+        slot_values: {
+          primary_heading: 'Take the next step',
+          buttons: remainderButtons.map((b, i) => ({
+            label: b.label, url: b.url,
+            kind: i === 0 ? 'primary' : 'secondary',
+          })),
+        },
+      })
+    }
   }
 
   return sections
-}
-
-function extractFirstHeadingFromRemainder(md: string): string | null {
-  // Look for H2-H3 heading at the start; H1 unlikely in remainder
-  // since we already consumed the page's primary H1.
-  const lines = md.split(/\r?\n/)
-  for (const l of lines) {
-    const m = l.match(/^#{2,3}\s+(.+?)\s*$/)
-    if (m) return m[1].trim()
-    if (l.trim()) return null   // hit prose before a heading
-  }
-  return null
 }
