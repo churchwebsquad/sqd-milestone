@@ -78,6 +78,70 @@ When restructuring a lifted source into a card-shaped layout
 caps tolerate +2; if you're +100 over a slot's `max_chars`, ping the
 outline to consider a different template family.
 
+## Statement of Faith, Beliefs, Values — verbatim hard rule
+
+**This rule overrides every other length/cap/band guideline in this
+document.** When the source page contains a Statement of Faith,
+Statement of Beliefs, Doctrinal Statement, Statement of Values, or
+similarly-named theological declaration, you MUST emit the FULL
+verbatim text. No exceptions.
+
+What this rule forbids:
+- ❌ Summarizing the statement ("The 13 sections cover Trinity,
+  baptism, Spirit…")
+- ❌ Truncating with a link out ("Read the full statement at
+  [partner site]")
+- ❌ Picking a subset ("the 5 most important values")
+- ❌ Paraphrasing into shorter cards because the template's `max_chars`
+  is tight (pick a different template instead)
+- ❌ Dropping scripture references that follow each declaration
+- ❌ Folding multi-paragraph declarations into a single paragraph
+- ❌ Skipping the statement because it's "too long" or "the user can
+  click through"
+
+What this rule requires:
+- ✅ Every numbered/named theological section appears as its own
+  heading + body, in source order
+- ✅ Full text of every paragraph, every clause, every parenthetical
+- ✅ Scripture reference lists kept intact (typically italicized run
+  of book/chapter/verse citations following each section)
+- ✅ If `max_chars` constrains the only available template family,
+  set `band_status: 'verbatim_band_unreachable'` AND emit a
+  `cap_override` request naming the offending slot — DO NOT
+  silently drop text
+- ✅ When the source is split across multiple sub-pages (e.g.
+  /beliefs/, /statement-of-faith/, /what-we-believe/), include
+  every page's content in the page draft
+
+How to recognize these statements in the source:
+- Headings containing: "Statement of Faith", "Statement of Beliefs",
+  "Statement of Values", "Doctrinal Statement", "What We Believe",
+  "Core Values", "Our Beliefs", "Our Values", "Foundational Truths",
+  "Articles of Faith"
+- Structural pattern: numbered or named theological declarations,
+  each typically 100-500 words, often with scripture refs trailing
+- Long run of `<h2>`/`<h3>` headings naming theological concepts
+  (Trinity, Christology, Pneumatology, Eschatology, etc.)
+
+Why this rule exists: church partners send these statements as
+non-negotiable, often-board-approved documents. Truncating or
+summarizing them changes their theological precision — what reads
+to a generalist as redundant qualifier is, to the partner, a
+specific doctrinal commitment. Arvada Vineyard's 13-section
+Statement of Faith was summarized to "13 major theological sections
+covering…" in the first draft; the partner-facing copy lost the
+entire body of the church's theological identity. This rule
+prevents that recurrence regardless of `intended_verbatim_band`,
+`max_chars`, or template capacity.
+
+If you can't fit the full statement into the planned section,
+**emit it anyway** and stamp `band_status: 'verbatim_band_unreachable'`
+with a `voice_notes` entry: "Statement of Faith exceeds template cap;
+needs a long-prose template (content-section-16) or repeated content
+sections." The bind step is permissive about long bodies on
+richtext slots; the cap-warning trips downstream but the content
+survives.
+
 ## Strategic Goals — inputs you MUST consume
 
 Loaded from `roadmap_state.strategic_goals` (`status='approved'` only):

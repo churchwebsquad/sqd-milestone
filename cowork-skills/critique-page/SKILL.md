@@ -553,6 +553,42 @@ fact `55678` vs crawl `620-322-2390`), surface that conflict as a
 directive at severity `warning` so the strategist routes to partner
 confirmation. Never silently pick one value.
 
+### theological-statement truncation flag
+
+If the source page (per crawl atoms or partner-uploaded copy) contains
+a Statement of Faith, Statement of Beliefs, Statement of Values,
+Doctrinal Statement, or similar theological declaration, the draft's
+bound copy MUST contain it verbatim. Detect this:
+
+1. Walk the page's crawl atom bodies + content_collection markdown.
+   Match heading patterns: `Statement of Faith`, `Statement of Beliefs`,
+   `What We Believe`, `Doctrinal Statement`, `Core Values`,
+   `Our Beliefs`, `Foundational Truths`, `Articles of Faith`.
+2. For each match, extract the full block of text under that heading
+   (until the next H2 or end-of-page). Record total character count
+   and a fingerprint (first 100 chars + last 100 chars + word count).
+3. Concatenate the draft's section bodies that land on the same page.
+   Check: does the bound copy contain the fingerprint AND match the
+   word count within ±5%?
+4. If NO → emit a `blocker`-severity directive:
+   `theological_statement_truncated`. Cite the source heading +
+   source word count + draft word count. Example:
+   `"Source 'Statement of Faith' (1,847 words across 13 sections)
+   appears in draft as a 64-word summary. The full text must be
+   emitted verbatim — see draft-page SKILL §Statement of Faith
+   hard rule. Recommend a long-prose section (content-section-16)
+   between sections N and N+1."`
+5. NEVER tolerate "Read the full statement at [link]" patterns in
+   the draft. Phrases like `"For our full statement of faith, visit"`,
+   `"Read more at"`, `"See the complete statement"` followed by a URL
+   are also `theological_statement_truncated` blockers.
+
+This is the strictest critique rule in the rubric — it fires
+regardless of `intended_verbatim_band`, regardless of template
+constraints, regardless of page-length goals. Partners send these
+statements as theologically precise, often board-approved documents.
+Summarizing them changes their meaning.
+
 ### Authorized strategist overrides — DO NOT flag these as errors
 
 When the drafter logs a `verbatim_overrides[]` entry on a section
