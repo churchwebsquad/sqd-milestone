@@ -267,7 +267,115 @@ function normalizeCoworkSlotValues(section: CoworkDraftSection): Record<string, 
     )
     delete raw.build_cards
   }
+  recoverNoncanonicalSlots(raw)
   return raw
+}
+
+/** Fold common non-canonical slot drift back into the canonical
+ *  uniform vocab so content survives the bind. Arvada's cowork SKILL
+ *  emits `body_2`, `items_2`, `lead`, `why`, etc. — none of which the
+ *  alias maps know how to route. Without this recovery, the strategist
+ *  sees "perfect bind" while paragraphs and cards silently disappear.
+ *
+ *  Patterns handled:
+ *    • body_2, body_3, body_N  → appended to body as additional <p> tags
+ *    • items_2, items_3        → appended to items[] (string → {item_body})
+ *    • items as a scalar string → wrapped to [{item_body: string}]
+ *    • lead                    → tagline (if empty) else prepended to body
+ *    • why, intro              → appended to body as a leading paragraph
+ *    • *_cta strings           → noted in dropped_content via the sweep
+ *
+ *  Mutates `raw` in place. */
+function recoverNoncanonicalSlots(raw: Record<string, unknown>): void {
+  // 1. Coerce scalar items → items[]. Arvada home/s2 emitted items
+  //    as a single string ("You'll step into a welcoming space…").
+  if (typeof raw.items === 'string' && raw.items.trim()) {
+    raw.items = [{ item_body: raw.items }]
+  }
+
+  const bodyPrefixes: string[] = []   // rendered BEFORE existing body
+  const bodySuffixes: string[] = []   // rendered AFTER existing body
+
+  // 2. body_N siblings → append paragraphs to body (suffix).
+  for (const key of Object.keys(raw)) {
+    if (!/^body_\d+$/i.test(key)) continue
+    const v = raw[key]
+    if (typeof v === 'string' && v.trim()) bodySuffixes.push(v)
+    delete raw[key]
+  }
+
+  // 3. items_N siblings → append to items[].
+  for (const key of Object.keys(raw)) {
+    if (!/^items_\d+$/i.test(key)) continue
+    const v = raw[key]
+    if (v == null || v === '') { delete raw[key]; continue }
+    if (!Array.isArray(raw.items)) raw.items = []
+    const arr = raw.items as Array<Record<string, unknown>>
+    if (Array.isArray(v)) {
+      for (const it of v as unknown[]) {
+        if (it && typeof it === 'object') arr.push(it as Record<string, unknown>)
+        else if (typeof it === 'string' && it.trim()) arr.push({ item_body: it })
+      }
+    } else if (typeof v === 'string' && v.trim()) {
+      arr.push({ item_body: v })
+    } else if (v && typeof v === 'object') {
+      arr.push(v as Record<string, unknown>)
+    }
+    delete raw[key]
+  }
+
+  // 4. lead / intro → PREFIX (renders before body). These are leading
+  //    paragraphs by name. Body always has a destination on the
+  //    templates cowork picks; tagline doesn't (content-section-45/16
+  //    have no tagline slot), so routing lead→tagline silently drops
+  //    on those. Prepending to body guarantees the line renders.
+  for (const key of ['intro', 'lead']) {   // intro first so lead lands closer to existing body
+    const v = raw[key]
+    if (typeof v === 'string' && v.trim()) {
+      bodyPrefixes.push(v)
+      delete raw[key]
+    }
+  }
+
+  // 5. why → suffix (supporting paragraph after main body).
+  if (typeof raw.why === 'string' && (raw.why as string).trim()) {
+    bodySuffixes.push(raw.why as string)
+    delete raw.why
+  }
+
+  // 7. *_cta scalar strings → drop if already represented in buttons.
+  //    Arvada connect/s1 emitted `coffee_cta: "Set up coffee or a call"`
+  //    alongside `buttons: [{label: "Set up coffee or a call", url: ...}]`.
+  //    The cta label is redundant; deleting silently is fine. If buttons
+  //    is empty AND a *_cta scalar exists with a paired url, we can't
+  //    safely synthesize a button without knowing the URL — let the
+  //    sweep surface it for the strategist.
+  if (Array.isArray(raw.buttons) && (raw.buttons as unknown[]).length > 0) {
+    for (const key of Object.keys(raw)) {
+      if (!/_cta$/i.test(key)) continue
+      const v = raw[key]
+      if (typeof v !== 'string') continue
+      const ctaText = v.trim().toLowerCase()
+      const inButtons = (raw.buttons as Array<Record<string, unknown>>).some(b =>
+        typeof b?.label === 'string' && (b.label as string).trim().toLowerCase() === ctaText
+      )
+      if (inButtons) delete raw[key]
+    }
+  }
+
+  // 6. Fold prefixes + existing + suffixes into body as <p> blocks.
+  //    Wrap each non-HTML piece so paragraph breaks render.
+  if (bodyPrefixes.length > 0 || bodySuffixes.length > 0) {
+    const wrap = (s: string) => s.trim().startsWith('<') ? s : `<p>${escapeHtml(s)}</p>`
+    const existing = typeof raw.body === 'string' ? raw.body.trim() : ''
+    const existingWrapped = existing ? (existing.startsWith('<') ? existing : `<p>${escapeHtml(existing)}</p>`) : ''
+    const pieces = [
+      ...bodyPrefixes.map(wrap),
+      existingWrapped,
+      ...bodySuffixes.map(wrap),
+    ].filter(Boolean)
+    raw.body = pieces.join('\n')
+  }
 }
 
 // ── Schema-driven binding contract ────────────────────────────────
