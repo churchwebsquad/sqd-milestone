@@ -106,37 +106,122 @@ export default async function handler(req: any, res: any) {
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
-  const attachmentId = typeof req.body?.attachment_id === 'string' ? req.body.attachment_id : null
+  const attachmentId   = typeof req.body?.attachment_id      === 'string' ? req.body.attachment_id      : null
+  const intakeDocId    = typeof req.body?.intake_document_id === 'string' ? req.body.intake_document_id : null
   const force = Boolean(req.body?.force)
-  if (!attachmentId) return res.status(400).json({ error: 'attachment_id required' })
-
-  // 1. Look up the attachment + project context.
-  const { data: att, error: attErr } = await sb
-    .from('strategy_content_collection_attachments')
-    .select('id, session_id, kind, file_path, file_name, mime_type, size_bytes, target_path, parsed_at')
-    .eq('id', attachmentId)
-    .maybeSingle()
-  if (attErr) return res.status(500).json({ error: 'attachment lookup failed', detail: attErr.message })
-  if (!att)   return res.status(404).json({ error: 'attachment_not_found' })
-  const attachment = att as AttachmentRow
-
-  if (attachment.parsed_at && !force) {
-    return res.status(200).json({
-      ok: true, attachment_id: attachmentId, skipped: true,
-      reason: 'already_parsed', parsed_at: attachment.parsed_at,
-    })
+  if (!attachmentId && !intakeDocId) {
+    return res.status(400).json({ error: 'attachment_id or intake_document_id required' })
+  }
+  if (attachmentId && intakeDocId) {
+    return res.status(400).json({ error: 'only one of attachment_id or intake_document_id allowed' })
   }
 
-  const { data: session, error: sessErr } = await sb
-    .from('strategy_content_collection_sessions')
-    .select('web_project_id')
-    .eq('id', attachment.session_id)
-    .maybeSingle()
-  if (sessErr || !session) {
-    return await failParse(sb, attachmentId, 'session_lookup_failed', sessErr?.message ?? 'no session')
-      .then(() => res.status(500).json({ error: 'session_lookup_failed' }))
+  // 1. Look up the source — either a public-portal attachment OR a
+  //    staff-uploaded intake document. Both land in the same parsers
+  //    downstream; the normalized `source` shape carries the bucket +
+  //    storage path + file metadata regardless of which table holds it.
+  type NormalizedSource = {
+    table: 'strategy_content_collection_attachments' | 'web_intake_documents'
+    id:           string
+    bucket:       string
+    file_path:    string
+    file_name:    string
+    mime_type:    string | null
+    parsed_at:    string | null
+    web_project_id: string
   }
-  const webProjectId = (session as { web_project_id: string }).web_project_id
+  let src: NormalizedSource
+
+  if (attachmentId) {
+    const { data: att, error: attErr } = await sb
+      .from('strategy_content_collection_attachments')
+      .select('id, session_id, kind, file_path, file_name, mime_type, size_bytes, target_path, parsed_at')
+      .eq('id', attachmentId)
+      .maybeSingle()
+    if (attErr) return res.status(500).json({ error: 'attachment lookup failed', detail: attErr.message })
+    if (!att)   return res.status(404).json({ error: 'attachment_not_found' })
+    const attachment = att as AttachmentRow
+
+    if (attachment.parsed_at && !force) {
+      return res.status(200).json({
+        ok: true, attachment_id: attachmentId, skipped: true,
+        reason: 'already_parsed', parsed_at: attachment.parsed_at,
+      })
+    }
+
+    const { data: session, error: sessErr } = await sb
+      .from('strategy_content_collection_sessions')
+      .select('web_project_id')
+      .eq('id', attachment.session_id)
+      .maybeSingle()
+    if (sessErr || !session) {
+      return await failParse(sb, 'strategy_content_collection_attachments', attachmentId, 'session_lookup_failed', sessErr?.message ?? 'no session')
+        .then(() => res.status(500).json({ error: 'session_lookup_failed' }))
+    }
+    src = {
+      table: 'strategy_content_collection_attachments',
+      id: attachment.id,
+      bucket: 'content-collection-files',
+      file_path: attachment.file_path,
+      file_name: attachment.file_name,
+      mime_type: attachment.mime_type,
+      parsed_at: attachment.parsed_at,
+      web_project_id: (session as { web_project_id: string }).web_project_id,
+    }
+  } else {
+    // intake_document_id path (web_intake_documents, staff AM upload).
+    // Bucket is brand-assets (per the existing upload helper in
+    // src/lib/webIntakeDocuments.ts). Only content_collection-category
+    // files participate in the parse trigger — strategy_brief /
+    // brand_handoff / am_handoff_supplemental flow through their own
+    // normalize-intake pipeline and have no fact-extraction step.
+    const { data: doc, error: docErr } = await sb
+      .from('web_intake_documents')
+      .select('id, web_project_id, category, filename, storage_path, mime_type, file_size_bytes, parsed_at, archived')
+      .eq('id', intakeDocId)
+      .maybeSingle()
+    if (docErr) return res.status(500).json({ error: 'intake_document lookup failed', detail: docErr.message })
+    if (!doc)   return res.status(404).json({ error: 'intake_document_not_found' })
+    const docRow = doc as { id: string; web_project_id: string; category: string; filename: string; storage_path: string; mime_type: string | null; parsed_at: string | null; archived: boolean }
+
+    if (docRow.archived) {
+      return res.status(200).json({ ok: true, intake_document_id: intakeDocId, skipped: true, reason: 'archived' })
+    }
+    if (docRow.parsed_at && !force) {
+      return res.status(200).json({
+        ok: true, intake_document_id: intakeDocId, skipped: true,
+        reason: 'already_parsed', parsed_at: docRow.parsed_at,
+      })
+    }
+    if (docRow.category !== 'content_collection' && docRow.category !== 'content_collection_supplemental') {
+      return res.status(200).json({
+        ok: true, intake_document_id: intakeDocId, skipped: true,
+        reason: 'category_not_eligible',
+        detail: `Only content_collection-category docs run through fact extraction; this is '${docRow.category}'. Use normalize-intake for that category.`,
+      })
+    }
+    src = {
+      table: 'web_intake_documents',
+      id: docRow.id,
+      bucket: 'brand-assets',
+      file_path: docRow.storage_path,
+      file_name: docRow.filename,
+      mime_type: docRow.mime_type,
+      parsed_at: docRow.parsed_at,
+      web_project_id: docRow.web_project_id,
+    }
+  }
+
+  const sourceTable = src.table
+  const sourceId    = src.id
+  const webProjectId = src.web_project_id
+  // Shim so the rest of the function (which used `attachmentId` +
+  // `attachment.*`) compiles without re-naming every reference.
+  const attachment: AttachmentRow = {
+    id: src.id, session_id: '', kind: '', file_path: src.file_path,
+    file_name: src.file_name, mime_type: src.mime_type, size_bytes: null,
+    target_path: null, parsed_at: src.parsed_at,
+  }
 
   // 2. Detect format. Mime wins when present; filename extension is a
   //    fallback for browsers that pass empty mime. A mime+ext mismatch
@@ -161,29 +246,30 @@ export default async function handler(req: any, res: any) {
   }
 
   if (isUnsupported) {
-    await markParsed(sb, attachmentId, 'unsupported', 0, `mime ${mime || 'unknown'} not yet supported — upload as CSV or plain text`)
+    await markParsed(sb, sourceTable, sourceId, 'unsupported', 0, `mime ${mime || 'unknown'} not yet supported — upload as CSV or plain text`)
     return res.status(200).json({
       ok: true, attachment_id: attachmentId, destination: 'unsupported',
       detail: 'PDF / DOCX / XLSX not yet parsed; upload as CSV or .txt.',
     })
   }
   if (!isCsv && !isText) {
-    await markParsed(sb, attachmentId, 'unsupported', 0, `mime ${mime || 'unknown'} not handled`)
+    await markParsed(sb, sourceTable, sourceId, 'unsupported', 0, `mime ${mime || 'unknown'} not handled`)
     return res.status(200).json({ ok: true, attachment_id: attachmentId, destination: 'unsupported' })
   }
 
-  // 3. Download from Storage. The InventoryView uploader writes to
-  //    bucket `content-collection-files` at attachment.file_path.
+  // 3. Download from Storage. The source descriptor tells us which
+  //    bucket the file lives in (content-collection-files for the
+  //    portal path; brand-assets for the staff-AM intake path).
   const { data: fileBlob, error: dlErr } = await sb.storage
-    .from('content-collection-files')
-    .download(attachment.file_path)
+    .from(src.bucket)
+    .download(src.file_path)
   if (dlErr || !fileBlob) {
-    await markParsed(sb, attachmentId, 'failed', 0, `storage download failed: ${dlErr?.message ?? 'no blob'}`)
+    await markParsed(sb, sourceTable, sourceId, 'failed', 0, `storage download failed: ${dlErr?.message ?? 'no blob'}`)
     return res.status(500).json({ error: 'storage_download_failed', detail: dlErr?.message })
   }
   const fileText = await fileBlob.text()
   if (!fileText.trim()) {
-    await markParsed(sb, attachmentId, 'failed', 0, 'file is empty')
+    await markParsed(sb, sourceTable, sourceId, 'failed', 0, 'file is empty')
     return res.status(200).json({ ok: true, attachment_id: attachmentId, destination: 'failed', detail: 'empty_file' })
   }
 
@@ -192,8 +278,9 @@ export default async function handler(req: any, res: any) {
   //    and re-use the existing Vercel function so all gateway/SKILL
   //    handling stays in one place.
   const baseUrl = resolveBaseUrl(req)
-  const sourceKind = 'content_collection'
-  const sourceRef  = `attachment:${attachmentId}`
+  const sourceKind = sourceTable === 'web_intake_documents' ? 'intake_doc' : 'content_collection'
+  const sourceRefPrefix = sourceTable === 'web_intake_documents' ? 'intake_doc' : 'attachment'
+  const sourceRef  = `${sourceRefPrefix}:${sourceId}`
 
   // On force=true, archive any previously-produced rows for this
   // attachment so the strategist doesn't end up with two stacks of
@@ -204,13 +291,14 @@ export default async function handler(req: any, res: any) {
   // existing soft-delete convention.
   if (force) {
     for (const table of ['church_facts', 'content_atoms'] as const) {
-      const { error: archErr } = await (sb as any)
-        .from(table)
-        .update({ status: 'archived' })
-        .eq('source_attachment_id', attachmentId)
-        .neq('status', 'archived')
+      // Attachment-sourced rows have a real column (source_attachment_id).
+      // Intake-doc-sourced rows are tagged via metadata.source_intake_document_id.
+      const query = (sb as any).from(table).update({ status: 'archived' }).neq('status', 'archived')
+      const { error: archErr } = sourceTable === 'web_intake_documents'
+        ? await query.eq('metadata->>source_intake_document_id', sourceId)
+        : await query.eq('source_attachment_id', sourceId)
       if (archErr) {
-        await markParsed(sb, attachmentId, 'failed', 0, `pre-force archive failed: ${archErr.message}`)
+        await markParsed(sb, sourceTable, sourceId, 'failed', 0, `pre-force archive failed: ${archErr.message}`)
         return res.status(500).json({ error: 'force_archive_failed', detail: archErr.message })
       }
     }
@@ -242,27 +330,48 @@ export default async function handler(req: any, res: any) {
 
   const parserBody = await parserResp.json().catch(() => ({}))
   if (!parserResp.ok) {
-    await markParsed(sb, attachmentId, 'failed', 0, `parser failed (${parserResp.status}): ${JSON.stringify(parserBody)?.slice(0, 400)}`)
+    await markParsed(sb, sourceTable, sourceId, 'failed', 0, `parser failed (${parserResp.status}): ${JSON.stringify(parserBody)?.slice(0, 400)}`)
     return res.status(parserResp.status).json({ error: 'parser_failed', detail: parserBody })
   }
 
   const insertedIds: string[] = Array.isArray(parserBody.inserted_ids) ? parserBody.inserted_ids : []
   const destination: ParseDestination = isCsv ? 'church_facts' : 'content_atoms'
 
-  // 5. Stamp source_attachment_id on the produced rows so the review
-  //    UI can group "rows from this upload."
+  // 5. Stamp the source on every produced row so the review UI can
+  //    group "rows from this upload." For attachment-sourced rows we
+  //    write the real source_attachment_id column. For intake-doc-
+  //    sourced rows there's no dedicated column, so we tag metadata
+  //    with source_intake_document_id instead (the coverage report
+  //    function in v84 queries by this path).
   if (insertedIds.length > 0) {
     const table = destination === 'church_facts' ? 'church_facts' : 'content_atoms'
-    const { error: stampErr } = await (sb as any)
-      .from(table)
-      .update({ source_attachment_id: attachmentId })
-      .in('id', insertedIds)
+    let stampErr: { message: string } | null = null
+    if (sourceTable === 'web_intake_documents') {
+      // Tag the source on the jsonb column. church_facts uses `data`;
+      // content_atoms uses `metadata`. Read-modify-write per row —
+      // fine at the row counts a single CSV produces (10-50).
+      const jsonCol = table === 'church_facts' ? 'data' : 'metadata'
+      for (const rid of insertedIds) {
+        const { data: existing } = await (sb as any).from(table)
+          .select(jsonCol).eq('id', rid).maybeSingle()
+        const cur = (existing as Record<string, unknown> | null)?.[jsonCol] ?? {}
+        const merged = { ...(cur as Record<string, unknown>), source_intake_document_id: sourceId }
+        const { error: e2 } = await (sb as any).from(table).update({ [jsonCol]: merged }).eq('id', rid)
+        if (e2) { stampErr = { message: e2.message }; break }
+      }
+    } else {
+      const { error } = await (sb as any)
+        .from(table)
+        .update({ source_attachment_id: sourceId })
+        .in('id', insertedIds)
+      if (error) stampErr = { message: error.message }
+    }
     if (stampErr) {
       // Rows exist + are findable by source_ref, but the review UI
       // queries by source_attachment_id and would miss them. Surface
       // as 'failed' so the strategist sees the inconsistency in the
       // PartnerUploadReview pane rather than silently losing rows.
-      await markParsed(sb, attachmentId, 'failed', insertedIds.length,
+      await markParsed(sb, sourceTable, sourceId, 'failed', insertedIds.length,
         `rows inserted but source stamp failed: ${stampErr.message}. Find by source_ref=${sourceRef}.`)
       return res.status(500).json({
         error: 'stamp_failed', detail: stampErr.message,
@@ -271,10 +380,12 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  await markParsed(sb, attachmentId, destination, insertedIds.length, null)
+  await markParsed(sb, sourceTable, sourceId, destination, insertedIds.length, null)
   return res.status(200).json({
     ok: true,
-    attachment_id: attachmentId,
+    ...(sourceTable === 'web_intake_documents'
+      ? { intake_document_id: sourceId }
+      : { attachment_id:     sourceId }),
     destination,
     inserted_count: insertedIds.length,
     inserted_ids:   insertedIds,
@@ -285,22 +396,30 @@ export default async function handler(req: any, res: any) {
 // ── Helpers ───────────────────────────────────────────────────────
 
 async function markParsed(
-  sb: any, attachmentId: string, destination: ParseDestination,
+  sb: any,
+  table: 'strategy_content_collection_attachments' | 'web_intake_documents',
+  rowId: string,
+  destination: ParseDestination,
   rowsCount: number, error: string | null,
 ) {
   const now = new Date().toISOString()
-  await sb.from('strategy_content_collection_attachments')
+  await sb.from(table)
     .update({
       parsed_at:          now,
       parsed_destination: destination,
       parsed_rows_count:  rowsCount,
       parse_error:        error,
     })
-    .eq('id', attachmentId)
+    .eq('id', rowId)
 }
 
-async function failParse(sb: any, attachmentId: string, code: string, detail: string) {
-  await markParsed(sb, attachmentId, 'failed', 0, `${code}: ${detail}`)
+async function failParse(
+  sb: any,
+  table: 'strategy_content_collection_attachments' | 'web_intake_documents',
+  rowId: string,
+  code: string, detail: string,
+) {
+  await markParsed(sb, table, rowId, 'failed', 0, `${code}: ${detail}`)
 }
 
 function resolveBaseUrl(req: any): string {
