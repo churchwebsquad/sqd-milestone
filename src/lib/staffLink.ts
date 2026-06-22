@@ -199,6 +199,71 @@ export async function ensurePerStaffPage(
   return { pageId: (inserted as { id: string }).id, pageSlug: (inserted as { slug: string }).slug, isNew: true }
 }
 
+/** Archive every per-staff page (slug `staff/<x>`) referenced by the
+ *  given slugs on a project, plus every Single Team Section 6 row
+ *  living on those pages. Used when a Team Section flips from
+ *  "linked" back to "inline" — once bios live on the parent card
+ *  again, the per-staff pages are dead weight in the page tree.
+ *
+ *  Guardrail: only archives pages whose slug starts with `staff/`
+ *  AND that are NOT referenced as a linked target by any OTHER
+ *  active Team Section 14 on the same project. That preserves the
+ *  per-staff page when a second Team Section is still in linked
+ *  mode for the same staff member.
+ *
+ *  Returns the slugs we actually archived so the caller can tell
+ *  the user. */
+export async function archivePerStaffPages(
+  sb:        SupabaseClient,
+  projectId: string,
+  slugs:     string[],
+): Promise<string[]> {
+  const targets = Array.from(new Set(
+    slugs.filter(s => typeof s === 'string' && s.startsWith('staff/')),
+  ))
+  if (targets.length === 0) return []
+
+  // Walk every active Team Section 14 on the same project. Any per-
+  // staff slug still referenced by a LINKED section stays live —
+  // archiving it would break the other section's card → page link.
+  const { data: teamSections } = await sb
+    .from('web_sections')
+    .select('field_values, web_pages!inner(web_project_id, archived)')
+    .eq('content_template_id', 'team-section-14')
+    .filter('web_pages.web_project_id', 'eq', projectId)
+    .filter('web_pages.archived', 'eq', false)
+  const claimedElsewhere = new Set<string>()
+  type Row = { field_values: Record<string, unknown> | null }
+  for (const r of (teamSections ?? []) as Row[]) {
+    const fv = (r.field_values ?? {}) as Record<string, unknown>
+    const mode = ((fv._staff_link ?? {}) as { display_mode?: string }).display_mode
+    if (mode !== 'linked') continue
+    const rows = Array.isArray(fv.row_grid) ? fv.row_grid as Array<Record<string, unknown>> : []
+    for (const row of rows) {
+      const cards = Array.isArray(row.card_team) ? row.card_team as Array<Record<string, unknown>> : []
+      for (const c of cards) {
+        const slug = typeof c._staff_page_slug === 'string' ? c._staff_page_slug : null
+        if (slug) claimedElsewhere.add(slug)
+      }
+    }
+  }
+
+  const toArchive = targets.filter(s => !claimedElsewhere.has(s))
+  if (toArchive.length === 0) return []
+
+  // Archive the matching pages on this project. Soft-delete via
+  // archived=true so the data is recoverable; the page tree filters
+  // these out, and {single-staff} template-mode pages aren't touched
+  // by this branch (their slug starts with `{single-`).
+  const { error: pErr } = await sb
+    .from('web_pages')
+    .update({ archived: true, updated_at: new Date().toISOString() })
+    .eq('web_project_id', projectId)
+    .in('slug', toArchive)
+  if (pErr) throw pErr
+  return toArchive
+}
+
 /** One staff update extracted from a section's field_values. The
  *  syncStaffLinkOnSave path produces these per linked card / section
  *  and propagates them to church_facts + every other linked section

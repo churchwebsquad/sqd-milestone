@@ -26,6 +26,7 @@ import {
   findOrCreateStaffFact,
   ensurePerStaffPage,
   appendSingleTeamSection,
+  archivePerStaffPages,
 } from '../../../lib/staffLink'
 import type { WebSection } from '../../../types/database'
 
@@ -153,14 +154,49 @@ export function SectionStaffLinkToggle({ section, projectId, onPatch }: Props) {
     }
   }
 
-  const flipToInline = () => {
-    // Per the brainstorm: always keep the destination sections + per-
-    // staff pages. Toggle-back only clears the section-level display
-    // flag; per-card _staff_fact_id stays so re-linking is idempotent.
-    onPatch({ ...values, _staff_link: { display_mode: 'inline' } })
-    setStage('idle')
+  const flipToInline = async () => {
+    // Inline flip is a TWO-STEP move now:
+    //   1. Flag this section as inline so the renderer stops linking
+    //      its cards to per-staff pages.
+    //   2. Archive any /staff/<x> page that THIS section owned and
+    //      that no OTHER linked Team Section 14 on the project is
+    //      still pointing at. (archivePerStaffPages enforces the
+    //      cross-section guardrail.)
+    //
+    // We keep the per-card _staff_fact_id / _staff_page_slug fields
+    // intact even after archiving — re-linking later restores the
+    // same fact rows + re-creates the same slug, so we don't lose
+    // the strategist's original bio captures.
     setError(null)
     setResult(null)
+    setStage('flipping')
+    try {
+      const slugs = cards
+        .map(c => {
+          const cell = (values.row_grid as Array<Record<string, unknown>> | undefined)?.[c.rowIdx]
+          const cellArr = cell ? (cell.card_team as Array<Record<string, unknown>> | undefined) : undefined
+          const cur = cellArr?.[c.cardIdx]
+          return typeof cur?._staff_page_slug === 'string' ? cur._staff_page_slug : null
+        })
+        .filter((s): s is string => !!s)
+      const archived = await archivePerStaffPages(supabase, projectId, slugs)
+      onPatch({ ...values, _staff_link: { display_mode: 'inline' } })
+      setResult({
+        linkedCount: 0,
+        skippedCount: archived.length,
+        skippedNames: archived,
+      })
+      setStage('done')
+    } catch (e: unknown) {
+      console.error('[staff-link] section flip to inline failed', e)
+      const msg = e instanceof Error
+        ? e.message
+        : (typeof e === 'object' && e !== null && 'message' in e)
+          ? String((e as { message: unknown }).message)
+          : 'unknown error'
+      setError(msg)
+      setStage('error')
+    }
   }
 
   return (
@@ -196,9 +232,9 @@ export function SectionStaffLinkToggle({ section, projectId, onPatch }: Props) {
         ) : (
           <button
             type="button"
-            onClick={flipToInline}
+            onClick={() => void flipToInline()}
             className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-semibold bg-wm-bg-hover text-wm-text-muted border border-wm-border hover:bg-wm-bg transition-colors shrink-0"
-            title="Render bios inline on this section again. Per-staff pages stay (archive manually if needed)."
+            title="Render bios inline on this section AND archive every /staff/… page only this section was linking to. Pages still claimed by another linked Team Section stay live."
           >
             <X size={11} />
             Render inline again
@@ -206,7 +242,17 @@ export function SectionStaffLinkToggle({ section, projectId, onPatch }: Props) {
         )}
       </div>
 
-      {result && (
+      {result && displayMode === 'inline' && (
+        <div className="mt-2 text-[11px] text-emerald-700 inline-flex items-start gap-1">
+          <UserCheck size={11} className="mt-0.5 shrink-0" />
+          <span>
+            {result.skippedCount > 0
+              ? <>Archived {result.skippedCount} per-staff page{result.skippedCount === 1 ? '' : 's'}{result.skippedNames.length > 0 && `: ${result.skippedNames.slice(0, 3).join(', ')}${result.skippedNames.length > 3 ? '…' : ''}`}.</>
+              : 'Flipped to inline. No per-staff pages needed cleanup.'}
+          </span>
+        </div>
+      )}
+      {result && displayMode === 'linked' && (
         <div className="mt-2 text-[11px] text-emerald-700 inline-flex items-start gap-1">
           <UserCheck size={11} className="mt-0.5 shrink-0" />
           <span>
