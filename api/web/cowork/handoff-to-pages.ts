@@ -384,7 +384,7 @@ function recoverNoncanonicalSlots(raw: Record<string, unknown>): void {
 // cowork uniform slot". Replaces the per-template uniform_to_brixies
 // block that used to live in the strategy.cowork_templates manifest.
 
-interface BrixiesTemplate {
+export interface BrixiesTemplate {
   id:     string
   fields: BrixiesFieldDef[] | null
   cowork_alias_map: CoworkAliasMap | null
@@ -471,7 +471,7 @@ interface ManifestEntry {
   notes?:           string
 }
 
-interface BindResult {
+export interface BindResult {
   field_values: Record<string, unknown>
   bind_quality: 'perfect' | 'partial'
   gaps:         Array<{ kind: string; severity: 'info' | 'warning' | 'blocker'; detail: string; slot?: string }>
@@ -670,7 +670,7 @@ const CANONICAL_UNIFORM_SLOTS = new Set([
   'build_cards',
 ])
 
-function composeFromCoworkAliasMap(
+export function composeFromCoworkAliasMap(
   slotValues: Record<string, unknown>,
   brixies:    BrixiesTemplate,
   templateKey: string,
