@@ -44,6 +44,7 @@ import {
 } from '../../../lib/webProjectHealth'
 import {
   deriveSizeTier, hourRangeForTier, sprintForDate,
+  computeDevHoursTotal,
   type ProjectSizeTier,
 } from '../../../lib/webPlanningMath'
 import { computeDevQueue, type QueueSlot } from '../../../lib/webDevQueue'
@@ -112,30 +113,43 @@ export function PlanningWorkspace({ project, onChange }: Props) {
   // Local edit buffer driven off the project prop. Re-syncs when the
   // parent's project ref changes (after onChange refetch).
   const [draft, setDraft] = useState({
-    launch_date:            project.launch_date ?? null,
-    priority_order:         project.priority_order ?? null,
-    dev_hours_estimate:     project.dev_hours_estimate ?? null,
-    phase_estimates:        (project.phase_estimates as PhaseEstimates) ?? {},
-    phase_progress:         (project.phase_progress as PhaseProgress) ?? {},
-    manual_remaining_hours: project.manual_remaining_hours ?? null,
-    status_note:            project.status_note ?? null,
-    manual_sub_status:      project.manual_sub_status ?? null,
-    status_reason:          project.status_reason ?? null,
+    launch_date:                  project.launch_date ?? null,
+    priority_order:               project.priority_order ?? null,
+    dev_hours_estimate:           project.dev_hours_estimate ?? null,
+    phase_estimates:              (project.phase_estimates as PhaseEstimates) ?? {},
+    phase_progress:               (project.phase_progress as PhaseProgress) ?? {},
+    manual_remaining_hours:       project.manual_remaining_hours ?? null,
+    status_note:                  project.status_note ?? null,
+    manual_sub_status:            project.manual_sub_status ?? null,
+    status_reason:                project.status_reason ?? null,
+    // v89 velocity levers
+    expected_page_count:          project.expected_page_count ?? null,
+    dev_hours_per_page:           Number(project.dev_hours_per_page ?? 3.0),
+    uses_novamira:                !!project.uses_novamira,
+    dev_edits_route_to_designer:  !!project.dev_edits_route_to_designer,
+    assist_hours_per_week_extra:  Number(project.assist_hours_per_week_extra ?? 0),
+    pre_dev_complete:             !!project.pre_dev_complete,
   })
   const [statusPanelOpen, setStatusPanelOpen] = useState(false)
   const [priorityDraft, setPriorityDraft] = useState<number | null>(project.priority_order ?? null)
 
   useEffect(() => {
     setDraft({
-      launch_date:            project.launch_date ?? null,
-      priority_order:         project.priority_order ?? null,
-      dev_hours_estimate:     project.dev_hours_estimate ?? null,
-      phase_estimates:        (project.phase_estimates as PhaseEstimates) ?? {},
-      phase_progress:         (project.phase_progress as PhaseProgress) ?? {},
-      manual_remaining_hours: project.manual_remaining_hours ?? null,
-      status_note:            project.status_note ?? null,
-      manual_sub_status:      project.manual_sub_status ?? null,
-      status_reason:          project.status_reason ?? null,
+      launch_date:                  project.launch_date ?? null,
+      priority_order:               project.priority_order ?? null,
+      dev_hours_estimate:           project.dev_hours_estimate ?? null,
+      phase_estimates:              (project.phase_estimates as PhaseEstimates) ?? {},
+      phase_progress:               (project.phase_progress as PhaseProgress) ?? {},
+      manual_remaining_hours:       project.manual_remaining_hours ?? null,
+      status_note:                  project.status_note ?? null,
+      manual_sub_status:            project.manual_sub_status ?? null,
+      status_reason:                project.status_reason ?? null,
+      expected_page_count:          project.expected_page_count ?? null,
+      dev_hours_per_page:           Number(project.dev_hours_per_page ?? 3.0),
+      uses_novamira:                !!project.uses_novamira,
+      dev_edits_route_to_designer:  !!project.dev_edits_route_to_designer,
+      assist_hours_per_week_extra:  Number(project.assist_hours_per_week_extra ?? 0),
+      pre_dev_complete:             !!project.pre_dev_complete,
     })
     setPriorityDraft(project.priority_order ?? null)
   }, [project])
@@ -406,6 +420,24 @@ export function PlanningWorkspace({ project, onChange }: Props) {
   /** Current phase label — what the strategist sees in the ribbon. */
   const currentPhase = (computed?.phase ?? 'intake') as typeof PHASE_ORDER[number]
 
+  /** Live dev-hours total under the v89 page-count math. Drives the
+   *  Project Settings preview. */
+  const devHoursLive = useMemo(() => computeDevHoursTotal({
+    manualOverride:           draft.dev_hours_estimate,
+    expectedPageCount:        draft.expected_page_count,
+    actualPageCount:          pageCount > 0 ? pageCount : null,
+    hoursPerPage:             draft.dev_hours_per_page,
+    usesNovamira:             draft.uses_novamira,
+    devEditsRouteToDesigner:  draft.dev_edits_route_to_designer,
+  }), [
+    draft.dev_hours_estimate,
+    draft.expected_page_count,
+    pageCount,
+    draft.dev_hours_per_page,
+    draft.uses_novamira,
+    draft.dev_edits_route_to_designer,
+  ])
+
   return (
     <div className="p-6 md:p-8">
       <div className="max-w-4xl mx-auto space-y-5">
@@ -675,6 +707,82 @@ export function PlanningWorkspace({ project, onChange }: Props) {
               </p>
             </div>
           )}
+        </WMCard>
+
+        {/* Project Settings — v89 velocity levers.
+            Page count + Novamira + dev-edits-to-designer + assist hrs
+            are the inputs that drive predicted launch. Live preview
+            shows the resulting dev-hour total + derivation note. */}
+        <WMCard padding="loose">
+          <SectionLabel>Project Settings</SectionLabel>
+          <p className="text-[11px] text-wm-text-muted mb-3">
+            Drives the predicted launch date. Page count × hrs/page × levers = dev hours.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <FieldNumber
+              label="Expected page count"
+              value={draft.expected_page_count}
+              min={1}
+              step={1}
+              onCommit={(v) => save('expected_page_count', v)}
+              saving={savingKey === 'expected_page_count'}
+            />
+            <FieldNumber
+              label="Dev hours per page"
+              value={draft.dev_hours_per_page}
+              min={0}
+              step={0.5}
+              onCommit={(v) => save('dev_hours_per_page', v ?? 3.0)}
+              saving={savingKey === 'dev_hours_per_page'}
+            />
+          </div>
+
+          <div className="mt-3 space-y-2">
+            <LeverToggle
+              label="Uses Novamira"
+              hint="AI-assisted dev — multiplies hours by 0.5."
+              checked={draft.uses_novamira}
+              saving={savingKey === 'uses_novamira'}
+              onChange={(v) => save('uses_novamira', v)}
+            />
+            <LeverToggle
+              label="Dev edits route to designer"
+              hint="Review-cycle edits go to the designer's queue — reduces dev hours by 15%."
+              checked={draft.dev_edits_route_to_designer}
+              saving={savingKey === 'dev_edits_route_to_designer'}
+              onChange={(v) => save('dev_edits_route_to_designer', v)}
+            />
+            <LeverToggle
+              label="Pre-dev phases complete"
+              hint="Intake + content + design are done — full launch budget can attribute to dev."
+              checked={draft.pre_dev_complete}
+              saving={savingKey === 'pre_dev_complete'}
+              onChange={(v) => save('pre_dev_complete', v)}
+            />
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <FieldNumber
+              label="Assist hours / week (extra)"
+              value={draft.assist_hours_per_week_extra}
+              min={0}
+              step={1}
+              onCommit={(v) => save('assist_hours_per_week_extra', v ?? 0)}
+              saving={savingKey === 'assist_hours_per_week_extra'}
+            />
+            <div className="rounded-md border border-wm-accent/30 bg-wm-accent/5 p-3">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent">
+                Predicted dev hours
+              </p>
+              <p className="text-2xl font-semibold text-wm-text mt-1">
+                {devHoursLive.total}<span className="text-[12px] text-wm-text-muted ml-1">h</span>
+              </p>
+              <p className="text-[11px] text-wm-text-muted mt-1">
+                {devHoursLive.note}
+              </p>
+            </div>
+          </div>
         </WMCard>
 
         {/* Phase budget */}
@@ -1008,6 +1116,33 @@ function FieldNumber({
         }}
         className="mt-1 w-full text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated font-mono tabular-nums focus:border-wm-accent focus:outline-none"
       />
+    </label>
+  )
+}
+
+function LeverToggle({
+  label, hint, checked, onChange, saving,
+}: {
+  label:    string
+  hint?:    string
+  checked:  boolean
+  onChange: (v: boolean) => void
+  saving?:  boolean
+}) {
+  return (
+    <label className="flex items-start gap-3 cursor-pointer select-none">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={e => onChange(e.target.checked)}
+        className="mt-0.5 h-4 w-4 rounded border-wm-border text-wm-accent focus:ring-wm-accent"
+      />
+      <div className="min-w-0 flex-1">
+        <span className="text-[12px] font-semibold text-wm-text flex items-center gap-1">
+          {label} {saving && <Loader2 size={9} className="animate-spin" />}
+        </span>
+        {hint && <p className="text-[11px] text-wm-text-muted leading-snug">{hint}</p>}
+      </div>
     </label>
   )
 }

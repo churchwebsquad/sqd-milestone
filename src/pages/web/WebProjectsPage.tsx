@@ -26,6 +26,7 @@ import { CalendarView } from '../../components/wm/manager/CalendarView'
 import { ListView } from '../../components/wm/manager/ListView'
 import { CapacityForecastView } from '../../components/wm/manager/CapacityForecastView'
 import { NeedsAttentionStrip } from '../../components/wm/manager/NeedsAttentionStrip'
+import { NewProspectSimulator } from '../../components/wm/manager/NewProspectSimulator'
 import { DevCapacityBanner } from '../../components/wm/manager/DevCapacityBanner'
 import { FilterChip } from '../../components/wm/manager/FilterChip'
 import { SalesQuoteCard } from '../../components/wm/manager/SalesQuoteCard'
@@ -213,6 +214,13 @@ export default function WebProjectsPage() {
             onOpenProject={(id) => navigate(`/web/${id}?tab=planning`)}
             onOpenSprint={(startISO) => navigate(`/web?view=waterfall&sprint=${startISO}`)}
           />
+        </div>
+
+        {/* New-prospect simulator — answers "when can this church
+            launch?" without creating a project. Sandboxed; nothing
+            is written. Collapsed by default. */}
+        <div className="mb-4">
+          <NewProspectSimulator rows={rows} />
         </div>
 
         {/* Toolbar: view toggle + search + archived */}

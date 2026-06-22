@@ -61,6 +61,114 @@ export function hourRangeForTier(tier: ProjectSizeTier): {
   }
 }
 
+// ── Dev hours total (v89 — page count × levers) ────────────────────
+//
+// The single source of truth for "how many dev hours does this project
+// need from now until launch." Driven by:
+//   - manual dev_hours_estimate override (always wins)
+//   - expected_page_count (manual input) or actual web_pages count
+//   - dev_hours_per_page baseline (team default 3.0; can be lowered
+//     per project for Novamira-friendly partners)
+//   - uses_novamira flag (0.5× multiplier)
+//   - dev_edits_route_to_designer flag (shifts ~15% review touch-ups
+//     off dev's queue)
+//
+// Replaces deriveSizeTier-based estimation as the primary driver.
+// deriveSizeTier remains as the fallback only when no page count is
+// known yet (true greenfield).
+
+const REVIEW_TO_DESIGNER_REDUCTION = 0.15
+const NOVAMIRA_MULTIPLIER = 0.5
+
+export interface DevHoursTotalInput {
+  /** Manual override on the project row. When set, beats everything else. */
+  manualOverride:              number | null
+  /** Strategist-entered expected page count (preferred when set). */
+  expectedPageCount:           number | null
+  /** Actual count from web_pages (used when expectedPageCount is null). */
+  actualPageCount:             number | null
+  /** Per-project hrs/page baseline (team default 3.0). */
+  hoursPerPage:                number
+  /** Novamira AI accelerator on this project? */
+  usesNovamira:                boolean
+  /** Review-cycle edits go to designer instead of dev? */
+  devEditsRouteToDesigner:     boolean
+}
+
+export interface DevHoursTotalDerivation {
+  source:              'manual_override' | 'page_count' | 'tier_default'
+  pageCountUsed:       number          // 0 when source = manual_override
+  hoursPerPageUsed:    number          // 0 when source = manual_override
+  rawBeforeLevers:     number          // pageCountUsed × hoursPerPageUsed
+  novamiraMultiplier:  number          // 0.5 or 1.0
+  reviewReduction:     number          // 0 or 0.15
+}
+
+export interface DevHoursTotal {
+  total:      number                   // rounded to whole hour
+  derivation: DevHoursTotalDerivation
+  note:       string                   // 1-sentence why
+}
+
+/** Compute the dev-hour budget for a project. See module docstring. */
+export function computeDevHoursTotal(input: DevHoursTotalInput): DevHoursTotal {
+  // 1. Manual override wins.
+  if (input.manualOverride != null && input.manualOverride > 0) {
+    return {
+      total: Math.round(input.manualOverride),
+      derivation: {
+        source: 'manual_override',
+        pageCountUsed: 0,
+        hoursPerPageUsed: 0,
+        rawBeforeLevers: input.manualOverride,
+        novamiraMultiplier: 1,
+        reviewReduction: 0,
+      },
+      note: `Manually overridden to ${Math.round(input.manualOverride)}h.`,
+    }
+  }
+
+  // 2. Page count × hours-per-page × levers.
+  const pageCount = input.expectedPageCount ?? input.actualPageCount ?? null
+  if (pageCount != null && pageCount > 0) {
+    const novamiraMult = input.usesNovamira ? NOVAMIRA_MULTIPLIER : 1
+    const reviewMult = input.devEditsRouteToDesigner ? (1 - REVIEW_TO_DESIGNER_REDUCTION) : 1
+    const raw = pageCount * input.hoursPerPage
+    const total = raw * novamiraMult * reviewMult
+    const noteParts: string[] = [`${pageCount}p × ${input.hoursPerPage}h/p = ${Math.round(raw)}h`]
+    if (input.usesNovamira) noteParts.push('Novamira ×0.5')
+    if (input.devEditsRouteToDesigner) noteParts.push('dev→designer −15%')
+    return {
+      total: Math.round(total),
+      derivation: {
+        source: 'page_count',
+        pageCountUsed: pageCount,
+        hoursPerPageUsed: input.hoursPerPage,
+        rawBeforeLevers: raw,
+        novamiraMultiplier: novamiraMult,
+        reviewReduction: input.devEditsRouteToDesigner ? REVIEW_TO_DESIGNER_REDUCTION : 0,
+      },
+      note: noteParts.join(' · '),
+    }
+  }
+
+  // 3. Fallback: no pages known yet, use tier default for a 20-page site.
+  const tier = deriveSizeTier(null)
+  const fallback = baseHoursForTier(tier)
+  return {
+    total: fallback,
+    derivation: {
+      source: 'tier_default',
+      pageCountUsed: 0,
+      hoursPerPageUsed: 0,
+      rawBeforeLevers: fallback,
+      novamiraMultiplier: 1,
+      reviewReduction: 0,
+    },
+    note: `No page count yet — assuming ${tier} tier (${fallback}h).`,
+  }
+}
+
 // ── Sprints ────────────────────────────────────────────────────────
 
 export interface Sprint {

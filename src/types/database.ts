@@ -1161,6 +1161,28 @@ export interface StrategyWebProject {
    *  losing the signal forever. */
   stalled_dismissed_until:  string | null    // ISO timestamptz
 
+  // ── Planning velocity levers (v89) ──────────────────────────────
+  /** Manual override for expected total pages. Used by hour math
+   *  before web_pages is scaffolded. Null = use the live web_pages
+   *  count instead. */
+  expected_page_count:           number | null
+  /** Per-project dev-hours-per-page baseline. Team default 3.0;
+   *  the Novamira-on target is 1.5. */
+  dev_hours_per_page:            number
+  /** When true, hour math applies a 0.5 multiplier — Novamira-assisted
+   *  dev runs roughly half the hours. */
+  uses_novamira:                 boolean
+  /** When true, review-cycle edits land in the designer's queue
+   *  instead of the developer's — reduces dev hours during review. */
+  dev_edits_route_to_designer:   boolean
+  /** Extra hours/week of dev capacity for this project from a helper
+   *  outside the team default 35h cap (e.g. Ashley assisting). */
+  assist_hours_per_week_extra:   number
+  /** Strategist flips this when intake + content + design phases are
+   *  all done, so the math can attribute the full launch budget to
+   *  dev. Replaces the per-phase budget/progress sliders. */
+  pre_dev_complete:              boolean
+
   [key: string]: unknown
 }
 
