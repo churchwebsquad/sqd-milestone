@@ -17,7 +17,8 @@
  * Pure presentational + persistence callbacks; the parent owns
  * refresh after any mutation.
  */
-import { ExternalLink } from 'lucide-react'
+import { useState } from 'react'
+import { Check, ExternalLink, Loader2 } from 'lucide-react'
 import { Avatar } from './Avatar'
 import { KindBadge } from './KindBadge'
 import { FeedbackStatusPill } from './FeedbackStatusPill'
@@ -26,7 +27,7 @@ import { AssigneePicker, type AssigneeValue } from './AssigneePicker'
 import { DueDatePicker } from './DueDatePicker'
 import { CommentActions } from '../sectioneditor/CommentActions'
 import {
-  setCommentCategory, setCommentAssignee, setCommentDueDate,
+  setCommentCategory, setCommentAssignee, setCommentDueDate, resolveComment,
 } from '../../../lib/webReviews'
 import type {
   WebReviewComment, WebReviewCommentCategory,
@@ -55,6 +56,24 @@ export function FeedbackCard({
   sectionFieldValues, onJumpToLocation, onChanged,
 }: FeedbackCardProps) {
   const isCompleted = comment.status !== 'open'
+  const [resolving, setResolving] = useState(false)
+
+  /** Mark this comment complete without any field change. For internal
+   *  comments this is the usual close path ("noted, fixed elsewhere"
+   *  or "no action needed"). Persists as status='dismissed' but the
+   *  receipt below renders it as "Completed" for internal reviews. */
+  const markComplete = async () => {
+    setResolving(true)
+    try {
+      const ok = await resolveComment({
+        commentId: comment.id,
+        outcome:   'dismissed',
+      })
+      if (ok) await onChanged()
+    } finally {
+      setResolving(false)
+    }
+  }
   const accentColor = isCompleted
     ? 'var(--color-wm-tone-green)'
     : (comment.kind !== 'comment' ? 'var(--color-wm-tone-orange)' : 'var(--color-wm-accent)')
@@ -162,6 +181,22 @@ export function FeedbackCard({
               hideDismiss
             />
           )}
+          {/* Mark complete — closes the comment without writing into the
+              section. Primary path for internal observations ("we got
+              it, no edit needed") and for any comment where the user
+              has already addressed it elsewhere. */}
+          <button
+            type="button"
+            onClick={() => void markComplete()}
+            disabled={resolving}
+            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-wm-tone-green/40 bg-wm-tone-green-bg text-wm-tone-green text-[11px] font-semibold hover:border-wm-tone-green transition-colors disabled:opacity-50"
+            title={reviewKind === 'internal'
+              ? 'Close this internal note without changing the section.'
+              : 'Mark this comment resolved without changing the field.'}
+          >
+            {resolving ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+            {reviewKind === 'internal' ? 'Mark complete' : 'Resolve'}
+          </button>
           {onJumpToLocation && (
             <button
               type="button"
@@ -177,7 +212,7 @@ export function FeedbackCard({
 
       {/* Resolution banner */}
       {isCompleted && (
-        <ResolutionReceipt comment={comment} />
+        <ResolutionReceipt comment={comment} reviewKind={reviewKind} />
       )}
 
       <div className="h-px bg-wm-border my-0.5 -mx-3.5" />
@@ -208,12 +243,17 @@ export function FeedbackCard({
 }
 
 /** Compact resolution banner — "Applied by Emily M. · Nov 19 · 9:08 AM"
- *  with the right color per outcome. */
-function ResolutionReceipt({ comment }: { comment: WebReviewComment }) {
+ *  with the right color per outcome. Internal "dismissed" reads as
+ *  "Completed" since marking an internal note done isn't a dismissal —
+ *  there was nothing to apply in the first place. */
+function ResolutionReceipt({
+  comment, reviewKind,
+}: { comment: WebReviewComment; reviewKind: 'internal' | 'partner' }) {
   const verb = comment.status === 'applied'  ? 'Applied'
             : comment.status === 'amended'  ? 'Amended'
-            : comment.status === 'dismissed' ? 'Dismissed'
-            : 'Resolved'
+            : comment.status === 'dismissed'
+              ? (reviewKind === 'internal' ? 'Completed' : 'Dismissed')
+              : 'Resolved'
   const tone = comment.status === 'amended' ? 'orange' : 'green'
   const cls = tone === 'green'
     ? 'bg-wm-tone-green-bg text-wm-tone-green'
