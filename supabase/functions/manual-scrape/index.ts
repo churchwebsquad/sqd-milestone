@@ -40,6 +40,25 @@ interface ManualScrapeRequest {
   urls: string[];
   crawl_deeper?: { max_depth?: number; max_pages?: number };
   commit?: { project_id: string };
+  /** JS render + click sequences. When set, Firecrawl waits for the
+   *  page to render, then performs a sequence of click+wait actions
+   *  before capturing the final DOM. Use for sites where bio popups,
+   *  accordion expanders, or tab content are lazy-loaded via JS
+   *  (Arvada Vineyard's Essential Addons popups are the canonical
+   *  case — bios stay hidden until the "Learn More" buttons are
+   *  clicked). Actions run sequentially on a SINGLE page load, so
+   *  capturing N popups means N click+wait pairs. */
+  deep?: {
+    /** CSS selectors to click in order. Each click is followed by a
+     *  short wait. Pass selectors targeting EVERY trigger that needs
+     *  to fire to populate the lazy content (e.g. ".eae-pop-btn a"
+     *  for Essential Addons, "[data-toggle='modal']" for Bootstrap). */
+    click_selectors?: string[];
+    /** Wait between clicks (ms). Defaults to 1500. */
+    wait_ms?: number;
+    /** Initial wait after page load before clicking, ms. Defaults to 2000. */
+    initial_wait_ms?: number;
+  };
 }
 
 interface PagePayload {
@@ -86,8 +105,8 @@ Deno.serve(async (req: Request) => {
         const pages = await runCrawl(seed, maxDepth, maxPages, apiKey);
         for (const p of pages) all.push({ ...p, source_url: seed });
       } else {
-        // Plain scrape: one /v1/scrape per URL.
-        const page = await runScrape(seed, apiKey);
+        // Plain scrape OR deep (JS render + click sequence).
+        const page = await runScrape(seed, apiKey, body.deep);
         if (page) all.push(page);
       }
     }
@@ -106,18 +125,38 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-async function runScrape(url: string, apiKey: string): Promise<PagePayload | null> {
+async function runScrape(
+  url: string,
+  apiKey: string,
+  deep?: { click_selectors?: string[]; wait_ms?: number; initial_wait_ms?: number },
+): Promise<PagePayload | null> {
+  // Deep scrapes can take 30-60s because each click triggers AJAX +
+  // wait. Bump the timeout when deep mode is active.
+  const timeoutMs = deep?.click_selectors?.length ? 120_000 : SCRAPE_TIMEOUT_MS;
   const ctrl = new AbortController();
-  const timeout = setTimeout(() => ctrl.abort(), SCRAPE_TIMEOUT_MS);
+  const timeout = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
+    const body: Record<string, unknown> = {
+      url,
+      formats: ["markdown", "html", "links"],
+      onlyMainContent: false,
+    };
+    if (deep?.click_selectors && deep.click_selectors.length > 0) {
+      const initialWait = deep.initial_wait_ms ?? 2000;
+      const perClickWait = deep.wait_ms ?? 1500;
+      const actions: Array<Record<string, unknown>> = [
+        { type: "wait", milliseconds: initialWait },
+      ];
+      for (const sel of deep.click_selectors) {
+        actions.push({ type: "click", selector: sel });
+        actions.push({ type: "wait", milliseconds: perClickWait });
+      }
+      body.actions = actions;
+    }
     const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
       method:  "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        url,
-        formats: ["markdown", "html", "links"],
-        onlyMainContent: false,
-      }),
+      body: JSON.stringify(body),
       signal: ctrl.signal,
     });
     clearTimeout(timeout);
