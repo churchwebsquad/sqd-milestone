@@ -15,7 +15,7 @@
  * applies the chosen levers via the regular ProjectEditPanel fields
  * (AI multipliers, page count, etc.) once they've decided.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { WMStatusPill } from '../StatusPill'
 import {
   computeProjectFeasibility,
@@ -41,8 +41,8 @@ interface Props {
   /** When supplied, the feasibility math respects queue position
    *  (devEndDate beats the optimistic per-project projection). */
   queueSlot?:  {
-    devStartDate:      string
-    devEndDate:        string
+    devStartDate:      string | null
+    devEndDate:        string | null
     hoursBeforeStart:  number
     remainingDevHours: number
   } | null
@@ -65,29 +65,13 @@ const VERDICT_LABEL: Record<FeasibilityResult['verdict'], string> = {
 export function FeasibilityPanel({
   project, milestones, allocations, pageCount, completedProjectCount, queueSlot,
 }: Props) {
-  // Persist target launch per-project in localStorage so the value
-  // survives reloads. The target is a per-project conversation tool
-  // (what the AM is asking about), so per-project scope is the right
-  // resolution. Per-user-per-browser is fine — this is staff-only.
-  const targetStorageKey = `wm:feasibility_target:${project.id}`
-  const [target, setTarget] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = window.localStorage.getItem(targetStorageKey)
-      if (saved) return saved
-    }
-    const d = fromIsoDate(project.launch_date)
-    if (!d) return ''
-    // Default to two weeks BEFORE the current launch_date so the
-    // strategist sees a useful "can we pull this in" answer instead
-    // of trivially-achievable.
-    d.setDate(d.getDate() - 14)
-    return d.toISOString().slice(0, 10)
-  })
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (target) window.localStorage.setItem(targetStorageKey, target)
-    else window.localStorage.removeItem(targetStorageKey)
-  }, [target, targetStorageKey])
+  // Target launch comes straight from the project row — no second
+  // input. The user explicitly flagged duplicate date entry as a bug:
+  // "Feasibility check asks the user to set the target launch date
+  // again even though it's already set in the schedule section above."
+  // Edit the launch date in the Launch hero block at the top of the
+  // Planning tab; the analyzer reruns automatically.
+  const target = project.launch_date ?? ''
   const [pulled, setPulled] = useState<Set<string>>(new Set())
 
   const result = useMemo<FeasibilityResult | null>(() => {
@@ -128,21 +112,16 @@ export function FeasibilityPanel({
         Feasibility check
       </p>
       <p className="text-[11px] text-wm-text-muted mb-3">
-        Enter a target date the AM is proposing. The analyzer runs the current plan
-        against it and lists levers that could pull the launch earlier.
+        Lists levers that could pull launch earlier when the queue
+        projection is tight against the target. Edit the target launch
+        date in the Launch block at the top — this analyzer reruns
+        automatically.
+        {!target && (
+          <span className="block mt-1 italic text-wm-text-subtle">
+            No target launch set yet — set one to see the analysis.
+          </span>
+        )}
       </p>
-
-      <label className="block mb-3">
-        <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
-          Target launch
-        </span>
-        <input
-          type="date"
-          value={target}
-          onChange={e => setTarget(e.target.value)}
-          className="mt-1 w-full text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated focus:border-wm-accent focus:outline-none"
-        />
-      </label>
 
       {result && (
         <div className="rounded-md border border-wm-border bg-wm-bg p-3 space-y-3">

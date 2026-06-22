@@ -36,20 +36,22 @@ export interface QueueSlot {
   remainingDevHours:   number
   /** Hours of dev work that sit in front of this project. */
   hoursBeforeStart:    number
-  /** ISO yyyy-mm-dd — first day the dev picks this project up. */
-  devStartDate:        string
-  /** ISO yyyy-mm-dd — projected dev completion. Becomes the project's
-   *  launch projection in `computeProjectHealth`. */
-  devEndDate:          string
+  /** ISO yyyy-mm-dd — first Monday the dev picks this project up.
+   *  NULL when the project has 0 remaining hours (done with dev). */
+  devStartDate:        string | null
+  /** ISO yyyy-mm-dd — projected dev completion (Sunday of the last
+   *  allocated week, so single-week projects don't show start === end).
+   *  Becomes the project's launch projection in computeProjectHealth.
+   *  NULL when the project has 0 remaining hours. */
+  devEndDate:          string | null
   /** ISO yyyy-mm-dd — design must finish by this date so dev can
-   *  start on schedule. Same as devStartDate in v1 — add buffer days
-   *  later if the team wants a slack window. */
-  designDeadline:      string
+   *  start on schedule. Same week as devStartDate; null when no dev. */
+  designDeadline:      string | null
   /** True when manual_remaining_hours drove the queue contribution. */
   usedManualRemaining: boolean
   /** Per-week hours this project consumes from the dev's shared
-   *  capacity pool. Keys are ISO week-start dates (Sun-based). The
-   *  schedule view renders these directly instead of re-deriving. */
+   *  capacity pool. Keys are ISO week-start dates (Sun-based). Empty
+   *  when the project has 0 remaining hours. */
   weeklyHours:         Record<string, number>
 }
 
@@ -209,14 +211,27 @@ export function computeDevQueue(
         : fromIsoDate(lastWeekIso) as Date
     }
 
+    // dev end = Sunday of the last allocated week (start + 6 days), so
+    // a project that finishes in one week doesn't show start === end.
+    // 0-hour projects (phase past dev, manual override = 0) get null
+    // start/end — the UI renders those as "done" instead of a date.
+    const devEndDateISO = lastWeekIso == null
+      ? null
+      : (() => {
+          const end = fromIsoDate(lastWeekIso)
+          if (!end) return lastWeekIso
+          end.setDate(end.getDate() + 6)
+          return toIsoDate(end)
+        })()
+
     out.set(p.id, {
       projectId:           p.id,
       priority:            p.priority_order ?? null,
       remainingDevHours:   round1(hours),
       hoursBeforeStart:    round1(cumulativeHours),
-      devStartDate:        firstWeekIso ?? toIsoDate(cursorWeek),
-      devEndDate:          lastWeekIso  ?? toIsoDate(cursorWeek),
-      designDeadline:      firstWeekIso ?? toIsoDate(cursorWeek),
+      devStartDate:        firstWeekIso,
+      devEndDate:          devEndDateISO,
+      designDeadline:      firstWeekIso,
       usedManualRemaining: usedManual,
       weeklyHours,
     })
@@ -229,6 +244,7 @@ export function computeDevQueue(
  *  Returns null when there's no active work (queue empty). */
 export function activeQueueProjectId(slots: Map<string, QueueSlot>, today: Date): string | null {
   for (const s of slots.values()) {
+    if (!s.devStartDate || !s.devEndDate) continue
     const start = fromIsoDate(s.devStartDate)
     const end   = fromIsoDate(s.devEndDate)
     if (!start || !end) continue

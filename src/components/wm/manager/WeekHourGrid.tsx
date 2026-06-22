@@ -102,16 +102,25 @@ export function WeekHourGrid({
   }, [projectIds, firstWeekISO, lastWeekISO])
 
   /** Get the effective value for a cell — override if set, else queue
-   *  projection. Used for both display and column totals. */
+   *  projection. Used for both display and column totals.
+   *
+   *  Projects with 0 hours remaining (past dev phase, or manual
+   *  override of 0) return 'none' even if a stale override row exists,
+   *  so old hand-typed allocations don't keep mass-allocating hours
+   *  to a project that's already shipped. */
   const cellHours = useCallback((projectId: string, weekISO: string): {
     value:    number
     source:   'override' | 'projection' | 'none'
   } => {
+    const row = ordered.find(r => r.id === projectId)
+    const remaining = row?.queueSlot?.remainingDevHours ?? 0
+    if (remaining <= 0) {
+      return { value: 0, source: 'none' }
+    }
     const k = overrideKey(projectId, weekISO)
     if (overrides.has(k)) {
       return { value: overrides.get(k) ?? 0, source: 'override' }
     }
-    const row = ordered.find(r => r.id === projectId)
     const projected = row?.queueSlot?.weeklyHours?.[weekISO] ?? 0
     return projected > 0
       ? { value: projected, source: 'projection' }

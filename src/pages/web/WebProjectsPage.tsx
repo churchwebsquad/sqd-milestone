@@ -40,8 +40,6 @@ export default function WebProjectsPage() {
     const v = params.get('view')
     return v === 'grid' ? 'grid' : 'list'
   })()
-  /** Bulk-reorder mode toggles drag handles on the list view. */
-  const reorderMode = params.get('reorder') === '1'
   const showArchived = params.get('archived') === '1'
   const query       = params.get('q') ?? ''
 
@@ -226,43 +224,36 @@ export default function WebProjectsPage() {
         )}
 
         {view === 'list' && (
-          <>
-            {/* Bulk reorder toggle — sits above the list. When on,
-                rows show drag handles + onPriorityChange shuffles
-                the priority_order column. */}
-            <div className="mb-2 flex items-center justify-end">
-              <button
-                type="button"
-                onClick={() => setParam('reorder', reorderMode ? null : '1')}
-                className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-colors ${reorderMode ? 'bg-wm-accent text-white border-wm-accent' : 'bg-wm-bg-elevated text-wm-text-muted border-wm-border hover:border-wm-accent'}`}
-              >
-                {reorderMode ? '✓ Bulk reorder on' : 'Bulk reorder'}
-              </button>
-            </div>
-            <ListView
-              rows={visible}
-              loading={loading}
-              onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
-              reorderMode={reorderMode}
-              query={query}
-              onPriorityChange={async (movedId, targetOrder) => {
-                // Drop the moved project at targetOrder, shift others.
-                const ordered = [...visible].sort(
-                  (a, b) => (a.priority_order ?? 999) - (b.priority_order ?? 999),
-                )
-                const sansMoved = ordered.filter(r => r.id !== movedId)
-                const movedIdx = Math.max(0, Math.min(sansMoved.length, targetOrder - 1))
-                sansMoved.splice(movedIdx, 0, ordered.find(r => r.id === movedId)!)
-                const updates = sansMoved.map((r, i) =>
-                  supabase.from('strategy_web_projects')
-                    .update({ priority_order: i + 1, updated_at: new Date().toISOString() })
-                    .eq('id', r.id),
-                )
-                await Promise.all(updates)
-                await refetch()
-              }}
-            />
-          </>
+          <ListView
+            rows={visible}
+            loading={loading}
+            onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
+            query={query}
+            onPriorityChange={async (movedId, targetOrder) => {
+              // Drag-and-drop is always live in /web List. Drop the
+              // moved project at targetOrder, shift others. No "bulk
+              // reorder" toggle — priority is editable any time.
+              const ordered = [...visible].sort(
+                (a, b) => (a.priority_order ?? 999) - (b.priority_order ?? 999),
+              )
+              const sansMoved = ordered.filter(r => r.id !== movedId)
+              const movedIdx = Math.max(0, Math.min(sansMoved.length, targetOrder - 1))
+              sansMoved.splice(movedIdx, 0, ordered.find(r => r.id === movedId)!)
+              const updates = sansMoved.map((r, i) =>
+                supabase.from('strategy_web_projects')
+                  .update({ priority_order: i + 1, updated_at: new Date().toISOString() })
+                  .eq('id', r.id),
+              )
+              await Promise.all(updates)
+              await refetch()
+            }}
+            onLaunchDateChange={async (projectId, iso) => {
+              await supabase.from('strategy_web_projects')
+                .update({ launch_date: iso, updated_at: new Date().toISOString() })
+                .eq('id', projectId)
+              await refetch()
+            }}
+          />
         )}
 
         {view === 'grid' && (

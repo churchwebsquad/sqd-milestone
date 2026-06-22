@@ -1,16 +1,15 @@
 /**
  * Manager-level list view — the new default at /web.
  *
- * Answers the Monday-morning JTBD ("what needs my attention?") by
- * rendering every project as a scannable row with the SIGNAL
- * CONSOLIDATOR'S output in the "Where it is" column. That's the
- * piece the old Board / Phase board / Schedule were all missing:
- * step-level visibility (e.g. "Step 8/11: Outline page · 3/12 pages"),
- * not just "Content phase."
- *
- * Drag-to-reorder is provided via the opt-in "Bulk reorder" mode
- * toggle the parent passes in; outside that mode rows are read-only
- * + sortable by column.
+ * Each row carries:
+ *   - a drag handle (always live — reorder is the primary way to
+ *     change priority; the manual number field is gone)
+ *   - project name + member + phase
+ *   - "Where it is" — the consolidator's one-liner (step name + progress)
+ *   - status pill with WHY in title
+ *   - launch date — inline editable date input + days-to-launch hint
+ *     + predicted launch chip when target is null
+ *   - chevron to open the planning tab
  */
 import { useMemo, useState } from 'react'
 import { ChevronRight, GripVertical, Search } from 'lucide-react'
@@ -25,10 +24,10 @@ interface Props {
   rows:      ProjectRowVM[]
   loading:   boolean
   onSelect:  (projectId: string) => void
-  /** Opt-in bulk reorder mode. When true, rows show a drag handle
-   *  and onPriorityChange fires on drop. */
-  reorderMode?: boolean
+  /** Fires when the user drags a row to a new position. */
   onPriorityChange?: (projectId: string, newOrder: number) => void
+  /** Fires when the user types into the launch date cell. */
+  onLaunchDateChange?: (projectId: string, iso: string | null) => Promise<void> | void
   /** Group rows by phase / AM / launch month. 'none' = priority order. */
   groupBy?: 'none' | 'phase' | 'owner' | 'month'
   /** Sort within each group. */
@@ -66,7 +65,7 @@ interface EnrichedRow {
 }
 
 export function ListView({
-  rows, loading, onSelect, reorderMode = false, onPriorityChange,
+  rows, loading, onSelect, onPriorityChange, onLaunchDateChange,
   groupBy = 'none', sortBy = 'priority', query = '',
 }: Props) {
   const today = new Date()
@@ -149,7 +148,7 @@ export function ListView({
                 key={e.row.id}
                 enriched={e}
                 onSelect={onSelect}
-                reorderMode={reorderMode}
+                onLaunchDateChange={onLaunchDateChange}
                 onDragStart={() => setDragId(e.row.id)}
                 onDragOver={ev => { ev.preventDefault() }}
                 onDrop={() => {
@@ -168,16 +167,16 @@ export function ListView({
 }
 
 interface ListRowProps {
-  enriched:   EnrichedRow
-  onSelect:   (id: string) => void
-  reorderMode: boolean
+  enriched:    EnrichedRow
+  onSelect:    (id: string) => void
+  onLaunchDateChange?: (projectId: string, iso: string | null) => Promise<void> | void
   onDragStart: () => void
   onDragOver:  (ev: React.DragEvent) => void
   onDrop:      () => void
   isDragging:  boolean
 }
 
-function ListRow({ enriched, onSelect, reorderMode, onDragStart, onDragOver, onDrop, isDragging }: ListRowProps) {
+function ListRow({ enriched, onSelect, onLaunchDateChange, onDragStart, onDragOver, onDrop, isDragging }: ListRowProps) {
   const { row, activity, stall, daysToLaunch } = enriched
   const isManual = activity.signal === 'manual_override' && activity.manualStatus
   const subTone = isManual
@@ -187,96 +186,157 @@ function ListRow({ enriched, onSelect, reorderMode, onDragStart, onDragOver, onD
     ? MANUAL_LABEL[activity.manualStatus!]
     : SUB_LABEL[row.health.subStatus]
 
+  // Predicted launch from the queue projection — surfaced when the AM
+  // hasn't pinned a target launch_date yet, so every row has SOMETHING
+  // to compare against the team's cap.
+  const predictedLaunch = row.queueSlot?.devEndDate ?? null
+  const queueRemaining  = row.queueSlot?.remainingDevHours ?? 0
+
   return (
     <li
-      draggable={reorderMode}
+      draggable
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      className={`${isDragging ? 'opacity-40' : ''} ${reorderMode ? 'cursor-grab' : ''}`}
+      className={`${isDragging ? 'opacity-40' : ''} cursor-grab`}
     >
       <div className="flex items-center gap-2 px-2 py-2 hover:bg-wm-bg-hover transition-colors">
-        {reorderMode && (
-          <GripVertical size={13} className="text-wm-text-subtle shrink-0" />
-        )}
+        <GripVertical size={13} className="text-wm-text-subtle shrink-0" />
+        {/* Priority chip — derived from row order, no manual entry */}
+        <span className="w-8 shrink-0 font-mono text-[10.5px] text-wm-text-subtle text-center">
+          #{row.priority_order ?? '—'}
+        </span>
+
+        {/* Project name — click to open planning. Each downstream
+            section is its own clickable region so the row never
+            hijacks a click that lands on the date input or pill. */}
         <button
           type="button"
           onClick={() => onSelect(row.id)}
           aria-label={`Open planning for ${row.church_name ?? row.name}`}
-          className="flex-1 min-w-0 text-left flex items-center gap-3"
+          className="min-w-0 flex-1 text-left"
         >
-          {/* Priority chip */}
-          <span className="w-8 shrink-0 font-mono text-[10.5px] text-wm-text-subtle text-center">
-            #{row.priority_order ?? '—'}
-          </span>
+          <p className="text-[12.5px] text-wm-text truncate">
+            {row.church_name ?? row.name}
+          </p>
+          <p className="text-[10px] font-mono text-wm-text-subtle">
+            #{row.member} · {PHASE_LABEL[activity.phase] ?? activity.phase}
+          </p>
+        </button>
 
-          {/* Project name + member. Demoted to support text — the
-              "where it is" column is the JTBD answer. Name stays
-              first-read but is lighter so the step name wins on the
-              scan path. */}
-          <div className="min-w-0 flex-1">
-            <p className="text-[12.5px] text-wm-text truncate">
-              {row.church_name ?? row.name}
+        {/* Where it is — the new column. Step name + progress + stall
+            badge. Visually the loudest text in the row because the
+            Monday-morning JTBD is "where is each project?". */}
+        <button
+          type="button"
+          onClick={() => onSelect(row.id)}
+          aria-label={`Open planning for ${row.church_name ?? row.name}`}
+          className="min-w-0 flex-[1.4] text-left"
+        >
+          <p className="text-[13px] font-semibold text-wm-text truncate">
+            {activity.oneLiner}
+          </p>
+          {(stall.isStalled || activity.lastActivityAt) && (
+            <p className="text-[10px] text-wm-text-subtle font-mono">
+              {stall.isStalled
+                ? `⚠ Stalled ${stall.daysSinceActivity}d`
+                : activity.lastActivityAt
+                  ? `Last activity ${fmtRelative(activity.lastActivityAt)}`
+                  : ''}
             </p>
-            <p className="text-[10px] font-mono text-wm-text-subtle">
-              #{row.member} · {PHASE_LABEL[activity.phase] ?? activity.phase}
-            </p>
-          </div>
+          )}
+        </button>
 
-          {/* Where it is — the new column. Step name + progress + stall
-              badge. Visually the loudest text in the row because the
-              Monday-morning JTBD is "where is each project?". On
-              mobile this stacks under the name (md: not hidden). */}
-          <div className="min-w-0 flex-[1.4]">
-            <p className="text-[13px] font-semibold text-wm-text truncate">
-              {activity.oneLiner}
-            </p>
-            {(stall.isStalled || activity.lastActivityAt) && (
-              <p className="text-[10px] text-wm-text-subtle font-mono">
-                {stall.isStalled
-                  ? `⚠ Stalled ${stall.daysSinceActivity}d`
-                  : activity.lastActivityAt
-                    ? `Last activity ${fmtRelative(activity.lastActivityAt)}`
-                    : ''}
-              </p>
-            )}
-          </div>
+        {/* Status — hover for the "why" (risk reasons or the manual
+            override reason that drove this pill). */}
+        <div
+          className="shrink-0"
+          title={
+            isManual && row.status_reason
+              ? `Manual: ${row.status_reason}`
+              : (row.health.riskReasons ?? []).length > 0
+                ? `Why: ${row.health.riskReasons.join(' · ')}`
+                : 'Live status from computeProjectHealth'
+          }
+        >
+          <WMStatusPill tone={subTone} size="sm">
+            {subLabel}
+          </WMStatusPill>
+        </div>
 
-          {/* Status — hover for the "why" (risk reasons or the manual
-              override reason that drove this pill). */}
-          <div
-            className="shrink-0"
-            title={
-              isManual && row.status_reason
-                ? `Manual: ${row.status_reason}`
-                : (row.health.riskReasons ?? []).length > 0
-                  ? `Why: ${row.health.riskReasons.join(' · ')}`
-                  : 'Live status from computeProjectHealth'
-            }
-          >
-            <WMStatusPill tone={subTone} size="sm">
-              {subLabel}
-            </WMStatusPill>
-          </div>
+        {/* Launch — inline editable. When the AM hasn't pinned a target,
+            shows the predicted dev-end date in italic as a "this is
+            when the queue says it ships" placeholder. */}
+        <div className="shrink-0 w-32 hidden sm:block">
+          <LaunchDateCell
+            projectId={row.id}
+            launchDate={row.launch_date ? row.launch_date.slice(0, 10) : null}
+            predictedDate={predictedLaunch}
+            daysToLaunch={daysToLaunch}
+            queueRemaining={queueRemaining}
+            onCommit={onLaunchDateChange}
+          />
+        </div>
 
-          {/* Launch */}
-          <div className="shrink-0 w-24 text-right hidden sm:block">
-            <p className="text-[11.5px] font-mono text-wm-text">
-              {row.launch_date ? row.launch_date.slice(5) : '—'}
-            </p>
-            <p className="text-[10px] font-mono text-wm-text-subtle">
-              {daysToLaunch == null
-                ? ''
-                : daysToLaunch < 0
-                  ? `${Math.abs(daysToLaunch)}d past`
-                  : `${daysToLaunch}d out`}
-            </p>
-          </div>
-
-          <ChevronRight size={12} className="text-wm-text-subtle shrink-0" />
+        <button
+          type="button"
+          onClick={() => onSelect(row.id)}
+          aria-label={`Open planning for ${row.church_name ?? row.name}`}
+          className="shrink-0"
+        >
+          <ChevronRight size={12} className="text-wm-text-subtle" />
         </button>
       </div>
     </li>
+  )
+}
+
+function LaunchDateCell({
+  projectId, launchDate, predictedDate, daysToLaunch, queueRemaining, onCommit,
+}: {
+  projectId:       string
+  launchDate:      string | null
+  predictedDate:   string | null
+  daysToLaunch:    number | null
+  queueRemaining:  number
+  onCommit?:       (projectId: string, iso: string | null) => Promise<void> | void
+}) {
+  const [draft, setDraft] = useState(launchDate ?? '')
+  const [saving, setSaving] = useState(false)
+  useMemo(() => setDraft(launchDate ?? ''), [launchDate])
+
+  const commit = async () => {
+    const next = draft.trim() === '' ? null : draft
+    if (next === launchDate) return
+    if (!onCommit) return
+    setSaving(true)
+    try { await onCommit(projectId, next) } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="text-right" onClick={ev => ev.stopPropagation()}>
+      <input
+        type="date"
+        value={draft}
+        disabled={saving}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={() => void commit()}
+        className="w-full text-[11px] font-mono text-wm-text bg-transparent border border-transparent hover:border-wm-border focus:border-wm-accent focus:bg-wm-bg-elevated px-1 py-0.5 rounded outline-none text-right"
+      />
+      {!launchDate && predictedDate && queueRemaining > 0 ? (
+        <p className="text-[10px] font-mono text-wm-text-subtle italic">
+          ≈ {predictedDate.slice(5)} predicted
+        </p>
+      ) : (
+        <p className="text-[10px] font-mono text-wm-text-subtle">
+          {daysToLaunch == null
+            ? ''
+            : daysToLaunch < 0
+              ? `${Math.abs(daysToLaunch)}d past`
+              : `${daysToLaunch}d out`}
+        </p>
+      )}
+    </div>
   )
 }
 

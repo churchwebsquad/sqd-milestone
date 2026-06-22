@@ -130,8 +130,8 @@ export interface HealthInputs {
    *  P3 doesn't get to claim "ships in 2 weeks" when P1 + P2 own
    *  the dev's next 8 weeks. */
   queueSlot?: {
-    devStartDate:        string
-    devEndDate:          string
+    devStartDate:        string | null
+    devEndDate:          string | null
     hoursBeforeStart:    number
     remainingDevHours:   number
   }
@@ -276,7 +276,7 @@ export function computeProjectHealth(i: HealthInputs): HealthResult {
   if (availableHours === 0 && launchDate) {
     const cap = Math.max(i.joshWeeklyCapacity, 0)
     let windowStart: Date = today
-    if (i.queueSlot) {
+    if (i.queueSlot && i.queueSlot.devStartDate) {
       const devStart = fromIsoDate(i.queueSlot.devStartDate)
       if (devStart && devStart > today) windowStart = devStart
       reasons.push(`Queue-aware capacity: dev picks this up ${fmtDate(i.queueSlot.devStartDate)}.`)
@@ -393,7 +393,7 @@ export function computeProjectHealth(i: HealthInputs): HealthResult {
     // EARLIER of allocation-based + capacity-based, same as before.
     if (queueProjection) {
       projection = queueProjection
-      if (i.queueSlot && i.queueSlot.hoursBeforeStart > 0) {
+      if (i.queueSlot && i.queueSlot.hoursBeforeStart > 0 && i.queueSlot.devStartDate) {
         reasons.push(
           `Queue: ${i.queueSlot.hoursBeforeStart.toFixed(0)}h of higher-priority work first; dev picks this up ${fmtDate(i.queueSlot.devStartDate)}.`,
         )

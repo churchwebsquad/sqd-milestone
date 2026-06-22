@@ -397,11 +397,38 @@ export function PlanningWorkspace({ project, onChange }: Props) {
     }
   }, [project.id, onChange])
 
+  /** Move this project one slot up or down in the queue, renumbering
+   *  any project caught in the swap. Mirror of the /web List drag
+   *  handler, just scoped to a single-step nudge from the Planning
+   *  tab so the user never types a free integer. */
+  const nudgePriority = useCallback(async (dir: 'up' | 'down') => {
+    if (!queueRows.length) return
+    const ordered = [...queueRows].sort(
+      (a, b) => (a.priority_order ?? 999) - (b.priority_order ?? 999),
+    )
+    const idx = ordered.findIndex(r => r.id === project.id)
+    if (idx === -1) return
+    const swapIdx = dir === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= ordered.length) return
+    const swapped = [...ordered]
+    const [moved] = swapped.splice(idx, 1)
+    swapped.splice(swapIdx, 0, moved)
+    setSavingKey('priority_order')
+    try {
+      await Promise.all(swapped.map((r, i) =>
+        supabase.from('strategy_web_projects')
+          .update({ priority_order: i + 1, updated_at: new Date().toISOString() })
+          .eq('id', r.id),
+      ))
+      void onChange()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Priority save failed')
+    } finally {
+      setSavingKey(null)
+    }
+  }, [queueRows, project.id, onChange])
+
   // ── Status hero computations ──────────────────────────────────
-  // Derive tier from sitemap page count. Override = anything stored
-  // in dev_hours_estimate that doesn't match the tier's base; we show
-  // both numbers so the strategist sees what we'd recommend vs what
-  // they committed to.
   const currentSprint = useMemo(() => sprintForDate(new Date()), [])
   /** Allocations in the current 2-week sprint window. */
   const sprintAllocations = useMemo(() => {
@@ -637,34 +664,94 @@ export function PlanningWorkspace({ project, onChange }: Props) {
           )}
         </WMCard>
 
-        {/* Schedule — launch / priority / hours with inline feasibility
-            chip on launch and cascade preview on priority changes. */}
+        {/* Target vs Predicted — hero comparison. Target = the AM's
+            promise (draft.launch_date). Predicted = what the queue
+            says given priority + remaining dev hours. The user has
+            been complaining these were scattered across cards — they
+            now live together at the top of the planning surface. */}
         <WMCard padding="loose">
-          <SectionLabel>Schedule</SectionLabel>
-          <div className="grid grid-cols-3 gap-3">
-            <FieldDate
-              label="Launch date"
-              value={draft.launch_date}
-              onCommit={(v) => save('launch_date', v)}
-              saving={savingKey === 'launch_date'}
-            />
-            <FieldNumber
-              label="Priority"
-              value={priorityDraft}
-              min={1}
-              // Track the typed value as a separate draft so the
-              // cascade preview can recompute against the candidate
-              // before it commits — but only when the user actually
-              // pauses typing (blur), not on every keystroke. The
-              // useMemo dep on priorityDraft keeps the queue
-              // recompute cheap because it only fires when the value
-              // settles.
-              onCommit={(v) => {
-                setPriorityDraft(v)
-                void save('priority_order', v)
-              }}
-              saving={savingKey === 'priority_order'}
-            />
+          <SectionLabel>Launch</SectionLabel>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+            <div className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Target</p>
+              <FieldDate
+                label=""
+                value={draft.launch_date}
+                onCommit={(v) => save('launch_date', v)}
+                saving={savingKey === 'launch_date'}
+              />
+              <p className="text-[10.5px] text-wm-text-subtle mt-1">
+                What the AM has promised the partner. Empty = no promise yet.
+              </p>
+            </div>
+            <div className="rounded-md border border-wm-accent/40 bg-wm-accent/5 p-3">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent">Predicted</p>
+              <p className="text-[18px] font-semibold text-wm-text mt-1">
+                {queueSlot && queueSlot.devEndDate
+                  ? formatLongDate(queueSlot.devEndDate)
+                  : queueSlot?.remainingDevHours === 0
+                    ? 'Dev complete'
+                    : '—'}
+              </p>
+              <p className="text-[10.5px] text-wm-text-muted mt-1">
+                {queueSlot?.remainingDevHours === 0
+                  ? 'No dev hours remaining.'
+                  : queueSlot && queueSlot.devStartDate
+                    ? `Queue picks this up ${formatLongDate(queueSlot.devStartDate)} · ${queueSlot.hoursBeforeStart}h ahead.`
+                    : 'Set page count + priority in Project Settings to compute.'}
+              </p>
+              {/* Apply-predicted CTA — fills launch_date with the queue's
+                  guess. Surfaces only when target is missing or off by
+                  more than 7 days. */}
+              {queueSlot?.devEndDate && (!draft.launch_date || Math.abs((fromIsoDate(draft.launch_date)?.getTime() ?? 0) - (fromIsoDate(queueSlot.devEndDate)?.getTime() ?? 0)) > 7 * 86400000) && (
+                <button
+                  type="button"
+                  onClick={() => save('launch_date', queueSlot.devEndDate)}
+                  className="mt-2 text-[11px] font-semibold text-wm-accent-strong hover:underline"
+                >
+                  → Set target to {formatLongDate(queueSlot.devEndDate)}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Inline feasibility chip — only meaningful when both target
+              and a remaining-hours number exist. */}
+          {feasibility && draft.launch_date && (
+            <div className="mb-3">
+              <FeasibilityChip
+                result={feasibility}
+                onApplySuggestion={(iso) => save('launch_date', iso)}
+              />
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Priority</p>
+              <div className="flex items-center gap-2 mt-1">
+                <p className="text-[18px] font-mono font-semibold text-wm-text">
+                  #{project.priority_order ?? '—'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void nudgePriority('up')}
+                  disabled={!queueRows.length || (project.priority_order ?? 1) <= 1}
+                  className="text-[11px] font-semibold px-2 py-1 rounded border border-wm-border hover:border-wm-accent disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Move one slot higher"
+                >↑</button>
+                <button
+                  type="button"
+                  onClick={() => void nudgePriority('down')}
+                  disabled={!queueRows.length}
+                  className="text-[11px] font-semibold px-2 py-1 rounded border border-wm-border hover:border-wm-accent disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Move one slot lower"
+                >↓</button>
+              </div>
+              <p className="text-[10.5px] text-wm-text-subtle mt-1">
+                For bulk shuffling, drag rows in <a href="/web" className="text-wm-accent hover:underline">/web list</a>.
+              </p>
+            </div>
             <FieldNumber
               label="Total dev hours (override)"
               value={draft.dev_hours_estimate}
@@ -675,22 +762,10 @@ export function PlanningWorkspace({ project, onChange }: Props) {
             />
           </div>
           <p className="text-[10.5px] text-wm-text-subtle italic mt-2">
-            Total dev hours = manual override. Leave blank to use the {devHoursLive.total}h
-            predicted by Project Settings below ({devHoursLive.note}).
+            Override blank ⇒ uses the {devHoursLive.total}h predicted by Project Settings ({devHoursLive.note}).
           </p>
 
-          {/* Inline feasibility chip on the launch date. */}
-          {feasibility && (
-            <div className="mt-3">
-              <FeasibilityChip
-                result={feasibility}
-                onApplySuggestion={(iso) => save('launch_date', iso)}
-              />
-            </div>
-          )}
-
-          {/* Cascade preview — only visible while priorityDraft differs
-              from saved value. */}
+          {/* Cascade preview while a priority nudge is unsaved. */}
           {priorityDraft !== project.priority_order && cascadeRows.length > 0 && (
             <div className="mt-3 rounded-md border border-wm-accent/30 bg-wm-accent/5 p-3">
               <PriorityCascadePreview
@@ -802,8 +877,10 @@ export function PlanningWorkspace({ project, onChange }: Props) {
           </div>
         </WMCard>
 
-        {/* Dev queue — sequential capacity walk across the org */}
-        {queueSlot && (
+        {/* Dev queue — sequential capacity walk across the org. Hidden
+            when the project has 0 hours remaining (dev complete or
+            phase past dev). */}
+        {queueSlot && queueSlot.devStartDate && queueSlot.remainingDevHours > 0 && (
           <WMCard padding="loose">
             <SectionLabel>Dev queue position</SectionLabel>
             <div className="grid grid-cols-2 gap-3 text-[12px]">
@@ -812,9 +889,11 @@ export function PlanningWorkspace({ project, onChange }: Props) {
               <Stat label="Hours ahead in queue"
                     value={`${queueSlot.hoursBeforeStart}h`} />
               <Stat label="Dev starts"
-                    value={new Date(fromIsoDate(queueSlot.devStartDate)!).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} />
-              <Stat label="Design must finish by"
-                    value={new Date(fromIsoDate(queueSlot.designDeadline)!).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} />
+                    value={formatLongDate(queueSlot.devStartDate)} />
+              {queueSlot.designDeadline && (
+                <Stat label="Design must finish by"
+                      value={formatLongDate(queueSlot.designDeadline)} />
+              )}
             </div>
             <p className="mt-2 text-[11px] text-wm-text-muted">
               The dev picks up projects in priority order. The launch projection below
@@ -852,21 +931,10 @@ export function PlanningWorkspace({ project, onChange }: Props) {
           </WMCard>
         )}
 
-        {/* Weekly allocations — override the auto-queue per week
-            when the team needs to (vacation cover, urgent ask, etc.) */}
-        <WMCard padding="loose">
-          <SectionLabel>Weekly allocations</SectionLabel>
-          <p className="text-[11px] text-wm-text-muted mb-3">
-            Optional. Override the auto-queue for specific weeks — leave
-            blank to let priority order decide. Hours typed here count
-            toward "allocated to target."
-          </p>
-          <AllocationGrid
-            projectId={project.id}
-            allocations={allocations}
-            onSaved={(rows) => setAllocations(rows)}
-          />
-        </WMCard>
+        {/* Weekly allocations retired — the per-project grid has been
+            replaced by the cross-project Week-Hour Grid on /web?view=grid.
+            Edit hours there to see how this project's week fits beside
+            every other project. */}
 
         {/* Feasibility */}
         <WMCard padding="loose">
@@ -1007,6 +1075,15 @@ function LeverToggle({
   )
 }
 
+/** Format an ISO yyyy-mm-dd as a strategist-friendly "Jul 6, 2026"
+ *  with safe fallbacks for null/invalid inputs. */
+function formatLongDate(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = fromIsoDate(iso)
+  if (!d) return iso
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
 function Stat({
   label, value, hint, tone = 'default',
 }: {
@@ -1027,108 +1104,3 @@ function Stat({
   )
 }
 
-// ── Allocation grid ──────────────────────────────────────────
-// Editable per-week hours field, scoped to this project. Writes to
-// strategy_dev_weekly_allocations. Each row is one week; entering 0
-// or clearing the field removes the allocation. The grid shows the
-// next 8 weeks by default — long enough to plan a launch, short
-// enough to fit in the panel.
-const ALLOC_WEEKS = 8
-const ALLOC_SLOT: 'primary' = 'primary'
-
-function AllocationGrid({
-  projectId, allocations, onSaved,
-}: {
-  projectId:   string
-  allocations: Array<{ week_starting: string; hours: number }>
-  onSaved:     (rows: Array<{ week_starting: string; hours: number }>) => void
-}) {
-  const today = new Date()
-  const weeks: string[] = []
-  const start = new Date(today)
-  // Snap to Monday-of-current-week (matches existing dateRange.weekStart logic).
-  const dow = start.getDay()
-  const offset = dow === 0 ? -6 : 1 - dow
-  start.setDate(start.getDate() + offset)
-  for (let i = 0; i < ALLOC_WEEKS; i++) {
-    const d = new Date(start)
-    d.setDate(d.getDate() + i * 7)
-    weeks.push(d.toISOString().slice(0, 10))
-  }
-  const byWeek = new Map(allocations.map(a => [a.week_starting, Number(a.hours)]))
-
-  const save = async (week: string, hours: number | null) => {
-    // Upsert or delete via Supabase.
-    if (hours == null || hours <= 0) {
-      await supabase.from('strategy_dev_weekly_allocations')
-        .delete()
-        .eq('web_project_id', projectId)
-        .eq('week_starting', week)
-        .eq('slot', ALLOC_SLOT)
-    } else {
-      await supabase.from('strategy_dev_weekly_allocations')
-        .upsert({
-          web_project_id: projectId,
-          week_starting:  week,
-          slot:           ALLOC_SLOT,
-          hours,
-        }, { onConflict: 'week_starting,web_project_id,slot' })
-    }
-    // Refetch to keep parent state honest.
-    const { data } = await supabase
-      .from('strategy_dev_weekly_allocations')
-      .select('week_starting, hours')
-      .eq('web_project_id', projectId)
-    onSaved(((data ?? []) as Array<{ week_starting: string; hours: number }>))
-  }
-
-  return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-      {weeks.map(w => (
-        <AllocationCell
-          key={w}
-          weekIso={w}
-          hours={byWeek.get(w) ?? null}
-          onCommit={(h) => save(w, h)}
-        />
-      ))}
-    </div>
-  )
-}
-
-function AllocationCell({
-  weekIso, hours, onCommit,
-}: {
-  weekIso: string
-  hours:   number | null
-  onCommit: (hours: number | null) => void
-}) {
-  const [v, setV] = useState(hours == null ? '' : String(hours))
-  useEffect(() => { setV(hours == null ? '' : String(hours)) }, [hours])
-  const wk = new Date(weekIso + 'T00:00:00')
-  const label = wk.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  return (
-    <label className="block rounded-md border border-wm-border bg-wm-bg-elevated p-2">
-      <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
-        Week of {label}
-      </span>
-      <div className="flex items-baseline gap-1 mt-1">
-        <input
-          type="number"
-          min={0}
-          step={0.25}
-          value={v}
-          onChange={e => setV(e.target.value)}
-          onBlur={() => {
-            const trimmed = v.trim()
-            const next = trimmed === '' ? null : Number(trimmed)
-            if (next !== hours) onCommit(Number.isFinite(next as number) ? next : null)
-          }}
-          placeholder="0"
-          className="flex-1 min-w-0 text-[13px] px-1.5 py-1 rounded border border-wm-border bg-wm-bg font-mono tabular-nums focus:border-wm-accent focus:outline-none"
-        />
-        <span className="text-[10px] text-wm-text-subtle">h</span>
-      </div>
-    </label>
-  )
-}

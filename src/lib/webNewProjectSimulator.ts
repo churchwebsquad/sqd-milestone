@@ -120,11 +120,14 @@ export function simulateNewProjectLaunch(input: SimulatorInput): SimulatorOutput
   )
 
   // 5. Cascade — for each existing project, compare devEnd before vs after.
+  // Skip projects whose devEnd is null in either snapshot (done with dev,
+  // or never had dev hours assigned).
   const cascade: CascadeRow[] = []
   for (const p of input.existingProjects) {
     const before = beforeSlots.get(p.id)
     const after  = afterSlots.get(p.id)
     if (!before || !after) continue
+    if (!before.devEndDate || !after.devEndDate) continue
     if (before.devEndDate === after.devEndDate) continue
     cascade.push({
       projectId:    p.id,

@@ -80,8 +80,8 @@ export interface FeasibilityInputs {
    *  so the projection respects queue position instead of the per-
    *  project capacity optimistic case. */
   queueSlot?:          {
-    devStartDate:      string
-    devEndDate:        string
+    devStartDate:      string | null
+    devEndDate:        string | null
     hoursBeforeStart:  number
     remainingDevHours: number
   }
