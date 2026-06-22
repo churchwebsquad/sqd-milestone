@@ -513,6 +513,14 @@ export function toClamp(desktopPx: number, mobilePx: number): string {
   return `clamp(${fmt(minRem)}rem, ${fmt(baseRem)}rem + ${fmt(vwCoef)}vw, ${fmt(maxRem)}rem)`
 }
 
+/** Convert a px value to a single rem string. Used by the Tokens Studio
+ *  export where Figma variables hold ONE numeric value — no clamp,
+ *  no min/max envelope. The CSS export (toClamp above) keeps the
+ *  responsive envelope; Figma gets the desktop snapshot. */
+export function toRem(px: number): string {
+  return (px / ROOT_FONT_PX).toFixed(3).replace(/\.?0+$/, '') + 'rem'
+}
+
 // ── Tokens Studio JSON export ───────────────────────────────────────
 
 /** Generate `tokens.figma.json` (Tokens Studio plugin format) from the
@@ -615,26 +623,31 @@ export function toTokensStudioJson(spec: DesignSystemSpec): TokensStudioFile {
   }
 
   // ── Spacing ──────────────────────────────────────────────────────
+  // Figma variables hold ONE numeric value, so we emit the desktop
+  // snapshot. The responsive envelope lives in the CSS export. If
+  // designers want a mobile variant in Figma, Tokens Studio supports
+  // multiple token sets — future work to add a `mobile` set alongside
+  // `global` and wire them as modes.
   const spacing: Record<string, { $value: string; $type: 'spacing' }> = {}
   for (const [step, vals] of Object.entries(spec.spacing.steps)) {
-    spacing[step] = { $value: toClamp(vals.desktop, vals.mobile), $type: 'spacing' }
+    spacing[step] = { $value: toRem(vals.desktop), $type: 'spacing' }
   }
   global.spacing = spacing
 
   // ── Border radius ────────────────────────────────────────────────
   const borderRadius: Record<string, { $value: string; $type: 'borderRadius'; $description?: string }> = {
     sm: {
-      $value: toClamp(spec.radius.sm.desktop, spec.radius.sm.mobile),
+      $value: toRem(spec.radius.sm.desktop),
       $type: 'borderRadius',
       $description: 'Buttons, inputs, inline interactives',
     },
     md: {
-      $value: toClamp(spec.radius.md.desktop, spec.radius.md.mobile),
+      $value: toRem(spec.radius.md.desktop),
       $type: 'borderRadius',
       $description: 'Cards, content surfaces',
     },
     lg: {
-      $value: toClamp(spec.radius.lg.desktop, spec.radius.lg.mobile),
+      $value: toRem(spec.radius.lg.desktop),
       $type: 'borderRadius',
       $description: 'Large atmospheric surfaces',
     },
@@ -654,7 +667,8 @@ export function toTokensStudioJson(spec: DesignSystemSpec): TokensStudioFile {
 
   const fontSizes: Record<string, { $value: string; $type: 'fontSizes' }> = {}
   for (const [role, vals] of Object.entries(spec.typography.sizes)) {
-    fontSizes[role] = { $value: toClamp(vals.desktop, vals.mobile), $type: 'fontSizes' }
+    // Desktop-only for Figma; clamp lives in CSS export.
+    fontSizes[role] = { $value: toRem(vals.desktop), $type: 'fontSizes' }
   }
   global.fontSizes = fontSizes
 
