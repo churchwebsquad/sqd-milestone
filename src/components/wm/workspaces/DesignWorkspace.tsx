@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Palette, Plus, Trash2, Download, Save, Loader2, Type, Move, Square,
   Sparkles, ExternalLink, Check, AlertCircle, Layers, FileCode, FileText,
-  FolderOpen, Lightbulb,
+  FolderOpen, Lightbulb, X,
 } from 'lucide-react'
 import { scanStrategicPhrases, extractInspirationalUrls } from '../../../lib/cowork/strategicPhraseScanner'
 import { supabase } from '../../../lib/supabase'
@@ -344,7 +344,7 @@ export function DesignWorkspace({ project, onChange }: Props) {
           <SpacingSection spec={spec} onChange={update} />
           <RadiusSection spec={spec} onChange={update} />
           <FigmaStyleGuideSection projectId={project.id} spec={spec} onChange={update} onAutoSave={autoSave} />
-          <OrganizedImagesFolderSection spec={spec} onAutoSave={autoSave} />
+          <ImagesSection projectId={project.id} spec={spec} onAutoSave={autoSave} />
           <FigmaPluginGeneratorSection project={project} spec={spec} />
         </div>
       </div>
@@ -1008,14 +1008,84 @@ function FigmaStyleGuideSection({
   }, [projectId])
   useEffect(() => { void loadUsed() }, [loadUsed])
 
+  // Designer-curated extras (templates they pulled into Figma that
+  // aren't bound to a section) + exclusions (auto-derived ones they
+  // chose not to use). Joined onto the auto-derived `used` set so the
+  // checklist accurately reflects what's actually in their Figma file.
+  const [extraTemplates, setExtraTemplates] = useState<WebContentTemplate[]>([])
+  const extraIds = useMemo(() => spec.figma?.extra_template_ids ?? [], [spec.figma])
+  const excludedIds = useMemo(() => new Set(spec.figma?.excluded_template_ids ?? []), [spec.figma])
+  useEffect(() => {
+    if (extraIds.length === 0) { setExtraTemplates([]); return }
+    let cancelled = false
+    void (async () => {
+      const { data } = await supabase
+        .from('web_content_templates')
+        .select('id, layer_name, family, preview_image_url')
+        .in('id', extraIds)
+      if (!cancelled) setExtraTemplates((data ?? []) as WebContentTemplate[])
+    })()
+    return () => { cancelled = true }
+  }, [extraIds])
+
+  const effectiveUsed = useMemo(() => {
+    const filteredAuto = used.filter(t => !excludedIds.has(t.id))
+    const autoIds = new Set(filteredAuto.map(t => t.id))
+    const dedupedExtras = extraTemplates.filter(t => !autoIds.has(t.id))
+    return [...filteredAuto, ...dedupedExtras]
+  }, [used, extraTemplates, excludedIds])
+
   const byFamily = useMemo(() => {
     const m = new Map<string, WebContentTemplate[]>()
-    for (const t of used) {
+    for (const t of effectiveUsed) {
       if (!m.has(t.family)) m.set(t.family, [])
       m.get(t.family)!.push(t)
     }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-  }, [used])
+  }, [effectiveUsed])
+
+  /** Mutator wrappers used by the checklist UI. */
+  const addExtraTemplate = (id: string) => {
+    const current = new Set(spec.figma?.extra_template_ids ?? [])
+    if (current.has(id)) return
+    current.add(id)
+    // If the designer is re-adding an auto-derived template they had
+    // previously excluded, clear the exclusion too.
+    const exclude = new Set(spec.figma?.excluded_template_ids ?? [])
+    exclude.delete(id)
+    void onAutoSave({
+      ...spec,
+      figma: {
+        ...(spec.figma ?? {}),
+        extra_template_ids:    [...current],
+        excluded_template_ids: [...exclude],
+      },
+    })
+  }
+  const removeTemplate = (id: string, isAutoDerived: boolean) => {
+    if (isAutoDerived) {
+      // Auto-derived: add to excluded list so it filters out.
+      const exclude = new Set(spec.figma?.excluded_template_ids ?? [])
+      exclude.add(id)
+      void onAutoSave({
+        ...spec,
+        figma: { ...(spec.figma ?? {}), excluded_template_ids: [...exclude] },
+      })
+    } else {
+      // Extra: drop from extras + clear loaded-state.
+      const extras = (spec.figma?.extra_template_ids ?? []).filter(x => x !== id)
+      const loaded = (spec.figma?.loaded_template_ids ?? []).filter(x => x !== id)
+      void onAutoSave({
+        ...spec,
+        figma: {
+          ...(spec.figma ?? {}),
+          extra_template_ids:  extras,
+          loaded_template_ids: loaded,
+        },
+      })
+    }
+  }
+  const usedIdsSet = useMemo(() => new Set(used.map(t => t.id)), [used])
 
   return (
     <Section title="Figma Style Guide source" icon={<Layers size={13} />}>
@@ -1094,9 +1164,10 @@ function FigmaStyleGuideSection({
 
       <TemplateLoadChecklist
         loading={loading}
-        used={used}
+        used={effectiveUsed}
         byFamily={byFamily}
         usageByTemplate={usageByTemplate}
+        usedIdsSet={usedIdsSet}
         loadedIds={spec.figma?.loaded_template_ids ?? []}
         onToggle={(id, next) => {
           const current = new Set(spec.figma?.loaded_template_ids ?? [])
@@ -1115,6 +1186,8 @@ function FigmaStyleGuideSection({
             figma: { ...(spec.figma ?? {}), loaded_template_ids: [...current] },
           })
         }}
+        onAdd={addExtraTemplate}
+        onRemove={removeTemplate}
       />
     </Section>
   )
@@ -1149,18 +1222,25 @@ function buildUsageLabel(usage: { pageNames: string[]; instances: number; isChro
 }
 
 function TemplateLoadChecklist({
-  loading, used, byFamily, usageByTemplate, loadedIds, onToggle, onSetAll,
+  loading, used, byFamily, usageByTemplate, usedIdsSet, loadedIds, onToggle, onSetAll, onAdd, onRemove,
 }: {
   loading: boolean
   used: WebContentTemplate[]
   byFamily: Array<[string, WebContentTemplate[]]>
   usageByTemplate: Record<string, { pageNames: string[]; instances: number; isChrome: boolean }>
+  /** Ids that come from the auto-derived `used` set (web_sections +
+   *  chrome bindings). Used to know whether a row is auto OR designer-
+   *  added so the remove button labels differently. */
+  usedIdsSet: Set<string>
   loadedIds: string[]
   onToggle: (id: string, next: boolean) => void
   onSetAll: (ids: string[], next: boolean) => void
+  onAdd: (id: string) => void
+  onRemove: (id: string, isAutoDerived: boolean) => void
 }) {
   const loadedSet = useMemo(() => new Set(loadedIds), [loadedIds])
   const loadedCount = used.filter(t => loadedSet.has(t.id)).length
+  const [showAdd, setShowAdd] = useState(false)
 
   return (
     <div className="mt-4">
@@ -1218,12 +1298,16 @@ function TemplateLoadChecklist({
                   {tpls.map(t => {
                     const checked = loadedSet.has(t.id)
                     const usage = usageByTemplate[t.id]
+                    const isAutoDerived = usedIdsSet.has(t.id)
+                    const isSynthetic   = t.id.startsWith('__')
                     const pageLabel = usage
                       ? buildUsageLabel(usage)
-                      : null
+                      : (isAutoDerived || isSynthetic
+                          ? null
+                          : 'Designer-added (not bound to a section)')
                     return (
-                      <li key={t.id}>
-                        <label className="flex items-start gap-2 px-3 py-1.5 cursor-pointer hover:bg-wm-bg-hover/40 transition-colors">
+                      <li key={t.id} className="flex items-stretch group">
+                        <label className="flex items-start gap-2 px-3 py-1.5 cursor-pointer hover:bg-wm-bg-hover/40 transition-colors flex-1 min-w-0">
                           <input
                             type="checkbox"
                             checked={checked}
@@ -1236,6 +1320,9 @@ function TemplateLoadChecklist({
                               checked ? 'text-wm-text-subtle line-through' : 'text-wm-text',
                             ].join(' ')}>
                               {t.layer_name}
+                              {!isAutoDerived && !isSynthetic && (
+                                <span className="ml-2 text-[9px] uppercase tracking-widest font-bold text-wm-accent">added</span>
+                              )}
                             </p>
                             {pageLabel && (
                               <p className="text-[10px] text-wm-text-muted leading-snug mt-0.5">
@@ -1244,6 +1331,19 @@ function TemplateLoadChecklist({
                             )}
                           </div>
                         </label>
+                        {!isSynthetic && (
+                          <button
+                            type="button"
+                            onClick={() => onRemove(t.id, isAutoDerived)}
+                            title={isAutoDerived
+                              ? 'Remove from checklist (the section binding stays; this template just won\'t appear here).'
+                              : 'Remove this designer-added template from the checklist.'}
+                            className="px-2 text-wm-text-subtle hover:text-wm-danger opacity-0 group-hover:opacity-100 transition-opacity"
+                            aria-label={`Remove ${t.layer_name} from checklist`}
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
                       </li>
                     )
                   })}
@@ -1251,7 +1351,104 @@ function TemplateLoadChecklist({
               </div>
             )
           })}
+          <div className="pt-1">
+            {showAdd ? (
+              <AddTemplateRow
+                onAdd={(id) => { onAdd(id); setShowAdd(false) }}
+                onCancel={() => setShowAdd(false)}
+                excludeIds={used.map(t => t.id)}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowAdd(true)}
+                className="text-[11px] font-medium text-wm-accent hover:text-wm-accent-strong inline-flex items-center gap-1"
+              >
+                <Plus size={11} /> Add template the designer used
+              </button>
+            )}
+            <p className="mt-1 text-[10.5px] text-wm-text-subtle leading-snug">
+              Designer-added templates show in the checklist alongside auto-derived ones.
+              Hover any row + click <X size={9} className="inline" /> to remove from the checklist
+              if a template was swapped during design.
+            </p>
+          </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+/** Inline search-and-pick for designer-added templates. Queries
+ *  web_content_templates by layer_name; excludes ids already on the
+ *  checklist so duplicates don't appear. */
+function AddTemplateRow({ onAdd, onCancel, excludeIds }: {
+  onAdd: (id: string) => void
+  onCancel: () => void
+  excludeIds: string[]
+}) {
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState<Array<{ id: string; layer_name: string; family: string }>>([])
+  const [searching, setSearching] = useState(false)
+  const excludeSet = useMemo(() => new Set(excludeIds), [excludeIds])
+  useEffect(() => {
+    if (!q.trim()) { setResults([]); return }
+    let cancelled = false
+    setSearching(true)
+    const t = setTimeout(async () => {
+      const { data } = await supabase
+        .from('web_content_templates')
+        .select('id, layer_name, family')
+        .eq('is_published', true)
+        .ilike('layer_name', `%${q.trim()}%`)
+        .order('layer_name')
+        .limit(15)
+      if (!cancelled) {
+        setResults(((data ?? []) as Array<{ id: string; layer_name: string; family: string }>)
+          .filter(r => !excludeSet.has(r.id)))
+        setSearching(false)
+      }
+    }, 200)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [q, excludeSet])
+  return (
+    <div className="rounded border border-wm-accent/40 bg-wm-accent-tint/20 p-2">
+      <div className="flex items-center gap-2 mb-2">
+        <input
+          type="text"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search Brixies templates by layer name…"
+          className="flex-1 text-[12px] font-mono px-2 py-1 rounded border border-wm-border bg-wm-bg-elevated focus:outline-none focus:border-wm-accent"
+          autoFocus
+        />
+        <button
+          type="button"
+          onClick={onCancel}
+          className="text-[11px] text-wm-text-muted hover:text-wm-text"
+        >
+          Cancel
+        </button>
+      </div>
+      {searching && <p className="text-[11px] text-wm-text-subtle">Searching…</p>}
+      {!searching && q.trim() && results.length === 0 && (
+        <p className="text-[11px] text-wm-text-subtle italic">No matches.</p>
+      )}
+      {results.length > 0 && (
+        <ul className="divide-y divide-wm-border/40 border border-wm-border rounded bg-wm-bg-elevated">
+          {results.map(r => (
+            <li key={r.id}>
+              <button
+                type="button"
+                onClick={() => onAdd(r.id)}
+                className="flex items-center justify-between gap-2 w-full px-2.5 py-1.5 text-left hover:bg-wm-bg-hover/40"
+              >
+                <span className="text-[11px] font-mono text-wm-text truncate">{r.layer_name}</span>
+                <span className="text-[10px] text-wm-text-subtle shrink-0">{r.family}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   )
@@ -1537,7 +1734,27 @@ function Section({
 // Dev Handoff (via OrganizedImagesFolderCard) so the same link is one
 // click away no matter which role opens the workspace.
 
-function OrganizedImagesFolderSection({
+/** Images — top-level section wrapping the folder URL field + the
+ *  per-page image count rollup. The folder URL stayed the same; the
+ *  per-page count is computed by walking every page's bound sections
+ *  and counting `image`-typed slots in each section's template fields. */
+function ImagesSection({
+  projectId, spec, onAutoSave,
+}: {
+  projectId: string
+  spec: DesignSystemSpec
+  onAutoSave: (s: DesignSystemSpec) => Promise<void>
+}) {
+  return (
+    <Section title="Images" icon={<FolderOpen size={13} />}>
+      <OrganizedImagesFolderSubsection spec={spec} onAutoSave={onAutoSave} />
+      <div className="h-px bg-wm-border my-5" />
+      <ImageCountChecklist projectId={projectId} />
+    </Section>
+  )
+}
+
+function OrganizedImagesFolderSubsection({
   spec, onAutoSave,
 }: {
   spec: DesignSystemSpec
@@ -1557,11 +1774,13 @@ function OrganizedImagesFolderSection({
   }
 
   return (
-    <Section title="Organized images folder" icon={<FolderOpen size={13} />}>
+    <div>
+      <p className="text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle mb-2">
+        Organized image folder
+      </p>
       <p className="text-[12px] text-wm-text-muted mb-3">
         One link to the prepared imagery for this project (Drive, Dropbox,
-        Notion gallery, etc.). Surfaced on Dev Handoff as well so the same
-        URL is one click away no matter who's pulling assets.
+        Notion gallery, etc.). Surfaced on Dev Handoff as well.
       </p>
       <label className="block">
         <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
@@ -1602,8 +1821,149 @@ function OrganizedImagesFolderSection({
           )}
         </div>
       </label>
-    </Section>
+    </div>
   )
+}
+
+/** Per-page rollup of image slots needed. For each page in the
+ *  project, walks its bound sections + the section's content_template
+ *  schema to count slots with `type: 'image'`. Renders as a checklist:
+ *  page name + total image slots + a "done" toggle the designer can
+ *  flip once the folder has all the assets. The toggle is persisted
+ *  on the page itself via web_pages.images_ready boolean (added in
+ *  v87 — additive nullable). */
+function ImageCountChecklist({ projectId }: { projectId: string }) {
+  const [rows, setRows] = useState<Array<{
+    page_id: string; name: string; slug: string;
+    image_count: number; images_ready: boolean;
+  }> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [busyPageId, setBusyPageId] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    const { data: pageRows } = await supabase
+      .from('web_pages')
+      .select('id, name, slug, sort_order, images_ready')
+      .eq('web_project_id', projectId)
+      .eq('archived', false)
+      .order('sort_order')
+    const pages = (pageRows ?? []) as Array<{ id: string; name: string; slug: string; sort_order: number; images_ready: boolean | null }>
+    if (pages.length === 0) {
+      setRows([])
+      setLoading(false)
+      return
+    }
+    const { data: secRows } = await supabase
+      .from('web_sections')
+      .select('id, web_page_id, content_template_id')
+      .in('web_page_id', pages.map(p => p.id))
+    const sections = (secRows ?? []) as Array<{ id: string; web_page_id: string; content_template_id: string | null }>
+    const tplIds = Array.from(new Set(sections.map(s => s.content_template_id).filter(Boolean) as string[]))
+    const tplFieldsById = new Map<string, unknown>()
+    if (tplIds.length > 0) {
+      const { data: tplRows } = await supabase
+        .from('web_content_templates')
+        .select('id, fields')
+        .in('id', tplIds)
+      for (const t of (tplRows ?? []) as Array<{ id: string; fields: unknown }>) {
+        tplFieldsById.set(t.id, t.fields)
+      }
+    }
+    const out = pages.map(p => {
+      const pageSections = sections.filter(s => s.web_page_id === p.id)
+      let count = 0
+      for (const s of pageSections) {
+        if (!s.content_template_id) continue
+        const fields = tplFieldsById.get(s.content_template_id)
+        count += countImageSlots(fields)
+      }
+      return {
+        page_id: p.id, name: p.name, slug: p.slug,
+        image_count: count,
+        images_ready: !!p.images_ready,
+      }
+    })
+    setRows(out)
+    setLoading(false)
+  }, [projectId])
+
+  useEffect(() => { void load() }, [load])
+
+  const toggleReady = async (pageId: string, next: boolean) => {
+    setBusyPageId(pageId)
+    const { error } = await supabase.from('web_pages').update({ images_ready: next }).eq('id', pageId)
+    if (!error) {
+      setRows(prev => prev?.map(r => r.page_id === pageId ? { ...r, images_ready: next } : r) ?? null)
+    }
+    setBusyPageId(null)
+  }
+
+  const totalImages = rows?.reduce((sum, r) => sum + r.image_count, 0) ?? 0
+  const totalReady  = rows?.filter(r => r.images_ready).length ?? 0
+  const totalPagesWithImages = rows?.filter(r => r.image_count > 0).length ?? 0
+
+  return (
+    <div>
+      <p className="text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle mb-2">
+        Image count
+      </p>
+      <p className="text-[12px] text-wm-text-muted mb-3">
+        Per-page count of image slots in bound section templates. Check off
+        each page once the corresponding images are in the folder.
+      </p>
+      {loading && <p className="text-[12px] text-wm-text-subtle">Loading…</p>}
+      {!loading && rows && rows.length === 0 && (
+        <p className="text-[12px] text-wm-text-subtle italic">No pages yet on this project.</p>
+      )}
+      {!loading && rows && rows.length > 0 && (
+        <>
+          <div className="mb-2 text-[11px] text-wm-text-muted">
+            <strong>{totalImages}</strong> image{totalImages === 1 ? '' : 's'} across{' '}
+            <strong>{totalPagesWithImages}</strong> page{totalPagesWithImages === 1 ? '' : 's'} ·{' '}
+            <strong>{totalReady}</strong> / {totalPagesWithImages} marked ready
+          </div>
+          <ul className="divide-y divide-wm-border border border-wm-border rounded-md bg-wm-bg-elevated">
+            {rows.map(r => (
+              <li key={r.page_id} className="flex items-center justify-between px-3 py-2 gap-3">
+                <label className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={r.images_ready}
+                    disabled={busyPageId === r.page_id || r.image_count === 0}
+                    onChange={(e) => void toggleReady(r.page_id, e.target.checked)}
+                    className="rounded border-wm-border accent-wm-accent"
+                  />
+                  <span className={`text-[13px] truncate ${r.image_count === 0 ? 'text-wm-text-subtle' : 'text-wm-text'}`}>
+                    {r.name}
+                    <span className="text-wm-text-subtle ml-1">/{r.slug}</span>
+                  </span>
+                </label>
+                <span className={`text-[11px] font-mono ${r.image_count === 0 ? 'text-wm-text-subtle' : 'text-wm-text-muted'}`}>
+                  {r.image_count} image{r.image_count === 1 ? '' : 's'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Recursive: count every `type: 'image'` slot in a template's
+ *  fields[]. Descends into `item_schema` for groups so cards with
+ *  image slots register. */
+function countImageSlots(fields: unknown): number {
+  if (!Array.isArray(fields)) return 0
+  let n = 0
+  for (const f of fields as Array<Record<string, unknown>>) {
+    if (f.kind === 'slot' && f.type === 'image') n += 1
+    if (f.kind === 'group' && Array.isArray(f.item_schema)) {
+      n += countImageSlots(f.item_schema)
+    }
+  }
+  return n
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────

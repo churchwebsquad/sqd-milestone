@@ -115,6 +115,20 @@ export interface FigmaBinding {
    *  loaded (detached + re-componentized) into the Style Guide frame.
    *  Pure progress-tracking; doesn't affect the plugin export. */
   loaded_template_ids?: string[]
+  /** Designer-added templates that aren't in the auto-derived `used`
+   *  set. The auto-derived list comes from web_sections.content_template_id;
+   *  this lets the designer record templates they pulled into Figma
+   *  for layouts that aren't bound back to a section yet (e.g. they
+   *  decided to use a different hero variant after the strategist
+   *  picked one, or they added a sub-component the strategist hadn't
+   *  budgeted). The checklist surfaces these alongside the auto-set. */
+  extra_template_ids?: string[]
+  /** Designer-removed auto-derived templates. When the designer
+   *  decides NOT to use an auto-derived template in Figma (template
+   *  swap, scope cut), they remove it from the checklist; the id
+   *  goes here so it's filtered out of the rendered list without
+   *  losing the underlying section binding. */
+  excluded_template_ids?: string[]
 }
 
 /** Map of role → shade-step → anchor id. Undefined / missing keys

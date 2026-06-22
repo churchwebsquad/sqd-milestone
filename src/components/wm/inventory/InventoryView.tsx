@@ -24,7 +24,7 @@ import {
   Mic2, ClipboardList, Sparkles, HelpCircle, Quote, ArrowRight, BookOpen,
   ExternalLink, CheckCircle2, Edit3, Circle,
   Calendar, MapPin, MessageCircle, ListChecks, Hash, Plus,
-  ChevronDown, ChevronUp, AlertCircle, Loader2,
+  ChevronDown, ChevronUp, AlertCircle, Loader2, Newspaper,
 } from 'lucide-react'
 import { PARTNER_GROUPS, type PartnerBucket } from '../../../lib/webPartnerGroups'
 import { computeBaselineCoverage, type BaselineCoverage } from '../../../lib/webPartnerBaselines'
@@ -503,6 +503,14 @@ function buildTocEntries(topicsByKey: Map<string, TopicRow>): TocEntry[] {
 function summarizeBucket(topics: TopicRow[], programScope?: 'local' | 'global'): string {
   const parts: string[] = []
   for (const topic of topics) {
+    // Blog topic has no items — summarize by parent index labels so the
+    // TOC reads "Articles · News · Resources" instead of empty.
+    if (topic.topic_key === 'blog_news') {
+      const sources = deriveBlogSources(topic)
+      for (const s of sources.slice(0, 6)) parts.push(s.label)
+      if (parts.length >= 6) break
+      continue
+    }
     for (const it of topic.items ?? []) {
       if (it.kind === 'program' && it.name) {
         if (programScope && it.scope !== programScope) continue
@@ -1370,6 +1378,16 @@ function TopicCard({
     return consolidateLabeledValues(details, extras, faqQAs)
   }, [details, topicSnippets, contacts, locations, meetingTimes, faqs])
 
+  // Blog topic: every URL is usually one post. Roll children up under
+  // their parent index (/articles, /blog, /news, /news-media, ...) so
+  // the partner sees blog SOURCES, not an arbitrary post elevated as
+  // "the blog." Computed only for the blog_news topic.
+  const isBlogTopic = topic.topic_key === 'blog_news'
+  const blogSources = useMemo(
+    () => (isBlogTopic ? deriveBlogSources(topic) : ([] as BlogSource[])),
+    [isBlogTopic, topic],
+  )
+
   // Programs + staff records already surface their own bio/about text.
   // Drop topic-level passages whose information is already covered by
   // structured content (program description / passages / detail labels +
@@ -1450,12 +1468,26 @@ function TopicCard({
         </Section>
       )}
 
+      {/* Blog sources — for blog_news, group all crawled URLs by their
+          parent index path (/articles, /blog, /news, ...) so a single
+          post can't masquerade as the blog itself. Replaces the noisy
+          per-post passage rows that used to render here. */}
+      {isBlogTopic && blogSources.length > 0 && (
+        <Section reviewMode={reviewMode} icon={Newspaper} title={`Blog sources (${blogSources.length})`}>
+          <div className="space-y-2">
+            {blogSources.map(s => <BlogSourceRow key={s.key} source={s} reviewMode={reviewMode} />)}
+          </div>
+        </Section>
+      )}
+
       {/* Details — consolidated detail items + snippets + passages.
           Raw passages (PassageRow) are hidden in reviewMode because
           they were the noisy "/url/  ·  ‘quoted text’" rows that
           didn't map to any baseline field. The values that DO matter
-          already feed the form prefills via baseline extractors. */}
-      {(consolidatedDetails.length > 0 || (!reviewMode && dedupedPassages.length > 0)) && (
+          already feed the form prefills via baseline extractors. For
+          blog_news, individual-post passages are also hidden — the
+          BlogSourcesSection above already accounts for those URLs. */}
+      {!isBlogTopic && (consolidatedDetails.length > 0 || (!reviewMode && dedupedPassages.length > 0)) && (
         <Section reviewMode={reviewMode} icon={ClipboardList} title="Details">
           {consolidatedDetails.length > 0 && (
             <div className="space-y-2">
@@ -1495,8 +1527,9 @@ function TopicCard({
         </Section>
       )}
 
-      {/* Key Phrases */}
-      {keyPhrases.length > 0 && (
+      {/* Key Phrases — hidden for blog_news (per-article highlights are
+          already accounted for in BlogSourcesSection above). */}
+      {!isBlogTopic && keyPhrases.length > 0 && (
         <Section reviewMode={reviewMode} icon={Hash} title={`Key Phrases (${keyPhrases.length})`}>
           <div className="space-y-2">
             {keyPhrases.map((k, i) => <KeyPhraseRow key={`k-${i}`} item={k} reviewMode={reviewMode} />)}
@@ -1548,14 +1581,15 @@ function TopicCard({
           <div className="space-y-2">{newsletterIssues.map((it, i) => <GenericRecordRow key={`n-${i}`} item={it} reviewMode={reviewMode} primary="title" />)}</div>
         </Section>
       )}
-      {otherItems.length > 0 && (
+      {!isBlogTopic && otherItems.length > 0 && (
         <Section reviewMode={reviewMode} icon={ListChecks} title={`Other (${otherItems.length})`}>
           <div className="space-y-2">{otherItems.map((it, i) => <GenericRecordRow key={`o-${i}`} item={it} reviewMode={reviewMode} />)}</div>
         </Section>
       )}
 
-      {/* Sources */}
-      {topic.source_page_urls.length > 0 && (
+      {/* Sources — hidden for blog_news; BlogSourcesSection already
+          lists every URL under its parent. */}
+      {!isBlogTopic && topic.source_page_urls.length > 0 && (
         <details className="mt-3">
           <summary className={reviewMode
               ? 'cursor-pointer text-[11px] uppercase tracking-widest font-bold text-purple-gray hover:text-deep-plum'
@@ -1876,6 +1910,217 @@ function ConsolidatedDetailRow({ entry, reviewMode }: { entry: ConsolidatedEntry
           </a>
         ) : entry.value}
       </div>
+    </div>
+  )
+}
+
+// ── Blog parent-rollup ───────────────────────────────────────────────
+//
+// The blog_news topic is special: each crawled URL is usually one
+// blog post, not the blog itself. Rendering every post as a passage
+// row elevates an individual article ("/articles/we-are-not-grasshoppers")
+// to look like THE blog content. The partner-truth signal is the
+// PARENT — e.g. /articles or /news — with a count of children found.
+//
+// `deriveBlogSources` groups every URL in the topic by its first
+// path segment per origin, identifies whichever URL exactly matches
+// that segment as the parent index page (if crawled), and rolls the
+// rest up as children. Sources sort by post count desc.
+
+interface BlogSourceChild {
+  url:          string
+  title:        string
+  date?:        string
+  author?:      string
+  passageText?: string
+}
+interface BlogSource {
+  key:        string
+  prefix:     string       // "/articles"
+  label:      string       // "Articles"
+  parentUrl:  string | null
+  children:   BlogSourceChild[]
+  summary:    string       // first sentence pulled from parent or any child passage
+}
+
+function titleizeSegment(seg: string): string {
+  const cleaned = seg.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!cleaned) return seg
+  return cleaned.replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function deriveSlugTitle(url: string): string {
+  try {
+    const u = new URL(url)
+    const segs = u.pathname.replace(/\/+$/, '').split('/').filter(Boolean)
+    return titleizeSegment(segs[segs.length - 1] ?? '') || url
+  } catch { return url }
+}
+
+function deriveBlogSources(topic: TopicRow): BlogSource[] {
+  // Per-post record. The categorizer scatters info about a single post
+  // across many shapes — kind=detail rows (Title/Author/Date Published),
+  // kind=blog_news items with url+title+date, plus passages. All carry
+  // a URL that identifies the post (item.source_url for details,
+  // item.url for blog_news kind, passage.url for snippets). Collapse
+  // them all into one PostRec keyed by that URL.
+  type PostRec = {
+    url:     string
+    title?:  string
+    date?:   string
+    author?: string
+    snippet?: string
+  }
+  const byUrl = new Map<string, PostRec>()
+  const upsert = (url: string): PostRec => {
+    let r = byUrl.get(url)
+    if (!r) { r = { url }; byUrl.set(url, r) }
+    return r
+  }
+
+  for (const u of topic.source_page_urls ?? []) upsert(u)
+
+  for (const p of topic.passages ?? []) {
+    if (!p.url) continue
+    const r = upsert(p.url)
+    if (!r.snippet && p.text) r.snippet = p.text
+    if (!r.title && p.title) r.title = p.title
+  }
+
+  for (const it of (topic.items ?? []) as Item[]) {
+    const itemUrl = String((it as Record<string, unknown>).url ?? it.source_url ?? '').trim()
+    if (!itemUrl) continue
+    const r = upsert(itemUrl)
+    const kind = String(it.kind ?? '')
+    if (kind === 'detail') {
+      const lbl = String((it as Record<string, unknown>).label ?? '').trim().toLowerCase()
+      const val = String((it as Record<string, unknown>).value ?? '').trim()
+      if (!val) continue
+      if (lbl === 'title' && !r.title) r.title = val
+      else if (lbl === 'author' && !r.author) r.author = val
+      else if ((lbl === 'date published' || lbl === 'date') && !r.date) r.date = val
+    } else if (kind === 'blog_news') {
+      const t = (it as Record<string, unknown>).title
+      const d = (it as Record<string, unknown>).date
+      if (!r.title && t) r.title = String(t)
+      if (!r.date && d) r.date = String(d)
+    }
+  }
+
+  type GroupEntry = { url: string; depth: number; post: PostRec }
+  const groups = new Map<string, { prefix: string; label: string; entries: GroupEntry[] }>()
+  for (const [url, post] of byUrl) {
+    let u: URL
+    try { u = new URL(url) } catch { continue }
+    const segs = u.pathname.replace(/\/+$/, '').split('/').filter(Boolean)
+    if (segs.length === 0) continue
+    const seg = segs[0]
+    const key = `${u.origin}/${seg}`
+    const g = groups.get(key) ?? { prefix: `/${seg}`, label: titleizeSegment(seg), entries: [] }
+    g.entries.push({ url, depth: segs.length, post })
+    groups.set(key, g)
+  }
+
+  const sources: BlogSource[] = []
+  for (const [key, g] of groups) {
+    const parent = g.entries.find(e => e.depth === 1)
+    const children: BlogSourceChild[] = g.entries
+      .filter(e => e.depth > 1)
+      .map(e => ({
+        url:         e.url,
+        title:       e.post.title || deriveSlugTitle(e.url),
+        date:        e.post.date,
+        author:      e.post.author,
+        passageText: e.post.snippet,
+      }))
+    const summarySrc = parent?.post.snippet
+      ?? children.find(c => c.passageText)?.passageText
+      ?? g.entries.find(e => e.post.snippet)?.post.snippet
+      ?? ''
+    sources.push({
+      key,
+      prefix: g.prefix,
+      label: g.label,
+      parentUrl: parent?.url ?? null,
+      children,
+      summary: summarySrc.replace(/\s+/g, ' ').trim().slice(0, 260),
+    })
+  }
+  // Sort by child count desc, then by whether parent was crawled, then alpha
+  return sources.sort((a, b) => {
+    if (b.children.length !== a.children.length) return b.children.length - a.children.length
+    if ((a.parentUrl ? 1 : 0) !== (b.parentUrl ? 1 : 0)) return (b.parentUrl ? 1 : 0) - (a.parentUrl ? 1 : 0)
+    return a.label.localeCompare(b.label)
+  })
+}
+
+function BlogSourceRow({ source, reviewMode }: { source: BlogSource; reviewMode: boolean }) {
+  const [open, setOpen] = useState(false)
+  const hasChildren = source.children.length > 0
+  const countLabel = `${source.children.length} ${source.children.length === 1 ? 'post' : 'posts'} found`
+  return (
+    <div className={reviewMode
+        ? 'bg-cream/40 border border-lavender/60 rounded-md px-3 py-2.5'
+        : 'bg-wm-bg-hover/30 border border-wm-border rounded-md px-3 py-2.5'}>
+      <div className="flex items-baseline justify-between gap-2 flex-wrap">
+        <div className="min-w-0">
+          <p className={reviewMode ? 'text-sm text-deep-plum font-semibold' : 'text-[13px] text-wm-text font-semibold'}>
+            {source.label}
+          </p>
+          {source.parentUrl ? (
+            <a href={source.parentUrl} target="_blank" rel="noopener noreferrer"
+              className={reviewMode
+                ? 'text-[11px] font-mono text-primary-purple hover:underline inline-flex items-center gap-0.5'
+                : 'text-[10px] font-mono text-wm-accent hover:underline inline-flex items-center gap-0.5'}>
+              {source.prefix} <ExternalLink size={9} />
+            </a>
+          ) : (
+            <p className={reviewMode
+                ? 'text-[11px] font-mono text-purple-gray'
+                : 'text-[10px] font-mono text-wm-text-muted'}>
+              {source.prefix} · index page not crawled
+            </p>
+          )}
+        </div>
+        <Pill text={countLabel} reviewMode={reviewMode} />
+      </div>
+      {source.summary && (
+        <p className={reviewMode
+            ? 'text-[12px] text-deep-plum/85 italic mt-1.5 leading-snug'
+            : 'text-[11px] text-wm-text/80 italic mt-1.5 leading-snug'}>
+          "{source.summary}"
+        </p>
+      )}
+      {hasChildren && (
+        <button type="button" onClick={() => setOpen(o => !o)}
+          className={reviewMode
+            ? 'text-[10px] uppercase tracking-widest font-bold text-purple-gray hover:text-deep-plum mt-2 inline-flex items-center gap-1'
+            : 'text-[10px] uppercase tracking-widest font-bold text-wm-text-muted hover:text-wm-text mt-2 inline-flex items-center gap-1'}>
+          {open ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+          {open ? 'Hide individual posts' : 'Show individual posts'}
+        </button>
+      )}
+      {open && hasChildren && (
+        <ul className="mt-1.5 space-y-1 pl-3">
+          {source.children.map(c => (
+            <li key={c.url} className="leading-tight">
+              <a href={c.url} target="_blank" rel="noopener noreferrer"
+                className={reviewMode
+                  ? 'text-[11px] text-primary-purple hover:underline inline-flex items-center gap-0.5'
+                  : 'text-[10px] text-wm-accent hover:underline inline-flex items-center gap-0.5'}>
+                {c.title || pathOnly(c.url)} <ExternalLink size={9} />
+              </a>
+              {(c.date || c.author) && (
+                <span className={reviewMode
+                    ? 'text-[10px] text-purple-gray ml-2'
+                    : 'text-[10px] text-wm-text-muted ml-2'}>
+                  {[c.date, c.author].filter(Boolean).join(' · ')}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

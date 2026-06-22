@@ -482,13 +482,9 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         timelineNotes={timelineNotes}
         onRefresh={() => { void loadProjectState(); void loadReadiness() }}
         refreshing={loading || readinessLoading}
-        projectId={project.id}
         auditBranch={!!project.notion_database_id}
         notionDatabaseUrl={project.notion_database_url ?? null}
         totalSteps={steps.length}
-        rollupAt={state?.critique_rollup?._meta?.generated_at ?? null}
-        handoffAudit={state?.cowork_handoff_audit ?? null}
-        onHandoffComplete={() => { void loadProjectState() }}
       />
 
       {error && (
@@ -524,6 +520,20 @@ export function CoworkWorkspace({ project, onChange }: Props) {
             onViewDetails={() => setDrawerStep(step)}
           />
         ))}
+
+        {/* Final step — Push to Pages. Lives at the end of the step
+            ladder (vs the previous "popup at top" placement) so the
+            pipeline reads top-to-bottom: foundations → drafts →
+            critique → handoff. Gated on critique_rollup landing so
+            the card only appears once the upstream steps are done. */}
+        {state?.critique_rollup?._meta?.generated_at && (
+          <PushToPagesCard
+            projectId={project.id}
+            rollupAt={state.critique_rollup._meta.generated_at}
+            handoffAudit={state.cowork_handoff_audit ?? null}
+            onComplete={() => { void loadProjectState() }}
+          />
+        )}
       </div>
 
       {drawerStep && drawerStep.output_key && (
@@ -542,25 +552,16 @@ export function CoworkWorkspace({ project, onChange }: Props) {
 // Header (readiness summary + refresh)
 // ────────────────────────────────────────────────────────────────────
 
-function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRefresh, refreshing, projectId, auditBranch, notionDatabaseUrl, totalSteps, rollupAt, handoffAudit, onHandoffComplete }: {
+function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRefresh, refreshing, auditBranch, notionDatabaseUrl, totalSteps }: {
   readiness:        ReadinessReport | null
   readinessLoading: boolean
   overallStats:     { done: number; ready: number; stale: number; cowork: number; waiting: number; firstReadyKey: string | null } | null
   timelineNotes:    string | null
   onRefresh:        () => void
   refreshing:       boolean
-  projectId:        string
   auditBranch:      boolean
   notionDatabaseUrl: string | null
   totalSteps:       number
-  /** synthesize-critique's _meta.generated_at — drives the handoff
-   *  card's "ready to push" state. */
-  rollupAt:         string | null
-  /** roadmap_state.cowork_handoff_audit — telemetry from the last
-   *  handoff run. Lets the card show "last pushed X ago" + telemetry. */
-  handoffAudit:     CoworkPipelineState['cowork_handoff_audit']
-  /** Re-load state after a successful manual push. */
-  onHandoffComplete: () => void
 }) {
   const blockers = readiness?.blockers ?? []
   const warnings = readiness?.warnings ?? []
@@ -626,22 +627,6 @@ function Header({ readiness, readinessLoading, overallStats, timelineNotes, onRe
             )}
           </div>
         </div>
-      )}
-
-      {/* Push-to-Pages card — surfaced when the final cowork step
-          (synthesize-critique) has produced its rollup. The auto-fire
-          hook on critique_rollup.generated_at handles new completions;
-          this card covers projects that completed step 7 BEFORE the
-          handoff was wired, gives explicit re-push controls for edits
-          + retries, and shows the last-pushed telemetry so the
-          strategist sees no-information-loss confirmation. */}
-      {rollupAt && (
-        <PushToPagesCard
-          projectId={projectId}
-          rollupAt={rollupAt}
-          handoffAudit={handoffAudit}
-          onComplete={onHandoffComplete}
-        />
       )}
 
       {/* Timeline notes (AM handoff) — visibility BEFORE pipeline launch */}

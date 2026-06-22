@@ -246,28 +246,28 @@ export function buildInventoryReadinessReport(input: InventoryReadinessInput): I
   // lives on the `data` jsonb under reserved key `_publishable`
   // (underscore prefix marks it as metadata vs. actual fact data).
   // Strategists set this via the Cowork-tab readiness resolver.
+  //
+  // Once the strategist marks a fact publishable, it disappears from
+  // the readiness panel entirely — no "verified publishable" warning
+  // row, no nudge. The publishable flag IS the resolution; we don't
+  // need to remind the strategist they already resolved it. This
+  // matches what they expect: action → action gone.
   let pii_flags = 0
   for (const f of input.facts) {
     if (f.topic !== 'contact_method') continue
     const blob = JSON.stringify(f.data ?? '')
     if (PHONE_PATTERN.test(blob)) {
-      pii_flags += 1
       const dataObj = (f.data && typeof f.data === 'object') ? (f.data as Record<string, unknown>) : null
       const publishable = dataObj && (dataObj._publishable === true || dataObj._published === true)
-      warnings.push({
+      if (publishable) continue   // resolved — no readiness signal
+      pii_flags += 1
+      blockers.push({
         kind:     'pii_flag_fact',
-        severity: publishable ? 'warning' : 'blocker',
-        detail:   `contact_method fact ${f.id} contains a phone-number-shaped string. ${publishable ? 'Marked publishable by strategist.' : 'Not yet marked publishable — likely a personal cell from AM handoff.'}`,
-        suggested_fix: publishable
-          ? 'Verified publishable — no action required.'
-          : 'Confirm with the partner. Mark publishable if this is a church main line; archive if it\'s a personal cell.',
+        severity: 'blocker',
+        detail:   `contact_method fact ${f.id} contains a phone-number-shaped string. Not yet marked publishable — likely a personal cell from AM handoff.`,
+        suggested_fix: 'Confirm with the partner. Mark publishable if this is a church main line; archive if it\'s a personal cell.',
         rows: [{ id: f.id, topic: f.topic, preview: previewOf(blob) }],
       })
-      // The blocker version goes to blockers[], the warning to warnings[] —
-      // but we already pushed once above. Recategorize:
-      if (!publishable) {
-        blockers.push(warnings.pop()!)
-      }
     }
   }
 
