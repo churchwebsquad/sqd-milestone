@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -8,9 +8,35 @@ type Step = 'email' | 'code'
 const SUPABASE_FN = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
 const ALLOWED_DOMAIN = 'churchmediasquad.com'
 
+/** Validate + sanitize a `next` URL so an attacker can't use the login
+ *  redirect as an open-redirect to a hostile site. Only allow same-
+ *  origin paths starting with "/" (and not "//" which browsers treat
+ *  as protocol-relative). Default to "/" on anything suspicious. */
+function safeNext(raw: string | null | undefined): string {
+  if (!raw) return '/'
+  if (!raw.startsWith('/')) return '/'
+  if (raw.startsWith('//')) return '/'
+  return raw
+}
+
 export default function LoginPage() {
   const { user, staffProfile, isLoading, authError, clearAuthError } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+
+  // Resolve where to send the user after login. Two carriers:
+  //   • React Router state.from — set by ProtectedRoute when it
+  //     bounces an unauthed staff member here.
+  //   • ?next= query param — survives OAuth round-trips that drop
+  //     router state (Google sign-in does a full page navigation).
+  // Validate with safeNext to prevent open-redirect abuse.
+  const nextUrl = useMemo(() => {
+    const stateFrom = (location.state as { from?: { pathname?: string; search?: string; hash?: string } } | null)?.from
+    if (stateFrom?.pathname) {
+      return safeNext(`${stateFrom.pathname}${stateFrom.search ?? ''}${stateFrom.hash ?? ''}`)
+    }
+    return safeNext(new URLSearchParams(location.search).get('next'))
+  }, [location])
 
   const [step, setStep] = useState<Step>('email')
   const [email, setEmail] = useState('')
@@ -29,12 +55,14 @@ export default function LoginPage() {
   const domain = email.trim().toLowerCase().split('@')[1] ?? ''
   const canUseGoogle = domain === ALLOWED_DOMAIN
 
-  // Redirect once AuthContext confirms the user is staff
+  // Redirect once AuthContext confirms the user is staff. Returns
+  // them to the URL they originally tried to reach (review link,
+  // project URL, etc.) rather than always dropping them on /.
   useEffect(() => {
     if (!isLoading && user && staffProfile) {
-      navigate('/', { replace: true })
+      navigate(nextUrl, { replace: true })
     }
-  }, [user, staffProfile, isLoading, navigate])
+  }, [user, staffProfile, isLoading, navigate, nextUrl])
 
   // Resend cooldown timer
   useEffect(() => {
@@ -80,10 +108,16 @@ export default function LoginPage() {
     setError(null)
     setGoogleSigningIn(true)
     try {
+      // Send Google's OAuth callback to the originally-requested URL
+      // so the user lands on (e.g.) /portal/review/<token> after auth
+      // instead of bouncing through the dashboard. Supabase preserves
+      // session in cookies on the redirect, so ProtectedRoute lets
+      // them through on arrival.
+      const redirectTo = `${window.location.origin}${nextUrl === '/' ? '' : nextUrl}`
       const { error: oauthErr } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin,
+          redirectTo,
           queryParams: {
             // Hint the OAuth flow at the typed email so the user
             // doesn't have to pick from a Google account chooser
