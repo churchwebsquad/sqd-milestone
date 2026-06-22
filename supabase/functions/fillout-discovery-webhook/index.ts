@@ -90,7 +90,12 @@ Deno.serve(async (req) => {
     }
 
     // Try to link to a member.
-    const memberId = await resolveMember(supabase, mapped.primary_contact_email, flat["Church Name"] || flat["Church name"]);
+    const memberId = await resolveMember(
+      supabase,
+      mapped.primary_contact_email,
+      flat["Church Name"] || flat["Church name"],
+      typeof mapped.current_website_url === "string" ? mapped.current_website_url : null,
+    );
     const source = memberId === null ? "fillout_webhook_unmatched" : "fillout_webhook";
 
     // Build the row.
@@ -451,7 +456,9 @@ async function resolveMember(
   supabase: any,
   email: unknown,
   churchName: unknown,
+  websiteUrl: unknown,
 ): Promise<number | null> {
+  // 1. Email match against clickup_users (most precise).
   if (email && typeof email === "string") {
     const { data } = await supabase
       .from("clickup_users")
@@ -462,6 +469,37 @@ async function resolveMember(
       .maybeSingle();
     if (data?.account_id) return Number(data.account_id);
   }
+  // 2. Email match against strategy_account_progress.primary_contact_email.
+  //    Smaller orgs may have a contact in account_progress but no
+  //    clickup_users row yet (Woodcreek Church / member 4071 is the
+  //    canonical example).
+  if (email && typeof email === "string") {
+    const { data } = await supabase
+      .from("strategy_account_progress")
+      .select("member")
+      .ilike("primary_contact_email", email.trim())
+      .limit(1)
+      .maybeSingle();
+    if (data?.member) return Number(data.member);
+  }
+  // 3. Website URL match. Submissions usually include the partner's
+  //    current site, and strategy_account_progress.church_website
+  //    holds the same value in normalized form. Strip protocol +
+  //    trailing slash so "https://woodcreekchurch.com/" matches
+  //    "woodcreekchurch.com".
+  if (websiteUrl && typeof websiteUrl === "string") {
+    const normalized = normalizeHost(websiteUrl);
+    if (normalized) {
+      const { data } = await supabase
+        .from("strategy_account_progress")
+        .select("member, church_website")
+        .ilike("church_website", `%${normalized}%`)
+        .limit(1)
+        .maybeSingle();
+      if (data?.member) return Number(data.member);
+    }
+  }
+  // 4. Church name fallback (case-insensitive).
   if (churchName && typeof churchName === "string") {
     const { data } = await supabase
       .from("strategy_account_progress")
@@ -472,6 +510,12 @@ async function resolveMember(
     if (data?.member) return Number(data.member);
   }
   return null;
+}
+
+/** Strip protocol, www, and trailing slash so URLs match across forms. */
+function normalizeHost(url: string): string | null {
+  const m = url.trim().toLowerCase().match(/^(?:https?:\/\/)?(?:www\.)?([^/?#]+)/);
+  return m ? m[1] : null;
 }
 
 function j(body: unknown, status: number) {

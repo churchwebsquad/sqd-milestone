@@ -531,6 +531,37 @@ function splitConflatedItem(
 // below (composeFieldValuesForBrixies) is retained only for refusal
 // fallbacks; new sections bind through this path.
 
+// Cowork archetypes that intend to emit per-card content. When one of
+// these archetypes emits NO items, that's content loss worth flagging.
+// Other archetypes (hero, content prose, cta) commonly land on
+// templates that have an items group but the archetype itself never
+// fills it — those don't warrant a warning.
+const CARD_BEARING_ARCHETYPES = new Set([
+  'cards_with_cta',
+  'feature_card_carousel_proxy',
+  'accordion_faq',
+  'feature_team',
+  'content_featured_a',
+  'feature_grid',
+  'testimonial_grid',
+  'timeline_steps',
+])
+
+// Slot names the handoff knows how to bind. Anything outside this
+// set that cowork emits gets surfaced as `noncanonical_slots_dropped`
+// so the strategist can recover the content (Arvada home/s2 lost
+// body_2/items_2, groups/s1 lost why/lead — all via this mechanism).
+const CANONICAL_UNIFORM_SLOTS = new Set([
+  'primary_heading',
+  'tagline',
+  'body',
+  'accent_body',
+  'items',
+  'buttons',
+  'embed_url',
+  'build_cards',
+])
+
 function composeFromCoworkAliasMap(
   slotValues: Record<string, unknown>,
   brixies:    BrixiesTemplate,
@@ -791,17 +822,17 @@ function composeFromCoworkAliasMap(
       }
       // No items_overflow warning — Bricks repeaters have no hard cap.
     }
-  } else if (map.items) {
-    // Template declares an items group but cowork emitted nothing.
-    // Without this, bind_quality reads "perfect" on a section whose
-    // entire card deck went missing (Arvada Missions partners). Flag
-    // it as a warning so the strategist can investigate upstream
-    // (typically the cowork SKILL chose an archetype that didn't
-    // emit build_cards, or the cowork output dropped them).
+  } else if (map.items && CARD_BEARING_ARCHETYPES.has(templateKey)) {
+    // Cowork archetype is one that's MEANT to emit cards (e.g.
+    // cards_with_cta, feature_card_carousel_proxy) but emitted none.
+    // This was the Arvada Missions partners bug. We restrict the
+    // warning to known card-bearing archetypes so hero/text sections
+    // (which happen to use templates that ALSO have an items group
+    // but don't intend to fill it) don't spam the audit.
     gaps.push({
       kind: 'items_expected_but_none_emitted',
       severity: 'warning',
-      detail: `Template '${brixies.id}' has an items group but cowork emitted no items. Check the cowork draft for this section — its archetype likely emits cards under build_cards/slots[] but none made it into cowork_slot_values.`,
+      detail: `Cowork archetype '${templateKey}' is card-bearing but emitted no items. Template '${brixies.id}' has an items group ready to receive them.`,
       slot: 'items',
     })
   }
@@ -850,6 +881,31 @@ function composeFromCoworkAliasMap(
         slot: reqKey,
       })
     }
+  }
+
+  // ── Noncanonical-slot sweep ────────────────────────────────────
+  // Cowork sometimes emits slots that aren't in the canonical uniform
+  // vocab (Arvada SKILL emitted body_2, items_2, why, lead, coffee_cta).
+  // Without surfacing these, the strategist sees "perfect bind" while
+  // content silently disappears. Stash them in dropped_content + emit
+  // a single warning naming the affected slots.
+  const noncanonicalSlots: string[] = []
+  for (const key of Object.keys(slotValues)) {
+    if (CANONICAL_UNIFORM_SLOTS.has(key)) continue
+    if (key.startsWith('_')) continue   // skip metadata fields
+    const v = slotValues[key]
+    if (v == null || v === '') continue
+    noncanonicalSlots.push(key)
+    droppedContent[key] = v
+  }
+  if (noncanonicalSlots.length > 0) {
+    const preview = noncanonicalSlots.slice(0, 6).join(', ')
+    gaps.push({
+      kind: 'noncanonical_slots_dropped',
+      severity: 'warning',
+      detail: `Cowork emitted ${noncanonicalSlots.length} slot(s) outside the canonical uniform vocab — ${preview}${noncanonicalSlots.length > 6 ? '…' : ''}. Content stashed in cowork_section_meta.dropped_content. Fix the cowork SKILL to emit canonical names (primary_heading / tagline / body / accent_body / items / buttons / embed_url) so the bind step can route them.`,
+      slot: 'multiple',
+    })
   }
 
   // Warnings are informational (content still bound, e.g. items folded
