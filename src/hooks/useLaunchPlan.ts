@@ -117,7 +117,9 @@ export function useLaunchPlan(): UseLaunchPlanReturn {
     pct_complete:      r.pct_complete != null ? Number(r.pct_complete) : null,
     target_launch:     r.launch_date,
     hard_deadline:     r.hard_deadline,
-    recovery_mode:     r.recovery_mode === 'dev-only' ? 'dev-only' : 'designer',
+    // Default to 'dev-only' when unset (per v92 schema default).
+    // The PM explicitly opts in to designer-recoverable per project.
+    recovery_mode:     r.recovery_mode === 'designer' ? 'designer' : 'dev-only',
   })), [rows])
 
   // Re-run scheduler + recovery solver whenever the inputs change.

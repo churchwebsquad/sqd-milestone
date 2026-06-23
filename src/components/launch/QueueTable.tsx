@@ -83,7 +83,7 @@ export function QueueTable({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-[12px] border-collapse">
+        <table className="w-full text-[13px] border-collapse">
           <thead>
             <tr className="text-left">
               <Th w="24px"></Th>
@@ -208,44 +208,44 @@ function RowAndRecovery({
           'cursor-grab',
         ].join(' ')}
       >
-        <td className="px-2 py-2 align-top"><GripVertical size={13} className="text-purple-gray" /></td>
-        <td className="px-2 py-2 align-top font-mono text-[11px] text-purple-gray">{priority}</td>
-        <td className="px-2 py-2 align-top min-w-[180px]">
+        <td className="px-2 py-2.5 align-top"><GripVertical size={14} className="text-purple-gray" /></td>
+        <td className="px-2 py-2.5 align-top font-mono text-[12px] text-purple-gray">{priority}</td>
+        <td className="px-2 py-2.5 align-top min-w-[200px]">
           <button
             type="button"
             onClick={() => onSelect(row.id)}
-            className="text-left text-[12.5px] font-semibold text-deep-plum hover:text-primary-purple inline-flex items-center gap-1"
+            className="text-left text-[14px] font-semibold text-deep-plum hover:text-primary-purple inline-flex items-center gap-1"
           >
             {row.church_name ?? row.name}
-            <ArrowRight size={10} className="opacity-50" />
+            <ArrowRight size={11} className="opacity-50" />
           </button>
-          <div className="flex items-center gap-2 mt-0.5 text-[10px] text-purple-gray">
+          <div className="flex items-center gap-2 mt-0.5 text-[11px] text-purple-gray">
             <span className="font-mono">#{row.member}</span>
             {row.current_phase && <><span>·</span><span>{row.current_phase}</span></>}
-            {isWaiting && <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[9px] font-bold uppercase">Waiting feedback</span>}
+            {isWaiting && <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold uppercase">Waiting feedback</span>}
             {row.hard_deadline && (
               <span className={`ml-1 inline-flex items-center gap-0.5 ${hardDeadlineMissed ? 'text-red-700 font-bold' : 'text-amber-700'}`}>
-                <Flag size={9} /> {row.hard_deadline.slice(5)}
+                <Flag size={10} /> {row.hard_deadline.slice(5)}
               </span>
             )}
           </div>
         </td>
-        <td className="px-2 py-2 align-top">
+        <td className="px-2 py-2.5 align-top">
           <DateCell
             value={row.launch_date ?? null}
             onChange={iso => onPatch({ launch_date: iso })}
             placeholder="—"
           />
         </td>
-        <td className="px-2 py-2 align-top text-[12px] text-deep-plum">
+        <td className="px-2 py-2.5 align-top text-[13px] text-deep-plum">
           {isWaiting
             ? <span className="text-purple-gray italic">waiting</span>
             : launchedISO ? shortDate(launchedISO) : '—'}
         </td>
-        <td className="px-2 py-2 align-top">
+        <td className="px-2 py-2.5 align-top">
           {slot?.delta != null && !isWaiting ? <DeltaPill delta={slot.delta} /> : <span className="text-purple-gray">—</span>}
         </td>
-        <td className="px-2 py-2 align-top text-[12px] text-purple-gray">
+        <td className="px-2 py-2.5 align-top text-[13px] text-purple-gray">
           {designDueISO ? (
             <span
               title="Design needs to be wrapped by this date so the developer can pick the project up cleanly (dev start − 2 business days)."
@@ -256,10 +256,10 @@ function RowAndRecovery({
             <span className="text-purple-gray/40">—</span>
           )}
         </td>
-        <td className="px-2 py-2 align-top min-w-[140px]">
-          {pace ? <PaceCell pace={pace} planned={site!.planned_dev_hours} tracked={site!.tracked_hours} /> : <span className="text-purple-gray italic text-[11px]">—</span>}
+        <td className="px-2 py-2.5 align-top min-w-[150px]">
+          {pace ? <PaceCell pace={pace} planned={site!.planned_dev_hours} tracked={site!.tracked_hours} /> : <span className="text-purple-gray italic text-[12px]">—</span>}
         </td>
-        <td className="px-2 py-2 align-top">
+        <td className="px-2 py-2.5 align-top">
           <div className="flex items-center gap-1">
             <input
               type="number"
@@ -267,11 +267,11 @@ function RowAndRecovery({
               step={1}
               value={row.dev_hours_estimate ?? 60}
               onChange={e => onPatch({ dev_hours_estimate: e.target.value === '' ? null : Number(e.target.value), dev_hours_source: 'manual' })}
-              className="w-14 text-[11.5px] font-mono text-right px-1.5 py-1 rounded border border-transparent hover:border-lavender focus:border-primary-purple focus:outline-none bg-transparent"
+              className="w-16 text-[13px] font-mono text-right px-1.5 py-1 rounded border border-transparent hover:border-lavender focus:border-primary-purple focus:outline-none bg-transparent"
             />
-            <span className="text-[9px] text-purple-gray">h</span>
+            <span className="text-[10px] text-purple-gray">h</span>
             <span
-              className={`text-[9px] font-bold uppercase tracking-widest ${row.dev_hours_source === 'clickup' ? 'text-emerald-700' : 'text-purple-gray'}`}
+              className={`text-[10px] font-bold uppercase tracking-widest ${row.dev_hours_source === 'clickup' ? 'text-emerald-700' : 'text-purple-gray'}`}
               title={row.dev_hours_source === 'clickup'
                 ? `From ClickUp sync · ${row.last_synced_at ? new Date(row.last_synced_at).toLocaleDateString() : ''}`
                 : 'Manually entered'}
@@ -280,11 +280,11 @@ function RowAndRecovery({
             </span>
           </div>
         </td>
-        <td className="px-2 py-2 align-top">
+        <td className="px-2 py-2.5 align-top">
           <button
             type="button"
             onClick={() => onPatch({ recovery_mode: row.recovery_mode === 'designer' ? 'dev-only' : 'designer' })}
-            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${row.recovery_mode === 'designer' ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-purple-gray/30 bg-cream text-purple-gray'}`}
+            className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${row.recovery_mode === 'designer' ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-purple-gray/30 bg-cream text-purple-gray'}`}
             title={row.recovery_mode === 'designer'
               ? 'Help can be offloaded to the designer. Click → dev-only.'
               : 'Work is developer-only — can\'t offload. Click → designer.'}
@@ -292,10 +292,10 @@ function RowAndRecovery({
             {row.recovery_mode === 'designer' ? '🎨 designer' : '🔒 dev-only'}
           </button>
         </td>
-        <td className="px-2 py-2 align-top font-mono text-[10.5px] text-purple-gray whitespace-nowrap">{span}</td>
-        <td className="px-2 py-2 align-top">
+        <td className="px-2 py-2.5 align-top font-mono text-[12px] text-purple-gray whitespace-nowrap">{span}</td>
+        <td className="px-2 py-2.5 align-top">
           <Link to={`/web/${row.id}?tab=planning`} className="text-purple-gray hover:text-primary-purple" title="Open project planning tab">
-            <ExternalLink size={11} />
+            <ExternalLink size={12} />
           </Link>
         </td>
       </tr>
@@ -322,7 +322,7 @@ function RecoveryRow({
       .map(w => `wk ${shortDate(weekStart(w.idx, cfg).toISOString().slice(0, 10))}: +${w.h}h`)
     return (
       <div className="ml-10 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 flex items-start justify-between gap-2">
-        <p className="text-[11.5px] text-amber-900">
+        <p className="text-[12.5px] text-amber-900">
           <strong>{rec.behind}d behind.</strong> Recoverable: add{' '}
           <strong>{rec.helpHours} help hrs</strong> (≈{(rec.helpHours / 7).toFixed(1)} designer-days) in {weeks.join(' · ')} →
           launches <strong>{shortDate(rec.date.toISOString().slice(0, 10))}</strong>, within target.
@@ -343,7 +343,7 @@ function RecoveryRow({
       : 'Designer unavailable in the weeks that feed this site.'
     return (
       <div className="ml-10 rounded-md border border-purple-gray/30 bg-cream px-3 py-2">
-        <p className="text-[11.5px] text-purple-gray">
+        <p className="text-[12.5px] text-purple-gray">
           <strong>{rec.behind}d behind.</strong> {reason}{' '}
           Projected launch <strong>{shortDate(rec.date.toISOString().slice(0, 10))}</strong> stands —
           renegotiate the target, reprioritize, or add a second developer.
@@ -354,7 +354,7 @@ function RecoveryRow({
   if (rec.state === 'insufficient' && rec.perWeek && rec.helpHours) {
     return (
       <div className="ml-10 rounded-md border border-red-300 bg-red-50 px-3 py-2 flex items-start justify-between gap-2">
-        <p className="text-[11.5px] text-red-900">
+        <p className="text-[12.5px] text-red-900">
           <strong>{rec.behind}d behind.</strong> Even {rec.helpHours} help hrs ({(rec.helpHours / 7).toFixed(1)} designer-days)
           isn't enough — best achievable date is <strong>{shortDate(rec.date.toISOString().slice(0, 10))}</strong>
           ({rec.stillLate}d still late).
@@ -376,7 +376,7 @@ function RecoveryRow({
 
 function Th({ children, w }: { children?: React.ReactNode; w?: string }) {
   return (
-    <th style={w ? { width: w } : undefined} className="px-2 py-2 text-[10px] uppercase tracking-widest font-bold text-purple-gray border-b border-lavender">
+    <th style={w ? { width: w } : undefined} className="px-2 py-2 text-[11px] uppercase tracking-widest font-bold text-purple-gray border-b border-lavender">
       {children}
     </th>
   )
@@ -387,7 +387,7 @@ function DeltaPill({ delta }: { delta: number }) {
             : delta <= 7 ? 'bg-amber-100 text-amber-800'
             : 'bg-emerald-100 text-emerald-800'
   const text = delta < 0 ? `−${Math.abs(delta)}d` : `+${delta}d`
-  return <span className={`inline-block text-[10.5px] font-bold px-2 py-0.5 rounded-full ${tone}`}>{text}</span>
+  return <span className={`inline-block text-[11.5px] font-bold px-2 py-0.5 rounded-full ${tone}`}>{text}</span>
 }
 
 function PaceCell({ pace, planned, tracked }: { pace: ReturnType<typeof paceOf> extends null | infer R ? R : never; planned: number; tracked: number }) {
@@ -400,7 +400,7 @@ function PaceCell({ pace, planned, tracked }: { pace: ReturnType<typeof paceOf> 
       <div className="h-1.5 w-full rounded bg-lavender-tint overflow-hidden">
         <div className={`h-full ${tone}`} style={{ width: `${Math.min(100, pace.pct)}%` }} />
       </div>
-      <p className="text-[10px] font-mono text-purple-gray mt-0.5">
+      <p className="text-[11px] font-mono text-purple-gray mt-0.5">
         {pace.pct}% · {tracked}/{planned}h ·{' '}
         <span className={pace.cls === 'late' ? 'text-red-700 font-bold' : pace.cls === 'tight' ? 'text-amber-700' : 'text-emerald-700'}>
           {pace.over > 0 ? `+${pace.over} over` : pace.over < 0 ? `${pace.over} under` : 'on est.'}
@@ -452,8 +452,8 @@ function DateCell({
   placeholder?: string
 }) {
   return (
-    <div className="relative inline-block min-w-[64px]">
-      <span className={`block text-[12px] ${value ? 'text-deep-plum' : 'text-purple-gray italic'}`}>
+    <div className="relative inline-block min-w-[72px]">
+      <span className={`block text-[13px] ${value ? 'text-deep-plum' : 'text-purple-gray italic'}`}>
         {value ? shortDate(value) : placeholder}
       </span>
       <input

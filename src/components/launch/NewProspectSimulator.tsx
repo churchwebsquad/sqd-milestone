@@ -30,7 +30,7 @@ export function NewProspectSimulator({ sites, rows, adjustments, cfg }: Props) {
   const [open, setOpen] = useState(false)
   const [churchName, setChurchName]       = useState('')
   const [plannedHours, setPlannedHours]   = useState(60)
-  const [recoveryMode, setRecoveryMode]   = useState<'designer' | 'dev-only'>('designer')
+  const [recoveryMode, setRecoveryMode]   = useState<'designer' | 'dev-only'>('dev-only')
   const [desiredPriority, setDesiredPriority] = useState(
     Math.max(0, ...sites.filter(s => s.status === 'in_progress').map(s => s.priority)) + 1,
   )
