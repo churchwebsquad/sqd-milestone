@@ -13,7 +13,7 @@ import { Sparkles, ChevronDown, ChevronUp, ArrowDown } from 'lucide-react'
 import {
   computeSchedule, calBtw, parseD,
   type SchedulerSite, type SchedulerConfig, type WeekAdjustment,
-  type HelpMap, type WeekFlag,
+  type HelpMap, type WeekFlag, type BaseCapMap,
 } from '../../lib/launchScheduler'
 import type { ProjectLaunchRow } from '../../hooks/useLaunchPlan'
 
@@ -43,12 +43,14 @@ export function NewProspectSimulator({ sites, rows, adjustments, cfg }: Props) {
     const helpMap: HelpMap = {}
     const designerOut: WeekFlag = {}
     const blackout: WeekFlag = {}
+    const baseCap: BaseCapMap = {}
     for (const a of adjustments) {
       const idx = Math.round((parseD(a.week_starting).getTime() - monday.getTime()) / (7 * 86_400_000))
       if (idx < 0) continue
-      if (a.help_hours > 0)  helpMap[idx]     = a.help_hours
-      if (a.designer_out)    designerOut[idx] = true
-      if (a.is_blackout)     blackout[idx]    = true
+      if (a.help_hours > 0)        helpMap[idx]     = a.help_hours
+      if (a.designer_out)          designerOut[idx] = true
+      if (a.is_blackout)           blackout[idx]    = true
+      if (a.base_capacity != null && a.base_capacity >= 0) baseCap[idx] = a.base_capacity
     }
 
     // Bump every real site at or above the requested priority down 1.
@@ -67,8 +69,8 @@ export function NewProspectSimulator({ sites, rows, adjustments, cfg }: Props) {
       recovery_mode:     recoveryMode,
     }
 
-    const before = computeSchedule(sites,                helpMap, designerOut, blackout, cfg)
-    const after  = computeSchedule([...shifted, synth],  helpMap, designerOut, blackout, cfg)
+    const before = computeSchedule(sites,                helpMap, designerOut, blackout, cfg, baseCap)
+    const after  = computeSchedule([...shifted, synth],  helpMap, designerOut, blackout, cfg, baseCap)
 
     const synthSlot = after[SYNTH_ID]
     const cascade: Array<{ id: string; name: string; beforeIso: string; afterIso: string; deltaDays: number }> = []

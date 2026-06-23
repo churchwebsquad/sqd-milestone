@@ -30,12 +30,14 @@ interface Props {
   cfg:         SchedulerConfig
   /** Per-week upsert into strategy_dev_weekly_allocations. */
   onAdjust:    (a: WeekAdjustment) => Promise<void>
-  /** How many sprints to render. Default 10. */
+  /** Optional override of how many sprints to render. When unset,
+   *  the timeline auto-extends to (last allocated sprint + 3 months
+   *  of empty sprints) so the PM can see open capacity ahead. */
   sprintsToShow?: number
 }
 
 export function SprintTimeline({
-  rows, sites, schedule, adjustments, cfg, onAdjust, sprintsToShow = 10,
+  rows, sites, schedule, adjustments, cfg, onAdjust, sprintsToShow,
 }: Props) {
   // Build color map for sites in priority order.
   const colorByProject = useMemo(() => {
@@ -72,9 +74,28 @@ export function SprintTimeline({
     return r ? (r.church_name ?? r.name) : id.slice(0, 8)
   }
 
-  // Render N sprints starting at week 0.
+  // How many sprints to render. If the caller didn't pin a count,
+  // extend through the LAST sprint that has any allocated work, plus
+  // 6 sprints (~3 months at 2-week sprints) of open capacity. That
+  // gives the PM a clear "here's the next quarter of headroom" view
+  // beyond the active queue.
+  const sprintsCount = useMemo(() => {
+    if (sprintsToShow != null) return sprintsToShow
+    let maxEndWeek = -1
+    for (const slot of Object.values(schedule)) {
+      if (slot.endWeek > maxEndWeek && Object.keys(slot.alloc).length > 0) {
+        maxEndWeek = slot.endWeek
+      }
+    }
+    const lastSprintIdx = maxEndWeek >= 0 ? Math.floor(maxEndWeek / cfg.sprint_weeks) : -1
+    const buffer = 6   // 6 two-week sprints = 12 weeks ≈ 3 months
+    const total = lastSprintIdx + 1 + buffer
+    return Math.max(total, 4)   // floor so an empty queue still shows something
+  }, [schedule, cfg.sprint_weeks, sprintsToShow])
+
+  // Build the sprint list.
   const sprints: Array<{ idx: number; startWeek: number; endWeek: number }> = []
-  for (let s = 0; s < sprintsToShow; s++) {
+  for (let s = 0; s < sprintsCount; s++) {
     sprints.push({ idx: s, startWeek: s * cfg.sprint_weeks, endWeek: s * cfg.sprint_weeks + (cfg.sprint_weeks - 1) })
   }
 
@@ -83,9 +104,12 @@ export function SprintTimeline({
       <div className="px-4 py-3 border-b border-lavender bg-lavender-tint/30">
         <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">Development sprint timeline</p>
         <p className="text-sm text-purple-gray mt-0.5">
-          Each week shows the <strong className="text-deep-plum">locked {cfg.base_weekly_cap}h base</strong> plus any extra help
-          you add — but only when the designer is available. Mark a week <em>designer out</em>
-          and its help is removed; mark <em>blackout</em> and the whole week is zeroed.
+          Each week starts at the team default <strong className="text-deep-plum">{cfg.base_weekly_cap}h base</strong>;
+          edit per week when the dev is out part of the week (e.g. one day off → 28h).
+          Stack extra <em>help</em> hours on top when a designer can offload work. Mark
+          <em>designer out</em> to drop help that week, or <em>blackout</em> to zero the
+          whole week. Cards auto-extend 3 months past the last allocated sprint so you
+          can see open capacity ahead.
         </p>
       </div>
 
@@ -129,7 +153,9 @@ function SprintCard({
   const sprintStart = weekStart(startWeek, cfg)
   const sprintEnd   = addCal(weekStart(endWeek, cfg), 6)
 
-  // Per-week effective capacity (base + help, 0 if blackout).
+  // Per-week effective capacity. base_capacity_override (when set)
+  // replaces the team default 35h base; help_hours stack on top
+  // unless designer_out; is_blackout zeros the whole week.
   const weeks: Array<{ idx: number; iso: string; cap: number; hours: number; adj: WeekAdjustment | null }> = []
   let sprintCap = 0
   let sprintHours = 0
@@ -137,9 +163,10 @@ function SprintCard({
     const wk = weekStart(i, cfg)
     const iso = fmtISO(wk)
     const adj = adjByIso.get(iso) ?? null
+    const base = adj?.base_capacity != null ? adj.base_capacity : cfg.base_weekly_cap
     const cap = adj?.is_blackout
       ? 0
-      : cfg.base_weekly_cap + (adj?.designer_out ? 0 : (adj?.help_hours ?? 0))
+      : Math.max(0, base + (adj?.designer_out ? 0 : (adj?.help_hours ?? 0)))
     const hrs = (allocByWeek[i] ?? []).reduce((s, x) => s + x.hours, 0)
     weeks.push({ idx: i, iso, cap, hours: hrs, adj })
     sprintCap += cap
@@ -159,11 +186,13 @@ function SprintCard({
   return (
     <div className="rounded-xl border border-lavender bg-cream/30">
       <div className="px-4 pt-3 pb-2">
-        <p className="text-[14px] font-bold text-deep-plum">Dev Sprint {sprintIdx + 1}</p>
-        <p className="text-[12px] text-purple-gray mt-0.5">
+        <p className="text-[14px] font-bold text-deep-plum">
           {sprintStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
           {' – '}
           {sprintEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
+        </p>
+        <p className="text-[11px] uppercase tracking-widest font-bold text-purple-gray mt-0.5">
+          Dev Sprint {sprintIdx + 1}
         </p>
       </div>
 
@@ -246,8 +275,15 @@ function WeekControl({
 }) {
   const [helpDraft, setHelpDraft] = useState(String(adj?.help_hours ?? ''))
   useEffect(() => { setHelpDraft(String(adj?.help_hours ?? '')) }, [adj?.help_hours])
+  // base capacity draft — null/'' means "use team default 35h"; any
+  // number means "override base for this week to N hours."
+  const [baseDraft, setBaseDraft] = useState<string>(adj?.base_capacity != null ? String(adj.base_capacity) : '')
+  useEffect(() => {
+    setBaseDraft(adj?.base_capacity != null ? String(adj.base_capacity) : '')
+  }, [adj?.base_capacity])
   const designerOut = !!adj?.designer_out
   const blackout    = !!adj?.is_blackout
+  const baseOverridden = adj?.base_capacity != null
 
   const commit = (next: Partial<WeekAdjustment>) => {
     void onAdjust({
@@ -255,6 +291,9 @@ function WeekControl({
       help_hours:    next.help_hours    ?? adj?.help_hours   ?? 0,
       designer_out:  next.designer_out  ?? adj?.designer_out ?? false,
       is_blackout:   next.is_blackout   ?? adj?.is_blackout  ?? false,
+      base_capacity: next.base_capacity !== undefined
+        ? next.base_capacity
+        : (adj?.base_capacity ?? null),
     })
   }
 
@@ -264,8 +303,27 @@ function WeekControl({
         {sprintStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}
       </div>
       <div className="flex items-center gap-2 flex-wrap justify-end">
-        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-lavender-tint text-deep-plum">
-          🔒 base {baseCap}h
+        <span className={`inline-flex items-center gap-1 ${baseOverridden ? 'text-amber-800' : 'text-deep-plum'}`}>
+          <span className="text-[9px] uppercase font-bold tracking-widest">base</span>
+          <input
+            type="number"
+            min={0}
+            max={80}
+            placeholder={String(baseCap)}
+            value={baseDraft}
+            onChange={e => setBaseDraft(e.target.value)}
+            onBlur={() => {
+              const trimmed = baseDraft.trim()
+              const next = trimmed === '' ? null : Number(trimmed)
+              const current = adj?.base_capacity ?? null
+              const finalVal = next != null && Number.isFinite(next) && next >= 0 ? next : null
+              if (finalVal !== current) commit({ base_capacity: finalVal })
+            }}
+            disabled={blackout}
+            title={`Override the team default ${baseCap}h base for this week (e.g. dev out one day → 28h). Leave blank to use ${baseCap}h.`}
+            className={`w-12 text-center font-mono px-1 py-0.5 rounded border focus:border-primary-purple focus:outline-none disabled:bg-cream disabled:text-purple-gray/40 ${baseOverridden ? 'border-amber-400 bg-amber-50' : 'border-lavender'}`}
+          />
+          <span className="text-[9px]">h</span>
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="text-[9px] text-emerald-700 font-bold uppercase">+ help</span>

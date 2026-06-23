@@ -19,7 +19,7 @@ import {
   computeSchedule, parseD, weekStart, type SchedulerSite,
   type WeekAdjustment, type SchedulerConfig, type SiteSchedule,
   type HelpMap, type WeekFlag,
-  buildHelpMap, buildDesignerOutMap, buildBlackoutMap,
+  buildHelpMap, buildDesignerOutMap, buildBlackoutMap, buildBaseCapMap,
 } from './launchScheduler'
 
 export type RecoveryState = 'on_time' | 'recoverable' | 'locked' | 'insufficient'
@@ -73,6 +73,7 @@ export function solveHelp(
   const helpMap0     = buildHelpMap(adjustments, cfg)
   const designerOut  = buildDesignerOutMap(adjustments, cfg)
   const blackout     = buildBlackoutMap(adjustments, cfg)
+  const baseCap      = buildBaseCapMap(adjustments, cfg)
 
   // Gating condition (b): at least one week through the site's end
   // must be both non-blackout AND designer-available.
@@ -115,7 +116,7 @@ export function solveHelp(
 
     trial[target] = (trial[target] ?? 0) + 1
     added++
-    last = computeSchedule(sites, trial, designerOut, blackout, cfg)[siteId] ?? last
+    last = computeSchedule(sites, trial, designerOut, blackout, cfg, baseCap)[siteId] ?? last
 
     if (last.delta != null && last.delta >= 0) {
       return {

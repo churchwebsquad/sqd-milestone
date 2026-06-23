@@ -77,7 +77,7 @@ export function useLaunchPlan(): UseLaunchPlanReturn {
           .eq('archived', false),
         supabase
           .from('strategy_dev_weekly_allocations')
-          .select('week_starting, help_hours, designer_out, is_blackout, reason'),
+          .select('week_starting, help_hours, designer_out, is_blackout, base_capacity_override, reason'),
         supabase
           .from('strategy_account_progress')
           .select('member, church_name'),
@@ -91,11 +91,13 @@ export function useLaunchPlan(): UseLaunchPlanReturn {
         ...p,
         church_name: accountByMember.get(p.member as number) ?? p.church_name ?? null,
       })))
-      setAdjustments(((adjRes.data ?? []) as StrategyDevWeeklyAllocation[]).map(a => ({
+      type Row = StrategyDevWeeklyAllocation & { base_capacity_override?: number | string | null }
+      setAdjustments(((adjRes.data ?? []) as Row[]).map(a => ({
         week_starting: a.week_starting,
         help_hours:    Number(a.help_hours ?? 0),
         designer_out:  !!a.designer_out,
         is_blackout:   !!a.is_blackout,
+        base_capacity: a.base_capacity_override != null ? Number(a.base_capacity_override) : null,
       })))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load launch plan')
@@ -124,11 +126,10 @@ export function useLaunchPlan(): UseLaunchPlanReturn {
 
   // Re-run scheduler + recovery solver whenever the inputs change.
   const schedule = useMemo(() => {
-    // helpMap / designerOut / blackout get rebuilt inside computeSchedule
-    // via the buildXxx helpers — we pass the raw adjustments here.
     const helpMap: Record<number, number> = {}
     const designerOut: Record<number, boolean> = {}
     const blackout: Record<number, boolean> = {}
+    const baseCap: Record<number, number> = {}
     const monday = mondayOf(new Date(Date.UTC(
       new Date().getUTCFullYear(),
       new Date().getUTCMonth(),
@@ -138,11 +139,12 @@ export function useLaunchPlan(): UseLaunchPlanReturn {
       const aWeek = new Date(`${a.week_starting}T00:00:00Z`)
       const idx = Math.round((mondayOf(aWeek).getTime() - monday.getTime()) / (7 * 86_400_000))
       if (idx < 0) continue
-      if (a.help_hours > 0)  helpMap[idx]     = a.help_hours
-      if (a.designer_out)    designerOut[idx] = true
-      if (a.is_blackout)     blackout[idx]    = true
+      if (a.help_hours > 0)        helpMap[idx]     = a.help_hours
+      if (a.designer_out)          designerOut[idx] = true
+      if (a.is_blackout)           blackout[idx]    = true
+      if (a.base_capacity != null && a.base_capacity >= 0) baseCap[idx] = a.base_capacity
     }
-    return computeSchedule(sites, helpMap, designerOut, blackout, cfg)
+    return computeSchedule(sites, helpMap, designerOut, blackout, cfg, baseCap)
   }, [sites, adjustments, cfg])
 
   const recovery = useMemo(() => solveAllHelp(sites, schedule, adjustments, cfg), [sites, schedule, adjustments, cfg])
@@ -168,7 +170,10 @@ export function useLaunchPlan(): UseLaunchPlanReturn {
 
   const upsertWeekAdjustment = useCallback(async (a: WeekAdjustment) => {
     // Delete the row entirely when it's reset to the default state.
-    if (a.help_hours === 0 && !a.designer_out && !a.is_blackout) {
+    if (a.help_hours === 0
+        && !a.designer_out
+        && !a.is_blackout
+        && (a.base_capacity == null)) {
       await supabase.from('strategy_dev_weekly_allocations')
         .delete()
         .eq('week_starting', a.week_starting)
@@ -177,11 +182,12 @@ export function useLaunchPlan(): UseLaunchPlanReturn {
     }
     await supabase.from('strategy_dev_weekly_allocations')
       .upsert({
-        week_starting: a.week_starting,
-        help_hours:    a.help_hours,
-        designer_out:  a.designer_out,
-        is_blackout:   a.is_blackout,
-        updated_at:    new Date().toISOString(),
+        week_starting:          a.week_starting,
+        help_hours:             a.help_hours,
+        designer_out:           a.designer_out,
+        is_blackout:            a.is_blackout,
+        base_capacity_override: a.base_capacity ?? null,
+        updated_at:             new Date().toISOString(),
       }, { onConflict: 'week_starting' })
     await refetch()
   }, [refetch])
@@ -194,18 +200,24 @@ export function useLaunchPlan(): UseLaunchPlanReturn {
       new Date().getUTCDate(),
     )))
     const existingByIso = new Map(adjustments.map(a => [a.week_starting, a]))
-    const upserts: Array<{ week_starting: string; help_hours: number; designer_out: boolean; is_blackout: boolean; updated_at: string }> = []
+    const upserts: Array<{
+      week_starting: string; help_hours: number;
+      designer_out: boolean; is_blackout: boolean;
+      base_capacity_override: number | null;
+      updated_at: string
+    }> = []
     for (const [idxStr, delta] of Object.entries(perWeek)) {
       const idx = Number(idxStr)
       const wk = new Date(monday.getTime() + idx * 7 * 86_400_000)
       const iso = fmtISO(wk)
       const existing = existingByIso.get(iso)
       upserts.push({
-        week_starting: iso,
-        help_hours:    (existing?.help_hours ?? 0) + delta,
-        designer_out:  existing?.designer_out ?? false,
-        is_blackout:   existing?.is_blackout ?? false,
-        updated_at:    new Date().toISOString(),
+        week_starting:          iso,
+        help_hours:             (existing?.help_hours ?? 0) + delta,
+        designer_out:           existing?.designer_out ?? false,
+        is_blackout:            existing?.is_blackout ?? false,
+        base_capacity_override: existing?.base_capacity ?? null,
+        updated_at:             new Date().toISOString(),
       })
     }
     if (upserts.length > 0) {

@@ -85,6 +85,10 @@ export interface WeekAdjustment {
   help_hours:    number
   designer_out:  boolean
   is_blackout:   boolean
+  /** When set, overrides the developer's locked 35h base for this
+   *  week. help_hours still stack on top; is_blackout still zeros
+   *  the whole week. Null = use cfg.base_weekly_cap. */
+  base_capacity?: number | null
 }
 
 /** Scheduler config (the locked constants + the calendar anchor). */
@@ -126,8 +130,9 @@ export interface SiteSchedule {
 }
 
 /** Adjustment lookup helpers. */
-export type HelpMap = Record<number, number>   // weekIndex → extra help hrs (designer)
-export type WeekFlag = Record<number, boolean> // weekIndex → designer_out / is_blackout
+export type HelpMap  = Record<number, number>   // weekIndex → extra help hrs (designer)
+export type WeekFlag = Record<number, boolean>  // weekIndex → designer_out / is_blackout
+export type BaseCapMap = Record<number, number> // weekIndex → base capacity override (sub-35 when dev is out part of the week)
 
 export function buildHelpMap(adjustments: WeekAdjustment[], cfg: SchedulerConfig): HelpMap {
   const start = mondayOf(parseD(cfg.schedule_start))
@@ -159,6 +164,18 @@ export function buildBlackoutMap(adjustments: WeekAdjustment[], cfg: SchedulerCo
   return out
 }
 
+export function buildBaseCapMap(adjustments: WeekAdjustment[], cfg: SchedulerConfig): BaseCapMap {
+  const start = mondayOf(parseD(cfg.schedule_start))
+  const out: BaseCapMap = {}
+  for (const a of adjustments) {
+    const idx = weeksBetween(start, parseD(a.week_starting))
+    if (idx >= 0 && a.base_capacity != null && a.base_capacity >= 0) {
+      out[idx] = Number(a.base_capacity)
+    }
+  }
+  return out
+}
+
 function weeksBetween(weekStartAnchor: Date, week: Date): number {
   return Math.round((mondayOf(week).getTime() - weekStartAnchor.getTime()) / (7 * DAY_MS))
 }
@@ -170,17 +187,24 @@ export function weekStart(i: number, cfg: SchedulerConfig): Date {
   return addCal(mondayOf(parseD(cfg.schedule_start)), i * 7)
 }
 
-/** Effective capacity for week `i` given the adjustments. */
+/** Effective capacity for week `i` given the adjustments.
+ *  - Blackout zeros everything.
+ *  - base_capacity_override (when set on the adjustment row) replaces
+ *    the team default 35h base; otherwise cfg.base_weekly_cap.
+ *  - help_hours stack on top of the base, unless designer_out is set
+ *    (then no help that week — no one to offload to). */
 export function effCap(
   i: number,
   helpMap: HelpMap,
   designerOut: WeekFlag,
   blackout: WeekFlag,
   cfg: SchedulerConfig,
+  baseCap?: BaseCapMap,
 ): number {
   if (blackout[i]) return 0
+  const base = baseCap?.[i] != null ? baseCap[i] : cfg.base_weekly_cap
   const help = designerOut[i] ? 0 : (helpMap[i] ?? 0)
-  return cfg.base_weekly_cap + help
+  return Math.max(0, base + help)
 }
 
 /** Hours remaining for a site — full estimate for in-progress sites
@@ -209,6 +233,7 @@ export function computeSchedule(
   designerOut:  WeekFlag,
   blackout:     WeekFlag,
   cfg:          SchedulerConfig = DEFAULT_CONFIG,
+  baseCap?:     BaseCapMap,
 ): Record<string, SiteSchedule> {
   const active = [...sites]
     .filter(s => s.status === 'in_progress')
@@ -216,7 +241,7 @@ export function computeSchedule(
 
   const res: Record<string, SiteSchedule> = {}
   let wi = 0
-  let rem = effCap(0, helpMap, designerOut, blackout, cfg)
+  let rem = effCap(0, helpMap, designerOut, blackout, cfg, baseCap)
 
   for (const s of active) {
     let need = remainingHours(s)
@@ -241,14 +266,14 @@ export function computeSchedule(
     // Walk past zero-capacity weeks (blackout) at the front.
     while (rem <= 0 && wi < MAX_WEEKS) {
       wi++
-      rem = effCap(wi, helpMap, designerOut, blackout, cfg)
+      rem = effCap(wi, helpMap, designerOut, blackout, cfg, baseCap)
     }
     const sw = wi
 
     while (need > 0 && wi < MAX_WEEKS) {
       if (rem <= 0) {
         wi++
-        rem = effCap(wi, helpMap, designerOut, blackout, cfg)
+        rem = effCap(wi, helpMap, designerOut, blackout, cfg, baseCap)
         continue
       }
       const use = Math.min(need, rem)
@@ -259,7 +284,7 @@ export function computeSchedule(
     }
 
     const ew = wi
-    const cap = effCap(wi, helpMap, designerOut, blackout, cfg) || cfg.base_weekly_cap
+    const cap = effCap(wi, helpMap, designerOut, blackout, cfg, baseCap) || cfg.base_weekly_cap
     const consumed = cap - rem
     const into = Math.max(0, Math.ceil((consumed / cap) * 5))
     const devCompleteDate = addBiz(weekStart(ew, cfg), into)
