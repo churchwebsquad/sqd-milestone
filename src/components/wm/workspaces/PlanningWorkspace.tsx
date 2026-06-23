@@ -298,16 +298,30 @@ export function PlanningWorkspace({ project, onChange }: Props) {
               type="button"
               disabled={!project.clickup_build_task_id}
               onClick={async () => {
-                // ClickUp tracked-time sync — calls the /api route added
-                // alongside this rewrite. Surfaces toast on result.
+                // ClickUp tracked-time sync. The endpoint authenticates
+                // via the Supabase user JWT (Bearer header) so include
+                // the current session token.
                 setSavingKey('sync_tracked')
+                setError(null)
                 try {
+                  const { data: sess } = await supabase.auth.getSession()
+                  const token = sess?.session?.access_token
+                  if (!token) throw new Error('Not signed in — refresh and try again.')
                   const res = await fetch('/api/web/clickup-build-phase-sync', {
                     method:  'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                      'Content-Type':  'application/json',
+                      'Authorization': `Bearer ${token}`,
+                    },
                     body:    JSON.stringify({ project_id: project.id }),
                   })
-                  if (!res.ok) throw new Error(`Sync failed (${res.status})`)
+                  const body = await res.json().catch(() => ({} as Record<string, unknown>))
+                  if (!res.ok) {
+                    const detail = typeof body.details === 'string' ? body.details
+                                 : typeof body.error === 'string' ? body.error
+                                 : `HTTP ${res.status}`
+                    throw new Error(detail)
+                  }
                   void onChange()
                 } catch (e) {
                   setError(e instanceof Error ? e.message : 'Sync failed')
