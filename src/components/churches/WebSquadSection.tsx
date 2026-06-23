@@ -1,9 +1,11 @@
-import { useState } from 'react'
-import { ChevronDown, ChevronRight, ExternalLink, PartyPopper, Link, Check, Globe, Wrench, Server } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Link as RouterLink } from 'react-router-dom'
+import { ChevronDown, ChevronRight, ExternalLink, PartyPopper, Link, Check, Globe, Wrench, Server, ArrowUpRight } from 'lucide-react'
 import type { StrategyAccountProgress, WebsiteSupportAudit, MilestoneStatus } from '../../types/database'
 import type { EnrichedSubmission } from '../../pages/ChurchDetailPage'
 import { extractWebPathway, normalizeWebsitePlatform } from '../../types/churches'
 import { PATHWAY_LABELS, ASSET_TYPE_LABELS } from '../submit/types'
+import { supabase } from '../../lib/supabase'
 import EditableField from './EditableField'
 import { SectionHeader, SubSectionLabel, ToolLink } from './ChurchUI'
 import { WebSupportEvaluationChecklist } from './WebSupportEvaluationChecklist'
@@ -124,6 +126,27 @@ export default function WebSquadSection({ church, submissions, onSave, editing, 
   const websiteLaunched = raw.website_launched as boolean | null ?? false
   const [launched, setLaunched] = useState(!!websiteLaunched)
 
+  // Look up the Website Manager project for this church (if one exists)
+  // so we can link to /web/{projectId}?tab=planning from this section.
+  // null = not loaded yet, '' = no project for this church.
+  const [webProjectId, setWebProjectId] = useState<string | '' | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const { data } = await supabase
+        .from('strategy_web_projects')
+        .select('id')
+        .eq('member', memberId)
+        .eq('archived', false)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (cancelled) return
+      setWebProjectId((data as { id?: string } | null)?.id ?? '')
+    })()
+    return () => { cancelled = true }
+  }, [memberId])
+
   const handleLaunchToggle = async () => {
     const next = !launched
     setLaunched(next)
@@ -136,7 +159,19 @@ export default function WebSquadSection({ church, submissions, onSave, editing, 
 
   return (
     <section id="website-squad" className="bg-white border border-lavender rounded-xl p-5 shadow-sm scroll-mt-6">
-      <SectionHeader icon={Globe} title="Website Squad" theme="web" />
+      <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
+        <SectionHeader icon={Globe} title="Website Squad" theme="web" />
+        {webProjectId && (
+          <RouterLink
+            to={`/web/${webProjectId}?tab=planning`}
+            className="inline-flex items-center gap-1 text-[12px] font-semibold text-primary-purple hover:text-deep-plum"
+            title="Open this church's Website Manager project"
+          >
+            Website manager
+            <ArrowUpRight size={12} />
+          </RouterLink>
+        )}
+      </div>
 
       {/* Web Pathway + current platform */}
       <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">

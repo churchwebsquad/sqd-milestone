@@ -22,7 +22,8 @@
  * from the queue + sprint timeline.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2, RefreshCw, Flag } from 'lucide-react'
+import { Loader2, RefreshCw, Flag, ArrowUpRight } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { WMCard } from '../Card'
 import { WMStatusPill } from '../StatusPill'
 import { StepTimeline } from '../planning/StepTimeline'
@@ -134,7 +135,19 @@ export function PlanningWorkspace({ project, onChange }: Props) {
             <h1 className="text-2xl font-semibold text-wm-text">
               {project.church_name ?? project.name}
             </h1>
-            <p className="text-xs font-mono text-wm-text-subtle mt-1">#{project.member}</p>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-xs font-mono text-wm-text-subtle">#{project.member}</p>
+              {project.member != null && (
+                <Link
+                  to={`/churches/${project.member}`}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-wm-accent hover:text-wm-accent-strong"
+                  title="Open the Church Detail page in the churches dashboard"
+                >
+                  Church detail
+                  <ArrowUpRight size={11} />
+                </Link>
+              )}
+            </div>
           </div>
           <StatusBadge launched={launched} isWaiting={isWaiting} isLate={isLate} isPaused={isPaused} />
         </header>
