@@ -38,13 +38,20 @@ export function QueueTable({
 }: Props) {
   const [dragId, setDragId] = useState<string | null>(null)
 
-  // Build display rows = active + waiting_feedback (launched excluded
-  // — they're shown in a collapsed group below). Order by priority_order
-  // (nulls last).
+  // Status lookup so we can split rows into queue / paused / launched.
+  // 'paused' comes from the scheduler-side derivation in useLaunchPlan
+  // (manual_sub_status === 'paused' takes precedence over phase).
+  const siteById = new Map(sites.map(s => [s.id, s]))
+  const isPausedRow = (id: string) => siteById.get(id)?.status === 'paused'
+
+  // Main queue = active + waiting_feedback. Paused and launched are
+  // peeled off into their own collapsed groups below — they don't
+  // carry priority numbers since they don't consume queue capacity.
   const visible = [...rows]
-    .filter(r => r.current_phase !== 'launched' && !r.archived)
+    .filter(r => r.current_phase !== 'launched' && !r.archived && !isPausedRow(r.id))
     .sort((a, b) => (a.priority_order ?? 99_999) - (b.priority_order ?? 99_999))
 
+  const paused   = rows.filter(r => !r.archived && isPausedRow(r.id))
   const launched = rows.filter(r => r.current_phase === 'launched' && !r.archived)
 
   const handleDrop = (targetId: string) => {
@@ -122,6 +129,33 @@ export function QueueTable({
           </tbody>
         </table>
       </div>
+
+      {paused.length > 0 && (
+        <details className="border-t border-lavender" open>
+          <summary className="px-4 py-2 text-[11px] uppercase tracking-widest font-bold text-amber-700 cursor-pointer hover:bg-amber-50/40">
+            Paused ({paused.length})
+          </summary>
+          <ul className="px-4 py-2 space-y-1">
+            {paused.map(p => (
+              <li key={p.id} className="flex items-center gap-2 text-[12.5px]">
+                <button
+                  type="button"
+                  onClick={() => onSelect(p.id)}
+                  className="text-deep-plum hover:text-primary-purple font-semibold"
+                >
+                  {p.church_name ?? p.name}
+                </button>
+                <span className="text-[10px] font-mono text-purple-gray">#{p.member}</span>
+                {p.status_reason && (
+                  <span className="text-[11px] text-purple-gray italic truncate" title={p.status_reason}>
+                    — {p.status_reason}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       {launched.length > 0 && (
         <details className="border-t border-lavender">
