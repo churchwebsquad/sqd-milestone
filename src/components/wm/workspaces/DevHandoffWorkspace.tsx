@@ -37,7 +37,7 @@ import {
 } from '../../../lib/cta'
 import type {
   StrategyWebProject, WebPage, WebSection, WebContentTemplate,
-  WebPageSeo, WebFieldDef, CtaValue,
+  WebPageSeo, WebFieldDef, CtaValue, WebProjectSnippet,
 } from '../../../types/database'
 
 interface Props {
@@ -87,6 +87,7 @@ export function DevHandoffWorkspace({ project }: Props) {
   const [seoRows, setSeoRows] = useState<PageSeoRow[]>([])
   const [ctaRows, setCtaRows] = useState<CtaRow[]>([])
   const [devNotesRows, setDevNotesRows] = useState<DevNotesRow[]>([])
+  const [snippets, setSnippets] = useState<WebProjectSnippet[]>([])
   const [seoCtaLoading, setSeoCtaLoading] = useState(true)
   // Software-in-use, surfaced from roadmap_state.strategic_goals (Phase 3).
   // Shown prominently at the top so the dev knows what integrations
@@ -173,6 +174,18 @@ export function DevHandoffWorkspace({ project }: Props) {
           pageId: p.id, pageName: p.name, pageSlug: p.slug, seo: p.seo ?? null,
         })))
       setCtaRows(extractCtaInventory({ pages, sections, templates }))
+
+      // Snippets — surfaced in Church Settings and used to resolve
+      // any CTA whose route is a {{token}} so the dev can see the
+      // expansion at a glance.
+      const { data: snipRows } = await supabase
+        .from('web_project_snippets')
+        .select('*')
+        .eq('web_project_id', project.id)
+        .eq('archived', false)
+        .order('token')
+      setSnippets((snipRows ?? []) as WebProjectSnippet[])
+
       setDevNotesRows(
         pages
           .filter(p => typeof p.dev_notes === 'string' && p.dev_notes.trim().length > 0)
@@ -192,6 +205,15 @@ export function DevHandoffWorkspace({ project }: Props) {
 
   const projectSlug = (project.church_short_name || project.name || 'project')
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+
+  // Token → expansion map. Used by the CTA inventory to resolve any
+  // route shaped like "{{token}}" or "{{base_url}}/page" inline. Also
+  // backs the Church settings table + JSON export.
+  const snippetMap = useMemo(() => {
+    const m: Record<string, WebProjectSnippet> = {}
+    for (const s of snippets) m[s.token] = s
+    return m
+  }, [snippets])
 
   const downloadAcssJson = () => {
     const json = JSON.stringify(toAcssGvmJson(spec), null, 2)
@@ -425,6 +447,13 @@ export function DevHandoffWorkspace({ project }: Props) {
             )}
           </WMCard>
 
+          {/* ── Church settings (site snippets) ───────────────────── */}
+          <ChurchSettingsCard
+            snippets={snippets}
+            projectSlug={projectSlug}
+            loading={seoCtaLoading}
+          />
+
           {/* ── CTA inventory ─────────────────────────────────────── */}
           <WMCard padding="loose">
             <div className="flex items-start justify-between gap-4 mb-3">
@@ -457,7 +486,10 @@ export function DevHandoffWorkspace({ project }: Props) {
             ) : ctaRows.filter(r => r.cta.url && r.cta.url.trim()).length === 0 ? (
               <p className="text-[12px] text-wm-text-subtle italic">No CTAs with destinations bound yet.</p>
             ) : (
-              <CtaInventoryTable rows={ctaRows.filter(r => r.cta.url && r.cta.url.trim())} />
+              <CtaInventoryTable
+                rows={ctaRows.filter(r => r.cta.url && r.cta.url.trim())}
+                snippetMap={snippetMap}
+              />
             )}
           </WMCard>
 
@@ -746,7 +778,9 @@ function SeoSummaryTable({ rows }: { rows: PageSeoRow[] }) {
   )
 }
 
-function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
+function CtaInventoryTable({
+  rows, snippetMap,
+}: { rows: CtaRow[]; snippetMap: Record<string, WebProjectSnippet> }) {
   const brokenCount = rows.filter(r => r.validationError != null).length
 
   // Group rows by page (alphabetical by name).  Each page becomes its
@@ -818,6 +852,13 @@ function CtaInventoryTable({ rows }: { rows: CtaRow[] }) {
                       </a>
                     ) : (
                       <span className="italic text-wm-text-subtle">no url</span>
+                    )}
+                    {/* Resolved snippet expansion — when the route is a
+                        {{token}} or contains tokens, render the expansion
+                        right below the raw route so the dev sees the
+                        actual destination without a context switch. */}
+                    {c.cta.kind === 'snippet' && c.cta.url && (
+                      <SnippetRouteResolved url={c.cta.url} snippetMap={snippetMap} />
                     )}
                     {broken && (
                       <p className="text-[10px] text-wm-warn mt-0.5 inline-flex items-start gap-1">
@@ -1102,4 +1143,136 @@ function triggerDownload(filename: string, content: string, mime: string): void 
   a.click()
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
+}
+
+// ── Church settings ────────────────────────────────────────────────
+
+/** Renders the church's site snippets (project-scoped key/value pairs
+ *  used as `{{token}}` expansions in body copy + CTA routes). The dev
+ *  team needs this inventory so they can map button routes back to
+ *  the actual destination. Includes a downloadable JSON so the dev
+ *  team can seed an ACF / WP options table directly. */
+function ChurchSettingsCard({
+  snippets, projectSlug, loading,
+}: { snippets: WebProjectSnippet[]; projectSlug: string; loading: boolean }) {
+  const ordered = [...snippets].sort((a, b) => a.token.localeCompare(b.token))
+  const downloadJson = () => {
+    // Shape: { "<token>": { value, label, description, tags } } —
+    // flat keyed by token so WP / ACF can ingest directly without a
+    // post-process step.
+    const out: Record<string, { value: string; label: string; description: string | null; tags: string[] }> = {}
+    for (const s of ordered) {
+      out[s.token] = {
+        value:       s.expansion,
+        label:       s.label,
+        description: s.description,
+        tags:        s.tags ?? [],
+      }
+    }
+    triggerDownload(`${projectSlug}-church-settings.json`, JSON.stringify(out, null, 2), 'application/json')
+  }
+  return (
+    <WMCard padding="loose">
+      <div className="flex items-start justify-between gap-4 mb-3">
+        <div>
+          <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+            <Globe size={13} />
+            <h2 className="text-[13px] font-bold uppercase tracking-widest">Church settings</h2>
+          </div>
+          <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+            Project-scoped site snippets that the church uses across the site
+            (give links, livestream URLs, address, phone, etc.). Referenced
+            in body copy and button routes as <code className="font-mono text-[11px]">{`{{token}}`}</code>;
+            resolve to the values below.
+          </p>
+        </div>
+        <WMButton
+          variant="primary"
+          size="md"
+          iconLeft={<Download size={13} />}
+          onClick={downloadJson}
+          disabled={ordered.length === 0 || loading}
+        >
+          Download JSON
+        </WMButton>
+      </div>
+      {loading ? (
+        <p className="text-[12px] text-wm-text-subtle">Loading…</p>
+      ) : ordered.length === 0 ? (
+        <p className="text-[12px] text-wm-text-subtle italic">No site snippets defined yet.</p>
+      ) : (
+        <div className="overflow-x-auto -mx-2">
+          <table className="w-full text-[11.5px] border-collapse">
+            <thead>
+              <tr className="text-left text-wm-text-subtle">
+                <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Token</th>
+                <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Label</th>
+                <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Value</th>
+                <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ordered.map(s => (
+                <tr key={s.id} className="border-t border-wm-border/40 align-top">
+                  <td className="px-2 py-2 font-mono text-deep-plum whitespace-nowrap">
+                    {`{{${s.token}}}`}
+                  </td>
+                  <td className="px-2 py-2 text-wm-text">{s.label}</td>
+                  <td className="px-2 py-2 max-w-[280px]">
+                    <span className="font-mono text-[11px] text-wm-text break-all">{s.expansion}</span>
+                  </td>
+                  <td className="px-2 py-2 max-w-[240px] text-wm-text-muted leading-snug">
+                    {s.description ?? <span className="italic text-wm-text-subtle">—</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </WMCard>
+  )
+}
+
+/** Renders the resolved value of a snippet-shaped route — e.g. a CTA
+ *  with url `{{give_url}}` shows the actual URL below. Multi-token
+ *  routes like `{{base_url}}/contact` are also resolved by replacing
+ *  every recognized token with its expansion. Tokens with no matching
+ *  snippet are shown in red so the dev knows what's still unbound. */
+function SnippetRouteResolved({
+  url, snippetMap,
+}: { url: string; snippetMap: Record<string, WebProjectSnippet> }) {
+  const tokenRe = /\{\{\s*([\w.]+)\s*\}\}/g
+  const tokens = Array.from(url.matchAll(tokenRe), m => m[1])
+  if (tokens.length === 0) return null
+  // Try to resolve every token; if all resolve, render the fully-
+  // expanded URL. Otherwise show a per-token resolution list so the
+  // dev can see what's bound and what isn't.
+  const allBound = tokens.every(t => snippetMap[t]?.expansion)
+  if (allBound) {
+    const resolved = url.replace(tokenRe, (_, t) => snippetMap[t]?.expansion ?? '')
+    return (
+      <p className="text-[10.5px] text-wm-text-muted mt-1 break-all" title={`Resolved from ${url}`}>
+        → <span className="font-mono text-deep-plum">{resolved}</span>
+      </p>
+    )
+  }
+  return (
+    <ul className="text-[10.5px] text-wm-text-muted mt-1 space-y-0.5">
+      {tokens.map((t, i) => {
+        const s = snippetMap[t]
+        return (
+          <li key={`${t}-${i}`} className="break-all">
+            <span className="font-mono">{`{{${t}}}`}</span>
+            {' → '}
+            {s?.expansion ? (
+              <span className="font-mono text-deep-plum">{s.expansion}</span>
+            ) : (
+              <span className="text-wm-warn italic">unbound</span>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
 }

@@ -109,9 +109,10 @@ export function PlanningWorkspace({ project, onChange }: Props) {
   const isPaused  = site?.status === 'paused'
   const launched  = project.current_phase === 'launched'
 
-  // Design start = dev start − 2 business days. Suppressed when paused
-  // or when there's no slot to anchor against.
-  const designStart: Date | null = !isPaused && slot?.devStartDate
+  // Design due = dev start − 2 business days. This is the date by
+  // which design must be wrapped so the developer can pick the project
+  // up cleanly with a 1-business-day handoff buffer.
+  const designDue: Date | null = !isPaused && slot?.devStartDate
     ? new Date(subBizDaysMs(slot.devStartDate.getTime(), 2))
     : null
 
@@ -240,9 +241,9 @@ export function PlanningWorkspace({ project, onChange }: Props) {
           {/* Dates row: Design start · Dev start (+ sprint sub-label) */}
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
             <Stat
-              label="Design start"
-              value={designStart ? fmtDate(designStart) : '—'}
-              hint={designStart ? 'Design needs to wrap 2 business days before dev picks up.' : ''}
+              label="Design due"
+              value={designDue ? fmtDate(designDue) : '—'}
+              hint={designDue ? 'Date design must be wrapped so the dev can pick this church up on time.' : ''}
             />
             <div>
               <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Dev start</p>
