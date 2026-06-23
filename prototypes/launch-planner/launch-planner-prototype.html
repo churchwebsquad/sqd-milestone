@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Website Launch Planner — Prototype</title>
+<style>
+  :root {
+    --purple:#513DE5; --plum:#341756; --lavender:#CFC9F8; --lavender-tint:#EDE9FC;
+    --cream:#F9F5F1; --white:#FFFFFF; --purple-mid:#6B5CE7; --purple-gray:#6B6180;
+    --good:#2E9E6B; --good-bg:#E4F4EC; --warn:#C8841A; --warn-bg:#FBEFDA;
+    --late:#C2453F; --late-bg:#FBE3E1; --radius:14px;
+    --shadow:0 1px 3px rgba(52,23,86,.08),0 6px 20px rgba(52,23,86,.06);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--cream);color:var(--plum);font-family:Inter,'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.45;}
+  h1,h2,h3{font-family:Georgia,'Times New Roman',serif;color:var(--plum);margin:0;}
+  .eyebrow{text-transform:uppercase;letter-spacing:.1em;font-size:11px;font-weight:700;color:var(--purple);font-family:Inter,sans-serif;}
+  em{color:var(--purple);font-style:italic;}
+  .wrap{max-width:1320px;margin:0 auto;padding:24px 20px 80px;}
+  header.app{background:linear-gradient(135deg,#341756 0%,#513DE5 100%);color:#fff;padding:28px 0;}
+  header.app .inner{max-width:1320px;margin:0 auto;padding:0 20px;}
+  header.app h1{color:#fff;font-size:30px;letter-spacing:-.5px;}
+  header.app h1 em{color:var(--lavender);}
+  header.app .sub{color:var(--lavender);margin-top:6px;max-width:820px;font-size:13.5px;}
+  .badge-pill{display:inline-block;background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.25);padding:4px 12px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.04em;margin-top:14px;}
+  .controls{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;background:var(--white);border:1px solid var(--lavender);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);margin-top:-26px;position:relative;}
+  .field{display:flex;flex-direction:column;gap:4px;}
+  .field label{font-size:11px;font-weight:700;color:var(--purple-gray);text-transform:uppercase;letter-spacing:.06em;}
+  .field input{font:inherit;color:var(--plum);border:1.5px solid var(--lavender);border-radius:10px;padding:8px 10px;background:var(--cream);}
+  .field input:focus{outline:none;border-color:var(--purple);background:#fff;}
+  .field input[type=number]{width:96px;}
+  .field.locked input{background:#efe9f8;color:var(--purple-gray);}
+  .lock-tag{font-size:9px;font-weight:700;color:var(--purple);}
+  .spacer{flex:1;}
+  button{font:inherit;cursor:pointer;border:none;}
+  .btn{border-radius:999px;padding:9px 18px;font-weight:600;font-size:13px;display:inline-flex;align-items:center;gap:7px;}
+  .btn-primary{background:var(--plum);color:#fff;} .btn-primary:hover{background:var(--purple);}
+  .btn-ghost{background:var(--lavender-tint);color:var(--plum);border:1.5px solid var(--lavender);} .btn-ghost:hover{background:var(--lavender);}
+  .btn-sm{padding:5px 12px;font-size:12px;}
+  .btn[disabled]{opacity:.45;cursor:not-allowed;}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:22px;}
+  .stat{background:var(--white);border:1px solid var(--lavender);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);}
+  .stat .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--purple-gray);font-weight:700;}
+  .stat .v{font-family:Georgia,serif;font-size:26px;margin-top:6px;}
+  .stat .n{font-size:12px;color:var(--purple-gray);margin-top:2px;}
+  .stat.alert .v{color:var(--late);}
+  .section{margin-top:30px;}
+  .section h2{font-size:20px;}
+  .section .lead{color:var(--purple-gray);font-size:13px;margin-top:3px;margin-bottom:14px;}
+  .tablecard{background:var(--white);border:1px solid var(--lavender);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;}
+  table{width:100%;border-collapse:collapse;}
+  thead th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--purple-gray);font-weight:700;padding:12px 9px;border-bottom:1.5px solid var(--lavender);background:var(--lavender-tint);}
+  tbody td{padding:11px 9px;border-bottom:1px solid var(--lavender-tint);vertical-align:middle;}
+  tbody tr.row:hover{background:var(--cream);}
+  tbody tr.dragging{opacity:.4;}
+  tbody tr.late-row{background:var(--late-bg);} tbody tr.late-row:hover{background:#f8d8d5;}
+  .handle{cursor:grab;color:var(--lavender);font-size:18px;user-select:none;} .handle:active{cursor:grabbing;}
+  .prio{font-weight:700;color:var(--purple);font-size:13px;}
+  .church-name{font-weight:600;font-size:14px;}
+  .church-meta{font-size:11px;color:var(--purple-gray);display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:3px;}
+  .chip{font-size:9.5px;font-weight:700;letter-spacing:.03em;padding:2px 7px;border-radius:999px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;border:1px solid transparent;}
+  .cu-synced{background:var(--good-bg);color:var(--good);} .cu-unsynced{background:var(--cream);color:var(--purple-gray);border-color:var(--lavender);}
+  .rec-designer{background:var(--lavender-tint);color:var(--purple);border-color:var(--lavender);}
+  .rec-dev{background:#ece9ef;color:var(--plum);border-color:#d9d2e6;}
+  .flag{color:var(--late);font-weight:700;font-size:11px;}
+  td.num{font-variant-numeric:tabular-nums;}
+  .editable{border:1.5px solid transparent;border-radius:8px;padding:5px 7px;background:var(--lavender-tint);width:60px;font:inherit;color:var(--plum);text-align:center;font-weight:600;}
+  .editable:focus{outline:none;border-color:var(--purple);background:#fff;}
+  input.date-edit{border:1.5px solid var(--lavender);border-radius:8px;padding:5px 7px;font:inherit;color:var(--plum);background:var(--cream);}
+  input.date-edit:focus{outline:none;border-color:var(--purple);background:#fff;}
+  .delta{font-weight:700;font-size:13px;border-radius:999px;padding:3px 10px;display:inline-block;font-variant-numeric:tabular-nums;}
+  .delta.good{background:var(--good-bg);color:var(--good);} .delta.tight{background:var(--warn-bg);color:var(--warn);} .delta.late{background:var(--late-bg);color:var(--late);}
+  .proj{font-weight:600;}
+  .span-chip{font-size:11px;color:var(--purple-gray);background:var(--cream);border:1px solid var(--lavender);padding:2px 8px;border-radius:999px;}
+  .iconbtn{background:none;color:var(--purple-gray);font-size:13px;padding:4px 6px;border-radius:8px;} .iconbtn:hover{background:var(--lavender-tint);color:var(--late);}
+  /* tracked */
+  .trk{min-width:120px;}
+  .trk-bar{height:7px;border-radius:999px;background:var(--lavender-tint);overflow:hidden;margin:4px 0 3px;}
+  .trk-fill{height:100%;background:var(--purple);}
+  .trk-meta{font-size:10.5px;color:var(--purple-gray);font-variant-numeric:tabular-nums;}
+  .pace{font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:999px;display:inline-block;margin-top:2px;}
+  .pace.good{background:var(--good-bg);color:var(--good);} .pace.tight{background:var(--warn-bg);color:var(--warn);} .pace.late{background:var(--late-bg);color:var(--late);}
+  /* recovery rows */
+  .helprow td{border-bottom:1px solid var(--lavender-tint);padding:10px 16px;}
+  .helprow.recoverable td{background:var(--warn-bg);}
+  .helprow.locked td{background:#efeaf3;}
+  .help-inner{display:flex;align-items:center;gap:10px;font-size:12.5px;}
+  .helprow.recoverable .help-inner{color:#7a5410;} .helprow.recoverable strong{color:var(--warn);}
+  .helprow.locked .help-inner{color:var(--purple-gray);} .helprow.locked strong{color:var(--plum);}
+  .help-action{margin-left:auto;display:flex;gap:8px;}
+  /* sprints */
+  .sprints{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px;}
+  .sprint{background:var(--white);border:1px solid var(--lavender);border-radius:var(--radius);padding:14px;box-shadow:var(--shadow);}
+  .sprint.blackout{background:repeating-linear-gradient(45deg,var(--cream),var(--cream) 10px,#f1ebe4 10px,#f1ebe4 20px);}
+  .sprint h3{font-size:14px;font-family:Inter,sans-serif;font-weight:700;display:flex;justify-content:space-between;align-items:center;}
+  .sprint .dates{font-size:11px;color:var(--purple-gray);margin:2px 0 10px;}
+  .capbar{height:9px;border-radius:999px;background:var(--lavender-tint);overflow:hidden;display:flex;}
+  .capseg{height:100%;}
+  .caplabel{font-size:11px;color:var(--purple-gray);margin-top:6px;display:flex;justify-content:space-between;}
+  .alloc{margin-top:10px;display:flex;flex-direction:column;gap:6px;}
+  .alloc-chip{display:flex;align-items:center;gap:8px;font-size:12px;}
+  .dot{width:9px;height:9px;border-radius:3px;flex:none;}
+  .alloc-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .alloc-hrs{font-weight:700;font-variant-numeric:tabular-nums;}
+  .week-controls{margin-top:12px;border-top:1px dashed var(--lavender);padding-top:10px;display:flex;flex-direction:column;gap:9px;}
+  .wk{font-size:11.5px;}
+  .wk-top{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  .wk-name{color:var(--plum);font-weight:600;}
+  .wk-cap{color:var(--purple-gray);font-variant-numeric:tabular-nums;}
+  .wk-bot{display:flex;align-items:center;gap:8px;margin-top:5px;}
+  .wk-base{font-size:10.5px;color:var(--purple-gray);background:#efe9f8;border-radius:6px;padding:2px 7px;}
+  .wk-help{display:flex;align-items:center;gap:5px;}
+  .wk-help input{width:46px;border:1.5px solid var(--lavender);border-radius:7px;padding:3px 5px;font:inherit;text-align:center;}
+  .wk-help input:focus{outline:none;border-color:var(--purple);}
+  .wk-help input:disabled{background:#f0eef4;color:#bbb;}
+  .wk-help .lbl{font-size:10.5px;color:var(--good);font-weight:700;}
+  .wk-out{font-size:10.5px;color:var(--late);display:flex;align-items:center;gap:4px;cursor:pointer;user-select:none;}
+  .wk-out input{accent-color:var(--late);}
+  .legend{font-size:11.5px;color:var(--purple-gray);margin-top:14px;display:flex;gap:18px;flex-wrap:wrap;}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .note{background:var(--lavender-tint);border-left:3px solid var(--purple);border-radius:10px;padding:12px 14px;font-size:12.5px;color:var(--plum);margin-top:16px;}
+  .note strong{color:var(--purple);}
+  footer.proto{margin-top:40px;font-size:11.5px;color:var(--purple-gray);text-align:center;}
+  @media (max-width:980px){.stats{grid-template-columns:repeat(2,1fr);} .hide-sm{display:none;}}
+</style>
+</head>
+<body>
+<header class="app">
+  <div class="inner">
+    <div class="eyebrow" style="color:var(--lavender)">Church Media Squad · Strategy Division</div>
+    <h1>Website <em>Launch</em> Planner</h1>
+    <div class="sub">Plans the <strong>development</strong> bottleneck across back-to-back 2-week sprints. The developer is a <strong>hard 35 dev hrs/week</strong>. The only way to go faster is <em>extra help hours</em> from a second person (e.g. the designer) — tracked separately and only when that help is actually available. These are <em>build hours only</em>, not total project effort.</div>
+    <span class="badge-pill">Prototype · administrative panel · full edit access</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="controls">
+    <div class="field">
+      <label>Schedule start</label>
+      <input type="date" id="startDate" />
+    </div>
+    <div class="field locked">
+      <label>Developer rate <span class="lock-tag">🔒 hard cap</span></label>
+      <input type="number" id="baseCap" min="1" max="80" />
+    </div>
+    <div class="field">
+      <label>Launch tail (days)</label>
+      <input type="number" id="tail" min="0" max="30" />
+    </div>
+    <div class="spacer"></div>
+    <button class="btn btn-ghost" id="syncBtn" title="Pull Build-Phase estimate + tracked time per partner from ClickUp">⟳ Sync dev hours + tracked time</button>
+    <button class="btn btn-primary" id="addBtn">+ Add partner site</button>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="section">
+    <h2>Build queue</h2>
+    <div class="lead">Drag to set priority. Dev runs top-to-bottom at 35 hrs/wk. <em>Tracked</em> shows real logged time vs estimate from the ClickUp Build Phase. Behind-target rows show whether help can recover them — or whether the date stands.</div>
+    <div class="tablecard">
+      <table>
+        <thead><tr>
+          <th style="width:24px"></th><th style="width:30px">#</th><th>Partner</th>
+          <th>Target</th><th>Projected</th><th>Δ</th>
+          <th class="hide-sm">Tracked vs est.</th><th>Dev hrs</th>
+          <th class="hide-sm">Span</th><th style="width:34px"></th>
+        </tr></thead>
+        <tbody id="queueBody"></tbody>
+      </table>
+    </div>
+    <div class="legend">
+      <span><span class="chip rec-designer">🎨 designer-recoverable</span> help can be offloaded</span>
+      <span><span class="chip rec-dev">🔒 developer-only</span> can't offload — date stands</span>
+      <span><span class="pace good">on budget</span> tracked time pacing within estimate</span>
+      <span>click a partner's mode chip to toggle it</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Sprint timeline</h2>
+    <div class="lead">Each week shows the <strong>locked 35 base</strong> plus any <strong>extra help hours</strong> you add — but only when the designer is available. Mark a week <em>designer out</em> and its help is removed and projected launches recalculate against the hard cap.</div>
+    <div class="sprints" id="sprints"></div>
+  </div>
+
+  <div class="note" id="helpSummary"></div>
+
+  <footer class="proto">
+    Logic is self-contained in this file. See <strong>LAUNCH-PLANNER-SPEC.md</strong> for the data model, algorithm, and ClickUp + Supabase integration contract.
+  </footer>
+</div>
+
+<script>
+/* ============================================================
+   WEBSITE LAUNCH PLANNER — prototype engine
+   - One developer, HARD 35 dev hrs/week. Sequential pipeline.
+   - Extra HELP HOURS (separate, costed) can be added per week
+     ONLY when a designer is available AND the work is offloadable.
+   - Actual launch = dev-complete + launch tail.
+   - Tracked time (from ClickUp Build Phase) compared to estimate.
+   ============================================================ */
+
+const DAY=86400000;
+const parseD=s=>{const[y,m,d]=s.split('-').map(Number);return new Date(Date.UTC(y,m-1,d));};
+const fmtISO=dt=>dt.toISOString().slice(0,10);
+const fmtNice=dt=>dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'});
+const fmtShort=dt=>dt.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
+const addCal=(dt,n)=>new Date(dt.getTime()+n*DAY);
+const mondayOf=dt=>{const d=new Date(dt.getTime());const wd=d.getUTCDay();const off=(wd===0?-6:1-wd);return new Date(d.getTime()+off*DAY);};
+const addBiz=(dt,n)=>{let d=new Date(dt.getTime()),left=Math.round(n);while(left>0){d=addCal(d,1);const wd=d.getUTCDay();if(wd!==0&&wd!==6)left--;}return d;};
+const calBtw=(a,b)=>Math.round((b.getTime()-a.getTime())/DAY);
+
+const COLORS=['#513DE5','#6B5CE7','#8A6FE8','#C8841A','#2E9E6B','#C2453F','#3D7DE5','#9B4FD1','#E5953D','#1FA39A','#B5519E','#5D6BE5','#D16A4F','#4FA85D','#8B5CF6'];
+
+const STATE={
+  startDate:'2026-06-22',
+  baseCap:35,                 // developer hard rate, hrs/week
+  sprintWeeks:2,
+  tailDays:0,
+  maxHelpPerWeek:35,          // a designer can contribute at most ~one full extra person/week
+  helpHours:{},               // weekIndex -> extra help hours (designer)
+  designerOut:{},             // weekIndex -> true (designer unavailable that week)
+  blackouts:[{start:'2026-12-21',end:'2027-01-04',label:'Christmas Break'}],
+  churches:[
+    {id:'c1802',member:1802,name:'Mosaic',target:'2026-06-09',devHours:139,status:'launched',synced:true,trackedHours:139,recovery:'designer'},
+    {id:'c1651',member:1651,name:'Mission Viejo Christian Church',target:'2026-06-22',devHours:58,status:'in_progress',synced:true,trackedHours:55,pct:0.95,recovery:'designer'},
+    {id:'c3634',member:3634,name:'Valley Church',target:'2026-06-30',devHours:64,status:'queued',recovery:'designer',note:'June 30. July 2 max.'},
+    {id:'c1961',member:1961,name:'The MET Church',target:'2026-07-30',devHours:75,status:'queued',recovery:'designer',note:'Ashley can help with the rest if needed.'},
+    {id:'c3680',member:3680,name:'Lakeway Church',target:'2026-08-13',devHours:57,status:'queued',recovery:'dev-only',hardDeadline:'2026-08-16',note:'Complex build — developer-only. Must be before Aug 16.'},
+    {id:'c3660',member:3660,name:'Journey Church',target:'2026-08-31',devHours:64,status:'queued',recovery:'designer'},
+    {id:'c3734',member:3734,name:'Arvada Vineyard',target:'2026-09-15',devHours:50,status:'queued',recovery:'designer'},
+    {id:'c2282',member:2282,name:'Real Life on the Palouse',target:'2026-09-29',devHours:52,status:'queued',recovery:'designer'},
+    {id:'c3585',member:3585,name:'Awaken Las Vegas',target:'2026-10-13',devHours:50,status:'queued',recovery:'designer'},
+    {id:'c3672',member:3672,name:'Canyon Del Oro Bible Church',target:'2026-10-27',devHours:52,status:'queued',recovery:'designer'},
+    {id:'c3249',member:3249,name:'First Presbyterian Church of Charlotte',target:'2026-11-10',devHours:51,status:'queued',recovery:'designer'},
+    {id:'c3640',member:3640,name:'Triumph Lutheran Brethren Church',target:'2026-12-01',devHours:50,status:'queued',recovery:'designer',note:'Flexible: Dec 1 or Jan 1.'},
+    {id:'c3602',member:3602,name:'The Axis Church',target:'2026-12-15',devHours:50,status:'queued',recovery:'designer'},
+    {id:'c2846',member:2846,name:'Evangel Christian Churches',target:'2027-01-11',devHours:50,status:'queued',recovery:'designer'},
+    {id:'c2266',member:2266,name:'Lakeshore Community Church',target:'2027-01-25',devHours:50,status:'queued',recovery:'designer'},
+  ]
+};
+
+/* ---------- capacity ---------- */
+function weekStart(i){return addCal(mondayOf(parseD(STATE.startDate)),i*7);}
+function isBlackout(ws){return STATE.blackouts.some(b=>ws.getTime()<parseD(b.end).getTime()&&addCal(ws,7).getTime()>parseD(b.start).getTime());}
+function effCap(i,helpMap){
+  const ws=weekStart(i);
+  if(isBlackout(ws))return 0;
+  const help=STATE.designerOut[i]?0:(helpMap[i]||0);
+  return STATE.baseCap+help;
+}
+/* schedule only the work that's LEFT — in-flight sites consume remaining, not the full estimate */
+function remainingHours(c){
+  if(c.status==='in_progress')return Math.max(0,(Number(c.devHours)||0)-(Number(c.trackedHours)||0));
+  return Number(c.devHours)||0;
+}
+
+/* ---------- pure scheduler (no mutation) ---------- */
+function computeSchedule(helpMap){
+  const active=STATE.churches.filter(c=>c.status!=='launched');
+  const res={};let wi=0,rem=effCap(0,helpMap);const MAX=800;
+  for(const c of active){
+    let need=remainingHours(c);const alloc={};
+    if(need<=0){res[c.id]={startWeek:wi,endWeek:wi,alloc,launchDate:weekStart(wi),devCompleteDate:weekStart(wi),delta:calBtw(weekStart(wi),parseD(c.target))};continue;}
+    while(rem<=0&&wi<MAX){wi++;rem=effCap(wi,helpMap);}
+    const sw=wi;
+    while(need>0&&wi<MAX){
+      if(rem<=0){wi++;rem=effCap(wi,helpMap);continue;}
+      const use=Math.min(need,rem);alloc[wi]=(alloc[wi]||0)+use;need-=use;rem-=use;
+      if(need<=0)break;
+    }
+    const ew=wi,cap=effCap(wi,helpMap)||STATE.baseCap,consumed=cap-rem;
+    const into=Math.max(0,Math.ceil((consumed/cap)*5));
+    const dev=addBiz(weekStart(ew),into),launch=addCal(dev,STATE.tailDays);
+    res[c.id]={startWeek:sw,endWeek:ew,alloc,devCompleteDate:dev,launchDate:launch,delta:calBtw(launch,parseD(c.target))};
+  }
+  return res;
+}
+
+/* ---------- recovery solver (minimum help hours, two paths) ---------- */
+function solveHelp(id,base){
+  const c=find(id);
+  if(!base||base.delta>=0)return{state:'ontime'};
+  if(c.recovery==='dev-only')return{state:'locked',reason:'dev-only',date:base.launchDate,behind:-base.delta};
+  // eligible weeks: through this site's end, not blackout, designer available
+  const elig=[];
+  for(let i=0;i<=base.endWeek;i++){const ws=weekStart(i);if(isBlackout(ws))continue;if(STATE.designerOut[i])continue;elig.push(i);}
+  if(!elig.length)return{state:'locked',reason:'designer-out',date:base.launchDate,behind:-base.delta};
+  const trial=Object.assign({},STATE.helpHours);
+  let added=0;const ceiling=elig.length*STATE.maxHelpPerWeek;let last=base;
+  while(added<ceiling){
+    let t=-1,min=Infinity;
+    for(const i of elig){const cur=(trial[i]||0);if(cur<STATE.maxHelpPerWeek&&cur<min){min=cur;t=i;}}
+    if(t<0)break;
+    trial[t]=(trial[t]||0)+1;added++;
+    last=computeSchedule(trial)[id];
+    if(last.delta>=0){
+      const perWeek={};for(const i of elig){const d=(trial[i]||0)-(STATE.helpHours[i]||0);if(d>0)perWeek[i]=d;}
+      return{state:'recoverable',helpHours:added,perWeek,date:last.launchDate,behind:-base.delta};
+    }
+  }
+  const perWeek={};for(const i of elig){const d=(trial[i]||0)-(STATE.helpHours[i]||0);if(d>0)perWeek[i]=d;}
+  return{state:'insufficient',helpHours:added,perWeek,date:last.launchDate,behind:-base.delta,stillLate:-last.delta};
+}
+
+/* ---------- tracked-time pace ---------- */
+function paceOf(c){
+  if(c.status!=='in_progress'||!c.trackedHours)return null;
+  const pct=c.pct||0;
+  if(pct<=0)return{pct:0,projected:c.devHours,over:0,cls:'good',txt:'just started'};
+  const projected=Math.round(c.trackedHours/pct);
+  const over=projected-c.devHours;
+  const cls=over>3?'late':(over<-1?'good':'tight');
+  return{pct:Math.round(pct*100),projected,over,cls};
+}
+
+/* ---------- render ---------- */
+const $=s=>document.querySelector(s);
+const find=id=>STATE.churches.find(c=>c.id===id);
+const colorFor=i=>COLORS[i%COLORS.length];
+let SCHED={};
+
+function render(){
+  SCHED=computeSchedule(STATE.helpHours);
+  STATE.churches.forEach(c=>{const r=SCHED[c.id];if(r)Object.assign(c,r);});
+  STATE.churches.forEach(c=>{c.help=(c.status!=='launched')?solveHelp(c.id,SCHED[c.id]):null;});
+  renderStats();renderQueue();renderSprints();renderHelpSummary();
+}
+function renderStats(){
+  const active=STATE.churches.filter(c=>c.status!=='launched');
+  const totalHrs=active.reduce((s,c)=>s+(Number(c.devHours)||0),0);
+  const last=active.reduce((m,c)=>(c.launchDate&&(!m||c.launchDate>m))?c.launchDate:m,null);
+  const behind=active.filter(c=>c.delta!=null&&c.delta<0);
+  const recov=behind.filter(c=>c.help&&c.help.state==='recoverable').length;
+  const totalHelp=Object.values(STATE.helpHours).reduce((s,v)=>s+v,0);
+  $('#stats').innerHTML=`
+    <div class="stat"><div class="k">Active sites</div><div class="v">${active.length}</div><div class="n">${STATE.churches.filter(c=>c.status==='launched').length} launched</div></div>
+    <div class="stat"><div class="k">Dev hrs queued</div><div class="v">${totalHrs}</div><div class="n">${(totalHrs/STATE.baseCap).toFixed(1)} wks at hard 35/wk</div></div>
+    <div class="stat"><div class="k">Extra help scheduled</div><div class="v">${totalHelp}h</div><div class="n">${totalHelp?'≈ '+(totalHelp/7).toFixed(1)+' designer-days':'none added'}</div></div>
+    <div class="stat ${behind.length?'alert':''}"><div class="k">Behind target</div><div class="v">${behind.length}</div><div class="n">${behind.length?recov+' recoverable w/ help':'all on track'}</div></div>`;
+}
+const deltaClass=d=>d==null?'':(d<0?'late':(d<=7?'tight':'good'));
+const deltaText=d=>d==null?'—':(d>=0?'+':'−')+Math.abs(d)+'d';
+
+function renderQueue(){
+  const tb=$('#queueBody');tb.innerHTML='';let prio=0;
+  STATE.churches.forEach(c=>{
+    if(c.status==='launched'){tb.appendChild(launchedRow(c));return;}
+    prio++;
+    const late=c.delta!=null&&c.delta<0;
+    const tr=document.createElement('tr');
+    tr.className='row'+(late?' late-row':'');tr.draggable=true;tr.dataset.id=c.id;
+    const span=(c.startWeek!=null)?sprintSpan(c.startWeek,c.endWeek):'—';
+    const recChip=c.recovery==='dev-only'
+      ? `<span class="chip rec-dev" data-act="recmode" data-id="${c.id}" title="Click: work can only be done by a developer">🔒 dev-only</span>`
+      : `<span class="chip rec-designer" data-act="recmode" data-id="${c.id}" title="Click: help can be offloaded to the designer">🎨 designer</span>`;
+    tr.innerHTML=`
+      <td><span class="handle">⠿</span></td>
+      <td class="prio">${prio}</td>
+      <td>
+        <div class="church-name">${c.name}</div>
+        <div class="church-meta">
+          <span>#${c.member}</span>
+          <span class="chip ${c.synced?'cu-synced':'cu-unsynced'}">${c.synced?'● ClickUp':'○ manual'}</span>
+          ${recChip}
+          ${c.hardDeadline?`<span class="flag">🚩 hard ${fmtShort(parseD(c.hardDeadline))}</span>`:''}
+        </div>
+      </td>
+      <td><input class="date-edit" type="date" value="${c.target}" data-act="target" data-id="${c.id}"></td>
+      <td class="proj num">${c.launchDate?fmtNice(c.launchDate):'—'}</td>
+      <td><span class="delta ${deltaClass(c.delta)}">${deltaText(c.delta)}</span></td>
+      <td class="hide-sm trk">${trackedCell(c)}</td>
+      <td><input class="editable" type="number" min="0" value="${c.devHours}" data-act="hours" data-id="${c.id}"></td>
+      <td class="hide-sm"><span class="span-chip">${span}</span></td>
+      <td><button class="iconbtn" data-act="del" data-id="${c.id}" title="Remove">✕</button></td>`;
+    tb.appendChild(tr);
+    if(c.help&&c.help.state!=='ontime')tb.appendChild(helpRow(c));
+  });
+  wireQueue();
+}
+function trackedCell(c){
+  if(c.status==='queued')return `<span class="trk-meta">not started</span>`;
+  const p=paceOf(c);const pctW=Math.min(100,Math.round((c.trackedHours/Math.max(c.devHours,1))*100));
+  let pace='';
+  if(p){const lbl=p.pct===0?'just started':(p.over>0?`+${p.over}h over est`:(p.over<0?`${p.over}h under est`:'on estimate'));pace=`<span class="pace ${p.cls}">${p.pct}% done · ${lbl}</span>`;}
+  const left=remainingHours(c);
+  return `<div class="trk-bar"><div class="trk-fill" style="width:${pctW}%"></div></div>
+          <div class="trk-meta">${c.trackedHours}h tracked / ${c.devHours}h est · <strong>${left}h left</strong></div>${pace}`;
+}
+function helpRow(c){
+  const h=c.help,tr=document.createElement('tr');
+  if(h.state==='recoverable'){
+    tr.className='helprow recoverable';
+    const wks=Object.keys(h.perWeek).map(i=>fmtShort(weekStart(+i))).join(', ');
+    tr.innerHTML=`<td colspan="10"><div class="help-inner">
+      ⚠ <span><strong>${c.name}</strong> is ~${h.behind} days behind. Recoverable: add <strong>${h.helpHours} help hrs</strong> (designer, ≈${(h.helpHours/7).toFixed(1)} days) in wk ${wks} → launches <strong>${fmtNice(h.date)}</strong>, within target.</span>
+      <span class="help-action"><button class="btn btn-ghost btn-sm" data-act="applyhelp" data-id="${c.id}">Apply help</button></span>
+    </div></td>`;
+  } else if(h.state==='locked'){
+    tr.className='helprow locked';
+    const why=h.reason==='dev-only'?'Work is developer-only — can\'t offload to a designer.':'Designer unavailable in the weeks that feed this site.';
+    tr.innerHTML=`<td colspan="10"><div class="help-inner">
+      🔒 <span>${why} <strong>${c.name}</strong> is ~${h.behind} days behind — the projected launch <strong>${fmtNice(h.date)}</strong> stands. Options: renegotiate the target, reprioritize, or add a second developer.</span>
+      <span class="help-action">${h.reason==='dev-only'?`<button class="btn btn-ghost btn-sm" data-act="recmode" data-id="${c.id}">Mark designer-eligible</button>`:''}</span>
+    </div></td>`;
+  } else { // insufficient
+    tr.className='helprow locked';
+    tr.innerHTML=`<td colspan="10"><div class="help-inner">
+      🔒 <span><strong>${c.name}</strong> is ~${h.behind} days behind. Even max designer help (${h.helpHours} hrs) only reaches <strong>${fmtNice(h.date)}</strong> — still ~${h.stillLate}d late. The target likely predates current capacity; renegotiate or add a second developer.</span>
+      <span class="help-action"><button class="btn btn-ghost btn-sm" data-act="applyhelp" data-id="${c.id}">Apply best-effort help</button></span>
+    </div></td>`;
+  }
+  return tr;
+}
+function launchedRow(c){
+  const tr=document.createElement('tr');tr.className='row';tr.style.opacity=.62;
+  tr.innerHTML=`<td>✓</td><td class="prio" style="color:var(--good)">live</td>
+    <td><div class="church-name">${c.name}</div><div class="church-meta"><span>#${c.member}</span><span class="chip cu-synced">● ClickUp</span></div></td>
+    <td class="num">${fmtNice(parseD(c.target))}</td><td class="proj">Launched</td>
+    <td><span class="delta good">live</span></td>
+    <td class="hide-sm trk"><span class="trk-meta">${c.trackedHours}h tracked / ${c.devHours}h est ✓</span></td>
+    <td class="num">${c.devHours}</td><td class="hide-sm"><span class="span-chip">complete</span></td><td></td>`;
+  return tr;
+}
+const sprintSpan=(sw,ew)=>{const a=Math.floor(sw/STATE.sprintWeeks)+1,b=Math.floor(ew/STATE.sprintWeeks)+1;return a===b?`Sprint ${a}`:`Sprints ${a}–${b}`;};
+
+function renderSprints(){
+  const root=$('#sprints');root.innerHTML='';
+  const active=STATE.churches.filter(c=>c.status!=='launched');
+  let maxW=0;active.forEach(c=>{if(c.endWeek!=null)maxW=Math.max(maxW,c.endWeek);});
+  const sprintCount=Math.floor(maxW/STATE.sprintWeeks)+1;
+  const colorIdx={};active.forEach((c,i)=>colorIdx[c.id]=i);
+  for(let s=0;s<sprintCount;s++){
+    const w0=s*STATE.sprintWeeks,weeks=[];for(let k=0;k<STATE.sprintWeeks;k++)weeks.push(w0+k);
+    const ws=weekStart(w0),we=addCal(weekStart(w0+STATE.sprintWeeks-1),4);
+    const cap=weeks.reduce((a,i)=>a+effCap(i,STATE.helpHours),0);
+    const blackout=weeks.every(i=>effCap(i,STATE.helpHours)===0);
+    const segs=[];let used=0;
+    active.forEach(c=>{let h=0;weeks.forEach(i=>{h+=(c.alloc&&c.alloc[i])||0;});if(h>0){segs.push({c,h});used+=h;}});
+    const div=document.createElement('div');div.className='sprint'+(blackout?' blackout':'');
+    let bar='';segs.forEach(seg=>{const pct=cap?(seg.h/Math.max(cap,used))*100:0;bar+=`<div class="capseg" style="width:${pct}%;background:${colorFor(colorIdx[seg.c.id])}"></div>`;});
+    let chips=segs.map(seg=>`<div class="alloc-chip"><span class="dot" style="background:${colorFor(colorIdx[seg.c.id])}"></span><span class="alloc-name">${seg.c.name}</span><span class="alloc-hrs">${seg.h}h</span></div>`).join('');
+    if(blackout)chips='<div class="alloc-chip" style="color:var(--purple-gray)">⛄ Blackout — no dev capacity</div>';
+    const wkCtrls=weeks.map(i=>{
+      const bl=isBlackout(weekStart(i)),out=!!STATE.designerOut[i],help=STATE.designerOut[i]?0:(STATE.helpHours[i]||0);
+      return `<div class="wk">
+        <div class="wk-top"><span class="wk-name">Wk of ${fmtShort(weekStart(i))}</span><span class="wk-cap">${bl?'blackout':effCap(i,STATE.helpHours)+' hr cap'}</span></div>
+        <div class="wk-bot">
+          <span class="wk-base">base 35 🔒</span>
+          <span class="wk-help">+ help <input type="number" min="0" max="${STATE.maxHelpPerWeek}" value="${help}" ${bl||out?'disabled':''} data-act="help" data-week="${i}"> hrs
+            ${help>0&&!out?'<span class="lbl">added</span>':''}</span>
+          <label class="wk-out"><input type="checkbox" ${out?'checked':''} ${bl?'disabled':''} data-act="dout" data-week="${i}">designer out</label>
+        </div>
+      </div>`;
+    }).join('');
+    div.innerHTML=`<h3>Sprint ${s+1}${blackout?' <span style="font-size:11px;color:var(--purple-gray)">break</span>':''}</h3>
+      <div class="dates">${fmtNice(ws)} – ${fmtNice(we)}</div>
+      <div class="capbar">${bar||'<div class="capseg" style="width:0"></div>'}</div>
+      <div class="caplabel"><span>${used} hrs scheduled</span><span>${cap} hr capacity</span></div>
+      <div class="alloc">${chips}</div>
+      <div class="week-controls">${wkCtrls}</div>`;
+    root.appendChild(div);
+  }
+  wireSprints();
+}
+function renderHelpSummary(){
+  const behind=STATE.churches.filter(c=>c.status!=='launched'&&c.help&&c.help.state!=='ontime');
+  if(!behind.length){$('#helpSummary').innerHTML='<strong>All active sites are projected to launch on or before target.</strong> Reorder priority or adjust dev hours to keep it that way.';return;}
+  const rec=behind.filter(c=>c.help.state==='recoverable');
+  const locked=behind.filter(c=>c.help.state!=='recoverable');
+  const recHrs=rec.reduce((s,c)=>s+c.help.helpHours,0);
+  let msg='';
+  if(rec.length)msg+=`<strong>${rec.length} site${rec.length>1?'s':''} recoverable with help:</strong> ~${recHrs} designer hrs total (≈${(recHrs/7).toFixed(1)} days) across ${rec.map(c=>c.name).join(', ')}. `;
+  if(locked.length)msg+=`<strong>${locked.length} can't be recovered with help</strong> (${locked.map(c=>c.name+' — '+(c.help.reason==='dev-only'?'dev-only':c.help.reason==='designer-out'?'designer out':'capacity')).join('; ')}); those dates stand unless you renegotiate or add a developer.`;
+  $('#helpSummary').innerHTML=msg;
+}
+
+/* ---------- interactions ---------- */
+function wireQueue(){
+  document.querySelectorAll('[data-act="hours"]').forEach(el=>el.onchange=e=>{const c=find(e.target.dataset.id);c.devHours=Math.max(0,Number(e.target.value)||0);c.synced=false;render();});
+  document.querySelectorAll('[data-act="target"]').forEach(el=>el.onchange=e=>{find(e.target.dataset.id).target=e.target.value;render();});
+  document.querySelectorAll('[data-act="del"]').forEach(el=>el.onclick=e=>{STATE.churches=STATE.churches.filter(c=>c.id!==e.target.dataset.id);render();});
+  document.querySelectorAll('[data-act="recmode"]').forEach(el=>el.onclick=e=>{const c=find(e.target.dataset.id);c.recovery=c.recovery==='dev-only'?'designer':'dev-only';render();});
+  document.querySelectorAll('[data-act="applyhelp"]').forEach(el=>el.onclick=e=>applyHelp(e.target.dataset.id));
+  let dragId=null;
+  document.querySelectorAll('tr.row[draggable]').forEach(tr=>{
+    tr.addEventListener('dragstart',()=>{dragId=tr.dataset.id;tr.classList.add('dragging');});
+    tr.addEventListener('dragend',()=>tr.classList.remove('dragging'));
+    tr.addEventListener('dragover',e=>e.preventDefault());
+    tr.addEventListener('drop',e=>{e.preventDefault();reorder(dragId,tr.dataset.id);});
+  });
+}
+function wireSprints(){
+  document.querySelectorAll('[data-act="help"]').forEach(el=>el.onchange=e=>{const wk=Number(e.target.dataset.week),v=Math.max(0,Number(e.target.value)||0);if(v===0)delete STATE.helpHours[wk];else STATE.helpHours[wk]=v;render();});
+  document.querySelectorAll('[data-act="dout"]').forEach(el=>el.onchange=e=>{const wk=Number(e.target.dataset.week);if(e.target.checked)STATE.designerOut[wk]=true;else delete STATE.designerOut[wk];render();});
+}
+function reorder(fromId,toId){
+  if(!fromId||fromId===toId)return;
+  const arr=STATE.churches,fi=arr.findIndex(c=>c.id===fromId),ti=arr.findIndex(c=>c.id===toId);
+  const[moved]=arr.splice(fi,1);const nti=arr.findIndex(c=>c.id===toId);
+  arr.splice(nti+(ti>fi?1:0),0,moved);render();
+}
+function applyHelp(id){
+  const c=find(id);if(!c||!c.help||!c.help.perWeek)return;
+  Object.entries(c.help.perWeek).forEach(([i,h])=>{STATE.helpHours[i]=(STATE.helpHours[i]||0)+h;});
+  render();
+}
+
+/* ---------- ClickUp sync stub ---------- */
+/* Production: per partner, read the "Redesign: Build Phase" milestone — its rolled-up
+   time ESTIMATE -> planned dev hours, and summed TIME ENTRIES -> tracked hours.
+   See LAUNCH-PLANNER-SPEC.md §4. */
+function syncClickUp(){
+  const btn=$('#syncBtn');btn.textContent='⟳ Syncing…';
+  setTimeout(()=>{STATE.churches.forEach(c=>{if(c.status!=='launched'&&!c.synced)c.synced=true;});
+    btn.textContent='✓ Synced from ClickUp';setTimeout(()=>btn.textContent='⟳ Sync dev hours + tracked time',1800);render();},700);
+}
+
+/* ---------- bootstrap ---------- */
+$('#startDate').value=STATE.startDate;$('#baseCap').value=STATE.baseCap;$('#tail').value=STATE.tailDays;
+$('#startDate').onchange=e=>{STATE.startDate=e.target.value;STATE.helpHours={};STATE.designerOut={};render();};
+$('#baseCap').onchange=e=>{STATE.baseCap=Math.max(1,Number(e.target.value)||35);render();};
+$('#tail').onchange=e=>{STATE.tailDays=Math.max(0,Number(e.target.value)||0);render();};
+$('#syncBtn').onclick=syncClickUp;
+$('#addBtn').onclick=()=>{STATE.churches.push({id:'c'+Date.now(),member:0,name:'New partner site',target:fmtISO(addCal(parseD(STATE.startDate),90)),devHours:60,status:'queued',synced:false,recovery:'designer'});render();};
+render();
+</script>
+</body>
+</html>

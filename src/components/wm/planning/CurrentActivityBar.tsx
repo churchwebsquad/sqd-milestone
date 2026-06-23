@@ -19,7 +19,8 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2, Pause, CheckCircle2, AlertTriangle, ExternalLink, Info } from 'lucide-react'
 import { WMStatusPill } from '../StatusPill'
-import { ProvenanceBadge } from './ProvenanceBadge'
+// ProvenanceBadge was removed in the launch-planner reshape. Inline a
+// minimal source-tag pill below — same semantic, lighter footprint.
 import type { CurrentActivity } from '../../../lib/webCurrentActivity'
 import type { StallSignal } from '../../../lib/webStallDetector'
 import type { WebProjectPhase, ManualSubStatus } from '../../../types/database'
@@ -87,7 +88,14 @@ export function CurrentActivityBar({
           <p className="text-[13.5px] font-semibold text-wm-text truncate">
             {activity.oneLiner}
           </p>
-          <ProvenanceBadge provenance={provenance} />
+          {provenance && (
+            <span
+              title={provenance.detail ?? provenance.sourceLabel ?? ''}
+              className="shrink-0 text-[9px] uppercase tracking-widest font-bold text-wm-text-subtle"
+            >
+              {provenance.mode === 'manual' ? '○' : '●'} {provenance.sourceLabel ?? provenance.mode}
+            </span>
+          )}
         </div>
 
         {/* Stall / manual-override surface */}

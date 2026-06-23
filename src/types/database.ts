@@ -1113,31 +1113,38 @@ export interface StrategyWebProject {
   denominational_filter:      string | null
   personas:                   WebPersona[]
 
-  // ── v58 — Website Manager scheduler ────────────────────────
-  // Target launch date (the calendar promise to the partner) and
-  // overall dev-hours budget. Phase-level estimates + AI-assist
-  // multipliers live in JSONB so the shape can evolve without
-  // adding columns. owner_employee_id assigns a Web team member;
-  // sub_status caches the last computed health pill so list-page
-  // queries don't have to recompute on every render.
-  launch_date:                string | null    // date (ISO yyyy-mm-dd)
-  priority_order:             number | null
-  dev_hours_estimate:         number | null
-  phase_estimates:            PhaseEstimates
-  ai_assist_multipliers:      AiAssistMultipliers
+  // ── Launch planner (v90 reshape — flat planned_dev_hours model) ──
+  //
+  // Replaces the old page-count × hrs/page × Novamira × per-project
+  // assist system with the prototype's flat planning model. Per-week
+  // org-wide help-hours, designer-out, and blackouts live on
+  // strategy_dev_weekly_allocations (repurposed in v90).
+  launch_date:                string | null    // date (ISO yyyy-mm-dd) — target_launch
+  priority_order:             number | null    // 1 = top of queue; drag-drop reorders
+  dev_hours_estimate:         number | null    // planned_dev_hours; manual or ClickUp Build-Phase rollup
   owner_employee_id:          string | null
   sub_status:                 ProjectSubStatus | null
 
-  // ── v60 — manual progress overrides ────────────────────
-  // Fraction complete per phase (0..1). When set, beats the
-  // milestone-derived progress. Missing key = 0.
-  phase_progress:             PhaseProgress
-  // Explicit override that wins over the phase math. When set,
-  // computeProjectHealth uses this number as `remaining` directly.
-  manual_remaining_hours:     number | null
-  // Markdown the strategist writes about "what's done, what's left,
-  // what's blocking." Surfaced on the side panel + board row.
-  status_note:                string | null
+  // ── v90 — launch planner ──
+  /** Sum of time entries on the ClickUp Build Phase milestone subtree.
+   *  Populated by clickupBuildPhase sync; 0 until synced. */
+  tracked_hours:              number
+  /** 0..1 progress fraction (optional). Drives pace projection;
+   *  falls back to tracked_hours / dev_hours_estimate when null. */
+  pct_complete:               number | null
+  /** 'designer' = a second person can pick up review-cycle edits /
+   *  image uploads to recover a behind-target launch.
+   *  'dev-only' = recovery requires the developer; date stands. */
+  recovery_mode:              'designer' | 'dev-only'
+  /** Optional immovable date (event-driven). Red flag if the
+   *  projected launch crosses it. */
+  hard_deadline:              string | null
+  /** ClickUp task id for the "Redesign: Build Phase" milestone task. */
+  clickup_build_task_id:      string | null
+  /** 'manual' = strategist typed dev_hours_estimate.
+   *  'clickup' = rolled up at last_synced_at. */
+  dev_hours_source:           'manual' | 'clickup'
+  last_synced_at:             string | null    // ISO timestamptz
 
   // ── v77 — audit branch global footer ─────────────────────
   // Partner-written global footer extracted from the Notion DB
@@ -1147,43 +1154,30 @@ export interface StrategyWebProject {
   global_footer: CoworkGlobalFooter | null
 
   // ── v79 — manual planning status + dismissals ─────────────
-  // AM-set override that beats the computed sub_status. When set,
-  // projection treats the project as paused so dev capacity frees up.
-  // Values: 'in_progress' | 'waiting_partner' | 'blocked' | 'paused'
-  // | null (= use computed). Reason + auto-stamps surface in the
-  // needs-attention digest and risk panel.
   manual_sub_status:        ManualSubStatus | null
   status_reason:            string | null
   status_changed_at:        string | null    // ISO timestamptz
   status_changed_by:        string | null    // employee_id
   /** When a stall warning was dismissed, the timestamp the dismissal
-   *  expires. Lets the user silence a known-slow step without
-   *  losing the signal forever. */
+   *  expires. */
   stalled_dismissed_until:  string | null    // ISO timestamptz
 
-  // ── Planning velocity levers (v89) ──────────────────────────────
-  /** Manual override for expected total pages. Used by hour math
-   *  before web_pages is scaffolded. Null = use the live web_pages
-   *  count instead. */
-  expected_page_count:           number | null
-  /** Per-project dev-hours-per-page baseline. Team default 3.0;
-   *  the Novamira-on target is 1.5. */
-  dev_hours_per_page:            number
-  /** When true, hour math applies a 0.5 multiplier — Novamira-assisted
-   *  dev runs roughly half the hours. */
-  uses_novamira:                 boolean
-  /** When true, review-cycle edits land in the designer's queue
-   *  instead of the developer's — reduces dev hours during review. */
-  dev_edits_route_to_designer:   boolean
-  /** Extra hours/week of dev capacity for this project from a helper
-   *  outside the team default 35h cap (e.g. Ashley assisting). */
-  assist_hours_per_week_extra:   number
-  /** Strategist flips this when intake + content + design phases are
-   *  all done, so the math can attribute the full launch budget to
-   *  dev. Replaces the per-phase budget/progress sliders. */
-  pre_dev_complete:              boolean
-
   [key: string]: unknown
+}
+
+/** Per-week org-wide adjustments to the launch scheduler. One row
+ *  per Monday-start affected week. `help_hours` add capacity on top
+ *  of the developer's locked 35h base; `designer_out` zeros help for
+ *  that week; `is_blackout` zeros total capacity (Christmas, etc.). */
+export interface StrategyDevWeeklyAllocation {
+  id:            string
+  week_starting: string         // ISO yyyy-mm-dd Monday
+  help_hours:    number
+  designer_out:  boolean
+  is_blackout:   boolean
+  reason:        string | null
+  created_at:    string
+  updated_at:    string
 }
 
 export type ManualSubStatus =

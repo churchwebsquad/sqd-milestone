@@ -1,76 +1,40 @@
 /**
- * Website Manager — Screen 1: Projects grid.
+ * Website Launch Planner — /web.
  *
- * Lists every active website project across the squad, with a card
- * per project showing the partner, the project name, the engagement
- * type, and the current phase. Click a card → drill into Screen 2
- * (per-project hub at /web/:projectId).
+ * Single-surface admin panel for scheduling the development bottleneck
+ * across back-to-back two-week sprints. Ported wholesale from the
+ * prototypes/launch-planner/launch-planner-prototype.html mental model:
  *
- * Phase 1 of the Web Manager build only displays projects + supports
- * "Add Web Project". Status pills per tool (Intake / Content / etc.)
- * land on Screen 2 in Phase 1; aggregating them onto these cards is
- * a Phase 2 polish.
+ *   - StatCards          headline (active · queued hrs · help scheduled · behind)
+ *   - NewProspectSimulator   "when could this church launch?" sandbox
+ *   - QueueTable             drag-reorder priority + inline editors + pace
+ *   - SprintTimeline         2-week capacity cards + per-week help/out/blackout
+ *   - HelpCallout            recovery summary (recoverable vs not)
+ *
+ * The per-project Planning tab at /web/:id?tab=planning stays — it
+ * becomes a thin slice showing this project's queue row + current
+ * activity signals (see PlanningWorkspace).
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { ChevronDown, ChevronRight, Library, MessageCircle, Plus, Search, Settings, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { SettingsWorkspace } from '../../components/wm/workspaces/SettingsWorkspace'
-import { WMSegmentedToggle } from '../../components/wm/SegmentedToggle'
-import { ListView } from '../../components/wm/manager/ListView'
-import { WeekHourGrid } from '../../components/wm/manager/WeekHourGrid'
-import { NeedsAttentionStrip } from '../../components/wm/manager/NeedsAttentionStrip'
-import { NewProspectSimulator } from '../../components/wm/manager/NewProspectSimulator'
-import { DevCapacityBanner } from '../../components/wm/manager/DevCapacityBanner'
-import { useProjectsWithHealth } from '../../hooks/useProjectsWithHealth'
-import type { ProjectRowVM } from '../../hooks/useProjectsWithHealth'
-
-// Two surfaces: a per-project List for priority + launch date shuffling,
-// and a Week-Hour Grid for visualizing the cap. Everything else
-// (Board/Phases/Schedule/Waterfall/Calendar/Forecast) is folded into
-// these two — phase boards added cognitive load without driving the
-// "where do my dev hours go this week" question.
-type ManagerView = 'list' | 'grid'
+import { StatCards } from '../../components/launch/StatCards'
+import { QueueTable } from '../../components/launch/QueueTable'
+import { SprintTimeline } from '../../components/launch/SprintTimeline'
+import { HelpCallout } from '../../components/launch/HelpCallout'
+import { NewProspectSimulator } from '../../components/launch/NewProspectSimulator'
+import { useLaunchPlan } from '../../hooks/useLaunchPlan'
 
 export default function WebProjectsPage() {
   const navigate = useNavigate()
-  const [params, setParams] = useSearchParams()
-  const view: ManagerView = ((): ManagerView => {
-    const v = params.get('view')
-    return v === 'grid' ? 'grid' : 'list'
-  })()
-  const showArchived = params.get('archived') === '1'
-  const query       = params.get('q') ?? ''
-
   const [createOpen, setCreateOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  const { rows, loading, error, refetch } = useProjectsWithHealth({ includeArchived: showArchived })
-
-  // Filter / search before passing to the view. Phase + health filters
-  // were dropped — the List view already shows phase + health pills
-  // and the WeekHourGrid renders every active project. Search covers
-  // ad-hoc lookups.
-  const visible = useMemo<ProjectRowVM[]>(() => {
-    const q = query.trim().toLowerCase()
-    return rows.filter(r => {
-      if (!showArchived && r.archived) return false
-      if (showArchived && !r.archived) return false
-      if (!q) return true
-      const hay = [r.church_name, r.name, String(r.member)].filter(Boolean).join(' ').toLowerCase()
-      return hay.includes(q)
-    })
-  }, [rows, query, showArchived])
-
-  const archivedCount = rows.filter(r => r.archived).length
-
-  const setParam = (key: string, value: string | null) => {
-    const next = new URLSearchParams(params)
-    if (value === null || value === '') next.delete(key)
-    else next.set(key, value)
-    setParams(next, { replace: true })
-  }
+  const plan = useLaunchPlan()
+  const launchedCount = plan.rows.filter(r => r.current_phase === 'launched' && !r.archived).length
 
   return (
     <div className="min-h-full py-6 px-4 md:px-6">
@@ -79,10 +43,12 @@ export default function WebProjectsPage() {
         <div className="mb-6 flex items-start justify-between gap-3 flex-wrap">
           <div>
             <p className="text-xs font-bold text-primary-purple uppercase tracking-widest mb-1">Web</p>
-            <h1 className="text-2xl font-semibold text-deep-plum">Website Manager</h1>
+            <h1 className="text-2xl font-semibold text-deep-plum">Website Launch Planner</h1>
             <p className="text-sm text-purple-gray mt-1 max-w-xl">
-              Every active website project across the squad. Each project rolls up Intake, Content,
-              Design, Dev, and Reviews against a shared brief, brand, and section library.
+              Schedules the development bottleneck across back-to-back 2-week sprints.
+              One developer, hard <strong className="text-deep-plum">35 hrs/wk</strong>.
+              Extra help hours from a second person (typically the designer) recover
+              behind-target dates — when the work is offloadable and the designer is available.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
@@ -127,138 +93,63 @@ export default function WebProjectsPage() {
           </div>
         </div>
 
-        {/* Org-wide Site Manager settings — applies to every project,
-            every church. Collapsed by default; toggle from the header. */}
         {settingsOpen && (
           <div className="mb-6 rounded-2xl border border-lavender bg-white/60 p-5">
             <div className="mb-3">
               <p className="text-xs font-bold text-primary-purple uppercase tracking-widest mb-0.5">Org-wide</p>
               <h2 className="text-base font-semibold text-deep-plum">Settings</h2>
-              <p className="text-xs text-purple-gray mt-0.5">
-                Changes here apply to every project, every church.
-              </p>
+              <p className="text-xs text-purple-gray mt-0.5">Changes here apply to every project, every church.</p>
             </div>
             <SettingsWorkspace />
           </div>
         )}
 
-        {/* Dev capacity outlook — answers "is dev overbooked?" at a glance.
-            The WeekHourGrid below shows the per-project breakdown; this
-            banner is the headline summary. */}
-        <DevCapacityBanner rows={rows} />
-
-        {/* Needs-attention digest — what should I look at right now?
-            Composes consolidator + feasibility + stall + capacity. */}
-        <div className="mt-3 mb-4">
-          <NeedsAttentionStrip
-            rows={rows}
-            onOpenProject={(id) => navigate(`/web/${id}?tab=planning`)}
-            onOpenSprint={(startISO) => navigate(`/web?view=waterfall&sprint=${startISO}`)}
-          />
-        </div>
-
-        {/* New-prospect simulator — answers "when can this church
-            launch?" without creating a project. Sandboxed; nothing
-            is written. Collapsed by default. */}
-        <div className="mb-4">
-          <NewProspectSimulator rows={rows} />
-        </div>
-
-        {/* Toolbar: view toggle + search + archived.
-            Two surfaces only — List (per-project priority + launch) and
-            Week-Hour Grid (per-week capacity). The old 7-view toggle
-            (Board/Phases/Schedule/Waterfall/Calendar/Forecast) added
-            cognitive load without driving the dev-hour question. */}
-        <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
-          <WMSegmentedToggle<ManagerView>
-            active={view}
-            onChange={(v) => setParam('view', v === 'list' ? null : v)}
-            options={[
-              { key: 'list', label: 'List' },
-              { key: 'grid', label: 'Week-Hour Grid' },
-            ]}
-          />
-
-          <div className="relative flex-1 min-w-[280px] max-w-md">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-purple-gray/60" />
-            <input
-              type="text"
-              value={query}
-              onChange={e => setParam('q', e.target.value || null)}
-              placeholder="Search by church, project, or member…"
-              className="w-full rounded-full border border-lavender bg-white pl-9 pr-10 py-2 text-sm text-deep-plum placeholder-purple-gray/60 outline-none focus:border-primary-purple focus:ring-2 focus:ring-primary-purple/20"
-            />
-            {query && (
-              <button
-                type="button"
-                onClick={() => setParam('q', null)}
-                aria-label="Clear search"
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-purple-gray hover:text-deep-plum"
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
-
-          {archivedCount > 0 && (
-            <label className="inline-flex items-center gap-1.5 text-xs text-purple-gray cursor-pointer select-none shrink-0">
-              <input
-                type="checkbox"
-                checked={showArchived}
-                onChange={e => setParam('archived', e.target.checked ? '1' : null)}
-                className="accent-deep-plum"
-              />
-              Archived ({archivedCount})
-            </label>
-          )}
-        </div>
-
-        <p className="text-xs text-purple-gray mb-3">
-          {visible.length} {visible.length === 1 ? 'project' : 'projects'}
-        </p>
-
-        {error && !loading && (
+        {plan.error && !plan.loading && (
           <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 mb-3">
-            Couldn't load projects: {error}
+            Couldn't load launch plan: {plan.error}
           </div>
         )}
 
-        {view === 'list' && (
-          <ListView
-            rows={visible}
-            loading={loading}
-            onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
-            query={query}
-            onPriorityChange={async (movedId, targetOrder) => {
-              // Drag-and-drop is always live in /web List. Drop the
-              // moved project at targetOrder, shift others. No "bulk
-              // reorder" toggle — priority is editable any time.
-              const ordered = [...visible].sort(
-                (a, b) => (a.priority_order ?? 999) - (b.priority_order ?? 999),
-              )
-              const sansMoved = ordered.filter(r => r.id !== movedId)
-              const movedIdx = Math.max(0, Math.min(sansMoved.length, targetOrder - 1))
-              sansMoved.splice(movedIdx, 0, ordered.find(r => r.id === movedId)!)
-              const updates = sansMoved.map((r, i) =>
-                supabase.from('strategy_web_projects')
-                  .update({ priority_order: i + 1, updated_at: new Date().toISOString() })
-                  .eq('id', r.id),
-              )
-              await Promise.all(updates)
-              await refetch()
-            }}
-            onLaunchDateChange={async (projectId, iso) => {
-              await supabase.from('strategy_web_projects')
-                .update({ launch_date: iso, updated_at: new Date().toISOString() })
-                .eq('id', projectId)
-              await refetch()
-            }}
-          />
-        )}
+        <StatCards
+          sites={plan.sites}
+          schedule={plan.schedule}
+          adjustments={plan.adjustments}
+          recovery={plan.recovery}
+          cfg={plan.cfg}
+          launchedCount={launchedCount}
+        />
 
-        {view === 'grid' && (
-          <WeekHourGrid rows={visible} capacityPerWeek={35} />
-        )}
+        <div className="mb-4">
+          <NewProspectSimulator
+            sites={plan.sites}
+            rows={plan.rows}
+            adjustments={plan.adjustments}
+            cfg={plan.cfg}
+          />
+        </div>
+
+        <QueueTable
+          rows={plan.rows}
+          sites={plan.sites}
+          schedule={plan.schedule}
+          recovery={plan.recovery}
+          cfg={plan.cfg}
+          onReorder={plan.reorderPriority}
+          onPatch={async (id, patch) => plan.setProjectField(id, patch)}
+          onApplyHelp={plan.applyRecoveryHelp}
+          onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
+        />
+
+        <SprintTimeline
+          rows={plan.rows}
+          sites={plan.sites}
+          schedule={plan.schedule}
+          adjustments={plan.adjustments}
+          cfg={plan.cfg}
+          onAdjust={plan.upsertWeekAdjustment}
+        />
+
+        <HelpCallout rows={plan.rows} recovery={plan.recovery} />
 
       </div>
 

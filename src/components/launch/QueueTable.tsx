@@ -1,0 +1,406 @@
+/**
+ * Build queue table — the primary editing surface on /web.
+ *
+ * Ported from the prototype's queue table. Every value is editable:
+ *   - drag handle to reorder (priority_order)
+ *   - inline target date
+ *   - inline dev hours (manual; flips dev_hours_source = 'manual')
+ *   - recovery-mode chip toggle (designer ↔ dev-only)
+ *   - hard-deadline flag
+ *
+ * Read-only signals:
+ *   - projected launch + Δ pill
+ *   - sprint span
+ *   - tracked vs estimate progress bar + pace badge (when in_progress
+ *     AND tracked_hours > 0)
+ *
+ * Behind-target rows render an inline RECOVERY row below them
+ *   (amber w/ "Apply help" CTA when recoverable; gray "date stands"
+ *   when locked / insufficient).
+ */
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { ArrowRight, ExternalLink, Flag, GripVertical } from 'lucide-react'
+import {
+  calBtw, parseD, paceOf, weekStart,
+  type SchedulerSite, type SchedulerConfig, type SiteSchedule,
+} from '../../lib/launchScheduler'
+import type { RecoveryResult } from '../../lib/launchRecoverySolver'
+import type { ProjectLaunchRow } from '../../hooks/useLaunchPlan'
+
+interface Props {
+  rows:        ProjectLaunchRow[]
+  sites:       SchedulerSite[]
+  schedule:    Record<string, SiteSchedule>
+  recovery:    Record<string, RecoveryResult>
+  cfg:         SchedulerConfig
+  onReorder:   (orderedIds: string[]) => Promise<void>
+  onPatch:     (id: string, patch: Partial<ProjectLaunchRow>) => Promise<void>
+  onApplyHelp: (perWeek: Record<number, number>) => Promise<void>
+  /** Navigation to the per-project workspace at ?tab=planning. */
+  onSelect:    (id: string) => void
+}
+
+export function QueueTable({
+  rows, sites, schedule, recovery, cfg, onReorder, onPatch, onApplyHelp, onSelect,
+}: Props) {
+  const [dragId, setDragId] = useState<string | null>(null)
+
+  // Build display rows = active + waiting_feedback (launched excluded
+  // — they're shown in a collapsed group below). Order by priority_order
+  // (nulls last).
+  const visible = [...rows]
+    .filter(r => r.current_phase !== 'launched' && !r.archived)
+    .sort((a, b) => (a.priority_order ?? 99_999) - (b.priority_order ?? 99_999))
+
+  const launched = rows.filter(r => r.current_phase === 'launched' && !r.archived)
+
+  const handleDrop = (targetId: string) => {
+    if (!dragId || dragId === targetId) {
+      setDragId(null)
+      return
+    }
+    // Renumber priority_order around the drop position.
+    const ordered = visible.map(r => r.id)
+    const fromIdx = ordered.indexOf(dragId)
+    const toIdx   = ordered.indexOf(targetId)
+    if (fromIdx < 0 || toIdx < 0) return
+    const next = [...ordered]
+    const [moved] = next.splice(fromIdx, 1)
+    next.splice(toIdx, 0, moved)
+    void onReorder(next)
+    setDragId(null)
+  }
+
+  return (
+    <div className="rounded-2xl border border-lavender bg-white overflow-hidden">
+      <div className="px-4 py-3 border-b border-lavender bg-lavender-tint/30">
+        <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">Build queue</p>
+        <p className="text-sm text-purple-gray mt-0.5">
+          Drag to reorder priority. Dev runs top-to-bottom at <strong className="text-deep-plum">{cfg.base_weekly_cap} hrs/wk</strong>.
+          Behind-target rows show whether help can recover the date — or whether the date stands.
+        </p>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-[12px] border-collapse">
+          <thead>
+            <tr className="text-left">
+              <Th w="24px"></Th>
+              <Th w="32px">#</Th>
+              <Th>Partner</Th>
+              <Th>Target</Th>
+              <Th>Projected</Th>
+              <Th>Δ</Th>
+              <Th>Tracked vs est.</Th>
+              <Th>Dev hrs</Th>
+              <Th>Recovery</Th>
+              <Th>Sprint</Th>
+              <Th w="32px"></Th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((row, idx) => {
+              const site = sites.find(s => s.id === row.id)
+              const slot = schedule[row.id]
+              const rec  = recovery[row.id]
+              const isWaiting = site?.status === 'waiting_feedback'
+              return (
+                <RowAndRecovery
+                  key={row.id}
+                  row={row}
+                  site={site}
+                  slot={slot}
+                  rec={rec}
+                  priority={idx + 1}
+                  cfg={cfg}
+                  isWaiting={isWaiting}
+                  draggingMe={dragId === row.id}
+                  onDragStart={() => setDragId(row.id)}
+                  onDragOver={ev => ev.preventDefault()}
+                  onDrop={() => handleDrop(row.id)}
+                  onPatch={(patch) => void onPatch(row.id, patch)}
+                  onApplyHelp={onApplyHelp}
+                  onSelect={onSelect}
+                />
+              )
+            })}
+            {visible.length === 0 && (
+              <tr><td colSpan={11} className="px-4 py-6 text-center text-sm text-purple-gray italic">No active projects.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {launched.length > 0 && (
+        <details className="border-t border-lavender">
+          <summary className="px-4 py-2 text-[11px] uppercase tracking-widest font-bold text-purple-gray cursor-pointer hover:bg-lavender-tint/20">
+            Launched ({launched.length})
+          </summary>
+          <ul className="px-4 py-2 space-y-0.5">
+            {launched.map(p => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  onClick={() => onSelect(p.id)}
+                  className="text-[12px] text-purple-gray hover:text-deep-plum"
+                >
+                  {p.church_name ?? p.name} <span className="text-[10px] font-mono">#{p.member}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  )
+}
+
+// ── Row + inline recovery ────────────────────────────────────────
+
+function RowAndRecovery({
+  row, site, slot, rec, priority, cfg, isWaiting,
+  draggingMe, onDragStart, onDragOver, onDrop, onPatch, onApplyHelp, onSelect,
+}: {
+  row:        ProjectLaunchRow
+  site:       SchedulerSite | undefined
+  slot:       SiteSchedule | undefined
+  rec:        RecoveryResult | undefined
+  priority:   number
+  cfg:        SchedulerConfig
+  isWaiting:  boolean
+  draggingMe: boolean
+  onDragStart:() => void
+  onDragOver: (ev: React.DragEvent) => void
+  onDrop:     () => void
+  onPatch:    (patch: Partial<ProjectLaunchRow>) => void
+  onApplyHelp:(perWeek: Record<number, number>) => Promise<void>
+  onSelect:   (id: string) => void
+}) {
+  const isLate = slot?.delta != null && slot.delta < 0
+  const pace   = site ? paceOf(site) : null
+  const launchedISO = slot?.launchDate ? slot.launchDate.toISOString().slice(0, 10) : null
+  const span = slot
+    ? sprintLabel(slot.startWeek, slot.endWeek, cfg)
+    : '—'
+  const hardDeadlineMissed = row.hard_deadline && launchedISO && launchedISO > row.hard_deadline
+
+  return (
+    <>
+      <tr
+        draggable
+        onDragStart={onDragStart}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        className={[
+          'border-t border-lavender/60',
+          draggingMe ? 'opacity-40' : '',
+          isLate ? 'bg-red-50/40' : 'hover:bg-lavender-tint/15',
+          'cursor-grab',
+        ].join(' ')}
+      >
+        <td className="px-2 py-2 align-top"><GripVertical size={13} className="text-purple-gray" /></td>
+        <td className="px-2 py-2 align-top font-mono text-[11px] text-purple-gray">{priority}</td>
+        <td className="px-2 py-2 align-top min-w-[180px]">
+          <button
+            type="button"
+            onClick={() => onSelect(row.id)}
+            className="text-left text-[12.5px] font-semibold text-deep-plum hover:text-primary-purple inline-flex items-center gap-1"
+          >
+            {row.church_name ?? row.name}
+            <ArrowRight size={10} className="opacity-50" />
+          </button>
+          <div className="flex items-center gap-2 mt-0.5 text-[10px] text-purple-gray">
+            <span className="font-mono">#{row.member}</span>
+            {row.current_phase && <><span>·</span><span>{row.current_phase}</span></>}
+            {isWaiting && <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[9px] font-bold uppercase">Waiting feedback</span>}
+            {row.hard_deadline && (
+              <span className={`ml-1 inline-flex items-center gap-0.5 ${hardDeadlineMissed ? 'text-red-700 font-bold' : 'text-amber-700'}`}>
+                <Flag size={9} /> {row.hard_deadline.slice(5)}
+              </span>
+            )}
+          </div>
+        </td>
+        <td className="px-2 py-2 align-top">
+          <input
+            type="date"
+            value={row.launch_date ?? ''}
+            onChange={e => onPatch({ launch_date: e.target.value || null })}
+            className="text-[11.5px] font-mono px-1.5 py-1 rounded border border-transparent hover:border-lavender focus:border-primary-purple focus:outline-none bg-transparent"
+          />
+        </td>
+        <td className="px-2 py-2 align-top font-mono text-[11.5px] text-deep-plum">
+          {isWaiting
+            ? <span className="text-purple-gray italic">waiting</span>
+            : launchedISO ? shortDate(launchedISO) : '—'}
+        </td>
+        <td className="px-2 py-2 align-top">
+          {slot?.delta != null && !isWaiting ? <DeltaPill delta={slot.delta} /> : <span className="text-purple-gray">—</span>}
+        </td>
+        <td className="px-2 py-2 align-top min-w-[140px]">
+          {pace ? <PaceCell pace={pace} planned={site!.planned_dev_hours} tracked={site!.tracked_hours} /> : <span className="text-purple-gray italic text-[11px]">—</span>}
+        </td>
+        <td className="px-2 py-2 align-top">
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={row.dev_hours_estimate ?? 60}
+              onChange={e => onPatch({ dev_hours_estimate: e.target.value === '' ? null : Number(e.target.value), dev_hours_source: 'manual' })}
+              className="w-14 text-[11.5px] font-mono text-right px-1.5 py-1 rounded border border-transparent hover:border-lavender focus:border-primary-purple focus:outline-none bg-transparent"
+            />
+            <span className="text-[9px] text-purple-gray">h</span>
+            <span
+              className={`text-[9px] font-bold uppercase tracking-widest ${row.dev_hours_source === 'clickup' ? 'text-emerald-700' : 'text-purple-gray'}`}
+              title={row.dev_hours_source === 'clickup'
+                ? `From ClickUp sync · ${row.last_synced_at ? new Date(row.last_synced_at).toLocaleDateString() : ''}`
+                : 'Manually entered'}
+            >
+              {row.dev_hours_source === 'clickup' ? '●' : '○'}
+            </span>
+          </div>
+        </td>
+        <td className="px-2 py-2 align-top">
+          <button
+            type="button"
+            onClick={() => onPatch({ recovery_mode: row.recovery_mode === 'designer' ? 'dev-only' : 'designer' })}
+            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${row.recovery_mode === 'designer' ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-purple-gray/30 bg-cream text-purple-gray'}`}
+            title={row.recovery_mode === 'designer'
+              ? 'Help can be offloaded to the designer. Click → dev-only.'
+              : 'Work is developer-only — can\'t offload. Click → designer.'}
+          >
+            {row.recovery_mode === 'designer' ? '🎨 designer' : '🔒 dev-only'}
+          </button>
+        </td>
+        <td className="px-2 py-2 align-top font-mono text-[10.5px] text-purple-gray whitespace-nowrap">{span}</td>
+        <td className="px-2 py-2 align-top">
+          <Link to={`/web/${row.id}?tab=planning`} className="text-purple-gray hover:text-primary-purple" title="Open project planning tab">
+            <ExternalLink size={11} />
+          </Link>
+        </td>
+      </tr>
+      {rec && rec.state !== 'on_time' && !isWaiting && (
+        <tr>
+          <td colSpan={11} className="px-2 pb-2">
+            <RecoveryRow rec={rec} cfg={cfg} onApplyHelp={onApplyHelp} />
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+// ── Recovery inline row ──────────────────────────────────────────
+
+function RecoveryRow({
+  rec, cfg, onApplyHelp,
+}: { rec: RecoveryResult; cfg: SchedulerConfig; onApplyHelp: (perWeek: Record<number, number>) => Promise<void> }) {
+  if (rec.state === 'recoverable' && rec.perWeek && rec.helpHours) {
+    const weeks = Object.entries(rec.perWeek)
+      .map(([idx, h]) => ({ idx: Number(idx), h }))
+      .sort((a, b) => a.idx - b.idx)
+      .map(w => `wk ${shortDate(weekStart(w.idx, cfg).toISOString().slice(0, 10))}: +${w.h}h`)
+    return (
+      <div className="ml-10 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 flex items-start justify-between gap-2">
+        <p className="text-[11.5px] text-amber-900">
+          <strong>{rec.behind}d behind.</strong> Recoverable: add{' '}
+          <strong>{rec.helpHours} help hrs</strong> (≈{(rec.helpHours / 7).toFixed(1)} designer-days) in {weeks.join(' · ')} →
+          launches <strong>{shortDate(rec.date.toISOString().slice(0, 10))}</strong>, within target.
+        </p>
+        <button
+          type="button"
+          onClick={() => void onApplyHelp(rec.perWeek ?? {})}
+          className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-md bg-deep-plum text-white text-[11px] font-semibold hover:bg-primary-purple"
+        >
+          Apply help
+        </button>
+      </div>
+    )
+  }
+  if (rec.state === 'locked') {
+    const reason = rec.reason === 'dev-only'
+      ? 'Work is developer-only — can\'t offload.'
+      : 'Designer unavailable in the weeks that feed this site.'
+    return (
+      <div className="ml-10 rounded-md border border-purple-gray/30 bg-cream px-3 py-2">
+        <p className="text-[11.5px] text-purple-gray">
+          <strong>{rec.behind}d behind.</strong> {reason}{' '}
+          Projected launch <strong>{shortDate(rec.date.toISOString().slice(0, 10))}</strong> stands —
+          renegotiate the target, reprioritize, or add a second developer.
+        </p>
+      </div>
+    )
+  }
+  if (rec.state === 'insufficient' && rec.perWeek && rec.helpHours) {
+    return (
+      <div className="ml-10 rounded-md border border-red-300 bg-red-50 px-3 py-2 flex items-start justify-between gap-2">
+        <p className="text-[11.5px] text-red-900">
+          <strong>{rec.behind}d behind.</strong> Even {rec.helpHours} help hrs ({(rec.helpHours / 7).toFixed(1)} designer-days)
+          isn't enough — best achievable date is <strong>{shortDate(rec.date.toISOString().slice(0, 10))}</strong>
+          ({rec.stillLate}d still late).
+        </p>
+        <button
+          type="button"
+          onClick={() => void onApplyHelp(rec.perWeek ?? {})}
+          className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-red-400 text-red-800 text-[11px] font-semibold hover:bg-red-100"
+        >
+          Apply best-effort help
+        </button>
+      </div>
+    )
+  }
+  return null
+}
+
+// ── Helpers ──────────────────────────────────────────────────────
+
+function Th({ children, w }: { children?: React.ReactNode; w?: string }) {
+  return (
+    <th style={w ? { width: w } : undefined} className="px-2 py-2 text-[10px] uppercase tracking-widest font-bold text-purple-gray border-b border-lavender">
+      {children}
+    </th>
+  )
+}
+
+function DeltaPill({ delta }: { delta: number }) {
+  const tone = delta < 0 ? 'bg-red-100 text-red-800'
+            : delta <= 7 ? 'bg-amber-100 text-amber-800'
+            : 'bg-emerald-100 text-emerald-800'
+  const text = delta < 0 ? `−${Math.abs(delta)}d` : `+${delta}d`
+  return <span className={`inline-block text-[10.5px] font-bold px-2 py-0.5 rounded-full ${tone}`}>{text}</span>
+}
+
+function PaceCell({ pace, planned, tracked }: { pace: ReturnType<typeof paceOf> extends null | infer R ? R : never; planned: number; tracked: number }) {
+  if (!pace) return null
+  const tone = pace.cls === 'late' ? 'bg-red-500'
+            : pace.cls === 'tight' ? 'bg-amber-500'
+            : 'bg-emerald-500'
+  return (
+    <div>
+      <div className="h-1.5 w-full rounded bg-lavender-tint overflow-hidden">
+        <div className={`h-full ${tone}`} style={{ width: `${Math.min(100, pace.pct)}%` }} />
+      </div>
+      <p className="text-[10px] font-mono text-purple-gray mt-0.5">
+        {pace.pct}% · {tracked}/{planned}h ·{' '}
+        <span className={pace.cls === 'late' ? 'text-red-700 font-bold' : pace.cls === 'tight' ? 'text-amber-700' : 'text-emerald-700'}>
+          {pace.over > 0 ? `+${pace.over} over` : pace.over < 0 ? `${pace.over} under` : 'on est.'}
+        </span>
+      </p>
+    </div>
+  )
+}
+
+function sprintLabel(startWeek: number, endWeek: number, cfg: SchedulerConfig): string {
+  // Spec convention: S1 = weeks 0..1, S2 = weeks 2..3, etc.
+  const s = Math.floor(startWeek / cfg.sprint_weeks) + 1
+  const e = Math.floor(endWeek   / cfg.sprint_weeks) + 1
+  return s === e ? `S${s}` : `S${s}–S${e}`
+}
+
+function shortDate(iso: string): string {
+  try {
+    const d = new Date(`${iso}T00:00:00`)
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  } catch { return iso }
+}
