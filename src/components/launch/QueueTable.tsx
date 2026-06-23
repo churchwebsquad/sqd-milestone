@@ -1,28 +1,21 @@
 /**
  * Build queue table — the primary editing surface on /web.
  *
- * Ported from the prototype's queue table. Every value is editable:
- *   - drag handle to reorder (priority_order)
- *   - inline target date
- *   - inline dev hours (manual; flips dev_hours_source = 'manual')
- *   - recovery-mode chip toggle (designer ↔ dev-only)
- *   - hard-deadline flag
+ * Column order: Partner → Projected (highlighted) → Target → Δ →
+ * Design due → Dev starts (with Sprint sub-label) → Dev hrs → Help hrs.
+ * Every numeric/date cell is inline-editable; drag-reorder writes
+ * priority_order.
  *
- * Read-only signals:
- *   - projected launch + Δ pill
- *   - sprint span
- *   - tracked vs estimate progress bar + pace badge (when in_progress
- *     AND tracked_hours > 0)
- *
- * Behind-target rows render an inline RECOVERY row below them
- *   (amber w/ "Apply help" CTA when recoverable; gray "date stands"
- *   when locked / insufficient).
+ * Behind-target rows render an inline read-only RECOVERY row beneath
+ * the main row. The amber recoverable callout tells the AM how many
+ * help hours land the church back on target — they enter that number
+ * in the Help hrs column themselves.
  */
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, ExternalLink, Flag, GripVertical } from 'lucide-react'
 import {
-  paceOf, weekStart,
+  weekStart,
   type SchedulerSite, type SchedulerConfig, type SiteSchedule,
 } from '../../lib/launchScheduler'
 import type { RecoveryResult } from '../../lib/launchRecoverySolver'
@@ -36,13 +29,12 @@ interface Props {
   cfg:         SchedulerConfig
   onReorder:   (orderedIds: string[]) => Promise<void>
   onPatch:     (id: string, patch: Partial<ProjectLaunchRow>) => Promise<void>
-  onApplyHelp: (perWeek: Record<number, number>) => Promise<void>
   /** Navigation to the per-project workspace at ?tab=planning. */
   onSelect:    (id: string) => void
 }
 
 export function QueueTable({
-  rows, sites, schedule, recovery, cfg, onReorder, onPatch, onApplyHelp, onSelect,
+  rows, sites, schedule, recovery, cfg, onReorder, onPatch, onSelect,
 }: Props) {
   const [dragId, setDragId] = useState<string | null>(null)
 
@@ -89,13 +81,13 @@ export function QueueTable({
               <Th w="24px"></Th>
               <Th w="32px">#</Th>
               <Th>Partner</Th>
+              <ThHighlight>Projected</ThHighlight>
               <Th>Target</Th>
-              <Th>Projected</Th>
               <Th>Δ</Th>
               <Th>Design due</Th>
-              <Th>Tracked vs est.</Th>
-              <Th>Dev hrs</Th>
               <Th>Dev starts</Th>
+              <Th>Dev hrs</Th>
+              <Th>Help hrs</Th>
               <Th w="32px"></Th>
             </tr>
           </thead>
@@ -120,7 +112,6 @@ export function QueueTable({
                   onDragOver={ev => ev.preventDefault()}
                   onDrop={() => handleDrop(row.id)}
                   onPatch={(patch) => void onPatch(row.id, patch)}
-                  onApplyHelp={onApplyHelp}
                   onSelect={onSelect}
                 />
               )
@@ -160,7 +151,7 @@ export function QueueTable({
 
 function RowAndRecovery({
   row, site, slot, rec, priority, cfg, isWaiting,
-  draggingMe, onDragStart, onDragOver, onDrop, onPatch, onApplyHelp, onSelect,
+  draggingMe, onDragStart, onDragOver, onDrop, onPatch, onSelect,
 }: {
   row:        ProjectLaunchRow
   site:       SchedulerSite | undefined
@@ -174,20 +165,22 @@ function RowAndRecovery({
   onDragOver: (ev: React.DragEvent) => void
   onDrop:     () => void
   onPatch:    (patch: Partial<ProjectLaunchRow>) => void
-  onApplyHelp:(perWeek: Record<number, number>) => Promise<void>
   onSelect:   (id: string) => void
 }) {
-  const isLate = slot?.delta != null && slot.delta < 0
-  const pace   = site ? paceOf(site) : null
+  const isLate   = slot?.delta != null && slot.delta < 0
+  const isPaused = site?.status === 'paused'
   // Projected launch — for waiting_feedback projects the day-level
   // scheduler now actually allocates the final pass, so slot.launchDate
-  // should be present. Fall back to the AM's target_launch only when
-  // there's no slot at all (e.g. launched, or an edge case).
-  const projectedDate: Date | null =
-    slot?.launchDate ?? (isWaiting && row.launch_date ? new Date(`${row.launch_date}T00:00:00Z`) : null)
+  // should be present. Paused sites have no slot → no projected date.
+  const projectedDate: Date | null = isPaused
+    ? null
+    : (slot?.launchDate ?? (isWaiting && row.launch_date ? new Date(`${row.launch_date}T00:00:00Z`) : null))
   const launchedISO = projectedDate ? projectedDate.toISOString().slice(0, 10) : null
   const devStartISO = slot?.devStartDate ? slot.devStartDate.toISOString().slice(0, 10) : null
   const hardDeadlineMissed = row.hard_deadline && launchedISO && launchedISO > row.hard_deadline
+  const sprintSpan = !isPaused && slot
+    ? sprintLabel(slot.startWeek, slot.endWeek, cfg)
+    : null
 
   // Upstream design cut-off: dev start − 2 business days, so the
   // designer has a clear handoff target with a 1-business-day buffer
@@ -235,6 +228,16 @@ function RowAndRecovery({
             )}
           </div>
         </td>
+        {/* Projected — highlighted column. */}
+        <td className="px-2 py-2.5 align-top bg-primary-purple/5 border-l border-r border-primary-purple/15">
+          {isPaused ? (
+            <span className="text-[11px] text-purple-gray italic">paused</span>
+          ) : launchedISO ? (
+            <span className="text-[14px] font-semibold text-deep-plum">{shortDate(launchedISO)}</span>
+          ) : (
+            <span className="text-purple-gray">—</span>
+          )}
+        </td>
         <td className="px-2 py-2.5 align-top">
           <DateCell
             value={row.launch_date ?? null}
@@ -242,28 +245,38 @@ function RowAndRecovery({
             placeholder="—"
           />
         </td>
-        <td className="px-2 py-2.5 align-top text-[13px] text-deep-plum">
-          {launchedISO ? shortDate(launchedISO) : '—'}
-        </td>
         <td className="px-2 py-2.5 align-top">
-          {slot?.delta != null && !isWaiting ? <DeltaPill delta={slot.delta} /> : <span className="text-purple-gray">—</span>}
+          {!isPaused && slot?.delta != null && !isWaiting
+            ? <DeltaPill delta={slot.delta} />
+            : <span className="text-purple-gray">—</span>}
         </td>
         <td className="px-2 py-2.5 align-top whitespace-nowrap">
           {designDueISO && slot?.devStartDate ? (
             <div
-              title={`Design needs to be wrapped by ${shortDate(designDueISO)} so the developer can pick up cleanly on ${shortDate(slot.devStartDate.toISOString().slice(0, 10))} (dev start − 2 business days). The MET sits mid-sprint behind Valley, which is why dev doesn't start at the sprint's first day.`}
+              title={`Design needs to be wrapped by ${shortDate(designDueISO)} so the developer can pick up cleanly on ${shortDate(slot.devStartDate.toISOString().slice(0, 10))} (dev start − 2 business days).`}
+              className="text-[13px] text-deep-plum"
             >
-              <div className="text-[13px] text-deep-plum">{shortDate(designDueISO)}</div>
-              <div className="text-[11px] text-purple-gray">
-                → dev {shortDate(slot.devStartDate.toISOString().slice(0, 10))}
-              </div>
+              {shortDate(designDueISO)}
             </div>
           ) : (
             <span className="text-purple-gray/40">—</span>
           )}
         </td>
-        <td className="px-2 py-2.5 align-top min-w-[150px]">
-          {pace ? <PaceCell pace={pace} planned={site!.planned_dev_hours} tracked={site!.tracked_hours} /> : <span className="text-purple-gray italic text-[12px]">—</span>}
+        <td className="px-2 py-2.5 align-top whitespace-nowrap">
+          {isPaused ? (
+            <span className="text-[11px] text-purple-gray italic">paused</span>
+          ) : devStartISO && !isWaiting ? (
+            <div>
+              <div className="text-[13px] text-deep-plum">{shortDate(devStartISO)}</div>
+              {sprintSpan && (
+                <div className="text-[10.5px] text-purple-gray/80 font-mono mt-0.5">{sprintSpan}</div>
+              )}
+            </div>
+          ) : isWaiting ? (
+            <span className="text-[11px] text-amber-700 italic">in final pass</span>
+          ) : (
+            <span className="text-purple-gray/40">—</span>
+          )}
         </td>
         <td className="px-2 py-2.5 align-top">
           <div className="flex items-center gap-1">
@@ -286,14 +299,19 @@ function RowAndRecovery({
             </span>
           </div>
         </td>
-        <td className="px-2 py-2.5 align-top whitespace-nowrap">
-          {devStartISO && !isWaiting ? (
-            <div className="text-[13px] text-deep-plum">{shortDate(devStartISO)}</div>
-          ) : isWaiting ? (
-            <span className="text-[11px] text-amber-700 italic">in final pass</span>
-          ) : (
-            <span className="text-purple-gray/40">—</span>
-          )}
+        <td className="px-2 py-2.5 align-top">
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={row.help_hours_needed ?? 0}
+              onChange={e => onPatch({ help_hours_needed: e.target.value === '' ? 0 : Number(e.target.value) })}
+              className="w-14 text-[13px] font-mono text-right px-1.5 py-1 rounded border border-transparent hover:border-lavender focus:border-primary-purple focus:outline-none bg-transparent"
+              title="Designer help hours allocated to this church. The scheduler distributes them across the weeks this church is being worked on, and they travel with the church if priority shifts."
+            />
+            <span className="text-[10px] text-purple-gray">h</span>
+          </div>
         </td>
         <td className="px-2 py-2.5 align-top">
           <Link to={`/web/${row.id}?tab=planning`} className="text-purple-gray hover:text-primary-purple" title="Open project planning tab">
@@ -301,10 +319,10 @@ function RowAndRecovery({
           </Link>
         </td>
       </tr>
-      {rec && rec.state !== 'on_time' && !isWaiting && (
+      {rec && rec.state !== 'on_time' && !isWaiting && !isPaused && (
         <tr>
           <td colSpan={10} className="px-2 pb-2">
-            <RecoveryRow rec={rec} cfg={cfg} onApplyHelp={onApplyHelp} />
+            <RecoveryRow rec={rec} />
           </td>
         </tr>
       )}
@@ -314,28 +332,16 @@ function RowAndRecovery({
 
 // ── Recovery inline row ──────────────────────────────────────────
 
-function RecoveryRow({
-  rec, cfg, onApplyHelp,
-}: { rec: RecoveryResult; cfg: SchedulerConfig; onApplyHelp: (perWeek: Record<number, number>) => Promise<void> }) {
-  if (rec.state === 'recoverable' && rec.perWeek && rec.helpHours) {
-    const weeks = Object.entries(rec.perWeek)
-      .map(([idx, h]) => ({ idx: Number(idx), h }))
-      .sort((a, b) => a.idx - b.idx)
-      .map(w => `wk ${shortDate(weekStart(w.idx, cfg).toISOString().slice(0, 10))}: +${w.h}h`)
+function RecoveryRow({ rec }: { rec: RecoveryResult }) {
+  if (rec.state === 'recoverable' && rec.helpHours) {
     return (
-      <div className="ml-10 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 flex items-start justify-between gap-2">
+      <div className="ml-10 rounded-md border border-amber-300 bg-amber-50 px-3 py-2">
         <p className="text-[12.5px] text-amber-900">
-          <strong>{rec.behind}d behind.</strong> Recoverable: add{' '}
-          <strong>{rec.helpHours} help hrs</strong> (≈{(rec.helpHours / 7).toFixed(1)} designer-days) in {weeks.join(' · ')} →
-          launches <strong>{shortDate(rec.date.toISOString().slice(0, 10))}</strong>, within target.
+          <strong>{rec.behind}d behind.</strong> Add{' '}
+          <strong>{rec.helpHours} help hrs</strong> to this church to land on{' '}
+          <strong>{shortDate(rec.date.toISOString().slice(0, 10))}</strong>. Drop it into the
+          Help hrs column on the right.
         </p>
-        <button
-          type="button"
-          onClick={() => void onApplyHelp(rec.perWeek ?? {})}
-          className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-md bg-deep-plum text-white text-[11px] font-semibold hover:bg-primary-purple"
-        >
-          Apply help
-        </button>
       </div>
     )
   }
@@ -346,28 +352,22 @@ function RecoveryRow({
     return (
       <div className="ml-10 rounded-md border border-purple-gray/30 bg-cream px-3 py-2">
         <p className="text-[12.5px] text-purple-gray">
-          <strong>{rec.behind}d behind.</strong> {reason}{' '}
-          Projected launch <strong>{shortDate(rec.date.toISOString().slice(0, 10))}</strong> stands —
-          renegotiate the target, reprioritize, or add a second developer.
+          <strong>{rec.behind}d behind.</strong> {reason} Projected launch{' '}
+          <strong>{shortDate(rec.date.toISOString().slice(0, 10))}</strong> stands — renegotiate the
+          target, reprioritize, or add a second developer.
         </p>
       </div>
     )
   }
-  if (rec.state === 'insufficient' && rec.perWeek && rec.helpHours) {
+  if (rec.state === 'insufficient' && rec.helpHours) {
     return (
-      <div className="ml-10 rounded-md border border-red-300 bg-red-50 px-3 py-2 flex items-start justify-between gap-2">
+      <div className="ml-10 rounded-md border border-red-300 bg-red-50 px-3 py-2">
         <p className="text-[12.5px] text-red-900">
-          <strong>{rec.behind}d behind.</strong> Even {rec.helpHours} help hrs ({(rec.helpHours / 7).toFixed(1)} designer-days)
-          isn't enough — best achievable date is <strong>{shortDate(rec.date.toISOString().slice(0, 10))}</strong>
+          <strong>{rec.behind}d behind.</strong> Even {rec.helpHours} help hrs isn't enough —
+          best achievable date is{' '}
+          <strong>{shortDate(rec.date.toISOString().slice(0, 10))}</strong>{' '}
           ({rec.stillLate}d still late).
         </p>
-        <button
-          type="button"
-          onClick={() => void onApplyHelp(rec.perWeek ?? {})}
-          className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-red-400 text-red-800 text-[11px] font-semibold hover:bg-red-100"
-        >
-          Apply best-effort help
-        </button>
       </div>
     )
   }
@@ -384,6 +384,16 @@ function Th({ children, w }: { children?: React.ReactNode; w?: string }) {
   )
 }
 
+/** Highlighted column header — used on the projected launch column so
+ *  it visually anchors the row as the single most-important number. */
+function ThHighlight({ children }: { children?: React.ReactNode }) {
+  return (
+    <th className="px-2 py-2 text-[11px] uppercase tracking-widest font-bold text-primary-purple border-b border-primary-purple/40 bg-primary-purple/5 border-l border-r border-primary-purple/15">
+      {children}
+    </th>
+  )
+}
+
 function DeltaPill({ delta }: { delta: number }) {
   const tone = delta < 0 ? 'bg-red-100 text-red-800'
             : delta <= 7 ? 'bg-amber-100 text-amber-800'
@@ -392,24 +402,13 @@ function DeltaPill({ delta }: { delta: number }) {
   return <span className={`inline-block text-[11.5px] font-bold px-2 py-0.5 rounded-full ${tone}`}>{text}</span>
 }
 
-function PaceCell({ pace, planned, tracked }: { pace: ReturnType<typeof paceOf> extends null | infer R ? R : never; planned: number; tracked: number }) {
-  if (!pace) return null
-  const tone = pace.cls === 'late' ? 'bg-red-500'
-            : pace.cls === 'tight' ? 'bg-amber-500'
-            : 'bg-emerald-500'
-  return (
-    <div>
-      <div className="h-1.5 w-full rounded bg-lavender-tint overflow-hidden">
-        <div className={`h-full ${tone}`} style={{ width: `${Math.min(100, pace.pct)}%` }} />
-      </div>
-      <p className="text-[11px] font-mono text-purple-gray mt-0.5">
-        {pace.pct}% · {tracked}/{planned}h ·{' '}
-        <span className={pace.cls === 'late' ? 'text-red-700 font-bold' : pace.cls === 'tight' ? 'text-amber-700' : 'text-emerald-700'}>
-          {pace.over > 0 ? `+${pace.over} over` : pace.over < 0 ? `${pace.over} under` : 'on est.'}
-        </span>
-      </p>
-    </div>
-  )
+/** "Dev S1" / "Dev S4–S5" — the sub-label that appears under the
+ *  Dev starts date so PMs can map a project to its sprint slot at
+ *  a glance. */
+function sprintLabel(startWeek: number, endWeek: number, cfg: SchedulerConfig): string {
+  const s = Math.floor(startWeek / cfg.sprint_weeks) + 1
+  const e = Math.floor(endWeek   / cfg.sprint_weeks) + 1
+  return s === e ? `Dev S${s}` : `Dev S${s}–S${e}`
 }
 
 function shortDate(iso: string): string {

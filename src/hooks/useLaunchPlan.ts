@@ -109,20 +109,27 @@ export function useLaunchPlan(): UseLaunchPlanReturn {
   useEffect(() => { void refetch() }, [refetch])
 
   // Map rows → SchedulerSite (scheduler-shape). Priority falls back to
-  // a large index for unranked rows so they sort last.
-  const sites = useMemo<SchedulerSite[]>(() => rows.map((r, i) => ({
-    id:                r.id,
-    priority:          r.priority_order ?? (10_000 + i),
-    status:            statusFromPhase(r.current_phase as WebProjectPhase),
-    planned_dev_hours: Number(r.dev_hours_estimate ?? 60),
-    tracked_hours:     Number(r.tracked_hours ?? 0),
-    pct_complete:      r.pct_complete != null ? Number(r.pct_complete) : null,
-    target_launch:     r.launch_date,
-    hard_deadline:     r.hard_deadline,
-    // Default to 'dev-only' when unset (per v92 schema default).
-    // The PM explicitly opts in to designer-recoverable per project.
-    recovery_mode:     r.recovery_mode === 'designer' ? 'designer' : 'dev-only',
-  })), [rows])
+  // a large index for unranked rows so they sort last. A manual
+  // sub-status of 'paused' takes precedence over the phase-derived
+  // status — paused projects are excluded from active scheduling.
+  const sites = useMemo<SchedulerSite[]>(() => rows.map((r, i) => {
+    const phaseStatus = statusFromPhase(r.current_phase as WebProjectPhase)
+    const status = r.manual_sub_status === 'paused' ? 'paused' as const : phaseStatus
+    return {
+      id:                r.id,
+      priority:          r.priority_order ?? (10_000 + i),
+      status,
+      planned_dev_hours: Number(r.dev_hours_estimate ?? 60),
+      tracked_hours:     Number(r.tracked_hours ?? 0),
+      pct_complete:      r.pct_complete != null ? Number(r.pct_complete) : null,
+      target_launch:     r.launch_date,
+      hard_deadline:     r.hard_deadline,
+      // Default to 'dev-only' when unset (per v92 schema default).
+      // The PM explicitly opts in to designer-recoverable per project.
+      recovery_mode:     r.recovery_mode === 'designer' ? 'designer' : 'dev-only',
+      help_hours_needed: Number(r.help_hours_needed ?? 0),
+    }
+  }), [rows])
 
   // Re-run scheduler + recovery solver whenever the inputs change.
   const schedule = useMemo(() => {

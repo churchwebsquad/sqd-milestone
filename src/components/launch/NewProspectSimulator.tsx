@@ -67,6 +67,7 @@ export function NewProspectSimulator({ sites, rows, adjustments, cfg }: Props) {
       target_launch:     targetDate || null,
       hard_deadline:     null,
       recovery_mode:     recoveryMode,
+      help_hours_needed: 0,
     }
 
     const before = computeSchedule(sites,                helpMap, designerOut, blackout, cfg, baseCap)

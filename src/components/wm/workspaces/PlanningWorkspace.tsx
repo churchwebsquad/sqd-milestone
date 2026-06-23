@@ -1,40 +1,36 @@
 /**
  * Web Manager — Planning workspace tab inside /web/:projectId.
  *
- * Lives at /web/:projectId?tab=planning. Renders this project's slice
- * of the org-wide launch plan + the project-specific activity signals
- * (current step, manual status, partner sync, ClickUp tasks).
+ * Lives at /web/:projectId?tab=planning. The full org-wide planner is
+ * /web; this tab is the project-specific lens.
  *
- * The PLANNING surface itself lives at /web — this tab is the
- * project-specific lens. Editing target launch / dev hours / recovery
- * mode here writes the same columns the /web QueueTable edits.
+ * Sections in render order (matches Ashley's core list):
+ *   1. Header — name + status pill
+ *   2. Launch slot — projected, target (with hard-deadline flag), Δ,
+ *      planned dev hours, help hours needed, design start, dev start
+ *      (with Dev Sprint # + span as smaller text)
+ *   3. Project status — manual sub-status override + reason
+ *   4. Step timeline
+ *   5. Build-phase tracked hours — from the two known dev subtask
+ *      names ("Developer Prep & Build", "Testing, Revisions, Launch")
+ *   6. Project manager notes
+ *   7. Partner sync sentence — for AM messaging
+ *   8. ClickUp · Website list — task summary table
  *
- * Sections in render order:
- *   1. Header — name + current activity pill
- *   2. Launch slot card — target / projected / Δ / sprint span /
- *      priority position. Inline editors for launch_date,
- *      dev_hours_estimate, recovery_mode, hard_deadline.
- *   3. Recovery callout — when this project is behind target.
- *   4. Tracked time + Sync from ClickUp.
- *   5. Manual status — manual_sub_status / status_reason override.
- *   6. Current activity bar — strategist-language "where this is."
- *   7. Step timeline — cowork pipeline + milestone submissions.
- *   8. Partner sync sentence — for AM messaging.
- *   9. ClickUp · Website list — task summary table.
+ * Paused projects (`manual_sub_status === 'paused'`) suppress the
+ * projected launch and sprint span; the scheduler also excludes them
+ * from the queue + sprint timeline.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Loader2, RefreshCw, Flag, ExternalLink } from 'lucide-react'
+import { Loader2, RefreshCw, Flag } from 'lucide-react'
 import { WMCard } from '../Card'
 import { WMStatusPill } from '../StatusPill'
-import { CurrentActivityBar } from '../planning/CurrentActivityBar'
 import { StepTimeline } from '../planning/StepTimeline'
 import { ManualStatusEditor } from '../planning/ManualStatusEditor'
 import { PartnerSyncBlock } from '../planning/PartnerSyncBlock'
 import { ClickUpTasksSummary } from '../manager/ClickUpTasksSummary'
 import { useLaunchPlan } from '../../../hooks/useLaunchPlan'
-import { paceOf, weekStart, calBtw, parseD } from '../../../lib/launchScheduler'
 import { buildCurrentActivity } from '../../../lib/webCurrentActivity'
-import { detectStall } from '../../../lib/webStallDetector'
 import { buildPartnerSyncString } from '../../../lib/webPartnerSyncString'
 import { supabase } from '../../../lib/supabase'
 import type { StrategyWebProject, ManualSubStatus } from '../../../types/database'
@@ -49,14 +45,14 @@ export function PlanningWorkspace({ project, onChange }: Props) {
   const [statusPanelOpen, setStatusPanelOpen] = useState(false)
   const [savingKey, setSavingKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [pmNotesDraft, setPmNotesDraft] = useState(project.pm_notes ?? '')
+  useEffect(() => { setPmNotesDraft(project.pm_notes ?? '') }, [project.pm_notes])
 
-  // The launch plan loads every active project; pluck this one.
   const site = plan.sites.find(s => s.id === project.id)
   const slot = plan.schedule[project.id]
   const rec  = plan.recovery[project.id]
 
-  // Activity consolidator (still works — reads milestones, cowork state,
-  // ClickUp, manual override). Local copy keyed on the project prop.
+  // Milestone history feeds the partner-sync sentence + step timeline.
   const [milestones, setMilestones] = useState<Array<{ milestone_id: number; milestone_status: string; submitted_at: string | null; squad: string | null; pathway: string | null; step_number: number | null }>>([])
   useEffect(() => {
     let cancelled = false
@@ -84,17 +80,12 @@ export function PlanningWorkspace({ project, onChange }: Props) {
     return () => { cancelled = true }
   }, [project.id, project.member])
 
-  // buildCurrentActivity reads project.roadmap_state directly for the
-  // cowork pipeline + copy engine signals. devTasks is the ClickUp
-  // task list — this surface doesn't load them, so an empty array is
-  // fine (the inference branch falls through to phaseOnly).
   const activity = useMemo(() => buildCurrentActivity({
     project,
     milestones,
     devTasks:  [],
     inference: null,
   }), [project, milestones])
-  const stall = useMemo(() => detectStall({ project, activity, today: new Date() }), [project, activity])
   const partnerSync = useMemo(() => buildPartnerSyncString({
     project: { ...project, name: project.name },
     activity,
@@ -115,12 +106,25 @@ export function PlanningWorkspace({ project, onChange }: Props) {
 
   const isLate    = slot?.delta != null && slot.delta < 0
   const isWaiting = site?.status === 'waiting_feedback'
+  const isPaused  = site?.status === 'paused'
   const launched  = project.current_phase === 'launched'
-  const pace      = site ? paceOf(site) : null
+
+  // Design start = dev start − 2 business days. Suppressed when paused
+  // or when there's no slot to anchor against.
+  const designStart: Date | null = !isPaused && slot?.devStartDate
+    ? new Date(subBizDaysMs(slot.devStartDate.getTime(), 2))
+    : null
+
+  const sprintLabel = !isPaused && slot
+    ? formatSprintLabel(slot.startWeek, slot.endWeek, plan.cfg.sprint_weeks)
+    : null
+  const sprintSpan = !isPaused && slot
+    ? formatSprintSpan(slot.startWeek, slot.endWeek, plan.cfg.sprint_weeks)
+    : null
 
   return (
     <div className="p-6 md:p-8">
-      <div className="max-w-4xl mx-auto space-y-5">
+      <div className="max-w-3xl mx-auto space-y-5">
 
         {/* ─── Header ──────────────────────────────────────────── */}
         <header className="flex items-start justify-between gap-3 flex-wrap">
@@ -129,71 +133,71 @@ export function PlanningWorkspace({ project, onChange }: Props) {
             <h1 className="text-2xl font-semibold text-wm-text">
               {project.church_name ?? project.name}
             </h1>
-            <p className="text-sm text-wm-text-muted mt-1 max-w-xl">
-              This project's slice of the org-wide launch plan. The full queue lives on{' '}
-              <a href="/web" className="text-wm-accent hover:underline">/web</a>.
-            </p>
+            <p className="text-xs font-mono text-wm-text-subtle mt-1">#{project.member}</p>
           </div>
-          <StatusBadge launched={launched} isWaiting={isWaiting} isLate={isLate} />
+          <StatusBadge launched={launched} isWaiting={isWaiting} isLate={isLate} isPaused={isPaused} />
         </header>
 
         {error && (
           <div className="rounded-md border border-wm-danger/40 bg-wm-danger-bg px-3 py-2 text-[12px] text-wm-danger">{error}</div>
         )}
 
-        {/* ─── Launch slot card ─────────────────────────────────── */}
+        {/* ─── Launch slot ─────────────────────────────────────── */}
         <WMCard padding="loose">
           <SectionLabel>Launch slot</SectionLabel>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Stat
-              label="Queue position"
-              value={project.priority_order != null ? `#${project.priority_order}` : 'Unranked'}
-              hint={launched ? 'Launched — out of queue.'
-                  : isWaiting ? 'Waiting on partner feedback — not consuming hours.'
-                  : 'Drag in /web to reorder.'}
-            />
-            <Stat
-              label="Dev sprint span"
-              value={slot && !launched && !isWaiting
-                ? `${sprintLabel(slot.startWeek, slot.endWeek)} · ${sprintDateRange(slot.startWeek, slot.endWeek)}`
-                : '—'}
-              hint={slot?.devCompleteDate && !isWaiting
-                ? `Dev complete ${fmtDate(slot.devCompleteDate)}`
-                : ''}
-            />
-          </div>
 
-          {/* Target vs projected */}
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Target launch (the partner's promise)" saving={savingKey === 'launch_date'}>
+          {/* Top row: Projected · Target · Δ */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="rounded-md border border-wm-accent/30 bg-wm-accent/5 p-3">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent">Projected launch</p>
+              <p className="text-[18px] font-semibold text-wm-text mt-1">
+                {isPaused    ? 'Paused'
+                 : launched  ? 'Launched'
+                 : slot?.launchDate ? fmtDate(slot.launchDate)
+                 : '—'}
+              </p>
+            </div>
+            <Field label="Target launch" saving={savingKey === 'launch_date' || savingKey === 'hard_deadline'}>
               <input
                 type="date"
                 value={project.launch_date ?? ''}
                 onChange={e => void save('launch_date', e.target.value || null)}
                 className="mt-1 w-full text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated focus:border-wm-accent focus:outline-none"
               />
+              <label className={`inline-flex items-center gap-1.5 mt-1.5 text-[11px] cursor-pointer ${project.hard_deadline ? 'text-amber-800 font-semibold' : 'text-wm-text-muted'}`}>
+                <input
+                  type="checkbox"
+                  checked={!!project.hard_deadline}
+                  disabled={!project.launch_date}
+                  onChange={e => void save('hard_deadline', e.target.checked ? project.launch_date : null)}
+                  className="accent-amber-600"
+                />
+                <Flag size={11} /> Hard deadline
+              </label>
             </Field>
-            <div className="rounded-md border border-wm-accent/30 bg-wm-accent/5 p-3">
-              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent">Projected launch</p>
-              <p className="text-[18px] font-semibold text-wm-text mt-1">
-                {launched ? 'Launched'
-                  : isWaiting ? 'Waiting feedback'
-                  : slot?.launchDate ? fmtDate(slot.launchDate)
-                  : '—'}
+            <div>
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Δ vs target</p>
+              <p className={`text-[18px] font-semibold mt-1 ${
+                slot?.delta == null || isPaused ? 'text-wm-text-muted'
+                : slot.delta < 0 ? 'text-red-700'
+                : slot.delta <= 7 ? 'text-amber-700'
+                : 'text-emerald-700'
+              }`}>
+                {isPaused || slot?.delta == null ? '—'
+                 : slot.delta < 0 ? `−${Math.abs(slot.delta)}d`
+                 : `+${slot.delta}d`}
               </p>
-              {slot?.delta != null && !isWaiting && !launched && (
-                <p className={`text-[12px] mt-1 font-semibold ${
-                  slot.delta < 0 ? 'text-red-700' : slot.delta <= 7 ? 'text-amber-700' : 'text-emerald-700'
-                }`}>
-                  {slot.delta < 0 ? `${Math.abs(slot.delta)}d behind target` : `+${slot.delta}d ahead of target`}
+              {slot?.delta != null && !isPaused && (
+                <p className="text-[11px] text-wm-text-subtle mt-0.5">
+                  {slot.delta < 0 ? 'behind target' : 'ahead of target'}
                 </p>
               )}
             </div>
           </div>
 
-          {/* Hours + recovery */}
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Field label="Dev hours (planned)" saving={savingKey === 'dev_hours_estimate'}>
+          {/* Hours row: Planned dev hrs · Help hrs needed */}
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label="Planned dev hours" saving={savingKey === 'dev_hours_estimate'}>
               <div className="flex items-center gap-2 mt-1">
                 <input
                   type="number"
@@ -204,6 +208,7 @@ export function PlanningWorkspace({ project, onChange }: Props) {
                   onBlur={() => void save('dev_hours_source', 'manual')}
                   className="w-20 text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated font-mono focus:border-wm-accent focus:outline-none"
                 />
+                <span className="text-[10px] text-wm-text-muted">h</span>
                 <span className={`text-[9px] uppercase tracking-widest font-bold ${
                   project.dev_hours_source === 'clickup' ? 'text-emerald-700' : 'text-wm-text-subtle'
                 }`}>
@@ -211,56 +216,114 @@ export function PlanningWorkspace({ project, onChange }: Props) {
                 </span>
               </div>
             </Field>
-            <Field label="Recovery mode" saving={savingKey === 'recovery_mode'}>
-              <div className="mt-1 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => void save('recovery_mode', 'designer')}
-                  className={`text-[11px] font-semibold px-2.5 py-1.5 rounded-full border ${
-                    project.recovery_mode === 'designer'
-                      ? 'border-emerald-400 bg-emerald-50 text-emerald-800'
-                      : 'border-wm-border bg-wm-bg-elevated text-wm-text-muted hover:border-emerald-300'
-                  }`}
-                >
-                  🎨 designer
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void save('recovery_mode', 'dev-only')}
-                  className={`text-[11px] font-semibold px-2.5 py-1.5 rounded-full border ${
-                    project.recovery_mode === 'dev-only'
-                      ? 'border-purple-gray bg-cream text-deep-plum'
-                      : 'border-wm-border bg-wm-bg-elevated text-wm-text-muted hover:border-purple-gray'
-                  }`}
-                >
-                  🔒 dev-only
-                </button>
-              </div>
-            </Field>
-            <Field label="Hard deadline (optional)" saving={savingKey === 'hard_deadline'}>
-              <div className="flex items-center gap-1 mt-1">
-                <Flag size={12} className="text-amber-700 shrink-0" />
+            <Field label="Help hours needed" saving={savingKey === 'help_hours_needed'}>
+              <div className="flex items-center gap-2 mt-1">
                 <input
-                  type="date"
-                  value={project.hard_deadline ?? ''}
-                  onChange={e => void save('hard_deadline', e.target.value || null)}
-                  className="flex-1 text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated focus:border-wm-accent focus:outline-none"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={project.help_hours_needed ?? 0}
+                  onChange={e => void save('help_hours_needed', e.target.value === '' ? 0 : Number(e.target.value))}
+                  className="w-20 text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated font-mono focus:border-wm-accent focus:outline-none"
                 />
+                <span className="text-[10px] text-wm-text-muted">h</span>
+                <span className="text-[10px] text-wm-text-subtle">
+                  designer
+                </span>
               </div>
+              <p className="text-[10.5px] text-wm-text-subtle mt-1 leading-snug">
+                Spread across the weeks this church is being worked on. Travels with this church if priority changes.
+              </p>
             </Field>
           </div>
 
+          {/* Dates row: Design start · Dev start (+ sprint sub-label) */}
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Stat
+              label="Design start"
+              value={designStart ? fmtDate(designStart) : '—'}
+              hint={designStart ? 'Design needs to wrap 2 business days before dev picks up.' : ''}
+            />
+            <div>
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Dev start</p>
+              <p className="text-[14px] font-semibold text-wm-text mt-0.5">
+                {isPaused      ? '—'
+                 : slot?.devStartDate ? fmtDate(slot.devStartDate)
+                 : '—'}
+              </p>
+              {sprintLabel && sprintSpan && (
+                <p className="text-[10.5px] text-wm-text-subtle mt-0.5 font-mono">
+                  {sprintLabel} · {sprintSpan}
+                </p>
+              )}
+            </div>
+          </div>
+
           {/* Recovery callout */}
-          {rec && rec.state !== 'on_time' && !isWaiting && !launched && (
+          {rec && rec.state !== 'on_time' && !isWaiting && !launched && !isPaused && (
             <div className="mt-4">
-              <RecoveryCallout rec={rec} cfg={plan.cfg} onApplyHelp={plan.applyRecoveryHelp} />
+              <RecoveryCallout rec={rec} />
             </div>
           )}
         </WMCard>
 
-        {/* ─── Tracked time + ClickUp sync ─────────────────────── */}
+        {/* ─── Project status ──────────────────────────────────── */}
         <WMCard padding="loose">
-          <SectionLabel>Build-phase tracking</SectionLabel>
+          <SectionLabel>Project status</SectionLabel>
+          <p className="text-[11px] text-wm-text-muted mb-2">
+            Override the auto-derived sub-status when the project is paused, blocked, or waiting on the partner.
+            Paused projects don't take a sprint slot.
+          </p>
+          {!statusPanelOpen ? (
+            <button
+              type="button"
+              onClick={() => setStatusPanelOpen(true)}
+              className="text-[12px] font-semibold text-wm-accent hover:underline"
+            >
+              {project.manual_sub_status
+                ? `Override: ${project.manual_sub_status}${project.status_reason ? ` — ${project.status_reason}` : ''}`
+                : '+ Set manual status'}
+            </button>
+          ) : (
+            <ManualStatusEditor
+              current={project.manual_sub_status ?? null}
+              reason={project.status_reason ?? null}
+              changedAt={project.status_changed_at ?? null}
+              changedBy={project.status_changed_by ?? null}
+              onSave={async (status, reason) => {
+                const { data: { user } } = await supabase.auth.getUser()
+                const employeeId = user?.email ?? user?.id ?? null
+                const now = new Date().toISOString()
+                await plan.setProjectField(project.id, {
+                  manual_sub_status: status as ManualSubStatus | null,
+                  status_reason:     reason,
+                  status_changed_at: status ? now : null,
+                  status_changed_by: status ? employeeId : null,
+                })
+                setStatusPanelOpen(false)
+                void onChange()
+              }}
+              onCancel={() => setStatusPanelOpen(false)}
+            />
+          )}
+        </WMCard>
+
+        {/* ─── Step timeline ───────────────────────────────────── */}
+        <StepTimeline
+          project={project}
+          milestones={milestones}
+          activity={activity}
+          effectiveProgress={{}}
+        />
+
+        {/* ─── Build-phase tracked hours ───────────────────────── */}
+        <WMCard padding="loose">
+          <SectionLabel>Build-phase tracked time</SectionLabel>
+          <p className="text-[11px] text-wm-text-muted mb-3">
+            Pulls time logged against the <code className="font-mono text-[11px] text-deep-plum">Developer Prep &amp; Build</code> and{' '}
+            <code className="font-mono text-[11px] text-deep-plum">Testing, Revisions, Launch</code> ClickUp tasks under the
+            project's Build Phase. Tracked time only — estimates stay separate.
+          </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Stat
               label="Tracked hours"
@@ -270,15 +333,12 @@ export function PlanningWorkspace({ project, onChange }: Props) {
                 : 'Never synced from ClickUp.'}
             />
             <Stat
-              label="Pace"
-              value={pace ? `${pace.pct}%` : '—'}
-              hint={pace
-                ? `${project.tracked_hours}/${project.dev_hours_estimate ?? 60}h · ${pace.over > 0 ? `+${pace.over} over` : pace.over < 0 ? `${pace.over} under` : 'on est.'}`
-                : 'No tracked time yet.'}
-              tone={pace?.cls === 'late' ? 'danger' : 'default'}
+              label="Remaining"
+              value={`${Math.max(0, (project.dev_hours_estimate ?? 60) - (project.tracked_hours ?? 0))}h`}
+              hint={`vs ${project.dev_hours_estimate ?? 60}h planned`}
             />
           </div>
-          <div className="mt-3 flex items-center gap-3">
+          <div className="mt-3 flex items-center gap-3 flex-wrap">
             <label className="text-[11px] text-wm-text-muted flex items-center gap-2">
               ClickUp Build Phase task id:
               <input
@@ -293,9 +353,6 @@ export function PlanningWorkspace({ project, onChange }: Props) {
               type="button"
               disabled={!project.clickup_build_task_id}
               onClick={async () => {
-                // ClickUp tracked-time sync. The endpoint authenticates
-                // via the Supabase user JWT (Bearer header) so include
-                // the current session token.
                 setSavingKey('sync_tracked')
                 setError(null)
                 try {
@@ -332,72 +389,27 @@ export function PlanningWorkspace({ project, onChange }: Props) {
           </div>
         </WMCard>
 
-        {/* ─── Manual status override ──────────────────────────── */}
+        {/* ─── Project manager notes ───────────────────────────── */}
         <WMCard padding="loose">
-          <SectionLabel>Manual status</SectionLabel>
-          <p className="text-[11px] text-wm-text-muted mb-2">
-            Override the auto-derived sub-status when the project is paused, blocked, or waiting on the partner.
-          </p>
-          {!statusPanelOpen ? (
-            <button
-              type="button"
-              onClick={() => setStatusPanelOpen(true)}
-              className="text-[12px] font-semibold text-wm-accent hover:underline"
-            >
-              {project.manual_sub_status
-                ? `Override: ${project.manual_sub_status}${project.status_reason ? ` — ${project.status_reason}` : ''}`
-                : '+ Set manual status'}
-            </button>
-          ) : (
-            <ManualStatusEditor
-              current={project.manual_sub_status ?? null}
-              reason={project.status_reason ?? null}
-              changedAt={project.status_changed_at ?? null}
-              changedBy={project.status_changed_by ?? null}
-              onSave={async (status, reason) => {
-                const { data: { user } } = await supabase.auth.getUser()
-                const employeeId = user?.email ?? user?.id ?? null
-                const now = new Date().toISOString()
-                await plan.setProjectField(project.id, {
-                  manual_sub_status: status as ManualSubStatus | null,
-                  status_reason:     reason,
-                  status_changed_at: status ? now : null,
-                  status_changed_by: status ? employeeId : null,
-                })
-                setStatusPanelOpen(false)
-                void onChange()
-              }}
-              onCancel={() => setStatusPanelOpen(false)}
-            />
+          <SectionLabel>Project manager notes</SectionLabel>
+          <textarea
+            value={pmNotesDraft}
+            onChange={e => setPmNotesDraft(e.target.value)}
+            onBlur={() => {
+              const trimmed = pmNotesDraft.trim()
+              const current = project.pm_notes ?? ''
+              if (trimmed !== current) void save('pm_notes', trimmed === '' ? null : pmNotesDraft)
+            }}
+            rows={4}
+            placeholder="Anything the team should know about this project — who's owning what, partner quirks, scope changes, etc."
+            className="w-full text-[12.5px] px-3 py-2 rounded-md border border-wm-border bg-wm-bg-elevated focus:border-wm-accent focus:outline-none resize-y"
+          />
+          {savingKey === 'pm_notes' && (
+            <p className="text-[10px] text-wm-text-subtle mt-1 inline-flex items-center gap-1">
+              <Loader2 size={9} className="animate-spin" /> Saving…
+            </p>
           )}
         </WMCard>
-
-        {/* ─── Current activity ────────────────────────────────── */}
-        <CurrentActivityBar
-          activity={activity}
-          stall={stall}
-          clickUpUrl={null}
-          openStepHref={null}
-          onResume={async () => {
-            await plan.setProjectField(project.id, { manual_sub_status: null, status_reason: null })
-            void onChange()
-          }}
-          onDismissStall={async () => {
-            const until = new Date()
-            until.setDate(until.getDate() + 7)
-            await plan.setProjectField(project.id, { stalled_dismissed_until: until.toISOString() })
-            void onChange()
-          }}
-          onOpenStatusPanel={() => setStatusPanelOpen(true)}
-        />
-
-        {/* ─── Step timeline ───────────────────────────────────── */}
-        <StepTimeline
-          project={project}
-          milestones={milestones}
-          activity={activity}
-          effectiveProgress={{}}
-        />
 
         {/* ─── Partner sync sentence ───────────────────────────── */}
         <PartnerSyncBlock text={partnerSync} />
@@ -431,52 +443,38 @@ function Field({
 }
 
 function Stat({
-  label, value, hint, tone = 'default',
-}: { label: React.ReactNode; value: string; hint?: string; tone?: 'default' | 'danger' }) {
+  label, value, hint,
+}: { label: React.ReactNode; value: string; hint?: string }) {
   return (
     <div>
       <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">{label}</p>
-      <p className={`text-[14px] font-semibold mt-0.5 ${tone === 'danger' ? 'text-wm-danger' : 'text-wm-text'}`}>
-        {value}
-      </p>
-      {hint && <p className="text-[10.5px] text-wm-text-subtle mt-0.5">{hint}</p>}
+      <p className="text-[14px] font-semibold mt-0.5 text-wm-text">{value}</p>
+      {hint && <p className="text-[10.5px] text-wm-text-subtle mt-0.5 leading-snug">{hint}</p>}
     </div>
   )
 }
 
-function StatusBadge({ launched, isWaiting, isLate }: { launched: boolean; isWaiting: boolean; isLate: boolean }) {
-  if (launched) return <WMStatusPill tone="neutral" size="md">Launched</WMStatusPill>
+function StatusBadge({ launched, isWaiting, isLate, isPaused }: { launched: boolean; isWaiting: boolean; isLate: boolean; isPaused: boolean }) {
+  if (launched)  return <WMStatusPill tone="neutral" size="md">Launched</WMStatusPill>
+  if (isPaused)  return <WMStatusPill tone="neutral" size="md">Paused</WMStatusPill>
   if (isWaiting) return <WMStatusPill tone="warning" size="md">Waiting feedback</WMStatusPill>
-  if (isLate)   return <WMStatusPill tone="danger" size="md">Behind target</WMStatusPill>
+  if (isLate)    return <WMStatusPill tone="danger"  size="md">Behind target</WMStatusPill>
   return <WMStatusPill tone="success" size="md">In progress</WMStatusPill>
 }
 
 function RecoveryCallout({
-  rec, cfg, onApplyHelp,
+  rec,
 }: {
   rec: import('../../../lib/launchRecoverySolver').RecoveryResult
-  cfg: import('../../../lib/launchScheduler').SchedulerConfig
-  onApplyHelp: (perWeek: Record<number, number>) => Promise<void>
 }) {
-  if (rec.state === 'recoverable' && rec.perWeek && rec.helpHours) {
-    const weeks = Object.entries(rec.perWeek)
-      .map(([idx, h]) => ({ idx: Number(idx), h }))
-      .sort((a, b) => a.idx - b.idx)
-      .map(w => `wk ${fmtDate(weekStart(w.idx, cfg))}: +${w.h}h`)
+  if (rec.state === 'recoverable' && rec.helpHours) {
     return (
-      <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 flex items-start justify-between gap-2">
+      <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2">
         <p className="text-[11.5px] text-amber-900">
-          <strong>{rec.behind}d behind.</strong> Recoverable: add{' '}
-          <strong>{rec.helpHours} help hrs</strong> (≈{(rec.helpHours / 7).toFixed(1)} designer-days) in {weeks.join(' · ')} →
-          launches <strong>{fmtDate(rec.date)}</strong>, within target.
+          <strong>{rec.behind}d behind.</strong> Add{' '}
+          <strong>{rec.helpHours} help hrs</strong> (in the Help hours needed field above)
+          to land on <strong>{fmtDate(rec.date)}</strong>.
         </p>
-        <button
-          type="button"
-          onClick={() => void onApplyHelp(rec.perWeek ?? {})}
-          className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-md bg-deep-plum text-white text-[11px] font-semibold hover:bg-primary-purple"
-        >
-          Apply help
-        </button>
       </div>
     )
   }
@@ -494,20 +492,14 @@ function RecoveryCallout({
       </div>
     )
   }
-  if (rec.state === 'insufficient' && rec.perWeek) {
+  if (rec.state === 'insufficient') {
     return (
-      <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 flex items-start justify-between gap-2">
+      <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2">
         <p className="text-[11.5px] text-red-900">
-          <strong>{rec.behind}d behind.</strong> Even {rec.helpHours} help hrs isn't enough — best achievable
-          date is <strong>{fmtDate(rec.date)}</strong> ({rec.stillLate}d still late).
+          <strong>{rec.behind}d behind.</strong> Even {rec.helpHours} help hrs isn't enough —
+          best achievable date is <strong>{fmtDate(rec.date)}</strong>{' '}
+          ({rec.stillLate}d still late).
         </p>
-        <button
-          type="button"
-          onClick={() => void onApplyHelp(rec.perWeek ?? {})}
-          className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-red-400 text-red-800 text-[11px] font-semibold hover:bg-red-100"
-        >
-          Apply best-effort help
-        </button>
       </div>
     )
   }
@@ -519,29 +511,38 @@ function fmtDate(d: Date | null | undefined): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
 }
 
-function sprintLabel(startWeek: number, endWeek: number): string {
-  const s = Math.floor(startWeek / 2) + 1
-  const e = Math.floor(endWeek / 2) + 1
+function formatSprintLabel(startWeek: number, endWeek: number, sprintWeeks: number): string {
+  const s = Math.floor(startWeek / sprintWeeks) + 1
+  const e = Math.floor(endWeek   / sprintWeeks) + 1
   return s === e ? `Dev S${s}` : `Dev S${s}–S${e}`
 }
 
-/** "Aug 1–21" calendar range matching the sprint span. Pairs with
- *  sprintLabel so the user sees both the sprint number AND the
- *  underlying dates. */
-function sprintDateRange(startWeek: number, endWeek: number): string {
-  const SPRINT_WEEKS = 2
-  const firstSprintIdx = Math.floor(startWeek / SPRINT_WEEKS)
-  const lastSprintIdx  = Math.floor(endWeek   / SPRINT_WEEKS)
-  // Anchor: today's Monday. Match useLaunchPlan's cfg.schedule_start.
+function formatSprintSpan(startWeek: number, endWeek: number, sprintWeeks: number): string {
+  // Anchor to today's Monday — matches useLaunchPlan's cfg.schedule_start.
   const now = new Date()
   const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   const wd = monday.getUTCDay()
   const off = wd === 0 ? -6 : 1 - wd
   monday.setUTCDate(monday.getUTCDate() + off)
   const dayMs = 86_400_000
-  const start = new Date(monday.getTime() + firstSprintIdx * SPRINT_WEEKS * 7 * dayMs)
-  const lastSprintStart = new Date(monday.getTime() + lastSprintIdx * SPRINT_WEEKS * 7 * dayMs)
-  const end = new Date(lastSprintStart.getTime() + (SPRINT_WEEKS * 7 - 1) * dayMs)
+  const firstSprintIdx = Math.floor(startWeek / sprintWeeks)
+  const lastSprintIdx  = Math.floor(endWeek   / sprintWeeks)
+  const start = new Date(monday.getTime() + firstSprintIdx * sprintWeeks * 7 * dayMs)
+  const lastSprintStart = new Date(monday.getTime() + lastSprintIdx * sprintWeeks * 7 * dayMs)
+  const end = new Date(lastSprintStart.getTime() + (sprintWeeks * 7 - 1) * dayMs)
   const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
   return `${fmt(start)}–${fmt(end)}`
 }
+
+/** Subtract N business days from a UTC ms timestamp. */
+function subBizDaysMs(ms: number, n: number): number {
+  let d = new Date(ms)
+  let left = Math.max(0, Math.round(n))
+  while (left > 0) {
+    d = new Date(d.getTime() - 86_400_000)
+    const wd = d.getUTCDay()
+    if (wd !== 0 && wd !== 6) left--
+  }
+  return d.getTime()
+}
+

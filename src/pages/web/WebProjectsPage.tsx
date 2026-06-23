@@ -136,7 +136,6 @@ export default function WebProjectsPage() {
           cfg={plan.cfg}
           onReorder={plan.reorderPriority}
           onPatch={async (id, patch) => plan.setProjectField(id, patch)}
-          onApplyHelp={plan.applyRecoveryHelp}
           onSelect={(id) => navigate(`/web/${id}?tab=planning`)}
         />
 

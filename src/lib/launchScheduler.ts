@@ -72,11 +72,20 @@ export function calBtw(a: Date, b: Date): number {
 
 // ── Domain types ────────────────────────────────────────────────────
 
-/** A site row the scheduler walks in priority order. */
+/** A site row the scheduler walks in priority order.
+ *
+ *  status semantics:
+ *    - in_progress     → standard build → review → final flow
+ *    - waiting_feedback → partner-side review complete; enter sim in
+ *                         finalizing state with final_hours remaining
+ *    - paused          → AM manually paused; excluded entirely (no slot,
+ *                         no projected date, no sprint allocation)
+ *    - launched        → done; excluded entirely
+ */
 export interface SchedulerSite {
   id:             string
   priority:       number
-  status:         'in_progress' | 'waiting_feedback' | 'launched'
+  status:         'in_progress' | 'waiting_feedback' | 'paused' | 'launched'
   planned_dev_hours: number
   tracked_hours:  number
   /** 0..1 progress fraction. Optional; used by paceOf when present. */
@@ -84,6 +93,11 @@ export interface SchedulerSite {
   target_launch:  string | null         // ISO yyyy-mm-dd
   hard_deadline:  string | null         // ISO yyyy-mm-dd; immovable date
   recovery_mode:  'designer' | 'dev-only'
+  /** Designer help hours allocated to this church. Distributed by the
+   *  scheduler across the weeks the church is being worked on (capped
+   *  at cfg.max_help_per_week per week, skipping designer_out / blackout
+   *  weeks). Travels with the church across priority shifts. */
+  help_hours_needed: number
 }
 
 /** Per-week org-wide adjustment row from strategy_dev_weekly_allocations. */
@@ -255,8 +269,16 @@ const MAX_WEEKS = 800     // ~15 years; guard against runaway loops
 const MAX_DAYS  = MAX_WEEKS * 7
 
 /** Walk active sites in priority order at the day level, applying the
- *  build → review → final phase model. PURE — takes a helpMap, mutates
- *  nothing.
+ *  build → review → final phase model. PURE — mutates nothing.
+ *
+ *  Help-hour handling:
+ *    - `helpMap` carries org-wide per-week designer help (e.g. when an
+ *      AM types into the sprint card's "+ help" input).
+ *    - Each site's `help_hours_needed` is distributed across the weeks
+ *      THAT SITE is active (build + final). We do a dry run first to
+ *      discover each site's active weeks, distribute help evenly across
+ *      them (capped per week, skipping designer_out / blackout weeks),
+ *      then run the real schedule with the augmented helpMap.
  *
  *  Sites included in active scheduling:
  *    - in_progress       → standard build → review → final flow.
@@ -265,6 +287,7 @@ const MAX_DAYS  = MAX_WEEKS * 7
  *      `final_hours` remaining. Partner review is treated as already
  *      complete; the site ships as soon as dev reaches it.
  *  Sites excluded:
+ *    - paused            → AM manually paused; no slot returned.
  *    - launched          → done, no schedule. */
 export function computeSchedule(
   sites:        SchedulerSite[],
@@ -272,6 +295,52 @@ export function computeSchedule(
   designerOut:  WeekFlag,
   blackout:     WeekFlag,
   cfg:          SchedulerConfig = DEFAULT_CONFIG,
+  baseCap?:     BaseCapMap,
+): Record<string, SiteSchedule> {
+  // Two-pass: dry run to learn each church's active weeks, distribute
+  // per-church help into helpMap, then run the real schedule.
+  const augmented: HelpMap = { ...helpMap }
+  const hasPerChurchHelp = sites.some(s => (s.help_hours_needed ?? 0) > 0)
+  if (hasPerChurchHelp) {
+    const dry = computeScheduleInner(sites, helpMap, designerOut, blackout, cfg, baseCap)
+    for (const s of sites) {
+      const need = Math.max(0, Number(s.help_hours_needed ?? 0))
+      if (need <= 0) continue
+      const slot = dry[s.id]
+      if (!slot) continue   // paused / launched
+      // Eligible weeks = weeks this site has dev allocation, where the
+      // designer isn't out and the week isn't a blackout. (Otherwise
+      // help that week is forbidden anyway.)
+      const eligible: number[] = []
+      for (const wkStr of Object.keys(slot.alloc)) {
+        const w = Number(wkStr)
+        if (designerOut[w] || blackout[w]) continue
+        eligible.push(w)
+      }
+      if (eligible.length === 0) continue
+      eligible.sort((a, b) => a - b)
+      // Even-spread distribution: floor + remainder.
+      const each = Math.floor(need / eligible.length)
+      let remainder = need - each * eligible.length
+      for (const w of eligible) {
+        const current = augmented[w] ?? 0
+        const room = Math.max(0, cfg.max_help_per_week - current)
+        const add = Math.min(room, each + (remainder > 0 ? 1 : 0))
+        if (add <= 0) continue
+        augmented[w] = current + add
+        if (remainder > 0) remainder -= 1
+      }
+    }
+  }
+  return computeScheduleInner(sites, augmented, designerOut, blackout, cfg, baseCap)
+}
+
+function computeScheduleInner(
+  sites:        SchedulerSite[],
+  helpMap:      HelpMap,
+  designerOut:  WeekFlag,
+  blackout:     WeekFlag,
+  cfg:          SchedulerConfig,
   baseCap?:     BaseCapMap,
 ): Record<string, SiteSchedule> {
   type SiteState = {
@@ -296,7 +365,7 @@ export function computeSchedule(
   const reviewDays = Math.max(0, Math.floor(cfg.review_days ?? 0))
 
   const active = [...sites]
-    .filter(s => s.status !== 'launched')
+    .filter(s => s.status !== 'launched' && s.status !== 'paused')
     .sort((a, b) => a.priority - b.priority)
 
   const states = new Map<string, SiteState>()

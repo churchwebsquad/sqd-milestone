@@ -107,25 +107,38 @@ export default async function handler(req: any, res: any) {
   }
   const task = (await taskRes.json()) as ClickUpTaskShape
 
-  // ── Sum time_spent across parent + all subtasks ──────────────────
-  // ClickUp's task.time_spent is the rolled-up total of every time
-  // entry logged to THAT specific task (not its subtasks). To get
-  // the true Build-Phase total we sum the parent + each subtask.
-  // Use a Set to dedupe by task id in case the same row appears
-  // twice via different paths.
+  // ── Sum time_spent ONLY from the two known dev subtasks ─────────
+  // Ashley's call: count tracked time only when it lands on the
+  // canonical Build-Phase subtasks named "Developer Prep & Build" and
+  // "Testing, Revisions, Launch". Other subtasks (QA, design polish,
+  // partner-side work, etc.) under the same Build-Phase milestone are
+  // intentionally excluded — they're not what we're measuring.
+  // Match by trimmed lowercase name to be forgiving of punctuation.
+  const NAMES_OK = new Set([
+    'developer prep & build',
+    'developer prep and build',
+    'testing, revisions, launch',
+    'testing revisions launch',
+  ])
+  const norm = (n?: string) =>
+    (n ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
   const seen = new Set<string>()
   let totalMs = 0
-  let subtasksCounted = 0
+  let matchedTasks = 0
+  let scannedTasks = 0
+  const matchedNames: string[] = []
   const walk = (t: ClickUpTaskShape) => {
     if (!t || !t.id || seen.has(t.id)) return
     seen.add(t.id)
-    const ms = Number(t.time_spent ?? 0)
-    if (Number.isFinite(ms) && ms > 0) totalMs += ms
-    const subs = Array.isArray(t.subtasks) ? t.subtasks : []
-    for (const sub of subs) {
-      walk(sub)
-      subtasksCounted++
+    scannedTasks++
+    if (NAMES_OK.has(norm(t.name))) {
+      const ms = Number(t.time_spent ?? 0)
+      if (Number.isFinite(ms) && ms > 0) totalMs += ms
+      matchedTasks++
+      if (t.name) matchedNames.push(t.name)
     }
+    const subs = Array.isArray(t.subtasks) ? t.subtasks : []
+    for (const sub of subs) walk(sub)
   }
   walk(task)
 
@@ -163,7 +176,9 @@ export default async function handler(req: any, res: any) {
   return res.status(200).json({
     ok:                 true,
     tracked_hours:      trackedHours,
-    subtasks_counted:   subtasksCounted,
+    scanned_tasks:      scannedTasks,
+    matched_tasks:      matchedTasks,
+    matched_names:      matchedNames,
     last_synced_at:     nowIso,
     clickup_task_id:    taskId,
     clickup_task_name:  task.name ?? null,

@@ -1162,6 +1162,16 @@ export interface StrategyWebProject {
    *  expires. */
   stalled_dismissed_until:  string | null    // ISO timestamptz
 
+  // ── v94 — per-church help hours + PM notes ───────────────
+  /** Designer help hours allocated to this church. The launch
+   *  scheduler distributes them across the weeks the church is being
+   *  worked on; they travel with the church if priority shifts. */
+  help_hours_needed:        number | null
+  /** Project manager free-form notes surfaced on the per-project
+   *  Planning workspace. Distinct from status_reason (which is tied
+   *  to manual_sub_status). */
+  pm_notes:                 string | null
+
   [key: string]: unknown
 }
 
