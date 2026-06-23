@@ -1,22 +1,29 @@
 /**
- * Launch scheduler — pure engine ported from the prototype at
- * prototypes/launch-planner/launch-planner-prototype.html.
+ * Launch scheduler — day-level simulation with phased build flow.
  *
- * Mental model (don't deviate):
- *   - One developer, HARD 35 dev hrs/week. Never raised.
- *   - Sites run sequentially in priority order. Sprint-splitting falls
- *     out naturally (when a site needs less than the sprint, the next
- *     site picks up the rest).
- *   - "Extra help hours" are a separate org-wide per-week resource
- *     (typically the designer). They stack ON TOP of the locked 35.
- *     Only applied when designer_out = false for that week.
- *   - Help has TWO gating conditions to actually pull a launch earlier:
- *     (a) site is `designer`-recoverable, not `dev-only`, AND
- *     (b) designer is available the eligible weeks.
- *     If either fails, the projected launch stands.
- *   - Schedule only the work that's LEFT. In-progress sites consume
- *     `dev_hours_estimate − tracked_hours`. Launched + waiting-feedback
- *     are excluded from active scheduling.
+ * Mental model:
+ *   - Each site decomposes into three segments:
+ *       build  → main development (consumes dev capacity)
+ *       review → out with the partner (calendar pause, dev pivots)
+ *       final  → final edits + launch (consumes dev capacity)
+ *   - build_hours + final_hours = planned_dev_hours.
+ *   - One developer, base 35 dev hrs/week → 7 hrs/weekday. Weekends 0.
+ *     Per-week base override (e.g. dev out one day → 28h → 5.6 hrs/day).
+ *     Blackout zeros the whole week. Help hours stack on top of base
+ *     unless designer_out is set.
+ *   - Sites are scanned in priority order. Each weekday, fill capacity
+ *     by picking the highest-priority WORKABLE segment (a build with
+ *     hours left, OR a final whose review has elapsed). When the
+ *     top-priority site enters review, the dev pivots to the next
+ *     site's build. When review elapses, the top-priority site's final
+ *     preempts whatever else is being built.
+ *   - In-flight sites consume tracked time against build first, then
+ *     final, so a nearly-done site skips straight to the final
+ *     segment.
+ *   - waiting_feedback sites enter the simulation in 'finalizing' state
+ *     with final_hours remaining — partner review is already complete
+ *     from their POV; we're just waiting on dev to ship the final
+ *     pass. launched sites are excluded entirely.
  *
  * All date math uses UTC.
  */
@@ -93,11 +100,18 @@ export interface WeekAdjustment {
 
 /** Scheduler config (the locked constants + the calendar anchor). */
 export interface SchedulerConfig {
-  schedule_start:  string               // ISO yyyy-mm-dd
-  base_weekly_cap: number               // hard 35
-  sprint_weeks:    number               // 2
+  schedule_start:   string              // ISO yyyy-mm-dd
+  base_weekly_cap:  number              // hard 35
+  sprint_weeks:     number              // 2
   launch_tail_days: number              // 0 by default
   max_help_per_week: number             // 35 — one full extra person per week max
+  /** Calendar days each site is out for partner review between build
+   *  and final edits. Dev pivots to other sites during this window. */
+  review_days:      number              // default 4
+  /** Hours reserved for the final edits + launch pass that runs after
+   *  partner review. Subtracted from planned_dev_hours to derive
+   *  build hours. */
+  final_hours:      number              // default 7
 }
 
 export const DEFAULT_CONFIG: SchedulerConfig = {
@@ -106,6 +120,8 @@ export const DEFAULT_CONFIG: SchedulerConfig = {
   sprint_weeks:      2,
   launch_tail_days:  0,
   max_help_per_week: 35,
+  review_days:       4,
+  final_hours:       7,
 }
 
 function todayISO(): string {
@@ -114,19 +130,38 @@ function todayISO(): string {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString().slice(0, 10)
 }
 
-/** Per-site result returned by computeSchedule. */
+/** Per-site result returned by computeSchedule.
+ *
+ *  `alloc` = combined dev hours per week (build + final). Used by the
+ *  capacity bar and the recovery solver. `buildAllocByWeek` and
+ *  `finalAllocByWeek` are the per-phase break-down for sprint cards.
+ *  `firstBuildDayByWeek` / `firstFinalDayByWeek` give the first weekday
+ *  the dev touched each phase in each week — used to order the phase
+ *  rows inside a sprint card by when they actually happened.
+ *  reviewStart/reviewEnd is a half-open interval: the partner is out
+ *  from reviewStart through reviewEnd-1, and on reviewEnd the site is
+ *  back in dev's hands.
+ */
 export interface SiteSchedule {
-  startWeek:        number              // index into the week stream from schedule_start
-  endWeek:          number
-  alloc:            Record<number, number>  // weekIndex → hours consumed by this site
-  /** Monday of the first week the dev picks this project up. Drives
-   *  the "Design due" upstream cutoff column on the queue table. */
-  devStartDate:     Date
-  devCompleteDate:  Date
-  launchDate:       Date                // dev complete + launch_tail_days
-  /** delta_days = launchDate − target_launch (calendar days).
+  startWeek:           number              // first week containing dev activity
+  endWeek:             number              // week containing finalEnd (or buildEnd if no final)
+  alloc:               Record<number, number>  // weekIndex → total dev hrs (build + final)
+  buildAllocByWeek:    Record<number, number>
+  finalAllocByWeek:    Record<number, number>
+  firstBuildDayByWeek: Record<number, Date>
+  firstFinalDayByWeek: Record<number, Date>
+  buildStart:          Date | null
+  buildEnd:            Date | null
+  reviewStart:         Date | null
+  reviewEnd:           Date | null
+  finalStart:          Date | null
+  finalEnd:            Date | null
+  devStartDate:        Date
+  devCompleteDate:     Date
+  launchDate:          Date
+  /** delta_days = target_launch − launchDate (calendar days).
    *  positive = ahead of target ; negative = behind. */
-  delta:            number | null
+  delta:               number | null
 }
 
 /** Adjustment lookup helpers. */
@@ -187,7 +222,7 @@ export function weekStart(i: number, cfg: SchedulerConfig): Date {
   return addCal(mondayOf(parseD(cfg.schedule_start)), i * 7)
 }
 
-/** Effective capacity for week `i` given the adjustments.
+/** Effective weekly capacity for week `i` given the adjustments.
  *  - Blackout zeros everything.
  *  - base_capacity_override (when set on the adjustment row) replaces
  *    the team default 35h base; otherwise cfg.base_weekly_cap.
@@ -210,23 +245,27 @@ export function effCap(
 /** Hours remaining for a site — full estimate for in-progress sites
  *  with no tracked time, estimate − tracked otherwise. */
 export function remainingHours(site: SchedulerSite): number {
-  if (site.status !== 'in_progress') return 0
+  if (site.status === 'launched') return 0
   return Math.max(0, Number(site.planned_dev_hours || 0) - Number(site.tracked_hours || 0))
 }
 
-// ── Pure scheduler ──────────────────────────────────────────────────
+// ── Day-level simulation ────────────────────────────────────────────
 
 const MAX_WEEKS = 800     // ~15 years; guard against runaway loops
+const MAX_DAYS  = MAX_WEEKS * 7
 
-/** Walk active sites in priority order; consume the weekly capacity
- *  pool sequentially. PURE — takes a helpMap, mutates nothing.
+/** Walk active sites in priority order at the day level, applying the
+ *  build → review → final phase model. PURE — takes a helpMap, mutates
+ *  nothing.
  *
- *  Sites excluded from active scheduling:
- *    - `launched`         → done
- *    - `waiting_feedback` → dev mostly complete; project sits in
- *      partner review. No hours are consumed.
- *  Both kinds still appear in the queue UI but get no `alloc` /
- *  `launchDate` here. */
+ *  Sites included in active scheduling:
+ *    - in_progress       → standard build → review → final flow.
+ *      Tracked time fills build first, then final.
+ *    - waiting_feedback  → enter directly in 'finalizing' state with
+ *      `final_hours` remaining. Partner review is treated as already
+ *      complete; the site ships as soon as dev reaches it.
+ *  Sites excluded:
+ *    - launched          → done, no schedule. */
 export function computeSchedule(
   sites:        SchedulerSite[],
   helpMap:      HelpMap,
@@ -235,70 +274,196 @@ export function computeSchedule(
   cfg:          SchedulerConfig = DEFAULT_CONFIG,
   baseCap?:     BaseCapMap,
 ): Record<string, SiteSchedule> {
+  type SiteState = {
+    site:                SchedulerSite
+    state:               'building' | 'review' | 'finalizing' | 'done'
+    buildLeft:           number
+    finalLeft:           number
+    buildStart:          Date | null
+    buildEnd:            Date | null
+    reviewStart:         Date | null
+    reviewEnd:           Date | null
+    finalStart:          Date | null
+    finalEnd:            Date | null
+    launchDate:          Date | null
+    buildAllocByWeek:    Record<number, number>
+    finalAllocByWeek:    Record<number, number>
+    firstBuildDayByWeek: Record<number, Date>
+    firstFinalDayByWeek: Record<number, Date>
+  }
+
+  const finalHcap = Math.max(0, cfg.final_hours ?? 0)
+  const reviewDays = Math.max(0, Math.floor(cfg.review_days ?? 0))
+
   const active = [...sites]
-    .filter(s => s.status === 'in_progress')
+    .filter(s => s.status !== 'launched')
     .sort((a, b) => a.priority - b.priority)
 
+  const states = new Map<string, SiteState>()
+  for (const s of active) {
+    const planned = Math.max(0, Number(s.planned_dev_hours || 0))
+    const tracked = Math.max(0, Number(s.tracked_hours || 0))
+    const finalH = Math.min(finalHcap, planned)
+    const buildH = Math.max(0, planned - finalH)
+
+    let buildLeft: number
+    let finalLeft: number
+    let state: SiteState['state']
+
+    if (s.status === 'waiting_feedback') {
+      buildLeft = 0
+      finalLeft = finalH
+      state = finalLeft > 0 ? 'finalizing' : 'done'
+    } else {
+      buildLeft = Math.max(0, buildH - tracked)
+      const overflow = Math.max(0, tracked - buildH)
+      finalLeft = Math.max(0, finalH - overflow)
+      if (buildLeft <= 0 && finalLeft <= 0)      state = 'done'
+      else if (buildLeft <= 0 && finalLeft > 0)  state = 'finalizing'
+      else                                       state = 'building'
+    }
+
+    states.set(s.id, {
+      site: s,
+      state, buildLeft, finalLeft,
+      buildStart: null, buildEnd: null,
+      reviewStart: null, reviewEnd: null,
+      finalStart: null, finalEnd: null,
+      launchDate: null,
+      buildAllocByWeek:    {},
+      finalAllocByWeek:    {},
+      firstBuildDayByWeek: {},
+      firstFinalDayByWeek: {},
+    })
+  }
+
+  const anchor = mondayOf(parseD(cfg.schedule_start))
+  const EPS = 0.001
+  let allDone = active.every(s => states.get(s.id)!.state === 'done')
+
+  for (let dayOffset = 0; !allDone && dayOffset < MAX_DAYS; dayOffset++) {
+    const d = addCal(anchor, dayOffset)
+    const wd = d.getUTCDay()
+    const weekIdx = Math.floor(dayOffset / 7)
+
+    // Promote reviews whose period has elapsed (start-of-day check).
+    for (const s of active) {
+      const st = states.get(s.id)!
+      if (st.state === 'review' && st.reviewEnd && d.getTime() >= st.reviewEnd.getTime()) {
+        st.state = 'finalizing'
+      }
+    }
+
+    // Weekends = no dev work, but reviews still tick.
+    if (wd === 0 || wd === 6) continue
+
+    const weekCap = effCap(weekIdx, helpMap, designerOut, blackout, cfg, baseCap)
+    let dayCap = weekCap / 5
+    if (dayCap <= 0) continue
+
+    // Allocate in priority order; preempt when a higher-priority
+    // segment becomes workable.
+    while (dayCap > EPS) {
+      let picked: SiteState | null = null
+      for (const s of active) {
+        const st = states.get(s.id)!
+        if ((st.state === 'building'   && st.buildLeft > 0) ||
+            (st.state === 'finalizing' && st.finalLeft > 0)) {
+          picked = st
+          break
+        }
+      }
+      if (!picked) break
+
+      if (picked.state === 'building') {
+        const work = Math.min(dayCap, picked.buildLeft)
+        dayCap -= work
+        picked.buildLeft -= work
+        picked.buildAllocByWeek[weekIdx] = (picked.buildAllocByWeek[weekIdx] ?? 0) + work
+        if (!picked.firstBuildDayByWeek[weekIdx]) picked.firstBuildDayByWeek[weekIdx] = d
+        if (!picked.buildStart) picked.buildStart = d
+        if (picked.buildLeft <= EPS) {
+          picked.buildLeft = 0
+          picked.buildEnd = d
+          if (picked.finalLeft > 0 && reviewDays > 0) {
+            picked.state = 'review'
+            picked.reviewStart = d
+            picked.reviewEnd = addCal(d, reviewDays)
+          } else if (picked.finalLeft > 0) {
+            picked.state = 'finalizing'
+          } else {
+            picked.state = 'done'
+            picked.finalEnd = d
+            picked.launchDate = addCal(d, cfg.launch_tail_days)
+          }
+        }
+      } else {
+        const work = Math.min(dayCap, picked.finalLeft)
+        dayCap -= work
+        picked.finalLeft -= work
+        picked.finalAllocByWeek[weekIdx] = (picked.finalAllocByWeek[weekIdx] ?? 0) + work
+        if (!picked.firstFinalDayByWeek[weekIdx]) picked.firstFinalDayByWeek[weekIdx] = d
+        if (!picked.finalStart) picked.finalStart = d
+        if (picked.finalLeft <= EPS) {
+          picked.finalLeft = 0
+          picked.finalEnd = d
+          picked.launchDate = addCal(d, cfg.launch_tail_days)
+          picked.state = 'done'
+        }
+      }
+    }
+
+    allDone = active.every(s => states.get(s.id)!.state === 'done')
+  }
+
+  // Materialize SiteSchedule for each active site.
   const res: Record<string, SiteSchedule> = {}
-  let wi = 0
-  let rem = effCap(0, helpMap, designerOut, blackout, cfg, baseCap)
+  const weekIdxFromDate = (dt: Date): number =>
+    Math.floor(calBtw(anchor, dt) / 7)
 
   for (const s of active) {
-    let need = remainingHours(s)
+    const st = states.get(s.id)!
+
     const alloc: Record<number, number> = {}
-
-    if (need <= 0) {
-      const ws = weekStart(wi, cfg)
-      res[s.id] = {
-        startWeek:       wi,
-        endWeek:         wi,
-        alloc,
-        devStartDate:    ws,
-        devCompleteDate: ws,
-        launchDate:      addCal(ws, cfg.launch_tail_days),
-        delta:           s.target_launch
-          ? calBtw(addCal(ws, cfg.launch_tail_days), parseD(s.target_launch))
-          : null,
-      }
-      continue
+    for (const [k, v] of Object.entries(st.buildAllocByWeek)) {
+      const wi = Number(k)
+      alloc[wi] = (alloc[wi] ?? 0) + v
+    }
+    for (const [k, v] of Object.entries(st.finalAllocByWeek)) {
+      const wi = Number(k)
+      alloc[wi] = (alloc[wi] ?? 0) + v
     }
 
-    // Walk past zero-capacity weeks (blackout) at the front.
-    while (rem <= 0 && wi < MAX_WEEKS) {
-      wi++
-      rem = effCap(wi, helpMap, designerOut, blackout, cfg, baseCap)
-    }
-    const sw = wi
+    const devStart = st.buildStart ?? st.finalStart
+    const devEnd   = st.finalEnd ?? st.buildEnd
 
-    while (need > 0 && wi < MAX_WEEKS) {
-      if (rem <= 0) {
-        wi++
-        rem = effCap(wi, helpMap, designerOut, blackout, cfg, baseCap)
-        continue
-      }
-      const use = Math.min(need, rem)
-      alloc[wi] = (alloc[wi] ?? 0) + use
-      need -= use
-      rem -= use
-      if (need <= 0) break
-    }
-
-    const ew = wi
-    const cap = effCap(wi, helpMap, designerOut, blackout, cfg, baseCap) || cfg.base_weekly_cap
-    const consumed = cap - rem
-    const into = Math.max(0, Math.ceil((consumed / cap) * 5))
-    const devCompleteDate = addBiz(weekStart(ew, cfg), into)
-    const launchDate = addCal(devCompleteDate, cfg.launch_tail_days)
+    // Defensive fallback: a site with no segments left (planned=0,
+    // tracked=0, or both segments already drained) lands on the
+    // anchor. Recovery solver checks delta against this stable date.
+    const fallback = mondayOf(parseD(cfg.schedule_start))
+    const finalDevStart = devStart ?? fallback
+    const finalDevEnd   = devEnd   ?? finalDevStart
+    const finalLaunch   = st.launchDate ?? addCal(finalDevEnd, cfg.launch_tail_days)
 
     res[s.id] = {
-      startWeek: sw,
-      endWeek:   ew,
+      startWeek:           weekIdxFromDate(finalDevStart),
+      endWeek:             weekIdxFromDate(finalLaunch),
       alloc,
-      devStartDate: weekStart(sw, cfg),
-      devCompleteDate,
-      launchDate,
-      delta:     s.target_launch
-        ? calBtw(launchDate, parseD(s.target_launch))
+      buildAllocByWeek:    st.buildAllocByWeek,
+      finalAllocByWeek:    st.finalAllocByWeek,
+      firstBuildDayByWeek: st.firstBuildDayByWeek,
+      firstFinalDayByWeek: st.firstFinalDayByWeek,
+      buildStart:          st.buildStart,
+      buildEnd:            st.buildEnd,
+      reviewStart:         st.reviewStart,
+      reviewEnd:           st.reviewEnd,
+      finalStart:          st.finalStart,
+      finalEnd:            st.finalEnd,
+      devStartDate:        finalDevStart,
+      devCompleteDate:     finalDevEnd,
+      launchDate:          finalLaunch,
+      delta: s.target_launch
+        ? calBtw(finalLaunch, parseD(s.target_launch))
         : null,
     }
   }
@@ -339,7 +504,7 @@ export function paceOf(site: SchedulerSite): PaceResult | null {
 
 /** Per the user's call:
  *  - intake / content / design / dev → 'in_progress' (consume hours)
- *  - review                          → 'waiting_feedback' (excluded)
+ *  - review                          → 'waiting_feedback' (final pass remains)
  *  - launched                        → 'launched' (excluded) */
 export function statusFromPhase(phase: string | null | undefined): SchedulerSite['status'] {
   if (phase === 'launched') return 'launched'

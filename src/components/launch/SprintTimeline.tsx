@@ -1,12 +1,18 @@
 /**
- * Sprint timeline — ported from the prototype.
+ * Sprint timeline — phased per-site flow.
  *
- * One card per 2-week sprint. Each card shows:
- *   - Sprint label + date range
- *   - Capacity bar segmented by site (colored chip per site)
- *   - Hours scheduled vs effective capacity (e.g. "63/70 hrs")
- *   - Per-week base 35 🔒 + editable + help hours input + designer-out
- *     checkbox + blackout marker
+ * One card per 2-week sprint. Each card lists the work that happens in
+ * that window as a time-ordered flow of phase rows:
+ *   - 🟪 BUILD              site · {h}h
+ *   - 🟧 PARTNER REVIEW     site · out {start} – {end}
+ *   - 🟩 FINAL EDITS + LAUNCH  site · {h}h
+ *
+ * Reviews are calendar windows (no dev work), so they don't consume
+ * the capacity bar — only build + final do. The capacity bar is
+ * segmented per site by dev hours scheduled in that sprint.
+ *
+ * Per-week controls (base override, + help, designer out, blackout)
+ * stay on the card.
  */
 import { useMemo, useState, useEffect } from 'react'
 import {
@@ -21,6 +27,8 @@ const SITE_COLORS = [
   '#C2453F', '#3D7DE5', '#9B4FD1', '#E5953D', '#1FA39A',
   '#B5519E', '#5D6BE5', '#D16A4F', '#4FA85D', '#8B5CF6',
 ]
+
+const DAY_MS = 86_400_000
 
 interface Props {
   rows:        ProjectLaunchRow[]
@@ -39,30 +47,23 @@ interface Props {
 export function SprintTimeline({
   rows, sites, schedule, adjustments, cfg, onAdjust, sprintsToShow,
 }: Props) {
-  // Build color map for sites in priority order.
+  // Color map for sites in priority order. Includes waiting_feedback
+  // sites — they show up as 'final edits' rows.
   const colorByProject = useMemo(() => {
     const m: Record<string, string> = {}
     const ordered = [...sites]
-      .filter(s => s.status === 'in_progress')
+      .filter(s => s.status !== 'launched')
       .sort((a, b) => a.priority - b.priority)
     ordered.forEach((s, i) => { m[s.id] = SITE_COLORS[i % SITE_COLORS.length] })
     return m
   }, [sites])
 
-  // Group consumed hours by week index for the capacity bar fills.
-  const allocByWeek = useMemo(() => {
-    const out: Record<number, Array<{ projectId: string; hours: number }>> = {}
-    for (const [pid, slot] of Object.entries(schedule)) {
-      for (const [wkStr, hrs] of Object.entries(slot.alloc)) {
-        const wk = Number(wkStr)
-        if (!out[wk]) out[wk] = []
-        out[wk].push({ projectId: pid, hours: hrs })
-      }
-    }
-    return out
-  }, [schedule])
+  const priorityByProject = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const s of sites) m[s.id] = s.priority
+    return m
+  }, [sites])
 
-  // Adjustments keyed by week_starting ISO.
   const adjByIso = useMemo(() => {
     const m = new Map<string, WeekAdjustment>()
     for (const a of adjustments) m.set(a.week_starting, a)
@@ -74,29 +75,33 @@ export function SprintTimeline({
     return r ? (r.church_name ?? r.name) : id.slice(0, 8)
   }
 
-  // How many sprints to render. If the caller didn't pin a count,
-  // extend through the LAST sprint that has any allocated work, plus
-  // 6 sprints (~3 months at 2-week sprints) of open capacity. That
-  // gives the PM a clear "here's the next quarter of headroom" view
-  // beyond the active queue.
+  // Extend through the last sprint that contains any allocated work
+  // OR any review window, then add 6 sprints (~3 months) of headroom.
   const sprintsCount = useMemo(() => {
     if (sprintsToShow != null) return sprintsToShow
     let maxEndWeek = -1
     for (const slot of Object.values(schedule)) {
-      if (slot.endWeek > maxEndWeek && Object.keys(slot.alloc).length > 0) {
-        maxEndWeek = slot.endWeek
+      const reviewEndIdx = slot.reviewEnd
+        ? weekIdxOf(slot.reviewEnd, cfg)
+        : -1
+      const lastTouched = Math.max(slot.endWeek, reviewEndIdx)
+      if (lastTouched > maxEndWeek && (Object.keys(slot.alloc).length > 0 || slot.reviewStart)) {
+        maxEndWeek = lastTouched
       }
     }
     const lastSprintIdx = maxEndWeek >= 0 ? Math.floor(maxEndWeek / cfg.sprint_weeks) : -1
-    const buffer = 6   // 6 two-week sprints = 12 weeks ≈ 3 months
+    const buffer = 6
     const total = lastSprintIdx + 1 + buffer
-    return Math.max(total, 4)   // floor so an empty queue still shows something
-  }, [schedule, cfg.sprint_weeks, sprintsToShow])
+    return Math.max(total, 4)
+  }, [schedule, cfg, sprintsToShow])
 
-  // Build the sprint list.
   const sprints: Array<{ idx: number; startWeek: number; endWeek: number }> = []
   for (let s = 0; s < sprintsCount; s++) {
-    sprints.push({ idx: s, startWeek: s * cfg.sprint_weeks, endWeek: s * cfg.sprint_weeks + (cfg.sprint_weeks - 1) })
+    sprints.push({
+      idx: s,
+      startWeek: s * cfg.sprint_weeks,
+      endWeek:   s * cfg.sprint_weeks + (cfg.sprint_weeks - 1),
+    })
   }
 
   return (
@@ -104,12 +109,10 @@ export function SprintTimeline({
       <div className="px-4 py-3 border-b border-lavender bg-lavender-tint/30">
         <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">Development sprint timeline</p>
         <p className="text-sm text-purple-gray mt-0.5">
-          Each week starts at the team default <strong className="text-deep-plum">{cfg.base_weekly_cap}h base</strong>;
-          edit per week when the dev is out part of the week (e.g. one day off → 28h).
-          Stack extra <em>help</em> hours on top when a designer can offload work. Mark
-          <em>designer out</em> to drop help that week, or <em>blackout</em> to zero the
-          whole week. Cards auto-extend 3 months past the last allocated sprint so you
-          can see open capacity ahead.
+          Each site flows <strong className="text-deep-plum">build → partner review → final edits + launch</strong>.
+          The dev pivots away during the review pause (default <strong className="text-deep-plum">{cfg.review_days}d</strong>),
+          then circles back for the <strong className="text-deep-plum">{cfg.final_hours}h</strong> final pass. Capacity bars
+          only count dev work (build + final); reviews are calendar time, not hours.
         </p>
       </div>
 
@@ -121,9 +124,10 @@ export function SprintTimeline({
             startWeek={sp.startWeek}
             endWeek={sp.endWeek}
             cfg={cfg}
-            allocByWeek={allocByWeek}
+            schedule={schedule}
             adjByIso={adjByIso}
             colorByProject={colorByProject}
+            priorityByProject={priorityByProject}
             projectName={projectName}
             onAdjust={onAdjust}
           />
@@ -135,30 +139,121 @@ export function SprintTimeline({
 
 // ── Sprint card ──────────────────────────────────────────────────
 
-function SprintCard({
-  sprintIdx, startWeek, endWeek, cfg, allocByWeek, adjByIso,
-  colorByProject, projectName, onAdjust,
-}: {
-  sprintIdx:       number
-  startWeek:       number
-  endWeek:         number
-  cfg:             SchedulerConfig
-  allocByWeek:     Record<number, Array<{ projectId: string; hours: number }>>
-  adjByIso:        Map<string, WeekAdjustment>
-  colorByProject:  Record<string, string>
-  projectName:     (id: string) => string
-  onAdjust:        (a: WeekAdjustment) => Promise<void>
-}) {
-  // Sprint span dates.
-  const sprintStart = weekStart(startWeek, cfg)
-  const sprintEnd   = addCal(weekStart(endWeek, cfg), 6)
+interface PhaseRow {
+  kind:    'build' | 'review' | 'final'
+  siteId:  string
+  hours?:  number
+  /** Review window — only for kind='review'. */
+  reviewStart?: Date
+  reviewEnd?:   Date
+  /** First calendar day this row appears in the sprint window. Drives
+   *  vertical ordering so the card reads top-to-bottom as the work
+   *  actually happened. */
+  sortKey: number
+  /** Tie-break when sortKey ties: build < review < final. */
+  phaseRank: number
+  priority:  number
+}
 
-  // Per-week effective capacity. base_capacity_override (when set)
-  // replaces the team default 35h base; help_hours stack on top
-  // unless designer_out; is_blackout zeros the whole week.
+function SprintCard({
+  sprintIdx, startWeek, endWeek, cfg, schedule, adjByIso,
+  colorByProject, priorityByProject, projectName, onAdjust,
+}: {
+  sprintIdx:        number
+  startWeek:        number
+  endWeek:          number
+  cfg:              SchedulerConfig
+  schedule:         Record<string, SiteSchedule>
+  adjByIso:         Map<string, WeekAdjustment>
+  colorByProject:   Record<string, string>
+  priorityByProject:Record<string, number>
+  projectName:      (id: string) => string
+  onAdjust:         (a: WeekAdjustment) => Promise<void>
+}) {
+  const sprintStart   = weekStart(startWeek, cfg)
+  const sprintEnd     = addCal(weekStart(endWeek, cfg), 6)
+  const sprintEndExcl = addCal(sprintEnd, 1)  // exclusive boundary for overlap math
+
+  // Per-week capacity row data.
   const weeks: Array<{ idx: number; iso: string; cap: number; hours: number; adj: WeekAdjustment | null }> = []
   let sprintCap = 0
   let sprintHours = 0
+
+  // Build phase rows by scanning the schedule.
+  const rows: PhaseRow[] = []
+  // Capacity bar slices, keyed by site (build + final summed).
+  const sprintAlloc = new Map<string, number>()
+
+  for (const [pid, slot] of Object.entries(schedule)) {
+    const priority = priorityByProject[pid] ?? 9_999
+
+    // Build allocation in this sprint window.
+    let buildH = 0
+    let buildFirst: Date | null = null
+    for (let w = startWeek; w <= endWeek; w++) {
+      const h = slot.buildAllocByWeek[w]
+      if (h && h > 0) {
+        buildH += h
+        const d = slot.firstBuildDayByWeek[w]
+        if (d && (!buildFirst || d.getTime() < buildFirst.getTime())) buildFirst = d
+      }
+    }
+    if (buildH > 0) {
+      rows.push({
+        kind:      'build',
+        siteId:    pid,
+        hours:     buildH,
+        sortKey:   buildFirst ? buildFirst.getTime() : sprintStart.getTime(),
+        phaseRank: 0,
+        priority,
+      })
+      sprintAlloc.set(pid, (sprintAlloc.get(pid) ?? 0) + buildH)
+      sprintHours += buildH
+    }
+
+    // Final allocation in this sprint window.
+    let finalH = 0
+    let finalFirst: Date | null = null
+    for (let w = startWeek; w <= endWeek; w++) {
+      const h = slot.finalAllocByWeek[w]
+      if (h && h > 0) {
+        finalH += h
+        const d = slot.firstFinalDayByWeek[w]
+        if (d && (!finalFirst || d.getTime() < finalFirst.getTime())) finalFirst = d
+      }
+    }
+    if (finalH > 0) {
+      rows.push({
+        kind:      'final',
+        siteId:    pid,
+        hours:     finalH,
+        sortKey:   finalFirst ? finalFirst.getTime() : sprintStart.getTime(),
+        phaseRank: 2,
+        priority,
+      })
+      sprintAlloc.set(pid, (sprintAlloc.get(pid) ?? 0) + finalH)
+      sprintHours += finalH
+    }
+
+    // Review window overlap.
+    if (slot.reviewStart && slot.reviewEnd) {
+      const overlapStart = Math.max(slot.reviewStart.getTime(), sprintStart.getTime())
+      const overlapEnd   = Math.min(slot.reviewEnd.getTime(),   sprintEndExcl.getTime())
+      if (overlapEnd > overlapStart) {
+        rows.push({
+          kind:        'review',
+          siteId:      pid,
+          reviewStart: slot.reviewStart,
+          reviewEnd:   slot.reviewEnd,
+          sortKey:     overlapStart,
+          phaseRank:   1,
+          priority,
+        })
+      }
+    }
+  }
+
+  // Per-week capacity sum (cap for the sprint).
   for (let i = startWeek; i <= endWeek; i++) {
     const wk = weekStart(i, cfg)
     const iso = fmtISO(wk)
@@ -167,81 +262,73 @@ function SprintCard({
     const cap = adj?.is_blackout
       ? 0
       : Math.max(0, base + (adj?.designer_out ? 0 : (adj?.help_hours ?? 0)))
-    const hrs = (allocByWeek[i] ?? []).reduce((s, x) => s + x.hours, 0)
+    // Per-week scheduled = sum of allocs from rows that landed in this week.
+    let hrs = 0
+    for (const [pid, slot] of Object.entries(schedule)) {
+      void pid
+      hrs += (slot.buildAllocByWeek[i] ?? 0) + (slot.finalAllocByWeek[i] ?? 0)
+    }
     weeks.push({ idx: i, iso, cap, hours: hrs, adj })
     sprintCap += cap
-    sprintHours += hrs
   }
 
-  // Aggregate per-project hours across the sprint for the capacity bar.
-  const sprintAlloc = new Map<string, number>()
-  for (let i = startWeek; i <= endWeek; i++) {
-    for (const a of (allocByWeek[i] ?? [])) {
-      sprintAlloc.set(a.projectId, (sprintAlloc.get(a.projectId) ?? 0) + a.hours)
-    }
-  }
-  const sprintAllocs = Array.from(sprintAlloc.entries()).map(([id, h]) => ({ id, hours: h }))
+  // Sort rows: by first-day-in-window asc, then build < review < final,
+  // then priority asc (high-pri first when same day + same phase).
+  rows.sort((a, b) => {
+    if (a.sortKey !== b.sortKey) return a.sortKey - b.sortKey
+    if (a.phaseRank !== b.phaseRank) return a.phaseRank - b.phaseRank
+    return a.priority - b.priority
+  })
+
+  const sprintAllocsArr = Array.from(sprintAlloc.entries()).map(([id, h]) => ({ id, hours: h }))
   const isFull = sprintCap > 0 && sprintHours >= sprintCap
 
   return (
     <div className="rounded-xl border border-lavender bg-cream/30">
       <div className="px-4 pt-3 pb-2">
-        <p className="text-[14px] font-bold text-deep-plum">
-          {sprintStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
+        <p className="font-serif text-[16px] font-semibold text-deep-plum leading-tight">
+          {sprintStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}
           {' – '}
-          {sprintEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
+          {sprintEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}
         </p>
-        <p className="text-[11px] uppercase tracking-widest font-bold text-purple-gray mt-0.5">
-          Dev Sprint {sprintIdx + 1}
+        <p className="text-[10px] uppercase tracking-widest font-bold text-purple-gray mt-0.5">
+          Sprint {sprintIdx + 1}
         </p>
       </div>
 
-      {/* Capacity bar */}
+      {/* Capacity bar — dev hours only (build + final). */}
       <div className="px-4">
         <div className="h-2 w-full rounded bg-lavender-tint overflow-hidden flex">
-          {sprintAllocs.map(a => (
+          {sprintAllocsArr.map(a => (
             <div
               key={a.id}
               style={{
                 width: `${sprintCap > 0 ? (a.hours / sprintCap) * 100 : 0}%`,
                 background: colorByProject[a.id] ?? '#A89BE5',
               }}
-              title={`${projectName(a.id)} · ${a.hours}h`}
+              title={`${projectName(a.id)} · ${roundH(a.hours)}h`}
             />
           ))}
         </div>
         <div className="mt-1 flex items-center justify-between text-[11px] text-purple-gray">
           <span className={isFull ? 'text-red-700 font-semibold' : ''}>
-            {sprintHours} hrs scheduled
+            {roundH(sprintHours)} dev hrs scheduled
           </span>
           <span>{sprintCap || 0} hr capacity</span>
         </div>
       </div>
 
-      {/* Per-project allocation rows — one per project, full church
-          name + right-aligned hours. This is the PM's "who gets which
-          slice of this sprint" read; the old inline-chip layout
-          truncated names and was hard to scan. Sorted by hours desc
-          so the biggest slice reads first. */}
-      {sprintAllocs.length > 0 && (
+      {/* Phase rows */}
+      {rows.length > 0 && (
         <div className="px-4 pt-3 pb-2 space-y-1.5">
-          {sprintAllocs
-            .slice()
-            .sort((a, b) => b.hours - a.hours)
-            .map(a => (
-              <div key={a.id} className="flex items-center gap-2.5 text-[13px]">
-                <span
-                  className="w-2.5 h-2.5 rounded-sm shrink-0"
-                  style={{ background: colorByProject[a.id] ?? '#A89BE5' }}
-                />
-                <span className="text-deep-plum flex-1 min-w-0">
-                  {projectName(a.id)}
-                </span>
-                <span className="font-mono font-bold text-deep-plum shrink-0">
-                  {a.hours}h
-                </span>
-              </div>
-            ))}
+          {rows.map((r, i) => (
+            <PhaseRowItem
+              key={`${r.kind}-${r.siteId}-${i}`}
+              row={r}
+              color={colorByProject[r.siteId] ?? '#A89BE5'}
+              name={projectName(r.siteId)}
+            />
+          ))}
         </div>
       )}
 
@@ -263,6 +350,86 @@ function SprintCard({
   )
 }
 
+function PhaseRowItem({
+  row, color, name,
+}: { row: PhaseRow; color: string; name: string }) {
+  if (row.kind === 'review') {
+    return (
+      <div className="flex items-start gap-2.5 text-[13px]">
+        <span
+          className="w-2.5 h-2.5 rounded-sm shrink-0 mt-1 border border-dashed"
+          style={{ borderColor: color, background: 'transparent' }}
+        />
+        <div className="flex-1 min-w-0">
+          <div className="text-deep-plum">{name}</div>
+          <div className="inline-flex items-center gap-1.5 mt-0.5">
+            <PhasePill kind="review" />
+            <span className="text-[11px] text-purple-gray">
+              out {fmtShort(row.reviewStart!)} – {fmtShort(row.reviewEnd!)}
+            </span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="flex items-start gap-2.5 text-[13px]">
+      <span
+        className="w-2.5 h-2.5 rounded-sm shrink-0 mt-1"
+        style={{ background: color }}
+      />
+      <div className="flex-1 min-w-0">
+        <div className="text-deep-plum">{name}</div>
+        <div className="mt-0.5">
+          <PhasePill kind={row.kind} />
+        </div>
+      </div>
+      <span className="font-mono font-bold text-deep-plum shrink-0 mt-1">
+        {roundH(row.hours ?? 0)}h
+      </span>
+    </div>
+  )
+}
+
+function PhasePill({ kind }: { kind: 'build' | 'review' | 'final' }) {
+  if (kind === 'build') {
+    return (
+      <span className="inline-block text-[9px] uppercase tracking-widest font-bold px-2 py-0.5 rounded-full bg-lavender text-deep-plum">
+        Build
+      </span>
+    )
+  }
+  if (kind === 'review') {
+    return (
+      <span className="inline-block text-[9px] uppercase tracking-widest font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900">
+        Partner review
+      </span>
+    )
+  }
+  return (
+    <span className="inline-block text-[9px] uppercase tracking-widest font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+      Final edits + launch
+    </span>
+  )
+}
+
+function roundH(n: number): number | string {
+  // 0.5h granularity reads cleaner than 0.1h in the sprint cards.
+  const r = Math.round(n * 2) / 2
+  return r === Math.floor(r) ? r : r.toFixed(1)
+}
+
+function fmtShort(d: Date): string {
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+}
+
+function weekIdxOf(d: Date, cfg: SchedulerConfig): number {
+  const anchor = weekStart(0, cfg)
+  return Math.floor((d.getTime() - anchor.getTime()) / (7 * DAY_MS))
+}
+
+// ── Per-week controls ────────────────────────────────────────────
+
 function WeekControl({
   iso, sprintStart, adj, baseCap, scheduledHours, onAdjust,
 }: {
@@ -275,8 +442,6 @@ function WeekControl({
 }) {
   const [helpDraft, setHelpDraft] = useState(String(adj?.help_hours ?? ''))
   useEffect(() => { setHelpDraft(String(adj?.help_hours ?? '')) }, [adj?.help_hours])
-  // base capacity draft — null/'' means "use team default 35h"; any
-  // number means "override base for this week to N hours."
   const [baseDraft, setBaseDraft] = useState<string>(adj?.base_capacity != null ? String(adj.base_capacity) : '')
   useEffect(() => {
     setBaseDraft(adj?.base_capacity != null ? String(adj.base_capacity) : '')
@@ -359,7 +524,7 @@ function WeekControl({
           />
           <span className="text-purple-gray font-semibold">blackout</span>
         </label>
-        <span className="font-mono text-purple-gray min-w-[40px] text-right">{scheduledHours}h</span>
+        <span className="font-mono text-purple-gray min-w-[40px] text-right">{roundH(scheduledHours)}h</span>
       </div>
     </div>
   )

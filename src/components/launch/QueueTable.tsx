@@ -22,7 +22,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, ExternalLink, Flag, GripVertical } from 'lucide-react'
 import {
-  calBtw, parseD, paceOf, weekStart,
+  paceOf, weekStart,
   type SchedulerSite, type SchedulerConfig, type SiteSchedule,
 } from '../../lib/launchScheduler'
 import type { RecoveryResult } from '../../lib/launchRecoverySolver'
@@ -95,8 +95,7 @@ export function QueueTable({
               <Th>Design due</Th>
               <Th>Tracked vs est.</Th>
               <Th>Dev hrs</Th>
-              <Th>Recovery</Th>
-              <Th>Dev sprint</Th>
+              <Th>Dev starts</Th>
               <Th w="32px"></Th>
             </tr>
           </thead>
@@ -127,7 +126,7 @@ export function QueueTable({
               )
             })}
             {visible.length === 0 && (
-              <tr><td colSpan={12} className="px-4 py-6 text-center text-sm text-purple-gray italic">No active projects.</td></tr>
+              <tr><td colSpan={11} className="px-4 py-6 text-center text-sm text-purple-gray italic">No active projects.</td></tr>
             )}
           </tbody>
         </table>
@@ -180,19 +179,14 @@ function RowAndRecovery({
 }) {
   const isLate = slot?.delta != null && slot.delta < 0
   const pace   = site ? paceOf(site) : null
-  // Projected launch — for waiting_feedback projects the scheduler
-  // doesn't allocate hours (dev is done), so fall back to the AM's
-  // target launch as the projected date. That's the date the partner
-  // is sitting on while review wraps up.
+  // Projected launch — for waiting_feedback projects the day-level
+  // scheduler now actually allocates the final pass, so slot.launchDate
+  // should be present. Fall back to the AM's target_launch only when
+  // there's no slot at all (e.g. launched, or an edge case).
   const projectedDate: Date | null =
     slot?.launchDate ?? (isWaiting && row.launch_date ? new Date(`${row.launch_date}T00:00:00Z`) : null)
   const launchedISO = projectedDate ? projectedDate.toISOString().slice(0, 10) : null
-  const span = slot
-    ? sprintLabel(slot.startWeek, slot.endWeek, cfg)
-    : '—'
-  const spanDates = slot
-    ? sprintDateRange(slot.startWeek, slot.endWeek, cfg)
-    : null
+  const devStartISO = slot?.devStartDate ? slot.devStartDate.toISOString().slice(0, 10) : null
   const hardDeadlineMissed = row.hard_deadline && launchedISO && launchedISO > row.hard_deadline
 
   // Upstream design cut-off: dev start − 2 business days, so the
@@ -292,22 +286,13 @@ function RowAndRecovery({
             </span>
           </div>
         </td>
-        <td className="px-2 py-2.5 align-top">
-          <button
-            type="button"
-            onClick={() => onPatch({ recovery_mode: row.recovery_mode === 'designer' ? 'dev-only' : 'designer' })}
-            className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${row.recovery_mode === 'designer' ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-purple-gray/30 bg-cream text-purple-gray'}`}
-            title={row.recovery_mode === 'designer'
-              ? 'Help can be offloaded to the designer. Click → dev-only.'
-              : 'Work is developer-only — can\'t offload. Click → designer.'}
-          >
-            {row.recovery_mode === 'designer' ? '🎨 designer' : '🔒 dev-only'}
-          </button>
-        </td>
-        <td className="px-2 py-2.5 align-top text-purple-gray whitespace-nowrap">
-          <div className="font-mono text-[12px]">{span}</div>
-          {spanDates && (
-            <div className="text-[11px] text-purple-gray/80">{spanDates}</div>
+        <td className="px-2 py-2.5 align-top whitespace-nowrap">
+          {devStartISO && !isWaiting ? (
+            <div className="text-[13px] text-deep-plum">{shortDate(devStartISO)}</div>
+          ) : isWaiting ? (
+            <span className="text-[11px] text-amber-700 italic">in final pass</span>
+          ) : (
+            <span className="text-purple-gray/40">—</span>
           )}
         </td>
         <td className="px-2 py-2.5 align-top">
@@ -318,7 +303,7 @@ function RowAndRecovery({
       </tr>
       {rec && rec.state !== 'on_time' && !isWaiting && (
         <tr>
-          <td colSpan={11} className="px-2 pb-2">
+          <td colSpan={10} className="px-2 pb-2">
             <RecoveryRow rec={rec} cfg={cfg} onApplyHelp={onApplyHelp} />
           </td>
         </tr>
@@ -425,26 +410,6 @@ function PaceCell({ pace, planned, tracked }: { pace: ReturnType<typeof paceOf> 
       </p>
     </div>
   )
-}
-
-function sprintLabel(startWeek: number, endWeek: number, cfg: SchedulerConfig): string {
-  // Spec convention: S1 = weeks 0..1, S2 = weeks 2..3, etc.
-  // Dev-prefixed per Ashley — the queue table only sequences dev sprints.
-  const s = Math.floor(startWeek / cfg.sprint_weeks) + 1
-  const e = Math.floor(endWeek   / cfg.sprint_weeks) + 1
-  return s === e ? `Dev S${s}` : `Dev S${s}–S${e}`
-}
-
-/** Calendar-date range matching the sprint span (start of first sprint
- *  to end of last sprint). Used to surface "Dev S4–S5, Aug 1–21" so
- *  the PM doesn't have to mentally map sprint numbers to dates. */
-function sprintDateRange(startWeek: number, endWeek: number, cfg: SchedulerConfig): string {
-  const firstSprintIdx = Math.floor(startWeek / cfg.sprint_weeks)
-  const lastSprintIdx  = Math.floor(endWeek   / cfg.sprint_weeks)
-  const start = weekStart(firstSprintIdx * cfg.sprint_weeks, cfg)
-  const lastSprintStart = weekStart(lastSprintIdx * cfg.sprint_weeks, cfg)
-  const end = new Date(lastSprintStart.getTime() + (cfg.sprint_weeks * 7 - 1) * 86_400_000)
-  return `${shortDate(start.toISOString().slice(0, 10))}–${shortDate(end.toISOString().slice(0, 10))}`
 }
 
 function shortDate(iso: string): string {
