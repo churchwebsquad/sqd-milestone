@@ -254,13 +254,16 @@ function RowAndRecovery({
         <td className="px-2 py-2.5 align-top">
           {slot?.delta != null && !isWaiting ? <DeltaPill delta={slot.delta} /> : <span className="text-purple-gray">—</span>}
         </td>
-        <td className="px-2 py-2.5 align-top text-[13px] text-purple-gray">
-          {designDueISO ? (
-            <span
-              title="Design needs to be wrapped by this date so the developer can pick the project up cleanly (dev start − 2 business days)."
+        <td className="px-2 py-2.5 align-top whitespace-nowrap">
+          {designDueISO && slot?.devStartDate ? (
+            <div
+              title={`Design needs to be wrapped by ${shortDate(designDueISO)} so the developer can pick up cleanly on ${shortDate(slot.devStartDate.toISOString().slice(0, 10))} (dev start − 2 business days). The MET sits mid-sprint behind Valley, which is why dev doesn't start at the sprint's first day.`}
             >
-              {shortDate(designDueISO)}
-            </span>
+              <div className="text-[13px] text-deep-plum">{shortDate(designDueISO)}</div>
+              <div className="text-[11px] text-purple-gray">
+                → dev {shortDate(slot.devStartDate.toISOString().slice(0, 10))}
+              </div>
+            </div>
           ) : (
             <span className="text-purple-gray/40">—</span>
           )}
