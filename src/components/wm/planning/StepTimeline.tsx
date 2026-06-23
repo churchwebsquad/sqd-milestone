@@ -11,7 +11,7 @@
  * activity, with a "Why?" provenance hover on every state.
  */
 import { useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Check, Circle, CircleDashed, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Check, Circle, CircleDashed } from 'lucide-react'
 import {
   WEB_MILESTONE_STEP_NAMES,
   COWORK_STEP_LABELS,
@@ -121,21 +121,34 @@ export function StepTimeline({ project, milestones, activity, effectiveProgress 
     })
     if (!expandedPhases.has(phase)) continue
 
-    // Milestone children.
+    // Milestone children. Only the FIRST unsubmitted milestone in the
+    // active phase gets `active` + `isCurrent` so the timeline reads
+    // "this one is next" — previously every unsubmitted milestone got
+    // marked active and every row showed the spinner glyph, which
+    // read as "the data is still loading."
     const milestoneSteps = phaseMap[phase] ?? []
+    let activeMilestoneClaimed = false
     for (const stepNum of milestoneSteps) {
       const stepName = stepNames?.[stepNum] ?? `Step ${stepNum}`
       const submitted = submittedStepNumbers.has(stepNum)
-      const status: TimelineRow['status'] =
-        submitted ? 'done'
-      : phaseStatus === 'done' ? 'skipped'
-      : phaseStatus === 'active' ? 'active'
-                                 : 'upcoming'
+      let status: TimelineRow['status']
+      let isCurrent = false
+      if (submitted) {
+        status = 'done'
+      } else if (phaseStatus === 'done') {
+        status = 'skipped'
+      } else if (phaseStatus === 'active' && !activeMilestoneClaimed && phase === currentPhase) {
+        status = 'active'
+        isCurrent = true
+        activeMilestoneClaimed = true
+      } else {
+        status = 'upcoming'
+      }
       rows.push({
         kind: 'milestone', key: `m-${phase}-${stepNum}`,
         label: `${stepNum}. ${stepName}`,
         status, depth: 1,
-        isCurrent: status === 'active' && phase === currentPhase,
+        isCurrent,
       })
 
       // Cowork sub-steps live INSIDE the Copywriting Phase milestone
@@ -231,7 +244,17 @@ export function StepTimeline({ project, milestones, activity, effectiveProgress 
 
 function StatusGlyph({ status, isCurrent }: { status: TimelineRow['status']; isCurrent: boolean }) {
   if (status === 'done') return <Check size={12} className="text-emerald-600 shrink-0" />
-  if (status === 'active' && isCurrent) return <Loader2 size={12} className="text-wm-accent shrink-0 animate-spin" />
+  // Active + current = filled dot with a subtle pulse halo. The old
+  // Loader2 spinner read as "data is loading"; this reads as "we are
+  // here right now."
+  if (status === 'active' && isCurrent) {
+    return (
+      <span className="relative shrink-0 w-3 h-3 inline-grid place-items-center">
+        <span className="absolute inset-0 rounded-full bg-wm-accent/30 animate-ping" />
+        <span className="relative w-2 h-2 rounded-full bg-wm-accent" />
+      </span>
+    )
+  }
   if (status === 'active') return <Circle size={12} className="text-wm-accent shrink-0" />
   if (status === 'skipped') return <CircleDashed size={11} className="text-wm-text-subtle shrink-0" />
   return <Circle size={10} className="text-wm-text-subtle shrink-0" />

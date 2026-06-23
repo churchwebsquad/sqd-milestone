@@ -96,7 +96,7 @@ export function QueueTable({
               <Th>Tracked vs est.</Th>
               <Th>Dev hrs</Th>
               <Th>Recovery</Th>
-              <Th>Sprint</Th>
+              <Th>Dev sprint</Th>
               <Th w="32px"></Th>
             </tr>
           </thead>
@@ -180,18 +180,29 @@ function RowAndRecovery({
 }) {
   const isLate = slot?.delta != null && slot.delta < 0
   const pace   = site ? paceOf(site) : null
-  const launchedISO = slot?.launchDate ? slot.launchDate.toISOString().slice(0, 10) : null
+  // Projected launch — for waiting_feedback projects the scheduler
+  // doesn't allocate hours (dev is done), so fall back to the AM's
+  // target launch as the projected date. That's the date the partner
+  // is sitting on while review wraps up.
+  const projectedDate: Date | null =
+    slot?.launchDate ?? (isWaiting && row.launch_date ? new Date(`${row.launch_date}T00:00:00Z`) : null)
+  const launchedISO = projectedDate ? projectedDate.toISOString().slice(0, 10) : null
   const span = slot
     ? sprintLabel(slot.startWeek, slot.endWeek, cfg)
     : '—'
+  const spanDates = slot
+    ? sprintDateRange(slot.startWeek, slot.endWeek, cfg)
+    : null
   const hardDeadlineMissed = row.hard_deadline && launchedISO && launchedISO > row.hard_deadline
 
   // Upstream design cut-off: dev start − 2 business days, so the
   // designer has a clear handoff target with a 1-business-day buffer
   // before dev picks the project up. Suppressed for projects that
   // aren't actively in the queue (done with dev / waiting feedback).
+  // slot.devStartDate is a Date object (per SiteSchedule); convert
+  // to ISO for the business-day math.
   const designDueISO = !isWaiting && slot?.devStartDate
-    ? subBizDays(slot.devStartDate, 2)
+    ? subBizDays(slot.devStartDate.toISOString().slice(0, 10), 2)
     : null
 
   return (
@@ -238,9 +249,7 @@ function RowAndRecovery({
           />
         </td>
         <td className="px-2 py-2.5 align-top text-[13px] text-deep-plum">
-          {isWaiting
-            ? <span className="text-purple-gray italic">waiting</span>
-            : launchedISO ? shortDate(launchedISO) : '—'}
+          {launchedISO ? shortDate(launchedISO) : '—'}
         </td>
         <td className="px-2 py-2.5 align-top">
           {slot?.delta != null && !isWaiting ? <DeltaPill delta={slot.delta} /> : <span className="text-purple-gray">—</span>}
@@ -292,7 +301,12 @@ function RowAndRecovery({
             {row.recovery_mode === 'designer' ? '🎨 designer' : '🔒 dev-only'}
           </button>
         </td>
-        <td className="px-2 py-2.5 align-top font-mono text-[12px] text-purple-gray whitespace-nowrap">{span}</td>
+        <td className="px-2 py-2.5 align-top text-purple-gray whitespace-nowrap">
+          <div className="font-mono text-[12px]">{span}</div>
+          {spanDates && (
+            <div className="text-[11px] text-purple-gray/80">{spanDates}</div>
+          )}
+        </td>
         <td className="px-2 py-2.5 align-top">
           <Link to={`/web/${row.id}?tab=planning`} className="text-purple-gray hover:text-primary-purple" title="Open project planning tab">
             <ExternalLink size={12} />
@@ -412,9 +426,22 @@ function PaceCell({ pace, planned, tracked }: { pace: ReturnType<typeof paceOf> 
 
 function sprintLabel(startWeek: number, endWeek: number, cfg: SchedulerConfig): string {
   // Spec convention: S1 = weeks 0..1, S2 = weeks 2..3, etc.
+  // Dev-prefixed per Ashley — the queue table only sequences dev sprints.
   const s = Math.floor(startWeek / cfg.sprint_weeks) + 1
   const e = Math.floor(endWeek   / cfg.sprint_weeks) + 1
-  return s === e ? `S${s}` : `S${s}–S${e}`
+  return s === e ? `Dev S${s}` : `Dev S${s}–S${e}`
+}
+
+/** Calendar-date range matching the sprint span (start of first sprint
+ *  to end of last sprint). Used to surface "Dev S4–S5, Aug 1–21" so
+ *  the PM doesn't have to mentally map sprint numbers to dates. */
+function sprintDateRange(startWeek: number, endWeek: number, cfg: SchedulerConfig): string {
+  const firstSprintIdx = Math.floor(startWeek / cfg.sprint_weeks)
+  const lastSprintIdx  = Math.floor(endWeek   / cfg.sprint_weeks)
+  const start = weekStart(firstSprintIdx * cfg.sprint_weeks, cfg)
+  const lastSprintStart = weekStart(lastSprintIdx * cfg.sprint_weeks, cfg)
+  const end = new Date(lastSprintStart.getTime() + (cfg.sprint_weeks * 7 - 1) * 86_400_000)
+  return `${shortDate(start.toISOString().slice(0, 10))}–${shortDate(end.toISOString().slice(0, 10))}`
 }
 
 function shortDate(iso: string): string {

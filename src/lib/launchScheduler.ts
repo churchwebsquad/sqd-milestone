@@ -115,6 +115,9 @@ export interface SiteSchedule {
   startWeek:        number              // index into the week stream from schedule_start
   endWeek:          number
   alloc:            Record<number, number>  // weekIndex → hours consumed by this site
+  /** Monday of the first week the dev picks this project up. Drives
+   *  the "Design due" upstream cutoff column on the queue table. */
+  devStartDate:     Date
   devCompleteDate:  Date
   launchDate:       Date                // dev complete + launch_tail_days
   /** delta_days = launchDate − target_launch (calendar days).
@@ -225,6 +228,7 @@ export function computeSchedule(
         startWeek:       wi,
         endWeek:         wi,
         alloc,
+        devStartDate:    ws,
         devCompleteDate: ws,
         launchDate:      addCal(ws, cfg.launch_tail_days),
         delta:           s.target_launch
@@ -265,6 +269,7 @@ export function computeSchedule(
       startWeek: sw,
       endWeek:   ew,
       alloc,
+      devStartDate: weekStart(sw, cfg),
       devCompleteDate,
       launchDate,
       delta:     s.target_launch

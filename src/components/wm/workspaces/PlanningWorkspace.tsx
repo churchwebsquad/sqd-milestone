@@ -153,9 +153,9 @@ export function PlanningWorkspace({ project, onChange }: Props) {
                   : 'Drag in /web to reorder.'}
             />
             <Stat
-              label="Sprint span"
+              label="Dev sprint span"
               value={slot && !launched && !isWaiting
-                ? sprintLabel(slot.startWeek, slot.endWeek)
+                ? `${sprintLabel(slot.startWeek, slot.endWeek)} · ${sprintDateRange(slot.startWeek, slot.endWeek)}`
                 : '—'}
               hint={slot?.devCompleteDate && !isWaiting
                 ? `Dev complete ${fmtDate(slot.devCompleteDate)}`
@@ -522,5 +522,26 @@ function fmtDate(d: Date | null | undefined): string {
 function sprintLabel(startWeek: number, endWeek: number): string {
   const s = Math.floor(startWeek / 2) + 1
   const e = Math.floor(endWeek / 2) + 1
-  return s === e ? `S${s}` : `S${s}–S${e}`
+  return s === e ? `Dev S${s}` : `Dev S${s}–S${e}`
+}
+
+/** "Aug 1–21" calendar range matching the sprint span. Pairs with
+ *  sprintLabel so the user sees both the sprint number AND the
+ *  underlying dates. */
+function sprintDateRange(startWeek: number, endWeek: number): string {
+  const SPRINT_WEEKS = 2
+  const firstSprintIdx = Math.floor(startWeek / SPRINT_WEEKS)
+  const lastSprintIdx  = Math.floor(endWeek   / SPRINT_WEEKS)
+  // Anchor: today's Monday. Match useLaunchPlan's cfg.schedule_start.
+  const now = new Date()
+  const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const wd = monday.getUTCDay()
+  const off = wd === 0 ? -6 : 1 - wd
+  monday.setUTCDate(monday.getUTCDate() + off)
+  const dayMs = 86_400_000
+  const start = new Date(monday.getTime() + firstSprintIdx * SPRINT_WEEKS * 7 * dayMs)
+  const lastSprintStart = new Date(monday.getTime() + lastSprintIdx * SPRINT_WEEKS * 7 * dayMs)
+  const end = new Date(lastSprintStart.getTime() + (SPRINT_WEEKS * 7 - 1) * dayMs)
+  const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+  return `${fmt(start)}–${fmt(end)}`
 }

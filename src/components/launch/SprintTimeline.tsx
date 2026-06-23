@@ -81,7 +81,7 @@ export function SprintTimeline({
   return (
     <div className="rounded-2xl border border-lavender bg-white overflow-hidden mt-4">
       <div className="px-4 py-3 border-b border-lavender bg-lavender-tint/30">
-        <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">Sprint timeline</p>
+        <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">Development sprint timeline</p>
         <p className="text-sm text-purple-gray mt-0.5">
           Each week shows the <strong className="text-deep-plum">locked {cfg.base_weekly_cap}h base</strong> plus any extra help
           you add — but only when the designer is available. Mark a week <em>designer out</em>
@@ -159,7 +159,7 @@ function SprintCard({
   return (
     <div className="rounded-xl border border-lavender bg-cream/30">
       <div className="px-4 pt-3 pb-2">
-        <p className="text-[14px] font-bold text-deep-plum">Sprint {sprintIdx + 1}</p>
+        <p className="text-[14px] font-bold text-deep-plum">Dev Sprint {sprintIdx + 1}</p>
         <p className="text-[12px] text-purple-gray mt-0.5">
           {sprintStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
           {' – '}
