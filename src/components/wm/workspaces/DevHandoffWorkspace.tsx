@@ -35,6 +35,7 @@ import {
   normalizeCtaValue, defaultTargetFor, validateCta, CTA_KIND_LABELS,
   isButtonShapedSlot,
 } from '../../../lib/cta'
+import { GLOBAL_FIELDS } from '../../../lib/webSnippets'
 import type {
   StrategyWebProject, WebPage, WebSection, WebContentTemplate,
   WebPageSeo, WebFieldDef, CtaValue, WebProjectSnippet,
@@ -206,14 +207,41 @@ export function DevHandoffWorkspace({ project }: Props) {
   const projectSlug = (project.church_short_name || project.name || 'project')
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 
-  // Token → expansion map. Used by the CTA inventory to resolve any
-  // route shaped like "{{token}}" or "{{base_url}}/page" inline. Also
-  // backs the Church settings table + JSON export.
-  const snippetMap = useMemo(() => {
-    const m: Record<string, WebProjectSnippet> = {}
-    for (const s of snippets) m[s.token] = s
+  // Token → expansion map. Combines the project's global merge fields
+  // (church_name, podcast_*, etc.) with custom web_project_snippets so
+  // the CTA inventory can resolve either kind inline.
+  const snippetMap = useMemo<Record<string, ResolvedSnippet>>(() => {
+    const m: Record<string, ResolvedSnippet> = {}
+    for (const g of GLOBAL_FIELDS) {
+      m[g.token] = {
+        token: g.token,
+        label: g.label,
+        value: (project[g.column] as string | null) ?? '',
+        source: 'global',
+      }
+    }
+    for (const s of snippets) {
+      m[s.token] = {
+        token: s.token,
+        label: s.label,
+        value: s.expansion,
+        source: 'custom',
+        description: s.description,
+      }
+    }
     return m
-  }, [snippets])
+  }, [snippets, project])
+
+  // Globals — surfaced standalone in the Church settings card. Reads
+  // the project's column values for each global field.
+  const globalSnippets = useMemo<ResolvedSnippet[]>(() =>
+    GLOBAL_FIELDS.map(g => ({
+      token: g.token,
+      label: g.label,
+      value: (project[g.column] as string | null) ?? '',
+      source: 'global' as const,
+    })),
+  [project])
 
   const downloadAcssJson = () => {
     const json = JSON.stringify(toAcssGvmJson(spec), null, 2)
@@ -449,7 +477,7 @@ export function DevHandoffWorkspace({ project }: Props) {
 
           {/* ── Church settings (site snippets) ───────────────────── */}
           <ChurchSettingsCard
-            snippets={snippets}
+            snippets={globalSnippets}
             projectSlug={projectSlug}
             loading={seoCtaLoading}
           />
@@ -780,7 +808,7 @@ function SeoSummaryTable({ rows }: { rows: PageSeoRow[] }) {
 
 function CtaInventoryTable({
   rows, snippetMap,
-}: { rows: CtaRow[]; snippetMap: Record<string, WebProjectSnippet> }) {
+}: { rows: CtaRow[]; snippetMap: Record<string, ResolvedSnippet> }) {
   const brokenCount = rows.filter(r => r.validationError != null).length
 
   // Group rows by page (alphabetical by name).  Each page becomes its
@@ -1147,27 +1175,33 @@ function triggerDownload(filename: string, content: string, mime: string): void 
 
 // ── Church settings ────────────────────────────────────────────────
 
-/** Renders the church's site snippets (project-scoped key/value pairs
- *  used as `{{token}}` expansions in body copy + CTA routes). The dev
- *  team needs this inventory so they can map button routes back to
- *  the actual destination. Includes a downloadable JSON so the dev
- *  team can seed an ACF / WP options table directly. */
+/** Unified snippet shape — covers both the project's global merge
+ *  fields (church_name, podcast_*, etc.) and the custom rows from
+ *  web_project_snippets. Source distinguishes the two when needed. */
+interface ResolvedSnippet {
+  token:       string
+  label:       string
+  value:       string
+  source:      'global' | 'custom'
+  description?: string | null
+}
+
+/** Renders the project's GLOBAL merge fields (church_name, address,
+ *  social_*, podcast_*, mission_statement, etc.) as a flat snippet
+ *  table. The custom web_project_snippets list lives on the Snippets
+ *  tab — Dev Handoff shows the canonical project-scoped values the
+ *  dev team will wire into WP/ACF. Download JSON is shaped for direct
+ *  ingest. */
 function ChurchSettingsCard({
   snippets, projectSlug, loading,
-}: { snippets: WebProjectSnippet[]; projectSlug: string; loading: boolean }) {
+}: { snippets: ResolvedSnippet[]; projectSlug: string; loading: boolean }) {
   const ordered = [...snippets].sort((a, b) => a.token.localeCompare(b.token))
   const downloadJson = () => {
-    // Shape: { "<token>": { value, label, description, tags } } —
-    // flat keyed by token so WP / ACF can ingest directly without a
-    // post-process step.
-    const out: Record<string, { value: string; label: string; description: string | null; tags: string[] }> = {}
+    // Shape: { "<token>": { value, label } } — flat key/value so WP /
+    // ACF can ingest directly without a post-process step.
+    const out: Record<string, { value: string; label: string }> = {}
     for (const s of ordered) {
-      out[s.token] = {
-        value:       s.expansion,
-        label:       s.label,
-        description: s.description,
-        tags:        s.tags ?? [],
-      }
+      out[s.token] = { value: s.value, label: s.label }
     }
     triggerDownload(`${projectSlug}-church-settings.json`, JSON.stringify(out, null, 2), 'application/json')
   }
@@ -1180,10 +1214,9 @@ function ChurchSettingsCard({
             <h2 className="text-[13px] font-bold uppercase tracking-widest">Church settings</h2>
           </div>
           <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
-            Project-scoped site snippets that the church uses across the site
-            (give links, livestream URLs, address, phone, etc.). Referenced
-            in body copy and button routes as <code className="font-mono text-[11px]">{`{{token}}`}</code>;
-            resolve to the values below.
+            The project's global merge fields — church name, address, socials,
+            podcast, mission. Referenced anywhere in body copy or button routes
+            as <code className="font-mono text-[11px]">{`{{token}}`}</code>. Download as JSON for direct WP/ACF ingest.
           </p>
         </div>
         <WMButton
@@ -1199,7 +1232,7 @@ function ChurchSettingsCard({
       {loading ? (
         <p className="text-[12px] text-wm-text-subtle">Loading…</p>
       ) : ordered.length === 0 ? (
-        <p className="text-[12px] text-wm-text-subtle italic">No site snippets defined yet.</p>
+        <p className="text-[12px] text-wm-text-subtle italic">No global fields set yet.</p>
       ) : (
         <div className="overflow-x-auto -mx-2">
           <table className="w-full text-[11.5px] border-collapse">
@@ -1208,21 +1241,19 @@ function ChurchSettingsCard({
                 <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Token</th>
                 <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Label</th>
                 <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Value</th>
-                <th className="px-2 py-1.5 font-bold uppercase tracking-widest">Description</th>
               </tr>
             </thead>
             <tbody>
               {ordered.map(s => (
-                <tr key={s.id} className="border-t border-wm-border/40 align-top">
+                <tr key={s.token} className="border-t border-wm-border/40 align-top">
                   <td className="px-2 py-2 font-mono text-deep-plum whitespace-nowrap">
                     {`{{${s.token}}}`}
                   </td>
                   <td className="px-2 py-2 text-wm-text">{s.label}</td>
-                  <td className="px-2 py-2 max-w-[280px]">
-                    <span className="font-mono text-[11px] text-wm-text break-all">{s.expansion}</span>
-                  </td>
-                  <td className="px-2 py-2 max-w-[240px] text-wm-text-muted leading-snug">
-                    {s.description ?? <span className="italic text-wm-text-subtle">—</span>}
+                  <td className="px-2 py-2 max-w-[320px]">
+                    {s.value
+                      ? <span className="font-mono text-[11px] text-wm-text break-all">{s.value}</span>
+                      : <span className="italic text-wm-text-subtle">— not set —</span>}
                   </td>
                 </tr>
               ))}
@@ -1235,22 +1266,19 @@ function ChurchSettingsCard({
 }
 
 /** Renders the resolved value of a snippet-shaped route — e.g. a CTA
- *  with url `{{give_url}}` shows the actual URL below. Multi-token
- *  routes like `{{base_url}}/contact` are also resolved by replacing
- *  every recognized token with its expansion. Tokens with no matching
- *  snippet are shown in red so the dev knows what's still unbound. */
+ *  with url `{{social_facebook_url}}` shows the actual URL below.
+ *  Multi-token routes like `{{base_url}}/contact` are partially
+ *  resolved per token. Tokens with no matching snippet (neither global
+ *  nor custom) are flagged so the dev sees exactly what's unbound. */
 function SnippetRouteResolved({
   url, snippetMap,
-}: { url: string; snippetMap: Record<string, WebProjectSnippet> }) {
+}: { url: string; snippetMap: Record<string, ResolvedSnippet> }) {
   const tokenRe = /\{\{\s*([\w.]+)\s*\}\}/g
   const tokens = Array.from(url.matchAll(tokenRe), m => m[1])
   if (tokens.length === 0) return null
-  // Try to resolve every token; if all resolve, render the fully-
-  // expanded URL. Otherwise show a per-token resolution list so the
-  // dev can see what's bound and what isn't.
-  const allBound = tokens.every(t => snippetMap[t]?.expansion)
+  const allBound = tokens.every(t => snippetMap[t]?.value)
   if (allBound) {
-    const resolved = url.replace(tokenRe, (_, t) => snippetMap[t]?.expansion ?? '')
+    const resolved = url.replace(tokenRe, (_, t) => snippetMap[t]?.value ?? '')
     return (
       <p className="text-[10.5px] text-wm-text-muted mt-1 break-all" title={`Resolved from ${url}`}>
         → <span className="font-mono text-deep-plum">{resolved}</span>
@@ -1265,10 +1293,10 @@ function SnippetRouteResolved({
           <li key={`${t}-${i}`} className="break-all">
             <span className="font-mono">{`{{${t}}}`}</span>
             {' → '}
-            {s?.expansion ? (
-              <span className="font-mono text-deep-plum">{s.expansion}</span>
+            {s?.value ? (
+              <span className="font-mono text-deep-plum">{s.value}</span>
             ) : (
-              <span className="text-wm-warn italic">unbound</span>
+              <span className="text-wm-warn italic">not set</span>
             )}
           </li>
         )

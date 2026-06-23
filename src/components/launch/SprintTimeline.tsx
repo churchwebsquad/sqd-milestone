@@ -107,12 +107,13 @@ export function SprintTimeline({
   return (
     <div className="rounded-2xl border border-lavender bg-white overflow-hidden mt-4">
       <div className="px-4 py-3 border-b border-lavender bg-lavender-tint/30">
-        <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">Development sprint timeline</p>
-        <p className="text-sm text-purple-gray mt-0.5">
+        <p className="text-[11px] uppercase tracking-widest font-bold text-primary-purple">Planning</p>
+        <h2 className="font-serif text-[22px] text-deep-plum leading-tight mt-1">Development sprint timeline</h2>
+        <p className="text-sm text-purple-gray mt-1.5">
           Each site flows <strong className="text-deep-plum">build → partner review → final edits + launch</strong>.
-          The dev pivots away during the review pause (default <strong className="text-deep-plum">{cfg.review_days}d</strong>),
-          then circles back for the <strong className="text-deep-plum">{cfg.final_hours}h</strong> final pass. Capacity bars
-          only count dev work (build + final); reviews are calendar time, not hours.
+          The dev pivots away during the review pause (default <strong className="text-deep-plum">{cfg.review_days} biz days</strong>;
+          weekends don't count), then circles back for the <strong className="text-deep-plum">{cfg.final_hours}h</strong> final pass.
+          Capacity bars only count dev work (build + final); reviews are calendar time, not hours.
         </p>
       </div>
 
@@ -175,7 +176,15 @@ function SprintCard({
   const sprintEndExcl = addCal(sprintEnd, 1)  // exclusive boundary for overlap math
 
   // Per-week capacity row data.
-  const weeks: Array<{ idx: number; iso: string; cap: number; hours: number; adj: WeekAdjustment | null }> = []
+  const weeks: Array<{
+    idx:                   number
+    iso:                   string
+    cap:                   number
+    hours:                 number
+    adj:                   WeekAdjustment | null
+    perChurchHelp:         number
+    perChurchHelpBySite:   Array<{ siteId: string; hours: number }>
+  }> = []
   let sprintCap = 0
   let sprintHours = 0
 
@@ -253,22 +262,33 @@ function SprintCard({
     }
   }
 
-  // Per-week capacity sum (cap for the sprint).
+  // Per-week capacity sum (cap for the sprint). Per-church help that
+  // was distributed to this week stacks on top of the org-wide
+  // help_hours (sum of slot.helpHoursByWeek[w] across all sites).
   for (let i = startWeek; i <= endWeek; i++) {
     const wk = weekStart(i, cfg)
     const iso = fmtISO(wk)
     const adj = adjByIso.get(iso) ?? null
+    let perChurchHelp = 0
+    const perChurchHelpBySite: Array<{ siteId: string; hours: number }> = []
+    for (const [pid, slot] of Object.entries(schedule)) {
+      const h = slot.helpHoursByWeek?.[i] ?? 0
+      if (h > 0) {
+        perChurchHelp += h
+        perChurchHelpBySite.push({ siteId: pid, hours: h })
+      }
+    }
     const base = adj?.base_capacity != null ? adj.base_capacity : cfg.base_weekly_cap
+    const orgHelp = adj?.designer_out ? 0 : (adj?.help_hours ?? 0)
     const cap = adj?.is_blackout
       ? 0
-      : Math.max(0, base + (adj?.designer_out ? 0 : (adj?.help_hours ?? 0)))
-    // Per-week scheduled = sum of allocs from rows that landed in this week.
+      : Math.max(0, base + orgHelp + perChurchHelp)
     let hrs = 0
     for (const [pid, slot] of Object.entries(schedule)) {
       void pid
       hrs += (slot.buildAllocByWeek[i] ?? 0) + (slot.finalAllocByWeek[i] ?? 0)
     }
-    weeks.push({ idx: i, iso, cap, hours: hrs, adj })
+    weeks.push({ idx: i, iso, cap, hours: hrs, adj, perChurchHelp, perChurchHelpBySite })
     sprintCap += cap
   }
 
@@ -342,6 +362,9 @@ function SprintCard({
             adj={w.adj}
             baseCap={cfg.base_weekly_cap}
             scheduledHours={w.hours}
+            perChurchHelp={w.perChurchHelp}
+            perChurchHelpBySite={w.perChurchHelpBySite}
+            projectName={projectName}
             onAdjust={onAdjust}
           />
         ))}
@@ -431,14 +454,18 @@ function weekIdxOf(d: Date, cfg: SchedulerConfig): number {
 // ── Per-week controls ────────────────────────────────────────────
 
 function WeekControl({
-  iso, sprintStart, adj, baseCap, scheduledHours, onAdjust,
+  iso, sprintStart, adj, baseCap, scheduledHours,
+  perChurchHelp, perChurchHelpBySite, projectName, onAdjust,
 }: {
-  iso:            string
-  sprintStart:    Date
-  adj:            WeekAdjustment | null
-  baseCap:        number
-  scheduledHours: number
-  onAdjust:       (a: WeekAdjustment) => Promise<void>
+  iso:                    string
+  sprintStart:            Date
+  adj:                    WeekAdjustment | null
+  baseCap:                number
+  scheduledHours:         number
+  perChurchHelp:          number
+  perChurchHelpBySite:    Array<{ siteId: string; hours: number }>
+  projectName:            (id: string) => string
+  onAdjust:               (a: WeekAdjustment) => Promise<void>
 }) {
   const [helpDraft, setHelpDraft] = useState(String(adj?.help_hours ?? ''))
   useEffect(() => { setHelpDraft(String(adj?.help_hours ?? '')) }, [adj?.help_hours])
@@ -463,7 +490,7 @@ function WeekControl({
   }
 
   return (
-    <div className={`flex items-center justify-between gap-2 text-[10.5px] ${blackout ? 'opacity-50' : ''}`}>
+    <div className={`flex items-center justify-between gap-2 flex-wrap text-[10.5px] ${blackout ? 'opacity-50' : ''}`}>
       <div className="text-purple-gray font-mono">
         {sprintStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}
       </div>
@@ -526,6 +553,16 @@ function WeekControl({
         </label>
         <span className="font-mono text-purple-gray min-w-[40px] text-right">{roundH(scheduledHours)}h</span>
       </div>
+      {perChurchHelp > 0 && (
+        <div className="basis-full text-[10px] text-emerald-700 italic pl-12"
+             title="Designer help hours auto-distributed from a church's Help hrs setting. These travel with the church if priority shifts.">
+          + {roundH(perChurchHelp)}h help from{' '}
+          {perChurchHelpBySite
+            .sort((a, b) => b.hours - a.hours)
+            .map(s => `${projectName(s.siteId)} (${roundH(s.hours)}h)`)
+            .join(', ')}
+        </div>
+      )}
     </div>
   )
 }

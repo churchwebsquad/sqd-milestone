@@ -11,7 +11,7 @@
  * help hours land the church back on target — they enter that number
  * in the Help hrs column themselves.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, ExternalLink, Flag, GripVertical } from 'lucide-react'
 import {
@@ -196,17 +196,28 @@ function RowAndRecovery({
     <>
       <tr
         draggable
-        onDragStart={onDragStart}
+        onDragStart={e => {
+          // Only drag from row chrome (grip cell, name cell, etc.).
+          // Inputs / selects / buttons should remain clickable without
+          // the row hijacking the click into a drag-start.
+          const target = e.target as HTMLElement
+          if (target.closest('input, select, textarea, button, a, label')) {
+            e.preventDefault()
+            return
+          }
+          onDragStart()
+        }}
         onDragOver={onDragOver}
         onDrop={onDrop}
         className={[
           'border-t border-lavender/60',
           draggingMe ? 'opacity-40' : '',
           isLate ? 'bg-red-50/40' : 'hover:bg-lavender-tint/15',
-          'cursor-grab',
         ].join(' ')}
       >
-        <td className="px-2 py-2.5 align-top"><GripVertical size={14} className="text-purple-gray" /></td>
+        <td className="px-2 py-2.5 align-top cursor-grab" title="Drag to reorder">
+          <GripVertical size={14} className="text-purple-gray" />
+        </td>
         <td className="px-2 py-2.5 align-top font-mono text-[12px] text-purple-gray">{priority}</td>
         <td className="px-2 py-2.5 align-top min-w-[200px]">
           <button
@@ -279,39 +290,23 @@ function RowAndRecovery({
           )}
         </td>
         <td className="px-2 py-2.5 align-top">
-          <div className="flex items-center gap-1">
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={row.dev_hours_estimate ?? 60}
-              onChange={e => onPatch({ dev_hours_estimate: e.target.value === '' ? null : Number(e.target.value), dev_hours_source: 'manual' })}
-              className="w-16 text-[13px] font-mono text-right px-1.5 py-1 rounded border border-transparent hover:border-lavender focus:border-primary-purple focus:outline-none bg-transparent"
-            />
-            <span className="text-[10px] text-purple-gray">h</span>
-            <span
-              className={`text-[10px] font-bold uppercase tracking-widest ${row.dev_hours_source === 'clickup' ? 'text-emerald-700' : 'text-purple-gray'}`}
-              title={row.dev_hours_source === 'clickup'
-                ? `From ClickUp sync · ${row.last_synced_at ? new Date(row.last_synced_at).toLocaleDateString() : ''}`
-                : 'Manually entered'}
-            >
-              {row.dev_hours_source === 'clickup' ? '●' : '○'}
-            </span>
-          </div>
+          <NumberCell
+            value={row.dev_hours_estimate ?? 60}
+            onCommit={n => onPatch({
+              dev_hours_estimate: n,
+              dev_hours_source:   'manual',
+            })}
+            title={row.dev_hours_source === 'clickup'
+              ? `From ClickUp sync · ${row.last_synced_at ? new Date(row.last_synced_at).toLocaleDateString() : ''}. Editing flips to manual.`
+              : 'Manually entered.'}
+          />
         </td>
         <td className="px-2 py-2.5 align-top">
-          <div className="flex items-center gap-1">
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={row.help_hours_needed ?? 0}
-              onChange={e => onPatch({ help_hours_needed: e.target.value === '' ? 0 : Number(e.target.value) })}
-              className="w-14 text-[13px] font-mono text-right px-1.5 py-1 rounded border border-transparent hover:border-lavender focus:border-primary-purple focus:outline-none bg-transparent"
-              title="Designer help hours allocated to this church. The scheduler distributes them across the weeks this church is being worked on, and they travel with the church if priority shifts."
-            />
-            <span className="text-[10px] text-purple-gray">h</span>
-          </div>
+          <NumberCell
+            value={row.help_hours_needed ?? 0}
+            onCommit={n => onPatch({ help_hours_needed: n })}
+            title="Designer help hours allocated to this church. The scheduler distributes them across the weeks this church is being worked on, and they travel with the church if priority shifts."
+          />
         </td>
         <td className="px-2 py-2.5 align-top">
           <Link to={`/web/${row.id}?tab=planning`} className="text-purple-gray hover:text-primary-purple" title="Open project planning tab">
@@ -432,6 +427,65 @@ function subBizDays(iso: string, n: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+/** Editable number cell with local-draft semantics. Avoids the bug
+ *  where typing "30" into a "60"-default input persisted as 6030 (the
+ *  characters were appended to the existing value because every
+ *  keystroke wrote back to the parent state). Behavior:
+ *   - Focus selects all so the next keystroke replaces the value.
+ *   - Edits live in local state until blur or Enter, then commit.
+ *   - When the parent prop changes externally (refetch), the draft
+ *     resyncs unless the input is currently focused. */
+function NumberCell({
+  value, onCommit, title,
+}: {
+  value:    number
+  onCommit: (n: number) => void
+  title?:   string
+}) {
+  const [draft, setDraft] = useState<string>(String(value))
+  const [focused, setFocused] = useState(false)
+  useEffect(() => {
+    // Sync from the parent when the prop changes — but only when the
+    // user isn't currently typing, so a slow refetch doesn't blow
+    // away an in-flight edit.
+    if (!focused) setDraft(String(value))
+  }, [value, focused])
+
+  const commit = () => {
+    const trimmed = draft.trim()
+    if (trimmed === '') {
+      onCommit(0)
+      setDraft('0')
+      return
+    }
+    const n = Number(trimmed)
+    if (!Number.isFinite(n) || n < 0) {
+      // Reject garbage; restore prior value.
+      setDraft(String(value))
+      return
+    }
+    if (n !== value) onCommit(n)
+  }
+
+  return (
+    <input
+      type="number"
+      min={0}
+      step={1}
+      value={draft}
+      title={title}
+      onChange={e => setDraft(e.target.value)}
+      onFocus={e => { setFocused(true); e.currentTarget.select() }}
+      onBlur={() => { setFocused(false); commit() }}
+      onKeyDown={e => {
+        if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur()
+        if (e.key === 'Escape') { setDraft(String(value)); (e.currentTarget as HTMLInputElement).blur() }
+      }}
+      className="w-16 text-[13px] font-mono text-right px-1.5 py-1 rounded border border-lavender bg-white focus:border-primary-purple focus:outline-none"
+    />
+  )
+}
+
 /** Editable date cell that DISPLAYS "Jun 23" (matching the projected
  *  launch's format) but EDITS via the browser's native date picker.
  *  The native `<input type=date>` is overlaid invisibly so a click
@@ -446,7 +500,7 @@ function DateCell({
   placeholder?: string
 }) {
   return (
-    <div className="relative inline-block min-w-[72px]">
+    <div className="relative inline-block min-w-[80px] rounded border border-lavender bg-white px-2 py-1 hover:border-primary-purple/60 focus-within:border-primary-purple cursor-pointer">
       <span className={`block text-[13px] ${value ? 'text-deep-plum' : 'text-purple-gray italic'}`}>
         {value ? shortDate(value) : placeholder}
       </span>

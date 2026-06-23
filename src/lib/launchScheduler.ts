@@ -119,9 +119,11 @@ export interface SchedulerConfig {
   sprint_weeks:     number              // 2
   launch_tail_days: number              // 0 by default
   max_help_per_week: number             // 35 — one full extra person per week max
-  /** Calendar days each site is out for partner review between build
-   *  and final edits. Dev pivots to other sites during this window. */
-  review_days:      number              // default 4
+  /** BUSINESS days each site is out for partner review between build
+   *  and final edits. Weekends don't count — a review starting Thursday
+   *  with review_days=4 ends the following Wednesday. Dev pivots to
+   *  other sites during this window. */
+  review_days:      number              // default 4 (business days)
   /** Hours reserved for the final edits + launch pass that runs after
    *  partner review. Subtracted from planned_dev_hours to derive
    *  build hours. */
@@ -164,6 +166,10 @@ export interface SiteSchedule {
   finalAllocByWeek:    Record<number, number>
   firstBuildDayByWeek: Record<number, Date>
   firstFinalDayByWeek: Record<number, Date>
+  /** Per-week help hours attributed to THIS site by the per-church
+   *  help distribution pass. Stays with the site if priority shifts
+   *  (re-distributes to its new active weeks on every recompute). */
+  helpHoursByWeek:     Record<number, number>
   buildStart:          Date | null
   buildEnd:            Date | null
   reviewStart:         Date | null
@@ -300,6 +306,10 @@ export function computeSchedule(
   // Two-pass: dry run to learn each church's active weeks, distribute
   // per-church help into helpMap, then run the real schedule.
   const augmented: HelpMap = { ...helpMap }
+  // Per-site, per-week help we attributed to this site. Stamped onto
+  // each SiteSchedule after the real run so the sprint card can show
+  // "Valley + 3h help this week."
+  const helpByWeekPerSite: Record<string, Record<number, number>> = {}
   const hasPerChurchHelp = sites.some(s => (s.help_hours_needed ?? 0) > 0)
   if (hasPerChurchHelp) {
     const dry = computeScheduleInner(sites, helpMap, designerOut, blackout, cfg, baseCap)
@@ -322,17 +332,25 @@ export function computeSchedule(
       // Even-spread distribution: floor + remainder.
       const each = Math.floor(need / eligible.length)
       let remainder = need - each * eligible.length
+      const perWeek: Record<number, number> = {}
       for (const w of eligible) {
         const current = augmented[w] ?? 0
         const room = Math.max(0, cfg.max_help_per_week - current)
         const add = Math.min(room, each + (remainder > 0 ? 1 : 0))
         if (add <= 0) continue
         augmented[w] = current + add
+        perWeek[w] = (perWeek[w] ?? 0) + add
         if (remainder > 0) remainder -= 1
       }
+      if (Object.keys(perWeek).length > 0) helpByWeekPerSite[s.id] = perWeek
     }
   }
-  return computeScheduleInner(sites, augmented, designerOut, blackout, cfg, baseCap)
+  const final = computeScheduleInner(sites, augmented, designerOut, blackout, cfg, baseCap)
+  // Stamp helpHoursByWeek on each site's schedule (default empty).
+  for (const id of Object.keys(final)) {
+    final[id].helpHoursByWeek = helpByWeekPerSite[id] ?? {}
+  }
+  return final
 }
 
 function computeScheduleInner(
@@ -457,7 +475,10 @@ function computeScheduleInner(
           if (picked.finalLeft > 0 && reviewDays > 0) {
             picked.state = 'review'
             picked.reviewStart = d
-            picked.reviewEnd = addCal(d, reviewDays)
+            // Partner review measured in BUSINESS days — weekends don't
+            // count. Review starting Thursday with reviewDays=4 ends
+            // the following Wednesday, not Sunday.
+            picked.reviewEnd = addBiz(d, reviewDays)
           } else if (picked.finalLeft > 0) {
             picked.state = 'finalizing'
           } else {
@@ -522,6 +543,7 @@ function computeScheduleInner(
       finalAllocByWeek:    st.finalAllocByWeek,
       firstBuildDayByWeek: st.firstBuildDayByWeek,
       firstFinalDayByWeek: st.firstFinalDayByWeek,
+      helpHoursByWeek:     {},          // stamped by the outer wrapper
       buildStart:          st.buildStart,
       buildEnd:            st.buildEnd,
       reviewStart:         st.reviewStart,

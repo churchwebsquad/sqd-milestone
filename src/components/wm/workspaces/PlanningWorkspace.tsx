@@ -159,12 +159,21 @@ export function PlanningWorkspace({ project, onChange }: Props) {
               </p>
             </div>
             <Field label="Target launch" saving={savingKey === 'launch_date' || savingKey === 'hard_deadline'}>
-              <input
-                type="date"
-                value={project.launch_date ?? ''}
-                onChange={e => void save('launch_date', e.target.value || null)}
-                className="mt-1 w-full text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated focus:border-wm-accent focus:outline-none"
-              />
+              {/* Reads "Sep 4, 2026" but edits via the native date picker
+                  overlay so the display format stays consistent with
+                  the Projected launch field. */}
+              <div className="relative mt-1 w-full rounded-md border border-wm-border bg-wm-bg-elevated px-2 py-1.5 hover:border-wm-accent/60 focus-within:border-wm-accent cursor-pointer">
+                <span className={`block text-[13px] ${project.launch_date ? 'text-wm-text' : 'text-wm-text-muted italic'}`}>
+                  {project.launch_date ? fmtDate(parseIsoUtc(project.launch_date)) : '— pick a date —'}
+                </span>
+                <input
+                  type="date"
+                  value={project.launch_date ?? ''}
+                  onChange={e => void save('launch_date', e.target.value || null)}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  title="Click to edit"
+                />
+              </div>
               <label className={`inline-flex items-center gap-1.5 mt-1.5 text-[11px] cursor-pointer ${project.hard_deadline ? 'text-amber-800 font-semibold' : 'text-wm-text-muted'}`}>
                 <input
                   type="checkbox"
@@ -189,7 +198,7 @@ export function PlanningWorkspace({ project, onChange }: Props) {
                  : `+${slot.delta}d`}
               </p>
               {slot?.delta != null && !isPaused && (
-                <p className="text-[11px] text-wm-text-subtle mt-0.5">
+                <p className="text-[11px] text-wm-text-muted mt-0.5">
                   {slot.delta < 0 ? 'behind target' : 'ahead of target'}
                 </p>
               )}
@@ -200,18 +209,15 @@ export function PlanningWorkspace({ project, onChange }: Props) {
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Planned dev hours" saving={savingKey === 'dev_hours_estimate'}>
               <div className="flex items-center gap-2 mt-1">
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
+                <BufferedNumberInput
                   value={project.dev_hours_estimate ?? 60}
-                  onChange={e => void save('dev_hours_estimate', e.target.value === '' ? null : Number(e.target.value))}
-                  onBlur={() => void save('dev_hours_source', 'manual')}
-                  className="w-20 text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated font-mono focus:border-wm-accent focus:outline-none"
+                  onCommit={n => {
+                    void save('dev_hours_estimate', n)
+                    void save('dev_hours_source',   'manual')
+                  }}
                 />
-                <span className="text-[10px] text-wm-text-muted">h</span>
                 <span className={`text-[9px] uppercase tracking-widest font-bold ${
-                  project.dev_hours_source === 'clickup' ? 'text-emerald-700' : 'text-wm-text-subtle'
+                  project.dev_hours_source === 'clickup' ? 'text-emerald-700' : 'text-wm-text-muted'
                 }`}>
                   {project.dev_hours_source === 'clickup' ? '● ClickUp synced' : '○ Manual'}
                 </span>
@@ -219,20 +225,12 @@ export function PlanningWorkspace({ project, onChange }: Props) {
             </Field>
             <Field label="Help hours needed" saving={savingKey === 'help_hours_needed'}>
               <div className="flex items-center gap-2 mt-1">
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
+                <BufferedNumberInput
                   value={project.help_hours_needed ?? 0}
-                  onChange={e => void save('help_hours_needed', e.target.value === '' ? 0 : Number(e.target.value))}
-                  className="w-20 text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated font-mono focus:border-wm-accent focus:outline-none"
+                  onCommit={n => void save('help_hours_needed', n)}
                 />
-                <span className="text-[10px] text-wm-text-muted">h</span>
-                <span className="text-[10px] text-wm-text-subtle">
-                  designer
-                </span>
               </div>
-              <p className="text-[10.5px] text-wm-text-subtle mt-1 leading-snug">
+              <p className="text-[10.5px] text-wm-text-muted mt-1 leading-snug">
                 Spread across the weeks this church is being worked on. Travels with this church if priority changes.
               </p>
             </Field>
@@ -253,7 +251,7 @@ export function PlanningWorkspace({ project, onChange }: Props) {
                  : '—'}
               </p>
               {sprintLabel && sprintSpan && (
-                <p className="text-[10.5px] text-wm-text-subtle mt-0.5 font-mono">
+                <p className="text-[10.5px] text-wm-text-muted mt-0.5 font-mono">
                   {sprintLabel} · {sprintSpan}
                 </p>
               )}
@@ -448,11 +446,59 @@ function Stat({
 }: { label: React.ReactNode; value: string; hint?: string }) {
   return (
     <div>
-      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">{label}</p>
+      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-muted">{label}</p>
       <p className="text-[14px] font-semibold mt-0.5 text-wm-text">{value}</p>
-      {hint && <p className="text-[10.5px] text-wm-text-subtle mt-0.5 leading-snug">{hint}</p>}
+      {hint && <p className="text-[10.5px] text-wm-text-muted mt-0.5 leading-snug">{hint}</p>}
     </div>
   )
+}
+
+/** Buffered numeric input — fixes the "60 → 6030" bug where typing
+ *  into a default-populated field appended chars and shipped every
+ *  keystroke to the DB. Behavior:
+ *   - Focus selects all so the next keystroke replaces the value.
+ *   - Edits stay in local state until blur or Enter, then commit once.
+ *   - When the parent prop changes externally (refetch), the draft
+ *     resyncs unless the input is currently focused. */
+function BufferedNumberInput({
+  value, onCommit, width = 'w-20',
+}: { value: number; onCommit: (n: number) => void; width?: string }) {
+  const [draft, setDraft] = useState<string>(String(value))
+  const [focused, setFocused] = useState(false)
+  useEffect(() => { if (!focused) setDraft(String(value)) }, [value, focused])
+  const commit = () => {
+    const t = draft.trim()
+    if (t === '') { onCommit(0); setDraft('0'); return }
+    const n = Number(t)
+    if (!Number.isFinite(n) || n < 0) { setDraft(String(value)); return }
+    if (n !== value) onCommit(n)
+  }
+  return (
+    <div className="inline-flex items-center gap-1">
+      <input
+        type="number"
+        min={0}
+        step={1}
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onFocus={e => { setFocused(true); e.currentTarget.select() }}
+        onBlur={() => { setFocused(false); commit() }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur()
+          if (e.key === 'Escape') { setDraft(String(value)); (e.currentTarget as HTMLInputElement).blur() }
+        }}
+        className={`${width} text-[12px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated font-mono focus:border-wm-accent focus:outline-none`}
+      />
+      <span className="text-[10px] text-wm-text-muted">h</span>
+    </div>
+  )
+}
+
+/** ISO yyyy-mm-dd → UTC midnight Date. Mirrors the scheduler's parseD
+ *  so the displayed date doesn't drift by a day across local offsets. */
+function parseIsoUtc(iso: string): Date {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d))
 }
 
 function StatusBadge({ launched, isWaiting, isLate, isPaused }: { launched: boolean; isWaiting: boolean; isLate: boolean; isPaused: boolean }) {

@@ -1088,6 +1088,12 @@ export interface StrategyWebProject {
   social_twitter_url:   string | null
   social_linkedin_url:  string | null
 
+  // ── v95 — podcast + mission added to the global merge-field set ──
+  podcast_name:         string | null
+  podcast_apple_url:    string | null
+  podcast_spotify_url:  string | null
+  mission_statement:    string | null
+
   // ── Intake — optional URLs paired with file uploads (v29) ──
   strategy_brief_notion_url:  string | null
   external_brand_guide_url:   string | null

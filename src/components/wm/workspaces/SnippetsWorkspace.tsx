@@ -45,6 +45,7 @@ const GLOBAL_FIELDS: GlobalFieldDef[] = [
   { column: 'email',                token: '{{email}}',                label: 'General contact email', placeholder: 'info@church.org',      type: 'email' },
   { column: 'denomination',         token: '{{denomination}}',         label: 'Denomination',          placeholder: 'Non-denominational' },
   { column: 'pastor_name',          token: '{{pastor_name}}',          label: 'Lead pastor name',      placeholder: 'Dr. Michael Hines' },
+  { column: 'mission_statement',    token: '{{mission_statement}}',    label: 'Mission statement',     placeholder: 'To know God and make Him known.' },
   // primary_service_time row removed — consolidated into all_service_times.
   { column: 'all_service_times',    token: '{{all_service_times}}',    label: 'Service times',         placeholder: 'Sundays 9 AM & 11 AM · Wed 7 PM' },
   { column: 'social_facebook_url',  token: '{{social_facebook_url}}',  label: 'Facebook',              placeholder: 'https://facebook.com/…', type: 'url' },
@@ -53,6 +54,9 @@ const GLOBAL_FIELDS: GlobalFieldDef[] = [
   { column: 'social_tiktok_url',    token: '{{social_tiktok_url}}',    label: 'TikTok',                placeholder: 'https://tiktok.com/@…',   type: 'url' },
   { column: 'social_twitter_url',   token: '{{social_twitter_url}}',   label: 'X / Twitter',           placeholder: 'https://x.com/…',         type: 'url' },
   { column: 'social_linkedin_url',  token: '{{social_linkedin_url}}',  label: 'LinkedIn',              placeholder: 'https://linkedin.com/…',  type: 'url' },
+  { column: 'podcast_name',         token: '{{podcast_name}}',         label: 'Podcast show name',     placeholder: 'The ECC Podcast' },
+  { column: 'podcast_apple_url',    token: '{{podcast_apple_url}}',    label: 'Apple Podcasts URL',    placeholder: 'https://podcasts.apple.com/…', type: 'url' },
+  { column: 'podcast_spotify_url',  token: '{{podcast_spotify_url}}',  label: 'Spotify podcast URL',   placeholder: 'https://open.spotify.com/show/…', type: 'url' },
 ]
 
 export function SnippetsWorkspace({ project, onChange }: Props) {

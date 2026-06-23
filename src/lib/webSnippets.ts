@@ -16,13 +16,13 @@ import { supabase } from './supabase'
 import type { StrategyWebProject, WebProjectSnippet } from '../types/database'
 import type { WMSnippetOption } from '../components/wm/RichTextEditor'
 
-interface GlobalFieldDef {
+export interface GlobalFieldDef {
   column: keyof StrategyWebProject
   token: string
   label: string
 }
 
-const GLOBAL_FIELDS: GlobalFieldDef[] = [
+export const GLOBAL_FIELDS: GlobalFieldDef[] = [
   { column: 'church_name',          token: 'church_name',          label: 'Church name' },
   { column: 'church_short_name',    token: 'church_short_name',    label: 'Short / common name' },
   { column: 'address',              token: 'address',              label: 'Street address' },
@@ -31,6 +31,7 @@ const GLOBAL_FIELDS: GlobalFieldDef[] = [
   { column: 'email',                token: 'email',                label: 'General contact email' },
   { column: 'denomination',         token: 'denomination',         label: 'Denomination' },
   { column: 'pastor_name',          token: 'pastor_name',          label: 'Lead pastor' },
+  { column: 'mission_statement',    token: 'mission_statement',    label: 'Mission statement' },
   // primary_service_time intentionally omitted — consolidated into
   // all_service_times so there's one canonical service-times snippet
   // rather than two near-duplicates.
@@ -41,6 +42,9 @@ const GLOBAL_FIELDS: GlobalFieldDef[] = [
   { column: 'social_tiktok_url',    token: 'social_tiktok_url',    label: 'TikTok URL' },
   { column: 'social_twitter_url',   token: 'social_twitter_url',   label: 'X / Twitter URL' },
   { column: 'social_linkedin_url',  token: 'social_linkedin_url',  label: 'LinkedIn URL' },
+  { column: 'podcast_name',         token: 'podcast_name',         label: 'Podcast show name' },
+  { column: 'podcast_apple_url',    token: 'podcast_apple_url',    label: 'Apple Podcasts URL' },
+  { column: 'podcast_spotify_url',  token: 'podcast_spotify_url',  label: 'Spotify podcast URL' },
 ]
 
 /** Build the editor-ready snippet list for a project. Includes empty

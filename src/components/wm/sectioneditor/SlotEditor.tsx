@@ -91,7 +91,7 @@ function SlotInput({
   slot, value, onChange, snippets, depth, isButton,
 }: Props & { isButton: boolean }) {
   if (isButton) {
-    return <ButtonInput slot={slot} value={value} onChange={onChange} />
+    return <ButtonInput slot={slot} value={value} onChange={onChange} snippets={snippets} />
   }
   switch (slot.type) {
     case 'text':
@@ -104,7 +104,7 @@ function SlotInput({
     case 'richtext':
       return <RichTextInput slot={slot} value={value} onChange={onChange} snippets={snippets} depth={depth ?? 0} />
     case 'cta':
-      return <ButtonInput slot={slot} value={value} onChange={onChange} />
+      return <ButtonInput slot={slot} value={value} onChange={onChange} snippets={snippets} />
     case 'boolean':
       return <BooleanInput slot={slot} value={value} onChange={onChange} />
     case 'form-input':
@@ -222,11 +222,12 @@ function RichTextInput({
  *  An inline validation chip surfaces broken internal routes /
  *  malformed external URLs so staff catches them at authoring time. */
 function ButtonInput({
-  slot, value, onChange,
+  slot, value, onChange, snippets,
 }: {
   slot: WebSlotDef
   value: unknown
   onChange: (v: unknown) => void
+  snippets: readonly WMSnippetOption[]
 }) {
   const focus = useSnippetFocus()
   const pages = useProjectPages()
@@ -293,7 +294,7 @@ function ButtonInput({
           New tab
         </label>
       </div>
-      <CtaUrlInput cta={cta} pages={pages} onChange={(url) => patch({ url })} />
+      <CtaUrlInput cta={cta} pages={pages} snippets={snippets} onChange={(url) => patch({ url })} />
       {validationError && (
         <div className="inline-flex items-start gap-1 text-[10px] text-wm-warn">
           <AlertTriangle size={10} className="mt-0.5 shrink-0" />
@@ -305,13 +306,15 @@ function ButtonInput({
 }
 
 /** Kind-specific URL input. Internal routes get a project-page
- *  dropdown so strategists can't typo a slug; everything else gets
- *  a typed text input with the right scheme placeholder. */
+ *  dropdown so strategists can't typo a slug; snippet picks one of
+ *  the project's defined tokens; everything else gets a typed text
+ *  input with the right scheme placeholder. */
 function CtaUrlInput({
-  cta, pages, onChange,
+  cta, pages, snippets, onChange,
 }: {
   cta: CtaValue
   pages: ReadonlyArray<{ id: string; name: string; slug: string }>
+  snippets: readonly WMSnippetOption[]
   onChange: (url: string) => void
 }) {
   if (cta.kind === 'internal_route') {
@@ -335,12 +338,59 @@ function CtaUrlInput({
       </div>
     )
   }
+  if (cta.kind === 'snippet') {
+    // Snippets are project-scoped tokens — let the user pick from the
+    // global merge fields + custom snippets rather than typing a raw
+    // {{token}} that might not exist. The value is stored as `{{token}}`
+    // so resolved-route rendering downstream stays consistent.
+    const currentToken = (() => {
+      const m = cta.url.trim().match(/^\{\{\s*([\w.]+)\s*\}\}$/)
+      return m ? m[1] : ''
+    })()
+    const groups = {
+      global: snippets.filter(s => s.source === 'global'),
+      custom: snippets.filter(s => s.source !== 'global'),
+    }
+    const known = new Set(snippets.map(s => s.token))
+    return (
+      <div className="relative">
+        <Link2 size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-wm-text-subtle pointer-events-none z-10" />
+        <select
+          value={currentToken}
+          onChange={e => onChange(e.target.value ? `{{${e.target.value}}}` : '')}
+          className="w-full bg-wm-bg-elevated text-wm-text pl-7 pr-3 py-2 rounded-md border border-wm-border outline-none focus:border-wm-accent focus:ring-2 focus:ring-wm-accent/15 transition-colors text-[12px] font-mono"
+        >
+          <option value="">— Pick a snippet —</option>
+          {groups.global.length > 0 && (
+            <optgroup label="Global merge fields">
+              {groups.global.map(s => (
+                <option key={s.token} value={s.token}>
+                  {`{{${s.token}}}`} · {s.label}{s.resolvedValue ? ` — ${s.resolvedValue.slice(0, 40)}${s.resolvedValue.length > 40 ? '…' : ''}` : ' — (empty)'}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {groups.custom.length > 0 && (
+            <optgroup label="Custom snippets">
+              {groups.custom.map(s => (
+                <option key={s.token} value={s.token}>
+                  {`{{${s.token}}}`} · {s.label}{s.resolvedValue ? ` — ${s.resolvedValue.slice(0, 40)}${s.resolvedValue.length > 40 ? '…' : ''}` : ''}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {currentToken && !known.has(currentToken) && (
+            <option value={currentToken}>{`{{${currentToken}}}`} (unmatched — set this token on the Snippets tab)</option>
+          )}
+        </select>
+      </div>
+    )
+  }
   const placeholder =
     cta.kind === 'external_url' ? 'https://example.com' :
     cta.kind === 'anchor'       ? '#section-id' :
     cta.kind === 'mailto'       ? 'mailto:hello@example.com' :
     cta.kind === 'tel'          ? 'tel:+15555551234' :
-    cta.kind === 'snippet'      ? '{{directions_url}}' :
     ''
   return (
     <div className="relative">
