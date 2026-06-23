@@ -89,7 +89,7 @@ export function SprintTimeline({
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 p-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 p-4">
         {sprints.map(sp => (
           <SprintCard
             key={sp.idx}
@@ -158,20 +158,17 @@ function SprintCard({
 
   return (
     <div className="rounded-xl border border-lavender bg-cream/30">
-      <div className="px-3 py-2 border-b border-lavender flex items-center justify-between gap-2">
-        <div>
-          <p className="text-[10px] uppercase tracking-widest font-bold text-purple-gray">Sprint {sprintIdx + 1}</p>
-          <p className="text-[11px] text-deep-plum font-semibold">
-            {sprintStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })} – {sprintEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}
-          </p>
-        </div>
-        <p className={`text-[11px] font-mono ${isFull ? 'text-red-700 font-bold' : 'text-purple-gray'}`}>
-          {sprintHours}/{sprintCap || 0} hrs
+      <div className="px-4 pt-3 pb-2">
+        <p className="text-[14px] font-bold text-deep-plum">Sprint {sprintIdx + 1}</p>
+        <p className="text-[12px] text-purple-gray mt-0.5">
+          {sprintStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
+          {' – '}
+          {sprintEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
         </p>
       </div>
 
       {/* Capacity bar */}
-      <div className="px-3 pt-2">
+      <div className="px-4">
         <div className="h-2 w-full rounded bg-lavender-tint overflow-hidden flex">
           {sprintAllocs.map(a => (
             <div
@@ -184,20 +181,43 @@ function SprintCard({
             />
           ))}
         </div>
-        {sprintAllocs.length > 0 && (
-          <div className="mt-1.5 flex flex-wrap gap-1">
-            {sprintAllocs.map(a => (
-              <span key={a.id} className="inline-flex items-center gap-1 text-[10px] text-deep-plum">
-                <span className="w-2 h-2 rounded-sm" style={{ background: colorByProject[a.id] ?? '#A89BE5' }} />
-                {projectName(a.id)} · {a.hours}h
-              </span>
-            ))}
-          </div>
-        )}
+        <div className="mt-1 flex items-center justify-between text-[11px] text-purple-gray">
+          <span className={isFull ? 'text-red-700 font-semibold' : ''}>
+            {sprintHours} hrs scheduled
+          </span>
+          <span>{sprintCap || 0} hr capacity</span>
+        </div>
       </div>
 
+      {/* Per-project allocation rows — one per project, full church
+          name + right-aligned hours. This is the PM's "who gets which
+          slice of this sprint" read; the old inline-chip layout
+          truncated names and was hard to scan. Sorted by hours desc
+          so the biggest slice reads first. */}
+      {sprintAllocs.length > 0 && (
+        <div className="px-4 pt-3 pb-2 space-y-1.5">
+          {sprintAllocs
+            .slice()
+            .sort((a, b) => b.hours - a.hours)
+            .map(a => (
+              <div key={a.id} className="flex items-center gap-2.5 text-[13px]">
+                <span
+                  className="w-2.5 h-2.5 rounded-sm shrink-0"
+                  style={{ background: colorByProject[a.id] ?? '#A89BE5' }}
+                />
+                <span className="text-deep-plum flex-1 min-w-0">
+                  {projectName(a.id)}
+                </span>
+                <span className="font-mono font-bold text-deep-plum shrink-0">
+                  {a.hours}h
+                </span>
+              </div>
+            ))}
+        </div>
+      )}
+
       {/* Per-week controls */}
-      <div className="px-3 py-2 space-y-1.5">
+      <div className="px-4 pt-2 pb-3 border-t border-lavender/60 space-y-1.5">
         {weeks.map(w => (
           <WeekControl
             key={w.iso}
