@@ -11,7 +11,7 @@
  * help hours land the church back on target — they enter that number
  * in the Help hrs column themselves.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, ExternalLink, Flag, GripVertical } from 'lucide-react'
 import {
@@ -492,6 +492,13 @@ function NumberCell({
  *  anywhere on the cell opens the picker, regardless of where the
  *  user lands. Avoids the m/d/y vs Mon-Day mismatch between Target
  *  and Projected columns. */
+/** Displays "Sep 4" but edits via the browser's native date picker.
+ *  Implementation note: we previously overlayed an `opacity:0`
+ *  `<input type=date>` and relied on the browser opening the picker
+ *  on click. That only works in Chrome — Firefox and Safari only
+ *  open the picker when their visible calendar indicator is clicked,
+ *  which we hid. The reliable pattern is `input.showPicker()` fired
+ *  from an explicit click handler on the chip wrapper. */
 function DateCell({
   value, onChange, placeholder = '—',
 }: {
@@ -499,17 +506,39 @@ function DateCell({
   onChange:    (iso: string | null) => void
   placeholder?: string
 }) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const openPicker = () => {
+    const el = inputRef.current
+    if (!el) return
+    try {
+      el.showPicker?.()
+    } catch {
+      // Older Safari throws here; fall back to focus + click.
+      el.focus()
+      el.click()
+    }
+  }
   return (
-    <div className="relative inline-block min-w-[80px] rounded border border-lavender bg-white px-2 py-1 hover:border-primary-purple/60 focus-within:border-primary-purple cursor-pointer">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={openPicker}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPicker() }
+      }}
+      className="inline-flex items-center min-w-[80px] rounded border border-lavender bg-white px-2 py-1 hover:border-primary-purple/60 focus:border-primary-purple focus:outline-none cursor-pointer"
+      title="Click to edit"
+    >
       <span className={`block text-[13px] ${value ? 'text-deep-plum' : 'text-purple-gray italic'}`}>
         {value ? shortDate(value) : placeholder}
       </span>
       <input
+        ref={inputRef}
         type="date"
         value={value ?? ''}
         onChange={e => onChange(e.target.value || null)}
-        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-        title="Click to edit"
+        className="sr-only"
+        tabIndex={-1}
       />
     </div>
   )

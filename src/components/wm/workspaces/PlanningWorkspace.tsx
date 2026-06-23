@@ -21,7 +21,7 @@
  * projected launch and sprint span; the scheduler also excludes them
  * from the queue + sprint timeline.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, RefreshCw, Flag } from 'lucide-react'
 import { WMCard } from '../Card'
 import { WMStatusPill } from '../StatusPill'
@@ -159,21 +159,14 @@ export function PlanningWorkspace({ project, onChange }: Props) {
               </p>
             </div>
             <Field label="Target launch" saving={savingKey === 'launch_date' || savingKey === 'hard_deadline'}>
-              {/* Reads "Sep 4, 2026" but edits via the native date picker
-                  overlay so the display format stays consistent with
-                  the Projected launch field. */}
-              <div className="relative mt-1 w-full rounded-md border border-wm-border bg-wm-bg-elevated px-2 py-1.5 hover:border-wm-accent/60 focus-within:border-wm-accent cursor-pointer">
-                <span className={`block text-[13px] ${project.launch_date ? 'text-wm-text' : 'text-wm-text-muted italic'}`}>
-                  {project.launch_date ? fmtDate(parseIsoUtc(project.launch_date)) : '— pick a date —'}
-                </span>
-                <input
-                  type="date"
-                  value={project.launch_date ?? ''}
-                  onChange={e => void save('launch_date', e.target.value || null)}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  title="Click to edit"
-                />
-              </div>
+              {/* Reads "Sep 4, 2026" but edits via the native date
+                  picker — explicit showPicker() so Firefox/Safari open
+                  the picker on click (not just Chrome). */}
+              <DatePickerChip
+                value={project.launch_date ?? null}
+                onChange={iso => void save('launch_date', iso)}
+                placeholder="— pick a date —"
+              />
               <label className={`inline-flex items-center gap-1.5 mt-1.5 text-[11px] cursor-pointer ${project.hard_deadline ? 'text-amber-800 font-semibold' : 'text-wm-text-muted'}`}>
                 <input
                   type="checkbox"
@@ -499,6 +492,50 @@ function BufferedNumberInput({
 function parseIsoUtc(iso: string): Date {
   const [y, m, d] = iso.split('-').map(Number)
   return new Date(Date.UTC(y, m - 1, d))
+}
+
+/** Displays "Sep 4, 2026" but edits via the native date picker. Uses
+ *  showPicker() so Firefox/Safari open the picker on click (not just
+ *  Chrome — they only honor a click on the visible calendar indicator
+ *  which we don't render). */
+function DatePickerChip({
+  value, onChange, placeholder,
+}: {
+  value:       string | null
+  onChange:    (iso: string | null) => void
+  placeholder: string
+}) {
+  const ref = useRef<HTMLInputElement>(null)
+  const open = () => {
+    const el = ref.current
+    if (!el) return
+    try { el.showPicker?.() }
+    catch { el.focus(); el.click() }
+  }
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={open}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open() }
+      }}
+      className="mt-1 w-full rounded-md border border-wm-border bg-wm-bg-elevated px-2 py-1.5 hover:border-wm-accent/60 focus:border-wm-accent focus:outline-none cursor-pointer"
+      title="Click to edit"
+    >
+      <span className={`block text-[13px] ${value ? 'text-wm-text' : 'text-wm-text-muted italic'}`}>
+        {value ? fmtDate(parseIsoUtc(value)) : placeholder}
+      </span>
+      <input
+        ref={ref}
+        type="date"
+        value={value ?? ''}
+        onChange={e => onChange(e.target.value || null)}
+        className="sr-only"
+        tabIndex={-1}
+      />
+    </div>
+  )
 }
 
 function StatusBadge({ launched, isWaiting, isLate, isPaused }: { launched: boolean; isWaiting: boolean; isLate: boolean; isPaused: boolean }) {
