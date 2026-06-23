@@ -58,23 +58,15 @@ export function PlanningWorkspace({ project, onChange }: Props) {
   // Activity consolidator (still works — reads milestones, cowork state,
   // ClickUp, manual override). Local copy keyed on the project prop.
   const [milestones, setMilestones] = useState<Array<{ milestone_id: number; milestone_status: string; submitted_at: string | null; squad: string | null; pathway: string | null; step_number: number | null }>>([])
-  const [coworkState, setCoworkState] = useState<Record<string, unknown> | null>(null)
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const [milestonesRes, coworkRes] = await Promise.all([
-        supabase
-          .from('strategy_milestone_submissions')
-          .select('milestone_id, milestone_status, submitted_at, milestone:strategy_milestone_definitions(squad, pathway, step_number)')
-          .eq('member', project.member as number)
-          .order('submitted_at', { ascending: false })
-          .limit(50),
-        supabase
-          .from('strategy_web_projects')
-          .select('roadmap_state')
-          .eq('id', project.id)
-          .maybeSingle(),
-      ])
+      const milestonesRes = await supabase
+        .from('strategy_milestone_submissions')
+        .select('milestone_id, milestone_status, submitted_at, milestone:strategy_milestone_definitions(squad, pathway, step_number)')
+        .eq('member', project.member as number)
+        .order('submitted_at', { ascending: false })
+        .limit(50)
       if (cancelled) return
       type Raw = { milestone_id: number; milestone_status: string; submitted_at: string | null; milestone?: { squad?: string | null; pathway?: string | null; step_number?: number | null } | Array<{ squad?: string | null; pathway?: string | null; step_number?: number | null }> | null }
       setMilestones(((milestonesRes.data ?? []) as Raw[]).map(m => {
@@ -88,17 +80,20 @@ export function PlanningWorkspace({ project, onChange }: Props) {
           step_number:      def?.step_number ?? null,
         }
       }))
-      setCoworkState((coworkRes.data?.roadmap_state ?? null) as Record<string, unknown> | null)
     })()
     return () => { cancelled = true }
   }, [project.id, project.member])
 
+  // buildCurrentActivity reads project.roadmap_state directly for the
+  // cowork pipeline + copy engine signals. devTasks is the ClickUp
+  // task list — this surface doesn't load them, so an empty array is
+  // fine (the inference branch falls through to phaseOnly).
   const activity = useMemo(() => buildCurrentActivity({
     project,
     milestones,
-    coworkState,
+    devTasks:  [],
     inference: null,
-  }), [project, milestones, coworkState])
+  }), [project, milestones])
   const stall = useMemo(() => detectStall({ project, activity, today: new Date() }), [project, activity])
   const partnerSync = useMemo(() => buildPartnerSyncString({
     project: { ...project, name: project.name },
@@ -400,7 +395,8 @@ export function PlanningWorkspace({ project, onChange }: Props) {
         <StepTimeline
           project={project}
           milestones={milestones}
-          coworkState={coworkState}
+          activity={activity}
+          effectiveProgress={{}}
         />
 
         {/* ─── Partner sync sentence ───────────────────────────── */}
