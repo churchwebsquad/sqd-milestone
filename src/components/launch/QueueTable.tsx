@@ -92,6 +92,7 @@ export function QueueTable({
               <Th>Target</Th>
               <Th>Projected</Th>
               <Th>Δ</Th>
+              <Th>Design due</Th>
               <Th>Tracked vs est.</Th>
               <Th>Dev hrs</Th>
               <Th>Recovery</Th>
@@ -126,7 +127,7 @@ export function QueueTable({
               )
             })}
             {visible.length === 0 && (
-              <tr><td colSpan={11} className="px-4 py-6 text-center text-sm text-purple-gray italic">No active projects.</td></tr>
+              <tr><td colSpan={12} className="px-4 py-6 text-center text-sm text-purple-gray italic">No active projects.</td></tr>
             )}
           </tbody>
         </table>
@@ -185,6 +186,14 @@ function RowAndRecovery({
     : '—'
   const hardDeadlineMissed = row.hard_deadline && launchedISO && launchedISO > row.hard_deadline
 
+  // Upstream design cut-off: dev start − 2 business days, so the
+  // designer has a clear handoff target with a 1-business-day buffer
+  // before dev picks the project up. Suppressed for projects that
+  // aren't actively in the queue (done with dev / waiting feedback).
+  const designDueISO = !isWaiting && slot?.devStartDate
+    ? subBizDays(slot.devStartDate, 2)
+    : null
+
   return (
     <>
       <tr
@@ -222,20 +231,30 @@ function RowAndRecovery({
           </div>
         </td>
         <td className="px-2 py-2 align-top">
-          <input
-            type="date"
-            value={row.launch_date ?? ''}
-            onChange={e => onPatch({ launch_date: e.target.value || null })}
-            className="text-[11.5px] font-mono px-1.5 py-1 rounded border border-transparent hover:border-lavender focus:border-primary-purple focus:outline-none bg-transparent"
+          <DateCell
+            value={row.launch_date ?? null}
+            onChange={iso => onPatch({ launch_date: iso })}
+            placeholder="—"
           />
         </td>
-        <td className="px-2 py-2 align-top font-mono text-[11.5px] text-deep-plum">
+        <td className="px-2 py-2 align-top text-[12px] text-deep-plum">
           {isWaiting
             ? <span className="text-purple-gray italic">waiting</span>
             : launchedISO ? shortDate(launchedISO) : '—'}
         </td>
         <td className="px-2 py-2 align-top">
           {slot?.delta != null && !isWaiting ? <DeltaPill delta={slot.delta} /> : <span className="text-purple-gray">—</span>}
+        </td>
+        <td className="px-2 py-2 align-top text-[12px] text-purple-gray">
+          {designDueISO ? (
+            <span
+              title="Design needs to be wrapped by this date so the developer can pick the project up cleanly (dev start − 2 business days)."
+            >
+              {shortDate(designDueISO)}
+            </span>
+          ) : (
+            <span className="text-purple-gray/40">—</span>
+          )}
         </td>
         <td className="px-2 py-2 align-top min-w-[140px]">
           {pace ? <PaceCell pace={pace} planned={site!.planned_dev_hours} tracked={site!.tracked_hours} /> : <span className="text-purple-gray italic text-[11px]">—</span>}
@@ -403,4 +422,47 @@ function shortDate(iso: string): string {
     const d = new Date(`${iso}T00:00:00`)
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   } catch { return iso }
+}
+
+/** Subtract N business days (skipping Sat/Sun) from an ISO yyyy-mm-dd
+ *  date. Returns ISO. Used to compute the upstream design cut-off
+ *  from the dev start date. */
+function subBizDays(iso: string, n: number): string {
+  let d = new Date(`${iso}T00:00:00Z`)
+  let left = Math.max(0, Math.round(n))
+  while (left > 0) {
+    d = new Date(d.getTime() - 86_400_000)
+    const wd = d.getUTCDay()
+    if (wd !== 0 && wd !== 6) left--
+  }
+  return d.toISOString().slice(0, 10)
+}
+
+/** Editable date cell that DISPLAYS "Jun 23" (matching the projected
+ *  launch's format) but EDITS via the browser's native date picker.
+ *  The native `<input type=date>` is overlaid invisibly so a click
+ *  anywhere on the cell opens the picker, regardless of where the
+ *  user lands. Avoids the m/d/y vs Mon-Day mismatch between Target
+ *  and Projected columns. */
+function DateCell({
+  value, onChange, placeholder = '—',
+}: {
+  value:       string | null
+  onChange:    (iso: string | null) => void
+  placeholder?: string
+}) {
+  return (
+    <div className="relative inline-block min-w-[64px]">
+      <span className={`block text-[12px] ${value ? 'text-deep-plum' : 'text-purple-gray italic'}`}>
+        {value ? shortDate(value) : placeholder}
+      </span>
+      <input
+        type="date"
+        value={value ?? ''}
+        onChange={e => onChange(e.target.value || null)}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+        title="Click to edit"
+      />
+    </div>
+  )
 }
