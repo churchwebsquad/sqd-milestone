@@ -83,6 +83,45 @@ export default async function handler(req: any, res: any) {
   const roadmapState = (project.roadmap_state ?? {}) as Record<string, any>
   const engineState = (roadmapState.engine_state ?? {}) as Record<string, any>
 
+  /** Stamp `roadmap_state.<stepKey>._meta.started_at` so other tabs +
+   *  re-opens of this tab can detect that a long-running step is in
+   *  flight even after the originating client disconnects. The
+   *  in-flight signal is `started_at > generated_at` (or
+   *  generated_at is null). Each agent writes generated_at when it
+   *  finishes; the difference between the two timestamps is how we
+   *  show progress without keeping the tab open. */
+  const markStepStarted = async (stepKey: 'stage_0' | 'stage_1') => {
+    // Fresh read so we don't clobber any concurrent agent writes.
+    const { data: latest } = await sb
+      .from('strategy_web_projects')
+      .select('roadmap_state')
+      .eq('id', projectId)
+      .maybeSingle()
+    const r = (latest?.roadmap_state ?? {}) as Record<string, any>
+    const step = (r[stepKey] ?? {}) as Record<string, any>
+    const meta = (step._meta ?? {}) as Record<string, any>
+    await sb
+      .from('strategy_web_projects')
+      .update({
+        roadmap_state: {
+          ...r,
+          [stepKey]: {
+            ...step,
+            _meta: {
+              ...meta,
+              started_at: new Date().toISOString(),
+              // Clear stale completion stamp so the UI knows a NEW
+              // run is in flight (rather than seeing an old generated_at
+              // and rendering the step as complete). The agent will
+              // write a fresh generated_at when it finishes.
+              generated_at: null,
+            },
+          },
+        },
+      })
+      .eq('id', projectId)
+  }
+
   try {
     if (action === 'status') {
       return res.status(200).json({ ok: true, engine_state: engineState })
@@ -122,6 +161,7 @@ export default async function handler(req: any, res: any) {
     }
 
     if (action === 'run_synthesize') {
+      await markStepStarted('stage_1')
       // Stage 1 — strategy synthesis from intake. Either a fresh draft
       // (no redoContext) or a redo driven by strategist feedback.
       const note = typeof req.body?.note === 'string' ? req.body.note.trim() : ''
@@ -131,6 +171,7 @@ export default async function handler(req: any, res: any) {
     }
 
     if (action === 'run_normalize') {
+      await markStepStarted('stage_0')
       // Stage 0 — atomize intake into content_atoms + church_facts.
       // Same orchestrate-wrapper pattern as run_synthesize so the
       // Copy Engine workspace can trigger Stage 0 re-runs without

@@ -175,6 +175,14 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   // Slug currently being saved — disables the row while the request is in flight.
   const [renameSavingSlug, setRenameSavingSlug] = useState<string | null>(null)
 
+  // Fresh-from-DB copy of roadmap_state so stage_0 / stage_1 meta
+  // reads update during polling (not just on project-prop change).
+  // Drives the in-progress detection below: a Stage 0 / Stage 1 run
+  // kicked off in ANOTHER tab — or in this tab before the user
+  // navigated away — is still visible from this view once the
+  // started_at marker lands.
+  const [liveRoadmap, setLiveRoadmap] = useState<Record<string, unknown> | null>(null)
+
   const refreshFromDB = useCallback(async () => {
     const { data } = await supabase
       .from('strategy_web_projects')
@@ -182,6 +190,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
       .eq('id', project.id)
       .maybeSingle()
     const state = ((data?.roadmap_state ?? {}) as Record<string, unknown>) || {}
+    setLiveRoadmap(state)
     setEngine(((state.engine_state as EngineState) ?? {}))
     setCritique(((state.director_critique as DirectorCritique) ?? null))
     setDrafts(((state.page_drafts as Record<string, PageDraft>) ?? {}))
@@ -305,6 +314,9 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   // coverage gaps, and significant drops vs prior runs so the user
   // doesn't proceed on a broken extraction. The flags below land
   // straight into a Setup Health banner above the gates.
+  // Both stage_0 + stage_1 meta read from liveRoadmap first (kept
+  // fresh by polling while a run is in flight) and fall back to the
+  // project prop on initial render.
   const stage0Meta = useMemo<{
     atom_count?: number; fact_count?: number
     truncation_suspected?: boolean
@@ -312,20 +324,55 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
     atoms_delta_vs_prior?: number
     atoms_by_source?: Record<string, number>
     sources_loaded?: Record<string, boolean | number>
+    started_at?:   string | null
+    generated_at?: string | null
   } | null>(() => {
-    const rs = project.roadmap_state as Record<string, unknown> | null
+    const rs = liveRoadmap ?? (project.roadmap_state as Record<string, unknown> | null)
     const s0 = rs?.stage_0 as Record<string, unknown> | undefined
     return (s0?._meta as never) ?? null
-  }, [project.roadmap_state])
+  }, [liveRoadmap, project.roadmap_state])
   const stage1Meta = useMemo<{
     truncation_suspected?: boolean
     looks_empty?: boolean
     substantive_keys_count?: number
+    started_at?:   string | null
+    generated_at?: string | null
   } | null>(() => {
-    const rs = project.roadmap_state as Record<string, unknown> | null
+    const rs = liveRoadmap ?? (project.roadmap_state as Record<string, unknown> | null)
     const s1 = rs?.stage_1 as Record<string, unknown> | undefined
     return (s1?._meta as never) ?? null
-  }, [project.roadmap_state])
+  }, [liveRoadmap, project.roadmap_state])
+
+  // Server-side "this step is in flight" detection. A step is running
+  // when started_at is set AND generated_at is older (or null). Lets
+  // us recover progress visibility after a tab close — the originating
+  // tab's `running` local state is gone, but the DB still says the
+  // server is working on it.
+  const serverRunningStage0 = !!(stage0Meta?.started_at
+    && (!stage0Meta?.generated_at
+        || new Date(stage0Meta.started_at).getTime() > new Date(stage0Meta.generated_at).getTime()))
+  const serverRunningStage1 = !!(stage1Meta?.started_at
+    && (!stage1Meta?.generated_at
+        || new Date(stage1Meta.started_at).getTime() > new Date(stage1Meta.generated_at).getTime()))
+  const serverRunning = serverRunningStage0
+    ? 'run_normalize'
+    : serverRunningStage1
+      ? 'run_synthesize'
+      : null
+
+  // Effective running state — local state for immediate UI feedback
+  // OR server-derived for cross-tab visibility. The UI buttons / spinners
+  // read from this, so a "Run" button correctly shows "Running…" even
+  // when the originating tab was closed.
+  const effectiveRunning = running ?? serverRunning
+
+  // While a server-side run is in flight, poll the project state every
+  // ~8s so the UI catches completion without the user reloading.
+  useEffect(() => {
+    if (!serverRunning) return
+    const t = setInterval(() => { void refreshFromDB() }, 8000)
+    return () => clearInterval(t)
+  }, [serverRunning, refreshFromDB])
 
   const hasStage1 = useMemo(() => {
     const rs = project.roadmap_state as Record<string, unknown> | null
@@ -1166,7 +1213,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
         hasStage1={hasStage1}
         onReNormalize={() => void callOrchestrate('run_normalize')}
         onReSynthesize={() => void callOrchestrate('run_synthesize')}
-        running={running}
+        running={effectiveRunning}
       />
 
       {/* In-flight banner — visible whenever any orchestrate action or
@@ -1182,7 +1229,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
           appears with its action-specific label + Stop button. */}
       {!enginePhase && (
         <InFlightBanner
-          running={running}
+          running={effectiveRunning}
           engineRunning={engineRunning}
           engine={engine}
           onStop={() => void handleStop()}
@@ -1219,14 +1266,14 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
           {!hasStage2 && !hasStage1 && (
             <button
               onClick={() => void callOrchestrate('run_synthesize')}
-              disabled={!!running || !hasStage0}
+              disabled={!!effectiveRunning || !hasStage0}
               title={!hasStage0
                 ? 'Stage 0 (intake normalization) must finish first — check the Intake & Crawl tab.'
                 : 'Synthesize the brief, AM handoff, discovery, brand handoff, and content collection into a strategic foundation. ~2–3 min.'}
               className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] text-white disabled:opacity-50"
             >
-              {running === 'run_synthesize' ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
-              Synthesize strategy
+              {effectiveRunning === 'run_synthesize' ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+              {effectiveRunning === 'run_synthesize' ? 'Synthesizing…' : 'Synthesize strategy'}
             </button>
           )}
           {!hasStage2 && hasStage1 && (
