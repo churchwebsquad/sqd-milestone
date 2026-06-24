@@ -48,6 +48,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { setRoadmapStateAtomic } from '../agents/_lib/roadmapStateMerge.js'
+import { snapshotPageVersion } from '../agents/_lib/pageSnapshot.js'
 
 export const maxDuration = 60
 
@@ -1450,6 +1451,17 @@ export default async function handler(req: any, res: any) {
     // Upsert web_pages row
     let pageId: string
     if (existing) {
+      // Snapshot the page BEFORE the metadata UPDATE + section wipe
+      // so the strategist can revert a cowork handoff that landed the
+      // wrong content shape. Skip for newly-created pages — nothing
+      // meaningful to revert TO.
+      await snapshotPageVersion({
+        sb,
+        webPageId:    existing.id,
+        triggerKind:  'agent_run',
+        triggerLabel: `Cowork → Pages handoff — ${slug}`,
+      })
+
       const { error: updErr } = await sb.from('web_pages')
         .update({
           cowork_handoff_meta: {
@@ -1498,7 +1510,9 @@ export default async function handler(req: any, res: any) {
       pageId = ins.id
     }
 
-    // Clean slate web_sections for this page
+    // Clean slate web_sections for this page (snapshot already taken
+    // at the top of the existing-page branch above; new pages have
+    // nothing to revert to so no snapshot needed).
     const { error: delErr } = await sb.from('web_sections')
       .delete()
       .eq('web_page_id', pageId)

@@ -75,3 +75,18 @@ ALTER TABLE strategy_web_projects
   ADD COLUMN IF NOT EXISTS figma_layout_swaps jsonb NOT NULL DEFAULT '{}'::jsonb;
 COMMENT ON COLUMN strategy_web_projects.figma_layout_swaps IS
   'Site-wide Figma layout swap map. Shape: { <from_template_id>: { to_template_id, note, swapped_at, swapped_by } }. Section-level figma_template_override_id wins when both apply.';
+
+-- RLS policies on strategy_web_page_versions. Same pattern web_pages
+-- and web_sections use: any authenticated user can read + write.
+-- Service role bypasses RLS so server-side agent snapshots still work
+-- even when no auth.uid() is set.
+ALTER TABLE strategy_web_page_versions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Authenticated users can read web_page_versions"
+  ON strategy_web_page_versions FOR SELECT
+  USING (auth.uid() IS NOT NULL);
+
+CREATE POLICY "Authenticated users can write web_page_versions"
+  ON strategy_web_page_versions FOR ALL
+  USING (auth.uid() IS NOT NULL)
+  WITH CHECK (auth.uid() IS NOT NULL);

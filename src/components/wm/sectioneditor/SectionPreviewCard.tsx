@@ -18,6 +18,7 @@ import {
   ArrowUp, ArrowDown, MessageSquare, Copy, ChevronRight,
 } from 'lucide-react'
 import { renderSectionToHtml, type SnippetMap } from '../../../lib/webBrixiesRender'
+import { composeSectionName } from '../../../lib/webSectionRoles'
 import type { WebContentTemplate, WebSection } from '../../../types/database'
 
 /** Minimal page reference for the "Duplicate to page" submenu. */
@@ -192,12 +193,23 @@ function SectionStrip({
       <span className="text-[10px] font-mono text-wm-text-subtle tabular-nums shrink-0">
         {String(index + 1).padStart(2, '0')}
       </span>
-      <span className="text-[12px] font-semibold text-wm-text truncate min-w-0">
-        {template?.layer_name ?? 'Freehand section'}
+      {/* Slot identity (role-based name) is the loud label; the
+          underlying Brixies layout name is now a quieter mono suffix
+          since the section's identity is the slot, not the layout. */}
+      <span
+        className="text-[12px] font-semibold text-wm-text truncate min-w-0"
+        title={template?.layer_name ?? 'Freehand section'}
+      >
+        {_section.section_role
+          ? composeSectionName({ page: null, section: _section, compact: true })
+          : template?.layer_name ?? 'Freehand section'}
       </span>
-      {template?.family && (
-        <span className="text-[10px] text-wm-text-subtle italic truncate shrink-0">
-          {template.family}
+      {template?.layer_name && (
+        <span
+          className="text-[10px] font-mono text-wm-text-subtle truncate shrink-0"
+          title="Wireframe layout (Brixies)"
+        >
+          {template.layer_name}
         </span>
       )}
       {reviewCounts && reviewCounts.open_total > 0 && (

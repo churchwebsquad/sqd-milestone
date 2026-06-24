@@ -157,7 +157,12 @@ export function inferSectionRoleFromTemplate(
 
 /** Human-readable section name composed of page + ordinal + role.
  *  Used everywhere a section needs a "what is this" label that
- *  doesn't lock you into the underlying Brixies layout. */
+ *  doesn't lock you into the underlying Brixies layout.
+ *
+ *  When `page` is null/undefined, the page-prefix is dropped — useful
+ *  inside the page editor where the page context is already in the
+ *  surrounding header. The composed label degrades to
+ *  `Section N · Role label`. */
 export function composeSectionName(opts: {
   page: Pick<WebPage, 'name'> | null
   section: Pick<WebSection, 'sort_order' | 'section_role' | 'section_role_label'>
@@ -166,12 +171,11 @@ export function composeSectionName(opts: {
   compact?: boolean
 }): string {
   const { page, section, compact = false } = opts
-  const pageName = page?.name?.trim() || 'Untitled page'
+  const pageName = page?.name?.trim() ?? null
   const ordinal  = `Section ${(section.sort_order ?? 0) + 1}`
   const roleLabel = section.section_role_label?.trim()
     || (section.section_role ? SECTION_ROLE_LABELS[section.section_role] : null)
     || 'Unclassified'
-  return compact && roleLabel !== 'Unclassified'
-    ? `${pageName} · ${roleLabel}`
-    : `${pageName} · ${ordinal} · ${roleLabel}`
+  const middle = compact && roleLabel !== 'Unclassified' ? null : ordinal
+  return [pageName, middle, roleLabel].filter(Boolean).join(' · ')
 }

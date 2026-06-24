@@ -260,11 +260,17 @@ export async function autoBindPageSections(
   project: StrategyWebProject,
 ): Promise<PageAutoBindResult> {
   // Snapshot the page's pre-bind state so the strategist can revert if
-  // autoBind's variant picks land somewhere unexpected. Fire-and-forget
-  // — snapshot failure logs but doesn't block the bind.
-  void snapshotPageVersion(supabase, pageId, {
+  // autoBind's variant picks land somewhere unexpected. Awaited (not
+  // fire-and-forget) — the snapshot READS pages + sections, so it must
+  // finish before the mutation loop below starts touching the same
+  // rows. Failure is non-fatal; we proceed without a revert point and
+  // log the warning. createdBy stamps the snapshot with the current
+  // staff user so the version drawer shows who triggered the run.
+  const { data: { session } } = await supabase.auth.getSession()
+  await snapshotPageVersion(supabase, pageId, {
     triggerKind:  'agent_run',
     triggerLabel: `Auto-bind sections — ${brief.page_name || brief.page_slug || pageId.slice(0, 8)}`,
+    createdBy:    session?.user?.id ?? null,
   })
 
   const { data: sectionRows } = await supabase

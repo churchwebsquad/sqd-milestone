@@ -42,6 +42,7 @@ import {
   type RoleShadeMatrix, type FigmaBinding,
 } from '../../../lib/designSystemSpec'
 import type { StrategyWebProject, WebContentTemplate } from '../../../types/database'
+import { LayoutSwapBoard } from '../LayoutSwapBoard'
 
 interface Props {
   project: StrategyWebProject
@@ -339,6 +340,7 @@ export function DesignWorkspace({ project, onChange }: Props) {
           <RadiusSection spec={spec} onChange={update} />
           <FigmaStyleGuideSection projectId={project.id} spec={spec} onChange={update} onAutoSave={autoSave} />
           <ImagesSection projectId={project.id} spec={spec} onAutoSave={autoSave} />
+          <LayoutSwapBoard project={project} onChange={onChange} />
           <SquadFigmaPluginSection project={project} onChange={onChange} />
         </div>
       </div>
