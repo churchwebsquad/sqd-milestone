@@ -15,7 +15,7 @@
  * project; if no session exists yet, the panel quietly omits itself.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2, FileText, MessagesSquare, Pencil, AlertCircle, ExternalLink, RefreshCw, Paperclip, CheckCircle2 } from 'lucide-react'
+import { Loader2, FileText, MessagesSquare, Pencil, AlertCircle, ExternalLink, RefreshCw, Paperclip, CheckCircle2, Undo2 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { attachmentPublicUrl, type AttachmentMetadata } from '../../../lib/contentCollectionAttachments'
 import { ContentCollectionAutoFillStaff } from './ContentCollectionAutoFillStaff'
@@ -82,6 +82,7 @@ export function ContentCollectionResponsesPanel({ projectId }: Props) {
   const [loading, setLoading]         = useState(true)
   const [refreshing, setRefreshing]   = useState(false)
   const [refreshMsg, setRefreshMsg]   = useState<string | null>(null)
+  const [reopening, setReopening]     = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -144,6 +145,35 @@ export function ContentCollectionResponsesPanel({ projectId }: Props) {
     setTimeout(() => setRefreshMsg(null), 5000)
   }
 
+  /** Staff-only reopen. Flips a submitted session back to 'open' and
+   *  clears submitted_at so the partner's portal link is editable
+   *  again. Useful when the partner submitted prematurely or staff
+   *  needs them to fix Page 2. The partner's previous answers stay
+   *  saved — only status + submitted_at change. */
+  const reopenSession = async () => {
+    if (!session || session.status !== 'submitted') return
+    if (!confirm(
+      'Reopen this submission?\n\n' +
+      "The partner's portal link becomes editable again. Their previous answers stay saved. " +
+      'They will not be notified — let them know separately if needed.',
+    )) return
+    setReopening(true)
+    setRefreshMsg(null)
+    const { error } = await supabase
+      .from('strategy_content_collection_sessions')
+      .update({ status: 'open', submitted_at: null })
+      .eq('id', session.id)
+    setReopening(false)
+    if (error) {
+      setRefreshMsg(`Reopen failed: ${error.message}`)
+      setTimeout(() => setRefreshMsg(null), 5000)
+      return
+    }
+    setRefreshMsg('Session reopened — partner can edit the portal again.')
+    setTimeout(() => setRefreshMsg(null), 5000)
+    await load()
+  }
+
   if (loading) {
     return (
       <div className="rounded-xl border border-wm-border bg-wm-bg-elevated px-5 py-4 grid place-items-center text-wm-text-muted">
@@ -164,6 +194,18 @@ export function ContentCollectionResponsesPanel({ projectId }: Props) {
             <MessagesSquare size={14} className="text-wm-accent" />
             <h2 className="text-[14px] font-bold text-wm-text">Partner Responses</h2>
             <StatusChip status={session.status} submittedAt={session.submitted_at} />
+            {session.status === 'submitted' && (
+              <button
+                type="button"
+                onClick={() => void reopenSession()}
+                disabled={reopening}
+                className="inline-flex items-center gap-1 rounded-full border border-wm-border bg-wm-bg text-wm-text-muted text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 hover:bg-wm-bg-hover hover:text-wm-text disabled:opacity-50"
+                title="Flip status back to Open so the partner's portal link is editable again. Their answers stay saved."
+              >
+                {reopening ? <Loader2 size={10} className="animate-spin" /> : <Undo2 size={10} />}
+                Reopen
+              </button>
+            )}
           </div>
           <p className="text-[12px] text-wm-text-muted mt-0.5">
             What the partner answered on the Content Collection portal —

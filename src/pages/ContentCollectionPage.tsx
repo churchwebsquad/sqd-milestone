@@ -439,31 +439,6 @@ export default function ContentCollectionPage() {
     if (error) console.error('Session save failed', field, error)
   }
 
-  // Partner-initiated reopen. Flips a submitted session back to 'open'
-  // and clears submitted_at so the form is editable again. Two entry
-  // points use this:
-  //   • Button on the AlreadySubmitted screen.
-  //   • Auto-fires when the partner lands with an explicit `?step=N`
-  //     in the URL while status is 'submitted' — that link IS the
-  //     shareable "start over on page 2" link AMs send partners.
-  const reopenSession = async () => {
-    if (!sessionId || !session) return
-    setSession({ ...session, status: 'open', submitted_at: null })
-    const { error } = await supabase
-      .from('strategy_content_collection_sessions')
-      .update({ status: 'open', submitted_at: null })
-      .eq('id', sessionId)
-    if (error) console.error('Reopen failed', error)
-  }
-
-  // Shareable-link reopen: any explicit `?step=N` while submitted = reopen.
-  useEffect(() => {
-    if (!session || session.status !== 'submitted') return
-    if (!searchParams.get('step')) return
-    void reopenSession()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.status])
-
   const submitFinal = async () => {
     if (!sessionId) return
     await supabase
@@ -491,14 +466,7 @@ export default function ContentCollectionPage() {
   // ── Loading / error gates ──────────────────────────────────────────
   if (loading) return <FullPageLoader />
   if (notFound || !session || !partner) return <NotFound />
-  // Deep-link reopen: when the URL carries `?step=N`, treat it as the
-  // partner clicking "reopen" — skip the AlreadySubmitted screen and
-  // render the form straight away. The effect upstream flips the DB
-  // status to 'open' in the background; the optimistic state update
-  // means the form is editable immediately.
-  if (session.status === 'submitted' && !searchParams.get('step')) {
-    return <AlreadySubmitted partner={partner} token={token!} onReopen={reopenSession} />
-  }
+  if (session.status === 'submitted') return <AlreadySubmitted partner={partner} token={token!} />
 
   return (
     <div className="min-h-screen bg-cream flex flex-col">
@@ -2085,24 +2053,7 @@ function NotFound() {
   )
 }
 
-function AlreadySubmitted({
-  partner, token, onReopen,
-}: {
-  partner: PartnerCtx
-  token: string
-  onReopen: () => Promise<void>
-}) {
-  const [reopening, setReopening] = useState(false)
-  const handleReopen = async (targetStep: 1 | 2) => {
-    setReopening(true)
-    await onReopen()
-    // Replace URL so a refresh keeps the partner in editing mode. The
-    // shareable-link effect upstream also auto-reopens on `?step=`, so
-    // landing back here after a refresh is impossible. Keep current
-    // pathname so this works under whatever route mount the partner
-    // landed on (currently /portal/:token/hub/content-collection/:id).
-    window.location.assign(`${window.location.pathname}?step=${targetStep}`)
-  }
+function AlreadySubmitted({ partner, token }: { partner: PartnerCtx; token: string }) {
   return (
     <div className="min-h-screen bg-cream flex flex-col">
       <header className="bg-hero-gradient text-cream px-6 py-10">
@@ -2116,35 +2067,9 @@ function AlreadySubmitted({
           <CheckCircle2 className="mx-auto text-emerald-500 mb-3" size={48} />
           <h2 className="font-serif italic text-2xl text-deep-plum mb-2">Thanks — we've got this from here.</h2>
           <p className="text-purple-gray text-sm mb-6">
-            Your responses are in. Your team will review them and reach out with next steps.
+            Your responses are in. Your team will review them and reach out with next steps. If you need
+            to make a change, contact your account manager.
           </p>
-
-          <div className="rounded-2xl border border-lavender bg-white px-5 py-5 text-left mb-6">
-            <p className="font-semibold text-deep-plum text-sm mb-1">Need to make changes?</p>
-            <p className="text-purple-gray text-[13px] mb-4">
-              Reopening puts your submission back into editing mode so you can update or add anything you missed. Your previous answers stay saved.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void handleReopen(1)}
-                disabled={reopening}
-                className="inline-flex items-center gap-1.5 rounded-full bg-deep-plum text-cream px-5 py-2 text-sm font-semibold hover:bg-primary-purple transition disabled:opacity-60"
-              >
-                {reopening ? <Loader2 size={14} className="animate-spin" /> : <Edit3 size={14} />}
-                Reopen submission
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleReopen(2)}
-                disabled={reopening}
-                className="inline-flex items-center gap-1.5 rounded-full border border-lavender bg-lavender-tint/40 text-deep-plum px-5 py-2 text-sm font-semibold hover:bg-lavender-tint transition disabled:opacity-60"
-              >
-                Jump to Page 2 <ArrowRight size={14} />
-              </button>
-            </div>
-          </div>
-
           <Link to={`/portal/${token}/hub`} className="text-primary-purple font-semibold underline inline-flex items-center gap-1">
             <ArrowLeft size={14} /> Back to hub
           </Link>
