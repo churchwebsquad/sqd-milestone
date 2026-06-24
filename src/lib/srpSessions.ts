@@ -70,7 +70,7 @@ export async function createSession(input: {
       member:                memberNum,
       church_name:           input.churchName,
       user_email:            input.userEmail,
-      current_step:          'account',
+      current_step:          input.clickupTaskId ? 'deliverables' : 'account',
       status:                'in_progress',
       ...(input.brandVoiceGuidelines ? { brand_voice_guidelines: input.brandVoiceGuidelines } : {}),
       ...(input.clickupTaskId  ? { clickup_task_id: input.clickupTaskId }  : {}),
