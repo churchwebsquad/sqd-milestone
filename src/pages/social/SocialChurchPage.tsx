@@ -136,6 +136,11 @@ export default function SocialChurchPage() {
   const [linkDraft, setLinkDraft] = useState({ instagram: '', facebook: '', youtube: '', branded_carousel_task: '', branded_carousel_dropbox_file: '' })
   const [linkSaving, setLinkSaving] = useState(false)
 
+  // ── Management fields edit state ─────────────────────────────────────────
+  const [editingMgmt, setEditingMgmt] = useState(false)
+  const [mgmtDraft, setMgmtDraft] = useState({ social_coach: '', css_rep: '', sms_notes: '' })
+  const [mgmtSaving, setMgmtSaving] = useState(false)
+
   // ── Intel state ──────────────────────────────────────────────────────────
   const [intelScreen, setIntelScreen] = useState<'loading' | 'generating' | 'profile' | 'error'>('loading')
   const [savedIntel, setSavedIntel] = useState<SavedIntel | null>(null)
@@ -193,14 +198,15 @@ export default function SocialChurchPage() {
 
   // ── Load ClickUp tasks for this church ──────────────────────────────────
   useEffect(() => {
-    if (tab !== 'profile') return
+    if (tab !== 'profile' && tab !== 'srp') return
     setCuLoading(true)
     Promise.allSettled([
       fetch('/api/clickup/srp-tasks')
         .then(r => r.ok ? r.json() : { allTasks: [] })
         .then(data => {
           const all: CuTask[] = (data.allTasks ?? []).filter((t: CuTask & { member: number }) => t.member === member)
-          setSrpTasks(all.slice(0, 3))
+          // On profile tab show max 3; on SRP tab keep all (filtered by 30 days in the tab)
+          setSrpTasks(tab === 'srp' ? all : all.slice(0, 3))
         }),
       fetch(`/api/clickup/church-tasks?member=${member}`)
         .then(r => r.ok ? r.json() : { sermonTasks: [], carouselTasks: [] })
@@ -281,6 +287,33 @@ export default function SocialChurchPage() {
       alert(`Save failed: ${error.message}`)
     }
     setLinkSaving(false)
+  }
+
+  const startEditMgmt = () => {
+    setMgmtDraft({
+      social_coach: church?.social_coach ?? '',
+      css_rep:      church?.css_rep ?? '',
+      sms_notes:    church?.sms_notes ?? '',
+    })
+    setEditingMgmt(true)
+  }
+
+  const saveMgmt = async () => {
+    if (!member) return
+    setMgmtSaving(true)
+    const updates = {
+      social_coach: mgmtDraft.social_coach.trim() || null,
+      css_rep:      mgmtDraft.css_rep.trim() || null,
+      sms_notes:    mgmtDraft.sms_notes.trim() || null,
+    }
+    const { error } = await supabase.from('strategy_account_progress').update(updates).eq('member', member)
+    if (!error) {
+      setChurch(prev => prev ? { ...prev, ...updates } : prev)
+      setEditingMgmt(false)
+    } else {
+      alert(`Save failed: ${error.message}`)
+    }
+    setMgmtSaving(false)
   }
 
   // ── Intel actions ────────────────────────────────────────────────────────
@@ -581,20 +614,51 @@ export default function SocialChurchPage() {
 
           {/* Social Media Management */}
           <div className="bg-white border border-[#CFC9F8] rounded-2xl p-6">
-            <Section title="Social Media Management">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Field label="Social Manager" value={
-                  church?.social_coach && !church.social_coach.startsWith('rec') ? church.social_coach : null
-                } />
-                <Field label="Account Manager" value={church?.css_rep} />
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-bold text-[#513DE5] uppercase tracking-widest">Social Media Management</h3>
+              {!editingMgmt
+                ? <button onClick={startEditMgmt} className="text-xs text-[#513DE5] hover:underline">Edit</button>
+                : <div className="flex gap-2">
+                    <button onClick={saveMgmt} disabled={mgmtSaving}
+                      className="text-xs bg-[#513DE5] text-white px-3 py-1 rounded-full hover:opacity-90 disabled:opacity-50">
+                      {mgmtSaving ? 'Saving…' : 'Save'}
+                    </button>
+                    <button onClick={() => setEditingMgmt(false)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                  </div>}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
+              <div>
+                <p className="text-xs text-gray-400 mb-1">Social Manager</p>
+                {editingMgmt
+                  ? <input value={mgmtDraft.social_coach} onChange={e => setMgmtDraft(d => ({ ...d, social_coach: e.target.value }))}
+                      placeholder="Name"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#513DE5]" />
+                  : church?.social_coach && !church.social_coach.startsWith('rec')
+                    ? <p className="text-sm text-[#341756]">{church.social_coach}</p>
+                    : <p className="text-sm text-gray-300">—</p>}
               </div>
-              <div className="mt-2">
-                <p className="text-xs text-gray-400 mb-1">SMS Notes</p>
-                {church?.sms_notes
+              <div>
+                <p className="text-xs text-gray-400 mb-1">Account Manager</p>
+                {editingMgmt
+                  ? <input value={mgmtDraft.css_rep} onChange={e => setMgmtDraft(d => ({ ...d, css_rep: e.target.value }))}
+                      placeholder="Name"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#513DE5]" />
+                  : church?.css_rep
+                    ? <p className="text-sm text-[#341756]">{church.css_rep}</p>
+                    : <p className="text-sm text-gray-300">—</p>}
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 mb-1">SMS Notes</p>
+              {editingMgmt
+                ? <textarea value={mgmtDraft.sms_notes} onChange={e => setMgmtDraft(d => ({ ...d, sms_notes: e.target.value }))}
+                    placeholder="Notes about this church's social strategy…"
+                    rows={4}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#513DE5] resize-y" />
+                : church?.sms_notes
                   ? <div className="bg-[#EDE9FC] rounded-xl px-4 py-3 text-sm text-[#341756] whitespace-pre-wrap">{church.sms_notes}</div>
                   : <p className="text-sm text-gray-300">—</p>}
-              </div>
-            </Section>
+            </div>
           </div>
 
           {/* ClickUp Task Sections */}
@@ -771,58 +835,118 @@ export default function SocialChurchPage() {
       )}
 
       {/* ── SRP TAB ────────────────────────────────────────────────────── */}
-      {tab === 'srp' && (
-        <div>
-          <h2 className="font-bold text-[#341756] mb-6">Sermon Recap Sessions</h2>
-          {srpLoading ? (
-            <div className="flex items-center justify-center py-16">
-              <div className="w-8 h-8 border-4 border-[#513DE5] border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : srpSessions.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-[#CFC9F8] p-10 text-center">
-              <Sparkles size={32} className="text-[#CFC9F8] mx-auto mb-4" />
-              <h3 className="font-bold text-[#341756] mb-2">No sessions yet</h3>
-              <p className="text-sm text-gray-500 mb-6 max-w-sm mx-auto">Start a Sermon Recap session to generate content for {churchName}.</p>
-              <button onClick={handleNewSrp} disabled={srpCreating}
-                className="bg-[#513DE5] text-white font-semibold px-6 py-3 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-60">
-                {srpCreating ? 'Creating…' : 'Start first SRP →'}
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {srpSessions.map(s => {
-                const stepLabel = s.current_step ? (STEP_LABELS[s.current_step] ?? s.current_step) : 'Not started'
-                const updatedDate = new Date(s.updated_at!).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                const isDone = s.status === 'complete' || s.status === 'done'
-                return (
-                  <Link key={s.session_id} to={`/social/srp/${encodeURIComponent(s.session_id)}`}
-                    className="group flex items-center justify-between bg-white border border-[#CFC9F8] rounded-xl px-5 py-4 hover:border-[#513DE5] hover:shadow-sm transition-all">
-                    <div>
-                      <p className="font-semibold text-[#341756] text-sm group-hover:text-[#513DE5] transition-colors">
-                        {s.sermon_title ?? stepLabel}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-0.5">Updated {updatedDate} · {s.user_email}</p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isDone ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-600'}`}>
-                        {isDone ? 'Complete' : 'In progress'}
-                      </span>
-                      <ChevronRight size={15} className="text-gray-300 group-hover:text-[#513DE5] transition-colors" />
-                    </div>
-                  </Link>
-                )
-              })}
-              <div className="pt-2 text-center">
-                <button onClick={handleNewSrp} disabled={srpCreating}
-                  className="text-sm text-[#513DE5] hover:underline disabled:opacity-50 inline-flex items-center gap-1.5">
-                  <Plus size={13} />
-                  {srpCreating ? 'Creating…' : 'New session'}
-                </button>
+      {tab === 'srp' && (() => {
+        const since30 = Date.now() - 30 * 24 * 60 * 60 * 1000
+        const recentSrpTasks = (srpTasks as (CuTask & { member: number })[])
+          .concat(([] as (CuTask & { member: number })[]))
+          // srpTasks is already filtered to this member — just apply 30-day window
+          .filter(t => Number(t.date_created ?? 0) >= since30 || new Date(t.updatedAt).getTime() >= since30)
+
+        // Build a map of clickup_task_id → session for quick lookup
+        const sessionByTaskId = new Map<string, SrpSessionListRow>()
+        for (const s of srpSessions) {
+          if ((s as unknown as Record<string, unknown>).clickup_task_id) {
+            sessionByTaskId.set((s as unknown as Record<string, unknown>).clickup_task_id as string, s)
+          }
+        }
+
+        const handleTaskClick = async (task: CuTask & { member: number }) => {
+          const existing = sessionByTaskId.get(task.id)
+          if (existing) {
+            navigate(`/social/srp/${encodeURIComponent(existing.session_id)}`)
+            return
+          }
+          if (!church || !user?.email) return
+          setSrpCreating(true)
+          try {
+            // Strip member prefix from task name for sermon title
+            const sermonTitle = task.name.replace(/^\d+\s*-\s*/, '').trim()
+            const { session_id } = await createSession({
+              member: String(member),
+              churchName: church.church_name ?? `Member ${member}`,
+              userEmail: user.email,
+              clickupTaskId: task.id,
+              sermonTitle,
+            })
+            navigate(`/social/srp/${encodeURIComponent(session_id)}`)
+          } catch (err) {
+            alert(err instanceof Error ? err.message : 'Failed to create SRP session')
+          } finally {
+            setSrpCreating(false)
+          }
+        }
+
+        return (
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="font-bold text-[#341756]">SRP Generator</h2>
+                <p className="text-xs text-gray-400 mt-0.5">ClickUp tasks tagged <span className="font-mono">sms-sermon-recap</span> · last 30 days</p>
               </div>
             </div>
-          )}
-        </div>
-      )}
+
+            {cuLoading || srpLoading ? (
+              <div className="flex items-center gap-2 text-sm text-gray-400 py-8">
+                <div className="w-4 h-4 border-2 border-[#513DE5] border-t-transparent rounded-full animate-spin" />
+                Loading tasks…
+              </div>
+            ) : recentSrpTasks.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-[#CFC9F8] p-10 text-center">
+                <Sparkles size={32} className="text-[#CFC9F8] mx-auto mb-4" />
+                <h3 className="font-bold text-[#341756] mb-2">No SRP tasks in the last 30 days</h3>
+                <p className="text-sm text-gray-500 max-w-sm mx-auto">ClickUp tasks tagged <span className="font-mono text-xs">sms-sermon-recap</span> for this church will appear here.</p>
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-[#CFC9F8] overflow-hidden">
+                {/* Table header */}
+                <div className="grid grid-cols-[1fr_auto_auto_auto] gap-4 px-5 py-3 border-b border-gray-100 bg-[#F9F5F1]">
+                  <p className="text-xs font-semibold text-[#513DE5] uppercase tracking-wider">Task</p>
+                  <p className="text-xs font-semibold text-[#513DE5] uppercase tracking-wider w-20 text-center">Date</p>
+                  <p className="text-xs font-semibold text-[#513DE5] uppercase tracking-wider w-24 text-center">Status</p>
+                  <p className="text-xs font-semibold text-[#513DE5] uppercase tracking-wider w-28 text-center">SRP</p>
+                </div>
+
+                {recentSrpTasks.map((task, i) => {
+                  const session = sessionByTaskId.get(task.id)
+                  const isDone = session?.status === 'completed'
+                  const hasSession = !!session
+                  const date = task.date_created
+                    ? new Date(Number(task.date_created)).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    : new Date(task.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                  const title = task.name.replace(/^\d+\s*-\s*/, '').trim()
+
+                  return (
+                    <button
+                      key={task.id}
+                      onClick={() => handleTaskClick(task as CuTask & { member: number })}
+                      disabled={srpCreating}
+                      className={`w-full grid grid-cols-[1fr_auto_auto_auto] gap-4 px-5 py-4 text-left hover:bg-[#EDE9FC] transition-colors disabled:opacity-60 ${i < recentSrpTasks.length - 1 ? 'border-b border-gray-100' : ''}`}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-[#341756] truncate">{title}</p>
+                        <p className="text-xs text-gray-400 mt-0.5 font-mono">#{task.id}</p>
+                      </div>
+                      <p className="text-xs text-gray-500 w-20 text-center self-center">{date}</p>
+                      <div className="w-24 flex justify-center self-center">
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 capitalize">{task.status || '—'}</span>
+                      </div>
+                      <div className="w-28 flex justify-center self-center">
+                        {isDone ? (
+                          <span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 font-medium">Complete ✓</span>
+                        ) : hasSession ? (
+                          <span className="text-xs px-2 py-1 rounded-full bg-amber-50 text-amber-600 font-medium flex items-center gap-1">In progress <ChevronRight size={10} /></span>
+                        ) : (
+                          <span className="text-xs px-3 py-1 rounded-full bg-[#513DE5] text-white font-medium flex items-center gap-1">Start SRP <ChevronRight size={10} /></span>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* ── CALENDAR TAB ───────────────────────────────────────────────── */}
       {tab === 'calendar' && (

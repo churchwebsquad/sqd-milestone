@@ -29,15 +29,16 @@ import type {
 export const srpPipeline = (supabase as any).schema('srp_pipeline') as ReturnType<typeof supabase.schema>
 
 export interface SrpSessionListRow {
-  id:           string
-  session_id:   string
-  church_name:  string | null
-  member:       number | null
-  user_email:   string | null
-  current_step: SrpWorkflowStep | null
-  status:       string | null
-  created_at:   string | null
-  updated_at:   string | null
+  id:            string
+  session_id:    string
+  church_name:   string | null
+  member:        number | null
+  user_email:    string | null
+  current_step:  SrpWorkflowStep | null
+  status:        string | null
+  sermon_title:  string | null
+  created_at:    string | null
+  updated_at:    string | null
 }
 
 /** session_id format: {member}_{ChurchNameNoSpaces}_{YYYYMMDDHHMMSS} */
@@ -51,9 +52,12 @@ export function makeSessionId(member: number | string, churchName: string): stri
 
 /** Create a fresh session row. Returns { id, session_id }. */
 export async function createSession(input: {
-  member:      number | string
-  churchName:  string
-  userEmail:   string | null
+  member:                number | string
+  churchName:            string
+  userEmail:             string | null
+  brandVoiceGuidelines?: string | null
+  clickupTaskId?:        string | null
+  sermonTitle?:          string | null
 }): Promise<{ id: string; session_id: string }> {
   const session_id = makeSessionId(input.member, input.churchName)
   const memberNum = typeof input.member === 'number' ? input.member : Number(input.member)
@@ -63,11 +67,14 @@ export async function createSession(input: {
     .from('sessions')
     .insert({
       session_id,
-      member:       memberNum,
-      church_name:  input.churchName,
-      user_email:   input.userEmail,
-      current_step: 'account',
-      status:       'in_progress',
+      member:                memberNum,
+      church_name:           input.churchName,
+      user_email:            input.userEmail,
+      current_step:          'account',
+      status:                'in_progress',
+      ...(input.brandVoiceGuidelines ? { brand_voice_guidelines: input.brandVoiceGuidelines } : {}),
+      ...(input.clickupTaskId  ? { clickup_task_id: input.clickupTaskId }  : {}),
+      ...(input.sermonTitle    ? { sermon_title:    input.sermonTitle }    : {}),
     })
     .select('id, session_id')
     .single()
