@@ -292,10 +292,16 @@ export default async function handler(req: any, res: any) {
   if (force) {
     for (const table of ['church_facts', 'content_atoms'] as const) {
       // Attachment-sourced rows have a real column (source_attachment_id).
-      // Intake-doc-sourced rows are tagged via metadata.source_intake_document_id.
+      // Intake-doc-sourced rows are tagged via the jsonb column —
+      // church_facts uses `data`, content_atoms uses `metadata` (same
+      // per-table convention as the stamp phase below). Prior code
+      // queried `metadata->>source_intake_document_id` for both
+      // tables, which 500'd on church_facts because that table has
+      // no `metadata` column.
+      const jsonCol = table === 'church_facts' ? 'data' : 'metadata'
       const query = (sb as any).from(table).update({ status: 'archived' }).neq('status', 'archived')
       const { error: archErr } = sourceTable === 'web_intake_documents'
-        ? await query.eq('metadata->>source_intake_document_id', sourceId)
+        ? await query.eq(`${jsonCol}->>source_intake_document_id`, sourceId)
         : await query.eq('source_attachment_id', sourceId)
       if (archErr) {
         await markParsed(sb, sourceTable, sourceId, 'failed', 0, `pre-force archive failed: ${archErr.message}`)
