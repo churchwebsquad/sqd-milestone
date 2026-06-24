@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Palette, Plus, Trash2, Download, Save, Loader2, Type, Move, Square,
   Sparkles, ExternalLink, Check, AlertCircle, Layers, FileCode, FileText,
-  FolderOpen, Lightbulb, X,
+  FolderOpen, Lightbulb, X, Copy, KeyRound, RefreshCw,
 } from 'lucide-react'
 import { scanStrategicPhrases, extractInspirationalUrls } from '../../../lib/cowork/strategicPhraseScanner'
 import { supabase } from '../../../lib/supabase'
@@ -346,6 +346,7 @@ export function DesignWorkspace({ project, onChange }: Props) {
           <FigmaStyleGuideSection projectId={project.id} spec={spec} onChange={update} onAutoSave={autoSave} />
           <ImagesSection projectId={project.id} spec={spec} onAutoSave={autoSave} />
           <FigmaPluginGeneratorSection project={project} spec={spec} />
+          <SquadFigmaPluginSection project={project} onChange={onChange} />
         </div>
       </div>
     </div>
@@ -1655,6 +1656,173 @@ function FigmaPluginGeneratorSection({
         </>
       )}
     </Section>
+  )
+}
+
+// ── Squad — Web Builder (Figma plugin, next-gen) ───────────────────
+//
+// Next-gen Figma plugin distributed as a local-dev manifest. Replaces
+// the paste-into-console scripts above with a proper Figma plugin that
+// imports Brixies templates via the public API (importComponentByKey /
+// importComponentSetByKey), detaches the team-library instance, and
+// promotes each to a local component stamped with the original Brixies
+// key. The plugin authenticates against /api/figma/project-export with
+// a per-project bearer token surfaced from this card.
+//
+// Token is stored on strategy_web_projects.figma_share_token. Generate
+// mints a fresh uuid; Revoke sets it back to NULL.
+
+function SquadFigmaPluginSection({
+  project, onChange,
+}: {
+  project: StrategyWebProject
+  onChange: () => Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState<'id' | 'token' | null>(null)
+
+  const token = project.figma_share_token ?? null
+
+  const generate = useCallback(async () => {
+    setBusy(true)
+    setError(null)
+    const newToken = crypto.randomUUID()
+    const { error } = await supabase
+      .from('strategy_web_projects')
+      .update({ figma_share_token: newToken })
+      .eq('id', project.id)
+    setBusy(false)
+    if (error) { setError(error.message); return }
+    await onChange()
+  }, [project.id, onChange])
+
+  const revoke = useCallback(async () => {
+    if (!confirm('Revoke the current token? The plugin will stop working until a new one is generated and pasted.')) return
+    setBusy(true)
+    setError(null)
+    const { error } = await supabase
+      .from('strategy_web_projects')
+      .update({ figma_share_token: null })
+      .eq('id', project.id)
+    setBusy(false)
+    if (error) { setError(error.message); return }
+    await onChange()
+  }, [project.id, onChange])
+
+  const copy = useCallback(async (value: string, which: 'id' | 'token') => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(which)
+      setTimeout(() => setCopied(c => (c === which ? null : c)), 1500)
+    } catch {
+      /* silent */
+    }
+  }, [])
+
+  return (
+    <Section title="Squad — Web Builder (Figma plugin)" icon={<KeyRound size={13} />}>
+      <p className="text-[12px] text-wm-text-muted mb-3">
+        Next-gen Figma plugin. Imports the project's Brixies templates,
+        detaches them, and promotes to local components the designer can
+        restyle. Install from manifest in the Figma desktop app, then
+        paste the project ID + token below.
+      </p>
+
+      <div className="rounded-md border border-wm-border bg-wm-bg-hover px-3 py-2 text-[12px] text-wm-text mb-3">
+        <p className="font-semibold mb-1">Install (one-time)</p>
+        <ol className="list-decimal pl-5 space-y-0.5 text-wm-text-muted">
+          <li>Clone or download this repo to your machine.</li>
+          <li>Figma <span className="text-wm-text">desktop</span> → Menu → Plugins → Development → <span className="text-wm-text">Import plugin from manifest…</span></li>
+          <li>Pick <code className="text-[11px]">figma-plugin/manifest.json</code>.</li>
+          <li>Open the Figma file you want to design in. Enable <span className="text-wm-text">Brixies Library ACSS [PRO]</span> in Assets → Libraries.</li>
+          <li>Run <span className="text-wm-text">Plugins → Development → Squad — Web Builder</span>. Paste the values below. Save.</li>
+        </ol>
+      </div>
+
+      <div className="space-y-2.5 mb-3">
+        <FieldRow
+          label="Project ID"
+          value={project.id}
+          copied={copied === 'id'}
+          onCopy={() => void copy(project.id, 'id')}
+        />
+        <FieldRow
+          label="Share token"
+          value={token ?? '— not generated —'}
+          mono
+          copied={copied === 'token'}
+          onCopy={token ? () => void copy(token, 'token') : undefined}
+        />
+      </div>
+
+      {error && (
+        <div className="mb-3 rounded-md border border-wm-danger/30 bg-wm-danger-bg px-3 py-2 text-[11.5px] text-wm-danger">
+          {error}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <WMButton
+          variant="primary"
+          size="md"
+          iconLeft={busy ? <Loader2 size={13} className="animate-spin" /> : (token ? <RefreshCw size={13} /> : <KeyRound size={13} />)}
+          onClick={() => void generate()}
+          disabled={busy}
+        >
+          {token ? 'Regenerate token' : 'Generate token'}
+        </WMButton>
+        {token && (
+          <WMButton
+            variant="ghost"
+            size="md"
+            iconLeft={<X size={13} />}
+            onClick={() => void revoke()}
+            disabled={busy}
+          >
+            Revoke
+          </WMButton>
+        )}
+      </div>
+    </Section>
+  )
+}
+
+function FieldRow({
+  label, value, mono, copied, onCopy,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+  copied: boolean
+  onCopy?: () => void
+}) {
+  return (
+    <div>
+      <label className="block text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">{label}</label>
+      <div className="flex items-stretch gap-2">
+        <div
+          className={[
+            'flex-1 rounded-md border border-wm-border bg-wm-bg-card px-3 py-1.5 text-[12px] text-wm-text',
+            'overflow-x-auto whitespace-nowrap',
+            mono ? 'font-mono' : '',
+          ].join(' ')}
+          style={mono ? { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' } : undefined}
+        >
+          {value}
+        </div>
+        {onCopy && (
+          <WMButton
+            variant="ghost"
+            size="sm"
+            iconLeft={copied ? <Check size={13} /> : <Copy size={13} />}
+            onClick={onCopy}
+          >
+            {copied ? 'Copied' : 'Copy'}
+          </WMButton>
+        )}
+      </div>
+    </div>
   )
 }
 

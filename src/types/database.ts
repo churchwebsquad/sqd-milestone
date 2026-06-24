@@ -1184,6 +1184,12 @@ export interface StrategyWebProject {
    *  → status. Missing key falls back to the auto-derived status. */
   step_timeline_overrides:  Record<string, 'done' | 'active' | 'upcoming' | 'skipped'>
 
+  // ── v99 — Figma plugin share token ───────────────────────
+  /** Per-project bearer token for the Squad Figma plugin. NULL until
+   *  staff generates one from Dev Handoff. Revoke by setting back to
+   *  NULL. */
+  figma_share_token:        string | null
+
   [key: string]: unknown
 }
 

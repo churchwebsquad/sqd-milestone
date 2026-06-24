@@ -1,0 +1,14 @@
+{
+  "name": "Squad — Web Builder",
+  "id": "squad-web-builder",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["*"],
+    "reasoning": "The plugin fetches project data (template list, page sections) from the Squad web app's API (per-project share token gates access). Wildcard during development; restrict to the production host before community release."
+  },
+  "permissions": ["currentuser"]
+}
