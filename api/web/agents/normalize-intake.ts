@@ -208,13 +208,27 @@ export default async function handler(req: any, res: any) {
   const contentSession   = contentSessionRes.data ?? null
   const projectSnippets  = (snippetsRes.data ?? []) as any[]
 
-  // Same minimum-intake pre-flight as Stage 1 (loosened to accept handoff_brand_form).
+  // Minimum-intake pre-flight. Each gate has a primary source AND a
+  // fallback so projects that arrived pre-workflow (no brand handoff
+  // in our system) or were imported from external content-collection
+  // tools can still normalize.
+  //
+  // Fallback semantics: content_collection-category intake docs are
+  // typically partner-supplied voice + ministry + strategy material
+  // and can stand in for the formal brand source / strategy brief
+  // when those don't exist. The LLM extracts whatever's available;
+  // the gate is just preventing "literally no usable intake".
   const missing: string[] = []
+  const hasContentCollection = intakeDocs.some(d => d.category === 'content_collection')
   if (!discoveryRes.data && !intakeDocs.some(d => d.category === 'discovery_questionnaire_supplemental')) {
     missing.push('Discovery questionnaire')
   }
-  if (!brandGuide && !brandHandoffForm) missing.push('Brand source (published guide OR handoff_brand_form)')
-  if (!intakeDocs.some(d => d.category === 'strategy_brief')) missing.push('Strategy brief')
+  if (!brandGuide && !brandHandoffForm && !hasContentCollection) {
+    missing.push('Brand source (published guide, handoff_brand_form, OR content collection docs)')
+  }
+  if (!intakeDocs.some(d => d.category === 'strategy_brief') && !hasContentCollection) {
+    missing.push('Strategy brief OR content collection docs')
+  }
   if (missing.length > 0) {
     return res.status(400).json({ error: 'Required intake sources missing', missing })
   }

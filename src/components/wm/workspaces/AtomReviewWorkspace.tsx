@@ -84,22 +84,51 @@ export function AtomReviewWorkspace({ project, onChange }: Props) {
   const [editingId, setEditingId]         = useState<string | null>(null)
   const [savingIds, setSavingIds]         = useState<Set<string>>(new Set())
 
-  // Load atoms.
+  // Empty-state CTA needs: are there intake docs sitting unprocessed?
+  // Read the count once on load. Drives the "Run intake normalization"
+  // banner that surfaces when atoms = 0.
+  const [intakeDocCount, setIntakeDocCount] = useState<number>(0)
+  const [normalizing, setNormalizing] = useState(false)
+  // stage_0 meta — read from project prop + refreshed by re-fetch so
+  // the "Running" state survives a tab close. Same pattern as the
+  // CopyEngine workspace's started_at detection.
+  const [stage0Meta, setStage0Meta] = useState<{
+    started_at?:   string | null
+    generated_at?: string | null
+  } | null>(null)
+
+  // Load atoms + stage_0 meta + intake doc count.
   const load = async () => {
     setLoading(true)
     setError(null)
-    const { data, error: err } = await supabase
-      .from('content_atoms')
-      .select('id, topic, body, source_kind, source_ref, verbatim, confidence, status, created_at, updated_at')
-      .eq('web_project_id', project.id)
-      .order('topic', { ascending: true })
-      .order('created_at', { ascending: true })
-    if (err) {
-      setError(err.message)
+    const [atomsRes, projRes, intakeRes] = await Promise.all([
+      supabase
+        .from('content_atoms')
+        .select('id, topic, body, source_kind, source_ref, verbatim, confidence, status, created_at, updated_at')
+        .eq('web_project_id', project.id)
+        .order('topic', { ascending: true })
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('strategy_web_projects')
+        .select('roadmap_state')
+        .eq('id', project.id)
+        .maybeSingle(),
+      supabase
+        .from('web_intake_documents')
+        .select('id', { count: 'exact', head: true })
+        .eq('web_project_id', project.id)
+        .eq('archived', false),
+    ])
+    if (atomsRes.error) {
+      setError(atomsRes.error.message)
       setLoading(false)
       return
     }
-    setAtoms((data ?? []) as Atom[])
+    setAtoms((atomsRes.data ?? []) as Atom[])
+    const rs = (projRes.data?.roadmap_state ?? {}) as Record<string, unknown>
+    const s0 = rs.stage_0 as Record<string, unknown> | undefined
+    setStage0Meta((s0?._meta as { started_at?: string | null; generated_at?: string | null }) ?? null)
+    setIntakeDocCount(intakeRes.count ?? 0)
     setLoading(false)
   }
 
@@ -108,6 +137,45 @@ export function AtomReviewWorkspace({ project, onChange }: Props) {
   // data-fetch pattern every other workspace in this directory uses.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void load() }, [project.id])
+
+  // Server-side "Stage 0 is in flight" detection — same shape as the
+  // CopyEngine workspace. started_at > generated_at (or generated_at
+  // is null) means the normalize-intake agent is still running. Poll
+  // every 8s while running so we see completion.
+  const stage0Running = !!(stage0Meta?.started_at
+    && (!stage0Meta?.generated_at
+        || new Date(stage0Meta.started_at).getTime() > new Date(stage0Meta.generated_at).getTime()))
+  useEffect(() => {
+    if (!stage0Running && !normalizing) return
+    const t = setInterval(() => { void load() }, 8000)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage0Running, normalizing])
+
+  const runNormalize = async () => {
+    setNormalizing(true)
+    setError(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const jwt = session?.access_token
+      if (!jwt) throw new Error('Not authenticated')
+      const res = await fetch('/api/web/agents/orchestrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ projectId: project.id, action: 'run_normalize' }),
+      })
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '')
+        throw new Error(`Normalize-intake failed (HTTP ${res.status}): ${txt.slice(0, 200)}`)
+      }
+      await load()
+      onChange?.()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to run intake normalization')
+    } finally {
+      setNormalizing(false)
+    }
+  }
 
   // Counts by status (always computed over ALL atoms, not the filtered view —
   // the strategist's summary needs the raw inventory).
@@ -242,7 +310,56 @@ export function AtomReviewWorkspace({ project, onChange }: Props) {
         </div>
       )}
 
-      {grouped.length === 0 && (
+      {grouped.length === 0 && atoms.length === 0 && (() => {
+        // Three distinct empty-state cases. The prior generic "all
+        // approved or archived" line was misleading when nothing had
+        // ever been extracted.
+        const isRunning = stage0Running || normalizing
+        const hasIntake = intakeDocCount > 0
+
+        if (isRunning) {
+          return (
+            <div className="rounded-md border border-wm-accent/40 bg-wm-accent/5 p-5 text-center">
+              <Loader2 size={18} className="animate-spin text-wm-accent mx-auto mb-2" />
+              <p className="text-[13px] font-semibold text-wm-text">Extracting core messages from intake…</p>
+              <p className="text-[11.5px] text-wm-text-muted mt-1">
+                {hasIntake ? `${intakeDocCount} intake doc${intakeDocCount === 1 ? '' : 's'} feeding normalize-intake.` : 'normalize-intake is running.'} This usually takes 2–4 minutes; the page auto-updates when it finishes — safe to leave the tab.
+              </p>
+            </div>
+          )
+        }
+        if (!hasIntake) {
+          return (
+            <div className="rounded-md border border-dashed border-wm-border bg-wm-bg p-5 text-center">
+              <p className="text-[13px] font-semibold text-wm-text">No core messages yet</p>
+              <p className="text-[11.5px] text-wm-text-muted mt-1">
+                Upload the project's intake docs (strategy brief, content collection, discovery) on the Intake & Crawl tab. Once they're in, run intake normalization here to extract core messages.
+              </p>
+            </div>
+          )
+        }
+        return (
+          <div className="rounded-md border border-wm-accent/40 bg-wm-accent/5 p-5">
+            <p className="text-[13px] font-semibold text-wm-text">
+              {intakeDocCount} intake doc{intakeDocCount === 1 ? '' : 's'} uploaded — ready to extract core messages.
+            </p>
+            <p className="text-[11.5px] text-wm-text-muted mt-1 mb-3">
+              Run intake normalization to atomize the uploads into reviewable core messages (mission, vision, values, voice rules, ethos lines, personas, etc.). The strategist review queue will populate here once it completes.
+            </p>
+            <button
+              type="button"
+              onClick={() => void runNormalize()}
+              disabled={normalizing}
+              className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent px-4 py-1.5 text-[12px] font-semibold text-white hover:bg-wm-accent-hover disabled:opacity-50"
+            >
+              {normalizing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+              {normalizing ? 'Normalizing intake…' : 'Run intake normalization'}
+            </button>
+          </div>
+        )
+      })()}
+
+      {grouped.length === 0 && atoms.length > 0 && (
         <div className="rounded-md border border-dashed border-wm-border bg-wm-bg p-5 text-center">
           <p className="text-[12px] text-wm-text-muted">
             {statusFilter === 'draft' ? 'No drafts to review — all core messages are approved or archived.' : `No core messages with status=${statusFilter}.`}
