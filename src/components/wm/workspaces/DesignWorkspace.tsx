@@ -23,7 +23,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Palette, Plus, Trash2, Download, Save, Loader2, Type, Move, Square,
-  Sparkles, ExternalLink, Check, AlertCircle, Layers, FileCode, FileText,
+  Sparkles, ExternalLink, Check, AlertCircle, Layers,
   FolderOpen, Lightbulb, X, KeyRound, RefreshCw,
 } from 'lucide-react'
 import { scanStrategicPhrases, extractInspirationalUrls } from '../../../lib/cowork/strategicPhraseScanner'
@@ -41,13 +41,7 @@ import {
   type FontResource, type AcssRole,
   type RoleShadeMatrix, type FigmaBinding,
 } from '../../../lib/designSystemSpec'
-import {
-  toPluginTemplateRow, buildPageData,
-  generateStyleGuidePlugin, generatePagesPlugin,
-} from '../../../lib/figmaPluginGenerator'
-import { loadEditorSnippets } from '../../../lib/webSnippets'
-import { augmentTemplate } from '../../../lib/webBrixiesSchemaAugment'
-import type { StrategyWebProject, WebContentTemplate, WebPage, WebSection } from '../../../types/database'
+import type { StrategyWebProject, WebContentTemplate } from '../../../types/database'
 
 interface Props {
   project: StrategyWebProject
@@ -345,7 +339,6 @@ export function DesignWorkspace({ project, onChange }: Props) {
           <RadiusSection spec={spec} onChange={update} />
           <FigmaStyleGuideSection projectId={project.id} spec={spec} onChange={update} onAutoSave={autoSave} />
           <ImagesSection projectId={project.id} spec={spec} onAutoSave={autoSave} />
-          <FigmaPluginGeneratorSection project={project} spec={spec} />
           <SquadFigmaPluginSection project={project} onChange={onChange} />
         </div>
       </div>
@@ -1456,208 +1449,9 @@ function AddTemplateRow({ onAdd, onCancel, excludeIds }: {
 }
 
 // ── Figma plugin generators ────────────────────────────────────────
-//
-// Reads the project's bound Brixies templates + (for Pages) every
-// page's sections, emits two paste-into-console plugin scripts:
-//
-//   • Style Guide — one instance of every used template in a single
-//     auto-layout frame grouped by family.
-//   • Pages — one frame per project page, sections stacked in
-//     sort_order, text populated from each section's field_values.
-//
-// Both rely on figma_component_key being set on every used template
-// (in the Figma Library Bindings section above). Templates without a
-// key get skipped at assembly time with a console warning.
-
-function FigmaPluginGeneratorSection({
-  project, spec,
-}: {
-  project: StrategyWebProject
-  spec: DesignSystemSpec
-}) {
-  const [loading, setLoading] = useState(true)
-  const [report, setReport] = useState<{
-    templates: WebContentTemplate[]
-    pages: Array<{ page: WebPage; sections: Array<{ section: WebSection; template: WebContentTemplate }> }>
-    snippetMap: Record<string, string>
-  } | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    // Pages + their sections, ordered.
-    const { data: pagesRows } = await supabase
-      .from('web_pages')
-      .select('*')
-      .eq('web_project_id', project.id)
-      .eq('archived', false)
-      .order('sort_order')
-    const pages = (pagesRows ?? []) as WebPage[]
-    const pageIds = pages.map(p => p.id)
-    const { data: sectionRows } = pageIds.length > 0
-      ? await supabase
-          .from('web_sections')
-          .select('*')
-          .in('web_page_id', pageIds)
-          .order('sort_order')
-      : { data: [] as WebSection[] } as { data: WebSection[] }
-    const allSections = (sectionRows ?? []) as WebSection[]
-
-    // Unique template ids across sections + project chrome.
-    const usedTemplateIds = new Set<string>()
-    for (const s of allSections) {
-      if (s.content_template_id) usedTemplateIds.add(s.content_template_id)
-    }
-    if (project.primary_header_template_id) usedTemplateIds.add(project.primary_header_template_id)
-    if (project.primary_footer_template_id) usedTemplateIds.add(project.primary_footer_template_id)
-    for (const id of project.megamenu_template_ids ?? []) usedTemplateIds.add(id)
-    for (const id of project.offcanvas_template_ids ?? []) usedTemplateIds.add(id)
-
-    const { data: tplRows } = usedTemplateIds.size > 0
-      ? await supabase
-          .from('web_content_templates')
-          .select('*')
-          .in('id', [...usedTemplateIds])
-      : { data: [] as WebContentTemplate[] } as { data: WebContentTemplate[] }
-    const templatesById: Record<string, WebContentTemplate> = {}
-    for (const t of (tplRows ?? []) as WebContentTemplate[]) {
-      templatesById[t.id] = augmentTemplate(t)
-    }
-
-    // Group sections per page with their resolved template.
-    const pagesGrouped = pages.map(page => ({
-      page,
-      sections: allSections
-        .filter(s => s.web_page_id === page.id && s.content_template_id && templatesById[s.content_template_id])
-        .map(section => ({
-          section,
-          template: templatesById[section.content_template_id!],
-        })),
-    }))
-
-    const snippetList = await loadEditorSnippets(project)
-    const snippetMap: Record<string, string> = {}
-    for (const s of snippetList) snippetMap[s.token] = s.resolvedValue
-
-    setReport({
-      templates: Object.values(templatesById),
-      pages: pagesGrouped,
-      snippetMap,
-    })
-    setLoading(false)
-  }, [project.id, project.primary_header_template_id, project.primary_footer_template_id, project.megamenu_template_ids, project.offcanvas_template_ids])
-
-  useEffect(() => { void load() }, [load])
-
-  const templateRows = useMemo(() => {
-    if (!report) return []
-    return report.templates.map(toPluginTemplateRow)
-  }, [report])
-
-  const styleGuideNodeId = spec.figma?.style_guide_node_id
-  const styleGuideFileKey = spec.figma?.file_key
-
-  const downloadFile = (content: string, filename: string) => {
-    const blob = new Blob([content], { type: 'application/javascript' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }
-
-  const projectSlug = (project.church_short_name || project.name || 'project')
-    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-
-  const downloadStyleGuide = () => {
-    if (!styleGuideNodeId || templateRows.length === 0) return
-    const script = generateStyleGuidePlugin(templateRows, {
-      projectName: project.name,
-      generatedAt: new Date().toISOString(),
-      styleGuideNodeId,
-      figmaFileKey: styleGuideFileKey ?? undefined,
-    })
-    downloadFile(script, `${projectSlug}-style-guide-plugin.js`)
-  }
-
-  const downloadPages = () => {
-    if (!styleGuideNodeId || !report) return
-    const pageData = report.pages.map(({ page, sections }) =>
-      buildPageData(page.name, page.slug, sections, report.snippetMap),
-    )
-    const script = generatePagesPlugin(templateRows, pageData, {
-      projectName: project.name,
-      generatedAt: new Date().toISOString(),
-      styleGuideNodeId,
-      figmaFileKey: styleGuideFileKey ?? undefined,
-    })
-    downloadFile(script, `${projectSlug}-pages-plugin.js`)
-  }
-
-  const ready = !!styleGuideNodeId
-  const pagesCount = report?.pages.length ?? 0
-
-  return (
-    <Section title="Figma plugin scripts" icon={<FileCode size={13} />}>
-      <p className="text-[12px] text-wm-text-muted mb-3">
-        Scripts you paste into your Figma file's plugin console. They walk
-        the Style Guide frame above to find each Brixies layout by name and
-        build (1) a side-by-side overview frame and (2) one fully-populated
-        frame per project page.
-      </p>
-      {loading ? (
-        <div className="py-6 grid place-items-center text-wm-text-muted">
-          <Loader2 size={16} className="animate-spin" />
-        </div>
-      ) : (
-        <>
-          <div className="mb-3 text-[11px] text-wm-text-subtle">
-            <span className="font-semibold text-wm-text">{templateRows.length}</span> template{templateRows.length === 1 ? '' : 's'} used
-            {report && <span> · {pagesCount} project page{pagesCount === 1 ? '' : 's'}</span>}
-            {ready
-              ? <span> · <span className="text-wm-success">Style Guide frame bound</span></span>
-              : <span> · <span className="text-wm-danger">Style Guide URL missing</span></span>}
-          </div>
-          {!ready && (
-            <div className="mb-3 rounded-md border border-wm-border bg-wm-bg-hover px-3 py-2 text-[11px] text-wm-text-muted">
-              Paste the Style Guide frame URL above to enable the assembler downloads.
-            </div>
-          )}
-          <div className="flex items-center gap-2 flex-wrap">
-            <WMButton
-              variant="primary"
-              size="md"
-              iconLeft={<FileText size={13} />}
-              onClick={downloadStyleGuide}
-              disabled={!ready || templateRows.length === 0}
-            >
-              Download Style Guide plugin
-            </WMButton>
-            <WMButton
-              variant="primary"
-              size="md"
-              iconLeft={<FileText size={13} />}
-              onClick={downloadPages}
-              disabled={!ready || templateRows.length === 0 || pagesCount === 0}
-            >
-              Download Pages plugin
-            </WMButton>
-            <WMButton
-              variant="ghost"
-              size="md"
-              iconLeft={<Loader2 size={13} className={loading ? 'animate-spin' : 'hidden'} />}
-              onClick={() => void load()}
-            >
-              Refresh
-            </WMButton>
-          </div>
-        </>
-      )}
-    </Section>
-  )
-}
+// (Removed FigmaPluginGeneratorSection — replaced by SquadFigmaPluginSection
+//  below, which ships a real per-project Figma plugin via manifest import
+//  instead of paste-into-console scripts.)
 
 // ── Squad — Web Builder (Figma plugin, next-gen) ───────────────────
 //

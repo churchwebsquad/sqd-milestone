@@ -121,6 +121,16 @@ export function WMRichTextEditor({
         }
         return false
       },
+      // Clean up Word / Google Docs paste before ProseMirror parses it.
+      // Office paste carries XML namespaces, MSO conditional comments,
+      // <style> blocks, and class+style attributes that confuse TipTap's
+      // schema — when that happens, formatting gets stripped entirely
+      // (the partner pastes a bolded heading and gets plain text). The
+      // sanitizer normalizes Word's idioms into structural HTML so
+      // bold / italic / headings / lists survive.
+      transformPastedHTML(html) {
+        return sanitizeOfficePaste(html)
+      },
     },
   })
 
@@ -625,4 +635,78 @@ function promptLink(editor: Editor) {
   }
   const url = window.prompt('URL')
   if (url) editor.chain().focus().setLink({ href: url }).run()
+}
+
+// ── Office paste sanitizer ───────────────────────────────────────────
+//
+// When the partner pastes from Microsoft Word, Pages, Google Docs, or
+// Outlook, the clipboard HTML carries a payload that's mostly noise:
+// <style> blocks, MSO conditional comments, XML namespace tags, font
+// tags, and spans wrapping every word in inline styles. ProseMirror's
+// schema rejects most of this, and the salvage path strips formatting
+// the partner expected to keep — they paste a bolded heading and see
+// plain text in the editor.
+//
+// This function runs as TipTap's `transformPastedHTML` hook. It:
+//   • short-circuits non-Office paste (web pages keep their HTML),
+//   • promotes style-based bold/italic to <strong>/<em> so TipTap's
+//     Bold/Italic extensions latch on,
+//   • drops Office-namespaced tags, <style>/<head>/<script> blocks,
+//     MSO conditional comments, and <font> wrappers,
+//   • strips class/style/lang attributes from everything that survives
+//     so the inline noise doesn't leak into the editor.
+//
+// What does NOT get touched: <h1>–<h6>, <p>, <strong>/<b>, <em>/<i>,
+// <ul>/<ol>/<li>, <a href>, <br>, <img src> — the structural HTML
+// TipTap already parses correctly.
+export function sanitizeOfficePaste(html: string): string {
+  // Heuristic: Office paste carries unmistakable markers. If none are
+  // present, return the HTML untouched so non-Word paste keeps every-
+  // thing it brought in.
+  const officeMarker = /xmlns:o=|class=["']?Mso|mso-|<!--\[if/i
+  const styledSpans = /<span[^>]*style=/i
+  if (!officeMarker.test(html) && !styledSpans.test(html)) return html
+
+  let s = html
+
+  // 1. Drop Office conditional comments (<!--[if gte mso 9]> … <![endif]-->)
+  s = s.replace(/<!--\[if[\s\S]*?<!\[endif\]-->/g, '')
+  // 2. Drop <head>, <style>, <script>, <meta>, <link> entirely.
+  s = s.replace(/<head[\s\S]*?<\/head>/gi, '')
+  s = s.replace(/<style[\s\S]*?<\/style>/gi, '')
+  s = s.replace(/<script[\s\S]*?<\/script>/gi, '')
+  s = s.replace(/<(?:meta|link)\b[^>]*>/gi, '')
+  // 3. Drop XML-namespaced tags (<o:p>, <w:something>, etc.)
+  s = s.replace(/<\/?[a-z]+:[a-z0-9]+[^>]*>/gi, '')
+  // 4. Promote style-based bold/italic to tag-based BEFORE stripping
+  //    style attributes. Three passes cover the common combinations:
+  //    bold+italic together, then bold alone, then italic alone.
+  const BOLD_WEIGHT = '(?:bold|bolder|[5-9]\\d{2})'
+  s = s.replace(
+    new RegExp(`<span([^>]*?)style=["'][^"']*font-weight\\s*:\\s*${BOLD_WEIGHT}[^"']*font-style\\s*:\\s*italic[^"']*["']([^>]*)>([\\s\\S]*?)<\\/span>`, 'gi'),
+    '<strong><em>$3</em></strong>',
+  )
+  s = s.replace(
+    new RegExp(`<span([^>]*?)style=["'][^"']*font-style\\s*:\\s*italic[^"']*font-weight\\s*:\\s*${BOLD_WEIGHT}[^"']*["']([^>]*)>([\\s\\S]*?)<\\/span>`, 'gi'),
+    '<strong><em>$3</em></strong>',
+  )
+  s = s.replace(
+    new RegExp(`<span[^>]*style=["'][^"']*font-weight\\s*:\\s*${BOLD_WEIGHT}[^"']*["'][^>]*>([\\s\\S]*?)<\\/span>`, 'gi'),
+    '<strong>$1</strong>',
+  )
+  s = s.replace(
+    /<span[^>]*style=["'][^"']*font-style\s*:\s*italic[^"']*["'][^>]*>([\s\S]*?)<\/span>/gi,
+    '<em>$1</em>',
+  )
+  // 5. Strip remaining <span> wrappers — they're now stripped of any
+  //    semantic role. Keep the content.
+  s = s.replace(/<span\b[^>]*>/gi, '').replace(/<\/span>/gi, '')
+  // 6. Drop <font> wrappers; keep their children.
+  s = s.replace(/<\/?font\b[^>]*>/gi, '')
+  // 7. Strip noise attributes from anything that survives. Double- and
+  //    single-quoted variants both appear in Office paste.
+  s = s.replace(/\s+(?:class|style|lang|align|dir|valign|width|height|cellspacing|cellpadding|border|bgcolor|color|face|size)\s*=\s*"[^"]*"/gi, '')
+  s = s.replace(/\s+(?:class|style|lang|align|dir|valign|width|height|cellspacing|cellpadding|border|bgcolor|color|face|size)\s*=\s*'[^']*'/gi, '')
+
+  return s
 }

@@ -12,9 +12,11 @@
  * session so staff can see the page is sealed.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2, Check, ArrowRight, ArrowLeft, EyeOff } from 'lucide-react'
+import { Loader2, Check, ArrowRight, ArrowLeft, EyeOff, Paperclip } from 'lucide-react'
 import { WMRichTextEditor } from '../wm/RichTextEditor'
 import { PARTNER_GROUPS } from '../../lib/webPartnerGroups'
+import { FileUploadField } from './FileUploadField'
+import type { AttachmentMetadata } from '../../lib/contentCollectionAttachments'
 import type { Mark, SaveMark } from '../wm/inventory/InventoryView'
 
 export type SupplementalBlockKind =
@@ -121,11 +123,23 @@ interface Props {
   onContinue?:      () => void | Promise<void>
   /** Step back (e.g., Step 1 = inventory). */
   onBack?:          () => void
+  /** Required when the Attachments section should render. Caller owns
+   *  the session-wide attachment list; this component filters to the
+   *  `supplemental` kind for display + add/remove. */
+  sessionId?:           string
+  attachments?:         AttachmentMetadata[]
+  onAttachmentChange?:  (updater: (prev: AttachmentMetadata[]) => AttachmentMetadata[]) => void
 }
 
 export function SupplementalForm({
   initialBlocks, saveBlock, marks, saveMark, submittedAt, onContinue, onBack,
+  sessionId, attachments, onAttachmentChange,
 }: Props) {
+  const supplementalAttachments = useMemo(
+    () => (attachments ?? []).filter(a => a.kind === 'supplemental'),
+    [attachments],
+  )
+  const canAttach = !!sessionId && !!onAttachmentChange
   // Per-block draft state, keyed by kind. Initialized from the saved
   // blocks; resyncs only when the underlying value changes from outside.
   const blocksByKind = useMemo(() => {
@@ -276,6 +290,37 @@ export function SupplementalForm({
             </div>
           </section>
         ))}
+
+        {/* ── Attachments ──────────────────────────────────────────────
+            CSVs, source docs, PDFs, screenshots — anything that backs
+            up the supplemental content above. Common case: a directory
+            CSV (staff, volunteers) or a vision doc the church wants
+            the team to read in full. */}
+        {canAttach && (
+          <section>
+            <div className="flex items-center justify-between gap-3 mb-1.5">
+              <h3 className="text-[15px] font-semibold text-deep-plum inline-flex items-center gap-2">
+                <Paperclip size={14} className="text-primary-purple" />
+                Attachments
+              </h3>
+            </div>
+            <p className="text-[12.5px] text-purple-gray mb-2 leading-snug">
+              Drop in CSV exports (staff, ministries, groups), source docs,
+              PDFs, or images that back up anything you wrote above. Files
+              save the moment you upload — no need to hit Continue first.
+            </p>
+            <div className="rounded-lg border border-lavender bg-cream/30 p-3">
+              <FileUploadField
+                sessionId={sessionId!}
+                kind="supplemental"
+                attachments={supplementalAttachments}
+                onUploaded={a => onAttachmentChange!(prev => [a, ...prev])}
+                onDeleted={id => onAttachmentChange!(prev => prev.filter(p => p.id !== id))}
+                help="CSV, DOCX, PDF, or images. Up to 50 MB per file."
+              />
+            </div>
+          </section>
+        )}
       </div>
 
       {/* Footer nav. The supplemental page can't be skipped past

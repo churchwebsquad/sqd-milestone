@@ -536,6 +536,9 @@ export default function ContentCollectionPage() {
               submittedAt={session.supplemental_submitted_at}
               marks={marks}
               saveMark={saveMark}
+              sessionId={sessionId!}
+              attachments={attachments}
+              onAttachmentChange={(updater) => setAttachments(prev => updater(prev))}
               saveBlock={async (kind, body_markdown) => {
                 const existing = (session.supplemental_blocks ?? []) as Array<{ kind: string; body_markdown: string; label?: string | null; updated_at?: string }>
                 const now = new Date().toISOString()

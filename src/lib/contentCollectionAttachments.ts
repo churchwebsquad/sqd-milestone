@@ -20,6 +20,7 @@ export type AttachmentKind =
   | 'careers_csv'
   | 'testimonials_csv'
   | 'campuses_csv'
+  | 'supplemental'
 
 export interface AttachmentMetadata {
   id:           string
@@ -190,6 +191,7 @@ export const ACCEPT_BY_KIND: Record<AttachmentKind, string> = {
   careers_csv:       '.csv,text/csv',
   testimonials_csv:  '.csv,text/csv',
   campuses_csv:      '.csv,.doc,.docx,text/csv,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  supplemental:      '.csv,.doc,.docx,.jpg,.jpeg,.png,.webp,.gif,.pdf,text/csv,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*,application/pdf',
 }
 
 export const KIND_LABEL: Record<AttachmentKind, string> = {
@@ -201,4 +203,5 @@ export const KIND_LABEL: Record<AttachmentKind, string> = {
   careers_csv:      'Careers CSV',
   testimonials_csv: 'Testimonials CSV',
   campuses_csv:     'Campuses CSV or .docx',
+  supplemental:     'Supplemental attachment',
 }
