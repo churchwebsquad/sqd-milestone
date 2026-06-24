@@ -161,6 +161,7 @@ export default function SocialChurchPage() {
   const [aiUpdateError, setAiUpdateError] = useState('')
 
   const [refreshingNow, setRefreshingNow] = useState(false)
+  const [srpNoIntelWarning, setSrpNoIntelWarning] = useState(false)
 
   // ── SRP state ────────────────────────────────────────────────────────────
   const [srpSessions, setSrpSessions] = useState<SrpSessionListRow[]>([])
@@ -859,7 +860,37 @@ export default function SocialChurchPage() {
           if (!church || !user?.email) return
           setSrpCreating(true)
           try {
-            // Strip member prefix from task name for sermon title
+            // Fetch intel profile for brand voice
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { data: intelData } = await (supabase as any)
+              .from('strategy_church_intel')
+              .select('intel_profile')
+              .eq('member', member)
+              .eq('status', 'live')
+              .maybeSingle()
+
+            if (!intelData?.intel_profile) {
+              setSrpCreating(false)
+              setSrpNoIntelWarning(true)
+              return
+            }
+            setSrpNoIntelWarning(false)
+
+            // Format brand voice from intel profile
+            const bv = intelData.intel_profile?.brand_voice
+            const lines: string[] = []
+            if (bv?.tone_summary) lines.push(`Tone: ${bv.tone_summary}`)
+            if (bv?.casual_to_formal_spectrum) lines.push(`Voice spectrum: ${bv.casual_to_formal_spectrum}`)
+            if (Array.isArray(bv?.attributes)) {
+              for (const attr of bv.attributes) {
+                lines.push(`- ${attr.name}: ${attr.definition ?? ''}`)
+                if (attr.write_with_this_in_mind) lines.push(`  Write with this in mind: ${attr.write_with_this_in_mind}`)
+                if (Array.isArray(attr.use) && attr.use.length)     lines.push(`  Use: ${attr.use.join(', ')}`)
+                if (Array.isArray(attr.avoid) && attr.avoid.length) lines.push(`  Avoid: ${attr.avoid.join(', ')}`)
+              }
+            }
+            const brandVoiceGuidelines = lines.join('\n').trim() || null
+
             const sermonTitle = task.name.replace(/^\d+\s*-\s*/, '').trim()
             const { session_id } = await createSession({
               member: String(member),
@@ -867,6 +898,7 @@ export default function SocialChurchPage() {
               userEmail: user.email,
               clickupTaskId: task.id,
               sermonTitle,
+              brandVoiceGuidelines,
             })
             navigate(`/social/srp/${encodeURIComponent(session_id)}`)
           } catch (err) {
@@ -884,6 +916,22 @@ export default function SocialChurchPage() {
                 <p className="text-xs text-gray-400 mt-0.5">ClickUp tasks tagged <span className="font-mono">sms-sermon-recap</span> · last 30 days</p>
               </div>
             </div>
+
+            {srpNoIntelWarning && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 mb-6 flex items-start gap-4">
+                <span className="text-amber-500 text-xl mt-0.5">⚠</span>
+                <div className="flex-1">
+                  <p className="font-semibold text-amber-800 text-sm mb-1">Intel profile required before starting an SRP</p>
+                  <p className="text-xs text-amber-700 mb-3">The SRP generator uses the church's brand voice from their Intel document to write captions and content. {churchName} doesn't have one yet — you'll need to build it first.</p>
+                  <button
+                    onClick={() => { setSrpNoIntelWarning(false); setTab('intel') }}
+                    className="text-xs bg-amber-500 text-white font-semibold px-4 py-2 rounded-full hover:opacity-90 transition-opacity"
+                  >
+                    Go build Intel profile →
+                  </button>
+                </div>
+              </div>
+            )}
 
             {cuLoading || srpLoading ? (
               <div className="flex items-center gap-2 text-sm text-gray-400 py-8">
