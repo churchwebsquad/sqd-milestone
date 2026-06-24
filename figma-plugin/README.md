@@ -1,32 +1,33 @@
 # Squad — Web Builder (Figma plugin)
 
-Local-development Figma plugin. Wave 1 covers the design-handoff workflow's first big step: pull the project's Brixies templates from the team library, detach them, and promote each to a local component the designer can restyle.
+Per-project Figma plugin. The project's API credentials are baked into this folder at download time — there is no settings dialog and you paste nothing.
 
-## Install (one-time, per machine)
+## Install (per project, per machine)
 
-You should have downloaded this folder as a zip from the Web Manager's **Design Handoff → Squad — Web Builder** card. If you don't have it, go there and click **Download plugin (.zip)**.
-
-1. Unzip the file somewhere stable on your machine — e.g. `~/Figma Plugins/squad-web-builder/`. Figma reads the folder from disk every time you run the plugin, so don't move or delete it.
+1. Unzip this folder somewhere stable on your machine — e.g. `~/Figma Plugins/__SQD_PROJECT_NAME__/`. Figma reads the folder from disk every run, so don't move or delete it after installing.
 2. Open the Figma **desktop app**.
 3. **Menu → Plugins → Development → Import plugin from manifest…**
 4. Pick `manifest.json` inside this unzipped folder.
-5. The plugin now appears under **Plugins → Development → Squad — Web Builder**.
+5. The plugin shows up under **Plugins → Development → Squad — __SQD_PROJECT_NAME__**.
 
 ## Use
 
-1. In the Web Manager, open the project → **Design Handoff** tab → **Squad — Web Builder** card → click **Generate token**. Copy the project ID + the token.
-2. In Figma, open the file you want to build the design in. Make sure **Brixies Library ACSS [PRO]** is enabled on the file (Assets panel → Libraries).
-3. Run the plugin. Paste the project ID + token. Save settings.
-4. Click **Preflight** to verify every template can be imported. If anything fails, the panel tells you why.
-5. Click **Assemble style guide**. The plugin places one instance per template into a `Style Guide · <project>` frame, detaches each, and promotes to a local component. Stamps the original Brixies key onto each local component via `pluginData` so later waves can read the bridge back.
-
-## Updates
-
-When the plugin updates, re-download the zip from the Web Manager and replace this folder in place — keep the path the same so Figma's manifest import still resolves. No re-import required.
+1. Open the Figma file where the design lives. Make sure **Brixies Library ACSS [PRO]** is enabled (Assets panel → Libraries).
+2. Run the plugin. The project's name is shown in the chip at the top of the panel so you can tell it apart from other Squad plugin installs.
+3. Click **Preflight** — verifies every template imports cleanly. If it fails, the panel tells you why.
+4. Click **Assemble style guide** — drops one instance per template into a `Style Guide · <project>` frame, detaches each, and promotes to a local component. The original Brixies key is stamped on every local component via pluginData so later waves can bridge back even after layout swaps.
 
 ## Re-running
 
-Idempotent. Local components carrying the same `brixies_origin_key` are kept in place on re-runs — only new templates get added. Delete a local component if you want it rebuilt from scratch.
+Idempotent. Local components carrying the same Brixies origin key are kept in place — only new templates get added. Delete a local component if you want it rebuilt from scratch.
+
+## Updates / new project
+
+This folder is project-specific. To work on a different project, download that project's plugin zip from its own Design Handoff card. Each project gets its own install with a distinct name. If the token is rotated in the web app, re-download this project's zip and replace the folder in place — keep the path the same so Figma's import still resolves.
+
+## Security
+
+This folder contains a bearer token granting read access to this project's templates list. Don't commit it to a repo, share over public channels, or hand to anyone outside the team. If a copy leaks, **Revoke** in the web app immediately.
 
 ## What's next
 

@@ -1,7 +1,7 @@
 <style>
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 14px;
+    margin: 0; padding: 16px;
     font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
     font-size: 12px;
     color: #1f1530;
@@ -9,19 +9,30 @@
   }
   h1 {
     font-family: Georgia, serif;
-    font-size: 16px;
+    font-size: 18px;
     margin: 0 0 4px;
     font-weight: 600;
   }
   .sub {
     color: #6b6180;
-    margin-bottom: 14px;
+    margin: 0 0 14px;
     line-height: 1.4;
+  }
+  .project-chip {
+    display: inline-block;
+    margin: 0 0 14px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: #ede9fc;
+    color: #341756;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
   }
   fieldset {
     border: 1px solid #cfc9f8;
     border-radius: 8px;
-    padding: 12px;
+    padding: 14px;
     margin: 0 0 12px;
     background: #fff;
   }
@@ -33,34 +44,9 @@
     color: #513DE5;
     padding: 0 6px;
   }
-  label {
-    display: block;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: #6b6180;
-    margin: 8px 0 4px;
-  }
-  input[type=text], input[type=url] {
-    width: 100%;
-    height: 28px;
-    padding: 0 8px;
-    border: 1px solid #cfc9f8;
-    border-radius: 6px;
-    background: #fff;
-    font-size: 12px;
-    color: #1f1530;
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  }
-  input:focus {
-    outline: none;
-    border-color: #513DE5;
-    box-shadow: 0 0 0 2px rgba(81, 61, 229, 0.15);
-  }
   button {
-    height: 28px;
-    padding: 0 12px;
+    height: 32px;
+    padding: 0 14px;
     border-radius: 999px;
     border: 1px solid transparent;
     cursor: pointer;
@@ -80,20 +66,21 @@
     border-color: #cfc9f8;
   }
   button.ghost:hover { background: #ede9fc; }
+  button.ghost:disabled { color: #b8b1c8; border-color: #ede9fc; cursor: not-allowed; }
   .row {
     display: flex;
     gap: 8px;
-    margin-top: 12px;
+    margin-top: 10px;
   }
   .row button { flex: 1; }
   .status {
-    margin-top: 10px;
-    padding: 8px 10px;
+    margin-top: 12px;
+    padding: 10px 12px;
     border-radius: 6px;
     font-size: 11.5px;
-    line-height: 1.4;
+    line-height: 1.45;
     white-space: pre-wrap;
-    max-height: 200px;
+    max-height: 220px;
     overflow-y: auto;
   }
   .status.info    { background: #ede9fc; color: #341756; }
@@ -103,30 +90,15 @@
   .small {
     font-size: 10.5px;
     color: #6b6180;
-    margin-top: 4px;
-    line-height: 1.4;
+    margin: 6px 0 0;
+    line-height: 1.45;
   }
 </style>
 
 <h1>Squad — Web Builder</h1>
-<p class="sub">Pull Brixies templates → detach → componentize. The first step of the design handoff workflow.</p>
+<p class="sub">Pull this project's Brixies templates → detach → componentize.</p>
 
-<fieldset>
-  <legend>Project</legend>
-  <label for="host">API host</label>
-  <input id="host" type="url" placeholder="https://sqd-milestone.vercel.app" />
-  <p class="small">Leave default for production. Override for local dev (e.g. http://localhost:3000).</p>
-
-  <label for="projectId">Project ID</label>
-  <input id="projectId" type="text" placeholder="00000000-0000-0000-0000-000000000000" />
-
-  <label for="token">Share token</label>
-  <input id="token" type="text" placeholder="paste from Dev Handoff" />
-
-  <div class="row">
-    <button class="ghost" id="save">Save settings</button>
-  </div>
-</fieldset>
+<span id="project-chip" class="project-chip">Loading project…</span>
 
 <fieldset>
   <legend>Commands</legend>
@@ -135,96 +107,98 @@
     <button class="primary" id="assemble">2 · Assemble style guide</button>
   </div>
   <p class="small">
-    Preflight checks each template's component imports cleanly from the team library.
-    Assemble drops one instance per template into a Style Guide frame, detaches it,
-    and promotes to a local component. The original Brixies key is stamped on each
-    local component so later waves can read the bridge back.
+    Preflight checks every template imports cleanly from the team library.
+    Assemble drops one instance per template into a Style Guide frame on
+    the current page, detaches it, and promotes to a local component.
+    The original Brixies key is stamped on each local component via
+    pluginData so later waves can bridge back.
   </p>
 </fieldset>
 
 <div id="status" class="status empty"></div>
 
 <script>
-  const $ = function (id) { return document.getElementById(id) }
-  const status = $('status')
+  (function () {
+    var status = document.getElementById('status')
+    var chip = document.getElementById('project-chip')
+    var btnPreflight = document.getElementById('preflight')
+    var btnAssemble  = document.getElementById('assemble')
 
-  function setStatus(kind, text) {
-    status.className = 'status ' + kind
-    status.textContent = text
-  }
-
-  function readSettings() {
-    return {
-      host:      $('host').value.trim(),
-      projectId: $('projectId').value.trim(),
-      token:     $('token').value.trim(),
+    function setStatus(kind, text) {
+      status.className = 'status ' + kind
+      status.textContent = text
     }
-  }
 
-  $('save').addEventListener('click', function () {
-    const s = readSettings()
-    parent.postMessage({ pluginMessage: { type: 'save-settings', host: s.host, projectId: s.projectId, token: s.token } }, '*')
-  })
-
-  $('preflight').addEventListener('click', function () {
-    const s = readSettings()
-    setStatus('info', 'Preflight running…')
-    parent.postMessage({ pluginMessage: { type: 'preflight', host: s.host, projectId: s.projectId, token: s.token } }, '*')
-  })
-
-  $('assemble').addEventListener('click', function () {
-    const s = readSettings()
-    setStatus('info', 'Assembling style guide…')
-    parent.postMessage({ pluginMessage: { type: 'assemble-style-guide', host: s.host, projectId: s.projectId, token: s.token } }, '*')
-  })
-
-  window.addEventListener('message', function (event) {
-    const msg = event.data.pluginMessage
-    if (!msg) return
-    if (msg.type === 'init') {
-      $('host').value      = msg.host      || ''
-      $('projectId').value = msg.projectId || ''
-      $('token').value     = msg.token     || ''
+    function send(type) {
+      btnPreflight.disabled = true
+      btnAssemble.disabled  = true
+      parent.postMessage({ pluginMessage: { type: type } }, '*')
     }
-    if (msg.type === 'settings-saved') {
-      setStatus('success', 'Settings saved.')
+
+    btnPreflight.addEventListener('click', function () {
+      setStatus('info', 'Preflight running…')
+      send('preflight')
+    })
+    btnAssemble.addEventListener('click', function () {
+      setStatus('info', 'Assembling style guide…')
+      send('assemble-style-guide')
+    })
+
+    function reEnable() {
+      btnPreflight.disabled = false
+      btnAssemble.disabled  = false
     }
-    if (msg.type === 'progress') {
-      setStatus('info', msg.label)
-    }
-    if (msg.type === 'preflight-result') {
-      const r = msg.result
-      const lines = [
-        '✓ ' + r.ok_count + ' importable',
-        '✗ ' + r.failed_count + ' failed',
-      ]
-      if (r.failed.length > 0) {
-        lines.push('')
-        lines.push('Failed:')
-        for (const f of r.failed) lines.push('  ' + f.layer_name + ' — ' + f.error)
+
+    window.addEventListener('message', function (event) {
+      var msg = event.data && event.data.pluginMessage
+      if (!msg) return
+      if (msg.type === 'init') {
+        chip.textContent = msg.projectName || 'Project'
       }
-      if (r.library_hint) {
-        lines.push('')
-        lines.push(r.library_hint)
+      if (msg.type === 'progress') {
+        setStatus('info', msg.label)
       }
-      setStatus(r.failed_count === 0 ? 'success' : 'error', lines.join('\n'))
-    }
-    if (msg.type === 'assemble-result') {
-      const r = msg.result
-      const lines = [
-        '✓ ' + r.placed_count + ' placed',
-        '↻ ' + r.skipped_count + ' already in style guide',
-        '✗ ' + r.failed_count + ' failed',
-      ]
-      if (r.failed && r.failed.length > 0) {
-        lines.push('')
-        lines.push('Failed:')
-        for (const f of r.failed) lines.push('  ' + f.layer_name + ' — ' + f.error)
+      if (msg.type === 'preflight-result') {
+        reEnable()
+        var r = msg.result
+        var lines = [
+          '✓ ' + r.ok_count + ' importable',
+          '✗ ' + r.failed_count + ' failed',
+        ]
+        if (r.failed && r.failed.length > 0) {
+          lines.push('')
+          lines.push('Failed:')
+          for (var i = 0; i < r.failed.length; i++) {
+            lines.push('  ' + r.failed[i].layer_name + ' — ' + r.failed[i].error)
+          }
+        }
+        if (r.library_hint) {
+          lines.push('')
+          lines.push(r.library_hint)
+        }
+        setStatus(r.failed_count === 0 ? 'success' : 'error', lines.join('\n'))
       }
-      setStatus(r.failed_count === 0 ? 'success' : 'error', lines.join('\n'))
-    }
-    if (msg.type === 'error') {
-      setStatus('error', msg.message)
-    }
-  })
+      if (msg.type === 'assemble-result') {
+        reEnable()
+        var a = msg.result
+        var aLines = [
+          '✓ ' + a.placed_count + ' placed',
+          '↻ ' + a.skipped_count + ' already in style guide',
+          '✗ ' + a.failed_count + ' failed',
+        ]
+        if (a.failed && a.failed.length > 0) {
+          aLines.push('')
+          aLines.push('Failed:')
+          for (var j = 0; j < a.failed.length; j++) {
+            aLines.push('  ' + a.failed[j].layer_name + ' — ' + a.failed[j].error)
+          }
+        }
+        setStatus(a.failed_count === 0 ? 'success' : 'error', aLines.join('\n'))
+      }
+      if (msg.type === 'error') {
+        reEnable()
+        setStatus('error', msg.message)
+      }
+    })
+  })()
 </script>

@@ -1,6 +1,6 @@
 {
-  "name": "Squad — Web Builder",
-  "id": "squad-web-builder",
+  "name": "Squad — __SQD_PROJECT_NAME__",
+  "id": "sqd-web-__SQD_PROJECT_ID_SHORT__",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",
@@ -8,7 +8,6 @@
   "documentAccess": "dynamic-page",
   "networkAccess": {
     "allowedDomains": ["*"],
-    "reasoning": "The plugin fetches project data (template list, page sections) from the Squad web app's API (per-project share token gates access). Wildcard during development; restrict to the production host before community release."
-  },
-  "permissions": ["currentuser"]
+    "reasoning": "Fetches this project's template list from the Squad web app via the baked-in per-project bearer token."
+  }
 }

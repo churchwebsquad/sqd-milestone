@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Palette, Plus, Trash2, Download, Save, Loader2, Type, Move, Square,
   Sparkles, ExternalLink, Check, AlertCircle, Layers, FileCode, FileText,
-  FolderOpen, Lightbulb, X, Copy, KeyRound, RefreshCw,
+  FolderOpen, Lightbulb, X, KeyRound, RefreshCw,
 } from 'lucide-react'
 import { scanStrategicPhrases, extractInspirationalUrls } from '../../../lib/cowork/strategicPhraseScanner'
 import { supabase } from '../../../lib/supabase'
@@ -1680,16 +1680,40 @@ function SquadFigmaPluginSection({
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [copied, setCopied] = useState<'id' | 'token' | null>(null)
-  const [downloading, setDownloading] = useState(false)
 
   const token = project.figma_share_token ?? null
 
+  /** Personalize + zip the plugin folder client-side. Replaces the
+   *  __SQD_*__ placeholders inside manifest.json / code.js / README.md
+   *  with the project's values so the designer pastes nothing in
+   *  Figma. If no token exists yet, mints one as part of the click —
+   *  one button does the whole "generate + download" flow. */
   const downloadPlugin = useCallback(async () => {
-    setDownloading(true)
+    setBusy(true)
+    setError(null)
     try {
-      // Raw-import the plugin files at build time so they ship inside
-      // the bundle — no repo clone, no extra deploy step.
+      // Ensure we have a token; mint one on demand.
+      let activeToken = token
+      if (!activeToken) {
+        activeToken = crypto.randomUUID()
+        const { error: tokenErr } = await supabase
+          .from('strategy_web_projects')
+          .update({ figma_share_token: activeToken })
+          .eq('id', project.id)
+        if (tokenErr) throw new Error(tokenErr.message)
+      }
+
+      const rawName = project.church_short_name || project.name || 'Project'
+      // Strip characters that would need different escaping rules in
+      // JSON vs JS-single-quoted contexts. Real project names don't
+      // contain quotes/backslashes — strip defensively rather than
+      // emit per-context escapes.
+      const projectName = rawName.replace(/[\\"'\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim() || 'Project'
+      const projectIdShort = project.id.slice(0, 8)
+      const host = window.location.origin
+
+      // Raw-import the plugin file templates at build time so they
+      // ship inside the bundle — no repo clone, no deploy step.
       const [{ zipSync, strToU8 }, manifestText, codeText, uiText, readmeText] = await Promise.all([
         import('fflate'),
         import('../../../../figma-plugin/manifest.json?raw').then(m => m.default),
@@ -1697,35 +1721,54 @@ function SquadFigmaPluginSection({
         import('../../../../figma-plugin/ui.html?raw').then(m => m.default),
         import('../../../../figma-plugin/README.md?raw').then(m => m.default),
       ])
+
+      const replacements: Record<string, string> = {
+        __SQD_HOST__:              host,
+        __SQD_PROJECT_ID__:        project.id,
+        __SQD_PROJECT_ID_SHORT__:  projectIdShort,
+        __SQD_TOKEN__:             activeToken,
+        __SQD_PROJECT_NAME__:      projectName,
+      }
+      const fill = (s: string) => Object.entries(replacements).reduce(
+        (acc, [k, v]) => acc.split(k).join(v),
+        s,
+      )
+
+      const folderSlug = `sqd-web-${projectIdShort}`
       const zipped = zipSync({
-        'squad-web-builder/manifest.json': strToU8(manifestText),
-        'squad-web-builder/code.js':       strToU8(codeText),
-        'squad-web-builder/ui.html':       strToU8(uiText),
-        'squad-web-builder/README.md':     strToU8(readmeText),
+        [`${folderSlug}/manifest.json`]: strToU8(fill(manifestText)),
+        [`${folderSlug}/code.js`]:       strToU8(fill(codeText)),
+        [`${folderSlug}/ui.html`]:       strToU8(fill(uiText)),
+        [`${folderSlug}/README.md`]:     strToU8(fill(readmeText)),
       })
       const blob = new Blob([zipped as BlobPart], { type: 'application/zip' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = 'squad-web-builder.zip'
+      a.download = `${folderSlug}.zip`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
+
+      if (!token) await onChange()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setDownloading(false)
+      setBusy(false)
     }
-  }, [])
+  }, [project, token, onChange])
 
-  const generate = useCallback(async () => {
+  const regenerate = useCallback(async () => {
+    if (!confirm(
+      "Regenerate the share token?\n\nThe currently-installed plugin folder (with the old token baked in) will stop working. " +
+      "You'll need to re-download the zip and replace the folder on every machine that has it installed.",
+    )) return
     setBusy(true)
     setError(null)
-    const newToken = crypto.randomUUID()
     const { error } = await supabase
       .from('strategy_web_projects')
-      .update({ figma_share_token: newToken })
+      .update({ figma_share_token: crypto.randomUUID() })
       .eq('id', project.id)
     setBusy(false)
     if (error) { setError(error.message); return }
@@ -1733,7 +1776,10 @@ function SquadFigmaPluginSection({
   }, [project.id, onChange])
 
   const revoke = useCallback(async () => {
-    if (!confirm('Revoke the current token? The plugin will stop working until a new one is generated and pasted.')) return
+    if (!confirm(
+      'Revoke the share token?\n\nAny installed plugin folder will stop working immediately. ' +
+      'Re-issue by clicking Download plugin again.',
+    )) return
     setBusy(true)
     setError(null)
     const { error } = await supabase
@@ -1745,51 +1791,25 @@ function SquadFigmaPluginSection({
     await onChange()
   }, [project.id, onChange])
 
-  const copy = useCallback(async (value: string, which: 'id' | 'token') => {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(which)
-      setTimeout(() => setCopied(c => (c === which ? null : c)), 1500)
-    } catch {
-      /* silent */
-    }
-  }, [])
-
   return (
     <Section title="Squad — Web Builder (Figma plugin)" icon={<KeyRound size={13} />}>
       <p className="text-[12px] text-wm-text-muted mb-3">
-        Next-gen Figma plugin. Imports the project's Brixies templates,
-        detaches them, and promotes to local components the designer can
-        restyle. Install from manifest in the Figma desktop app, then
-        paste the project ID + token below.
+        Per-project Figma plugin. The zip below is personalized for this
+        project — its API credentials are baked into the files inside, so
+        the designer pastes nothing in Figma. Each project gets its own
+        zip, its own plugin install, and its own bearer token.
       </p>
 
       <div className="rounded-md border border-wm-border bg-wm-bg-hover px-3 py-2 text-[12px] text-wm-text mb-3">
-        <p className="font-semibold mb-1">Install (one-time, per machine)</p>
+        <p className="font-semibold mb-1">Install (per project, per machine)</p>
         <ol className="list-decimal pl-5 space-y-0.5 text-wm-text-muted">
-          <li>Click <span className="text-wm-text">Download plugin</span> below — you'll get <code className="text-[11px]">squad-web-builder.zip</code>.</li>
-          <li>Unzip it somewhere stable (e.g. <code className="text-[11px]">~/Figma Plugins/squad-web-builder/</code>). Figma reads the folder from disk each time you run it — don't move or delete it after installing.</li>
-          <li>Open the Figma <span className="text-wm-text">desktop app</span>. Menu → Plugins → Development → <span className="text-wm-text">Import plugin from manifest…</span> → pick <code className="text-[11px]">manifest.json</code> inside the unzipped folder.</li>
+          <li>Click <span className="text-wm-text">Download plugin</span> below.</li>
+          <li>Unzip the folder somewhere stable (e.g. <code className="text-[11px]">~/Figma Plugins/&lt;project&gt;/</code>). Figma reads from disk every run, so don't move or delete it.</li>
+          <li>Figma <span className="text-wm-text">desktop</span> → Menu → Plugins → Development → <span className="text-wm-text">Import plugin from manifest…</span> → pick <code className="text-[11px]">manifest.json</code> inside the folder.</li>
           <li>Open the Figma file you want to design in. Enable <span className="text-wm-text">Brixies Library ACSS [PRO]</span> in Assets → Libraries.</li>
-          <li>Plugins → Development → <span className="text-wm-text">Squad — Web Builder</span>. Paste the project ID + token below. Save.</li>
+          <li>Plugins → Development → <span className="text-wm-text">Squad — {project.church_short_name || project.name}</span>. Run it. No paste required.</li>
         </ol>
-        <p className="mt-2 text-wm-text-subtle">Download the zip once per designer. When the plugin updates, re-download and replace the folder in place.</p>
-      </div>
-
-      <div className="space-y-2.5 mb-3">
-        <FieldRow
-          label="Project ID"
-          value={project.id}
-          copied={copied === 'id'}
-          onCopy={() => void copy(project.id, 'id')}
-        />
-        <FieldRow
-          label="Share token"
-          value={token ?? '— not generated —'}
-          mono
-          copied={copied === 'token'}
-          onCopy={token ? () => void copy(token, 'token') : undefined}
-        />
+        <p className="mt-2 text-wm-text-subtle">If the token is regenerated or revoked, re-download and replace the folder in place — keep the path the same so Figma's import still resolves.</p>
       </div>
 
       {error && (
@@ -1800,74 +1820,38 @@ function SquadFigmaPluginSection({
 
       <div className="flex items-center gap-2 flex-wrap">
         <WMButton
-          variant="secondary"
-          size="md"
-          iconLeft={downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-          onClick={() => void downloadPlugin()}
-          disabled={downloading}
-        >
-          Download plugin (.zip)
-        </WMButton>
-        <WMButton
           variant="primary"
           size="md"
-          iconLeft={busy ? <Loader2 size={13} className="animate-spin" /> : (token ? <RefreshCw size={13} /> : <KeyRound size={13} />)}
-          onClick={() => void generate()}
+          iconLeft={busy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+          onClick={() => void downloadPlugin()}
           disabled={busy}
         >
-          {token ? 'Regenerate token' : 'Generate token'}
+          {token ? 'Download plugin (.zip)' : 'Generate token & download'}
         </WMButton>
         {token && (
-          <WMButton
-            variant="ghost"
-            size="md"
-            iconLeft={<X size={13} />}
-            onClick={() => void revoke()}
-            disabled={busy}
-          >
-            Revoke
-          </WMButton>
+          <>
+            <WMButton
+              variant="ghost"
+              size="md"
+              iconLeft={<RefreshCw size={13} />}
+              onClick={() => void regenerate()}
+              disabled={busy}
+            >
+              Regenerate token
+            </WMButton>
+            <WMButton
+              variant="ghost"
+              size="md"
+              iconLeft={<X size={13} />}
+              onClick={() => void revoke()}
+              disabled={busy}
+            >
+              Revoke
+            </WMButton>
+          </>
         )}
       </div>
     </Section>
-  )
-}
-
-function FieldRow({
-  label, value, mono, copied, onCopy,
-}: {
-  label: string
-  value: string
-  mono?: boolean
-  copied: boolean
-  onCopy?: () => void
-}) {
-  return (
-    <div>
-      <label className="block text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">{label}</label>
-      <div className="flex items-stretch gap-2">
-        <div
-          className={[
-            'flex-1 rounded-md border border-wm-border bg-wm-bg-card px-3 py-1.5 text-[12px] text-wm-text',
-            'overflow-x-auto whitespace-nowrap',
-            mono ? 'font-mono' : '',
-          ].join(' ')}
-          style={mono ? { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' } : undefined}
-        >
-          {value}
-        </div>
-        {onCopy && (
-          <WMButton
-            variant="ghost"
-            size="sm"
-            iconLeft={copied ? <Check size={13} /> : <Copy size={13} />}
-            onClick={onCopy}
-          >
-            {copied ? 'Copied' : 'Copy'}
-          </WMButton>
-        )}
-      </div>
-    </div>
   )
 }
 
