@@ -71,8 +71,19 @@ export const CRAWL_TAXONOMY: readonly CrawlTopic[] = [
   },
   {
     key: 'leadership', label: 'Leadership & Staff', group: 'identity', inventory_kind: 'fact_rich',
-    url_patterns: [/^\/(staff|team|leadership|elders|pastors|our-team)\/?/i, /^\/(staff|team)\//i],
+    // Word-boundary anchors (?:\/|$) so we don't accidentally match
+    // event-style URLs like /leadership-summit or /pastors-retreat.
+    // The prior `\/?` pattern allowed prefix matches and was pulling
+    // in conference / summit pages.
+    url_patterns: [
+      /^\/(staff|team|leadership|elders|pastors|our-team)(?:\/|$)/i,
+    ],
     keywords: ['lead pastor', 'executive pastor', 'elder', 'our team', 'staff directory'],
+    // Explicit URL deny-list: even if a page matches a leadership
+    // keyword, drop it from this topic if the URL slug points at an
+    // event/summit/conference/retreat/camp/register page. Honored by
+    // crawl-categorize.
+    exclude_url_patterns: [/(summit|conference|retreat|camp\b|register|event|gathering)/i],
     item_fields: ['name', 'role', 'bio', 'photo_url', 'email'],
     description: 'People who lead — names, roles, contact, photos.',
   },

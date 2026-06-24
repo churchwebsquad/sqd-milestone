@@ -781,6 +781,9 @@ function BucketBlock({
             programScope={bucket.programScope}
             snippetsByToken={snippetsByToken}
             reviewMode={reviewMode}
+            bucketKey={bucket.key}
+            marks={marks}
+            saveMark={saveMark}
           />
         ))}
         {reviewMode && saveMark && (
@@ -924,6 +927,9 @@ function BucketReviewCard({
                 programScope={bucket.programScope}
                 snippetsByToken={snippetsByToken}
                 reviewMode={true}
+                bucketKey={bucket.key}
+                marks={marks}
+                saveMark={saveMark}
               />
             ))}
           </div>
@@ -948,6 +954,9 @@ function BucketReviewCard({
                     programScope={bucket.programScope}
                     snippetsByToken={snippetsByToken}
                     reviewMode={true}
+                    bucketKey={bucket.key}
+                    marks={marks}
+                    saveMark={saveMark}
                   />
                 ))}
               </div>
@@ -1333,12 +1342,20 @@ function BaselineFieldRow({
 // ── Topic card ───────────────────────────────────────────────────────
 
 function TopicCard({
-  topic, programScope, snippetsByToken, reviewMode,
+  topic, programScope, snippetsByToken, reviewMode, bucketKey, marks, saveMark,
 }: {
   topic:            TopicRow
   programScope?:    'local' | 'global'
   snippetsByToken?: Map<string, SnippetRow>
   reviewMode:       boolean
+  /** When provided alongside `marks` + `saveMark`, enables per-item
+   *  omit affordances inside the topic (e.g. drop a misclassified
+   *  blog row before the partner sees it). Staff-side CrawlInventory
+   *  passes these; partner-side passes them too so the partner can
+   *  see the omitted state. */
+  bucketKey?:       string
+  marks?:           Map<string, Mark>
+  saveMark?:        SaveMark
 }) {
   // Partner's own site host — pulled from the `site_url` snippet the
   // crawl writes during fire-crawl-trigger. Used to demote same-domain
@@ -1542,14 +1559,35 @@ function TopicCard({
       {/* Blog sources — for blog_news, group all crawled URLs by their
           parent index path (/articles, /blog, /news, ...) so a single
           post can't masquerade as the blog itself. Replaces the noisy
-          per-post passage rows that used to render here. */}
-      {isBlogTopic && blogSources.length > 0 && (
-        <Section reviewMode={reviewMode} icon={Newspaper} title={`Blog sources (${blogSources.length})`}>
-          <div className="space-y-2">
-            {blogSources.map(s => <BlogSourceRow key={s.key} source={s} reviewMode={reviewMode} />)}
-          </div>
-        </Section>
-      )}
+          per-post passage rows that used to render here.
+
+          Per-row omit (staff-side cleanup): when bucketKey + marks +
+          saveMark are passed, each row carries a Skip button that
+          writes `item:<bucket>/<source-key>` mark. On the partner
+          side (reviewMode=true), omitted rows are filtered before
+          render so the partner never sees a misclassified row. */}
+      {isBlogTopic && blogSources.length > 0 && (() => {
+        const visibleSources = bucketKey && marks && reviewMode
+          ? blogSources.filter(s => marks.get(`item:${bucketKey}/${s.key}`)?.status !== 'omit')
+          : blogSources
+        if (visibleSources.length === 0) return null
+        return (
+          <Section reviewMode={reviewMode} icon={Newspaper} title={`Blog sources (${visibleSources.length})`}>
+            <div className="space-y-2">
+              {visibleSources.map(s => (
+                <BlogSourceRow
+                  key={s.key}
+                  source={s}
+                  reviewMode={reviewMode}
+                  bucketKey={bucketKey}
+                  marks={marks}
+                  saveMark={saveMark}
+                />
+              ))}
+            </div>
+          </Section>
+        )
+      })()}
 
       {/* Details — consolidated detail items + snippets + passages.
           Raw passages (PassageRow) are hidden in reviewMode because
@@ -2125,17 +2163,34 @@ function deriveBlogSources(topic: TopicRow): BlogSource[] {
   })
 }
 
-function BlogSourceRow({ source, reviewMode }: { source: BlogSource; reviewMode: boolean }) {
+function BlogSourceRow({
+  source, reviewMode, bucketKey, marks, saveMark,
+}: {
+  source:      BlogSource
+  reviewMode:  boolean
+  bucketKey?:  string
+  marks?:      Map<string, Mark>
+  saveMark?:   SaveMark
+}) {
   const [open, setOpen] = useState(false)
   const hasChildren = source.children.length > 0
   const countLabel = `${source.children.length} ${source.children.length === 1 ? 'post' : 'posts'} found`
+  const itemPath = bucketKey ? `item:${bucketKey}/${source.key}` : null
+  const omitted  = itemPath ? marks?.get(itemPath)?.status === 'omit' : false
+  const canEdit  = !!itemPath && !!saveMark
   return (
-    <div className={reviewMode
+    <div className={[
+      reviewMode
         ? 'bg-cream/40 border border-lavender/60 rounded-md px-3 py-2.5'
-        : 'bg-wm-bg-hover/30 border border-wm-border rounded-md px-3 py-2.5'}>
+        : 'bg-wm-bg-hover/30 border border-wm-border rounded-md px-3 py-2.5',
+      omitted ? 'opacity-60' : '',
+    ].join(' ')}>
       <div className="flex items-baseline justify-between gap-2 flex-wrap">
         <div className="min-w-0">
-          <p className={reviewMode ? 'text-sm text-deep-plum font-semibold' : 'text-[13px] text-wm-text font-semibold'}>
+          <p className={[
+            reviewMode ? 'text-sm text-deep-plum font-semibold' : 'text-[13px] text-wm-text font-semibold',
+            omitted ? 'line-through' : '',
+          ].join(' ')}>
             {source.label}
           </p>
           {source.parentUrl ? (
@@ -2153,7 +2208,30 @@ function BlogSourceRow({ source, reviewMode }: { source: BlogSource; reviewMode:
             </p>
           )}
         </div>
-        <Pill text={countLabel} reviewMode={reviewMode} />
+        <div className="inline-flex items-center gap-2 shrink-0">
+          <Pill text={countLabel} reviewMode={reviewMode} />
+          {canEdit && (
+            omitted ? (
+              <button
+                type="button"
+                onClick={() => void saveMark!(itemPath!, 'topic_item', 'approved', null)}
+                className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-bold text-purple-gray hover:text-deep-plum px-1.5 py-0.5 rounded-full border border-purple-gray/30 bg-cream"
+                title="Bring this row back into the inventory"
+              >
+                Restore
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void saveMark!(itemPath!, 'topic_item', 'omit', null)}
+                className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-bold text-purple-gray hover:text-deep-plum px-1.5 py-0.5 rounded-full hover:border hover:border-purple-gray/30 hover:bg-cream"
+                title="This row is misclassified or shouldn't be carried over — skip it on the new site."
+              >
+                <EyeOff size={10} /> Skip
+              </button>
+            )
+          )}
+        </div>
       </div>
       {source.summary && (
         <p className={reviewMode

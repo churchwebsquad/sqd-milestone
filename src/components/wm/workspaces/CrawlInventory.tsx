@@ -6,10 +6,10 @@
  * across both surfaces so staff can preview what the partner sees
  * before sending a Content Collection request.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ListChecks, Loader2, Sparkles, Send, Copy, X, Link as LinkIcon, ExternalLink, ChevronDown, ChevronUp, RefreshCw, Check } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
-import { InventoryView, type TopicRow, type SnippetRow } from '../inventory/InventoryView'
+import { InventoryView, type TopicRow, type SnippetRow, type Mark, type SaveMark } from '../inventory/InventoryView'
 import { loadStrategyBriefSections, strategyBriefToExternalPrefills } from '../../../lib/webStrategyBrief'
 
 interface Props {
@@ -33,6 +33,72 @@ export function CrawlInventory({ projectId }: Props) {
   // Cleared after ~4s.
   const [refreshFeedback, setRefreshFeedback] = useState<string | null>(null)
 
+  // Staff-side cleanup: omitting misclassified items writes a mark to
+  // strategy_content_collection_marks. We lazy-create a draft session
+  // on first omit (status='open', no due_at) so staff can tidy the
+  // inventory before sending it to the partner. The same session is
+  // reused when the partner is later invited.
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [marks, setMarks] = useState<Map<string, Mark>>(new Map())
+
+  const ensureSession = async (memberFallback: number | null): Promise<string | null> => {
+    if (sessionId) return sessionId
+    // Try latest session first (might exist if a partner-collection
+    // request was already created).
+    const { data: latest } = await supabase
+      .from('strategy_content_collection_sessions')
+      .select('id')
+      .eq('web_project_id', projectId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (latest?.id) { setSessionId(latest.id); return latest.id }
+    // No session yet — create a draft. due_at null = no partner
+    // deadline yet; the Request Content Collection button fills that
+    // in when the link is sent.
+    if (memberFallback == null) return null
+    const { data: created, error } = await supabase
+      .from('strategy_content_collection_sessions')
+      .insert({
+        web_project_id:     projectId,
+        member:             memberFallback,
+        due_at:             null,
+        inventory_snapshot: { topics: rows, snapped_at: new Date().toISOString() },
+      })
+      .select('id')
+      .single()
+    if (error || !created) return null
+    setSessionId(created.id)
+    return created.id
+  }
+
+  const memberRef = useRef<number | null>(null)
+
+  const saveMark: SaveMark = async (path, kind, status, note = null, extra = {}) => {
+    const sid = await ensureSession(memberRef.current)
+    if (!sid) return
+    const next: Mark = {
+      target_kind:                  kind,
+      target_path:                  path,
+      status,
+      client_note:                  note ?? null,
+      proposed_program_name:        extra?.proposed_program_name ?? null,
+      proposed_program_description: extra?.proposed_program_description ?? null,
+    }
+    setMarks(prev => new Map(prev).set(path, next))
+    await supabase
+      .from('strategy_content_collection_marks')
+      .upsert({
+        session_id:                   sid,
+        target_kind:                  kind,
+        target_path:                  path,
+        status,
+        client_note:                  note ?? null,
+        proposed_program_name:        extra?.proposed_program_name ?? null,
+        proposed_program_description: extra?.proposed_program_description ?? null,
+      }, { onConflict: 'session_id,target_path' })
+  }
+
   const load = async (opts: { isManualRefresh?: boolean } = {}) => {
     setLoading(true); setError(null)
     // Track what intake docs got picked up this round so the Refresh
@@ -55,6 +121,7 @@ export function CrawlInventory({ projectId }: Props) {
     // Active partner-share link (latest non-closed session for this project)
     // + off-crawl prefills assembled the same way ContentCollectionPage does.
     const member = projRes.data?.member ?? null
+    memberRef.current = member
     if (member != null) {
       const [sessionRes, apRes, discRes] = await Promise.all([
         // Surface the latest session regardless of status so staff can
@@ -85,6 +152,22 @@ export function CrawlInventory({ projectId }: Props) {
         setActiveShareUrl(`${window.location.origin}/portal/${apRes.data.portal_token}/hub/content-collection/${sessionRes.data.id}`)
       } else {
         setActiveShareUrl(null)
+      }
+      // Track the session id (if any) so saveMark can append to it
+      // without re-querying. Load existing marks too so the omit
+      // toggles render with the current state on first paint.
+      if (sessionRes.data?.id) {
+        setSessionId(sessionRes.data.id)
+        const { data: marksData } = await supabase
+          .from('strategy_content_collection_marks')
+          .select('target_kind, target_path, status, client_note, proposed_program_name, proposed_program_description')
+          .eq('session_id', sessionRes.data.id)
+        const m = new Map<string, Mark>()
+        for (const row of (marksData ?? []) as Mark[]) m.set(row.target_path, row)
+        setMarks(m)
+      } else {
+        setSessionId(null)
+        setMarks(new Map())
       }
       const ap = (apRes.data ?? {}) as Record<string, string | null>
       const disc = (discRes.data ?? {}) as Record<string, string | null>
@@ -242,6 +325,8 @@ export function CrawlInventory({ projectId }: Props) {
             reviewMode={false}
             groupAccordion
             externalPrefills={externalPrefills}
+            marks={marks}
+            saveMark={saveMark}
           />
         </div>
       )}
