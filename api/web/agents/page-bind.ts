@@ -20,6 +20,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { createClient } from '@supabase/supabase-js'
+import { snapshotPageVersion } from './_lib/pageSnapshot.js'
 
 export const maxDuration = 60
 
@@ -92,6 +93,20 @@ export default async function handler(req: any, res: any) {
     if (createErr || !newPage) return res.status(500).json({ error: `Page create failed: ${createErr?.message}` })
     pageId = (newPage as { id: string }).id
     created = true
+  }
+
+  // Snapshot the page's pre-bind state to strategy_web_page_versions
+  // BEFORE we wipe sections. This is the revert point if the bind
+  // produces an outcome the strategist doesn't like. Skip for
+  // newly-created pages (nothing meaningful to revert to). Fire-and-
+  // forget — snapshot failure logs but doesn't block the bind.
+  if (!created) {
+    await snapshotPageVersion({
+      sb,
+      webPageId:    pageId,
+      triggerKind:  'agent_run',
+      triggerLabel: `Page bind — ${pageSlug}`,
+    })
   }
 
   // Replace ALL existing sections on this page. The bind step now
