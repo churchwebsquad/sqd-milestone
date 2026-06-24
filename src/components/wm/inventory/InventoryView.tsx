@@ -22,9 +22,9 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Mic2, ClipboardList, Sparkles, HelpCircle, Quote, ArrowRight, BookOpen,
-  ExternalLink, CheckCircle2, Edit3, Circle, EyeOff,
+  ExternalLink, CheckCircle2, Edit3, Circle, EyeOff, Check, Pencil,
   Calendar, MapPin, MessageCircle, ListChecks, Hash, Plus,
-  ChevronDown, ChevronUp, AlertCircle, Loader2, Newspaper,
+  ChevronDown, ChevronUp, AlertCircle, Loader2, Newspaper, Layers,
 } from 'lucide-react'
 import { PARTNER_GROUPS, type PartnerBucket } from '../../../lib/webPartnerGroups'
 import { computeBaselineCoverage, type BaselineCoverage } from '../../../lib/webPartnerBaselines'
@@ -1596,42 +1596,136 @@ function TopicCard({
           already feed the form prefills via baseline extractors. For
           blog_news, individual-post passages are also hidden — the
           BlogSourcesSection above already accounts for those URLs. */}
-      {!isBlogTopic && (consolidatedDetails.length > 0 || (!reviewMode && dedupedPassages.length > 0)) && (
-        <Section reviewMode={reviewMode} icon={ClipboardList} title="Details">
-          {consolidatedDetails.length > 0 && (
-            <div className="space-y-2">
-              {consolidatedDetails.map((d, i) => <ConsolidatedDetailRow key={`d-${i}`} entry={d} reviewMode={reviewMode} />)}
-            </div>
-          )}
-          {!reviewMode && dedupedPassages.length > 0 && (
-            <div className={(consolidatedDetails.length > 0 ? 'mt-3' : '') + ' space-y-2'}>
-              {dedupedPassages.map((p, i) => <PassageRow key={`p-${i}`} passage={p} reviewMode={reviewMode} />)}
-            </div>
-          )}
-        </Section>
-      )}
-
-      {/* Programs — each as a dossier */}
-      {dedupedPrograms.length > 0 && (
-        <Section reviewMode={reviewMode} icon={Sparkles} title={`Programs (${dedupedPrograms.length})`}>
-          <div className="space-y-3">
-            {dedupedPrograms.map((p, i) => (
-              <ProgramDossier
-                key={`prog-${i}`}
-                program={p}
+      {/* Details — split top-level (ministry-wide facts) from weekly
+          lesson cruft. The categorizer doesn't distinguish "Service
+          Times" (ministry-wide) from "Lesson Date / Memory Verse /
+          Character Trait Theme / Week 4" (one specific weekly resource)
+          when both appear on the same crawled page; both land as
+          kind='detail' at the topic root and clutter the inventory.
+          We partition by label here so the lesson-week stuff collapses
+          into a sub-section and the partner sees the ministry-level
+          facts cleanly. */}
+      {(() => {
+        if (isBlogTopic) return null
+        const topLevelDetails = consolidatedDetails.filter(d => !isWeeklyLessonDetail(d))
+        const weeklyDetails   = consolidatedDetails.filter(d =>  isWeeklyLessonDetail(d))
+        if (topLevelDetails.length === 0 && weeklyDetails.length === 0 && (reviewMode || dedupedPassages.length === 0)) return null
+        return (
+          <Section reviewMode={reviewMode} icon={ClipboardList} title="Details">
+            {topLevelDetails.length > 0 && (
+              <div className="space-y-2">
+                {topLevelDetails.map((d, i) => (
+                  <ConsolidatedDetailRow
+                    key={`d-${i}`}
+                    entry={d}
+                    reviewMode={reviewMode}
+                    bucketKey={bucketKey}
+                    topicKey={topic.topic_key}
+                    marks={marks}
+                    saveMark={saveMark}
+                  />
+                ))}
+              </div>
+            )}
+            {weeklyDetails.length > 0 && (
+              <CollapsibleSubsection
                 reviewMode={reviewMode}
-                selfHost={selfHost}
-              />
-            ))}
-          </div>
-        </Section>
-      )}
+                title={`Weekly lesson details (${weeklyDetails.length})`}
+                hint="Date-stamped lesson info crawled from one specific weekly resource page. Usually safe to skim — fix or skip in bulk."
+              >
+                <div className="space-y-2">
+                  {weeklyDetails.map((d, i) => (
+                    <ConsolidatedDetailRow
+                      key={`wd-${i}`}
+                      entry={d}
+                      reviewMode={reviewMode}
+                      bucketKey={bucketKey}
+                      topicKey={topic.topic_key}
+                      marks={marks}
+                      saveMark={saveMark}
+                    />
+                  ))}
+                </div>
+              </CollapsibleSubsection>
+            )}
+            {!reviewMode && dedupedPassages.length > 0 && (
+              <div className={(topLevelDetails.length + weeklyDetails.length > 0 ? 'mt-3' : '') + ' space-y-2'}>
+                {dedupedPassages.map((p, i) => <PassageRow key={`p-${i}`} passage={p} reviewMode={reviewMode} />)}
+              </div>
+            )}
+          </Section>
+        )
+      })()}
+
+      {/* Programs — split true ministry programs from weekly resources.
+          Crawl-extracted "Elementary // Contentment Week 2 Resource"
+          and similar should NOT sit alongside actual programs like
+          "Youth Group" or "Kids Wednesdays". We detect resource-shaped
+          names and collapse them. */}
+      {dedupedPrograms.length > 0 && (() => {
+        const realPrograms     = dedupedPrograms.filter(p => !isWeeklyResourceProgram(p))
+        const resourcePrograms = dedupedPrograms.filter(p =>  isWeeklyResourceProgram(p))
+        return (
+          <Section reviewMode={reviewMode} icon={Sparkles} title={`Programs (${realPrograms.length})`}>
+            {realPrograms.length > 0 && (
+              <div className="space-y-3">
+                {realPrograms.map((p, i) => (
+                  <ProgramDossier
+                    key={`prog-${i}`}
+                    program={p}
+                    reviewMode={reviewMode}
+                    selfHost={selfHost}
+                    bucketKey={bucketKey}
+                    topicKey={topic.topic_key}
+                    marks={marks}
+                    saveMark={saveMark}
+                  />
+                ))}
+              </div>
+            )}
+            {resourcePrograms.length > 0 && (
+              <div className={realPrograms.length > 0 ? 'mt-3' : ''}>
+                <CollapsibleSubsection
+                  reviewMode={reviewMode}
+                  title={`Ministry resources (${resourcePrograms.length})`}
+                  hint="Weekly lesson resources, dated material, and per-session pages crawled in. These usually don't belong as standalone programs — skim and skip if outdated."
+                >
+                  <div className="space-y-3">
+                    {resourcePrograms.map((p, i) => (
+                      <ProgramDossier
+                        key={`res-${i}`}
+                        program={p}
+                        reviewMode={reviewMode}
+                        selfHost={selfHost}
+                        bucketKey={bucketKey}
+                        topicKey={topic.topic_key}
+                        marks={marks}
+                        saveMark={saveMark}
+                      />
+                    ))}
+                  </div>
+                </CollapsibleSubsection>
+              </div>
+            )}
+          </Section>
+        )
+      })()}
 
       {/* FAQs */}
       {faqs.length > 0 && (
         <Section reviewMode={reviewMode} icon={HelpCircle} title={`FAQs (${faqs.length})`}>
           <div className="space-y-2">
-            {faqs.map((f, i) => <FaqRow key={`f-${i}`} item={f} reviewMode={reviewMode} />)}
+            {faqs.map((f, i) => (
+              <FaqRow
+                key={`f-${i}`}
+                item={f}
+                reviewMode={reviewMode}
+                bucketKey={bucketKey}
+                topicKey={topic.topic_key}
+                marks={marks}
+                saveMark={saveMark}
+              />
+            ))}
           </div>
         </Section>
       )}
@@ -1813,7 +1907,7 @@ function MarkNoteBox({
 // ── Program dossier ──────────────────────────────────────────────────
 
 function ProgramDossier({
-  program, reviewMode, selfHost,
+  program, reviewMode, selfHost, bucketKey, topicKey, marks, saveMark,
 }: {
   program:    Item
   reviewMode: boolean
@@ -1821,6 +1915,12 @@ function ProgramDossier({
    *  are treated as internal and filtered out of partner-facing
    *  inventory. Sub-programs receive the same value. */
   selfHost?:  string
+  /** Optional. When set + saveMark is available, nested detail rows
+   *  carry an Edit button so partners can rewrite values in place. */
+  bucketKey?: string
+  topicKey?:  string
+  marks?:     Map<string, Mark>
+  saveMark?:  SaveMark
 }) {
   const name = String(program.name ?? 'Untitled program')
   const desc = String(program.description ?? '')
@@ -1888,7 +1988,17 @@ function ProgramDossier({
       {programDetails.length > 0 && (
         <DossierSlot icon={ClipboardList} title="Details" reviewMode={reviewMode}>
           <div className="space-y-2">
-            {programDetails.map((d, i) => <ConsolidatedDetailRow key={`pd-${i}`} entry={d} reviewMode={reviewMode} />)}
+            {programDetails.map((d, i) => (
+              <ConsolidatedDetailRow
+                key={`pd-${i}`}
+                entry={d}
+                reviewMode={reviewMode}
+                bucketKey={bucketKey}
+                topicKey={topicKey ? `${topicKey}/program-${slugify(String(program.name ?? '')).slice(0, 40) || 'unnamed'}` : undefined}
+                marks={marks}
+                saveMark={saveMark}
+              />
+            ))}
           </div>
         </DossierSlot>
       )}
@@ -1976,7 +2086,17 @@ function ProgramDossier({
 
       {programFaqs.length > 0 && (
         <DossierSlot icon={HelpCircle} title={`FAQs (${programFaqs.length})`} reviewMode={reviewMode}>
-          <div className="space-y-2">{programFaqs.map((f, i) => <FaqRow key={i} item={f} reviewMode={reviewMode} />)}</div>
+          <div className="space-y-2">{programFaqs.map((f, i) => (
+            <FaqRow
+              key={i}
+              item={f}
+              reviewMode={reviewMode}
+              bucketKey={bucketKey}
+              topicKey={topicKey ? `${topicKey}/program-${slugify(String(program.name ?? '')).slice(0, 40) || 'unnamed'}` : undefined}
+              marks={marks}
+              saveMark={saveMark}
+            />
+          ))}</div>
         </DossierSlot>
       )}
 
@@ -2021,14 +2141,71 @@ function DossierSlot({ icon: Icon, title, children, reviewMode }: { icon: typeof
 
 interface ConsolidatedEntry { value: string; labels: string[] }
 
-function ConsolidatedDetailRow({ entry, reviewMode }: { entry: ConsolidatedEntry; reviewMode: boolean }) {
+/** Stable slug for a detail entry's edit-mark path. Derives from the
+ *  first label when present; otherwise from the value itself. Same
+ *  input → same slug across renders. */
+function detailEntrySlug(entry: ConsolidatedEntry): string {
+  const seed = entry.labels[0] || entry.value
+  return slugify(seed).slice(0, 60) ||
+    `e-${Math.abs(hashString(entry.labels.join('|') + '::' + entry.value)).toString(36).slice(0, 6)}`
+}
+
+function ConsolidatedDetailRow({
+  entry, reviewMode, bucketKey, topicKey, marks, saveMark,
+}: {
+  entry:       ConsolidatedEntry
+  reviewMode:  boolean
+  bucketKey?:  string
+  topicKey?:   string
+  marks?:      Map<string, Mark>
+  saveMark?:   SaveMark
+}) {
+  // Partner override path: if marks + saveMark are wired and the partner
+  // has edited this entry's value, surface their edit instead of the
+  // crawled value. Falls back to the original entry.value when no edit
+  // exists. Same shape as EditableStaffCard's field-level overrides.
+  const editPath = bucketKey && topicKey ? `detail-edit:${bucketKey}/${topicKey}/${detailEntrySlug(entry)}` : null
+  const editMark = editPath ? marks?.get(editPath) : undefined
+  const currentValue = (editMark?.status === 'approved' && editMark.client_note != null)
+    ? editMark.client_note
+    : entry.value
+  const canEdit = reviewMode && !!editPath && !!saveMark
+
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(currentValue)
+  const [saving, setSaving] = useState(false)
+  useEffect(() => { if (!editing) setDraft(currentValue) }, [currentValue, editing])
+
+  const commit = async () => {
+    if (!editPath || !saveMark) return
+    const trimmed = draft.trim()
+    if (trimmed === entry.value.trim()) {
+      // Reverting to the original value clears the override mark so the
+      // crawl-extracted value flows through cleanly.
+      await saveMark(editPath, 'topic_item', 'approved', null)
+    } else {
+      setSaving(true)
+      try { await saveMark(editPath, 'topic_item', 'approved', trimmed) }
+      finally { setSaving(false) }
+    }
+    setEditing(false)
+  }
+  const cancel = () => { setDraft(currentValue); setEditing(false) }
+
   const valueClass = reviewMode
-    ? 'flex-1 text-deep-plum leading-snug whitespace-pre-line'
-    : 'flex-1 text-wm-text leading-snug whitespace-pre-line'
+    ? 'flex-1 min-w-0 text-deep-plum leading-snug whitespace-pre-line'
+    : 'flex-1 min-w-0 text-wm-text leading-snug whitespace-pre-line'
+  const wrapperClass = [
+    reviewMode
+      ? 'flex gap-3 text-sm bg-cream/40 border border-lavender/60 rounded-md px-3 py-2 group/detail relative'
+      : 'flex gap-3 text-[12px] bg-wm-bg-hover/40 border border-wm-border rounded-md px-3 py-2 group/detail relative',
+    editMark?.status === 'approved' && editMark.client_note != null
+      ? (reviewMode ? 'ring-1 ring-primary-purple/30' : 'ring-1 ring-wm-accent/30')
+      : '',
+  ].join(' ')
+
   return (
-    <div className={reviewMode
-        ? 'flex gap-3 text-sm bg-cream/40 border border-lavender/60 rounded-md px-3 py-2'
-        : 'flex gap-3 text-[12px] bg-wm-bg-hover/40 border border-wm-border rounded-md px-3 py-2'}>
+    <div className={wrapperClass}>
       <div className="min-w-[8rem] shrink-0 flex flex-wrap gap-1 content-start">
         {entry.labels.length === 0 ? (
           <span className={reviewMode ? 'text-deep-plum/60 text-xs italic' : 'text-wm-text-muted text-[11px] italic'}>—</span>
@@ -2043,14 +2220,79 @@ function ConsolidatedDetailRow({ entry, reviewMode }: { entry: ConsolidatedEntry
           </span>
         ))}
       </div>
-      <div className={valueClass}>
-        {isUrl(entry.value) ? (
-          <a href={entry.value} target="_blank" rel="noopener noreferrer"
-             className={reviewMode ? 'text-primary-purple hover:underline inline-flex items-center gap-0.5 font-mono text-xs break-all' : 'text-wm-accent hover:underline inline-flex items-center gap-0.5 font-mono text-[11px] break-all'}>
-            {entry.value} <ExternalLink size={9} />
-          </a>
-        ) : entry.value}
-      </div>
+      {editing ? (
+        <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+          <textarea
+            value={draft}
+            rows={Math.max(2, Math.min(8, draft.split('\n').length))}
+            onChange={e => setDraft(e.target.value)}
+            className="w-full text-sm text-deep-plum bg-white border border-primary-purple rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-purple/30 resize-y leading-snug"
+            autoFocus
+          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void commit()}
+              disabled={saving}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-white bg-primary-purple hover:bg-deep-plum rounded-full px-3 py-1 disabled:opacity-60"
+            >
+              {saving ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={cancel}
+              className="text-[11px] font-semibold text-purple-gray hover:text-deep-plum"
+            >
+              Cancel
+            </button>
+            {editMark?.client_note != null && (
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!editPath || !saveMark) return
+                  setSaving(true)
+                  try { await saveMark(editPath, 'topic_item', 'approved', null) }
+                  finally { setSaving(false) }
+                  setEditing(false)
+                }}
+                className="ml-auto text-[10px] font-semibold text-purple-gray hover:text-deep-plum"
+                title="Discard your edit and revert to the original value"
+              >
+                Revert to original
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className={valueClass}>
+            {isUrl(currentValue) ? (
+              <a href={currentValue} target="_blank" rel="noopener noreferrer"
+                 className={reviewMode ? 'text-primary-purple hover:underline inline-flex items-center gap-0.5 font-mono text-xs break-all' : 'text-wm-accent hover:underline inline-flex items-center gap-0.5 font-mono text-[11px] break-all'}>
+                {currentValue} <ExternalLink size={9} />
+              </a>
+            ) : currentValue}
+            {editMark?.client_note != null && (
+              <span className={reviewMode
+                ? 'ml-2 inline-flex items-center text-[9px] uppercase tracking-wider font-bold text-primary-purple bg-lavender-tint border border-primary-purple/30 rounded-full px-1.5 py-0.5'
+                : 'ml-2 inline-flex items-center text-[9px] uppercase tracking-wider font-bold text-wm-accent bg-wm-accent-tint border border-wm-accent/30 rounded-full px-1.5 py-0.5'}>
+                Edited
+              </span>
+            )}
+          </div>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => { setDraft(currentValue); setEditing(true) }}
+              className="shrink-0 self-start text-[10px] font-semibold text-primary-purple hover:text-deep-plum inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-lavender-tint/60 opacity-70 group-hover/detail:opacity-100 transition-opacity"
+              title="Edit this entry"
+            >
+              <Pencil size={10} /> Edit
+            </button>
+          )}
+        </>
+      )}
     </div>
   )
 }
@@ -2324,17 +2566,122 @@ function PassageRow({ passage, reviewMode }: { passage: Passage; reviewMode: boo
   )
 }
 
-function FaqRow({ item, reviewMode }: { item: Item; reviewMode: boolean }) {
+function FaqRow({
+  item, reviewMode, bucketKey, topicKey, marks, saveMark,
+}: {
+  item:        Item
+  reviewMode:  boolean
+  bucketKey?:  string
+  topicKey?:   string
+  marks?:      Map<string, Mark>
+  saveMark?:   SaveMark
+}) {
+  const origQuestion = String(item.question ?? '')
+  const origAnswer   = String(item.answer ?? '')
+  const slug = slugify(origQuestion).slice(0, 60) || `faq-${Math.abs(hashString(origQuestion + '::' + origAnswer)).toString(36).slice(0, 6)}`
+  const editPath = bucketKey && topicKey ? `faq-edit:${bucketKey}/${topicKey}/${slug}` : null
+  const qMark    = editPath ? marks?.get(`${editPath}/question`) : undefined
+  const aMark    = editPath ? marks?.get(`${editPath}/answer`)   : undefined
+  const question = (qMark?.status === 'approved' && qMark.client_note != null) ? qMark.client_note : origQuestion
+  const answer   = (aMark?.status === 'approved' && aMark.client_note != null) ? aMark.client_note : origAnswer
+  const canEdit  = reviewMode && !!editPath && !!saveMark
+  const edited   = (qMark?.client_note != null) || (aMark?.client_note != null)
+
+  const [editing, setEditing] = useState(false)
+  const [qDraft, setQDraft] = useState(question)
+  const [aDraft, setADraft] = useState(answer)
+  const [saving, setSaving] = useState(false)
+  useEffect(() => { if (!editing) { setQDraft(question); setADraft(answer) } }, [question, answer, editing])
+
+  const commit = async () => {
+    if (!editPath || !saveMark) return
+    setSaving(true)
+    try {
+      await saveMark(`${editPath}/question`, 'topic_item', 'approved', qDraft.trim() === origQuestion.trim() ? null : qDraft.trim())
+      await saveMark(`${editPath}/answer`,   'topic_item', 'approved', aDraft.trim() === origAnswer.trim()   ? null : aDraft.trim())
+    } finally { setSaving(false) }
+    setEditing(false)
+  }
+  const cancel = () => { setQDraft(question); setADraft(answer); setEditing(false) }
+  const revert = async () => {
+    if (!editPath || !saveMark) return
+    setSaving(true)
+    try {
+      await saveMark(`${editPath}/question`, 'topic_item', 'approved', null)
+      await saveMark(`${editPath}/answer`,   'topic_item', 'approved', null)
+    } finally { setSaving(false) }
+    setEditing(false)
+  }
+
   return (
-    <div className={reviewMode
-        ? 'bg-cream/40 border border-lavender/60 rounded-md px-3 py-2'
-        : 'bg-wm-bg-hover/40 border border-wm-border rounded-md px-3 py-2'}>
-      <p className={reviewMode ? 'text-sm text-deep-plum font-semibold' : 'text-[12px] text-wm-text font-semibold'}>
-        {String(item.question ?? '')}
-      </p>
-      <p className={reviewMode ? 'text-sm text-deep-plum/85 mt-1 leading-snug whitespace-pre-line' : 'text-[12px] text-wm-text/85 mt-1 leading-snug whitespace-pre-line'}>
-        {String(item.answer ?? '')}
-      </p>
+    <div className={[
+      reviewMode
+        ? 'bg-cream/40 border border-lavender/60 rounded-md px-3 py-2 group/faq relative'
+        : 'bg-wm-bg-hover/40 border border-wm-border rounded-md px-3 py-2 group/faq relative',
+      edited ? (reviewMode ? 'ring-1 ring-primary-purple/30' : 'ring-1 ring-wm-accent/30') : '',
+    ].join(' ')}>
+      {editing ? (
+        <div className="flex flex-col gap-2">
+          <label className="block">
+            <span className={reviewMode ? 'text-[10px] uppercase tracking-widest font-bold text-purple-gray' : 'text-[10px] uppercase tracking-widest font-bold text-wm-text-muted'}>Question</span>
+            <textarea
+              value={qDraft}
+              rows={2}
+              onChange={e => setQDraft(e.target.value)}
+              className="w-full mt-0.5 text-sm text-deep-plum bg-white border border-primary-purple rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-purple/30 resize-y leading-snug"
+              autoFocus
+            />
+          </label>
+          <label className="block">
+            <span className={reviewMode ? 'text-[10px] uppercase tracking-widest font-bold text-purple-gray' : 'text-[10px] uppercase tracking-widest font-bold text-wm-text-muted'}>Answer</span>
+            <textarea
+              value={aDraft}
+              rows={Math.max(3, Math.min(10, aDraft.split('\n').length + 1))}
+              onChange={e => setADraft(e.target.value)}
+              className="w-full mt-0.5 text-sm text-deep-plum bg-white border border-primary-purple rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-purple/30 resize-y leading-snug"
+            />
+          </label>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => void commit()} disabled={saving} className="inline-flex items-center gap-1 text-[11px] font-semibold text-white bg-primary-purple hover:bg-deep-plum rounded-full px-3 py-1 disabled:opacity-60">
+              {saving ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />} Save
+            </button>
+            <button type="button" onClick={cancel} className="text-[11px] font-semibold text-purple-gray hover:text-deep-plum">Cancel</button>
+            {edited && (
+              <button type="button" onClick={() => void revert()} className="ml-auto text-[10px] font-semibold text-purple-gray hover:text-deep-plum">
+                Revert to original
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-start justify-between gap-2">
+            <p className={reviewMode ? 'text-sm text-deep-plum font-semibold flex-1' : 'text-[12px] text-wm-text font-semibold flex-1'}>
+              {question}
+              {edited && (
+                <span className={reviewMode
+                    ? 'ml-2 inline-flex items-center text-[9px] uppercase tracking-wider font-bold text-primary-purple bg-lavender-tint border border-primary-purple/30 rounded-full px-1.5 py-0.5'
+                    : 'ml-2 inline-flex items-center text-[9px] uppercase tracking-wider font-bold text-wm-accent bg-wm-accent-tint border border-wm-accent/30 rounded-full px-1.5 py-0.5'}>
+                  Edited
+                </span>
+              )}
+            </p>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => { setQDraft(question); setADraft(answer); setEditing(true) }}
+                className="shrink-0 text-[10px] font-semibold text-primary-purple hover:text-deep-plum inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-lavender-tint/60 opacity-70 group-hover/faq:opacity-100 transition-opacity"
+                title="Edit this FAQ"
+              >
+                <Pencil size={10} /> Edit
+              </button>
+            )}
+          </div>
+          <p className={reviewMode ? 'text-sm text-deep-plum/85 mt-1 leading-snug whitespace-pre-line' : 'text-[12px] text-wm-text/85 mt-1 leading-snug whitespace-pre-line'}>
+            {answer}
+          </p>
+        </>
+      )}
     </div>
   )
 }
@@ -3130,6 +3477,107 @@ function dedupeTimeBearingEntries(entries: ConsolidatedEntry[]): ConsolidatedEnt
 function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'untitled'
 }
+
+// ── Weekly-lesson detail detector ────────────────────────────────────
+//
+// The categorizer's crawl pulls per-week lesson resources (Sunday school
+// curriculum, character-trait series, etc.) onto whatever ministry topic
+// page they sit under, then emits each lesson's metadata as
+// kind='detail' items at the topic root. The result: ministry-level
+// inventory polluted with "Lesson Date: November 23", "Memory Verse:
+// Ephesians 4:32", "Character Trait Theme: Contentment (Week 4)", and
+// dozens of other one-week-only facts that don't belong as top-level
+// truth about, say, the Kids Ministry.
+//
+// We detect these by label, not by value, since the labels are
+// LLM-extracted from the page and reliably echo the lesson curriculum's
+// vocabulary. Anything matching gets routed into a collapsed
+// "Weekly lesson details" sub-section so the partner can ignore or
+// bulk-skip them without losing legitimate ministry facts above.
+const WEEKLY_LESSON_LABEL_PATTERNS: RegExp[] = [
+  /\blesson\s*(date|topic|title|name)\b/i,
+  /\bmemory\s*verse\b/i,
+  /\bteaching\s*truth\b/i,
+  /\bscripture\s*reference\b/i,
+  /\bcharacter\s*trait\b/i,           // covers Character Trait, Character Trait Theme/Focus/Definition
+  /\btrait\s*definition\b/i,
+  /\bfamily\s*activity\b/i,
+  /\bwrap[\s-]*up\b/i,
+  /\bweek\b/i,                        // "Week" / "Week 3" / "Weekly Resource" labels
+  /\bpage\s*(subject|type)\b/i,
+  /\bresource\s*(type|source)\b/i,
+  /\bactivity\s*(name|description)\b/i,
+  /\bdiscussion\s*question/i,
+]
+function isWeeklyLessonDetail(entry: ConsolidatedEntry): boolean {
+  if (entry.labels.length === 0) return false
+  return entry.labels.some(l => WEEKLY_LESSON_LABEL_PATTERNS.some(re => re.test(l)))
+}
+
+// ── Weekly-resource program detector ─────────────────────────────────
+//
+// Similarly, the categorizer sometimes promotes individual weekly
+// resource pages (e.g. "Elementary // Contentment Week 2 Resource",
+// "Preschool Unit 4 Lesson 2") to top-level programs. They're not
+// ministry programs — they're discrete weekly material from a series.
+// Group them into a collapsed sub-section.
+const RESOURCE_PROGRAM_PATTERNS: RegExp[] = [
+  /\bweek\s*\d+\b/i,                  // "Week 2"
+  /\bunit\s*\d+\b/i,                  // "Unit 4"
+  /\blesson\s*\d+\b/i,                // "Lesson 2"
+  /\bresource\b/i,                    // catchall for "Weekly Resource", "Family Resource"
+  /\/\/.*\bweek\b/i,                  // "Elementary // Contentment Week 2 Resource"
+]
+function isWeeklyResourceProgram(program: Item): boolean {
+  const name = String(program.name ?? program.title ?? '').trim()
+  if (!name) return false
+  return RESOURCE_PROGRAM_PATTERNS.some(re => re.test(name))
+}
+
+// ── Collapsible sub-section (used inside inventory Sections) ────────
+function CollapsibleSubsection({
+  reviewMode, title, hint, children,
+}: {
+  reviewMode: boolean
+  title:      string
+  hint?:      string
+  children:   React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className={reviewMode ? 'mt-3 rounded-md border border-lavender/60 bg-cream/30' : 'mt-3 rounded-md border border-wm-border bg-wm-bg-hover/30'}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className={reviewMode
+          ? 'w-full flex items-center justify-between gap-3 px-3 py-2 text-left hover:bg-cream/60 rounded-md'
+          : 'w-full flex items-center justify-between gap-3 px-3 py-2 text-left hover:bg-wm-bg-hover/50 rounded-md'}
+      >
+        <span className="flex items-center gap-2">
+          <Layers size={11} className={reviewMode ? 'text-purple-gray' : 'text-wm-text-muted'} />
+          <span className={reviewMode
+              ? 'text-[11px] uppercase tracking-widest font-bold text-deep-plum'
+              : 'text-[11px] uppercase tracking-widest font-bold text-wm-text'}>
+            {title}
+          </span>
+        </span>
+        {open ? <ChevronUp size={12} className={reviewMode ? 'text-purple-gray' : 'text-wm-text-muted'} />
+              : <ChevronDown size={12} className={reviewMode ? 'text-purple-gray' : 'text-wm-text-muted'} />}
+      </button>
+      {open && (
+        <div className="px-3 pb-3 pt-1">
+          {hint && (
+            <p className={reviewMode ? 'text-[11px] text-purple-gray mb-2 leading-snug' : 'text-[11px] text-wm-text-muted mb-2 leading-snug'}>
+              {hint}
+            </p>
+          )}
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function renderCell(v: unknown): React.ReactNode {
   if (v == null) return null
   if (typeof v === 'string') {
