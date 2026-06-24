@@ -18,12 +18,13 @@
  * session row to status='submitted'.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Calendar, CheckCircle2, Loader2, AlertCircle, ArrowRight, ArrowLeft, Edit3, EyeOff } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { InventoryView, type TopicRow, type SnippetRow, type Mark as InvMark, type MarkStatus, type SaveMark } from '../components/wm/inventory/InventoryView'
 import { WMRichTextEditor } from '../components/wm/RichTextEditor'
 import { FileUploadField } from '../components/contentcollection/FileUploadField'
+import { SupplementalForm, type SupplementalBlockKind } from '../components/contentcollection/SupplementalForm'
 import type { AttachmentMetadata, AttachmentKind } from '../lib/contentCollectionAttachments'
 import { loadStrategyBriefSections, strategyBriefToExternalPrefills } from '../lib/webStrategyBrief'
 import { sanitizeTopicsForPartner } from '../lib/sanitizeInventoryForPartner'
@@ -105,6 +106,17 @@ interface SessionRow {
   hosting_approved:                  boolean
 
   submitted_at:                      string | null
+
+  // v98 — supplemental Page 2 (new) lets the partner paste fresh
+  // content when their current site doesn't reflect where they're
+  // headed. Blocks are typed by `kind` for downstream pipeline routing.
+  supplemental_blocks:               Array<{
+    kind:           string
+    label?:         string | null
+    body_markdown:  string
+    updated_at?:    string
+  }>
+  supplemental_submitted_at:         string | null
 }
 
 interface AttachmentRow {
@@ -176,9 +188,21 @@ interface PartnerCtx {
 
 export default function ContentCollectionPage() {
   const { token, sessionId } = useParams<{ token: string; sessionId: string }>()
+  const [searchParams] = useSearchParams()
   const [loading, setLoading]   = useState(true)
   const [notFound, setNotFound] = useState(false)
-  const [step, setStep]         = useState<1 | 2>(1)
+  // Staff can deep-link to Step 2 via `?step=2` — used when the partner
+  // already finished Step 1 inventory review and just needs to fill out
+  // the form, or when staff promote to the supplemental Page 2 flow.
+  // 3-step flow: 1 = Inventory Review, 2 = Supplemental Content (new),
+  // 3 = Technical Details Form (was step 2 before v98). `?step=N`
+  // deep-links to a specific step.
+  const [step, setStep]         = useState<1 | 2 | 3>(() => {
+    const s = searchParams.get('step')
+    if (s === '2') return 2
+    if (s === '3') return 3
+    return 1
+  })
 
   const [session, setSession]     = useState<SessionRow | null>(null)
   const [topics, setTopics]       = useState<TopicRow[]>([])
@@ -502,10 +526,41 @@ export default function ContentCollectionPage() {
                   : {}),
                 ...strategyBriefPrefills,
               }}
-              onContinue={() => setStep(2)}
+              onContinue={() => setStep(3)}
+              onSupplemental={() => setStep(2)}
             />
           )}
           {step === 2 && (
+            <SupplementalForm
+              initialBlocks={(session.supplemental_blocks ?? []) as Array<{ kind: SupplementalBlockKind; body_markdown: string; label?: string | null; updated_at?: string }>}
+              submittedAt={session.supplemental_submitted_at}
+              marks={marks}
+              saveMark={saveMark}
+              saveBlock={async (kind, body_markdown) => {
+                const existing = (session.supplemental_blocks ?? []) as Array<{ kind: string; body_markdown: string; label?: string | null; updated_at?: string }>
+                const now = new Date().toISOString()
+                const i = existing.findIndex(b => b.kind === kind)
+                const next = [...existing]
+                if (i >= 0) next[i] = { ...next[i], body_markdown, updated_at: now }
+                else        next.push({ kind, body_markdown, updated_at: now })
+                await saveSessionField('supplemental_blocks', next as SessionRow['supplemental_blocks'])
+              }}
+              onBack={() => setStep(1)}
+              onContinue={async () => {
+                // Clicking Continue both seals the supplemental page
+                // (stamps supplemental_submitted_at — downstream
+                // pipelines key off this to know fresh content was
+                // supplied) AND advances to Step 3. The supplemental
+                // can't be "submitted" standalone — finishing
+                // requires Step 3.
+                if (!session.supplemental_submitted_at) {
+                  await saveSessionField('supplemental_submitted_at', new Date().toISOString())
+                }
+                setStep(3)
+              }}
+            />
+          )}
+          {step === 3 && (
             <Step2Form
               session={session}
               recap={recap}
@@ -527,7 +582,7 @@ export default function ContentCollectionPage() {
 
 // ── Header ───────────────────────────────────────────────────────────
 
-function Header({ partner, session, step, token }: { partner: PartnerCtx; session: SessionRow; step: 1 | 2; token: string }) {
+function Header({ partner, session, step, token }: { partner: PartnerCtx; session: SessionRow; step: 1 | 2 | 3; token: string }) {
   const due = formatDue(session.due_at)
   return (
     <header className="bg-hero-gradient text-cream px-4 sm:px-6 py-6 md:py-8">
@@ -553,9 +608,9 @@ function Header({ partner, session, step, token }: { partner: PartnerCtx; sessio
           )}
         </div>
         <p className="text-cream/80 text-sm mt-2">
-          {step === 1
-            ? 'Step 1 of 2 — Review your site information and details.'
-            : 'Step 2 of 2 — Managing your new website.'}
+          {step === 1 ? 'Step 1 of 3 — Review your site information and details.'
+           : step === 2 ? 'Step 2 of 3 — Supply any fresh content you want to lead with.'
+           : 'Step 3 of 3 — Managing your new website.'}
         </p>
         <p className="text-cream/70 text-xs mt-1.5 inline-flex items-center gap-1.5">
           <CheckCircle2 size={11} className="text-cream/80 shrink-0" />
@@ -567,11 +622,12 @@ function Header({ partner, session, step, token }: { partner: PartnerCtx; sessio
   )
 }
 
-function ProgressBar({ step }: { step: 1 | 2 }) {
+function ProgressBar({ step }: { step: 1 | 2 | 3 }) {
   return (
-    <div className="mt-4 grid grid-cols-2 gap-2">
+    <div className="mt-4 grid grid-cols-3 gap-2">
       <div className={`h-1 rounded-full ${step >= 1 ? 'bg-cream' : 'bg-cream/30'}`} />
       <div className={`h-1 rounded-full ${step >= 2 ? 'bg-cream' : 'bg-cream/30'}`} />
+      <div className={`h-1 rounded-full ${step >= 3 ? 'bg-cream' : 'bg-cream/30'}`} />
     </div>
   )
 }
@@ -579,7 +635,7 @@ function ProgressBar({ step }: { step: 1 | 2 }) {
 // ── Step 1: Inventory Review (uses shared InventoryView) ────────────
 
 function Step1Review({
-  topicsByKey, snippetsByToken, marks, saveMark, recap, session, attachments, onAttachmentChange, externalPrefills, onContinue,
+  topicsByKey, snippetsByToken, marks, saveMark, recap, session, attachments, onAttachmentChange, externalPrefills, onContinue, onSupplemental,
 }: {
   topicsByKey:     Map<string, TopicRow>
   snippetsByToken: Map<string, SnippetRow>
@@ -590,7 +646,12 @@ function Step1Review({
   attachments:     AttachmentRow[]
   onAttachmentChange: (updater: (prev: AttachmentRow[]) => AttachmentRow[]) => void
   externalPrefills:   Record<string, string>
+  /** Continue forward into Step 3 (technical details). */
   onContinue:      () => void
+  /** Branch into Step 2 (supplemental content form) when the partner
+   *  signals they want to supply fresh content instead of carrying
+   *  the current site over. */
+  onSupplemental:  () => void
 }) {
   const copyAllowance = copyAllowanceFromRecap(recap)
   // "Start from scratch" suppresses the crawl entirely — the partner
@@ -631,6 +692,31 @@ function Step1Review({
           <p className="text-purple-gray text-xs leading-relaxed italic">
             Once you&rsquo;re finished, we&rsquo;ll use everything you&rsquo;ve shared to build a website strategy that reflects your church, supports your goals, and helps people take their next step.
           </p>
+
+          {/* Branch: optional fresh-content path. The partner can hop
+              straight to Step 2 (supplemental content form) instead of
+              reviewing the crawl inventory. The "use what's on my
+              current site" option is implicit — they just keep
+              scrolling and hit the Continue button at the bottom. */}
+          <div className="mt-4 rounded-xl border border-lavender bg-cream/40 p-4">
+            <p className="text-sm font-semibold text-deep-plum">
+              Want to supply fresh content instead?
+            </p>
+            <p className="text-purple-gray text-xs mt-1 leading-snug">
+              If your website is outdated or incomplete, we can build a new one using fresh content from you.
+              On the next page, let us know what content to include and what content from your current site
+              we should leave out.
+            </p>
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={onSupplemental}
+                className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-white bg-primary-purple hover:bg-deep-plum px-4 py-2 rounded-full"
+              >
+                Ignore Current Content &amp; Start Fresh <ArrowRight size={13} />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -1178,6 +1178,12 @@ export interface StrategyWebProject {
    *  to manual_sub_status). */
   pm_notes:                 string | null
 
+  // ── v97 — step timeline override layer ───────────────────
+  /** Staff override layer for the Planning step timeline. Keyed by
+   *  row identifier (phase:<phase>, milestone:<step>, cowork:<step>)
+   *  → status. Missing key falls back to the auto-derived status. */
+  step_timeline_overrides:  Record<string, 'done' | 'active' | 'upcoming' | 'skipped'>
+
   [key: string]: unknown
 }
 

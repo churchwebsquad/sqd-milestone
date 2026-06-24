@@ -7,7 +7,7 @@
  * before sending a Content Collection request.
  */
 import { useEffect, useState } from 'react'
-import { ListChecks, Loader2, Sparkles, Send, Copy, X, Link as LinkIcon, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react'
+import { ListChecks, Loader2, Sparkles, Send, Copy, X, Link as LinkIcon, ExternalLink, ChevronDown, ChevronUp, RefreshCw, Check } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { InventoryView, type TopicRow, type SnippetRow } from '../inventory/InventoryView'
 import { loadStrategyBriefSections, strategyBriefToExternalPrefills } from '../../../lib/webStrategyBrief'
@@ -28,9 +28,16 @@ export function CrawlInventory({ projectId }: Props) {
   // bucket cards rather than placeholder rollups like "Supplied
   // during onboarding."
   const [externalPrefills, setExternalPrefills] = useState<Record<string, string>>({})
+  // Short-lived confirmation toast after a refresh so staff can see
+  // which intake docs were picked up (e.g. "Strategy brief loaded").
+  // Cleared after ~4s.
+  const [refreshFeedback, setRefreshFeedback] = useState<string | null>(null)
 
-  const load = async () => {
+  const load = async (opts: { isManualRefresh?: boolean } = {}) => {
     setLoading(true); setError(null)
+    // Track what intake docs got picked up this round so the Refresh
+    // button can summarize what changed (briefly).
+    const intakeFound: string[] = []
     const [topicsRes, snippetsRes, projRes] = await Promise.all([
       supabase.from('web_project_topics')
         .select('id, topic_key, topic_label, voice_signal, passages, items, added_snippet_tokens, source_page_urls')
@@ -50,11 +57,14 @@ export function CrawlInventory({ projectId }: Props) {
     const member = projRes.data?.member ?? null
     if (member != null) {
       const [sessionRes, apRes, discRes] = await Promise.all([
+        // Surface the latest session regardless of status so staff can
+        // copy the Page 2 link even after the partner submits / closes
+        // a session — used for the "supply supplemental content"
+        // workflow where the partner may need to revisit Page 2.
         supabase
           .from('strategy_content_collection_sessions')
           .select('id')
           .eq('web_project_id', projectId)
-          .neq('status', 'closed')
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle(),
@@ -92,6 +102,24 @@ export function CrawlInventory({ projectId }: Props) {
       // AM-curated authoritative version.
       const brief = await loadStrategyBriefSections(projectId)
       const briefPrefills = strategyBriefToExternalPrefills(brief)
+      if (brief) {
+        // Tell staff exactly which brief sections got extracted — if
+        // the brief was uploaded but a section is missing here, the
+        // partner's brief headings didn't match the parser's keywords.
+        const sections: string[] = []
+        if (brief.mission)        sections.push('mission')
+        if (brief.vision)         sections.push('vision')
+        if (brief.values)         sections.push('values')
+        if (brief.founding_story) sections.push('founding story')
+        if (brief.taglines)       sections.push('taglines')
+        intakeFound.push(
+          sections.length > 0
+            ? `Strategy brief (${sections.join(', ')})`
+            : 'Strategy brief (no recognized sections — check the brief\'s headings)',
+        )
+      }
+      if (disc.mission_vision_statement) intakeFound.push('Discovery questionnaire')
+      if (photoUrl)                       intakeFound.push('Photo library')
       setExternalPrefills({
         ...(photoUrl ? { 'branding_photos/photo_library': photoUrl } : {}),
         ...(socialLines.length > 0 ? { 'social_newsletter/social_links': socialLines.join('\n') } : {}),
@@ -107,6 +135,16 @@ export function CrawlInventory({ projectId }: Props) {
       setExternalPrefills({})
     }
     setLoading(false)
+
+    // Manual-refresh-only confirmation. Auto-clears after 4s so it
+    // doesn't linger across long sessions.
+    if (opts.isManualRefresh) {
+      const msg = intakeFound.length > 0
+        ? `Refreshed · Picked up ${intakeFound.join(', ')}.`
+        : 'Refreshed · No intake docs found yet.'
+      setRefreshFeedback(msg)
+      setTimeout(() => setRefreshFeedback(null), 4000)
+    }
   }
   useEffect(() => { void load() }, [projectId])
 
@@ -137,20 +175,42 @@ export function CrawlInventory({ projectId }: Props) {
           <span>{totalItems} pieces</span>
           <span>·</span>
           <span>{totalSnippets} snippets</span>
-          <button type="button" onClick={() => void load()} className="ml-2 text-wm-accent hover:underline text-[11px]">
-            Refresh
+          <button
+            type="button"
+            onClick={() => void load({ isManualRefresh: true })}
+            disabled={loading}
+            className="ml-2 inline-flex items-center gap-1 text-wm-accent hover:underline text-[11px] disabled:opacity-50"
+            title="Re-read crawl content + intake docs (strategy brief, discovery, photo library)"
+          >
+            {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+            Refresh content + intake docs
           </button>
           <RequestContentCollectionButton projectId={projectId} rows={rows} hasActiveLink={!!activeShareUrl} onCreated={url => setActiveShareUrl(url)} />
         </div>
       </header>
 
-      {activeShareUrl && (
-        <div className="px-5 py-2.5 bg-wm-accent-tint/40 border-b border-wm-accent/20 flex items-center gap-2 flex-wrap">
-          <LinkIcon size={11} className="text-wm-accent shrink-0" />
-          <span className="text-[11px] font-semibold text-wm-text shrink-0">Partner review link:</span>
-          <code className="text-[11px] font-mono text-wm-text flex-1 min-w-0 truncate">{activeShareUrl}</code>
-          <PartnerLinkActions url={activeShareUrl} />
+{refreshFeedback && (
+        <div className="px-5 py-2 bg-emerald-50 border-b border-emerald-200 text-[11.5px] text-emerald-900 inline-flex items-center gap-1.5">
+          <Check size={11} className="text-emerald-600" />
+          {refreshFeedback}
         </div>
+      )}
+
+      {activeShareUrl && (
+        <>
+          <div className="px-5 py-2.5 bg-wm-accent-tint/40 border-b border-wm-accent/20 flex items-center gap-2 flex-wrap">
+            <LinkIcon size={11} className="text-wm-accent shrink-0" />
+            <span className="text-[11px] font-semibold text-wm-text shrink-0">Full content collection (Steps 1 → 3):</span>
+            <code className="text-[11px] font-mono text-wm-text flex-1 min-w-0 truncate">{activeShareUrl}</code>
+            <PartnerLinkActions url={activeShareUrl} />
+          </div>
+          <div className="px-5 py-2.5 bg-wm-accent-tint/20 border-b border-wm-accent/15 flex items-center gap-2 flex-wrap">
+            <LinkIcon size={11} className="text-wm-accent shrink-0" />
+            <span className="text-[11px] font-semibold text-wm-text shrink-0">Supplemental content (Step 2 only):</span>
+            <code className="text-[11px] font-mono text-wm-text flex-1 min-w-0 truncate">{activeShareUrl}?step=2</code>
+            <PartnerLinkActions url={`${activeShareUrl}?step=2`} />
+          </div>
+        </>
       )}
 
       {error && (

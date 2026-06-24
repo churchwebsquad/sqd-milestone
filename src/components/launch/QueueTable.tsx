@@ -38,21 +38,31 @@ export function QueueTable({
 }: Props) {
   const [dragId, setDragId] = useState<string | null>(null)
 
-  // Status lookup so we can split rows into queue / paused / launched.
-  // 'paused' comes from the scheduler-side derivation in useLaunchPlan
-  // (manual_sub_status === 'paused' takes precedence over phase).
+  // Status lookup so we can split rows into queue / paused / blocked
+  // / launched. Paused and blocked come from useLaunchPlan's scheduler
+  // mapping (manual_sub_status takes precedence over phase).
   const siteById = new Map(sites.map(s => [s.id, s]))
-  const isPausedRow = (id: string) => siteById.get(id)?.status === 'paused'
+  const isPausedRow  = (id: string) => siteById.get(id)?.status === 'paused'
+  const isBlockedRow = (id: string) => siteById.get(id)?.status === 'blocked'
 
-  // Main queue = active + waiting_feedback. Paused and launched are
-  // peeled off into their own collapsed groups below — they don't
+  // Main queue = active + waiting_feedback. Paused / blocked / launched
+  // are peeled off into their own collapsed groups below — they don't
   // carry priority numbers since they don't consume queue capacity.
+  // Uses effective_phase so a project manually marked launched via the
+  // step-timeline override lands in the Launched group + drops out of
+  // the active queue, even if current_phase hasn't been written back.
   const visible = [...rows]
-    .filter(r => r.current_phase !== 'launched' && !r.archived && !isPausedRow(r.id))
+    .filter(r =>
+      r.effective_phase !== 'launched'
+      && !r.archived
+      && !isPausedRow(r.id)
+      && !isBlockedRow(r.id),
+    )
     .sort((a, b) => (a.priority_order ?? 99_999) - (b.priority_order ?? 99_999))
 
   const paused   = rows.filter(r => !r.archived && isPausedRow(r.id))
-  const launched = rows.filter(r => r.current_phase === 'launched' && !r.archived)
+  const blocked  = rows.filter(r => !r.archived && isBlockedRow(r.id))
+  const launched = rows.filter(r => r.effective_phase === 'launched' && !r.archived)
 
   const handleDrop = (targetId: string) => {
     if (!dragId || dragId === targetId) {
@@ -137,6 +147,33 @@ export function QueueTable({
           </summary>
           <ul className="px-4 py-2 space-y-1">
             {paused.map(p => (
+              <li key={p.id} className="flex items-center gap-2 text-[12.5px]">
+                <button
+                  type="button"
+                  onClick={() => onSelect(p.id)}
+                  className="text-deep-plum hover:text-primary-purple font-semibold"
+                >
+                  {p.church_name ?? p.name}
+                </button>
+                <span className="text-[10px] font-mono text-purple-gray">#{p.member}</span>
+                {p.status_reason && (
+                  <span className="text-[11px] text-purple-gray italic truncate" title={p.status_reason}>
+                    — {p.status_reason}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {blocked.length > 0 && (
+        <details className="border-t border-lavender" open>
+          <summary className="px-4 py-2 text-[11px] uppercase tracking-widest font-bold text-red-700 cursor-pointer hover:bg-red-50/40">
+            Blocked ({blocked.length})
+          </summary>
+          <ul className="px-4 py-2 space-y-1">
+            {blocked.map(p => (
               <li key={p.id} className="flex items-center gap-2 text-[12.5px]">
                 <button
                   type="button"
@@ -262,9 +299,9 @@ function RowAndRecovery({
             {row.church_name ?? row.name}
             <ArrowRight size={11} className="opacity-50" />
           </button>
-          <div className="flex items-center gap-2 mt-0.5 text-[11px] text-purple-gray">
+          <div className="flex items-center gap-2 mt-0.5 text-[11px] text-purple-gray flex-wrap">
             <span className="font-mono">#{row.member}</span>
-            {row.current_phase && <><span>·</span><span>{row.current_phase}</span></>}
+            {row.current_phase && <><span>·</span><span className="uppercase tracking-wider text-[10px] font-bold text-primary-purple">{row.current_phase}</span></>}
             {isWaiting && <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold uppercase">Waiting feedback</span>}
             {row.hard_deadline && (
               <span className={`ml-1 inline-flex items-center gap-0.5 ${hardDeadlineMissed ? 'text-red-700 font-bold' : 'text-amber-700'}`}>
@@ -272,6 +309,11 @@ function RowAndRecovery({
               </span>
             )}
           </div>
+          {row.activity_label && (
+            <p className="text-[11px] text-deep-plum/75 mt-1 leading-snug" title={row.activity_label}>
+              {row.activity_label}
+            </p>
+          )}
         </td>
         {/* Projected — highlighted column. */}
         <td className="px-2 py-2.5 align-top bg-primary-purple/5 border-l border-r border-primary-purple/15">
@@ -440,10 +482,16 @@ function sprintLabel(startWeek: number, endWeek: number, cfg: SchedulerConfig): 
   return s === e ? `Dev S${s}` : `Dev S${s}–S${e}`
 }
 
+/** "Jan 6, 2026" — year is always shown. We previously omitted the
+ *  year to keep cells compact, but that masked a real failure mode:
+ *  projected launches a year past target (e.g. "Jan 27" rendering for
+ *  a 2027 schedule when the partner targeted Jan 6 2026) looked
+ *  identical to a near-term date. Always-show-year fixes the
+ *  interpretation. */
 function shortDate(iso: string): string {
   try {
     const d = new Date(`${iso}T00:00:00`)
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   } catch { return iso }
 }
 
@@ -526,54 +574,25 @@ function NumberCell({
  *  anywhere on the cell opens the picker, regardless of where the
  *  user lands. Avoids the m/d/y vs Mon-Day mismatch between Target
  *  and Projected columns. */
-/** Displays "Sep 4" but edits via the browser's native date picker.
- *  Implementation note: we previously overlayed an `opacity:0`
- *  `<input type=date>` and relied on the browser opening the picker
- *  on click. That only works in Chrome — Firefox and Safari only
- *  open the picker when their visible calendar indicator is clicked,
- *  which we hid. The reliable pattern is `input.showPicker()` fired
- *  from an explicit click handler on the chip wrapper. */
+/** Native date input, styled to fit the cell. We previously overlayed
+ *  an invisible input with sr-only / opacity-0 and called showPicker(),
+ *  but the picker positioned relative to a 1px input → often opened
+ *  off-screen. Rendering a real visible input means the browser
+ *  positions the picker reliably relative to the visible field. */
 function DateCell({
-  value, onChange, placeholder = '—',
+  value, onChange,
 }: {
-  value:       string | null
-  onChange:    (iso: string | null) => void
-  placeholder?: string
+  value:    string | null
+  onChange: (iso: string | null) => void
+  placeholder?: string  // kept for API compatibility, unused
 }) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const openPicker = () => {
-    const el = inputRef.current
-    if (!el) return
-    try {
-      el.showPicker?.()
-    } catch {
-      // Older Safari throws here; fall back to focus + click.
-      el.focus()
-      el.click()
-    }
-  }
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={openPicker}
-      onKeyDown={e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPicker() }
-      }}
-      className="inline-flex items-center min-w-[80px] rounded border border-lavender bg-white px-2 py-1 hover:border-primary-purple/60 focus:border-primary-purple focus:outline-none cursor-pointer"
-      title="Click to edit"
-    >
-      <span className={`block text-[13px] ${value ? 'text-deep-plum' : 'text-purple-gray italic'}`}>
-        {value ? shortDate(value) : placeholder}
-      </span>
-      <input
-        ref={inputRef}
-        type="date"
-        value={value ?? ''}
-        onChange={e => onChange(e.target.value || null)}
-        className="sr-only"
-        tabIndex={-1}
-      />
-    </div>
+    <input
+      type="date"
+      value={value ?? ''}
+      onChange={e => onChange(e.target.value || null)}
+      className="text-[13px] font-mono text-deep-plum bg-white border border-lavender rounded px-2 py-1 hover:border-primary-purple/60 focus:border-primary-purple focus:outline-none cursor-pointer min-w-[130px]"
+      title="Click to edit target launch"
+    />
   )
 }

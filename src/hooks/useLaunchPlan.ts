@@ -30,10 +30,22 @@ import {
   type SiteSchedule,
 } from '../lib/launchScheduler'
 import { solveAllHelp, type RecoveryResult } from '../lib/launchRecoverySolver'
+import { summarizeQueueActivity } from '../lib/webQueueActivity'
+import { effectiveCurrentPhase } from '../lib/webEffectivePhase'
 import type { StrategyWebProject, StrategyDevWeeklyAllocation, WebProjectPhase } from '../types/database'
 
 export interface ProjectLaunchRow extends StrategyWebProject {
-  church_name:  string | null
+  church_name:           string | null
+  /** Sub-label for the build-queue Partner cell — distinguishes
+   *  "not started" / "crawled, CC not sent" / "CC submitted" /
+   *  cowork stage / etc within the broad current_phase. Computed in
+   *  useLaunchPlan from a bulk web_project_topics + sessions query. */
+  activity_label:        string | null
+  /** current_phase + step_timeline_overrides honoring force-launched
+   *  overrides. Drives queue grouping (Launched section) + scheduler
+   *  exclusion. Always falls through to current_phase when no
+   *  override pushes the project elsewhere. */
+  effective_phase:       WebProjectPhase
 }
 
 export interface UseLaunchPlanReturn {
@@ -87,10 +99,55 @@ export function useLaunchPlan(): UseLaunchPlanReturn {
       const projects = (projectsRes.data ?? []) as StrategyWebProject[]
       const accounts = (accountsRes.data ?? []) as Array<{ member: number; church_name: string | null }>
       const accountByMember = new Map(accounts.map(a => [a.member, a.church_name]))
-      setRows(projects.map(p => ({
-        ...p,
-        church_name: accountByMember.get(p.member as number) ?? p.church_name ?? null,
-      })))
+
+      // Bulk-load the signals that drive the queue activity sub-label.
+      // Two extra queries scoped to the project IDs we already have —
+      // cheaper than per-row lookups and keeps the queue render fast.
+      const projectIds = projects.map(p => p.id)
+      const [topicCountsRes, sessionsRes] = projectIds.length === 0
+        ? [{ data: [] }, { data: [] }]
+        : await Promise.all([
+            supabase
+              .from('web_project_topics')
+              .select('web_project_id')
+              .in('web_project_id', projectIds),
+            supabase
+              .from('strategy_content_collection_sessions')
+              .select('web_project_id, status, submitted_at, supplemental_submitted_at, created_at')
+              .in('web_project_id', projectIds)
+              .order('created_at', { ascending: false }),
+          ])
+      const hasCrawlSet = new Set<string>()
+      for (const t of ((topicCountsRes as { data?: Array<{ web_project_id: string }> }).data ?? [])) {
+        hasCrawlSet.add(t.web_project_id)
+      }
+      // Latest session per project (the order BY created_at desc + Map
+      // overwrite-on-set semantics means we keep the first row per id).
+      type SessionRow = { web_project_id: string; status: string; submitted_at: string | null; supplemental_submitted_at: string | null }
+      const latestSessionByProject = new Map<string, SessionRow>()
+      for (const s of ((sessionsRes as { data?: SessionRow[] }).data ?? [])) {
+        if (!latestSessionByProject.has(s.web_project_id)) latestSessionByProject.set(s.web_project_id, s)
+      }
+
+      setRows(projects.map(p => {
+        const cc = latestSessionByProject.get(p.id) ?? null
+        const effective = effectiveCurrentPhase(p)
+        // Activity label reads from the EFFECTIVE phase so a manually-
+        // marked-launched project doesn't keep showing "awaiting crawl"
+        // just because current_phase is still 'intake' in the DB.
+        const activity = summarizeQueueActivity({ ...p, current_phase: effective }, {
+          hasCrawl: hasCrawlSet.has(p.id),
+          contentCollection: cc
+            ? { status: cc.status, submitted_at: cc.submitted_at, supplemental_submitted_at: cc.supplemental_submitted_at }
+            : null,
+        })
+        return {
+          ...p,
+          church_name:     accountByMember.get(p.member as number) ?? p.church_name ?? null,
+          activity_label:  activity,
+          effective_phase: effective,
+        }
+      }))
       type Row = StrategyDevWeeklyAllocation & { base_capacity_override?: number | string | null }
       setAdjustments(((adjRes.data ?? []) as Row[]).map(a => ({
         week_starting: a.week_starting,
@@ -113,8 +170,14 @@ export function useLaunchPlan(): UseLaunchPlanReturn {
   // sub-status of 'paused' takes precedence over the phase-derived
   // status — paused projects are excluded from active scheduling.
   const sites = useMemo<SchedulerSite[]>(() => rows.map((r, i) => {
-    const phaseStatus = statusFromPhase(r.current_phase as WebProjectPhase)
-    const status = r.manual_sub_status === 'paused' ? 'paused' as const : phaseStatus
+    // Use the effective phase (current_phase + manual launched override)
+    // so a project the user marked launched via the step-timeline picker
+    // drops out of active scheduling and lands in the Launched group.
+    const phaseStatus = statusFromPhase(r.effective_phase as WebProjectPhase)
+    const status: SchedulerSite['status'] =
+        r.manual_sub_status === 'paused'  ? 'paused'
+      : r.manual_sub_status === 'blocked' ? 'blocked'
+      : phaseStatus
     return {
       id:                r.id,
       priority:          r.priority_order ?? (10_000 + i),

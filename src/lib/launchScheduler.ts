@@ -78,14 +78,14 @@ export function calBtw(a: Date, b: Date): number {
  *    - in_progress     → standard build → review → final flow
  *    - waiting_feedback → partner-side review complete; enter sim in
  *                         finalizing state with final_hours remaining
- *    - paused          → AM manually paused; excluded entirely (no slot,
- *                         no projected date, no sprint allocation)
+ *    - paused          → AM manually paused; excluded entirely
+ *    - blocked         → AM manually flagged blocked; excluded entirely
  *    - launched        → done; excluded entirely
  */
 export interface SchedulerSite {
   id:             string
   priority:       number
-  status:         'in_progress' | 'waiting_feedback' | 'paused' | 'launched'
+  status:         'in_progress' | 'waiting_feedback' | 'paused' | 'blocked' | 'launched'
   planned_dev_hours: number
   tracked_hours:  number
   /** 0..1 progress fraction. Optional; used by paceOf when present. */
@@ -383,7 +383,7 @@ function computeScheduleInner(
   const reviewDays = Math.max(0, Math.floor(cfg.review_days ?? 0))
 
   const active = [...sites]
-    .filter(s => s.status !== 'launched' && s.status !== 'paused')
+    .filter(s => s.status !== 'launched' && s.status !== 'paused' && s.status !== 'blocked')
     .sort((a, b) => a.priority - b.priority)
 
   const states = new Map<string, SiteState>()

@@ -319,6 +319,17 @@ export function PlanningWorkspace({ project, onChange }: Props) {
           milestones={milestones}
           activity={activity}
           effectiveProgress={{}}
+          onOverride={async (updates) => {
+            const next: Record<string, 'done' | 'active' | 'upcoming' | 'skipped'> = {
+              ...(project.step_timeline_overrides ?? {}),
+            }
+            for (const [rowKey, status] of Object.entries(updates)) {
+              if (status == null) delete next[rowKey]
+              else                next[rowKey] = status
+            }
+            await plan.setProjectField(project.id, { step_timeline_overrides: next })
+            void onChange()
+          }}
         />
 
         {/* ─── Build-phase tracked hours ───────────────────────── */}
@@ -507,46 +518,33 @@ function parseIsoUtc(iso: string): Date {
   return new Date(Date.UTC(y, m - 1, d))
 }
 
-/** Displays "Sep 4, 2026" but edits via the native date picker. Uses
- *  showPicker() so Firefox/Safari open the picker on click (not just
- *  Chrome — they only honor a click on the visible calendar indicator
- *  which we don't render). */
+/** Native date input. The browser positions the picker relative to
+ *  the visible input element — the prior overlay approach with an
+ *  sr-only / opacity-0 input caused the picker to open off-screen.
+ *  We keep a "Sep 4, 2026" display label below the input so the
+ *  formatted date stays visible (most browsers render the input as
+ *  "MM/DD/YYYY" by default). */
 function DatePickerChip({
-  value, onChange, placeholder,
+  value, onChange,
 }: {
   value:       string | null
   onChange:    (iso: string | null) => void
-  placeholder: string
+  placeholder?: string  // kept for API compatibility, unused
 }) {
-  const ref = useRef<HTMLInputElement>(null)
-  const open = () => {
-    const el = ref.current
-    if (!el) return
-    try { el.showPicker?.() }
-    catch { el.focus(); el.click() }
-  }
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={open}
-      onKeyDown={e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open() }
-      }}
-      className="mt-1 w-full rounded-md border border-wm-border bg-wm-bg-elevated px-2 py-1.5 hover:border-wm-accent/60 focus:border-wm-accent focus:outline-none cursor-pointer"
-      title="Click to edit"
-    >
-      <span className={`block text-[13px] ${value ? 'text-wm-text' : 'text-wm-text-muted italic'}`}>
-        {value ? fmtDate(parseIsoUtc(value)) : placeholder}
-      </span>
+    <div className="mt-1">
       <input
-        ref={ref}
         type="date"
         value={value ?? ''}
         onChange={e => onChange(e.target.value || null)}
-        className="sr-only"
-        tabIndex={-1}
+        className="w-full text-[13px] px-2 py-1.5 rounded-md border border-wm-border bg-wm-bg-elevated hover:border-wm-accent/60 focus:border-wm-accent focus:outline-none cursor-pointer"
+        title="Click to edit target launch"
       />
+      {value && (
+        <p className="text-[10.5px] text-wm-text-muted mt-1">
+          {fmtDate(parseIsoUtc(value))}
+        </p>
+      )}
     </div>
   )
 }
@@ -628,7 +626,8 @@ function formatSprintSpan(startWeek: number, endWeek: number, sprintWeeks: numbe
   const lastSprintStart = new Date(monday.getTime() + lastSprintIdx * sprintWeeks * 7 * dayMs)
   const end = new Date(lastSprintStart.getTime() + (sprintWeeks * 7 - 1) * dayMs)
   const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
-  return `${fmt(start)}–${fmt(end)}`
+  const endFmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+  return `${fmt(start)}–${endFmt(end)}`
 }
 
 /** Subtract N business days from a UTC ms timestamp. */

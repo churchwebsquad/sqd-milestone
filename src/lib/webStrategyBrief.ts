@@ -60,7 +60,12 @@ export async function loadStrategyBriefSections(webProjectId: string): Promise<S
   if (!url) return null
 
   try {
-    const res = await fetch(url)
+    // Cache-bust so the partner / staff can re-upload a brief and
+    // hit Refresh without the browser HTTP cache serving the prior
+    // version. Without this, staff would have to hard-reload the
+    // page after uploading.
+    const cacheBust = `?t=${Date.now()}`
+    const res = await fetch(`${url}${cacheBust}`, { cache: 'no-store' })
     if (!res.ok) return null
     const md = await res.text()
     return parseStrategyBriefSections(md)
@@ -120,19 +125,36 @@ export function parseStrategyBriefSections(md: string): StrategyBriefSections {
   }
   flush()
 
-  // Direct field mappings — case-insensitive lookup on the heading map.
-  out.mission = out.byHeading['mission'] ?? undefined
-  out.vision  = out.byHeading['vision']  ?? undefined
-  out.values  = out.byHeading['values']  ?? undefined
+  // Direct field mappings — exact heading first, then substring fall-
+  // backs so briefs with non-canonical headings ("Our Mission",
+  // "Vision & Calling", etc.) still parse.
+  out.mission = pickByHeading(out.byHeading, ['mission'], /\bmission\b/)
+  out.vision  = pickByHeading(out.byHeading, ['vision'],  /\bvision\b/)
+  out.values  = pickByHeading(out.byHeading, ['values', 'core values'], /\b(values|core values)\b/)
 
-  // Founding story: prefer explicit headings, fall back to common
-  // brief synonyms. First non-empty wins.
-  for (const key of [
-    'founding story', 'our story', 'origin story', 'history',
-    'historical reflections',
-  ]) {
-    const body = out.byHeading[key]
-    if (body) { out.founding_story = body; break }
+  // Founding story: try a wide net of heading keywords. Picks the
+  // FIRST matching section so briefs with multiple history blocks
+  // surface the most prominent one. Falls back to body keyword scan
+  // if no heading matches.
+  out.founding_story = pickByHeading(
+    out.byHeading,
+    [
+      'founding story', 'our story', 'origin story', 'history',
+      'historical reflections', 'background', 'our background',
+      'heritage', 'where we started',
+    ],
+    /\b(found|origin|history|background|heritage|our story|where we (started|began))\b/,
+  )
+  // Final fallback: scan section BODIES for "founded in YYYY" /
+  // "started in YYYY" patterns. Picks the first section whose body
+  // mentions the founding cue.
+  if (!out.founding_story) {
+    for (const [, body] of Object.entries(out.byHeading)) {
+      if (/\b(founded|established|started|began|planted)\s+(in\s+\d{4}|by\b)/i.test(body)) {
+        out.founding_story = body
+        break
+      }
+    }
   }
 
   // Taglines: most briefs don't carry a literal "Repeated taglines"
@@ -175,6 +197,24 @@ function normalizeHeading(s: string): string {
 /** Strip leading / trailing blank lines, leave inner markdown alone. */
 function trimBlockBody(text: string): string {
   return text.replace(/^[\s\n]+/, '').replace(/[\s\n]+$/, '')
+}
+
+/** Pick a section body from the parsed heading map. Tries exact-match
+ *  keys first (case-insensitive — keys are already normalized), then
+ *  falls back to a regex sweep of all heading keys. Returns the first
+ *  non-empty body or undefined. */
+function pickByHeading(
+  byHeading: Record<string, string>,
+  exactKeys: string[],
+  fallbackPattern: RegExp,
+): string | undefined {
+  for (const k of exactKeys) {
+    if (byHeading[k]) return byHeading[k]
+  }
+  for (const k of Object.keys(byHeading)) {
+    if (fallbackPattern.test(k) && byHeading[k]) return byHeading[k]
+  }
+  return undefined
 }
 
 /** Build the externalPrefills entries the inventory cares about from a

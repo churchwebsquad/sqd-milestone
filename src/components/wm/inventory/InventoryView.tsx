@@ -22,7 +22,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Mic2, ClipboardList, Sparkles, HelpCircle, Quote, ArrowRight, BookOpen,
-  ExternalLink, CheckCircle2, Edit3, Circle,
+  ExternalLink, CheckCircle2, Edit3, Circle, EyeOff,
   Calendar, MapPin, MessageCircle, ListChecks, Hash, Plus,
   ChevronDown, ChevronUp, AlertCircle, Loader2, Newspaper,
 } from 'lucide-react'
@@ -55,7 +55,7 @@ export interface Passage  { url: string; title?: string; text: string }
 export type Item = Record<string, unknown> & { kind?: string; source_url?: string }
 export interface SnippetRow { token: string; label: string; expansion: string }
 
-export type MarkStatus = 'approved' | 'outdated' | 'approved_keep_as_is'
+export type MarkStatus = 'approved' | 'outdated' | 'approved_keep_as_is' | 'omit'
 export interface Mark {
   target_kind:                   string
   target_path:                   string
@@ -859,11 +859,44 @@ function BucketReviewCard({
     )
   }
 
+  // Bucket-level omit. Partners can drop this whole card from the new
+  // site — surfaces a "Skip this on the new site" toggle in the header.
+  // When omitted the card collapses to header + restore affordance and
+  // downstream pipelines (atomizer, prompt builder, sitemap) read the
+  // bucket:<key> mark to exclude this bucket entirely.
+  const bucketPath = `bucket:${bucket.key}`
+  const isOmitted = (marks?.get(bucketPath)?.status ?? null) === 'omit'
+
   return (
-    <article id={`bucket:${bucket.key}`} className="bg-white border border-lavender rounded-2xl overflow-hidden scroll-mt-24">
-      <header className="px-4 md:px-5 py-3 border-b border-lavender bg-lavender-tint/20">
-        <p className="text-deep-plum font-semibold">{bucket.label}</p>
+    <article
+      id={bucketPath}
+      className={`bg-white border rounded-2xl overflow-hidden scroll-mt-24 transition-opacity ${
+        isOmitted ? 'border-purple-gray/30 opacity-70' : 'border-lavender'
+      }`}
+    >
+      <header className={`px-4 md:px-5 py-3 border-b ${
+        isOmitted ? 'border-purple-gray/20 bg-cream/60' : 'border-lavender bg-lavender-tint/20'
+      }`}>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <p className={`font-semibold ${isOmitted ? 'text-purple-gray line-through' : 'text-deep-plum'}`}>
+              {bucket.label}
+            </p>
+          </div>
+          {saveMark && (
+            <OmitToggle
+              isOmitted={isOmitted}
+              onOmit={() => saveMark(bucketPath, 'topic_item', 'omit', null)}
+              onRestore={() => saveMark(bucketPath, 'topic_item', 'approved', null)}
+            />
+          )}
+        </div>
       </header>
+      {isOmitted ? (
+        <div className="px-4 md:px-5 py-3 text-[12.5px] text-purple-gray italic">
+          We won't carry anything from <strong className="not-italic">{bucket.label.toLowerCase()}</strong> over to the new site. Click <strong className="not-italic text-deep-plum">Restore</strong> above to bring it back.
+        </div>
+      ) : (
       <div className="p-4 md:p-5 space-y-3">
         {coverage.map(c => (
           <BucketReviewField
@@ -944,7 +977,45 @@ function BucketReviewCard({
           />
         )}
       </div>
+      )}
     </article>
+  )
+}
+
+/** Inline header-level toggle that flips a card between active and
+ *  omitted. Partners hit "Skip this on the new site" to drop a card;
+ *  the same control flips to "Restore" when omitted. Subtle — sits
+ *  in the header opposite the bucket title. */
+function OmitToggle({
+  isOmitted, onOmit, onRestore,
+}: { isOmitted: boolean; onOmit: () => void; onRestore: () => void }) {
+  if (isOmitted) {
+    return (
+      <div className="inline-flex items-center gap-2 shrink-0">
+        <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-bold text-purple-gray bg-cream border border-purple-gray/30 rounded-full px-2 py-0.5">
+          <EyeOff size={10} />
+          Omitted
+        </span>
+        <button
+          type="button"
+          onClick={onRestore}
+          className="text-[11px] font-semibold text-primary-purple hover:text-deep-plum underline-offset-2 hover:underline"
+        >
+          Restore
+        </button>
+      </div>
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={onOmit}
+      className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-purple-gray hover:text-deep-plum px-2.5 py-1 rounded-full border border-transparent hover:border-purple-gray/30 hover:bg-cream transition-colors"
+      title="Drop this section from the new site"
+    >
+      <EyeOff size={11} />
+      Skip on new site
+    </button>
   )
 }
 
@@ -2297,6 +2368,7 @@ function StatusPicker({ current, onPick }: { current: MarkStatus | null; onPick:
   const opts: { key: MarkStatus; icon: typeof CheckCircle2; label: string; idle: string; active: string }[] = [
     { key: 'approved', icon: CheckCircle2, label: 'Approved',     idle: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200', active: 'bg-emerald-500 text-white border-emerald-500 shadow-sm' },
     { key: 'outdated', icon: Edit3,        label: 'Needs update', idle: 'bg-amber-50 text-amber-800 hover:bg-amber-100 border-amber-200',       active: 'bg-amber-500 text-white border-amber-500 shadow-sm' },
+    { key: 'omit',     icon: EyeOff,       label: 'Omit',         idle: 'bg-cream text-purple-gray hover:bg-lavender-tint border-purple-gray/30',  active: 'bg-purple-gray text-white border-purple-gray shadow-sm' },
   ]
   return (
     <div className="inline-flex flex-wrap gap-1.5">

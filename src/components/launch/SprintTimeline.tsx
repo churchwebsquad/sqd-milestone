@@ -309,7 +309,7 @@ function SprintCard({
         <p className="font-serif text-[16px] font-semibold text-deep-plum leading-tight">
           {sprintStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}
           {' – '}
-          {sprintEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}
+          {sprintEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
         </p>
         <p className="text-[10px] uppercase tracking-widest font-bold text-purple-gray mt-0.5">
           Sprint {sprintIdx + 1}
