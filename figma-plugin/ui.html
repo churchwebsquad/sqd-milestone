@@ -186,6 +186,19 @@
           '↻ ' + a.skipped_count + ' already in style guide',
           '✗ ' + a.failed_count + ' failed',
         ]
+        if (a.swap_count && a.swap_count > 0) {
+          aLines.push('⇄ ' + a.swap_count + ' designer layout swap' + (a.swap_count === 1 ? '' : 's') + ' applied')
+        }
+        var swappedAll = []
+          .concat((a.placed || []).filter(function (p) { return p && p.swapped_from }))
+          .concat((a.skipped || []).filter(function (p) { return p && p.swapped_from }))
+        if (swappedAll.length > 0) {
+          aLines.push('')
+          aLines.push('Layout swaps:')
+          for (var sp = 0; sp < swappedAll.length; sp++) {
+            aLines.push('  ' + swappedAll[sp].layer_name + ' ← ' + swappedAll[sp].swapped_from)
+          }
+        }
         if (a.failed && a.failed.length > 0) {
           aLines.push('')
           aLines.push('Failed:')

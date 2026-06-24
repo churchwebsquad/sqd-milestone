@@ -49,7 +49,7 @@ figma.ui.onmessage = async function (msg) {
     }
     if (msg.type === 'assemble-style-guide') {
       var data2 = await fetchProjectExport()
-      var result2 = await assembleStyleGuide(data2.project, data2.templates)
+      var result2 = await assembleStyleGuide(data2.project, data2.templates, data2.layout_swaps || {})
       figma.ui.postMessage({ type: 'assemble-result', result: result2 })
       return
     }
@@ -110,11 +110,31 @@ async function runPreflight(templates) {
 }
 
 // ── Style guide assembly ──────────────────────────────────────────
-async function assembleStyleGuide(project, templates) {
+// The `templates` list is the EFFECTIVE template list — already resolved
+// server-side through the swap chain (section override → project swap →
+// wireframe). The `layoutSwaps` map is keyed by wireframe template id
+// and tells us "this slot was wireframed as X but the designer chose Y";
+// we stamp the swap info onto each promoted local component so later
+// waves (handoff exports, dev specs) can read it back.
+async function assembleStyleGuide(project, templates, layoutSwaps) {
   // documentAccess: 'dynamic-page' lazily loads pages. currentPage
   // is always loaded on plugin start, but call loadAsync() defensively
   // so iterating its children is guaranteed safe.
   await figma.currentPage.loadAsync()
+
+  // Build a reverse map: effective template id → wireframe template id
+  // (only when the two differ). Lets us stamp swap context onto each
+  // promoted local component.
+  var effectiveToWireframe = {}
+  if (layoutSwaps && typeof layoutSwaps === 'object') {
+    for (var fromKey in layoutSwaps) {
+      if (!Object.prototype.hasOwnProperty.call(layoutSwaps, fromKey)) continue
+      var swap = layoutSwaps[fromKey]
+      if (swap && swap.to && swap.to.template_id) {
+        effectiveToWireframe[swap.to.template_id] = swap.from || null
+      }
+    }
+  }
 
   var sgFrame = ensureStyleGuideFrame(project)
 
@@ -141,7 +161,23 @@ async function assembleStyleGuide(project, templates) {
       var existing = existingByKey.get(t.figma_component_key)
       existing.y = yOffset
       yOffset += existing.height + 80
-      skipped.push({ layer_name: t.layer_name })
+      // Re-stamp swap data so swap edits between runs aren't masked by
+      // stale pluginData on the already-placed component. If no swap
+      // applies, clear the prior stamp.
+      var existingWf = effectiveToWireframe[t.template_id]
+      if (existingWf) {
+        existing.setPluginData('squad_swapped_from_template_id', String(existingWf.template_id || ''))
+        existing.setPluginData('squad_swapped_from_layer_name',  String(existingWf.layer_name || ''))
+        existing.setPluginData('squad_swapped_from_family',      String(existingWf.family || ''))
+      } else {
+        existing.setPluginData('squad_swapped_from_template_id', '')
+        existing.setPluginData('squad_swapped_from_layer_name',  '')
+        existing.setPluginData('squad_swapped_from_family',      '')
+      }
+      skipped.push({
+        layer_name:   t.layer_name,
+        swapped_from: existingWf ? (existingWf.layer_name || existingWf.template_id) : null,
+      })
       continue
     }
 
@@ -157,8 +193,19 @@ async function assembleStyleGuide(project, templates) {
       localComp.setPluginData('brixies_origin_key', t.figma_component_key)
       localComp.setPluginData('brixies_layer_name', t.layer_name)
       localComp.setPluginData('brixies_family',     t.family)
+      // If this effective template was swapped in for a wireframe, stamp
+      // the swap context so handoff tooling can show "swapped from X".
+      var wf = effectiveToWireframe[t.template_id]
+      if (wf) {
+        localComp.setPluginData('squad_swapped_from_template_id', String(wf.template_id || ''))
+        localComp.setPluginData('squad_swapped_from_layer_name',  String(wf.layer_name || ''))
+        localComp.setPluginData('squad_swapped_from_family',      String(wf.family || ''))
+      }
       yOffset += localComp.height + 80
-      placed.push({ layer_name: t.layer_name })
+      placed.push({
+        layer_name:    t.layer_name,
+        swapped_from:  wf ? (wf.layer_name || wf.template_id) : null,
+      })
     } catch (err) {
       failed.push({
         layer_name: t.layer_name,
@@ -171,11 +218,19 @@ async function assembleStyleGuide(project, templates) {
   sgFrame.resize(sgFrame.width, Math.max(yOffset + 80, 200))
   figma.viewport.scrollAndZoomIntoView([sgFrame])
 
+  // Count the layout swaps the designer recorded so the UI can show
+  // "3 layout swaps applied" alongside the placement counts.
+  var swapCount = 0
+  for (var swapKey in (layoutSwaps || {})) {
+    if (Object.prototype.hasOwnProperty.call(layoutSwaps, swapKey)) swapCount++
+  }
+
   return {
     style_guide_frame_id: sgFrame.id,
     placed_count:         placed.length,
     skipped_count:        skipped.length,
     failed_count:         failed.length,
+    swap_count:           swapCount,
     placed:               placed,
     skipped:              skipped,
     failed:               failed,

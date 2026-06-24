@@ -32,7 +32,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FileText, Loader2, Plus, Trash2, Eye, Edit3, Upload, Archive, MoreHorizontal,
-  ChevronDown, ChevronRight, MessageSquare, ArrowRight, Copy, X, History,
+  ChevronDown, ChevronRight, MessageSquare, ArrowRight, Copy, X, History, Save, Check,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { loadEditorSnippets } from '../../../lib/webSnippets'
@@ -45,6 +45,7 @@ import { WMCatalogSidePanel } from '../CatalogSidePanel'
 import { WMAIAttribution } from '../AIAttribution'
 import { PageBriefImportModal } from '../PageBriefImportModal'
 import { PageVersionDrawer } from '../PageVersionDrawer'
+import { snapshotPageVersion } from '../../../lib/webPageVersions'
 import { AddPageModal } from '../AddPageModal'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { PagePreview } from '../PagePreview'
@@ -686,6 +687,10 @@ function PageEditor({
   // Version history drawer (revertible snapshots taken before agent
   // runs + on manual saves; see src/lib/webPageVersions.ts).
   const [historyOpen, setHistoryOpen] = useState(false)
+  // Manual save-snapshot state. The user clicks "Save snapshot" to
+  // capture the current page+sections as a revertible checkpoint without
+  // running an agent or rebinding anything.
+  const [savingSnapshot, setSavingSnapshot] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
 
   const [sections, setSections] = useState<WebSection[]>([])
   const [templates, setTemplates] = useState<Record<string, WebContentTemplate>>({})
@@ -1581,6 +1586,41 @@ function PageEditor({
           />
           <button
             type="button"
+            disabled={savingSnapshot === 'saving'}
+            onClick={async () => {
+              setSavingSnapshot('saving')
+              const { data: sess } = await supabase.auth.getSession()
+              const userId = sess.session?.user?.id ?? null
+              const id = await snapshotPageVersion(supabase, page.id, {
+                triggerKind:  'manual_save',
+                triggerLabel: 'Manual save',
+                createdBy:    userId,
+              })
+              setSavingSnapshot(id ? 'saved' : 'failed')
+              setTimeout(() => setSavingSnapshot('idle'), id ? 1800 : 3000)
+            }}
+            className={[
+              'inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded transition-colors disabled:opacity-60 disabled:cursor-wait',
+              savingSnapshot === 'failed'
+                ? 'text-wm-danger bg-wm-danger-bg hover:bg-wm-danger-bg/80'
+                : 'text-wm-text-muted hover:text-wm-text hover:bg-wm-bg-hover',
+            ].join(' ')}
+            title={
+              savingSnapshot === 'failed'
+                ? 'Snapshot save failed. Check console for details and retry.'
+                : "Capture the page's current state as a revertible snapshot. Open History to restore."
+            }
+          >
+            {savingSnapshot === 'saving' && <Loader2 size={11} className="animate-spin" />}
+            {savingSnapshot === 'saved'  && <Check    size={11} />}
+            {savingSnapshot === 'failed' && <X        size={11} />}
+            {savingSnapshot === 'idle'   && <Save     size={11} />}
+            {savingSnapshot === 'saved'  ? 'Saved'
+              : savingSnapshot === 'failed' ? 'Save failed'
+              : 'Save snapshot'}
+          </button>
+          <button
+            type="button"
             onClick={() => setHistoryOpen(true)}
             className="inline-flex items-center gap-1 text-[11px] font-semibold text-wm-text-muted hover:text-wm-text px-2 py-1 rounded hover:bg-wm-bg-hover"
             title="Version history for this page (revert to any prior agent run or save)"
@@ -1682,6 +1722,7 @@ function PageEditor({
               templates={templates}
               cardTemplates={cardTemplates}
               snippetMap={snippetMap}
+              page={page}
               onSelectSection={(id) => {
                 setViewMode('edit')
                 setSelectedSectionId(id)

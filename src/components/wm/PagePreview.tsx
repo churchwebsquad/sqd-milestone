@@ -10,7 +10,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Image as ImageIcon } from 'lucide-react'
 import { renderSectionToHtml, type SnippetMap } from '../../lib/webBrixiesRender'
-import type { WebContentTemplate, WebSection } from '../../types/database'
+import { composeSectionName } from '../../lib/webSectionRoles'
+import type { WebContentTemplate, WebPage, WebSection } from '../../types/database'
 
 interface Props {
   sections: WebSection[]
@@ -21,11 +22,16 @@ interface Props {
   cardTemplates?: Record<string, WebContentTemplate>
   snippetMap: SnippetMap
   onSelectSection: (id: string) => void
+  /** The page these sections belong to. Used to compose the role-based
+   *  section label ("Section 3 · Innerpage hero"). Optional so existing
+   *  call sites that don't have the page handy still render — the label
+   *  degrades gracefully. */
+  page?: Pick<WebPage, 'name'> | null
 }
 
 const BRIXIES_VIEWPORT_PX = 1512
 
-export function PagePreview({ sections, templates, cardTemplates, snippetMap, onSelectSection }: Props) {
+export function PagePreview({ sections, templates, cardTemplates, snippetMap, onSelectSection, page }: Props) {
   if (sections.length === 0) {
     return (
       <div className="text-center py-16 text-[12px] text-wm-text-muted">
@@ -61,9 +67,18 @@ export function PagePreview({ sections, templates, cardTemplates, snippetMap, on
               ) : (
                 <FreehandPreview section={section} />
               )}
-              <span className="absolute bottom-0 left-0 right-0 z-10 px-3 py-1.5 bg-wm-text/80 text-wm-bg-elevated text-[11px] font-semibold opacity-0 group-hover/section:opacity-100 transition-opacity">
-                {template?.layer_name ?? 'Freehand section'}
-                {template?.family && <span className="ml-2 font-normal opacity-80">{template.family}</span>}
+              <span className="absolute bottom-0 left-0 right-0 z-10 px-3 py-1.5 bg-wm-text/80 text-wm-bg-elevated text-[11px] font-semibold opacity-0 group-hover/section:opacity-100 transition-opacity flex items-center gap-2">
+                {/* compact:false keeps the "Section N" ordinal even after a
+                    role is set — strategists scan the previews by ordinal. */}
+                <span>{composeSectionName({ page: page ?? null, section, compact: false })}</span>
+                {template?.layer_name && (
+                  <span
+                    className="font-mono font-normal opacity-70"
+                    title="Wireframe Brixies layout"
+                  >
+                    {template.layer_name}
+                  </span>
+                )}
               </span>
             </button>
           )

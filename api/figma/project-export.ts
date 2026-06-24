@@ -66,7 +66,7 @@ export default async function handler(req: any, res: any) {
   // the token equality is our gate.
   const { data: project, error: projErr } = await sb
     .from('strategy_web_projects')
-    .select('id, name, church_short_name, figma_share_token, archived')
+    .select('id, name, church_short_name, figma_share_token, archived, figma_layout_swaps')
     .eq('id', projectId)
     .maybeSingle()
   if (projErr) return res.status(500).json({ error: 'project_load_failed', details: projErr.message })
@@ -79,33 +79,83 @@ export default async function handler(req: any, res: any) {
     return res.status(401).json({ error: 'invalid_token' })
   }
 
-  // Templates used by the project = distinct content_template_id across
-  // all this project's non-archived web_sections, joined with the
-  // catalog. Only return templates that have a figma_component_key
-  // set — the plugin can't import without one.
+  // Templates used by the project = distinct EFFECTIVE template ids
+  // across the project's non-archived web_sections. The "effective"
+  // template is the resolver chain:
+  //   section.figma_template_override_id   (per-section override)
+  //     ?? project.figma_layout_swaps[wireframe_template_id]?.to_template_id  (site-wide swap)
+  //     ?? wireframe_template_id            (original lo-fi choice)
+  // Mirrors the client-side resolver in src/lib/webFigmaLayoutSwap.ts.
+  // Without this, the Figma plugin would always assemble a style guide
+  // for the WIREFRAME templates, ignoring the designer's swaps.
   const { data: sectionRows, error: sectionsErr } = await sb
     .from('web_sections')
-    .select('content_template_id, web_pages!inner(web_project_id, archived)')
+    .select('content_template_id, figma_template_override_id, web_pages!inner(web_project_id, archived)')
     .eq('web_pages.web_project_id', projectId)
     .eq('web_pages.archived', false)
     .not('content_template_id', 'is', null)
   if (sectionsErr) return res.status(500).json({ error: 'sections_load_failed', details: sectionsErr.message })
 
-  const templateIds = Array.from(new Set(
-    (sectionRows ?? [])
-      .map((r: { content_template_id: string | null }) => r.content_template_id)
-      .filter((id): id is string => !!id),
-  ))
+  type FigmaSwapEntry = { to_template_id: string | null }
+  const swapMap = ((project as { figma_layout_swaps: Record<string, FigmaSwapEntry> | null }).figma_layout_swaps ?? {}) as Record<string, FigmaSwapEntry>
 
-  let templates: Array<{ id: string; layer_name: string; family: string; figma_component_key: string | null }> = []
-  if (templateIds.length > 0) {
+  const resolveEffective = (wireframeId: string | null, overrideId: string | null): string | null => {
+    if (overrideId) return overrideId
+    if (wireframeId && swapMap[wireframeId]?.to_template_id) return swapMap[wireframeId].to_template_id
+    return wireframeId
+  }
+
+  const effectiveIds = new Set<string>()
+  const wireframeIds = new Set<string>()
+  for (const row of (sectionRows ?? []) as Array<{ content_template_id: string | null; figma_template_override_id: string | null }>) {
+    if (row.content_template_id) wireframeIds.add(row.content_template_id)
+    const eff = resolveEffective(row.content_template_id, row.figma_template_override_id)
+    if (eff) effectiveIds.add(eff)
+  }
+
+  // Load the catalog rows for every id we mention (effective + wireframe)
+  // so we can return both the assembled style-guide list AND a
+  // wireframe→effective mapping the plugin can surface as "originally
+  // wireframed as X" hints.
+  const allIds = Array.from(new Set([...effectiveIds, ...wireframeIds]))
+  let catalog: Array<{ id: string; layer_name: string; family: string; figma_component_key: string | null }> = []
+  if (allIds.length > 0) {
     const { data: tpls, error: tplErr } = await sb
       .from('web_content_templates')
       .select('id, layer_name, family, figma_component_key')
-      .in('id', templateIds)
+      .in('id', allIds)
     if (tplErr) return res.status(500).json({ error: 'templates_load_failed', details: tplErr.message })
-    templates = ((tpls ?? []) as typeof templates)
-      .filter(t => !!t.figma_component_key)
+    catalog = (tpls ?? []) as typeof catalog
+  }
+  const catalogById = new Map(catalog.map(t => [t.id, t]))
+
+  // The plugin assembles components from the EFFECTIVE list. Filter to
+  // templates that have a figma_component_key set — the plugin can't
+  // import without one.
+  const templates = Array.from(effectiveIds)
+    .map(id => catalogById.get(id))
+    .filter((t): t is typeof catalog[number] => !!t && !!t.figma_component_key)
+
+  // Hand the plugin a swap map keyed by wireframe id so it can show
+  // "this slot was wireframed as X but the designer swapped to Y".
+  // Cross-family swaps are explicit; same-family swaps are still
+  // included (designer may have chosen a different style within family).
+  // NOTE: this only surfaces project-level (site-wide) swaps. Per-section
+  // overrides (web_sections.figma_template_override_id) ALREADY influence
+  // the `templates` effective list, but their context isn't summarized
+  // here — Wave 2's per-page section payload will surface per-section
+  // override info alongside the section it belongs to.
+  const swapsForPlugin: Record<string, { from: { template_id: string; layer_name: string | null; family: string | null }; to: { template_id: string; layer_name: string | null; family: string | null } }> = {}
+  for (const fromId of wireframeIds) {
+    const toId = resolveEffective(fromId, null) // project-level only; section-level overrides are surfaced per-section in Wave 2
+    if (!toId || toId === fromId) continue
+    const fromT = catalogById.get(fromId)
+    const toT = catalogById.get(toId)
+    if (!fromT || !toT) continue
+    swapsForPlugin[fromId] = {
+      from: { template_id: fromT.id, layer_name: fromT.layer_name, family: fromT.family },
+      to:   { template_id: toT.id,   layer_name: toT.layer_name,   family: toT.family },
+    }
   }
 
   return res.status(200).json({
@@ -121,8 +171,13 @@ export default async function handler(req: any, res: any) {
       family:              t.family,
       figma_component_key: t.figma_component_key as string,
     })),
-    // Wave 1 doesn't need pages/sections yet. Wave 2 will add a
+    // Site-wide layout swaps the designer recorded. Keyed by wireframe
+    // template id → { from, to } catalog refs. Plugin can surface this
+    // as a "Layout swaps applied" summary on the style guide.
+    layout_swaps: swapsForPlugin,
+    // Wave 2 will add a
     // pages: [{ slug, name, sections: [{ template_id, field_values }] }]
-    // payload so the assemble-pages command can populate text.
+    // payload that includes each section's effective template id +
+    // override info for per-section assembly.
   })
 }

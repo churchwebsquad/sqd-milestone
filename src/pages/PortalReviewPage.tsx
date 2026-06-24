@@ -688,6 +688,7 @@ export default function PortalReviewPage() {
                 templates={data.templates}
                 cardTemplates={data.cardTemplates}
                 snippetMap={data.snippetMap}
+                page={activePage}
                 onSelectSection={startComment}
               />
             )

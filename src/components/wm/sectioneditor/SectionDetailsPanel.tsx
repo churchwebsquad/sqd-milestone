@@ -33,6 +33,8 @@ import { ProjectPagesProvider } from './ProjectPagesContext'
 import { useProjectId } from './ProjectIdContext'
 import { SectionStaffLinkToggle } from './SectionStaffLinkToggle'
 import { summarizeSlotPresence } from '../../../lib/webBrixiesLayoutParser'
+import { SECTION_ROLE_GROUPS, SECTION_ROLE_LABELS } from '../../../lib/webSectionRoles'
+import type { SectionRole } from '../../../types/database'
 import { supabase } from '../../../lib/supabase'
 import {
   findPlacements, applyPlacement, previewConversion, isStructuredPlacement,
@@ -188,12 +190,34 @@ export function SectionDetailsPanel({
             <div className="shrink-0 w-14 h-9 rounded-md border border-wm-border bg-wm-bg-hover" />
           )}
           <div className="min-w-0 flex-1">
+            {/* Slot identity (role) is the primary label. The
+                Brixies layer name moves to a quieter mono suffix —
+                still useful as a technical reference for designers /
+                devs, but the section's identity is its slot, not the
+                underlying layout. Picker below lets the strategist
+                override the auto-inferred role. */}
             <p className="text-[11px] uppercase tracking-widest font-bold text-wm-accent-strong truncate">
-              {template?.family ?? 'Freehand section'}
+              {section.section_role_label?.trim()
+                || (section.section_role ? SECTION_ROLE_LABELS[section.section_role] : null)
+                || template?.family
+                || 'Freehand section'}
             </p>
-            <p className="text-[13px] font-semibold text-wm-text truncate">
+            <p className="text-[13px] font-semibold text-wm-text truncate" title="Wireframe Brixies layout">
               {template?.layer_name ?? 'No template bound'}
             </p>
+            <div className="mt-1.5">
+              <SectionRolePicker
+                value={section.section_role ?? null}
+                onChange={role => onChange({
+                  section_role: role,
+                  // Clear any per-section custom label so the new role's
+                  // default label takes over. Users who want a custom
+                  // label for the new role will see the default first
+                  // and can re-customize from there.
+                  section_role_label: null,
+                })}
+              />
+            </div>
           </div>
           <button
             type="button"
@@ -1008,6 +1032,40 @@ function CounterChip({
       <span>{label}</span>
       <span className="font-mono tabular-nums">{count}</span>
     </span>
+  )
+}
+
+/** Inline role picker shown in the section details header. Roles are
+ *  the stable slot identity — they survive Brixies layout swaps. The
+ *  enum is curated; users can also choose `custom` when nothing fits.
+ *  Saves on change via the parent's onChange(patch). */
+function SectionRolePicker({
+  value, onChange,
+}: {
+  value: SectionRole | null
+  onChange: (next: SectionRole | null) => void
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <label className="text-[9px] uppercase tracking-widest font-bold text-wm-text-subtle">Role</label>
+      <select
+        value={value ?? ''}
+        onChange={e => {
+          const v = e.target.value
+          onChange(v ? (v as SectionRole) : null)
+        }}
+        className="text-[11px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-1.5 py-0.5 hover:border-wm-accent focus:border-wm-accent focus:outline-none cursor-pointer"
+      >
+        <option value="">(unclassified)</option>
+        {SECTION_ROLE_GROUPS.map(g => (
+          <optgroup key={g.label} label={g.label}>
+            {g.roles.map(r => (
+              <option key={r} value={r}>{SECTION_ROLE_LABELS[r]}</option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+    </div>
   )
 }
 
