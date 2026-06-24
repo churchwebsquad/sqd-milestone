@@ -3,6 +3,75 @@
 // 4 existing read-only tables + 5 new strategy_ tables
 // ============================================================================
 
+/** Curated section role identifying the slot purpose. Stable across
+ *  Figma layout swaps so handoff metadata follows the slot, not the
+ *  underlying Brixies layout. Lives on web_sections.section_role. See
+ *  `src/lib/webSectionRoles.ts` for labels + groupings. */
+export type SectionRole =
+  // Hero / banner
+  | 'hero_home' | 'hero_innerpage' | 'hero_visual' | 'banner_announcement'
+  // Intro / content
+  | 'intro_text' | 'content_block' | 'mission_statement' | 'verse_callout'
+  // Features / cards
+  | 'feature_grid' | 'feature_split' | 'card_grid' | 'card_carousel'
+  // CTA
+  | 'cta_banner_simple' | 'cta_banner_split' | 'cta_full_bleed'
+  // People
+  | 'team_grid' | 'team_carousel' | 'staff_member_detail'
+  // Process / timeline
+  | 'steps_horizontal' | 'steps_vertical' | 'timeline_chronology'
+  // FAQ
+  | 'faq_accordion' | 'faq_grid'
+  // Filter / search
+  | 'category_filter' | 'search_bar'
+  // Single content
+  | 'event_detail' | 'post_detail'
+  // Gallery
+  | 'gallery_grid' | 'gallery_carousel'
+  // Career
+  | 'career_listing' | 'career_detail'
+  // Blog
+  | 'blog_listing' | 'blog_featured'
+  // Chrome
+  | 'nav_header' | 'footer_main' | 'offcanvas_menu' | 'megamenu' | 'link_page'
+  // Catch-all
+  | 'custom'
+
+/** Per-entry value in strategy_web_projects.figma_layout_swaps. The
+ *  designer's site-wide swap "anywhere this template was used, render
+ *  THIS template instead" plus the reasoning that informed the choice. */
+export interface FigmaLayoutSwapEntry {
+  to_template_id: string
+  note:           string | null
+  swapped_at:     string  // ISO timestamp
+  swapped_by:     string  // user_id
+}
+
+/** Snapshot of a page + its sections at a point in time. Captured by
+ *  the page-snapshot helper before agent runs / on manual saves. */
+export interface WebPageVersion {
+  id:                    string
+  web_page_id:           string
+  web_project_id:        string
+  created_at:            string
+  created_by:            string | null
+  /** What kind of action triggered the snapshot. Drives the version
+   *  drawer's grouping + icon. */
+  trigger_kind:          'manual_save' | 'agent_run' | 'bind' | 'unbind' | 'revert' | string
+  /** Free-form one-line label shown in the drawer. e.g.
+   *  "Atomize Strategy", "Page Bind", "Reverted to v3 of 2026-06-22". */
+  trigger_label:         string | null
+  /** When this snapshot was created BY a revert, points at the version
+   *  that was restored. NULL on snapshots created by regular changes. */
+  reverted_from_version: string | null
+  /** Full web_pages row at the time of the snapshot. */
+  page_snapshot:         Record<string, unknown>
+  /** Array of web_sections rows ordered by sort_order at the time of
+   *  the snapshot. */
+  sections_snapshot:     Array<Record<string, unknown>>
+}
+
+
 export type AssetType =
   | 'loom_video'
   | 'brand_guide'
@@ -1190,6 +1259,18 @@ export interface StrategyWebProject {
    *  NULL. */
   figma_share_token:        string | null
 
+  // ── v100 — site-wide Figma layout swap map ────────────────
+  /** Designer's site-wide layout substitution map. Keyed by the
+   *  original (wireframe-stage) template id; value is the chosen
+   *  Figma replacement plus designer notes. Read by the Design Handoff
+   *  swap board, the Figma plugin's style guide assembler, and the
+   *  Dev handoff checklist — NOT by the page editor (content stays
+   *  flowing through the wireframe-stage layout).
+   *
+   *  Per-section overrides on web_sections.figma_template_override_id
+   *  win when both apply. */
+  figma_layout_swaps:       Record<string, FigmaLayoutSwapEntry>
+
   [key: string]: unknown
 }
 
@@ -1696,6 +1777,27 @@ export interface WebSection {
   notes: string | null
   created_at: string
   updated_at: string
+
+  // ── v100 — slot identity + designer Figma swap ──
+  /** Curated slot role identifying what this section IS at the page
+   *  level (hero_innerpage, cta_banner_simple, etc.). Stable across
+   *  Figma layout swaps so handoff metadata follows the slot, not the
+   *  underlying Brixies layout. NULL = not yet classified. See
+   *  `src/lib/webSectionRoles.ts` for the enum + labels. */
+  section_role: SectionRole | null
+  /** Optional per-section override of the role's default label. NULL =
+   *  fall back to SECTION_ROLE_LABELS[section_role]. */
+  section_role_label: string | null
+  /** Designer's per-section Figma layout override. When set, takes
+   *  precedence over the project-level `figma_layout_swaps` map. Means
+   *  "in Figma + dev handoff, use THIS Brixies layout for THIS slot,
+   *  overriding both the site-wide swap and the wireframe-stage
+   *  content_template_id." Page editor + content pipeline ignore this. */
+  figma_template_override_id: string | null
+  figma_swap_note:           string | null
+  figma_swap_at:             string | null
+  figma_swap_by:             string | null
+
   [key: string]: unknown
 }
 
