@@ -486,18 +486,91 @@ function buildIframeDoc(html: string): string {
 function FreehandPreview({ section }: { section: WebSection }) {
   const values = (section.field_values ?? {}) as Record<string, unknown>
   const body = typeof values.body === 'string' ? values.body : ''
-  const text = useMemo(() => {
-    if (typeof document === 'undefined') return ''
-    const d = document.createElement('div')
-    d.innerHTML = body
-    return (d.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 260)
-  }, [body])
+  // Render the FULL body — markdown if it looks like markdown, plain
+  // otherwise. We previously truncated to 260 chars / 4 lines for a
+  // compact preview, but freehand sections from cowork imports carry
+  // multi-paragraph copy + cards in the body string, and hiding most
+  // of it left the strategist unable to read their own content
+  // without opening the edit drawer. Show everything so the page
+  // serves as a readable proof on first glance, even pre-bind.
   return (
     <div className="bg-wm-warning-bg/30 border-l-4 border-wm-warning px-6 py-8">
       <p className="text-[10px] uppercase tracking-widest font-bold text-wm-warning mb-2">
         Freehand section — bind to a template to render
       </p>
-      <p className="text-[13px] text-wm-text line-clamp-4">{text || '(empty)'}</p>
+      {body ? (
+        <div
+          className="prose prose-sm max-w-none text-[13px] text-wm-text [&_h1]:text-[18px] [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-2 [&_h2]:text-[16px] [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-[14px] [&_h3]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_p]:my-2 [&_ul]:list-disc [&_ul]:ml-5 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-5 [&_ol]:my-2 [&_li]:my-0.5 [&_blockquote]:border-l-2 [&_blockquote]:border-wm-border [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-wm-text-muted [&_code]:font-mono [&_code]:text-[12px] [&_a]:text-wm-accent [&_a]:underline"
+          dangerouslySetInnerHTML={{ __html: markdownLikeToHtml(body) }}
+        />
+      ) : (
+        <p className="text-[13px] text-wm-text-muted italic">(empty)</p>
+      )}
     </div>
   )
+}
+
+/** Minimal markdown → HTML for the freehand preview. The body strings
+ *  written by page-bind look like markdown (headings, bullets,
+ *  paragraphs, links, blockquotes). We don't import a full markdown
+ *  parser here — this is preview-only — but enough patterns to render
+ *  cleanly. If the body is already HTML (e.g. <p>, <h2>), it passes
+ *  through untouched. */
+function markdownLikeToHtml(src: string): string {
+  // Pass-through if already HTML (contains a block tag).
+  if (/<(p|h[1-6]|ul|ol|li|blockquote|div|section)\b/i.test(src)) return src
+
+  const escape = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+  const lines = src.split(/\r?\n/)
+  const out: string[] = []
+  let paraBuf: string[] = []
+  let listBuf: string[] = []
+  let listKind: 'ul' | 'ol' | null = null
+  let quoteBuf: string[] = []
+  const flushParas = () => {
+    if (paraBuf.length === 0) return
+    out.push(`<p>${inline(paraBuf.join(' '))}</p>`)
+    paraBuf = []
+  }
+  const flushList = () => {
+    if (!listKind || listBuf.length === 0) { listBuf = []; listKind = null; return }
+    out.push(`<${listKind}>${listBuf.map(li => `<li>${inline(li)}</li>`).join('')}</${listKind}>`)
+    listBuf = []; listKind = null
+  }
+  const flushQuote = () => {
+    if (quoteBuf.length === 0) return
+    out.push(`<blockquote>${inline(quoteBuf.join(' '))}</blockquote>`)
+    quoteBuf = []
+  }
+  const flushAll = () => { flushParas(); flushList(); flushQuote() }
+
+  const inline = (s: string) => {
+    const e = escape(s)
+    return e
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>')
+      .replace(/_([^_]+)_/g, '<em>$1</em>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+  }
+
+  for (const raw of lines) {
+    const line = raw
+    const trimmed = line.trim()
+    if (!trimmed) { flushAll(); continue }
+    const h = trimmed.match(/^(#{1,6})\s+(.+)$/)
+    if (h) { flushAll(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue }
+    const ul = trimmed.match(/^[-*•]\s+(.+)$/)
+    if (ul) { flushParas(); flushQuote(); if (listKind !== 'ul') { flushList(); listKind = 'ul' } listBuf.push(ul[1]); continue }
+    const ol = trimmed.match(/^\d+\.\s+(.+)$/)
+    if (ol) { flushParas(); flushQuote(); if (listKind !== 'ol') { flushList(); listKind = 'ol' } listBuf.push(ol[1]); continue }
+    const bq = trimmed.match(/^>\s?(.*)$/)
+    if (bq) { flushParas(); flushList(); quoteBuf.push(bq[1]); continue }
+    flushList(); flushQuote()
+    paraBuf.push(trimmed)
+  }
+  flushAll()
+  return out.join('\n')
 }

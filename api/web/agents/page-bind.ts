@@ -166,9 +166,80 @@ export default async function handler(req: any, res: any) {
 
 // ── Markdown rendering — one body string per section ────────────────
 
+/** Normalize a cowork draft section into a flat `copy` shape regardless
+ *  of which schema cowork wrote it in. Two shapes exist in the wild:
+ *
+ *   1. LEGACY  — `s.copy = { eyebrow, heading, tagline, description,
+ *      body, cards[], items[], cta }`.
+ *
+ *   2. SLOTS   — current cowork output:
+ *      `s.slots = [{ slot, text, provenance, source_refs }]` plus
+ *      `s.build_cards = [{ heading, description, cta_label, ... }]`
+ *      and `s.cta_targets = [{ label, target }]` when present.
+ *
+ *  This normalizer reads either and returns the LEGACY shape so the
+ *  renderer + composer below don't need two code paths. Slot names map:
+ *      primary_heading → heading
+ *      secondary_heading → tagline
+ *      eyebrow → eyebrow
+ *      tagline → tagline
+ *      description → description
+ *      body → body
+ *      buttons → cta (first button label) */
+function normalizeSectionCopy(s: any): Record<string, any> {
+  // Legacy shape already present → pass through.
+  if (s?.copy && typeof s.copy === 'object') return s.copy as Record<string, any>
+
+  const out: Record<string, any> = {}
+  const slots = Array.isArray(s?.slots) ? s.slots : []
+  for (const sl of slots) {
+    const name = String(sl?.slot ?? '').toLowerCase()
+    const text = typeof sl?.text === 'string' ? sl.text : ''
+    if (!name || !text) continue
+    if (name === 'primary_heading' || name === 'heading' || name === 'h')      { out.heading = out.heading ?? text }
+    else if (name === 'secondary_heading' || name === 'subheading')             { out.tagline = out.tagline ?? text }
+    else if (name === 'eyebrow')                                                { out.eyebrow = out.eyebrow ?? text }
+    else if (name === 'tagline')                                                { out.tagline = out.tagline ?? text }
+    else if (name === 'description' || name === 'subtitle')                     { out.description = out.description ?? text }
+    else if (name === 'body' || name === 'content' || name === 'intro')         { out.body = out.body ?? text }
+    else if (name === 'buttons' || name === 'cta' || name === 'primary_cta')    {
+      // The slot's source_refs[0] often carries the URL (e.g. mailto:...).
+      const ref = Array.isArray(sl?.source_refs) && sl.source_refs.length > 0 ? String(sl.source_refs[0]) : '#'
+      out.cta = out.cta ?? { label: text, intent: null, url: ref }
+    }
+    else {
+      // Unknown slot — preserve as a labelled trailing line so nothing
+      // is silently lost. Prefix the label so the strategist can see
+      // what was unmapped while reviewing the freehand body.
+      out._extra = out._extra ?? []
+      out._extra.push({ name, text })
+    }
+  }
+
+  // Cowork tabbed/featured sections carry their cards in `build_cards`.
+  if (Array.isArray(s?.build_cards) && s.build_cards.length > 0) {
+    out.cards = s.build_cards.map((c: any) => ({
+      heading:     c?.course ?? c?.heading ?? null,
+      description: c?.description ?? null,
+      cta_label:   c?.cta_label ?? null,
+      cta_target:  c?.cta_target ?? null,
+    }))
+  }
+
+  // cta_targets[] — sections sometimes carry CTAs in a sibling array
+  // even when there's no buttons slot. Take the first as the section CTA
+  // when no other CTA already landed.
+  if (!out.cta && Array.isArray(s?.cta_targets) && s.cta_targets.length > 0) {
+    const first = s.cta_targets[0]
+    if (first?.label) out.cta = { label: first.label, intent: null, url: first.target ?? '#' }
+  }
+
+  return out
+}
+
 function renderSection(s: any): string {
-  const archetype = String(s?.archetype ?? 'rich_body')
-  const copy = (s?.copy ?? {}) as Record<string, any>
+  const archetype = String(s?.archetype ?? s?.template_key ?? 'rich_body')
+  const copy = normalizeSectionCopy(s)
   const parts: string[] = []
 
   if (copy.eyebrow) parts.push(`> **${String(copy.eyebrow).toUpperCase()}**`)
@@ -182,7 +253,10 @@ function renderSection(s: any): string {
     for (const c of copy.cards) {
       if (c?.heading) parts.push(`### ${c.heading}`)
       if (c?.description) parts.push(String(c.description))
-      if (c?.cta_label) parts.push(`[${c.cta_label}](#)`)
+      if (c?.cta_label) {
+        const url = c?.cta_target ?? '#'
+        parts.push(`[${c.cta_label}](${url})`)
+      }
     }
   }
 
@@ -194,8 +268,14 @@ function renderSection(s: any): string {
     }
   }
 
+  if (Array.isArray(copy._extra) && copy._extra.length > 0) {
+    for (const ex of copy._extra) {
+      parts.push(`**${String(ex.name).replace(/_/g, ' ')}:** ${ex.text}`)
+    }
+  }
+
   if (copy.cta?.label) {
-    const url = copy.cta?.intent ? `#${String(copy.cta.intent)}` : '#'
+    const url = copy.cta?.url ?? (copy.cta?.intent ? `#${String(copy.cta.intent)}` : '#')
     parts.push(`\n[${String(copy.cta.label)}](${url})`)
   }
 
@@ -233,7 +313,8 @@ function buildSectionNotes(s: any, pickedTemplateId?: string | null, isUserOverr
  *  that's what reorg-section-for-template handles when the strategist
  *  asks for an AI redistribution. */
 function composeFieldValuesForTemplate(s: any, template: { fields: any }): Record<string, unknown> {
-  const copy = (s?.copy ?? {}) as Record<string, any>
+  // Normalize once so cowork slot-shape and legacy copy-shape both work.
+  const copy = normalizeSectionCopy(s)
   const fields = Array.isArray(template?.fields) ? template.fields : []
   const out: Record<string, unknown> = {}
 
