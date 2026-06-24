@@ -381,6 +381,55 @@ function CoworkForm({ projectId, phase, existingPages, onClose, onCreated }: Pro
       const { data: { session } } = await supabase.auth.getSession()
       const token = session?.access_token
       if (!token) { setError('Not authenticated.'); setBinding(null); return }
+
+      // Ensure the slug is in stage_2.sitemap.pages BEFORE calling
+      // page-bind. The bind agent refuses unknown slugs — its
+      // expectation is that every bind has a sitemap entry to draw
+      // title + phase from. Adding from cowork is an implicit approval
+      // of this page; we append the sitemap entry on the strategist's
+      // behalf so they don't have to pre-edit the sitemap.
+      const { data: projRow, error: readErr } = await supabase
+        .from('strategy_web_projects')
+        .select('roadmap_state')
+        .eq('id', projectId)
+        .maybeSingle()
+      if (readErr) { setError(`Could not read project state: ${readErr.message}`); setBinding(null); return }
+      const roadmap = ((projRow?.roadmap_state ?? {}) as Record<string, unknown>)
+      const stage2  = ((roadmap.stage_2 ?? {}) as Record<string, unknown>)
+      // stage_2 has two historical shapes — { sitemap: { pages: [...] } }
+      // and { pages: [...] } directly. Update whichever exists; if
+      // neither, create the modern shape.
+      const sitemap = (stage2.sitemap as Record<string, unknown> | undefined)
+      const nestedPages = Array.isArray((sitemap as { pages?: unknown[] })?.pages)
+        ? ((sitemap as { pages?: unknown[] }).pages as Array<Record<string, unknown>>)
+        : null
+      const flatPages = Array.isArray((stage2 as { pages?: unknown[] }).pages)
+        ? ((stage2 as { pages?: unknown[] }).pages as Array<Record<string, unknown>>)
+        : null
+      const currentPages = nestedPages ?? flatPages ?? []
+      const alreadyInSitemap = currentPages.some(p => typeof p?.slug === 'string' && p.slug === slug)
+      if (!alreadyInSitemap) {
+        const newEntry: Record<string, unknown> = {
+          slug,
+          name,
+          title: name,
+          phase,
+          rationale: 'Added from cowork via the Pages tab.',
+          source: 'cowork_import',
+        }
+        const nextPages = [...currentPages, newEntry]
+        const nextStage2: Record<string, unknown> = nestedPages
+          ? { ...stage2, sitemap: { ...(sitemap ?? {}), pages: nextPages } }
+          : flatPages
+            ? { ...stage2, pages: nextPages }
+            : { ...stage2, sitemap: { pages: nextPages } }
+        const { error: updErr } = await supabase
+          .from('strategy_web_projects')
+          .update({ roadmap_state: { ...roadmap, stage_2: nextStage2 } })
+          .eq('id', projectId)
+        if (updErr) { setError(`Could not append to sitemap: ${updErr.message}`); setBinding(null); return }
+      }
+
       const res = await fetch('/api/web/agents/page-bind', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
