@@ -19,7 +19,7 @@
  * No content is hidden behind "show more" — the partner can't approve
  * what they can't see. All passages, all items, expanded by default.
  */
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Mic2, ClipboardList, Sparkles, HelpCircle, Quote, ArrowRight, BookOpen,
   ExternalLink, CheckCircle2, Edit3, Circle, EyeOff, Check, Pencil,
@@ -101,6 +101,115 @@ interface AttachmentContextValue {
 }
 const AttachmentContext = createContext<AttachmentContextValue | null>(null)
 function useAttachmentContext() { return useContext(AttachmentContext) }
+
+// ── Group-edit scope ─────────────────────────────────────────────────
+//
+// Edits at the partner portal happen one card at a time, not one
+// line at a time. Each editable card (top-level Details section, each
+// Program card) hosts a GroupEditScope that:
+//   • exposes an `editing` flag down to descendants via context,
+//   • collects each editable row's commit / reset callbacks via
+//     `register`, and
+//   • runs all commits sequentially when the card's Save button fires.
+//
+// Rows that want to participate call `useGroupEdit()`. When editing
+// is true they render an input + register a commit (latest draft via
+// ref). When editing is false they render read-only.
+interface GroupEditRowHandlers {
+  commit: () => Promise<void>
+  reset:  () => void
+}
+interface GroupEditContextValue {
+  editing:  boolean
+  register: (id: string, handlers: GroupEditRowHandlers) => () => void
+}
+const GroupEditContext = createContext<GroupEditContextValue | null>(null)
+function useGroupEdit(): GroupEditContextValue | null { return useContext(GroupEditContext) }
+
+interface GroupEditState {
+  editing:     boolean
+  saving:      boolean
+  startEdit:   () => void
+  cancelAll:   () => void
+  saveAll:     () => Promise<void>
+  contextValue: GroupEditContextValue
+}
+function useGroupEditState(): GroupEditState {
+  const [editing, setEditing] = useState(false)
+  const [saving,  setSaving]  = useState(false)
+  const handlersRef = useRef<Map<string, GroupEditRowHandlers>>(new Map())
+
+  const register: GroupEditContextValue['register'] = useCallback((id, handlers) => {
+    handlersRef.current.set(id, handlers)
+    return () => { handlersRef.current.delete(id) }
+  }, [])
+
+  const startEdit = useCallback(() => { setEditing(true) }, [])
+  const cancelAll = useCallback(() => {
+    for (const h of handlersRef.current.values()) h.reset()
+    setEditing(false)
+  }, [])
+  const saveAll = useCallback(async () => {
+    setSaving(true)
+    try {
+      // Sequential commits avoid Supabase write contention on the
+      // same session row when many rows save back-to-back.
+      for (const h of handlersRef.current.values()) {
+        await h.commit()
+      }
+    } finally {
+      setSaving(false)
+    }
+    setEditing(false)
+  }, [])
+
+  const contextValue: GroupEditContextValue = useMemo(
+    () => ({ editing, register }),
+    [editing, register],
+  )
+  return { editing, saving, startEdit, cancelAll, saveAll, contextValue }
+}
+
+/** Edit / Save all / Cancel button cluster for a GroupEditScope's
+ *  card header. Renders nothing when canEdit is false. */
+function GroupEditToolbar({ scope, canEdit, label = 'Edit' }: {
+  scope:   GroupEditState
+  canEdit: boolean
+  label?:  string
+}) {
+  if (!canEdit) return null
+  if (scope.editing) {
+    return (
+      <div className="inline-flex items-center gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={() => void scope.saveAll()}
+          disabled={scope.saving}
+          className="inline-flex items-center gap-1 text-[11px] font-semibold text-white bg-primary-purple hover:bg-deep-plum rounded-full px-3 py-1 disabled:opacity-60"
+        >
+          {scope.saving ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />} Save all
+        </button>
+        <button
+          type="button"
+          onClick={scope.cancelAll}
+          className="text-[11px] font-semibold text-purple-gray hover:text-deep-plum"
+        >
+          Cancel
+        </button>
+      </div>
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={scope.startEdit}
+      className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-purple hover:text-deep-plum px-2 py-0.5 rounded hover:bg-lavender-tint/60 shrink-0"
+      title="Edit everything in this card"
+    >
+      <Pencil size={11} /> {label}
+    </button>
+  )
+}
 
 /** Context for external prefills (e.g. photo library URL from
  *  discovery). Keyed `bucketKey/fieldKey`. */
@@ -1611,49 +1720,17 @@ function TopicCard({
         const weeklyDetails   = consolidatedDetails.filter(d =>  isWeeklyLessonDetail(d))
         if (topLevelDetails.length === 0 && weeklyDetails.length === 0 && (reviewMode || dedupedPassages.length === 0)) return null
         return (
-          <Section reviewMode={reviewMode} icon={ClipboardList} title="Details">
-            {topLevelDetails.length > 0 && (
-              <div className="space-y-2">
-                {topLevelDetails.map((d, i) => (
-                  <ConsolidatedDetailRow
-                    key={`d-${i}`}
-                    entry={d}
-                    reviewMode={reviewMode}
-                    bucketKey={bucketKey}
-                    topicKey={topic.topic_key}
-                    marks={marks}
-                    saveMark={saveMark}
-                  />
-                ))}
-              </div>
-            )}
-            {weeklyDetails.length > 0 && (
-              <CollapsibleSubsection
-                reviewMode={reviewMode}
-                title={`Weekly lesson details (${weeklyDetails.length})`}
-                hint="Date-stamped lesson info crawled from one specific weekly resource page. Usually safe to skim — fix or skip in bulk."
-              >
-                <div className="space-y-2">
-                  {weeklyDetails.map((d, i) => (
-                    <ConsolidatedDetailRow
-                      key={`wd-${i}`}
-                      entry={d}
-                      reviewMode={reviewMode}
-                      bucketKey={bucketKey}
-                      topicKey={topic.topic_key}
-                      marks={marks}
-                      saveMark={saveMark}
-                    />
-                  ))}
-                </div>
-              </CollapsibleSubsection>
-            )}
-            {!reviewMode && dedupedPassages.length > 0 && (
-              <div className={(topLevelDetails.length + weeklyDetails.length > 0 ? 'mt-3' : '') + ' space-y-2'}>
-                {dedupedPassages.map((p, i) => <PassageRow key={`p-${i}`} passage={p} reviewMode={reviewMode} />)}
-              </div>
-            )}
-          </Section>
+          <DetailsGroupEditScope
+            reviewMode={reviewMode}
+            canEdit={!!bucketKey && !!saveMark}
+            topLevelDetails={topLevelDetails}
+            weeklyDetails={weeklyDetails}
+            dedupedPassages={dedupedPassages}
+            bucketKey={bucketKey}
+            topicKey={topic.topic_key}
+            marks={marks}
+            saveMark={saveMark}
+          />
         )
       })()}
 
@@ -1849,15 +1926,98 @@ function TopicCard({
   )
 }
 
+// ── Top-level Details section with group-edit scope ──────────────────
+//
+// Wraps the Details Section + its rows in a GroupEditScope so the
+// section header carries a single Edit / Save all / Cancel cluster.
+// Children rows (ConsolidatedDetailRow) read `editing` from the
+// GroupEditContext and switch between read-only and input modes in
+// sync.
+function DetailsGroupEditScope({
+  reviewMode, canEdit, topLevelDetails, weeklyDetails, dedupedPassages,
+  bucketKey, topicKey, marks, saveMark,
+}: {
+  reviewMode:      boolean
+  canEdit:         boolean
+  topLevelDetails: ConsolidatedEntry[]
+  weeklyDetails:   ConsolidatedEntry[]
+  dedupedPassages: Passage[]
+  bucketKey?:      string
+  topicKey:        string
+  marks?:          Map<string, Mark>
+  saveMark?:       SaveMark
+}) {
+  const scope = useGroupEditState()
+  // Force-open the lesson-details accordion while editing so the
+  // Save-all button reaches the rows inside.
+  const forceOpenWeekly = scope.editing
+  return (
+    <GroupEditContext.Provider value={scope.contextValue}>
+      <Section
+        reviewMode={reviewMode}
+        icon={ClipboardList}
+        title="Details"
+        headerExtra={reviewMode ? <GroupEditToolbar scope={scope} canEdit={canEdit} /> : null}
+      >
+        {topLevelDetails.length > 0 && (
+          <div className="space-y-2">
+            {topLevelDetails.map((d, i) => (
+              <ConsolidatedDetailRow
+                key={`d-${i}`}
+                entry={d}
+                reviewMode={reviewMode}
+                bucketKey={bucketKey}
+                topicKey={topicKey}
+                marks={marks}
+                saveMark={saveMark}
+              />
+            ))}
+          </div>
+        )}
+        {weeklyDetails.length > 0 && (
+          <CollapsibleSubsection
+            reviewMode={reviewMode}
+            title={`Weekly lesson details (${weeklyDetails.length})`}
+            hint="Date-stamped lesson info crawled from one specific weekly resource page. Usually safe to skim — fix or skip in bulk."
+            forceOpen={forceOpenWeekly}
+          >
+            <div className="space-y-2">
+              {weeklyDetails.map((d, i) => (
+                <ConsolidatedDetailRow
+                  key={`wd-${i}`}
+                  entry={d}
+                  reviewMode={reviewMode}
+                  bucketKey={bucketKey}
+                  topicKey={topicKey}
+                  marks={marks}
+                  saveMark={saveMark}
+                />
+              ))}
+            </div>
+          </CollapsibleSubsection>
+        )}
+        {!reviewMode && dedupedPassages.length > 0 && (
+          <div className={(topLevelDetails.length + weeklyDetails.length > 0 ? 'mt-3' : '') + ' space-y-2'}>
+            {dedupedPassages.map((p, i) => <PassageRow key={`p-${i}`} passage={p} reviewMode={reviewMode} />)}
+          </div>
+        )}
+      </Section>
+    </GroupEditContext.Provider>
+  )
+}
+
 // ── Section wrapper (with optional review pill) ──────────────────────
 
 function Section({
-  reviewMode, icon: Icon, title, children,
+  reviewMode, icon: Icon, title, headerExtra, children,
 }: {
-  reviewMode: boolean
-  icon:       typeof Mic2
-  title:      string
-  children:   React.ReactNode
+  reviewMode:   boolean
+  icon:         typeof Mic2
+  title:        string
+  /** Optional right-aligned element in the section header (e.g. a
+   *  GroupEditToolbar for partner-facing edit affordances). */
+  headerExtra?: React.ReactNode
+  children:     React.ReactNode
 }) {
   return (
     <div className={reviewMode ? 'mt-4' : 'mt-3'}>
@@ -1868,6 +2028,7 @@ function Section({
             : 'text-[10px] uppercase tracking-widest font-bold text-wm-accent'}>
           {title}
         </p>
+        {headerExtra && <div className="ml-auto">{headerExtra}</div>}
       </div>
       {children}
     </div>
@@ -1915,15 +2076,57 @@ function ProgramDossier({
    *  are treated as internal and filtered out of partner-facing
    *  inventory. Sub-programs receive the same value. */
   selfHost?:  string
-  /** Optional. When set + saveMark is available, nested detail rows
-   *  carry an Edit button so partners can rewrite values in place. */
+  /** When set with saveMark, the dossier hosts its own GroupEditScope
+   *  so a single Edit button at the program header drives name +
+   *  description + every nested editable row at once. */
   bucketKey?: string
   topicKey?:  string
   marks?:     Map<string, Mark>
   saveMark?:  SaveMark
 }) {
-  const name = String(program.name ?? 'Untitled program')
-  const desc = String(program.description ?? '')
+  // Partner override paths for the program's name + description.
+  const programSlug = slugify(String(program.name ?? '')).slice(0, 40) || 'unnamed'
+  const programEditBase = bucketKey && topicKey
+    ? `program-edit:${bucketKey}/${topicKey}/${programSlug}`
+    : null
+  const nameMark = programEditBase ? marks?.get(`${programEditBase}/name`) : undefined
+  const descMark = programEditBase ? marks?.get(`${programEditBase}/description`) : undefined
+  const origName = String(program.name ?? 'Untitled program')
+  const origDesc = String(program.description ?? '')
+  const name = (nameMark?.status === 'approved' && nameMark.client_note != null) ? nameMark.client_note : origName
+  const desc = (descMark?.status === 'approved' && descMark.client_note != null) ? descMark.client_note : origDesc
+
+  // Own group-edit scope per program. Independent of the topic-level
+  // Details scope so the partner can edit one program at a time.
+  const scope = useGroupEditState()
+  const canEdit = reviewMode && !!programEditBase && !!saveMark
+
+  // Local drafts for name + description, registered with the scope so
+  // they save in the same batch as the nested rows.
+  const [nameDraft, setNameDraft] = useState(name)
+  const [descDraft, setDescDraft] = useState(desc)
+  const nameDraftRef = useRef(nameDraft)
+  const descDraftRef = useRef(descDraft)
+  useEffect(() => { nameDraftRef.current = nameDraft }, [nameDraft])
+  useEffect(() => { descDraftRef.current = descDraft }, [descDraft])
+  useEffect(() => {
+    if (!scope.editing) { setNameDraft(name); setDescDraft(desc) }
+  }, [scope.editing, name, desc])
+
+  useEffect(() => {
+    if (!programEditBase || !saveMark) return
+    return scope.contextValue.register(`${programEditBase}/header`, {
+      commit: async () => {
+        const nTrim = nameDraftRef.current.trim()
+        const dTrim = descDraftRef.current.trim()
+        await saveMark(`${programEditBase}/name`,        'topic_item', 'approved', nTrim === origName.trim() ? null : nTrim)
+        await saveMark(`${programEditBase}/description`, 'topic_item', 'approved', dTrim === origDesc.trim() ? null : dTrim)
+      },
+      reset: () => { setNameDraft(name); setDescDraft(desc) },
+    })
+  }, [scope.contextValue, programEditBase, saveMark, origName, origDesc, name, desc])
+
+  const headerEdited = (nameMark?.client_note != null) || (descMark?.client_note != null)
 
   const nestedItems = Array.isArray(program.items) ? (program.items as Item[]) : []
   const nestedPassages = Array.isArray(program.passages)
@@ -1955,25 +2158,63 @@ function ProgramDossier({
   const programOther  = nestedItems.filter(i => !handledKinds.has(String(i.kind)))
 
   return (
-    <article className={reviewMode
-        ? 'rounded-xl border border-primary-purple/20 bg-lavender-tint/15 p-4'
-        : 'rounded-lg border border-wm-accent/20 bg-wm-accent-tint/15 p-3'}>
-      {/* Program header — no per-program approval; partner approves at topic level */}
-      <div className="flex items-baseline gap-2 flex-wrap">
-        <Sparkles size={13} className={reviewMode ? 'text-primary-purple' : 'text-wm-accent'} />
-        <span className={reviewMode ? 'text-deep-plum font-bold text-base' : 'text-wm-text font-bold text-[13px]'}>{name}</span>
-        {program.audience  ? <Pill text={String(program.audience)}  reviewMode={reviewMode} /> : null}
-        {program.duration  ? <Pill text={String(program.duration)}  reviewMode={reviewMode} /> : null}
-        {program.scope     ? <Pill text={String(program.scope).toUpperCase()} reviewMode={reviewMode} /> : null}
-      </div>
-      {program.tagline && (
-        <p className={reviewMode ? 'text-sm italic text-primary-purple/80 mt-1' : 'text-[12px] italic text-wm-accent/80 mt-1'}>"{String(program.tagline)}"</p>
-      )}
+    <GroupEditContext.Provider value={scope.contextValue}>
+      <article className={reviewMode
+          ? 'rounded-xl border border-primary-purple/20 bg-lavender-tint/15 p-4'
+          : 'rounded-lg border border-wm-accent/20 bg-wm-accent-tint/15 p-3'}>
+        {/* Program header — single Edit / Save all / Cancel cluster
+            drives every editable field inside this card. Name +
+            description flip to inputs in edit mode; nested details +
+            FAQs flip in sync via GroupEditContext. */}
+        <div className="flex items-start gap-2 flex-wrap">
+          <Sparkles size={13} className={reviewMode ? 'text-primary-purple shrink-0 mt-1' : 'text-wm-accent shrink-0 mt-1'} />
+          {scope.editing ? (
+            <input
+              type="text"
+              value={nameDraft}
+              onChange={e => setNameDraft(e.target.value)}
+              placeholder="Program name"
+              className={reviewMode
+                ? 'flex-1 min-w-[180px] text-deep-plum font-bold text-base bg-white border border-primary-purple rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-primary-purple/30'
+                : 'flex-1 min-w-[180px] text-wm-text font-bold text-[13px] bg-wm-bg-elevated border border-wm-border-focus rounded px-2 py-0.5 focus:outline-none'}
+            />
+          ) : (
+            <span className={reviewMode ? 'text-deep-plum font-bold text-base flex-1 min-w-0' : 'text-wm-text font-bold text-[13px] flex-1 min-w-0'}>
+              {name}
+              {headerEdited && (
+                <span className={reviewMode
+                    ? 'ml-2 inline-flex items-center text-[9px] uppercase tracking-wider font-bold text-primary-purple bg-lavender-tint border border-primary-purple/30 rounded-full px-1.5 py-0.5'
+                    : 'ml-2 inline-flex items-center text-[9px] uppercase tracking-wider font-bold text-wm-accent bg-wm-accent-tint border border-wm-accent/30 rounded-full px-1.5 py-0.5'}>
+                  Edited
+                </span>
+              )}
+            </span>
+          )}
+          {program.audience  ? <Pill text={String(program.audience)}  reviewMode={reviewMode} /> : null}
+          {program.duration  ? <Pill text={String(program.duration)}  reviewMode={reviewMode} /> : null}
+          {program.scope     ? <Pill text={String(program.scope).toUpperCase()} reviewMode={reviewMode} /> : null}
+          <GroupEditToolbar scope={scope} canEdit={canEdit} />
+        </div>
+        {program.tagline && (
+          <p className={reviewMode ? 'text-sm italic text-primary-purple/80 mt-1' : 'text-[12px] italic text-wm-accent/80 mt-1'}>"{String(program.tagline)}"</p>
+        )}
 
       {/* About */}
-      {(desc || nestedPassages.length > 0) && (
+      {(desc || nestedPassages.length > 0 || scope.editing) && (
         <DossierSlot icon={ClipboardList} title="About" reviewMode={reviewMode}>
-          {desc && <p className={reviewMode ? 'text-sm text-deep-plum leading-snug' : 'text-[12px] text-wm-text leading-snug'}>{desc}</p>}
+          {scope.editing ? (
+            <textarea
+              value={descDraft}
+              rows={Math.max(2, Math.min(8, descDraft.split('\n').length + 1))}
+              onChange={e => setDescDraft(e.target.value)}
+              placeholder="What is this program? Who is it for?"
+              className={reviewMode
+                ? 'w-full text-sm text-deep-plum bg-white border border-primary-purple rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-purple/30 resize-y leading-snug'
+                : 'w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border-focus rounded px-2 py-1.5 focus:outline-none resize-y leading-snug'}
+            />
+          ) : (
+            desc && <p className={reviewMode ? 'text-sm text-deep-plum leading-snug' : 'text-[12px] text-wm-text leading-snug'}>{desc}</p>
+          )}
           {nestedPassages.map((p, i) => (
             <p key={i} className={reviewMode ? 'text-sm text-deep-plum/85 leading-snug mt-2 italic' : 'text-[12px] text-wm-text/85 leading-snug mt-2 italic'}>
               "{p.text}"
@@ -2117,7 +2358,8 @@ function ProgramDossier({
           <div className="space-y-2">{programOther.map((it, i) => <GenericRecordRow key={i} item={it} reviewMode={reviewMode} />)}</div>
         </DossierSlot>
       )}
-    </article>
+      </article>
+    </GroupEditContext.Provider>
   )
 }
 
@@ -2160,49 +2402,52 @@ function ConsolidatedDetailRow({
   marks?:      Map<string, Mark>
   saveMark?:   SaveMark
 }) {
-  // Partner override path: if marks + saveMark are wired and the partner
-  // has edited this entry's value, surface their edit instead of the
-  // crawled value. Falls back to the original entry.value when no edit
-  // exists. Same shape as EditableStaffCard's field-level overrides.
-  const editPath = bucketKey && topicKey ? `detail-edit:${bucketKey}/${topicKey}/${detailEntrySlug(entry)}` : null
+  // Partner override path: when marks/saveMark are wired and the partner
+  // has rewritten this entry inside the parent card's group-edit scope,
+  // surface their edit instead of the crawled value. Falls back to
+  // entry.value when no override exists.
+  const editPath = bucketKey && topicKey
+    ? `detail-edit:${bucketKey}/${topicKey}/${detailEntrySlug(entry)}`
+    : null
   const editMark = editPath ? marks?.get(editPath) : undefined
   const currentValue = (editMark?.status === 'approved' && editMark.client_note != null)
     ? editMark.client_note
     : entry.value
-  const canEdit = reviewMode && !!editPath && !!saveMark
+  const groupEdit = useGroupEdit()
+  const editing = groupEdit?.editing ?? false
 
-  const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(currentValue)
-  const [saving, setSaving] = useState(false)
-  useEffect(() => { if (!editing) setDraft(currentValue) }, [currentValue, editing])
+  const draftRef = useRef(draft)
+  useEffect(() => { draftRef.current = draft }, [draft])
+  useEffect(() => { if (!editing) setDraft(currentValue) }, [editing, currentValue])
 
-  const commit = async () => {
-    if (!editPath || !saveMark) return
-    const trimmed = draft.trim()
-    if (trimmed === entry.value.trim()) {
-      // Reverting to the original value clears the override mark so the
-      // crawl-extracted value flows through cleanly.
-      await saveMark(editPath, 'topic_item', 'approved', null)
-    } else {
-      setSaving(true)
-      try { await saveMark(editPath, 'topic_item', 'approved', trimmed) }
-      finally { setSaving(false) }
-    }
-    setEditing(false)
-  }
-  const cancel = () => { setDraft(currentValue); setEditing(false) }
+  // Register commit + reset with the surrounding group-edit scope so
+  // the card's Save all / Cancel buttons drive every row at once.
+  useEffect(() => {
+    if (!groupEdit?.register || !editPath || !saveMark) return
+    return groupEdit.register(editPath, {
+      commit: async () => {
+        const trimmed = draftRef.current.trim()
+        if (trimmed === entry.value.trim()) {
+          await saveMark(editPath, 'topic_item', 'approved', null)
+        } else {
+          await saveMark(editPath, 'topic_item', 'approved', trimmed)
+        }
+      },
+      reset: () => setDraft(currentValue),
+    })
+  }, [groupEdit, editPath, saveMark, entry.value, currentValue])
 
+  const overridden = editMark?.status === 'approved' && editMark.client_note != null
+  const wrapperClass = [
+    reviewMode
+      ? 'flex gap-3 text-sm bg-cream/40 border border-lavender/60 rounded-md px-3 py-2'
+      : 'flex gap-3 text-[12px] bg-wm-bg-hover/40 border border-wm-border rounded-md px-3 py-2',
+    overridden ? (reviewMode ? 'ring-1 ring-primary-purple/30' : 'ring-1 ring-wm-accent/30') : '',
+  ].join(' ')
   const valueClass = reviewMode
     ? 'flex-1 min-w-0 text-deep-plum leading-snug whitespace-pre-line'
     : 'flex-1 min-w-0 text-wm-text leading-snug whitespace-pre-line'
-  const wrapperClass = [
-    reviewMode
-      ? 'flex gap-3 text-sm bg-cream/40 border border-lavender/60 rounded-md px-3 py-2 group/detail relative'
-      : 'flex gap-3 text-[12px] bg-wm-bg-hover/40 border border-wm-border rounded-md px-3 py-2 group/detail relative',
-    editMark?.status === 'approved' && editMark.client_note != null
-      ? (reviewMode ? 'ring-1 ring-primary-purple/30' : 'ring-1 ring-wm-accent/30')
-      : '',
-  ].join(' ')
 
   return (
     <div className={wrapperClass}>
@@ -2221,77 +2466,30 @@ function ConsolidatedDetailRow({
         ))}
       </div>
       {editing ? (
-        <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-          <textarea
-            value={draft}
-            rows={Math.max(2, Math.min(8, draft.split('\n').length))}
-            onChange={e => setDraft(e.target.value)}
-            className="w-full text-sm text-deep-plum bg-white border border-primary-purple rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-purple/30 resize-y leading-snug"
-            autoFocus
-          />
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void commit()}
-              disabled={saving}
-              className="inline-flex items-center gap-1 text-[11px] font-semibold text-white bg-primary-purple hover:bg-deep-plum rounded-full px-3 py-1 disabled:opacity-60"
-            >
-              {saving ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
-              Save
-            </button>
-            <button
-              type="button"
-              onClick={cancel}
-              className="text-[11px] font-semibold text-purple-gray hover:text-deep-plum"
-            >
-              Cancel
-            </button>
-            {editMark?.client_note != null && (
-              <button
-                type="button"
-                onClick={async () => {
-                  if (!editPath || !saveMark) return
-                  setSaving(true)
-                  try { await saveMark(editPath, 'topic_item', 'approved', null) }
-                  finally { setSaving(false) }
-                  setEditing(false)
-                }}
-                className="ml-auto text-[10px] font-semibold text-purple-gray hover:text-deep-plum"
-                title="Discard your edit and revert to the original value"
-              >
-                Revert to original
-              </button>
-            )}
-          </div>
-        </div>
+        <textarea
+          value={draft}
+          rows={Math.max(2, Math.min(8, draft.split('\n').length))}
+          onChange={e => setDraft(e.target.value)}
+          className={reviewMode
+            ? 'flex-1 min-w-0 text-sm text-deep-plum bg-white border border-primary-purple rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-purple/30 resize-y leading-snug'
+            : 'flex-1 min-w-0 text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border-focus rounded px-2 py-1.5 focus:outline-none resize-y leading-snug'}
+        />
       ) : (
-        <>
-          <div className={valueClass}>
-            {isUrl(currentValue) ? (
-              <a href={currentValue} target="_blank" rel="noopener noreferrer"
-                 className={reviewMode ? 'text-primary-purple hover:underline inline-flex items-center gap-0.5 font-mono text-xs break-all' : 'text-wm-accent hover:underline inline-flex items-center gap-0.5 font-mono text-[11px] break-all'}>
-                {currentValue} <ExternalLink size={9} />
-              </a>
-            ) : currentValue}
-            {editMark?.client_note != null && (
-              <span className={reviewMode
-                ? 'ml-2 inline-flex items-center text-[9px] uppercase tracking-wider font-bold text-primary-purple bg-lavender-tint border border-primary-purple/30 rounded-full px-1.5 py-0.5'
-                : 'ml-2 inline-flex items-center text-[9px] uppercase tracking-wider font-bold text-wm-accent bg-wm-accent-tint border border-wm-accent/30 rounded-full px-1.5 py-0.5'}>
-                Edited
-              </span>
-            )}
-          </div>
-          {canEdit && (
-            <button
-              type="button"
-              onClick={() => { setDraft(currentValue); setEditing(true) }}
-              className="shrink-0 self-start text-[10px] font-semibold text-primary-purple hover:text-deep-plum inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-lavender-tint/60 opacity-70 group-hover/detail:opacity-100 transition-opacity"
-              title="Edit this entry"
-            >
-              <Pencil size={10} /> Edit
-            </button>
+        <div className={valueClass}>
+          {isUrl(currentValue) ? (
+            <a href={currentValue} target="_blank" rel="noopener noreferrer"
+               className={reviewMode ? 'text-primary-purple hover:underline inline-flex items-center gap-0.5 font-mono text-xs break-all' : 'text-wm-accent hover:underline inline-flex items-center gap-0.5 font-mono text-[11px] break-all'}>
+              {currentValue} <ExternalLink size={9} />
+            </a>
+          ) : currentValue}
+          {overridden && (
+            <span className={reviewMode
+              ? 'ml-2 inline-flex items-center text-[9px] uppercase tracking-wider font-bold text-primary-purple bg-lavender-tint border border-primary-purple/30 rounded-full px-1.5 py-0.5'
+              : 'ml-2 inline-flex items-center text-[9px] uppercase tracking-wider font-bold text-wm-accent bg-wm-accent-tint border border-wm-accent/30 rounded-full px-1.5 py-0.5'}>
+              Edited
+            </span>
           )}
-        </>
+        </div>
       )}
     </div>
   )
@@ -2578,46 +2776,44 @@ function FaqRow({
 }) {
   const origQuestion = String(item.question ?? '')
   const origAnswer   = String(item.answer ?? '')
-  const slug = slugify(origQuestion).slice(0, 60) || `faq-${Math.abs(hashString(origQuestion + '::' + origAnswer)).toString(36).slice(0, 6)}`
+  const slug = slugify(origQuestion).slice(0, 60) ||
+    `faq-${Math.abs(hashString(origQuestion + '::' + origAnswer)).toString(36).slice(0, 6)}`
   const editPath = bucketKey && topicKey ? `faq-edit:${bucketKey}/${topicKey}/${slug}` : null
   const qMark    = editPath ? marks?.get(`${editPath}/question`) : undefined
   const aMark    = editPath ? marks?.get(`${editPath}/answer`)   : undefined
   const question = (qMark?.status === 'approved' && qMark.client_note != null) ? qMark.client_note : origQuestion
   const answer   = (aMark?.status === 'approved' && aMark.client_note != null) ? aMark.client_note : origAnswer
-  const canEdit  = reviewMode && !!editPath && !!saveMark
   const edited   = (qMark?.client_note != null) || (aMark?.client_note != null)
 
-  const [editing, setEditing] = useState(false)
+  const groupEdit = useGroupEdit()
+  const editing = groupEdit?.editing ?? false
+
   const [qDraft, setQDraft] = useState(question)
   const [aDraft, setADraft] = useState(answer)
-  const [saving, setSaving] = useState(false)
-  useEffect(() => { if (!editing) { setQDraft(question); setADraft(answer) } }, [question, answer, editing])
+  const qDraftRef = useRef(qDraft)
+  const aDraftRef = useRef(aDraft)
+  useEffect(() => { qDraftRef.current = qDraft }, [qDraft])
+  useEffect(() => { aDraftRef.current = aDraft }, [aDraft])
+  useEffect(() => { if (!editing) { setQDraft(question); setADraft(answer) } }, [editing, question, answer])
 
-  const commit = async () => {
-    if (!editPath || !saveMark) return
-    setSaving(true)
-    try {
-      await saveMark(`${editPath}/question`, 'topic_item', 'approved', qDraft.trim() === origQuestion.trim() ? null : qDraft.trim())
-      await saveMark(`${editPath}/answer`,   'topic_item', 'approved', aDraft.trim() === origAnswer.trim()   ? null : aDraft.trim())
-    } finally { setSaving(false) }
-    setEditing(false)
-  }
-  const cancel = () => { setQDraft(question); setADraft(answer); setEditing(false) }
-  const revert = async () => {
-    if (!editPath || !saveMark) return
-    setSaving(true)
-    try {
-      await saveMark(`${editPath}/question`, 'topic_item', 'approved', null)
-      await saveMark(`${editPath}/answer`,   'topic_item', 'approved', null)
-    } finally { setSaving(false) }
-    setEditing(false)
-  }
+  useEffect(() => {
+    if (!groupEdit?.register || !editPath || !saveMark) return
+    return groupEdit.register(`${editPath}/qa`, {
+      commit: async () => {
+        const qTrim = qDraftRef.current.trim()
+        const aTrim = aDraftRef.current.trim()
+        await saveMark(`${editPath}/question`, 'topic_item', 'approved', qTrim === origQuestion.trim() ? null : qTrim)
+        await saveMark(`${editPath}/answer`,   'topic_item', 'approved', aTrim === origAnswer.trim()   ? null : aTrim)
+      },
+      reset: () => { setQDraft(question); setADraft(answer) },
+    })
+  }, [groupEdit, editPath, saveMark, origQuestion, origAnswer, question, answer])
 
   return (
     <div className={[
       reviewMode
-        ? 'bg-cream/40 border border-lavender/60 rounded-md px-3 py-2 group/faq relative'
-        : 'bg-wm-bg-hover/40 border border-wm-border rounded-md px-3 py-2 group/faq relative',
+        ? 'bg-cream/40 border border-lavender/60 rounded-md px-3 py-2'
+        : 'bg-wm-bg-hover/40 border border-wm-border rounded-md px-3 py-2',
       edited ? (reviewMode ? 'ring-1 ring-primary-purple/30' : 'ring-1 ring-wm-accent/30') : '',
     ].join(' ')}>
       {editing ? (
@@ -2628,8 +2824,9 @@ function FaqRow({
               value={qDraft}
               rows={2}
               onChange={e => setQDraft(e.target.value)}
-              className="w-full mt-0.5 text-sm text-deep-plum bg-white border border-primary-purple rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-purple/30 resize-y leading-snug"
-              autoFocus
+              className={reviewMode
+                ? 'w-full mt-0.5 text-sm text-deep-plum bg-white border border-primary-purple rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-purple/30 resize-y leading-snug'
+                : 'w-full mt-0.5 text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border-focus rounded px-2 py-1.5 focus:outline-none resize-y leading-snug'}
             />
           </label>
           <label className="block">
@@ -2638,45 +2835,24 @@ function FaqRow({
               value={aDraft}
               rows={Math.max(3, Math.min(10, aDraft.split('\n').length + 1))}
               onChange={e => setADraft(e.target.value)}
-              className="w-full mt-0.5 text-sm text-deep-plum bg-white border border-primary-purple rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-purple/30 resize-y leading-snug"
+              className={reviewMode
+                ? 'w-full mt-0.5 text-sm text-deep-plum bg-white border border-primary-purple rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-purple/30 resize-y leading-snug'
+                : 'w-full mt-0.5 text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border-focus rounded px-2 py-1.5 focus:outline-none resize-y leading-snug'}
             />
           </label>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => void commit()} disabled={saving} className="inline-flex items-center gap-1 text-[11px] font-semibold text-white bg-primary-purple hover:bg-deep-plum rounded-full px-3 py-1 disabled:opacity-60">
-              {saving ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />} Save
-            </button>
-            <button type="button" onClick={cancel} className="text-[11px] font-semibold text-purple-gray hover:text-deep-plum">Cancel</button>
-            {edited && (
-              <button type="button" onClick={() => void revert()} className="ml-auto text-[10px] font-semibold text-purple-gray hover:text-deep-plum">
-                Revert to original
-              </button>
-            )}
-          </div>
         </div>
       ) : (
         <>
-          <div className="flex items-start justify-between gap-2">
-            <p className={reviewMode ? 'text-sm text-deep-plum font-semibold flex-1' : 'text-[12px] text-wm-text font-semibold flex-1'}>
-              {question}
-              {edited && (
-                <span className={reviewMode
-                    ? 'ml-2 inline-flex items-center text-[9px] uppercase tracking-wider font-bold text-primary-purple bg-lavender-tint border border-primary-purple/30 rounded-full px-1.5 py-0.5'
-                    : 'ml-2 inline-flex items-center text-[9px] uppercase tracking-wider font-bold text-wm-accent bg-wm-accent-tint border border-wm-accent/30 rounded-full px-1.5 py-0.5'}>
-                  Edited
-                </span>
-              )}
-            </p>
-            {canEdit && (
-              <button
-                type="button"
-                onClick={() => { setQDraft(question); setADraft(answer); setEditing(true) }}
-                className="shrink-0 text-[10px] font-semibold text-primary-purple hover:text-deep-plum inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-lavender-tint/60 opacity-70 group-hover/faq:opacity-100 transition-opacity"
-                title="Edit this FAQ"
-              >
-                <Pencil size={10} /> Edit
-              </button>
+          <p className={reviewMode ? 'text-sm text-deep-plum font-semibold' : 'text-[12px] text-wm-text font-semibold'}>
+            {question}
+            {edited && (
+              <span className={reviewMode
+                  ? 'ml-2 inline-flex items-center text-[9px] uppercase tracking-wider font-bold text-primary-purple bg-lavender-tint border border-primary-purple/30 rounded-full px-1.5 py-0.5'
+                  : 'ml-2 inline-flex items-center text-[9px] uppercase tracking-wider font-bold text-wm-accent bg-wm-accent-tint border border-wm-accent/30 rounded-full px-1.5 py-0.5'}>
+                Edited
+              </span>
             )}
-          </div>
+          </p>
           <p className={reviewMode ? 'text-sm text-deep-plum/85 mt-1 leading-snug whitespace-pre-line' : 'text-[12px] text-wm-text/85 mt-1 leading-snug whitespace-pre-line'}>
             {answer}
           </p>
@@ -3536,14 +3712,19 @@ function isWeeklyResourceProgram(program: Item): boolean {
 
 // ── Collapsible sub-section (used inside inventory Sections) ────────
 function CollapsibleSubsection({
-  reviewMode, title, hint, children,
+  reviewMode, title, hint, forceOpen, children,
 }: {
   reviewMode: boolean
   title:      string
   hint?:      string
+  /** When true, the body stays open regardless of the user's toggle.
+   *  Used by group-edit scopes so the Save-all path reaches rows
+   *  hidden inside collapsed accordions. */
+  forceOpen?: boolean
   children:   React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
+  const isOpen = forceOpen || open
   return (
     <div className={reviewMode ? 'mt-3 rounded-md border border-lavender/60 bg-cream/30' : 'mt-3 rounded-md border border-wm-border bg-wm-bg-hover/30'}>
       <button
@@ -3561,10 +3742,10 @@ function CollapsibleSubsection({
             {title}
           </span>
         </span>
-        {open ? <ChevronUp size={12} className={reviewMode ? 'text-purple-gray' : 'text-wm-text-muted'} />
-              : <ChevronDown size={12} className={reviewMode ? 'text-purple-gray' : 'text-wm-text-muted'} />}
+        {isOpen ? <ChevronUp size={12} className={reviewMode ? 'text-purple-gray' : 'text-wm-text-muted'} />
+                : <ChevronDown size={12} className={reviewMode ? 'text-purple-gray' : 'text-wm-text-muted'} />}
       </button>
-      {open && (
+      {isOpen && (
         <div className="px-3 pb-3 pt-1">
           {hint && (
             <p className={reviewMode ? 'text-[11px] text-purple-gray mb-2 leading-snug' : 'text-[11px] text-wm-text-muted mb-2 leading-snug'}>

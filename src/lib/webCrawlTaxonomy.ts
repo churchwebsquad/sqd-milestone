@@ -42,6 +42,11 @@ export interface CrawlTopic {
   inventory_kind:  InventoryKind
   url_patterns:    RegExp[]
   keywords:        string[]
+  /** Optional URL deny-list. Pages that match url_patterns AND any of
+   *  these get demoted away from this topic. Use for slug variants
+   *  that look right but mean something else ("/join-the-team" event
+   *  vs. real hiring page). */
+  exclude_url_patterns?: RegExp[]
   /** For fact_rich topics: canonical fields the LLM should extract
    *  per item. Helps keep output shape consistent across crawls. */
   item_fields?:    string[]
@@ -186,6 +191,20 @@ export const CRAWL_TAXONOMY: readonly CrawlTopic[] = [
     url_patterns: [/^\/(next-steps|next-step|grow|discipleship)\/?/i],
     keywords: ['next step', 'next steps', 'discipleship path', 'starting point'],
     description: 'Discipleship journey + decision-making path.',
+  },
+  {
+    // Careers / employment. Slug variants seen across partner sites:
+    // /careers, /jobs, /employment, /hiring, /apply, plus the looser
+    // /work (Doxa uses this) and /work-with-us. Pre-classifier hits
+    // these so /work doesn't fall into `other`.
+    key: 'careers', label: 'Careers / Jobs', group: 'path', inventory_kind: 'fact_rich',
+    url_patterns: [/^\/(careers?|jobs?|employment|hiring|apply|work|work-with-us|join-the-team|join-our-team|join-staff|open-positions|positions)(?:\/|$)/i],
+    keywords: ['open position', 'job opening', 'careers', 'we are hiring', "we're hiring", 'apply now', 'employment opportunities', 'join the team', 'join our staff', 'job description'],
+    item_fields: ['title', 'department', 'location', 'employment_type', 'description', 'apply_url'],
+    description: 'Open paid positions at the church — title, department, description, how to apply.',
+    // Be explicit: the LLM occasionally confuses "join the team" event
+    // pages or "team retreat" pages with hiring. Drop them.
+    exclude_url_patterns: [/(volunteer|serve|retreat|summit|gathering|register|event|camp\b)/i],
   },
 
   // ── Activities (mostly fact-rich) ────────────────────────────────────
