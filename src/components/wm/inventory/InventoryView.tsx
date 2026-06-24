@@ -1675,11 +1675,43 @@ function TopicCard({
           <div className="space-y-2">{events.map((it, i) => <GenericRecordRow key={`ev-${i}`} item={it} reviewMode={reviewMode} primary="name" />)}</div>
         </Section>
       )}
-      {dedupedStaff.length > 0 && (
-        <Section reviewMode={reviewMode} icon={ListChecks} title={`Staff (${dedupedStaff.length})`}>
-          <div className="space-y-2">{dedupedStaff.map((it, i) => <GenericRecordRow key={`st-${i}`} item={it} reviewMode={reviewMode} primary="name" />)}</div>
-        </Section>
-      )}
+      {dedupedStaff.length > 0 && (() => {
+        // Editable mode requires marks + saveMark + bucketKey wired up
+        // (staff side of CrawlInventory + partner side of content
+        // collection both pass these now). When all three present,
+        // render each staff entry as an EditableStaffCard with inline
+        // edits + Remove. Otherwise fall back to the read-only
+        // GenericRecordRow so legacy view paths still work.
+        const editable = bucketKey && marks && saveMark
+        // Hide omitted staff from partner view; staff side keeps them
+        // muted with a Restore affordance handled inside the card.
+        const visible = editable && reviewMode
+          ? dedupedStaff.filter(it => {
+              const slug = slugify(String(it.name ?? it.title ?? '')) || ''
+              if (!slug) return true
+              return marks!.get(`item:${bucketKey}/${topic.topic_key}/${slug}`)?.status !== 'omit'
+            })
+          : dedupedStaff
+        if (visible.length === 0) return null
+        return (
+          <Section reviewMode={reviewMode} icon={ListChecks} title={`Staff (${visible.length})`}>
+            <div className="space-y-2">
+              {visible.map((it, i) => editable
+                ? <EditableStaffCard
+                    key={`st-${i}`}
+                    item={it}
+                    bucketKey={bucketKey!}
+                    topicKey={topic.topic_key}
+                    marks={marks!}
+                    saveMark={saveMark!}
+                    reviewMode={reviewMode}
+                  />
+                : <GenericRecordRow key={`st-${i}`} item={it} reviewMode={reviewMode} primary="name" />,
+              )}
+            </div>
+          </Section>
+        )
+      })()}
       {testimonies.length > 0 && (
         <Section reviewMode={reviewMode} icon={Quote} title={`Testimonies (${testimonies.length})`}>
           <div className="space-y-2">{testimonies.map((it, i) => <TestimonyRow key={`t-${i}`} item={it} reviewMode={reviewMode} />)}</div>
@@ -2415,6 +2447,149 @@ function TestimonyRow({ item, reviewMode }: { item: Item; reviewMode: boolean })
       )}
     </div>
   )
+}
+
+/** Editable card for a single staff entry. Each field (name, role,
+ *  bio, email, phone) is inline-editable and saves on blur via
+ *  saveMark. A Remove button omits the whole staff member (writes
+ *  status='omit' on the parent item path). Falls back to a read-only
+ *  GenericRecordRow when marks/saveMark aren't available. */
+function EditableStaffCard({
+  item, bucketKey, topicKey, marks, saveMark, reviewMode,
+}: {
+  item:       Item
+  bucketKey:  string
+  topicKey:   string
+  marks:      Map<string, Mark>
+  saveMark:   SaveMark
+  reviewMode: boolean
+}) {
+  const rawName = String(item.name ?? item.title ?? '').trim()
+  const itemKey = (slugify(rawName) || `unnamed-${Math.abs(hashString(JSON.stringify(item))).toString(36).slice(0, 6)}`)
+  const basePath = `item:${bucketKey}/${topicKey}/${itemKey}`
+  const omitMark = marks.get(basePath)
+  const omitted  = omitMark?.status === 'omit'
+
+  // Partner side hides removed staff entirely; staff side shows them
+  // muted with a Restore affordance so the row isn't lost.
+  if (omitted && reviewMode) return null
+
+  // Per-field current value: partner edit wins over crawl extraction.
+  const getField = (field: string): string => {
+    const m = marks.get(`${basePath}/${field}`)
+    if (m?.status === 'approved' && m.client_note != null) return m.client_note
+    const v = (item as Record<string, unknown>)[field]
+    return typeof v === 'string' ? v : (v != null ? String(v) : '')
+  }
+  const setField = async (field: string, value: string) => {
+    await saveMark(`${basePath}/${field}`, 'topic_item', 'approved', value.trim() || null)
+  }
+
+  return (
+    <div className={[
+      reviewMode
+        ? 'bg-white border border-lavender rounded-md p-3 space-y-2'
+        : 'bg-wm-bg-elevated border border-wm-border rounded-md p-3 space-y-2',
+      omitted ? 'opacity-60' : '',
+    ].join(' ')}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <StaffField label="Name"  initial={getField('name')}  onCommit={v => setField('name', v)}  reviewMode={reviewMode} />
+          <StaffField label="Role"  initial={getField('role') || getField('title')} onCommit={v => setField('role', v)} reviewMode={reviewMode} />
+          <StaffField label="Email" initial={getField('email')} onCommit={v => setField('email', v)} reviewMode={reviewMode} type="email" />
+          <StaffField label="Phone" initial={getField('phone')} onCommit={v => setField('phone', v)} reviewMode={reviewMode} type="tel" />
+        </div>
+        <div className="shrink-0">
+          {omitted ? (
+            <button
+              type="button"
+              onClick={() => void saveMark(basePath, 'topic_item', 'approved', null)}
+              className="text-[11px] font-semibold text-primary-purple hover:text-deep-plum"
+              title="Bring this staff member back"
+            >
+              Restore
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void saveMark(basePath, 'topic_item', 'omit', null)}
+              className="text-[11px] font-semibold text-purple-gray hover:text-red-700 inline-flex items-center gap-1"
+              title="Remove this staff member"
+            >
+              <EyeOff size={11} /> Remove
+            </button>
+          )}
+        </div>
+      </div>
+      <StaffField
+        label="Bio"
+        initial={getField('bio')}
+        onCommit={v => setField('bio', v)}
+        reviewMode={reviewMode}
+        multiline
+      />
+    </div>
+  )
+}
+
+function StaffField({
+  label, initial, onCommit, reviewMode, multiline, type,
+}: {
+  label:      string
+  initial:    string
+  onCommit:   (v: string) => Promise<void>
+  reviewMode: boolean
+  multiline?: boolean
+  type?:      string
+}) {
+  const [value, setValue] = useState(initial)
+  const [saving, setSaving] = useState(false)
+  useEffect(() => { setValue(initial) }, [initial])
+  const commit = async () => {
+    if (value === initial) return
+    setSaving(true)
+    try { await onCommit(value) } finally { setSaving(false) }
+  }
+  const labelCls = reviewMode
+    ? 'text-[10px] uppercase tracking-widest font-bold text-purple-gray'
+    : 'text-[10px] uppercase tracking-widest font-bold text-wm-text-muted'
+  const inputCls = reviewMode
+    ? 'w-full text-[12.5px] text-deep-plum bg-cream/40 border border-lavender/60 rounded px-2 py-1 focus:border-primary-purple focus:bg-white focus:outline-none'
+    : 'w-full text-[12px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:border-wm-accent focus:bg-wm-bg-elevated focus:outline-none'
+  return (
+    <label className={multiline ? 'block w-full' : 'block'}>
+      <span className={`${labelCls} inline-flex items-center gap-1`}>
+        {label} {saving && <Loader2 size={9} className="animate-spin" />}
+      </span>
+      {multiline ? (
+        <textarea
+          value={value}
+          rows={3}
+          placeholder="Add or edit bio…"
+          onChange={e => setValue(e.target.value)}
+          onBlur={() => void commit()}
+          className={`${inputCls} mt-0.5 resize-y leading-snug min-h-[60px]`}
+        />
+      ) : (
+        <input
+          type={type ?? 'text'}
+          value={value}
+          placeholder={`Add ${label.toLowerCase()}…`}
+          onChange={e => setValue(e.target.value)}
+          onBlur={() => void commit()}
+          className={`${inputCls} mt-0.5`}
+        />
+      )}
+    </label>
+  )
+}
+
+/** Cheap, deterministic string hash for fallback item IDs when a
+ *  staff entry has no name. Same input → same output across renders. */
+function hashString(s: string): number {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0
+  return h
 }
 
 function GenericRecordRow({ item, reviewMode, primary }: { item: Item; reviewMode: boolean; primary?: string }) {
