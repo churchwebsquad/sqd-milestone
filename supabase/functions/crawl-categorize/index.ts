@@ -1,3 +1,49 @@
+// crawl-categorize v16 — priority-URL filter + grouped `other` bucket
+//
+//   • Added priority_url_patterns to clean ministry/path/identity topics.
+//     A page's kind='detail' or kind='key_phrase' items only contribute
+//     top-level facts to a topic when its source URL matches that
+//     topic's priority patterns. Programs / staff / events / meeting
+//     times survive regardless — a named program on a non-canonical
+//     page still lands in its right topic via the LLM's body-driven
+//     classification.
+//
+//   • New helper `filterByPriorityUrl(buckets)` runs after extraction
+//     and before the dedup merge passes. It drops non-priority
+//     detail/key_phrase items + non-priority passages, and routes
+//     the dropped pieces into the `other` bucket.
+//
+//   • New helper `regroupOtherIntoPrograms(buckets, pages, dropped)`
+//     groups everything in `other` by source URL into one program
+//     card per page. Stops `other` from becoming a splatter of
+//     individual atoms.
+//
+//   • Added `careers` topic with permissive slug variants (/careers,
+//     /jobs, /work, /work-with-us, /employment, /hiring, /apply,
+//     /apprenticeship, /internship, /residency, etc.) + exclude_url_patterns
+//     to demote retreat / volunteer / event pages that share keywords.
+//
+//   • Extended url_patterns across most existing topics with the
+//     common slug variants partners actually use (gospelcare for care,
+//     hymnal for worship_music, foundations for membership,
+//     missional-communities / dna-groups for connect_groups, etc.).
+//
+//   • Prompt rule additions:
+//       11a. PAGE PRIMARY TOPIC — hub pages put substantive content
+//            under their primary topic, not fanned across every topic
+//            they mention.
+//       11b. URL-AMBIGUOUS PAGES — when URL slug is unusual, read body
+//            content to decide the topic.
+//       11c. UNCLASSIFIABLE PAGES — emit `other` content as ONE program
+//            per page, not splattered atoms.
+//
+//   • Hint line now says the URL pre-classification IS the primary
+//     topic for the page (not just a preference).
+//
+// Carried forward from v15: service-time consolidation, anti-hallucination
+// snippet rules, completeness rules, dedup rules.
+//
+// (Original v15 comment block, retained for diff continuity):
 // crawl-categorize v15 — service-time consolidation (over v13):
 //
 //   • Drop primary_service_time entirely. Every service-time concept
@@ -51,42 +97,133 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
+// Each topic that should be guarded by priority filtering declares
+// `priority_url_patterns`. Items with kind='detail' from a source URL
+// that doesn't match the topic's priority patterns get demoted at
+// write time so hub pages (e.g. /new, homepage) can't pollute every
+// topic with their mentions. Programs / staff / events / meeting
+// times survive regardless. Topics without priority_url_patterns
+// (events, sermons, blog, location_contact) skip the filter.
 const TAXONOMY = [
-  { key:'about',           label:'Who We Are',           group:'identity',  inventory_kind:'voice_rich', url_patterns:[/^\/(about|who-we-are|our-story|story|history)\/?$/i,/^\/about\//i], description:'Identity narrative.' },
-  { key:'beliefs',         label:'Beliefs & Values',     group:'identity',  inventory_kind:'voice_rich', url_patterns:[/^\/(beliefs|what-we-believe|values|doctrine|statement-of-faith)\/?/i], description:'Statement of faith + values.' },
-  { key:'testimonies',     label:'Testimonies & Stories', group:'identity', inventory_kind:'voice_rich', url_patterns:[/^\/(stories|testimonies|testimony|baptism-stories|life-change|impact-stories|my-story)\/?/i,/^\/stories\//i,/^\/testimon/i], description:'Verbatim partner testimonies and life-change stories.' },
+  { key:'about',           label:'Who We Are',           group:'identity',  inventory_kind:'voice_rich',
+    url_patterns:[/^\/(about|who-we-are|our-story|story|history|mission-and-vision|distinctives)\/?$/i,/^\/about\//i],
+    priority_url_patterns:[/^\/(about|who-we-are|our-story|story|history|mission-and-vision|distinctives)\/?$/i,/^\/about\//i],
+    description:'Identity narrative.' },
+  { key:'beliefs',         label:'Beliefs & Values',     group:'identity',  inventory_kind:'voice_rich',
+    url_patterns:[/^\/(beliefs|what-we-believe(?:-\d+)?|values|doctrine|statement-of-faith|our-beliefs|core-values)\/?/i],
+    priority_url_patterns:[/^\/(beliefs|what-we-believe(?:-\d+)?|values|doctrine|statement-of-faith|our-beliefs|core-values)\/?/i],
+    description:'Statement of faith + values.' },
+  { key:'testimonies',     label:'Testimonies & Stories', group:'identity', inventory_kind:'voice_rich',
+    url_patterns:[/^\/(stories|testimonies|testimony|baptism-stories|life-change|impact-stories|my-story)\/?/i,/^\/stories\//i,/^\/testimon/i],
+    description:'Verbatim partner testimonies and life-change stories.' },
   // Word-boundary anchor: don't sweep /leadership-summit or /pastors-retreat
   // into staff. Prior /^\/leadership\/?/i incorrectly matched any URL
   // STARTING with /leadership.
-  { key:'leadership',      label:'Leadership & Staff',   group:'identity',  inventory_kind:'fact_rich',  url_patterns:[/^\/(staff|team|leadership|elders|pastors|our-team)(?:\/|$)/i], item_fields:['name','role','bio','photo_url','email'], description:'Staff + leadership (people who lead — names, roles, bios). DO NOT include event/summit/conference/retreat/camp/register pages even if their URL contains "leadership" or "pastors" — those belong under events.' },
-  { key:'kids',            label:'Kids Ministry',        group:'ministry',  inventory_kind:'voice_rich', url_patterns:[/^\/(kids|kids-ministry|children|childrens-ministry|kidmin)\/?/i], description:'Kids ministry narrative.' },
-  { key:'students',        label:'Students / Youth',     group:'ministry',  inventory_kind:'voice_rich', url_patterns:[/^\/(students|youth|teens|student-ministry|youth-ministry|middle-school|high-school)\/?/i], description:'Middle + high school.' },
-  { key:'college',         label:'College / Young Adults', group:'ministry', inventory_kind:'voice_rich', url_patterns:[/^\/(college|young-adults|20s|twenties|college-ministry)\/?/i], description:'College + young adults.' },
-  { key:'adults',          label:'Adult Ministry',       group:'ministry',  inventory_kind:'voice_rich', url_patterns:[/^\/(adults|adult-ministry|men|women|seniors)\/?/i], description:'Adult ministries.' },
-  { key:'worship_music',   label:'Worship & Music',      group:'ministry',  inventory_kind:'voice_rich', url_patterns:[/^\/(worship|music|worship-arts|worship-team|choir|band)\/?/i], description:'Worship arts.' },
-  { key:'missions',        label:'Missions & Outreach',  group:'ministry',  inventory_kind:'voice_rich', url_patterns:[/^\/(missions|outreach|global|local-outreach|partners)\/?/i], description:'Local + global outreach. Programs MUST include scope:"local" or scope:"global".' },
-  { key:'care',            label:'Care',                 group:'ministry',  inventory_kind:'voice_rich', url_patterns:[/^\/(care|prayer|grief|funerals|hospital)\/?/i], description:'Pastoral care.' },
-  { key:'counseling',      label:'Counseling',           group:'ministry',  inventory_kind:'voice_rich', url_patterns:[/^\/(counseling|biblical-counseling|therapy)\/?/i], description:'Counseling ministry.' },
-  { key:'special_needs',   label:'Special Needs',        group:'ministry',  inventory_kind:'voice_rich', url_patterns:[/^\/(special-needs|access|inclusion|disability)\/?/i], description:'Inclusion ministry.' },
-  { key:'new_here',        label:'New Here / First-Time', group:'path',     inventory_kind:'voice_rich', url_patterns:[/^\/(new|new-here|first-time|im-new|welcome)\/?/i], description:'First-time visitor.' },
-  { key:'plan_visit',      label:'Plan a Visit',         group:'path',      inventory_kind:'voice_rich', url_patterns:[/^\/(plan-a-visit|plan-your-visit|visit)\/?/i], description:'Pre-visit pathway.' },
-  { key:'connect_groups',  label:'Connect / Groups',     group:'path',      inventory_kind:'voice_rich', url_patterns:[/^\/(connect|groups|life-groups|small-groups|community|get-connected)\/?/i], description:'Groups + discipleship.' },
-  { key:'serve',           label:'Serve / Volunteer',    group:'path',      inventory_kind:'voice_rich', url_patterns:[/^\/(serve|volunteer|get-involved|teams|ministry-teams)\/?/i], description:'Serve pathway.' },
-  { key:'membership',      label:'Membership',           group:'path',      inventory_kind:'voice_rich', url_patterns:[/^\/(membership|become-a-member|covenant-membership|partnership)\/?/i], description:'Membership pathway.' },
-  { key:'baptism',         label:'Baptism',              group:'path',      inventory_kind:'voice_rich', url_patterns:[/^\/(baptism|baptisms|get-baptized)\/?/i], description:'Baptism path.' },
-  { key:'next_steps',      label:'Next Steps',           group:'path',      inventory_kind:'voice_rich', url_patterns:[/^\/(next-steps|next-step|grow|discipleship)\/?/i], description:'Discipleship journey.' },
-  { key:'sundays',         label:'Sundays / Services',   group:'activity',  inventory_kind:'voice_rich', url_patterns:[/^\/(sundays|sunday|services|sunday-services|gathering)\/?/i], description:'Sunday narrative.' },
+  { key:'leadership',      label:'Leadership & Staff',   group:'identity',  inventory_kind:'fact_rich',
+    url_patterns:[/^\/(staff|team|leadership|elders|eldership|pastors|our-team|our-leaders|meet-our-team|meet-the-staff|deacons|deacon-team|bio[a-z]+)(?:\/|$)/i],
+    priority_url_patterns:[/^\/(staff|team|leadership|elders|eldership|pastors|our-team|our-leaders|meet-our-team|meet-the-staff|deacons|deacon-team|bio[a-z]+)(?:\/|$)/i],
+    item_fields:['name','role','bio','photo_url','email'],
+    description:'Staff + leadership (people who lead — names, roles, bios). DO NOT include event/summit/conference/retreat/camp/register pages even if their URL contains "leadership" or "pastors" — those belong under events.' },
+  { key:'kids',            label:'Kids Ministry',        group:'ministry',  inventory_kind:'voice_rich',
+    url_patterns:[/^\/(kids|kids-ministry|children|childrens-ministry|kidmin|family-ministry|kids-zone|kids-club)\/?/i],
+    priority_url_patterns:[/^\/(kids|kids-ministry|children|childrens-ministry|kidmin|family-ministry|kids-zone|kids-club)\/?/i],
+    description:'Kids ministry narrative.' },
+  { key:'students',        label:'Students / Youth',     group:'ministry',  inventory_kind:'voice_rich',
+    url_patterns:[/^\/(students|youth|teens|student-ministry|students-ministry|youth-ministry|middle-school|high-school|youth-group)\/?/i],
+    priority_url_patterns:[/^\/(students|youth|teens|student-ministry|students-ministry|youth-ministry|middle-school|high-school|youth-group)\/?/i],
+    description:'Middle + high school.' },
+  { key:'college',         label:'College / Young Adults', group:'ministry', inventory_kind:'voice_rich',
+    url_patterns:[/^\/(college|young-adults|young-adult|20s|twenties|college-ministry|college-students)\/?/i],
+    priority_url_patterns:[/^\/(college|young-adults|young-adult|20s|twenties|college-ministry|college-students)\/?/i],
+    description:'College + young adults.' },
+  { key:'adults',          label:'Adult Ministry',       group:'ministry',  inventory_kind:'voice_rich',
+    url_patterns:[/^\/(adults|adult-ministry|men|mens|womens?|seniors)\/?/i],
+    priority_url_patterns:[/^\/(adults|adult-ministry|men|mens|womens?|seniors)\/?/i],
+    description:'Adult ministries.' },
+  { key:'worship_music',   label:'Worship & Music',      group:'ministry',  inventory_kind:'voice_rich',
+    url_patterns:[/^\/(worship|music|worship-arts|worship-team|choir|band|hymnal|production|tech-team|audio-team|av-team|sound-team)\/?/i],
+    priority_url_patterns:[/^\/(worship|music|worship-arts|worship-team|choir|band|hymnal|production|tech-team|audio-team|av-team|sound-team)\/?/i],
+    description:'Worship arts.' },
+  { key:'missions',        label:'Missions & Outreach',  group:'ministry',  inventory_kind:'voice_rich',
+    url_patterns:[/^\/(missions|outreach|global|local-outreach|partners|mission-partners)\/?/i],
+    priority_url_patterns:[/^\/(missions|outreach|global|local-outreach|partners|mission-partners)\/?/i],
+    description:'Local + global outreach. Programs MUST include scope:"local" or scope:"global".' },
+  { key:'care',            label:'Care',                 group:'ministry',  inventory_kind:'voice_rich',
+    url_patterns:[/^\/(care|gospel-?care|prayer|prayer-team|grief|funerals|hospital|recovery|support-groups|freedom|restoration|crisis-care)\/?/i],
+    priority_url_patterns:[/^\/(care|gospel-?care|prayer|prayer-team|grief|funerals|hospital|recovery|support-groups|freedom|restoration|crisis-care)\/?/i],
+    description:'Pastoral care.' },
+  { key:'counseling',      label:'Counseling',           group:'ministry',  inventory_kind:'voice_rich',
+    url_patterns:[/^\/(counseling|biblical-counseling|christian-counseling|therapy|counsel)\/?/i],
+    priority_url_patterns:[/^\/(counseling|biblical-counseling|christian-counseling|therapy|counsel)\/?/i],
+    description:'Counseling ministry.' },
+  { key:'special_needs',   label:'Special Needs',        group:'ministry',  inventory_kind:'voice_rich',
+    url_patterns:[/^\/(special-needs|access|inclusion|disability|sensory)\/?/i],
+    priority_url_patterns:[/^\/(special-needs|access|inclusion|disability|sensory)\/?/i],
+    description:'Inclusion ministry.' },
+  { key:'new_here',        label:'New Here / First-Time', group:'path',     inventory_kind:'voice_rich',
+    url_patterns:[/^\/(new|new-here|first-time|im-new|welcome|first-visit|visitor)\/?/i],
+    priority_url_patterns:[/^\/(new|new-here|first-time|im-new|welcome|first-visit|visitor)\/?/i],
+    description:'First-time visitor.' },
+  { key:'plan_visit',      label:'Plan a Visit',         group:'path',      inventory_kind:'voice_rich',
+    url_patterns:[/^\/(plan-a-visit|plan-your-visit|visit|plan-your-first-visit)\/?/i],
+    priority_url_patterns:[/^\/(plan-a-visit|plan-your-visit|visit|plan-your-first-visit)\/?/i],
+    description:'Pre-visit pathway.' },
+  { key:'connect_groups',  label:'Connect / Groups',     group:'path',      inventory_kind:'voice_rich',
+    url_patterns:[/^\/(connect|groups|life-groups|small-groups|community|get-connected|dna|dna-groups|missional-communities|mc-groups|gospel-communities|home-groups|house-churches|community-groups)\/?/i],
+    priority_url_patterns:[/^\/(connect|groups|life-groups|small-groups|community|get-connected|dna|dna-groups|missional-communities|mc-groups|gospel-communities|home-groups|house-churches|community-groups)\/?/i],
+    description:'Groups + discipleship.' },
+  { key:'serve',           label:'Serve / Volunteer',    group:'path',      inventory_kind:'voice_rich',
+    url_patterns:[/^\/(serve|volunteer|get-involved|teams|ministry-teams|dream-team|host-team|volunteer-roles|team-signup|serving)\/?/i],
+    priority_url_patterns:[/^\/(serve|volunteer|get-involved|teams|ministry-teams|dream-team|host-team|volunteer-roles|team-signup|serving)\/?/i],
+    description:'Serve pathway.' },
+  { key:'membership',      label:'Membership',           group:'path',      inventory_kind:'voice_rich',
+    url_patterns:[/^\/(membership|become-a-member|covenant-membership|partnership|foundations|members-class|membership-class|partnership-class|covenant)\/?/i],
+    priority_url_patterns:[/^\/(membership|become-a-member|covenant-membership|partnership|foundations|members-class|membership-class|partnership-class|covenant)\/?/i],
+    description:'Membership pathway.' },
+  { key:'baptism',         label:'Baptism',              group:'path',      inventory_kind:'voice_rich',
+    url_patterns:[/^\/(baptism|baptisms|get-baptized|baptize)\/?/i],
+    priority_url_patterns:[/^\/(baptism|baptisms|get-baptized|baptize)\/?/i],
+    description:'Baptism path.' },
+  { key:'next_steps',      label:'Next Steps',           group:'path',      inventory_kind:'voice_rich',
+    url_patterns:[/^\/(next-steps|next-step|grow|discipleship|growth|formation|spiritual-growth|journey|starting-point|get-started|growth-track|growth-path)\/?/i],
+    priority_url_patterns:[/^\/(next-steps|next-step|grow|discipleship|growth|formation|spiritual-growth|journey|starting-point|get-started|growth-track|growth-path)\/?/i],
+    description:'Discipleship journey.' },
+  { key:'careers',         label:'Careers / Jobs',       group:'path',      inventory_kind:'fact_rich',
+    url_patterns:[/^\/(careers?|jobs?|employment|hiring|apply|work|work-with-us|join-the-team|join-our-team|join-staff|open-positions|positions|apprentice|apprenticeship|internship|intern|residency|residencies)(?:\/|$)/i],
+    priority_url_patterns:[/^\/(careers?|jobs?|employment|hiring|apply|work|work-with-us|join-the-team|join-our-team|join-staff|open-positions|positions|apprentice|apprenticeship|internship|intern|residency|residencies)(?:\/|$)/i],
+    exclude_url_patterns:[/(volunteer|serve|retreat|summit|gathering|register|event|camp\b)/i],
+    item_fields:['title','department','location','employment_type','description','apply_url'],
+    description:'Open paid positions, apprenticeships, internships, residencies — title, department, description, how to apply. NOT volunteer / serve / retreat / event pages.' },
+  { key:'sundays',         label:'Sundays / Services',   group:'activity',  inventory_kind:'voice_rich',
+    url_patterns:[/^\/(sundays|sunday|services|sunday-services|gathering|gatherings|worship-service|sunday-experience|what-to-expect)\/?/i],
+    priority_url_patterns:[/^\/(sundays|sunday|services|sunday-services|gathering|gatherings|worship-service|sunday-experience|what-to-expect)\/?/i],
+    description:'Sunday narrative.' },
   { key:'sermons',         label:'Sermons / Messages',   group:'activity',  inventory_kind:'fact_rich',  url_patterns:[/^\/(sermons?|messages|teaching|preaching|watch)\/?/i,/^\/(sermons?|messages)\//i], item_fields:['title','speaker','date','series','video_url','audio_url','notes_url','description'], description:'Sermon archive.' },
   { key:'events',          label:'Events / Calendar',    group:'activity',  inventory_kind:'fact_rich',  url_patterns:[/^\/(events?|calendar|happenings)\/?/i,/^\/(events?|calendar)\//i], item_fields:['name','start_date','end_date','time','location','audience','register_url','description'], description:'Events.' },
   { key:'camps_retreats',  label:'Camps / Retreats',     group:'activity',  inventory_kind:'fact_rich',  url_patterns:[/^\/(camp|camps|retreat|retreats|conferences?)\/?/i], item_fields:['name','start_date','end_date','audience','cost','register_url'], description:'Camps + retreats.' },
   { key:'blog_news',       label:'Blog / News',          group:'activity',  inventory_kind:'fact_rich',  url_patterns:[/^\/(blog|news|articles|posts)\/?/i,/^\/(blog|news|articles)\//i], item_fields:['title','author','date','excerpt','url'], description:'Blog / news / articles.' },
-  { key:'location_contact', label:'Location & Contact',  group:'logistics', inventory_kind:'voice_rich', url_patterns:[/^\/(contact|location|directions|where|find-us)\/?/i], description:'Address + contact.' },
+  // location_contact intentionally has no priority_url_patterns — every
+  // page's footer contributes address/contact legitimately.
+  { key:'location_contact', label:'Location & Contact',  group:'logistics', inventory_kind:'voice_rich', url_patterns:[/^\/(contact|location|directions|where|find-us|address|map|get-in-touch)\/?/i], description:'Address + contact.' },
   { key:'locations_multi', label:'Locations (multi-site)', group:'logistics', inventory_kind:'fact_rich', url_patterns:[/^\/(locations|campuses|sites)\/?/i,/^\/(locations|campuses|sites)\//i], item_fields:['name','address','service_times','campus_pastor','phone','website'], description:'Multi-site listings.' },
-  { key:'school',          label:'School / Preschool',   group:'logistics', inventory_kind:'voice_rich', url_patterns:[/^\/(school|preschool|academy|christian-school)\/?/i], description:'School affiliated with church.' },
+  { key:'school',          label:'School / Preschool',   group:'logistics', inventory_kind:'voice_rich',
+    url_patterns:[/^\/(school|preschool|academy|christian-school|day-school|elementary-school)\/?/i],
+    priority_url_patterns:[/^\/(school|preschool|academy|christian-school|day-school|elementary-school)\/?/i],
+    description:'School affiliated with church.' },
   { key:'newsletter_bulletin', label:'Newsletter & Bulletin', group:'logistics', inventory_kind:'fact_rich', url_patterns:[/^\/(newsletter|bulletin|weekly-update|enews|e-news)\/?/i,/^\/(newsletter|bulletin)\//i], item_fields:['title','date','link','excerpt'], description:'Newsletter / bulletin entries.' },
-  { key:'giving',          label:'Giving',               group:'conversion',inventory_kind:'voice_rich', url_patterns:[/^\/(give|giving|donate|stewardship|tithe)\/?/i], description:'Giving + stewardship.' },
-  { key:'capital_campaign', label:'Capital Campaign',    group:'conversion',inventory_kind:'voice_rich', url_patterns:[/^\/(campaign|capital-campaign|building|growth-campaign)\/?/i], description:'Capital campaigns.' },
-  { key:'merch',           label:'Merch / Shop',         group:'logistics', inventory_kind:'fact_rich', url_patterns:[/^\/(merch|shop|store|apparel|swag|merchandise|gear)\/?/i,/^\/(merch|shop|store)\//i], item_fields:['name','url','description','price'], description:'External merch store (Shopify / Printful / etc.). Capture CTAs + the store URL only — we link out, we do not run ecommerce.' },
+  { key:'giving',          label:'Giving',               group:'conversion',inventory_kind:'voice_rich',
+    url_patterns:[/^\/(give|giving|donate|donation|stewardship|tithe|tithing|planned-giving)\/?/i],
+    priority_url_patterns:[/^\/(give|giving|donate|donation|stewardship|tithe|tithing|planned-giving)\/?/i],
+    description:'Giving + stewardship.' },
+  { key:'capital_campaign', label:'Capital Campaign',    group:'conversion',inventory_kind:'voice_rich',
+    url_patterns:[/^\/(campaign|capital-campaign|building|growth-campaign|pledge|expansion)\/?/i],
+    priority_url_patterns:[/^\/(campaign|capital-campaign|building|growth-campaign|pledge|expansion)\/?/i],
+    description:'Capital campaigns.' },
+  { key:'merch',           label:'Merch / Shop',         group:'logistics', inventory_kind:'fact_rich',
+    url_patterns:[/^\/(merch|shop|store|apparel|swag|merchandise|gear)\/?/i,/^\/(merch|shop|store)\//i],
+    priority_url_patterns:[/^\/(merch|shop|store|apparel|swag|merchandise|gear)\/?/i],
+    item_fields:['name','url','description','price'],
+    description:'External merch store (Shopify / Printful / etc.). Capture CTAs + the store URL only — we link out, we do not run ecommerce.' },
   { key:'other',           label:'Other / Unclassified', group:'other',     inventory_kind:'voice_rich', url_patterns:[], description:'Catch-all.' },
 ];
 
@@ -171,6 +308,17 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Priority-URL filter: drop `detail` items + passages from pages
+    // that aren't the topic's authoritative source. Programs / staff /
+    // events / etc. survive — non-canonical pages can still describe
+    // a ministry program. Dropped items route into `other` next.
+    const dropped = filterByPriorityUrl(buckets);
+
+    // Regroup the `other` bucket so each source URL becomes a single
+    // program card instead of a splatter of individual atoms. Pulls
+    // in the items + passages the priority filter just demoted.
+    regroupOtherIntoPrograms(buckets, pages, dropped);
+
     for (const t of TAXONOMY) {
       buckets[t.key].items = mergeDuplicatePrograms(buckets[t.key].items);
       buckets[t.key].items = mergeDuplicateDetails(buckets[t.key].items);
@@ -244,6 +392,173 @@ function preClassifyUrl(url) {
     for (const re of t.url_patterns) if (re.test(path)) { hits.push(t.key); break; }
   }
   return hits;
+}
+
+// Pull a URL's pathname for filter matching. Falls back to the raw
+// string when URL parsing fails (e.g. relative URLs).
+function pathFromUrl(url) {
+  let p = String(url ?? "");
+  try { p = new URL(p).pathname; } catch {}
+  return p;
+}
+
+// ── Priority-URL filter ─────────────────────────────────────────────
+//
+// User principle: be conservative about which pages contribute
+// top-level facts to a topic. A hub page like /new mentions kids,
+// beliefs, sundays, missional communities — those are decoration,
+// not authority. The kids topic should be sourced from /kids; the
+// beliefs topic from /what-we-believe; etc.
+//
+// Rule (per topic that declares priority_url_patterns):
+//   • kind='detail' AND kind='passage' (passages) → KEEP only if the
+//     source URL matches a priority pattern. DROP otherwise.
+//   • kind='program' / 'staff' / 'meeting_time' / 'location_info' /
+//     'contact_block' / 'faq' / 'cta' / 'key_phrase' / etc. → KEEP
+//     regardless of source URL. The LLM's body-driven classification
+//     of named programs / records is trusted, so a ministry program
+//     described on a non-priority page still lands in the right topic.
+//   • location_contact and topics without priority_url_patterns →
+//     skip the filter entirely.
+//
+// Returns the dropped items so the orchestrator can route them into
+// the `other` bucket as one grouped program per source URL.
+function filterByPriorityUrl(buckets) {
+  const dropped = { items: [], passages: [] };  // for re-routing to `other`
+  for (const t of TAXONOMY) {
+    if (t.key === "location_contact" || t.key === "other") continue;
+    if (!Array.isArray(t.priority_url_patterns) || t.priority_url_patterns.length === 0) continue;
+    const bucket = buckets[t.key];
+    if (!bucket) continue;
+    const priority = t.priority_url_patterns;
+    const matches = (src) => {
+      const path = pathFromUrl(src);
+      for (const re of priority) if (re.test(path)) return true;
+      return false;
+    };
+    // Items
+    const keptItems = [];
+    for (const it of bucket.items) {
+      const kind = String(it?.kind ?? "");
+      const isTopLevelFact = kind === "detail" || kind === "key_phrase";
+      if (isTopLevelFact && !matches(it?.source_url)) {
+        dropped.items.push(it);
+        continue;
+      }
+      keptItems.push(it);
+    }
+    bucket.items = keptItems;
+    // Passages
+    const keptPassages = [];
+    for (const p of bucket.passages) {
+      if (!matches(p?.url)) {
+        dropped.passages.push(p);
+        continue;
+      }
+      keptPassages.push(p);
+    }
+    bucket.passages = keptPassages;
+    // Re-derive source_urls: only URLs that still own content here.
+    const remainingUrls = new Set();
+    for (const it of bucket.items) {
+      const src = it?.source_url; if (src) remainingUrls.add(src);
+    }
+    for (const p of bucket.passages) {
+      const src = p?.url; if (src) remainingUrls.add(src);
+    }
+    bucket.source_urls = Array.from(remainingUrls);
+  }
+  return dropped;
+}
+
+// ── Regroup `other` bucket into per-URL programs ────────────────────
+//
+// When a page can't be assigned to any topic the categorizer falls
+// back to `other`. Without grouping, every fact + passage from those
+// pages lands as a separate atom in the dump — staff scrolls through
+// 40 fragments of "Director of Digital Content" facts to realize
+// they're describing one job posting.
+//
+// This regroups each source URL's contributions into ONE program card:
+//   { kind: 'program', name: <page title>, source_url, description,
+//     items: [...the facts...], passages: [...] }
+//
+// Two inputs feed this: (1) whatever the LLM put into the `other`
+// bucket directly, and (2) items the priority-URL filter demoted.
+function regroupOtherIntoPrograms(buckets, pages, dropped) {
+  const other = buckets["other"];
+  if (!other) return;
+  const pageByUrl = new Map();
+  for (const pg of pages) {
+    if (pg?.url) pageByUrl.set(pg.url, pg);
+  }
+  // Combine everything destined for `other`: existing bucket contents
+  // PLUS dropped items/passages from priority filtering.
+  const allItems = [...other.items, ...dropped.items];
+  const allPassages = [...other.passages, ...dropped.passages];
+  // Pull out anything that's already a program — those stay as-is.
+  const existingPrograms = allItems.filter(i => String(i?.kind) === "program");
+  const nonProgramItems  = allItems.filter(i => String(i?.kind) !== "program");
+
+  // Group non-program items by source_url
+  const bySrc = new Map();
+  for (const it of nonProgramItems) {
+    const src = String(it?.source_url ?? "").trim();
+    if (!src) continue;
+    if (!bySrc.has(src)) bySrc.set(src, { items: [], passages: [] });
+    bySrc.get(src).items.push(it);
+  }
+  for (const p of allPassages) {
+    const src = String(p?.url ?? "").trim();
+    if (!src) continue;
+    if (!bySrc.has(src)) bySrc.set(src, { items: [], passages: [] });
+    bySrc.get(src).passages.push(p);
+  }
+
+  const grouped = [];
+  for (const [src, group] of bySrc) {
+    if (group.items.length === 0 && group.passages.length === 0) continue;
+    const page = pageByUrl.get(src);
+    const title = (page?.title || urlToHumanTitle(src) || src).slice(0, 120);
+    // Description: prefer the first non-trivial passage text, fall
+    // back to the first detail value, fall back to the URL slug.
+    let description = "";
+    if (group.passages.length > 0 && group.passages[0]?.text) {
+      description = String(group.passages[0].text).trim().slice(0, 280);
+    } else if (group.items.length > 0) {
+      const firstDetail = group.items.find(i => String(i?.kind) === "detail" && i?.value);
+      if (firstDetail) description = `${firstDetail.label}: ${firstDetail.value}`.slice(0, 280);
+    }
+    grouped.push({
+      kind: "program",
+      name: title,
+      source_url: src,
+      description,
+      items: group.items,
+      passages: group.passages,
+    });
+  }
+
+  other.items    = [...existingPrograms, ...grouped];
+  other.passages = [];  // moved into program cards above
+  // Rebuild source_urls
+  const urls = new Set();
+  for (const it of other.items) {
+    const src = it?.source_url; if (src) urls.add(src);
+    if (Array.isArray(it?.items)) for (const c of it.items) if (c?.source_url) urls.add(c.source_url);
+  }
+  other.source_urls = Array.from(urls);
+}
+
+function urlToHumanTitle(url) {
+  let path = ""; try { path = new URL(url).pathname; } catch {}
+  if (!path || path === "/") return "Homepage";
+  const last = path.replace(/\/$/, "").split("/").filter(Boolean).pop() ?? "";
+  if (!last) return "Untitled";
+  return last
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, c => c.toUpperCase())
+    .slice(0, 80);
 }
 
 function stampSourceUrl(item, url) {
@@ -567,8 +882,8 @@ async function llmExtractPage(apiKey, page, urlHits) {
   }
   const taxonomyForPrompt = taxLines.join("\n");
   const hintLine = urlHits.length > 0
-    ? "URL pre-classified into: " + urlHits.join(", ") + " — prefer these unless content clearly says otherwise."
-    : "URL didn't pre-classify. Choose best fit(s) or assign to 'other'.";
+    ? "URL pre-classified into: " + urlHits.join(", ") + " — these are the PRIMARY topic(s) for this page. Anything you emit here is the page's main content; do not also dump the same content into other topics just because the page mentions them."
+    : "URL didn't pre-classify. Read the page CONTENT (the title, the first heading, the opening paragraph) and decide what topic this page is PRIMARILY about. Pick exactly ONE topic that fits — that's the page's primary topic. If absolutely nothing in the taxonomy fits the page's content, only then assign to 'other'.";
   const content = page.markdown ?? page.content ?? "";
 
   const exampleJson = '{\n  "topics": [\n    {\n      "key":"location_contact",\n      "passages":["<verbatim prose about contact / location, if any>"],\n      "items":[\n        {"kind":"contact_block","label":"General inquiries","email":"info@church.org","phone":"(555) 123-4567"},\n        {"kind":"location_info","address":"716 Main Street, Lumberton, NJ 08048","label":"Main entrance off Route 38"},\n        {"kind":"detail","label":"Parking","value":"Free parking in lot behind building"}\n      ],\n      "snippets":[{"token":"general_email","label":"General Email","value":"info@church.org"},{"token":"main_phone","label":"Main Phone","value":"(555) 123-4567"}]\n    },\n    {\n      "key":"locations_multi",\n      "passages":["<topic-level intro to the campuses page, if any>"],\n      "items":[\n        {\n          "kind":"program",\n          "name":"Lumberton Campus",\n          "description":"Main campus in Lumberton, NJ.",\n          "passages":["<verbatim campus prose>"],\n          "items":[\n            {"kind":"meeting_time","when":"Sundays 9 AM & 11 AM"},\n            {"kind":"location_info","address":"716 Main Street, Lumberton, NJ 08048","label":"Across from Walther Elementary"},\n            {"kind":"contact_block","label":"Lumberton Campus","email":"lumberton@church.org","phone":"(555) 123-4567"},\n            {"kind":"detail","label":"Campus Pastor","value":"Pastor Jane Doe"}\n          ]\n        },\n        {\n          "kind":"program",\n          "name":"Mount Holly Campus",\n          "description":"Second campus in Mount Holly, NJ.",\n          "passages":["<verbatim campus prose>"],\n          "items":[\n            {"kind":"meeting_time","when":"Sundays 10 AM"},\n            {"kind":"location_info","address":"123 Pine Ave, Mount Holly, NJ 08060"},\n            {"kind":"contact_block","label":"Mount Holly Campus","email":"mountholly@church.org"},\n            {"kind":"detail","label":"Campus Pastor","value":"Pastor John Smith"}\n          ]\n        }\n      ],\n      "snippets":[]\n    },\n    {\n      "key": "kids",\n      "passages": ["<verbatim topic-level prose about kids ministry>"],\n      "items": [\n        {"kind":"detail","label":"Service Times","value":"9:00 AM and 11:00 AM Sunday"},\n        {"kind":"detail","label":"Age Groups","value":"Nursery (birth-2), Pre-K (3-4), K-2, 3-5"},\n        {"kind":"key_phrase","phrase":"build great kids","context":"LHT Kids mission statement"},\n        {\n          "kind":"program",\n          "name":"LHT Kids",\n          "description":"<one-paragraph about>",\n          "audience":"Pre-K through 5th grade",\n          "duration":"Sundays",\n          "tagline":"...",\n          "passages":["<verbatim quote belonging to THIS program>"],\n          "items":[\n            {"kind":"meeting_time","when":"Sundays 9 & 11 AM","location":"Kids wing","audience":"Pre-K through 5th"},\n            {"kind":"contact_block","label":"Kids inquiries","email":"kids@church.org"},\n            {"kind":"detail","label":"Check-in","value":"Arrive 10 minutes early"},\n            {"kind":"faq","question":"What if my child cries?","answer":"..."},\n            {"kind":"cta","label":"Pre-register your child","url":"https://example.com/preregister"}\n          ]\n        }\n      ],\n      "snippets":[{"token":"kids_check_in_email","label":"Kids check-in email","value":"kids@church.org"}]\n    },\n    {\n      "key":"events",\n      "passages":["<topic-level intro to the events page, if any>"],\n      "items":[\n        {\n          "kind":"program",\n          "name":"Christmas Experience",\n          "description":"Christmas Eve services at 2 PM and 4 PM with LHT Kids programming.",\n          "audience":"All ages",\n          "passages":["<verbatim christmas-experience prose>"],\n          "items":[\n            {"kind":"meeting_time","when":"Saturday December 24, 2 PM and 4 PM"},\n            {"kind":"location_info","address":"716 Main Street, Lumberton, NJ 08048"},\n            {"kind":"detail","label":"Kids Programming","value":"LHT Kids Experiences provided during both services"},\n            {"kind":"cta","label":"Plan your visit","url":"https://example.com/plan-a-visit"}\n          ]\n        }\n      ],\n      "snippets":[]\n    },\n    {\n      "key":"giving",\n      "passages":["<topic-level prose about giving>"],\n      "items":[\n        {"kind":"detail","label":"Online Giving","value":"Available via Pushpay"},\n        {\n          "kind":"program",\n          "name":"Faith Challenge",\n          "description":"40-day generosity challenge with structured tiers like Faith Builders, House Builders, Kingdom Builders.",\n          "passages":["<verbatim faith-challenge prose>"],\n          "items":[\n            {"kind":"tier","name":"Faith Builders","commitment":"$50/mo","description":"Beginner tier — build the habit of giving."},\n            {"kind":"tier","name":"House Builders","commitment":"$200/mo","description":"Growing tier — sustain the local church."},\n            {"kind":"tier","name":"Kingdom Builders","commitment":"$1000/mo","description":"Visionary tier — fuel kingdom expansion."},\n            {"kind":"cta","label":"Take the challenge","url":"https://example.com/faith-challenge"}\n          ]\n        }\n      ],\n      "snippets":[]\n    }\n  ]\n}';
@@ -628,6 +943,9 @@ async function llmExtractPage(apiKey, page, urlHits) {
     "9. CTAs / links MUST have a real http(s) URL. NEVER emit cta/link with url='Typeform embedded', url='embedded form', url='form widget', url='' or any non-URL string. If the page embeds a Typeform / Mailchimp / Calendly widget without a discoverable destination URL on the page, OMIT the CTA entirely. Better to extract nothing than to fabricate a placeholder.",
     "10. SNIPPETS require literal usable values. NEVER emit a snippet whose value contains '{{', or whose value names a tool/mechanism ('Typeform embedded', 'Calendly widget', 'Mailchimp form', 'iframe widget'). Only emit snippets when the actual data is reusable (URL, phone, email, address, name). If unsure, OMIT the snippet.",
     "11. Use ONLY taxonomy keys. Use 'other' only if it really doesn't fit.",
+    "11a. PAGE PRIMARY TOPIC — every page has ONE topic it's primarily about. Hub pages (e.g. /new, /home) MENTION many things but they are PRIMARILY about ONE topic (new_here for /new, about for /home). Put the page's substantive content under the primary topic. Don't fan a hub page's mentions out into the kids topic, the beliefs topic, the sundays topic, etc. — those topics get their content from THEIR canonical pages (/kids, /what-we-believe, /sundays). Universal extractors (location_contact for footer address/contact) are the only exception.",
+    "11b. URL-AMBIGUOUS PAGES — when the URL doesn't clearly map to a topic (e.g. /work, /foundations, /dna, /hymnal, /gospelcare, /freedom), read the page CONTENT to decide. /work with apprenticeship + job descriptions → careers. /foundations with class outline + sign-up → membership. /dna or /missional-communities with small-group structure → connect_groups. /gospelcare with prayer + grief + recovery copy → care. Don't dump these into 'other' just because the URL slug is unusual — use the body to pick the right topic.",
+    "11c. UNCLASSIFIABLE PAGES — when nothing in the taxonomy actually fits, emit content under 'other' as ONE item[kind=program] PER PAGE (name = page title or H1, description = a one-line summary, items = the page's facts, passages = the page's prose). Do NOT splatter individual atoms across the 'other' bucket without grouping — that turns 'other' into an unreadable dump. The post-processor will also enforce this, but emit in this shape from the start.",
     "12. snippets = reusable values referenced across pages (snake_case token).",
     "12a. SNIPPET DEDUP — ONE token per concept. Don't emit BOTH `service_time` AND `sunday_service_time` AND `main_service_times` for the same fact. Pick the most specific token name and use it exclusively. Same for any youth/student/kids text-keyword / phone / signup pairs. The reader only needs one canonical reference per concept.",
     "12b. COMPLETE VALUES — if the page lists multiple readings of the same fact (e.g. '9 AM and 11 AM' for service times, three campus phone numbers, two giving methods), the snippet `value` MUST contain ALL of them — joined naturally ('9:00 AM and 11:00 AM', 'AmEx, Visa, Mastercard'). Never truncate to just the first one. A snippet value `\"11 AM\"` is WRONG when the page also lists a 9 AM service.",

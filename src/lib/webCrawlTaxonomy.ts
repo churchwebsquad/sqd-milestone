@@ -47,6 +47,18 @@ export interface CrawlTopic {
    *  that look right but mean something else ("/join-the-team" event
    *  vs. real hiring page). */
   exclude_url_patterns?: RegExp[]
+  /** Canonical "this page IS the topic's authority" URL patterns.
+   *  Used by the categorizer's post-extraction filter to keep
+   *  `kind=detail` items + passages only from pages that match here —
+   *  pages outside this set can still contribute named programs
+   *  (kind=program) and named records (staff, events, etc.), but they
+   *  can't pollute the topic with top-level facts. Empty = no filter,
+   *  which is correct for topics like `events` or `sermons` where
+   *  every page is its own item. Be permissive on slug variants
+   *  (e.g. careers accepts /careers /jobs /work /employment /hiring).
+   *  When URL is ambiguous, the LLM falls back to body content for
+   *  topic intent — this filter only narrows AFTER that decision. */
+  priority_url_patterns?: RegExp[]
   /** For fact_rich topics: canonical fields the LLM should extract
    *  per item. Helps keep output shape consistent across crawls. */
   item_fields?:    string[]
@@ -58,13 +70,15 @@ export const CRAWL_TAXONOMY: readonly CrawlTopic[] = [
   // ── Identity ─────────────────────────────────────────────────────────
   {
     key: 'about', label: 'Who We Are', group: 'identity', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(about|who-we-are|our-story|story|history)\/?$/i, /^\/about\//i],
+    url_patterns: [/^\/(about|who-we-are|our-story|story|history|mission-and-vision|distinctives)\/?$/i, /^\/about\//i],
+    priority_url_patterns: [/^\/(about|who-we-are|our-story|story|history|mission-and-vision|distinctives)\/?$/i, /^\/about\//i],
     keywords: ['who we are', 'our story', 'about us', 'mission', 'vision'],
     description: 'Identity narrative — mission, vision, story, who they are.',
   },
   {
     key: 'beliefs', label: 'Beliefs & Values', group: 'identity', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(beliefs|what-we-believe|values|doctrine|statement-of-faith)\/?/i],
+    url_patterns: [/^\/(beliefs|what-we-believe(?:-\d+)?|values|doctrine|statement-of-faith|our-beliefs|core-values)\/?/i],
+    priority_url_patterns: [/^\/(beliefs|what-we-believe(?:-\d+)?|values|doctrine|statement-of-faith|our-beliefs|core-values)\/?/i],
     keywords: ['we believe', 'core values', 'doctrine', 'statement of faith', 'theology'],
     description: 'Statement of faith, core values, distinctives.',
   },
@@ -81,7 +95,10 @@ export const CRAWL_TAXONOMY: readonly CrawlTopic[] = [
     // The prior `\/?` pattern allowed prefix matches and was pulling
     // in conference / summit pages.
     url_patterns: [
-      /^\/(staff|team|leadership|elders|pastors|our-team)(?:\/|$)/i,
+      /^\/(staff|team|leadership|elders|eldership|pastors|our-team|our-leaders|meet-our-team|meet-the-staff|deacons|deacon-team|bio[a-z]+)(?:\/|$)/i,
+    ],
+    priority_url_patterns: [
+      /^\/(staff|team|leadership|elders|eldership|pastors|our-team|our-leaders|meet-our-team|meet-the-staff|deacons|deacon-team|bio[a-z]+)(?:\/|$)/i,
     ],
     keywords: ['lead pastor', 'executive pastor', 'elder', 'our team', 'staff directory'],
     // Explicit URL deny-list: even if a page matches a leadership
@@ -96,55 +113,64 @@ export const CRAWL_TAXONOMY: readonly CrawlTopic[] = [
   // ── Ministries ───────────────────────────────────────────────────────
   {
     key: 'kids', label: 'Kids Ministry', group: 'ministry', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(kids|kids-ministry|children|childrens-ministry|kidmin)\/?/i],
+    url_patterns: [/^\/(kids|kids-ministry|children|childrens-ministry|kidmin|family-ministry|kids-zone|kids-club)\/?/i],
+    priority_url_patterns: [/^\/(kids|kids-ministry|children|childrens-ministry|kidmin|family-ministry|kids-zone|kids-club)\/?/i],
     keywords: ['kids ministry', 'children', 'preschool', 'elementary', 'kids wing', 'check-in', 'birth through'],
     description: 'Birth through elementary content + safety/check-in narrative.',
   },
   {
     key: 'students', label: 'Students / Youth', group: 'ministry', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(students|youth|teens|student-ministry|youth-ministry|middle-school|high-school)\/?/i],
+    url_patterns: [/^\/(students|youth|teens|student-ministry|students-ministry|youth-ministry|middle-school|high-school|youth-group)\/?/i],
+    priority_url_patterns: [/^\/(students|youth|teens|student-ministry|students-ministry|youth-ministry|middle-school|high-school|youth-group)\/?/i],
     keywords: ['student ministry', 'youth group', 'middle school', 'high school', '6th-8th', '9th-12th'],
     description: 'Middle and high school programming.',
   },
   {
     key: 'college', label: 'College / Young Adults', group: 'ministry', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(college|young-adults|20s|twenties|college-ministry)\/?/i],
+    url_patterns: [/^\/(college|young-adults|young-adult|20s|twenties|college-ministry|college-students)\/?/i],
+    priority_url_patterns: [/^\/(college|young-adults|young-adult|20s|twenties|college-ministry|college-students)\/?/i],
     keywords: ['college', 'young adults', 'twenties', 'campus ministry', 'post-grad'],
     description: 'College students and 20-somethings.',
   },
   {
     key: 'adults', label: 'Adult Ministry', group: 'ministry', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(adults|adult-ministry|men|women|seniors)\/?/i],
+    url_patterns: [/^\/(adults|adult-ministry|men|mens|womens?|seniors)\/?/i],
+    priority_url_patterns: [/^\/(adults|adult-ministry|men|mens|womens?|seniors)\/?/i],
     keywords: ['adult ministry', 'mens ministry', 'womens ministry', 'seniors', 'over 50'],
     description: 'Men, women, adult-stage programming (when not split into separate sections).',
   },
   {
     key: 'worship_music', label: 'Worship & Music', group: 'ministry', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(worship|music|worship-arts|worship-team|choir|band)\/?/i],
-    keywords: ['worship team', 'music ministry', 'choir', 'band', 'worship arts'],
+    url_patterns: [/^\/(worship|music|worship-arts|worship-team|choir|band|hymnal|production|tech-team|audio-team|av-team|sound-team)\/?/i],
+    priority_url_patterns: [/^\/(worship|music|worship-arts|worship-team|choir|band|hymnal|production|tech-team|audio-team|av-team|sound-team)\/?/i],
+    keywords: ['worship team', 'music ministry', 'choir', 'band', 'worship arts', 'hymnal'],
     description: 'Worship arts, music ministry, audition pathways.',
   },
   {
     key: 'missions', label: 'Missions & Outreach', group: 'ministry', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(missions|outreach|global|local-outreach|partners)\/?/i],
+    url_patterns: [/^\/(missions|outreach|global|local-outreach|partners|mission-partners)\/?/i],
+    priority_url_patterns: [/^\/(missions|outreach|global|local-outreach|partners|mission-partners)\/?/i],
     keywords: ['missions', 'outreach', 'global partners', 'sending', 'mission trips'],
     description: 'Local and global mission engagement.',
   },
   {
     key: 'care', label: 'Care', group: 'ministry', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(care|prayer|grief|funerals|hospital)\/?/i],
-    keywords: ['care ministry', 'prayer', 'grief', 'funerals', 'hospital visits', 'crisis'],
+    url_patterns: [/^\/(care|gospel-?care|prayer|prayer-team|grief|funerals|hospital|recovery|support-groups|freedom|restoration|crisis-care)\/?/i],
+    priority_url_patterns: [/^\/(care|gospel-?care|prayer|prayer-team|grief|funerals|hospital|recovery|support-groups|freedom|restoration|crisis-care)\/?/i],
+    keywords: ['care ministry', 'gospel care', 'prayer', 'grief', 'funerals', 'hospital visits', 'crisis', 'recovery'],
     description: 'Pastoral care, crisis, grief, prayer.',
   },
   {
     key: 'counseling', label: 'Counseling', group: 'ministry', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(counseling|biblical-counseling|therapy)\/?/i],
+    url_patterns: [/^\/(counseling|biblical-counseling|christian-counseling|therapy|counsel)\/?/i],
+    priority_url_patterns: [/^\/(counseling|biblical-counseling|christian-counseling|therapy|counsel)\/?/i],
     keywords: ['biblical counseling', 'counseling', 'therapy', 'recovery'],
     description: 'Counseling ministry — biblical counseling, recovery groups, referrals.',
   },
   {
     key: 'special_needs', label: 'Special Needs', group: 'ministry', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(special-needs|access|inclusion|disability)\/?/i],
+    url_patterns: [/^\/(special-needs|access|inclusion|disability|sensory)\/?/i],
+    priority_url_patterns: [/^\/(special-needs|access|inclusion|disability|sensory)\/?/i],
     keywords: ['special needs', 'inclusion', 'disability', 'access ministry', 'sensory friendly'],
     description: 'Inclusion and special-needs ministry.',
   },
@@ -152,44 +178,51 @@ export const CRAWL_TAXONOMY: readonly CrawlTopic[] = [
   // ── Connection paths ─────────────────────────────────────────────────
   {
     key: 'new_here', label: 'New Here / First-Time', group: 'path', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(new|new-here|first-time|im-new|welcome)\/?/i],
+    url_patterns: [/^\/(new|new-here|first-time|im-new|welcome|first-visit|visitor)\/?/i],
+    priority_url_patterns: [/^\/(new|new-here|first-time|im-new|welcome|first-visit|visitor)\/?/i],
     keywords: ['new here', 'first time', 'what to expect', 'welcome'],
     description: 'First-time visitor path. What to expect on Sunday.',
   },
   {
     key: 'plan_visit', label: 'Plan a Visit', group: 'path', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(plan-a-visit|plan-your-visit|visit)\/?/i],
+    url_patterns: [/^\/(plan-a-visit|plan-your-visit|visit|plan-your-first-visit)\/?/i],
+    priority_url_patterns: [/^\/(plan-a-visit|plan-your-visit|visit|plan-your-first-visit)\/?/i],
     keywords: ['plan a visit', 'plan your visit', 'first sunday', 'getting here'],
     description: 'Pre-visit pathway — directions, parking, what to wear, check-in.',
   },
   {
     key: 'connect_groups', label: 'Connect / Groups', group: 'path', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(connect|groups|life-groups|small-groups|community|get-connected)\/?/i],
-    keywords: ['get connected', 'life groups', 'small groups', 'community', 'discipleship'],
+    url_patterns: [/^\/(connect|groups|life-groups|small-groups|community|get-connected|dna|dna-groups|missional-communities|mc-groups|gospel-communities|home-groups|house-churches|community-groups)\/?/i],
+    priority_url_patterns: [/^\/(connect|groups|life-groups|small-groups|community|get-connected|dna|dna-groups|missional-communities|mc-groups|gospel-communities|home-groups|house-churches|community-groups)\/?/i],
+    keywords: ['get connected', 'life groups', 'small groups', 'community', 'discipleship', 'missional communities', 'dna groups'],
     description: 'Life Groups / Small Groups / community discipleship.',
   },
   {
     key: 'serve', label: 'Serve / Volunteer', group: 'path', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(serve|volunteer|get-involved|teams|ministry-teams)\/?/i],
+    url_patterns: [/^\/(serve|volunteer|get-involved|teams|ministry-teams|dream-team|host-team|volunteer-roles|team-signup|serving)\/?/i],
+    priority_url_patterns: [/^\/(serve|volunteer|get-involved|teams|ministry-teams|dream-team|host-team|volunteer-roles|team-signup|serving)\/?/i],
     keywords: ['serve', 'volunteer', 'get involved', 'ministry teams', 'team signup'],
     description: 'Volunteer onboarding + serve teams.',
   },
   {
     key: 'membership', label: 'Membership', group: 'path', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(membership|become-a-member|covenant-membership|partnership)\/?/i],
-    keywords: ['membership', 'become a member', 'covenant member', 'partnership'],
+    url_patterns: [/^\/(membership|become-a-member|covenant-membership|partnership|foundations|members-class|membership-class|partnership-class|covenant)\/?/i],
+    priority_url_patterns: [/^\/(membership|become-a-member|covenant-membership|partnership|foundations|members-class|membership-class|partnership-class|covenant)\/?/i],
+    keywords: ['membership', 'become a member', 'covenant member', 'partnership', 'foundations class'],
     description: 'Membership / partnership covenant pathway.',
   },
   {
     key: 'baptism', label: 'Baptism', group: 'path', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(baptism|baptisms|get-baptized)\/?/i],
+    url_patterns: [/^\/(baptism|baptisms|get-baptized|baptize)\/?/i],
+    priority_url_patterns: [/^\/(baptism|baptisms|get-baptized|baptize)\/?/i],
     keywords: ['baptism', 'baptized', 'next step'],
     description: 'Baptism story, signup, next step.',
   },
   {
     key: 'next_steps', label: 'Next Steps', group: 'path', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(next-steps|next-step|grow|discipleship)\/?/i],
-    keywords: ['next step', 'next steps', 'discipleship path', 'starting point'],
+    url_patterns: [/^\/(next-steps|next-step|grow|discipleship|growth|formation|spiritual-growth|journey|starting-point|get-started|growth-track|growth-path)\/?/i],
+    priority_url_patterns: [/^\/(next-steps|next-step|grow|discipleship|growth|formation|spiritual-growth|journey|starting-point|get-started|growth-track|growth-path)\/?/i],
+    keywords: ['next step', 'next steps', 'discipleship path', 'starting point', 'growth track'],
     description: 'Discipleship journey + decision-making path.',
   },
   {
@@ -198,10 +231,11 @@ export const CRAWL_TAXONOMY: readonly CrawlTopic[] = [
     // /work (Doxa uses this) and /work-with-us. Pre-classifier hits
     // these so /work doesn't fall into `other`.
     key: 'careers', label: 'Careers / Jobs', group: 'path', inventory_kind: 'fact_rich',
-    url_patterns: [/^\/(careers?|jobs?|employment|hiring|apply|work|work-with-us|join-the-team|join-our-team|join-staff|open-positions|positions)(?:\/|$)/i],
-    keywords: ['open position', 'job opening', 'careers', 'we are hiring', "we're hiring", 'apply now', 'employment opportunities', 'join the team', 'join our staff', 'job description'],
+    url_patterns: [/^\/(careers?|jobs?|employment|hiring|apply|work|work-with-us|join-the-team|join-our-team|join-staff|open-positions|positions|apprentice|apprenticeship|internship|intern|residency|residencies)(?:\/|$)/i],
+    priority_url_patterns: [/^\/(careers?|jobs?|employment|hiring|apply|work|work-with-us|join-the-team|join-our-team|join-staff|open-positions|positions|apprentice|apprenticeship|internship|intern|residency|residencies)(?:\/|$)/i],
+    keywords: ['open position', 'job opening', 'careers', 'we are hiring', "we're hiring", 'apply now', 'employment opportunities', 'join the team', 'join our staff', 'job description', 'apprenticeship', 'internship', 'paid position'],
     item_fields: ['title', 'department', 'location', 'employment_type', 'description', 'apply_url'],
-    description: 'Open paid positions at the church — title, department, description, how to apply.',
+    description: 'Open paid positions at the church — title, department, description, how to apply. Includes apprenticeships, internships, and residency programs.',
     // Be explicit: the LLM occasionally confuses "join the team" event
     // pages or "team retreat" pages with hiring. Drop them.
     exclude_url_patterns: [/(volunteer|serve|retreat|summit|gathering|register|event|camp\b)/i],
@@ -210,7 +244,8 @@ export const CRAWL_TAXONOMY: readonly CrawlTopic[] = [
   // ── Activities (mostly fact-rich) ────────────────────────────────────
   {
     key: 'sundays', label: 'Sundays / Services', group: 'activity', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(sundays|sunday|services|sunday-services|gathering)\/?/i],
+    url_patterns: [/^\/(sundays|sunday|services|sunday-services|gathering|gatherings|worship-service|sunday-experience|what-to-expect)\/?/i],
+    priority_url_patterns: [/^\/(sundays|sunday|services|sunday-services|gathering|gatherings|worship-service|sunday-experience|what-to-expect)\/?/i],
     keywords: ['sunday service', 'service times', 'sunday morning', 'what to expect on sunday'],
     description: 'Sunday gathering narrative + service times context.',
   },
@@ -245,8 +280,11 @@ export const CRAWL_TAXONOMY: readonly CrawlTopic[] = [
 
   // ── Logistics ────────────────────────────────────────────────────────
   {
+    // NB: no priority_url_patterns. Address/contact is universal —
+    // every page's footer contributes legitimately, so the filter
+    // skips this topic.
     key: 'location_contact', label: 'Location & Contact', group: 'logistics', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(contact|location|directions|where|find-us)\/?/i],
+    url_patterns: [/^\/(contact|location|directions|where|find-us|address|map|get-in-touch)\/?/i],
     keywords: ['contact us', 'directions', 'address', 'parking', 'get in touch'],
     description: 'Physical address, directions, parking, primary contact channels.',
   },
@@ -259,7 +297,8 @@ export const CRAWL_TAXONOMY: readonly CrawlTopic[] = [
   },
   {
     key: 'school', label: 'School / Preschool', group: 'logistics', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(school|preschool|academy|christian-school)\/?/i],
+    url_patterns: [/^\/(school|preschool|academy|christian-school|day-school|elementary-school)\/?/i],
+    priority_url_patterns: [/^\/(school|preschool|academy|christian-school|day-school|elementary-school)\/?/i],
     keywords: ['christian school', 'preschool', 'academy', 'k-12', 'enrollment'],
     description: 'School or preschool affiliated with the church.',
   },
@@ -274,13 +313,15 @@ export const CRAWL_TAXONOMY: readonly CrawlTopic[] = [
   // ── Conversion ───────────────────────────────────────────────────────
   {
     key: 'giving', label: 'Giving', group: 'conversion', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(give|giving|donate|stewardship|tithe)\/?/i],
+    url_patterns: [/^\/(give|giving|donate|donation|stewardship|tithe|tithing|planned-giving)\/?/i],
+    priority_url_patterns: [/^\/(give|giving|donate|donation|stewardship|tithe|tithing|planned-giving)\/?/i],
     keywords: ['give online', 'giving', 'tithe', 'donate', 'stewardship', 'planned giving'],
     description: 'Online giving + stewardship narrative.',
   },
   {
     key: 'capital_campaign', label: 'Capital Campaign', group: 'conversion', inventory_kind: 'voice_rich',
-    url_patterns: [/^\/(campaign|capital-campaign|building|growth-campaign)\/?/i],
+    url_patterns: [/^\/(campaign|capital-campaign|building|growth-campaign|pledge|expansion)\/?/i],
+    priority_url_patterns: [/^\/(campaign|capital-campaign|building|growth-campaign|pledge|expansion)\/?/i],
     keywords: ['capital campaign', 'building campaign', 'pledge', 'expansion'],
     description: 'Capital campaigns, building expansions, special asks.',
   },
