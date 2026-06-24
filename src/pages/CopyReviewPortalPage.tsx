@@ -220,6 +220,12 @@ export default function CopyReviewPortalPage() {
     setSubmitting(false)
     if (ok) {
       setJustSubmitted(true)
+      // Fire-and-forget Slack notification to #am-pm-web. Same shape
+      // as ContentCollectionPage.submitFinal's notify hook — failures
+      // here don't block the partner's submit confirmation.
+      void supabase.functions.invoke('notify-copy-review-submitted', {
+        body: { review_id: review.id },
+      }).catch(err => { console.error('[copy-review notify] failed', err) })
       refresh()
     }
   }
