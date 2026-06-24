@@ -72,7 +72,8 @@ export async function createSession(input: {
       user_email:            input.userEmail,
       current_step:          input.clickupTaskId ? 'deliverables' : 'account',
       status:                'in_progress',
-      ...(input.brandVoiceGuidelines ? { brand_voice_guidelines: input.brandVoiceGuidelines } : {}),
+      // TODO: restore once v77_srp_sessions_brand_voice.sql migration is run
+      // ...(input.brandVoiceGuidelines ? { brand_voice_guidelines: input.brandVoiceGuidelines } : {}),
       ...(input.clickupTaskId  ? { clickup_task_id: input.clickupTaskId }  : {}),
       ...(input.sermonTitle    ? { sermon_title:    input.sermonTitle }    : {}),
     })
