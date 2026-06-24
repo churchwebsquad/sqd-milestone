@@ -3692,22 +3692,49 @@ function isWeeklyLessonDetail(entry: ConsolidatedEntry): boolean {
 
 // ── Weekly-resource program detector ─────────────────────────────────
 //
-// Similarly, the categorizer sometimes promotes individual weekly
-// resource pages (e.g. "Elementary // Contentment Week 2 Resource",
-// "Preschool Unit 4 Lesson 2") to top-level programs. They're not
-// ministry programs — they're discrete weekly material from a series.
-// Group them into a collapsed sub-section.
-const RESOURCE_PROGRAM_PATTERNS: RegExp[] = [
-  /\bweek\s*\d+\b/i,                  // "Week 2"
-  /\bunit\s*\d+\b/i,                  // "Unit 4"
-  /\blesson\s*\d+\b/i,                // "Lesson 2"
-  /\bresource\b/i,                    // catchall for "Weekly Resource", "Family Resource"
-  /\/\/.*\bweek\b/i,                  // "Elementary // Contentment Week 2 Resource"
+// The categorizer promotes weekly lesson pages (e.g. "Elementary //
+// Contentment Week 2 Resource", "Unit 4 Lesson 2", "November 16 //
+// Israel Wants a King") to top-level programs. They're not ministry
+// programs — they're discrete weekly material from a series. Group
+// them into a collapsed sub-section.
+//
+// Two signals:
+//   1. NAME pattern — week N / unit N / lesson N / "resource(s)" /
+//      "// " topic-marker / month-day date prefix.
+//   2. SOURCE URL pattern — paths under /kids-resource, /lesson-N,
+//      /unit-N, /week-N, /sermon-notes, etc. Catches "Evangelism
+//      Sunday" or "Kindness Alphabet Activity" — names that don't
+//      look resource-shaped but live on a resource page.
+const RESOURCE_NAME_PATTERNS: RegExp[] = [
+  /\bweek\s*\d+\b/i,                            // "Week 2"
+  /\bunit\s*\d+\b/i,                            // "Unit 4"
+  /\blesson\s*\d+\b/i,                          // "Lesson 2"
+  /\bresources?\b/i,                            // "Resource" or "Resources" — plural was missed
+  /\/\/.*\b(week|unit|lesson)\b/i,              // "Elementary // Contentment Week 2"
+  /^(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|jun(e)?|jul(y)?|aug(ust)?|sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?)\s+\d{1,2}\b/i,  // "November 16 //" date-prefix
+  /\bday\s+\d+\b/i,                             // "Day 3"
+  /\bsession\s+\d+\b/i,                         // "Session 2"
+]
+const RESOURCE_URL_PATTERNS: RegExp[] = [
+  /\/(kids|youth|students?|family|adult|womens?|mens?)-?resource/i,  // /kids-resource, /youth-resource
+  /\/resource(?:s|-|\/)/i,                      // /resources, /resource-, /resource/
+  /\/unit-?\d+/i,                               // /unit-3, /unit3
+  /\/week-?\d+/i,                               // /week-2, /week2
+  /\/lesson-?\d+/i,                             // /lesson-4, /lesson4
+  /\/sermon-?notes?/i,                          // /sermon-notes
+  /\/memory-?verse/i,                           // /kids-memory-verse-songs etc
+  /\/(self-control|kindness|purpose|contentment|joy|love|patience|gentleness|faithfulness|peace|goodness)-?week\d*/i,  // character trait series
 ]
 function isWeeklyResourceProgram(program: Item): boolean {
   const name = String(program.name ?? program.title ?? '').trim()
-  if (!name) return false
-  return RESOURCE_PROGRAM_PATTERNS.some(re => re.test(name))
+  if (name && RESOURCE_NAME_PATTERNS.some(re => re.test(name))) return true
+  const sourceUrl = String(program.source_url ?? '').trim()
+  if (sourceUrl) {
+    let path = sourceUrl
+    try { path = new URL(sourceUrl).pathname } catch { /* keep raw */ }
+    if (RESOURCE_URL_PATTERNS.some(re => re.test(path))) return true
+  }
+  return false
 }
 
 // ── Collapsible sub-section (used inside inventory Sections) ────────
