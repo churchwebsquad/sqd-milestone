@@ -23,7 +23,9 @@ import { Loader2, Search, FileText } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { WMButton } from './Button'
 import { WMSegmentedToggle } from './SegmentedToggle'
-import type { WebPage } from '../../types/database'
+import { autoBindPageSections } from '../../lib/webAutoBind'
+import type { PageBrief } from '../../lib/webPageBrief'
+import type { StrategyWebProject, WebPage } from '../../types/database'
 
 interface Props {
   projectId: string
@@ -447,6 +449,51 @@ function CoworkForm({ projectId, phase, existingPages, onClose, onCreated }: Pro
       // current modal phase. Make sure it lands in this phase so the
       // strategist sees it where they clicked Add.
       await supabase.from('web_pages').update({ phase }).eq('web_project_id', projectId).eq('slug', slug)
+
+      // page-bind writes sections as FREEHAND by design — template-
+      // binding is a separate user-initiated step in the rest of the
+      // app. For the Add-from-cowork flow the strategist expects the
+      // page to come in with proper Brixies templates bound, so we
+      // chain autoBindPageSections immediately after. Mirrors the
+      // importBrief flow at lib/webPageBrief.ts:488. Non-fatal on
+      // failure — sections stay freehand and can be bound from the
+      // page editor manually.
+      try {
+        const [pageRes, projRes] = await Promise.all([
+          supabase
+            .from('web_pages')
+            .select('id, brief')
+            .eq('web_project_id', projectId)
+            .eq('slug', slug)
+            .maybeSingle(),
+          supabase
+            .from('strategy_web_projects')
+            .select('*')
+            .eq('id', projectId)
+            .maybeSingle(),
+        ])
+        const pageId    = (pageRes.data as { id?: string; brief?: unknown } | null)?.id
+        const draftBrief = (pageRes.data as { id?: string; brief?: unknown } | null)?.brief as Record<string, unknown> | null
+        const projectRow = projRes.data as StrategyWebProject | null
+        if (pageId && draftBrief && projectRow) {
+          // Ensure page_slug / page_title / phase land on the brief so
+          // autoBindPageSections's brief→section mapping doesn't fall
+          // through. Cowork drafts may not stamp these top-level keys.
+          const brief: PageBrief = {
+            ...(draftBrief as object),
+            page_slug:  (draftBrief.page_slug  as string | undefined) ?? slug,
+            page_title: (draftBrief.page_title as string | undefined) ?? name,
+            phase:      (draftBrief.phase      as string | undefined) ?? phase,
+          } as PageBrief
+          await autoBindPageSections(pageId, brief, projectRow)
+        }
+      } catch (autoBindErr) {
+        // Don't fail the whole add — the page exists, the sections
+        // are there as freehand, and the strategist can bind from the
+        // page editor. Surface the error so they know what happened.
+        console.error('[cowork-import] auto-bind failed:', autoBindErr)
+      }
+
       setResult({ slug, name })
       setBinding(null)
       await onCreated()
