@@ -32,7 +32,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FileText, Loader2, Plus, Trash2, Eye, Edit3, Upload, Archive, MoreHorizontal,
-  ChevronDown, ChevronRight, MessageSquare, ArrowRight, Copy, X,
+  ChevronDown, ChevronRight, MessageSquare, ArrowRight, Copy, X, History,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { loadEditorSnippets } from '../../../lib/webSnippets'
@@ -44,6 +44,7 @@ import type { WMSnippetOption } from '../RichTextEditor'
 import { WMCatalogSidePanel } from '../CatalogSidePanel'
 import { WMAIAttribution } from '../AIAttribution'
 import { PageBriefImportModal } from '../PageBriefImportModal'
+import { PageVersionDrawer } from '../PageVersionDrawer'
 import { AddPageModal } from '../AddPageModal'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { PagePreview } from '../PagePreview'
@@ -682,6 +683,9 @@ function PageEditor({
   const [slugDraft, setSlugDraft] = useState(page.slug)
   const [titleDirty, setTitleDirty] = useState(false)
   const [savingTitle, setSavingTitle] = useState(false)
+  // Version history drawer (revertible snapshots taken before agent
+  // runs + on manual saves; see src/lib/webPageVersions.ts).
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   const [sections, setSections] = useState<WebSection[]>([])
   const [templates, setTemplates] = useState<Record<string, WebContentTemplate>>({})
@@ -1575,6 +1579,14 @@ function PageEditor({
             active={viewMode}
             onChange={setViewMode}
           />
+          <button
+            type="button"
+            onClick={() => setHistoryOpen(true)}
+            className="inline-flex items-center gap-1 text-[11px] font-semibold text-wm-text-muted hover:text-wm-text px-2 py-1 rounded hover:bg-wm-bg-hover"
+            title="Version history for this page (revert to any prior agent run or save)"
+          >
+            <History size={11} /> History
+          </button>
           <StatusMenu current={page.content_status} onChange={setStatus} />
           <PageActionsMenu onArchive={archivePage} />
         </div>
@@ -1970,6 +1982,14 @@ function PageEditor({
           </button>
         </div>
       )}
+
+      <PageVersionDrawer
+        pageId={page.id}
+        pageName={page.name}
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onReverted={async () => { await loadSections() }}
+      />
     </div>
   )
 }

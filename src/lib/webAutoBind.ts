@@ -17,6 +17,7 @@
  * so nothing is lost.
  */
 import { supabase } from './supabase'
+import { snapshotPageVersion } from './webPageVersions'
 import { LIBRARY_CONCEPTS, parseCuratedLibrary, getEffectiveBindings } from './webCuratedLibrary'
 import {
   composeBind, rankVariantsByBrief, extractSectionIdFromNotes,
@@ -258,6 +259,14 @@ export async function autoBindPageSections(
   brief: PageBrief,
   project: StrategyWebProject,
 ): Promise<PageAutoBindResult> {
+  // Snapshot the page's pre-bind state so the strategist can revert if
+  // autoBind's variant picks land somewhere unexpected. Fire-and-forget
+  // — snapshot failure logs but doesn't block the bind.
+  void snapshotPageVersion(supabase, pageId, {
+    triggerKind:  'agent_run',
+    triggerLabel: `Auto-bind sections — ${brief.page_name || brief.page_slug || pageId.slice(0, 8)}`,
+  })
+
   const { data: sectionRows } = await supabase
     .from('web_sections')
     .select('*')

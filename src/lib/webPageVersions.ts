@@ -94,16 +94,23 @@ export async function listPageVersions(
 }
 
 /** Revert a page to the state captured in a prior version. Restores
- *  the page row and replaces every section row with the snapshotted
- *  set. Writes a fresh snapshot recording the revert (so the revert
- *  itself is a save point — undo-able). Returns the new snapshot's id.
+ *  the page row and reconciles sections via a smart diff so FK cascade
+ *  doesn't nuke reviewer notes on sections that survive the revert.
  *
- *  Section restore strategy: delete current sections, re-insert from
- *  snapshot with the original ids preserved. This keeps downstream
- *  references (web_review_comments.web_section_id, telemetry, etc.)
- *  resolvable when the snapshotted section is restored. New sections
- *  that the user added AFTER the snapshot are dropped — that's the
- *  semantic of "revert to this point." */
+ *  Section reconciliation (UPDATE > INSERT > DELETE, by id):
+ *    • Sections present in BOTH snapshot and live → UPDATE in place.
+ *      Row id is preserved → web_review_comments / web_review_edits /
+ *      web_bind_telemetry that FK to the section's id stay intact.
+ *    • Sections present in snapshot only → INSERT with the
+ *      snapshotted id (and content). Restores sections that were
+ *      removed AFTER the snapshot.
+ *    • Sections present live only → DELETE. CASCADE wipes any
+ *      reviewer notes attached to those sections, but those sections
+ *      didn't exist at snapshot time so their notes didn't either —
+ *      this is correct revert semantic.
+ *
+ *  The revert writes a fresh snapshot tagged with reverted_from_version
+ *  so the revert itself is undo-able. Returns the new snapshot id. */
 export async function revertPageToVersion(
   sb: SupabaseClient,
   versionId: string,
@@ -119,25 +126,50 @@ export async function revertPageToVersion(
   const page = version.page_snapshot as { id: string; [k: string]: unknown }
   const sectionsSnap = (version.sections_snapshot ?? []) as Array<{ id: string; [k: string]: unknown }>
 
-  // Strip identity + lifecycle columns the database manages itself
-  // so the update doesn't try to overwrite serial timestamps.
-  const stripped = stripManagedColumns({ ...page })
+  // 1. Restore the page row.
+  const strippedPage = stripManagedColumns({ ...page })
   const { error: pageUpdateErr } = await sb
     .from('web_pages')
-    .update(stripped)
+    .update(strippedPage)
     .eq('id', page.id)
   if (pageUpdateErr) return { ok: false, error: `page restore failed: ${pageUpdateErr.message}` }
 
-  // Wipe the page's current sections + restore from the snapshot.
-  const { error: delErr } = await sb.from('web_sections').delete().eq('web_page_id', page.id)
-  if (delErr) return { ok: false, error: `section wipe failed: ${delErr.message}` }
-  if (sectionsSnap.length > 0) {
-    const rows = sectionsSnap.map(s => stripManagedColumns({ ...s }))
-    const { error: insErr } = await sb.from('web_sections').insert(rows)
-    if (insErr) return { ok: false, error: `section restore failed: ${insErr.message}` }
+  // 2. Read current section ids for this page so we can diff.
+  const { data: liveSections, error: liveErr } = await sb
+    .from('web_sections')
+    .select('id')
+    .eq('web_page_id', page.id)
+  if (liveErr) return { ok: false, error: `section diff failed: ${liveErr.message}` }
+  const liveIds = new Set((liveSections ?? []).map(s => (s as { id: string }).id))
+  const snapIds = new Set(sectionsSnap.map(s => s.id))
+
+  const toUpdate = sectionsSnap.filter(s => liveIds.has(s.id))
+  const toInsert = sectionsSnap.filter(s => !liveIds.has(s.id))
+  const toDelete: string[] = []
+  for (const id of liveIds) if (!snapIds.has(id)) toDelete.push(id)
+
+  // 3a. UPDATE preserved sections in place (no FK cascade fires).
+  for (const s of toUpdate) {
+    const row = stripManagedColumns({ ...s })
+    const { error } = await sb.from('web_sections').update(row).eq('id', s.id)
+    if (error) return { ok: false, error: `section update failed (${s.id}): ${error.message}` }
+  }
+  // 3b. INSERT sections that were removed after the snapshot.
+  if (toInsert.length > 0) {
+    const rows = toInsert.map(s => stripManagedColumns({ ...s }))
+    const { error } = await sb.from('web_sections').insert(rows)
+    if (error) return { ok: false, error: `section restore-insert failed: ${error.message}` }
+  }
+  // 3c. DELETE sections that were added after the snapshot. CASCADE
+  //     is acceptable here — those sections + their reviewer notes
+  //     post-date the snapshot, so removing them is consistent with
+  //     "revert to this point."
+  if (toDelete.length > 0) {
+    const { error } = await sb.from('web_sections').delete().in('id', toDelete)
+    if (error) return { ok: false, error: `section delete failed: ${error.message}` }
   }
 
-  // Write a fresh snapshot recording the revert.
+  // 4. Write a fresh snapshot recording the revert.
   const dateLabel = version.created_at?.slice(0, 10) ?? ''
   const newVersionId = await snapshotPageVersion(sb, page.id, {
     triggerKind:  'revert',
