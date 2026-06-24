@@ -1681,8 +1681,43 @@ function SquadFigmaPluginSection({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState<'id' | 'token' | null>(null)
+  const [downloading, setDownloading] = useState(false)
 
   const token = project.figma_share_token ?? null
+
+  const downloadPlugin = useCallback(async () => {
+    setDownloading(true)
+    try {
+      // Raw-import the plugin files at build time so they ship inside
+      // the bundle — no repo clone, no extra deploy step.
+      const [{ zipSync, strToU8 }, manifestText, codeText, uiText, readmeText] = await Promise.all([
+        import('fflate'),
+        import('../../../../figma-plugin/manifest.json?raw').then(m => m.default),
+        import('../../../../figma-plugin/code.js?raw').then(m => m.default),
+        import('../../../../figma-plugin/ui.html?raw').then(m => m.default),
+        import('../../../../figma-plugin/README.md?raw').then(m => m.default),
+      ])
+      const zipped = zipSync({
+        'squad-web-builder/manifest.json': strToU8(manifestText),
+        'squad-web-builder/code.js':       strToU8(codeText),
+        'squad-web-builder/ui.html':       strToU8(uiText),
+        'squad-web-builder/README.md':     strToU8(readmeText),
+      })
+      const blob = new Blob([zipped as BlobPart], { type: 'application/zip' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'squad-web-builder.zip'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDownloading(false)
+    }
+  }, [])
 
   const generate = useCallback(async () => {
     setBusy(true)
@@ -1730,14 +1765,15 @@ function SquadFigmaPluginSection({
       </p>
 
       <div className="rounded-md border border-wm-border bg-wm-bg-hover px-3 py-2 text-[12px] text-wm-text mb-3">
-        <p className="font-semibold mb-1">Install (one-time)</p>
+        <p className="font-semibold mb-1">Install (one-time, per machine)</p>
         <ol className="list-decimal pl-5 space-y-0.5 text-wm-text-muted">
-          <li>Clone or download this repo to your machine.</li>
-          <li>Figma <span className="text-wm-text">desktop</span> → Menu → Plugins → Development → <span className="text-wm-text">Import plugin from manifest…</span></li>
-          <li>Pick <code className="text-[11px]">figma-plugin/manifest.json</code>.</li>
+          <li>Click <span className="text-wm-text">Download plugin</span> below — you'll get <code className="text-[11px]">squad-web-builder.zip</code>.</li>
+          <li>Unzip it somewhere stable (e.g. <code className="text-[11px]">~/Figma Plugins/squad-web-builder/</code>). Figma reads the folder from disk each time you run it — don't move or delete it after installing.</li>
+          <li>Open the Figma <span className="text-wm-text">desktop app</span>. Menu → Plugins → Development → <span className="text-wm-text">Import plugin from manifest…</span> → pick <code className="text-[11px]">manifest.json</code> inside the unzipped folder.</li>
           <li>Open the Figma file you want to design in. Enable <span className="text-wm-text">Brixies Library ACSS [PRO]</span> in Assets → Libraries.</li>
-          <li>Run <span className="text-wm-text">Plugins → Development → Squad — Web Builder</span>. Paste the values below. Save.</li>
+          <li>Plugins → Development → <span className="text-wm-text">Squad — Web Builder</span>. Paste the project ID + token below. Save.</li>
         </ol>
+        <p className="mt-2 text-wm-text-subtle">Download the zip once per designer. When the plugin updates, re-download and replace the folder in place.</p>
       </div>
 
       <div className="space-y-2.5 mb-3">
@@ -1763,6 +1799,15 @@ function SquadFigmaPluginSection({
       )}
 
       <div className="flex items-center gap-2 flex-wrap">
+        <WMButton
+          variant="secondary"
+          size="md"
+          iconLeft={downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+          onClick={() => void downloadPlugin()}
+          disabled={downloading}
+        >
+          Download plugin (.zip)
+        </WMButton>
         <WMButton
           variant="primary"
           size="md"
