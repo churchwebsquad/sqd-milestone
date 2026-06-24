@@ -242,10 +242,12 @@ Deno.serve(async (req) => {
 
   let memberId: number;
   let amNotes: string | undefined;
+  let brandGuideUrlOverride: string | undefined;
   try {
     const body = await req.json();
     memberId = Number(body.memberId);
     amNotes  = body.amNotes;
+    brandGuideUrlOverride = body.brandGuideUrl || undefined;
     if (!memberId) return json({ error: "memberId is required" }, 400);
   } catch {
     return json({ error: "Invalid JSON body" }, 400);
@@ -386,7 +388,9 @@ Deno.serve(async (req) => {
 
   if (needsFallback && firecrawlKey) {
     // Fallback 1: scrape the brand guide URL from prf_brand_guides if we have one
-    const brandGuideUrl = (brandGuideData as Record<string, unknown> | null)?.url as string | undefined
+    const brandGuideUrl = brandGuideUrlOverride
+      ?? (brandGuideData as Record<string, unknown> | null)?.brand_guide_link as string | undefined
+      ?? (brandGuideData as Record<string, unknown> | null)?.url as string | undefined
       ?? (brandGuideData as Record<string, unknown> | null)?.guide_url as string | undefined;
 
     if (brandGuideUrl) {
