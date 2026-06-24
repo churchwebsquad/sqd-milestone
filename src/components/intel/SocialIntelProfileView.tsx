@@ -20,6 +20,7 @@ interface SocialIntelProfile {
     upcoming_events?: string[]
     recent_changes?: string
     am_notes?: string
+    refreshed_at?: string
   }
   cms_history?: {
     milestones_completed?: string[]
@@ -67,6 +68,8 @@ interface Props {
   profile: SocialIntelProfile
   editMode?: boolean
   onProfileChange?: (updated: SocialIntelProfile) => void
+  onRefreshNow?: () => void
+  refreshingNow?: boolean
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -214,7 +217,7 @@ function asArr(val: unknown): string[] {
   return []
 }
 
-export default function SocialIntelProfileView({ profile, editMode, onProfileChange }: Props) {
+export default function SocialIntelProfileView({ profile, editMode, onProfileChange, onRefreshNow, refreshingNow }: Props) {
   const ov = profile.church_overview ?? {}
   const now = profile.whats_happening_now ?? {}
   const cms = profile.cms_history ?? {}
@@ -299,6 +302,24 @@ export default function SocialIntelProfileView({ profile, editMode, onProfileCha
       {/* What's Happening Now */}
       {(editMode || now.current_series || (now.upcoming_events ?? []).length > 0 || now.recent_changes || now.am_notes) && (
         <Section title="What's Happening Now">
+          <div className="flex items-center gap-3 mb-3">
+            {now.refreshed_at && (
+              <span className="text-xs text-gray-400">
+                Pulled {new Date(now.refreshed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </span>
+            )}
+            {onRefreshNow && (
+              <button
+                onClick={onRefreshNow}
+                disabled={refreshingNow}
+                className="text-xs text-[#513DE5] border border-[#CFC9F8] rounded-full px-3 py-1 hover:bg-[#EDE9FC] transition-colors disabled:opacity-50 flex items-center gap-1"
+              >
+                {refreshingNow ? (
+                  <><span className="w-3 h-3 border-2 border-[#513DE5] border-t-transparent rounded-full animate-spin inline-block" /> Refreshing…</>
+                ) : '↻ Refresh'}
+              </button>
+            )}
+          </div>
           <div className="bg-[#F9F5F1] rounded-xl p-4">
             {editMode ? (
               <>

@@ -155,6 +155,8 @@ export default function SocialChurchPage() {
   const [aiUpdating, setAiUpdating] = useState(false)
   const [aiUpdateError, setAiUpdateError] = useState('')
 
+  const [refreshingNow, setRefreshingNow] = useState(false)
+
   // ── SRP state ────────────────────────────────────────────────────────────
   const [srpSessions, setSrpSessions] = useState<SrpSessionListRow[]>([])
   const [srpLoading, setSrpLoading] = useState(false)
@@ -356,6 +358,27 @@ export default function SocialChurchPage() {
       setAiUpdateError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
       setAiUpdating(false)
+    }
+  }
+
+  const refreshWhatsHappeningNow = async () => {
+    if (!profile || !member) return
+    setRefreshingNow(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('social-intel-generate', {
+        body: { memberId: member, section: 'whats_happening_now' },
+      })
+      if (error) throw new Error(error.message ?? 'Refresh failed')
+      if (!data?.whats_happening_now) throw new Error('No data returned')
+      // Preserve am_notes from existing profile, merge refreshed data
+      const existing = (profile as Record<string, unknown>).whats_happening_now as Record<string, unknown> ?? {}
+      const merged = { ...existing, ...data.whats_happening_now, am_notes: existing.am_notes }
+      const updated = { ...(profile as Record<string, unknown>), whats_happening_now: merged }
+      setProfile(updated); setIntelSaved(false); setWasEdited(true)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Refresh failed')
+    } finally {
+      setRefreshingNow(false)
     }
   }
 
@@ -732,6 +755,8 @@ export default function SocialChurchPage() {
                   profile={profile as Parameters<typeof SocialIntelProfileView>[0]['profile']}
                   editMode={editMode}
                   onProfileChange={updated => { setProfile(updated); setIntelSaved(false); setWasEdited(true) }}
+                  onRefreshNow={refreshWhatsHappeningNow}
+                  refreshingNow={refreshingNow}
                 />
               </div>
             </div>
