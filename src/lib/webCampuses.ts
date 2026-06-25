@@ -227,11 +227,19 @@ export function humanizeSlug(slug: string): string {
 }
 
 /** Persist confirmed campuses to strategy_web_projects.campuses.
- *  Returns the saved project on success. */
+ *  Returns the saved project on success.
+ *
+ *  v115 — when a completed crawl already exists for this project,
+ *  fires crawl-categorize automatically so the existing topics
+ *  re-partition into per-campus rows. Without this, staff would have
+ *  to manually trigger a re-categorize after every campus confirmation
+ *  (the "Doxology backfill" pattern). The trigger is fire-and-forget
+ *  to keep the UI snappy; result is reflected on the inventory's next
+ *  load. */
 export async function saveCampuses(
   webProjectId: string,
   campuses: CampusDefinition[],
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; recategorize_triggered: boolean } | { ok: false; error: string }> {
   // Light validation: at most one primary; slugs unique; non-empty labels.
   const primaryCount = campuses.filter(c => c.primary).length
   if (primaryCount > 1) return { ok: false, error: 'Only one campus can be marked primary.' }
@@ -253,7 +261,62 @@ export async function saveCampuses(
     .update({ campuses: finalCampuses } as never)
     .eq('id', webProjectId)
   if (error) return { ok: false, error: error.message }
-  return { ok: true }
+
+  // Auto-recategorize. If a completed crawl already exists, fire
+  // crawl-categorize so its topics re-partition by campus. New crawls
+  // (none yet completed) skip — the next crawl's normal pipeline will
+  // pick up the new registry on its own.
+  const recategorizeTriggered = await triggerRecategorizeIfCrawlExists(webProjectId)
+  return { ok: true, recategorize_triggered: recategorizeTriggered }
+}
+
+/** Trigger the crawl-categorize edge function against the latest
+ *  completed crawl for this project, if any. Returns true when a
+ *  request was sent (regardless of edge-fn outcome). Fire-and-forget —
+ *  errors are logged, never thrown. */
+async function triggerRecategorizeIfCrawlExists(webProjectId: string): Promise<boolean> {
+  try {
+    const { data: job } = await supabase
+      // @ts-expect-error — generic schema typing in this repo loses the 'web-hub' schema name
+      .schema('web-hub')
+      .from('crawl_jobs')
+      .select('id, status, completed_at')
+      .eq('project_id', webProjectId)
+      .eq('status', 'complete')
+      .order('completed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const jobId = (job as { id?: string } | null)?.id
+    if (!jobId) return false
+    const { data: sess } = await supabase.auth.getSession()
+    const accessToken = sess?.session?.access_token
+    const supabaseUrl = (import.meta as unknown as { env: { VITE_SUPABASE_URL: string } }).env.VITE_SUPABASE_URL
+    if (!accessToken || !supabaseUrl) return false
+    const headers = {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type':  'application/json',
+    }
+    // Don't await — UI snaps closed; edge fns finish in background,
+    // staff sees fresh partitions on next inventory load. Fire both
+    // in parallel since they touch different tables.
+    void fetch(`${supabaseUrl}/functions/v1/crawl-categorize`, {
+      method:  'POST',
+      headers,
+      body: JSON.stringify({ project_id: webProjectId, crawl_job_id: jobId }),
+    }).catch(err => console.warn('[saveCampuses] auto-recategorize fetch failed:', err))
+    // Atomize also re-tags every atom's metadata.campus_slug from the
+    // URL prefix, so the cowork pipeline can route per-campus atoms
+    // without staff having to remember to re-run anything.
+    void fetch(`${supabaseUrl}/functions/v1/atomize-crawl-into-atoms`, {
+      method:  'POST',
+      headers,
+      body: JSON.stringify({ project_id: webProjectId }),
+    }).catch(err => console.warn('[saveCampuses] auto-atomize fetch failed:', err))
+    return true
+  } catch (err) {
+    console.warn('[saveCampuses] auto-recategorize lookup failed:', err)
+    return false
+  }
 }
 
 /** Update only the display-label customization fields. */

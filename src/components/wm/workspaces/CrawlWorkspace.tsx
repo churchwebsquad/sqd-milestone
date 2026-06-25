@@ -499,6 +499,19 @@ export function CrawlWorkspace({ project, onProjectChange }: Props) {
       </section>
 
 
+      {/* Multi-campus pre-flag — visible before "Crawl now" so staff
+          can set up campuses BEFORE the crawl runs. Categorizer reads
+          this on every run; getting it right upfront means the first
+          inventory load is already partitioned per campus. After the
+          crawl completes, the same panel surfaces detection candidates
+          + lets staff confirm. Single-campus projects see a soft CTA
+          they can ignore. */}
+      <CampusPanel
+        project={project}
+        crawlResults={(jobs[0]?.crawl_results ?? []) as Array<{ url?: string; title?: string }>}
+        onChanged={() => { if (onProjectChange) void onProjectChange() }}
+      />
+
       {(!intent || (jobs.length === 0 && intent)) && (
         <div className="rounded-xl border border-wm-border bg-wm-bg-elevated p-5">
           <div className="text-center mb-4">
@@ -558,20 +571,6 @@ export function CrawlWorkspace({ project, onProjectChange }: Props) {
             </button>
           </div>
         </div>
-      )}
-
-      {/* Multi-campus detection + registry. Only useful once a crawl
-          has actually delivered pages — the detector reads the latest
-          completed crawl's results, surfaces URL-prefix clusters that
-          look like campuses, and lets staff confirm before tagging
-          downstream content. Hidden when the crawl hasn't produced
-          anything yet (nothing to detect from). */}
-      {jobs.length > 0 && jobs[0]?.crawl_results && jobs[0].crawl_results.length > 0 && (
-        <CampusPanel
-          project={project}
-          crawlResults={jobs[0].crawl_results}
-          onChanged={() => { if (onProjectChange) void onProjectChange() }}
-        />
       )}
 
       {/* Hide the "Triggered by" success card when the intent is stuck
@@ -972,22 +971,46 @@ function CampusPanel({
     onChanged()
   }
 
-  // Empty state — no registered campuses, no candidates found.
-  if (registered.length === 0 && newCandidates.length === 0) {
+  // Empty state — no registered campuses, no candidates found. Used
+  // in two situations:
+  //   1. Pre-crawl: no crawl_results yet, staff might already know
+  //      it's a multi-campus church. The "Set up multi-campus" toggle
+  //      lets them register campuses upfront so the FIRST crawl
+  //      categorizes correctly (no need for the post-detect
+  //      auto-recategorize fallback).
+  //   2. Post-crawl single-campus: detector found nothing, no clusters
+  //      to suggest. Staff can still hand-add campuses if the detector
+  //      missed them.
+  if (registered.length === 0 && newCandidates.length === 0 && !editing) {
+    const seedFirstCampus = () => {
+      setEditing(true)
+      setWorking([
+        { slug: 'campus-1', label: 'Campus 1', primary: true, sort_order: 100, crawl_url: null },
+      ])
+    }
     return (
-      <section className="rounded-xl border border-wm-border bg-wm-bg-elevated p-4">
-        <header className="flex items-center gap-2 mb-1">
+      <section className="rounded-xl border border-wm-border bg-wm-bg-elevated p-4 space-y-2">
+        <header className="flex items-center gap-2">
           <MapPin size={13} className="text-wm-text-subtle" />
-          <h2 className="text-[13px] font-bold text-wm-text">Campuses</h2>
+          <h2 className="text-[13px] font-bold text-wm-text">{labels.plural}</h2>
         </header>
         <p className="text-[12px] text-wm-text-muted">
-          Looks like a single-{labels.singular.toLowerCase()} project — no obvious campus URL clusters in the crawl.
+          {crawlResults.length === 0
+            ? `If this is a multi-${labels.singular.toLowerCase()} church, set up the ${labels.plural.toLowerCase()} here BEFORE the crawl runs so each ${labels.singular.toLowerCase()}'s content gets tagged correctly from the start. Otherwise, leave this alone — single-${labels.singular.toLowerCase()} is the default and works as-is.`
+            : `Looks like a single-${labels.singular.toLowerCase()} project — no obvious campus URL clusters in the crawl.`}
           {detection.has_campus_selector_landing && (
             <span className="block mt-1 text-wm-warn">
               Heads up: the homepage title suggests a campus selector, but no per-campus URL clusters showed up. The crawl may have only seeded one campus.
             </span>
           )}
         </p>
+        <button
+          type="button"
+          onClick={seedFirstCampus}
+          className="text-[11px] font-semibold text-wm-accent-strong hover:underline inline-flex items-center gap-1"
+        >
+          <Plus size={11} /> Set up multi-{labels.singular.toLowerCase()}
+        </button>
       </section>
     )
   }

@@ -1,11 +1,22 @@
 /**
- * Doxology Bible Church — multi-campus backfill (Phase 1.7 / v115).
+ * Doxology Bible Church — ONE-OFF multi-campus backfill (Phase 1.7 / v115).
  *
- * Doxology is the lead use case for multi-campus support. The church
- * has three locations (Southwest, Alliance, Espanol) that should each
- * carry their own per-ministry content rather than getting mashed into
- * one shared topic row. This script seeds the campus registry and
- * re-runs the crawl/atomize pipeline so existing data tags correctly.
+ * ⚠️ Doxology only. Future multi-campus churches do NOT need this
+ * script — they're handled by the in-app flow:
+ *   • Staff opens the Crawl Workspace and either pre-flags multi-
+ *     campus (sets up the registry BEFORE the crawl runs) OR
+ *   • Confirms detector-suggested campuses after the crawl, at which
+ *     point `saveCampuses` auto-triggers crawl-categorize + atomize.
+ * Doxology needed this script because its crawl ran before the feature
+ * existed; without the auto-recategorize trigger, its topics were
+ * already written without the partition. Don't reach for this script
+ * for any other church.
+ *
+ * Doxology has three locations (Southwest, Alliance, Espanol) that
+ * should each carry their own per-ministry content rather than getting
+ * mashed into one shared topic row. This script seeds the campus
+ * registry and re-runs the crawl/atomize pipeline so existing data
+ * tags correctly.
  *
  * BEFORE running this script, deploy these edge functions so the new
  * partitioning logic is live:
