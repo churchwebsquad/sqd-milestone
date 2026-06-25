@@ -72,9 +72,30 @@ Deno.serve(async (req) => {
       existingJob = ej;
       // Build excludePaths from the existing crawl's URLs + heavy
       // prefixes. Every URL already grabbed becomes an exact-match
-      // regex so Firecrawl skips it. Every path prefix that has ≥2
+      // regex so Firecrawl skips it. Every path prefix that has ≥10
       // pages becomes a wildcard exclude so post-style enumerations
-      // (e.g. /kids-resources/<slug>) don't keep eating the cap.
+      // (e.g. /sermons/<slug>, /blog/<slug>) don't keep eating the
+      // cap on a re-expand.
+      //
+      // Note: this prefix-exclude is EXPAND-MODE ONLY. The initial
+      // crawl has no prior pages so this branch never runs there;
+      // initial crawls are unaffected by this threshold.
+      //
+      // Threshold history:
+      //   - Started at ≥2 (aggressive). Choked off legit detail-page
+      //     expansion for thoroughly-crawled sites (Mountain Life:
+      //     /staff with 6 bios, /missionary-bio with 5, /service-date
+      //     with 5, /series with 12 — all flagged as enumerations and
+      //     excluded, leaving the second expand with only 2 candidate
+      //     URLs to try and 0 net additions).
+      //   - Bumped to ≥10. A typical church site has 1-7 staff,
+      //     1-8 missionaries, 1-10 ministries — none cross 10 in
+      //     legitimate detail-page counts. Sermon archives + blog
+      //     posts + event archives (the real enumerations) easily
+      //     cross 10 and stay excluded. Re-expanding into a /staff
+      //     prefix with 6 entries lets us find the 7th if they
+      //     hired someone new since the initial crawl.
+      const PREFIX_EXCLUDE_THRESHOLD = 10;
       const existingPages = Array.isArray(ej.crawl_results) ? ej.crawl_results : [];
       const exactPaths = new Set();
       const prefixCounts = new Map();
@@ -92,7 +113,7 @@ Deno.serve(async (req) => {
       const exactExcludes = [...exactPaths].map(p => `^${escapeRegex(p)}/?$`);
       const prefixExcludes = [];
       for (const [prefix, count] of prefixCounts.entries()) {
-        if (count >= 2) prefixExcludes.push(`^${escapeRegex(prefix)}/[^/]+/?$`);
+        if (count >= PREFIX_EXCLUDE_THRESHOLD) prefixExcludes.push(`^${escapeRegex(prefix)}/[^/]+/?$`);
       }
       excludePaths = [...new Set([...excludePaths, ...exactExcludes, ...prefixExcludes])];
     }
