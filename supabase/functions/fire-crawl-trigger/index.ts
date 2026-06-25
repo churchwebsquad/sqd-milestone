@@ -51,6 +51,39 @@ Deno.serve(async (req) => {
       return json({ error: "Missing required fields" }, 400);
     }
 
+    // v115 — multi-campus seed URLs. Read the project's campus
+    // registry; if any campuses have a crawl_url, we'll run a separate
+    // Firecrawl call per campus and merge the results into one
+    // crawl_job. Without this, Firecrawl only sees the main target_url
+    // and misses campuses whose subtrees aren't directly linked from
+    // the homepage (Doxology's selector page links them via JS-routed
+    // buttons that Firecrawl doesn't follow).
+    //
+    // Crawl budget = N seeds × maxPages. Three campuses + main URL
+    // costs 4× the default. Staff can lower maxPages per call if
+    // budget is a concern.
+    const { data: projForSeeds } = await supabase
+      .from("strategy_web_projects")
+      .select("campuses")
+      .eq("id", payload.project_id)
+      .maybeSingle();
+    const campusList = Array.isArray((projForSeeds as { campuses?: unknown } | null)?.campuses)
+      ? ((projForSeeds as { campuses: Array<{ slug: string; crawl_url: string | null }> }).campuses)
+      : [];
+    const seedUrls: string[] = [];
+    const seenSeeds = new Set<string>();
+    const addSeed = (u: string | null | undefined) => {
+      if (!u) return;
+      const trimmed = u.trim();
+      if (!trimmed) return;
+      if (seenSeeds.has(trimmed)) return;
+      seenSeeds.add(trimmed);
+      seedUrls.push(trimmed);
+    };
+    addSeed(payload.target_url);
+    for (const c of campusList) addSeed(c.crawl_url);
+    const isMultiSeedCrawl = seedUrls.length > 1;
+
     // EXPAND mode — append new pages to an existing crawl job instead
     // of creating a new one. Caller passes expand_into_job_id; we read
     // its crawl_results, derive exclude rules from the URLs already
@@ -159,12 +192,13 @@ Deno.serve(async (req) => {
     // soaked it all up). Throws on permanent failure.
     // proxy: 'basic' (default; cheapest) | 'stealth' (~5x credits, but
     // bypasses most Squarespace / Cloudflare bot walls).
-    const runFirecrawl = async (limit, excludePathsForRun, proxyMode = 'basic') => {
+    const runFirecrawl = async (limit, excludePathsForRun, proxyMode = 'basic', overrideUrl: string | null = null) => {
+      const seedUrl = overrideUrl ?? payload.target_url;
       const startRes = await fetch("https://api.firecrawl.dev/v1/crawl", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${fireCrawlApiKey}` },
         body: JSON.stringify({
-          url: payload.target_url, limit, maxDepth, excludePaths: excludePathsForRun,
+          url: seedUrl, limit, maxDepth, excludePaths: excludePathsForRun,
           allowBackwardLinks: false, allowExternalLinks: false,
           // onlyMainContent:false includes footer + header chrome so
           // the LLM categorizer can pick up site-wide details (address,
@@ -208,12 +242,42 @@ Deno.serve(async (req) => {
     };
 
     try {
-      const initial = await runFirecrawl(maxPages, excludePaths);
-      if (initial.timedOut) {
-        await supabase.schema("web-hub").from("crawl_jobs").update({ status: "in_progress", error_message: "Polling timed out" }).eq("id", crawlJob.id);
-        return json({ success: true, crawl_job_id: crawlJob.id, message: "in_progress" }, 202);
+      // v115 — for multi-campus projects, run one Firecrawl per seed
+      // URL (main + each campus's crawl_url). All pages merge into the
+      // same crawl_job's crawl_results. The first seed is the canonical
+      // run that drives hitCap detection / repeat-prefix expansion;
+      // additional seeds are append-only with no expansion pass.
+      //
+      // Dedup by URL across seeds — a campus selector landing page
+      // that links Southwest, then we ALSO seed /southwest directly,
+      // would otherwise double-count the Southwest pages.
+      let pages: any[] = [];
+      let initialTimedOut = false;
+      let initialHitCap = false;
+      const seenUrlsAcrossSeeds = new Set<string>();
+      for (let seedIdx = 0; seedIdx < seedUrls.length; seedIdx++) {
+        const seedUrl = seedUrls[seedIdx];
+        const isMainSeed = seedIdx === 0;
+        const seedRun = await runFirecrawl(maxPages, excludePaths, 'basic', seedUrl);
+        if (isMainSeed) {
+          initialTimedOut = seedRun.timedOut;
+          initialHitCap = seedRun.hitCap;
+        }
+        if (seedRun.timedOut && isMainSeed) {
+          await supabase.schema("web-hub").from("crawl_jobs").update({ status: "in_progress", error_message: "Polling timed out" }).eq("id", crawlJob.id);
+          return json({ success: true, crawl_job_id: crawlJob.id, message: "in_progress" }, 202);
+        }
+        for (const p of seedRun.pages) {
+          const u = p?.url || (p?.metadata && p.metadata.sourceURL) || "";
+          if (!u || seenUrlsAcrossSeeds.has(u)) continue;
+          seenUrlsAcrossSeeds.add(u);
+          pages.push(p);
+        }
+        if (isMultiSeedCrawl) {
+          console.log(`[fire-crawl-trigger] seed ${seedIdx + 1}/${seedUrls.length} (${seedUrl}): +${seedRun.pages.length} pages, total ${pages.length}`);
+        }
       }
-      let pages = initial.pages;
+      const initial = { pages, hitCap: initialHitCap, timedOut: initialTimedOut };
 
       // Repeat-prefix detection. Bucket URLs by their first two path
       // segments. If any prefix has ≥3 URLs (likely detail-page

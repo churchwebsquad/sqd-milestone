@@ -423,39 +423,33 @@ Deno.serve(async (req) => {
       if (wroteAnyPartition) writtenTopics++;
     }
 
-    // v115 — also delete any orphaned partitions. If a re-crawl no
-    // longer surfaces /alliance/* pages, the alliance partition of
-    // every topic should disappear instead of lingering with stale
-    // content. We delete rows whose campus_slug is non-NULL and
-    // wasn't written in this run.
-    if (campusRegistry.length > 0) {
-      const writtenKeys = new Set<string>();
-      for (const t of TAXONOMY) {
-        const b = buckets[t.key];
-        const parts = partitionBucketByCampus(b, campusRegistry);
-        for (const [campusSlug, part] of parts) {
-          const partHasContent = part.passages.length > 0 || part.items.length > 0;
-          if (!partHasContent) continue; // matches the write-side skip; multi-campus never writes empty
-          writtenKeys.add(`${t.key}::${campusSlug ?? ""}`);
-        }
-      }
-      const { data: existingRows } = await supabase
+    // v115 — orphan cleanup ONLY removes partitions for campuses no
+    // longer in the registry. If staff deletes the "alliance" campus
+    // from the registry, every alliance:* topic gets cleaned up.
+    //
+    // We do NOT delete partitions just because the current crawl
+    // didn't touch them. Per-campus crawls (one job per crawl_url)
+    // would otherwise wipe every other campus on every run — the bug
+    // the user flagged when shipping campus-aware crawls. Categorize
+    // gets called against ONE crawl_job whose pages may only cover
+    // one campus; the other campuses' content stays in place untouched.
+    const registeredSlugs = new Set(campusRegistry.map((c: { slug: string }) => c.slug));
+    const { data: existingRows } = await supabase
+      .from("web_project_topics")
+      .select("id, topic_key, campus_slug")
+      .eq("web_project_id", payload.project_id)
+      .not("campus_slug", "is", null);
+    const orphanIds: string[] = [];
+    for (const r of (existingRows ?? []) as Array<{id: string; topic_key: string; campus_slug: string}>) {
+      if (!registeredSlugs.has(r.campus_slug)) orphanIds.push(r.id);
+    }
+    if (orphanIds.length > 0) {
+      const { error: delErr } = await supabase
         .from("web_project_topics")
-        .select("id, topic_key, campus_slug")
-        .eq("web_project_id", payload.project_id)
-        .not("campus_slug", "is", null);
-      const orphanIds: string[] = [];
-      for (const r of (existingRows ?? []) as Array<{id: string; topic_key: string; campus_slug: string}>) {
-        if (!writtenKeys.has(`${r.topic_key}::${r.campus_slug}`)) orphanIds.push(r.id);
-      }
-      if (orphanIds.length > 0) {
-        const { error: delErr } = await supabase
-          .from("web_project_topics")
-          .delete()
-          .in("id", orphanIds);
-        if (delErr) console.error(`[Categorize] Failed to clean orphan campus partitions:`, delErr);
-        else console.log(`[Categorize] Cleaned ${orphanIds.length} orphan campus partition(s)`);
-      }
+        .delete()
+        .in("id", orphanIds);
+      if (delErr) console.error(`[Categorize] Failed to clean orphan campus partitions:`, delErr);
+      else console.log(`[Categorize] Cleaned ${orphanIds.length} orphan partition(s) for de-registered campuses`);
     }
 
     return j({ ok: true, topics_written: writtenTopics, rows_written: writtenRows, snippets_added: customTokensAdded.length, globals_filled: globalsFilled, pages_processed: pages.length }, 200);
