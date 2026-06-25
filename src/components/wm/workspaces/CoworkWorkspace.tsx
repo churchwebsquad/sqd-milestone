@@ -30,7 +30,7 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ArrowRight, Check, ChevronRight, Clock, Download, ExternalLink, Eye, FileText, Loader2, RefreshCw } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { WMStatusPill, type WMStatusTone } from '../StatusPill'
@@ -87,6 +87,11 @@ export function CoworkWorkspace({ project, onChange }: Props) {
   // chains automatically.
   const [pipelineRunning, setPipelineRunning] = useState(false)
   const [pipelineProgress, setPipelineProgress] = useState<{ stepNumber: number; title: string } | null>(null)
+  // Tight race gate for the auto-fire effect — useEffect can re-run
+  // synchronously across the same render commit, and `pipelineRunning`
+  // state updates aren't visible until the next render. This ref flips
+  // synchronously and gates re-entry within the same tick.
+  const autoFireInFlightRef = useRef(false)
   // Surfaced AM-handoff timeline notes from strategic_goals (Phase 3).
   // Shown above the progress card so the strategist sees constraints
   // BEFORE they fire any pipeline step.
@@ -232,45 +237,45 @@ export function CoworkWorkspace({ project, onChange }: Props) {
     return () => document.removeEventListener('visibilitychange', onVis)
   }, [project.id])
 
-  // Auto-fire normalize-intake when the strategist lands on Cowork
-  // for a project with 0 atoms. This is the safety net for cases
-  // where the IntakeWorkspace's own auto-fire didn't run (strategist
-  // skipped that tab) or the browser canceled the slow request
-  // before Vercel could finish (the earlier failure mode for 3249).
-  // Same fire-and-forget keepalive shape as IntakeWorkspace.
+  // Auto-fire the Foundation pipeline (steps 1-6) when the strategist
+  // lands on Cowork for a project that doesn't yet have a sitemap.
+  // The pipeline is the deterministic path from "content collection
+  // submitted" to "sitemap ready for review" — every step in between
+  // (normalize-intake → strategic goals → synthesize → ministry-model
+  // → acf-organizer → plan-site-strategy) chains automatically.
+  //
+  // Each individual endpoint is idempotent (409-on-fresh staleness
+  // guard), so a re-fire just resumes where the prior fire left off
+  // without re-burning Claude budget on completed steps.
+  //
+  // Dedup combines a render-time ref (blocks concurrent fires within a
+  // single component instance) with sessionStorage (blocks re-fires
+  // across remounts in the same tab). When the pipeline finishes
+  // (success OR fail), we CLEAR the session key so the next render
+  // can retry — without that, a transient failure would freeze the
+  // auto-path until the user closed the tab. Manual button always
+  // works regardless of dedup state.
   useEffect(() => {
     if (!state) return
-    if (state.atom_count > 0) return                    // already has atoms — nothing to do
-    if (state.fact_count > 0) return                    // facts only is rare but still skips
-    const dedupKey = `cowork-autofire-norm.${project.id}`
+    if (state.site_strategy?._meta?.generated_at) return       // sitemap done — nothing to do
+    if (pipelineRunning) return                                 // already in flight
+    if (autoFireInFlightRef.current) return                     // race-tight gate (effect re-runs)
+    const dedupKey = `cowork-autofire-pipeline.${project.id}`
     if (sessionStorage.getItem(dedupKey)) return
-    let cancelled = false
-    void (async () => {
-      sessionStorage.setItem(dedupKey, '1')
-      const { data: { session: authSession } } = await supabase.auth.getSession()
-      const jwt = authSession?.access_token
-      if (!jwt || cancelled) return
-      const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` }
-      void fetch('/api/web/agents/orchestrate', {
-        method: 'POST', headers,
-        body: JSON.stringify({ action: 'run_normalize', projectId: project.id }),
-        keepalive: true,
-      }).catch(() => { /* server keeps running */ })
-      // strategic-goals snapshot is quick + read-only; safe to also fire.
-      void fetch('/api/web/cowork/aggregate-strategic-goals', {
-        method: 'POST', headers,
-        body: JSON.stringify({ project_id: project.id }),
-        keepalive: true,
-      }).catch(() => { /* same — quick endpoint, fire and forget */ })
-      setLastResult({
-        step: 'auto-fire',
-        ok: true,
-        detail: 'No atoms found — triggered normalize-intake + strategic-goals in the background. Refresh in 1-2 minutes.',
-      })
-    })()
-    return () => { cancelled = true }
+    sessionStorage.setItem(dedupKey, '1')
+    autoFireInFlightRef.current = true
+    void runFoundationPipeline(false).finally(() => {
+      autoFireInFlightRef.current = false
+      // Clear the session key so a transient failure doesn't permanently
+      // disable auto-fire for the rest of the session. The dedup still
+      // protects against the immediate-re-render double-fire case (the
+      // useEffect won't re-run until state changes), and once it does
+      // re-run, the sitemap-done guard above stops repeat fires on
+      // successful completion.
+      sessionStorage.removeItem(dedupKey)
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.atom_count, state?.fact_count, project.id])
+  }, [state?.atom_count, state?.fact_count, state?.site_strategy?._meta?.generated_at, project.id])
 
   // Auto-fire handoff-to-pages when step 7 (synthesize-critique) lands
   // its rollup. This is the cowork→pages bridge — moves outline +
@@ -384,6 +389,150 @@ export function CoworkWorkspace({ project, onChange }: Props) {
       setRunningStep(null)
     }
   }
+
+  // ─── Foundation pipeline (Steps 1-6) ────────────────────────────────
+  //
+  // Sequences the deterministic path through the cowork pipeline up to
+  // the sitemap (step 6). Each substep:
+  //   - Step 0a: normalize-intake (atoms + facts) via orchestrate.ts —
+  //     auth via JWT because orchestrate requires it. Skipped if atoms
+  //     already exist for the project unless force=true.
+  //   - Step 0b: aggregate-strategic-goals — snapshots the goal fields
+  //     the synthesize step reads. Cheap, idempotent.
+  //   - Step 3: synthesize-strategy
+  //   - Step 4: classify-ministry
+  //   - Step 5: organize-acf
+  //   - Step 6: plan-site-strategy (the sitemap)
+  //
+  // Each per-step endpoint has its own staleness guard (returns 409
+  // when the output is already fresh), so this loop is naturally
+  // idempotent — re-running after a partial completion picks up where
+  // it left off without re-burning Claude budget on completed steps.
+  //
+  // The function awaits each HTTP call sequentially so the browser
+  // tab is the orchestrator. If the tab closes mid-run, completed
+  // steps stay completed (each writes roadmap_state on success);
+  // partial later steps just don't fire. A re-open + click resumes.
+  const runFoundationPipeline = useCallback(async (force = false) => {
+    setPipelineRunning(true)
+    setLastResult(null)
+
+    const refresh = async () => {
+      await loadProjectState()
+      await loadReadiness()
+    }
+
+    type PipelineFailure = { step: string; detail: string }
+
+    /** Run a single named endpoint step. Returns a failure object on
+     *  HTTP failure, or null on success (incl. 409 "already fresh"). */
+    const runEndpointStep = async (
+      label: string,
+      endpoint: string,
+      bodyExtra: Record<string, unknown> = {},
+    ): Promise<PipelineFailure | null> => {
+      try {
+        const r = await fetch(endpoint, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ project_id: project.id, force, ...bodyExtra }),
+        })
+        // 409 = "already fresh, skipped" — treat as success.
+        if (r.ok || r.status === 409) return null
+        const text = await r.text().catch(() => '')
+        let body: Record<string, unknown> = {}
+        try { body = text ? JSON.parse(text) : {} } catch { /* ignore */ }
+        const detail = (body.detail as string | undefined)
+          ?? (body.error as string | undefined)
+          ?? (text && text.length < 240 ? text : `status ${r.status}`)
+        return { step: label, detail }
+      } catch (err) {
+        return { step: label, detail: err instanceof Error ? err.message : 'network error' }
+      }
+    }
+
+    try {
+      // ── Sub-step 1: normalize-intake (atoms + facts via orchestrate)
+      // Skip if atoms already exist and we're not forcing. orchestrate
+      // requires a JWT; fetch it from the live session.
+      const needNormalize = force || (state?.atom_count ?? 0) === 0
+      if (needNormalize) {
+        setPipelineProgress({ stepNumber: 1, title: 'Pull out the core messages + capture site facts' })
+        const { data: { session: authSession } } = await supabase.auth.getSession()
+        const jwt = authSession?.access_token
+        if (!jwt) {
+          setLastResult({ step: 'Foundation pipeline', ok: false, detail: 'Not signed in.' })
+          return
+        }
+        const r = await fetch('/api/web/agents/orchestrate', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
+          body:    JSON.stringify({ action: 'run_normalize', projectId: project.id }),
+        })
+        if (!r.ok) {
+          const text = await r.text().catch(() => '')
+          setLastResult({ step: 'Sub-step 1 (normalize-intake)', ok: false, detail: text || `status ${r.status}` })
+          return
+        }
+        await refresh()
+      }
+
+      // ── Sub-step 2: aggregate-strategic-goals
+      // Cheap snapshot of the partner's strategic goals from
+      // discovery + content collection + AM handoff. The synthesize
+      // step reads this directly.
+      setPipelineProgress({ stepNumber: 2, title: 'Snapshot strategic goals' })
+      {
+        const r = await fetch('/api/web/cowork/aggregate-strategic-goals', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ project_id: project.id }),
+        })
+        if (!r.ok) {
+          const text = await r.text().catch(() => '')
+          setLastResult({ step: 'aggregate-strategic-goals', ok: false, detail: text || `status ${r.status}` })
+          return
+        }
+      }
+      await refresh()
+
+      // ── Sub-steps 3-6: synthesize / classify / acf / sitemap
+      // Each has its own /api/web/agents/run-* endpoint with a built-in
+      // staleness guard. Sequential because each depends on the prior.
+      // `num` here is the SUB-STEP ordinal (1..6) for progress display
+      // — NOT the catalog step number (catalog steps 3/4/5/6 map to
+      // sub-steps 3/4/5/6 here, but normalize+goals collapse from
+      // catalog steps 1+2 into sub-steps 1+2). Keep the progress
+      // surface labeled "sub-step N of 6" to avoid the confusion.
+      const ENDPOINT_SEQUENCE = [
+        { num: 3, title: 'Build the strategic foundation',       endpoint: '/api/web/agents/run-synthesize-strategy' },
+        { num: 4, title: 'Identify the ministry style',          endpoint: '/api/web/agents/run-classify-ministry' },
+        { num: 5, title: 'Map content to audience and funnel',   endpoint: '/api/web/agents/run-organize-acf' },
+        { num: 6, title: 'Plan the sitemap and navigation',      endpoint: '/api/web/agents/run-plan-site-strategy' },
+      ] as const
+      for (const s of ENDPOINT_SEQUENCE) {
+        setPipelineProgress({ stepNumber: s.num, title: s.title })
+        const fail = await runEndpointStep(`Sub-step ${s.num} (${s.title})`, s.endpoint)
+        if (fail) {
+          setLastResult({ step: fail.step, ok: false, detail: fail.detail })
+          await refresh()
+          return
+        }
+        await refresh()
+      }
+
+      setLastResult({
+        step:   'Foundation pipeline',
+        ok:     true,
+        detail: 'Steps 1-6 complete. The sitemap is ready for review below.',
+      })
+      onChange?.()
+    } finally {
+      setPipelineRunning(false)
+      setPipelineProgress(null)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, state?.atom_count])
 
   /** Approve a stale step as-is: bump its output's _meta.generated_at
    *  to now + stamp approved_as_is_at for audit. Content is preserved
@@ -511,6 +660,14 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         </div>
       )}
 
+      <FoundationPipelineBanner
+        state={state}
+        pipelineRunning={pipelineRunning}
+        pipelineProgress={pipelineProgress}
+        onRun={() => void runFoundationPipeline(false)}
+        onForceRun={() => void runFoundationPipeline(true)}
+      />
+
       <div className="flex flex-col gap-4">
         {steps.map(step => (
           <StepCard
@@ -551,6 +708,122 @@ export function CoworkWorkspace({ project, onChange }: Props) {
           onClose={() => setDrawerStep(null)}
         />
       )}
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Foundation pipeline banner — auto-fire status / manual run / sitemap
+// ready surface. Stays visible at the top of the cowork tab so the AM
+// can see at a glance: is the deterministic part of the pipeline done?
+// ────────────────────────────────────────────────────────────────────
+
+function FoundationPipelineBanner({
+  state, pipelineRunning, pipelineProgress, onRun, onForceRun,
+}: {
+  state:             CoworkPipelineState | null
+  pipelineRunning:   boolean
+  pipelineProgress:  { stepNumber: number; title: string } | null
+  onRun:             () => void
+  onForceRun:        () => void
+}) {
+  if (!state) return null
+
+  const atomsReady    = state.atom_count > 0
+  const goalsReady    = !!state.strategic_goals_at
+  const stage1Ready   = !!state.stage_1?._meta?.generated_at
+  const ministryReady = !!state.ministry_model?._meta?.generated_at
+  const acfReady      = !!state.acf_plan?._meta?.generated_at
+  const sitemapReady  = !!state.site_strategy?._meta?.generated_at
+
+  const checks = [
+    { label: 'Atoms + facts',         done: atomsReady },
+    { label: 'Strategic goals',       done: goalsReady },
+    { label: 'Strategic foundation',  done: stage1Ready },
+    { label: 'Ministry style',        done: ministryReady },
+    { label: 'ACF plan',              done: acfReady },
+    { label: 'Sitemap',               done: sitemapReady },
+  ]
+  const doneCount = checks.filter(c => c.done).length
+
+  // Sitemap done state — the only human gate. Surface it as a clear
+  // call-to-action: "scroll to step 6 / review the sitemap."
+  if (sitemapReady && doneCount === 6) {
+    return (
+      <div className="mb-4 rounded-xl border border-wm-success bg-wm-success-bg px-4 py-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[13px] font-semibold text-wm-success">Sitemap ready for review.</p>
+          <p className="text-[11px] text-wm-success/80 mt-0.5">
+            Sub-steps 1-6 complete. Open <strong>Plan the sitemap and navigation</strong> below to inspect the sitemap, then re-run any step if changes are needed.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            // Force-re-run is destructive — overwrites the existing
+            // sitemap + every upstream artifact. Confirm before firing.
+            if (confirm('Force-re-run the entire foundation pipeline? This overwrites every artifact from atoms through the sitemap.')) {
+              onForceRun()
+            }
+          }}
+          className="shrink-0 text-[11px] font-semibold px-2.5 py-1 rounded-md border border-wm-success/40 text-wm-success hover:bg-wm-success/10"
+          title="Force-re-run the entire foundation pipeline. Use when the content collection changed and the sitemap needs to reflect new inputs."
+        >
+          Re-run all
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mb-4 rounded-xl border border-wm-border bg-wm-bg-elevated px-4 py-3">
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">Foundation pipeline</p>
+          <p className="text-[13px] font-semibold text-wm-text">
+            {pipelineRunning
+              ? (pipelineProgress
+                  ? `Running sub-step ${pipelineProgress.stepNumber} of 6 — ${pipelineProgress.title}…`
+                  : 'Running…')
+              : sitemapReady
+                ? 'Sitemap ready'
+                : `${doneCount} of 6 sub-steps complete`}
+          </p>
+          <p className="text-[11px] text-wm-text-muted mt-0.5">
+            Auto-runs when you land here. Each step is idempotent so re-runs are safe — completed steps skip themselves.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={pipelineRunning ? undefined : onRun}
+          disabled={pipelineRunning}
+          className={[
+            'shrink-0 text-[11px] font-semibold px-3 py-1.5 rounded-md transition-colors',
+            pipelineRunning
+              ? 'bg-wm-bg-hover text-wm-text-muted cursor-wait'
+              : 'bg-wm-accent text-wm-text-on-accent hover:bg-wm-accent-hover',
+          ].join(' ')}
+        >
+          {pipelineRunning ? 'Running…' : (doneCount === 0 ? 'Run all sub-steps' : 'Resume pipeline')}
+        </button>
+      </div>
+      {/* Inline 6-dot progress strip — each dot represents one substep. */}
+      <div className="flex items-center gap-1.5">
+        {checks.map((c, i) => (
+          <span
+            key={c.label}
+            title={`Sub-step ${i + 1}: ${c.label} — ${c.done ? 'done' : pipelineProgress?.stepNumber === i + 1 ? 'running' : 'pending'}`}
+            className={[
+              'h-1.5 flex-1 rounded-full transition-colors',
+              c.done
+                ? 'bg-wm-success'
+                : pipelineRunning && pipelineProgress?.stepNumber === i + 1
+                  ? 'bg-wm-accent animate-pulse'
+                  : 'bg-wm-border',
+            ].join(' ')}
+          />
+        ))}
+      </div>
     </div>
   )
 }
