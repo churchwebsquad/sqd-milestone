@@ -152,10 +152,25 @@ function useGroupEditState(): GroupEditState {
   const saveAll = useCallback(async () => {
     setSaving(true)
     try {
-      // Sequential commits avoid Supabase write contention on the
-      // same session row when many rows save back-to-back.
-      for (const h of handlersRef.current.values()) {
-        await h.commit()
+      // Parallelize commits across rows. Each commit writes to a
+      // DIFFERENT strategy_content_collection_marks row (keyed by
+      // session_id + target_path), so there's no Supabase write
+      // contention to avoid — the prior comment about sequential
+      // saves was stale. With N rows in a group, the sequential
+      // for-await loop racked up N * ~300ms = multi-second hangs;
+      // Promise.all collapses that to a single round-trip wall time.
+      //
+      // Promise.allSettled keeps a single failing row from poisoning
+      // the rest — partner sees the remaining edits saved, and we
+      // surface failures via console rather than rolling everything
+      // back (each row's optimistic state already reflects the draft;
+      // a failed write means that row stays optimistic and the next
+      // edit retries).
+      const handlers = Array.from(handlersRef.current.values())
+      const results = await Promise.allSettled(handlers.map(h => h.commit()))
+      const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+      if (failures.length > 0) {
+        console.error(`[group-save] ${failures.length}/${results.length} commits failed`, failures.map(f => f.reason))
       }
     } finally {
       setSaving(false)
