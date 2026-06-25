@@ -20,14 +20,18 @@
  * core message + decides keep/edit/reject before any draft money is
  * spent.
  *
+ * Foundation auto-approves atoms on generation (normalize-intake writes
+ * status='approved' directly), so this surface no longer gates the
+ * pipeline — it's an inspection + correction view. Actions narrow to
+ * Edit / Archive / Restore. No "Approve" button anywhere.
+ *
  * MVP scope (deliberately narrow):
  *   - Group core messages by topic (voice_rule, value_statement,
  *     prose_snippet, …)
  *   - Per message: body + source provenance + status + verbatim + confidence
- *   - Three actions per message: Approve (draft→approved), Reject
- *     (→archived), Edit (inline body editor + verbatim toggle)
- *   - Bulk-approve all drafts in a topic group
- *   - Filter by status (default: show drafts only — the review queue)
+ *   - Per message: Edit (inline body editor + verbatim toggle) and
+ *     Archive (→archived) / Restore (archived→approved)
+ *   - Filter by status (default: all — see what the pipeline consumes)
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -79,7 +83,10 @@ export function AtomReviewWorkspace({ project, onChange }: Props) {
   const [atoms, setAtoms]                 = useState<Atom[]>([])
   const [loading, setLoading]             = useState(true)
   const [error, setError]                 = useState<string | null>(null)
-  const [statusFilter, setStatusFilter]   = useState<StatusFilter>('draft')
+  // Default to 'all' since Foundation auto-approves — there's no draft
+  // queue to review. Filter remains available for staff inspecting a
+  // specific status (e.g. archived to recover something).
+  const [statusFilter, setStatusFilter]   = useState<StatusFilter>('all')
   const [collapsedTopics, setCollapsedTopics] = useState<Set<string>>(new Set())
   const [editingId, setEditingId]         = useState<string | null>(null)
   const [savingIds, setSavingIds]         = useState<Set<string>>(new Set())
@@ -229,9 +236,11 @@ export function AtomReviewWorkspace({ project, onChange }: Props) {
     return true
   }
 
-  const approve = (id: string) => mutateAtom(id, { status: 'approved' })
   const reject  = (id: string) => mutateAtom(id, { status: 'archived' })
-  const restore = (id: string) => mutateAtom(id, { status: 'draft' })
+  // Restore lands archived atoms back in 'approved' — Foundation no
+  // longer uses 'draft' as a holding state since auto-approve on
+  // generation. Restore = "include this in the pipeline again."
+  const restore = (id: string) => mutateAtom(id, { status: 'approved' })
 
   // Strategist-authored recommended_page entry. These represent build /
   // workflow directives the partner needs (e.g. "We need a Staff CPT
@@ -276,15 +285,6 @@ export function AtomReviewWorkspace({ project, onChange }: Props) {
       return n
     })
     return true
-  }
-
-  // Bulk-approve all drafts in a topic group.
-  const bulkApproveTopic = async (topic: string) => {
-    const draftsInTopic = atoms.filter(a => a.topic === topic && a.status === 'draft')
-    if (draftsInTopic.length === 0) return
-    if (!confirm(`Approve ${draftsInTopic.length} draft core message${draftsInTopic.length === 1 ? '' : 's'} in "${topic}"?`)) return
-    // Sequential to keep the optimistic UI honest about failures.
-    for (const a of draftsInTopic) await approve(a.id)
   }
 
   if (loading) {
@@ -390,15 +390,6 @@ export function AtomReviewWorkspace({ project, onChange }: Props) {
                     {statusFilter === 'all' && draftsInGroup > 0 && ` · ${draftsInGroup} draft`}
                   </span>
                 </div>
-                {draftsInGroup > 0 && statusFilter === 'draft' && (
-                  <span
-                    role="button"
-                    onClick={(e) => { e.stopPropagation(); void bulkApproveTopic(topic) }}
-                    className="text-[11px] font-medium px-2 py-1 rounded-md bg-wm-accent text-wm-text-on-accent hover:bg-wm-accent-hover"
-                  >
-                    Approve all {draftsInGroup}
-                  </span>
-                )}
               </button>
               {!collapsed && (
                 <div className="border-t border-wm-border divide-y divide-wm-border">
@@ -414,7 +405,6 @@ export function AtomReviewWorkspace({ project, onChange }: Props) {
                         const ok = await mutateAtom(a.id, { body, verbatim })
                         if (ok) setEditingId(null)
                       }}
-                      onApprove={() => approve(a.id)}
                       onReject={() => reject(a.id)}
                       onRestore={() => restore(a.id)}
                     />
@@ -531,14 +521,13 @@ function Header({ counts, statusFilter, onFilter, onAddRecommendedPage }: {
   )
 }
 
-function AtomCard({ atom, editing, saving, onEditStart, onEditCancel, onEditSave, onApprove, onReject, onRestore }: {
+function AtomCard({ atom, editing, saving, onEditStart, onEditCancel, onEditSave, onReject, onRestore }: {
   atom:         Atom
   editing:      boolean
   saving:       boolean
   onEditStart:  () => void
   onEditCancel: () => void
   onEditSave:   (body: string, verbatim: boolean) => Promise<void>
-  onApprove:    () => void
   onReject:     () => void
   onRestore:    () => void
 }) {
@@ -632,30 +621,10 @@ function AtomCard({ atom, editing, saving, onEditStart, onEditCancel, onEditSave
             >
               <span className="flex items-center gap-1"><Edit2 size={11} /> Edit</span>
             </button>
-            {atom.status === 'draft' && (
-              <>
-                <button
-                  type="button"
-                  onClick={onReject}
-                  disabled={saving}
-                  className="text-[11px] font-medium px-2.5 py-1 rounded-md border border-wm-border text-wm-text-muted hover:bg-wm-danger-bg hover:text-wm-danger hover:border-wm-danger disabled:opacity-50"
-                >
-                  Reject
-                </button>
-                <button
-                  type="button"
-                  onClick={onApprove}
-                  disabled={saving}
-                  className="text-[11px] font-medium px-2.5 py-1 rounded-md bg-wm-accent text-wm-text-on-accent hover:bg-wm-accent-hover disabled:opacity-50"
-                >
-                  <span className="flex items-center gap-1">
-                    {saving ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
-                    Approve
-                  </span>
-                </button>
-              </>
-            )}
-            {atom.status === 'approved' && (
+            {/* Foundation auto-approves on generation — no Approve gate.
+                Strategists archive (reject) what doesn't belong; restore
+                puts an archived atom back in the pipeline. */}
+            {atom.status !== 'archived' && (
               <button
                 type="button"
                 onClick={onReject}
@@ -672,7 +641,7 @@ function AtomCard({ atom, editing, saving, onEditStart, onEditCancel, onEditSave
                 disabled={saving}
                 className="text-[11px] font-medium px-2.5 py-1 rounded-md border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover disabled:opacity-50"
               >
-                Restore to draft
+                Restore
               </button>
             )}
           </>

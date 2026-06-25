@@ -3,24 +3,28 @@
  *
  * Mirrors the Core Messages review surface but covers WHY + the
  * constraints around HOW: goals, vision, voice anchors, copy approach,
- * display preferences, inspirational sites. Strategist reviews +
- * approves each field before the cowork pipeline consumes it.
+ * display preferences, inspirational sites.
+ *
+ * Foundation auto-approves on aggregator sync, so this surface is an
+ * inspection + correction view — not a gate. Actions narrow to Edit /
+ * Archive / Restore. No "Approve" button anywhere.
  *
  * Data flow:
  *   Source tables (discovery / content collection / AM handoff JSONB)
  *     → aggregator endpoint /api/web/cowork/aggregate-strategic-goals
- *     → roadmap_state.strategic_goals (the AI-facing snapshot)
- *     → this workspace (strategist reviews / edits / approves)
+ *     → roadmap_state.strategic_goals (the AI-facing snapshot, all
+ *       fresh fields land as status='approved')
+ *     → this workspace (strategist inspects / edits / archives)
  *
  * Edits + status flips persist via Supabase update directly on
  * roadmap_state through the same atomic RPC the pipeline endpoints
  * use. A "Refresh from sources" button re-runs the aggregator
- * (preserves strategist edits unless force=true).
+ * (preserves strategist edits + archived fields unless force=true).
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Check, ChevronDown, ChevronRight, Edit2, Loader2, RefreshCw, Save, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Edit2, Loader2, RefreshCw, Save, X } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { WMStatusPill } from '../StatusPill'
 import {
@@ -55,7 +59,10 @@ export function StrategicGoalsWorkspace({ project, onChange }: Props) {
   const [error, setError]                     = useState<string | null>(null)
   const [refreshing, setRefreshing]           = useState(false)
   const [refreshError, setRefreshError]       = useState<string | null>(null)
-  const [statusFilter, setStatusFilter]       = useState<StatusFilter>('draft')
+  // Default to 'all' since Foundation auto-approves — there's no draft
+  // queue to review. Filter remains available for inspecting a specific
+  // status (e.g. archived to recover something).
+  const [statusFilter, setStatusFilter]       = useState<StatusFilter>('all')
   const [collapsed, setCollapsed]             = useState<Set<StrategicGoalCategory>>(new Set())
   const [editingKey, setEditingKey]           = useState<string | null>(null)
   const [savingKeys, setSavingKeys]           = useState<Set<string>>(new Set())
@@ -187,34 +194,10 @@ export function StrategicGoalsWorkspace({ project, onChange }: Props) {
     return true
   }
 
-  const approve = (cat: StrategicGoalCategory, key: string) => mutateField(cat, key, { status: 'approved' })
   const reject  = (cat: StrategicGoalCategory, key: string) => mutateField(cat, key, { status: 'archived' })
-  const restore = (cat: StrategicGoalCategory, key: string) => mutateField(cat, key, { status: 'draft' })
-
-  /** Bulk-approve every draft field in a category. Sequential to keep
-   *  optimistic UI honest about per-row failures. */
-  const bulkApproveCategory = async (category: StrategicGoalCategory) => {
-    if (!snapshot) return
-    const block = snapshot[category]
-    const drafts = Object.entries(block).filter(([, f]) => f.status === 'draft' && f.value != null)
-    if (drafts.length === 0) return
-    if (!confirm(`Approve ${drafts.length} draft field${drafts.length === 1 ? '' : 's'} in this category?`)) return
-    for (const [key] of drafts) await approve(category, key)
-  }
-
-  /** Bulk-approve every draft field across ALL categories. Same
-   *  sequential pattern as bulkApproveCategory. */
-  const bulkApproveAll = async () => {
-    if (!snapshot) return
-    const all: Array<[StrategicGoalCategory, string]> = []
-    for (const def of STRATEGIC_GOAL_FIELDS) {
-      const f = snapshot[def.category]?.[def.key]
-      if (f && f.status === 'draft' && f.value != null) all.push([def.category, def.key])
-    }
-    if (all.length === 0) return
-    if (!confirm(`Approve all ${all.length} draft strategic goal${all.length === 1 ? '' : 's'}?`)) return
-    for (const [cat, key] of all) await approve(cat, key)
-  }
+  // Restore lands archived fields back in 'approved' — Foundation
+  // auto-approves on sync, so 'draft' is no longer a meaningful state.
+  const restore = (cat: StrategicGoalCategory, key: string) => mutateField(cat, key, { status: 'approved' })
 
   // ─── Per-category counts ─────────────────────────────────────────
 
@@ -252,7 +235,6 @@ export function StrategicGoalsWorkspace({ project, onChange }: Props) {
         onRefresh={() => void refresh(false)}
         refreshing={refreshing}
         lastSyncedAt={snapshot?._meta?.generated_at ?? null}
-        onApproveAll={() => void bulkApproveAll()}
       />
 
       {error && (
@@ -324,15 +306,6 @@ export function StrategicGoalsWorkspace({ project, onChange }: Props) {
                       <p className="text-[11px] text-wm-text-subtle mt-0.5">{catDef.description}</p>
                     </div>
                   </div>
-                  {draftCount > 0 && statusFilter === 'draft' && (
-                    <span
-                      role="button"
-                      onClick={(e) => { e.stopPropagation(); void bulkApproveCategory(catDef.key) }}
-                      className="text-[11px] font-medium px-2.5 py-1 rounded-md bg-wm-accent text-wm-text-on-accent hover:bg-wm-accent-hover shrink-0"
-                    >
-                      Approve all {draftCount}
-                    </span>
-                  )}
                 </button>
                 {!isCollapsed && (
                   <div className="border-t border-wm-border divide-y divide-wm-border">
@@ -352,7 +325,6 @@ export function StrategicGoalsWorkspace({ project, onChange }: Props) {
                           })
                           if (ok) setEditingKey(null)
                         }}
-                        onApprove={() => approve(catDef.key, def.key)}
                         onReject={() => reject(catDef.key, def.key)}
                         onRestore={() => restore(catDef.key, def.key)}
                       />
@@ -372,14 +344,13 @@ export function StrategicGoalsWorkspace({ project, onChange }: Props) {
 // Header — counts, filter, refresh
 // ────────────────────────────────────────────────────────────────────
 
-function Header({ counts, statusFilter, onFilter, onRefresh, refreshing, lastSyncedAt, onApproveAll }: {
+function Header({ counts, statusFilter, onFilter, onRefresh, refreshing, lastSyncedAt }: {
   counts:       { total: number; draft: number; approved: number; archived: number; populated: number }
   statusFilter: StatusFilter
   onFilter:     (f: StatusFilter) => void
   onRefresh:    () => void
   refreshing:   boolean
   lastSyncedAt: string | null
-  onApproveAll: () => void
 }) {
   return (
     <div className="mb-4 flex items-end justify-between gap-2 flex-wrap">
@@ -414,17 +385,6 @@ function Header({ counts, statusFilter, onFilter, onRefresh, refreshing, lastSyn
         </div>
         <button
           type="button"
-          onClick={onApproveAll}
-          disabled={counts.draft === 0}
-          className="text-[11px] font-medium px-2.5 py-1.5 rounded-md bg-wm-accent text-wm-text-on-accent hover:bg-wm-accent-hover disabled:opacity-50"
-        >
-          <span className="flex items-center gap-1">
-            <Check size={11} />
-            Approve all {counts.draft > 0 ? `(${counts.draft})` : ''}
-          </span>
-        </button>
-        <button
-          type="button"
           onClick={onRefresh}
           disabled={refreshing}
           className="text-[11px] font-medium px-2.5 py-1.5 rounded-md border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text disabled:opacity-50"
@@ -443,7 +403,7 @@ function Header({ counts, statusFilter, onFilter, onRefresh, refreshing, lastSyn
 // FieldCard
 // ────────────────────────────────────────────────────────────────────
 
-function FieldCard({ def, field, editing, saving, onEditStart, onEditCancel, onEditSave, onApprove, onReject, onRestore }: {
+function FieldCard({ def, field, editing, saving, onEditStart, onEditCancel, onEditSave, onReject, onRestore }: {
   def:          StrategicGoalFieldDef
   field:        StrategicGoalField | null
   editing:      boolean
@@ -451,7 +411,6 @@ function FieldCard({ def, field, editing, saving, onEditStart, onEditCancel, onE
   onEditStart:  () => void
   onEditCancel: () => void
   onEditSave:   (newValue: string | number | null) => Promise<void>
-  onApprove:    () => void
   onReject:     () => void
   onRestore:    () => void
 }) {
@@ -554,30 +513,10 @@ function FieldCard({ def, field, editing, saving, onEditStart, onEditCancel, onE
             >
               <span className="flex items-center gap-1"><Edit2 size={11} /> Edit</span>
             </button>
-            {status === 'draft' && hasValue && (
-              <>
-                <button
-                  type="button"
-                  onClick={onReject}
-                  disabled={saving}
-                  className="text-[11px] font-medium px-2.5 py-1 rounded-md border border-wm-border text-wm-text-muted hover:bg-wm-danger-bg hover:text-wm-danger hover:border-wm-danger disabled:opacity-50"
-                >
-                  Reject
-                </button>
-                <button
-                  type="button"
-                  onClick={onApprove}
-                  disabled={saving}
-                  className="text-[11px] font-medium px-2.5 py-1 rounded-md bg-wm-accent text-wm-text-on-accent hover:bg-wm-accent-hover disabled:opacity-50"
-                >
-                  <span className="flex items-center gap-1">
-                    {saving ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
-                    Approve
-                  </span>
-                </button>
-              </>
-            )}
-            {status === 'approved' && (
+            {/* Foundation auto-approves on sync — no Approve gate.
+                Strategists archive (reject) what doesn't belong;
+                restore puts an archived field back in the pipeline. */}
+            {status !== 'archived' && hasValue && (
               <button
                 type="button"
                 onClick={onReject}
@@ -594,7 +533,7 @@ function FieldCard({ def, field, editing, saving, onEditStart, onEditCancel, onE
                 disabled={saving}
                 className="text-[11px] font-medium px-2.5 py-1 rounded-md border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover disabled:opacity-50"
               >
-                Restore to draft
+                Restore
               </button>
             )}
           </>

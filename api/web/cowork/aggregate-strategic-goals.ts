@@ -14,10 +14,13 @@
  *   - strategy_account_progress.handoff_web_form->'form' (5 JSONB keys)
  *
  * Re-sync behavior:
- *   - Default: preserves strategist edits + status flips. A field
- *     with status='approved' or 'archived' is NOT overwritten by a
- *     fresh source value unless `force=true`.
- *   - force=true: full overwrite, all fields back to status='draft'.
+ *   - Default: preserves strategist edits + archived fields. A field
+ *     where strategist_edited=true OR status='archived' is NOT
+ *     overwritten by a fresh source value unless `force=true`.
+ *     status='approved' alone does NOT preserve — Foundation auto-
+ *     approves on first sync, so checking status would freeze fields
+ *     that never had human intervention.
+ *   - force=true: full overwrite, all fields back to status='approved'.
  *
  *   POST { project_id, force?: boolean }
  *   → 200 { ok: true, snapshot, summary }
@@ -175,11 +178,16 @@ function buildField(
   source_ref: string | null,
   syncedAtIso: string,
 ): StrategicGoalField {
+  // Foundation no longer requires human approval — fields land in the
+  // 'approved' state directly. Strategists can still reject / archive
+  // individual fields in StrategicGoalsWorkspace, but nothing
+  // accumulates in a "must-approve" queue and the cowork pipeline can
+  // consume goals without a hand-off step.
   const field: StrategicGoalField = {
     value,
     source_kind:       def.source,
     source_ref,
-    status:            'draft',
+    status:            'approved',
     last_synced_at:    syncedAtIso,
     strategist_edited: false,
   }
@@ -228,12 +236,19 @@ function buildSnapshot(
       continue
     }
 
-    // Preserve strategist work: if the prior field was approved or
-    // archived OR carried a strategist edit, keep the strategist's
-    // value + status; only refresh the source-traceability metadata
-    // so they can see when this surface was last synced.
+    // Preserve strategist work: if the strategist edited the field or
+    // archived it, keep their value + status; only refresh the
+    // source-traceability metadata so they can see when this surface
+    // was last synced.
+    //
+    // Pre-Foundation-no-approval, this also preserved status='approved'
+    // because approval was a meaningful human signal. Now every fresh
+    // field lands as 'approved' on first sync, so checking status
+    // alone would freeze every field after the first sync. Restrict
+    // preservation to strategist_edited or archived — those are the
+    // only states that represent intentional human intervention.
     const preserveValue =
-      priorField.status !== 'draft' || priorField.strategist_edited === true
+      priorField.strategist_edited === true || priorField.status === 'archived'
     if (preserveValue) {
       block[def.key] = {
         ...priorField,

@@ -378,6 +378,11 @@ export default async function handler(req: any, res: any) {
   await sb.from('content_atoms').delete().eq('web_project_id', projectId)
   await sb.from('church_facts').delete().eq('web_project_id', projectId)
 
+  // Foundation no longer requires human approval — atoms land in the
+  // 'approved' state directly. The strategist can still reject / edit
+  // individual atoms in AtomReviewWorkspace, but nothing accumulates
+  // in a "must-approve" queue and downstream stages flow without a
+  // hand-off. See commit message for full rationale + tradeoffs.
   const atomRows = (toolResult?.atoms ?? []).map(a => ({
     web_project_id: projectId,
     topic:          a.topic,
@@ -387,6 +392,7 @@ export default async function handler(req: any, res: any) {
     source_ref:     a.source_ref ?? null,
     verbatim:       a.verbatim === true,
     confidence:     typeof a.confidence === 'number' ? a.confidence : null,
+    status:         'approved',
   }))
   const factRows = (toolResult?.facts ?? []).map(f => ({
     web_project_id: projectId,
