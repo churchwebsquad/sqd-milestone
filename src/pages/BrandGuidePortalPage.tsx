@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import {
   ArrowRight, Check, Download, ExternalLink, MessageCircle,
   Palette, Type as TypeIcon, Image as ImageIcon, Sparkles, AlertCircle,
@@ -33,11 +33,18 @@ const FALLBACK_FONT_STACK = `"${FALLBACK_FONT}", -apple-system, BlinkMacSystemFo
 // ── Page ────────────────────────────────────────────────────────────────────
 
 export default function BrandGuidePortalPage() {
-  const { churchSlug, ministrySlug } = useParams<{ churchSlug: string; ministrySlug?: string }>()
-  // Composite slug for the RPC — main guides live at `{church}`, subbrands at
-  // `{church}/{ministry}`. The slug column in strategy_brand_guides stores the
-  // full composite string either way.
-  const slug = ministrySlug ? `${churchSlug}/${ministrySlug}` : churchSlug
+  // Catch-all route: the slug is whatever sits under /brand/ in the URL.
+  // We read it via useLocation rather than useParams so the page works
+  // identically for 1-segment (`/brand/lakeway`), 2-segment
+  // (`/brand/tx/lakeway` or `/brand/lakeway/kids`), and 3-segment
+  // (`/brand/tx/lakeway/kids`) slugs. The slug column in
+  // strategy_brand_guides stores the full composite string either way,
+  // and the RPC matches on it verbatim.
+  const location = useLocation()
+  // useParams stays as a defensive fallback for any route that still
+  // passes named params (legacy compatibility).
+  const { '*': splat } = useParams<{ '*': string }>()
+  const slug = (splat ?? location.pathname.replace(/^\/brand\//, '')).replace(/\/+$/, '')
   const [payload, setPayload] = useState<BrandGuidePortalPayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

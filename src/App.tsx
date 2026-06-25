@@ -69,11 +69,18 @@ export default function App() {
       <AppErrorBoundary>
         <BrowserRouter>
           <Routes>
-            <Route path="/:churchSlug" element={<BrandGuidePortalPage />} />
-            <Route path="/:churchSlug/:ministrySlug" element={<BrandGuidePortalPage />} />
-            {/* Anything else — the bare root, typos, /login probes — renders
-                 a plain info page. Never redirects to the staff app. */}
-            <Route path="*" element={<BrandPortalLanding />} />
+            {/* Root — informational landing, never resolves to a guide. */}
+            <Route path="/" element={<BrandPortalLanding />} />
+            {/* Catch-all so the page can resolve 1-, 2-, and 3-segment
+                slugs uniformly. Examples:
+                  /lakeway                  — legacy flat slug
+                  /tx/lakeway               — v107 state-prefixed slug
+                  /lakeway/kids             — legacy + subbrand
+                  /tx/lakeway/kids          — state-prefixed + subbrand
+                The page reads the full path and queries the RPC verbatim
+                against the slug column. A missing/unknown slug returns
+                NULL → page renders NotFound. */}
+            <Route path="*" element={<BrandGuidePortalPage />} />
           </Routes>
         </BrowserRouter>
       </AppErrorBoundary>
@@ -107,9 +114,11 @@ export default function App() {
           {/* Dev-only fixture preview for the feedback UI primitives. */}
           <Route path="/dev/feedback-preview" element={<FeedbackPreviewPage />} />
           {/* Legacy brand-guide URLs — kept live so old links don't rot. New
-              links go through buildPortalUrl() which emits brand.thesqd.com. */}
-          <Route path="/brand/:churchSlug" element={<BrandGuidePortalPage />} />
-          <Route path="/brand/:churchSlug/:ministrySlug" element={<BrandGuidePortalPage />} />
+              links go through buildPortalUrl() which emits brand.thesqd.com.
+              Catch-all so the page handles 1- / 2- / 3-segment slugs
+              (v107 introduced state-prefixed slugs of the form
+              {state}/{church}/{ministry}). */}
+          <Route path="/brand/*" element={<BrandGuidePortalPage />} />
 
           {/* Protected routes — staff only, wrapped in AppLayout */}
           <Route

@@ -633,6 +633,14 @@ export interface StrategyBrandGuide {
   /** Short designer-facing brief (1–3 sentences) from the brand squad.
    *  Staff-only — not in the public RPC payload. */
   handoff_notes: string | null
+  /** US state abbreviation (lowercase, 2 chars) parsed from accounts.address
+   *  at guide-creation time. NULL = no parseable state available. When set,
+   *  the slug uses {state}/{base} as its prefix; when null, the slug is flat. */
+  slug_state: string | null
+  /** City slug parsed alongside state. Used as a secondary disambiguator
+   *  when {state}/{base} collides with another guide. NULL = no city, slug
+   *  falls back to {state}/{base}-2 etc. */
+  slug_city: string | null
   created_at: string
   updated_at: string
   [key: string]: unknown

@@ -239,7 +239,12 @@ export async function createMainGuide(params: {
   displayName: string
   createdBy: string | null
 }): Promise<StrategyBrandGuide> {
-  const slug = await generateUniqueSlug(params.displayName)
+  // Look up the partner's address from accounts so we can prefix the
+  // slug with state (and disambiguate by city on collision). When
+  // accounts has no row OR the address is unparseable / international,
+  // both parts come back null and the slug falls back to flat behavior.
+  const { state, city } = await resolveSlugStateAndCity(params.memberId)
+  const slug = await generateUniqueSlug(params.displayName, { state, city })
 
   const { data, error } = await supabase
     .from('strategy_brand_guides')
@@ -256,12 +261,28 @@ export async function createMainGuide(params: {
       is_published: false,
       last_updated_at: null,
       created_by: params.createdBy,
-    })
+      slug_state: state,
+      slug_city:  city,
+    } as Record<string, unknown>)
     .select()
     .single()
 
   if (error || !data) throw error ?? new Error('Failed to create brand guide')
   return data as StrategyBrandGuide
+}
+
+/** Look up the partner's address from the accounts table and parse a
+ *  state/city pair out of it. Returns nulls when the row is missing
+ *  or the address doesn't match a US postal pattern (international
+ *  partners fall through to the flat-slug path). */
+async function resolveSlugStateAndCity(memberId: number): Promise<{ state: string | null; city: string | null }> {
+  const { data } = await supabase
+    .from('accounts')
+    .select('address')
+    .eq('account', memberId)
+    .maybeSingle()
+  const address = (data as { address?: string | null } | null)?.address ?? null
+  return parseStateAndCityFromAddress(address)
 }
 
 /**
@@ -335,18 +356,101 @@ export function slugify(name: string): string {
     .slice(0, 60) || 'brand'
 }
 
-/** Find a free slug by appending -2, -3, etc. when the base is taken. */
-export async function generateUniqueSlug(displayName: string): Promise<string> {
+/** Parse a US state abbreviation + city from a free-form address string.
+ *
+ * Targets the canonical US postal shape: `... <City>, <ST> <ZIP> ...`
+ * with tolerance for missing commas and double spaces (real data in the
+ * accounts table includes "TX  78216" and "CA, 95129" variants).
+ *
+ * Returns nulls when the regex doesn't match (international addresses,
+ * empty strings, PO-box-only formats) — callers fall back to the flat
+ * slug behavior.
+ */
+export function parseStateAndCityFromAddress(
+  address: string | null | undefined,
+): { state: string | null; city: string | null } {
+  if (!address || typeof address !== 'string') return { state: null, city: null }
+  const trimmed = address.trim()
+  if (!trimmed) return { state: null, city: null }
+
+  // State + ZIP. `,?` covers "CA, 95129"; `\s+` covers "TX  78216".
+  const m = trimmed.match(/\b([A-Z]{2}),?\s+\d{5}\b/)
+  if (!m) return { state: null, city: null }
+  const state = m[1].toLowerCase()
+
+  // City is the token immediately before the state in the address —
+  // usually preceded by a comma (e.g. "San Jose, CA 95129") or by
+  // whitespace on the more-broken records. Scan backward from the
+  // state match.
+  const upto = trimmed.slice(0, m.index ?? 0).trimEnd().replace(/,$/, '').trimEnd()
+  // Pull the LAST comma-separated chunk; if no commas, the last
+  // whitespace-separated token.
+  let cityRaw: string | null = null
+  if (upto.includes(',')) {
+    const parts = upto.split(',').map(s => s.trim()).filter(Boolean)
+    cityRaw = parts[parts.length - 1] ?? null
+  } else {
+    const parts = upto.split(/\s+/).filter(Boolean)
+    cityRaw = parts[parts.length - 1] ?? null
+  }
+  const city = cityRaw ? slugify(cityRaw) || null : null
+  return { state, city }
+}
+
+/** Find a free slug by appending -2, -3, etc. when the base is taken.
+ *
+ * When `state` is provided, the canonical slug shape is `{state}/{base}`
+ * (e.g. `tx/lakeway`). On collision the chain escalates:
+ *   1. {state}/{base}
+ *   2. {state}/{city}-{base}     (when city is also provided)
+ *   3. {state}/{base}-2, -3, …   (numeric fallback)
+ *
+ * When `state` is not provided, behavior matches the original flat
+ * shape: `{base}`, then `-2`, `-3`, … on collision.
+ */
+export async function generateUniqueSlug(
+  displayName: string,
+  opts: { state?: string | null; city?: string | null } = {},
+): Promise<string> {
   const base = slugify(displayName)
+  const state = (opts.state ?? null)?.trim().toLowerCase() || null
+  const city  = (opts.city  ?? null)?.trim().toLowerCase() || null
+
+  // Pre-load every slug that COULD collide. We over-fetch a bit (any
+  // slug whose last segment starts with `base`) so the in-memory
+  // collision check is exact without a network round-trip per
+  // candidate.
   const { data: existing } = await supabase
     .from('strategy_brand_guides')
     .select('slug')
-    .ilike('slug', `${base}%`)
+    .or(`slug.ilike.${base}%,slug.ilike.%/${base}%`)
   const taken = new Set((existing ?? []).map((r: { slug: string }) => r.slug))
-  if (!taken.has(base)) return base
+
+  // No state → original flat behavior.
+  if (!state) {
+    if (!taken.has(base)) return base
+    let n = 2
+    while (taken.has(`${base}-${n}`)) n++
+    return `${base}-${n}`
+  }
+
+  // State known: try state/base first.
+  const stateBase = `${state}/${base}`
+  if (!taken.has(stateBase)) return stateBase
+
+  // Fall back to {state}/{city}-{base} when city is available and not
+  // already taken. Skip this rung if city is missing or matches base
+  // (e.g. a town literally called "Lakeway" → `tx/lakeway-lakeway`
+  // is uglier than the numeric fallback below).
+  if (city && city !== base) {
+    const stateCityBase = `${state}/${city}-${base}`
+    if (!taken.has(stateCityBase)) return stateCityBase
+  }
+
+  // Final fallback: numeric suffix on the {state}/{base} form.
   let n = 2
-  while (taken.has(`${base}-${n}`)) n++
-  return `${base}-${n}`
+  while (taken.has(`${stateBase}-${n}`)) n++
+  return `${stateBase}-${n}`
 }
 
 /**

@@ -14,7 +14,7 @@ import type {
 import {
   loadMainGuideByMember, loadGuideBySlug, loadSubbrandsFor,
   createMainGuide, createSubbrand, updateGuideMeta,
-  subbrandShortSlug,
+  subbrandShortSlug, slugify,
   saveLogos, saveColors, saveColorCombinations, saveTypography,
   saveElements, saveVoiceAttributes, saveVoiceGuidelines, saveBrandAttributes,
   createCustomSection, updateCustomSection, deleteCustomSection, saveCustomSectionEntries,
@@ -470,7 +470,7 @@ function MetaCard({ guide, churchName, onChange, onError }: {
       />
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="text-xs text-purple-gray flex items-center gap-2">
+        <div className="text-xs text-purple-gray flex items-center gap-2 flex-wrap">
           <span className="font-semibold">Portal URL:</span>
           <code className="bg-lavender-tint px-1.5 py-0.5 rounded text-primary-purple">{portalUrl}</code>
           <button
@@ -486,6 +486,15 @@ function MetaCard({ guide, churchName, onChange, onError }: {
           >
             {linkCopied ? <Check size={11} className="text-green-600" /> : <LinkIcon size={11} />}
           </button>
+          {/* Edit URL affordance: staff-only, unpublished-only. Published
+              guides are out in the wild (partner emails, business cards)
+              — we never rename those. Subbrand slugs also stay locked
+              because re-slugging the parent or any sibling would cascade
+              in ways the editor doesn't show today; this MVP scopes to
+              renaming MAIN guides only. */}
+          {!guide.is_published && !guide.parent_id && (
+            <SlugRenameAffordance guide={guide} onChange={onChange} onError={onError} />
+          )}
           {!guide.is_published && (
             <span className="text-amber-700">(hidden until published)</span>
           )}
@@ -500,6 +509,135 @@ function MetaCard({ guide, churchName, onChange, onError }: {
           Save meta
         </button>
       </div>
+    </div>
+  )
+}
+
+// ── Slug rename affordance (unpublished main guides only) ─────────────────
+//
+// Lets staff change the URL of an unpublished brand guide before it goes
+// public. Published guides are locked — their URLs are out in partner
+// emails, business cards, etc. Subbrand guides are also locked here
+// (rename would cascade through the parent's slug); MVP scopes to main
+// guides only.
+//
+// Collision handling is identical to generateUniqueSlug's chain — the
+// user types a base; we check for collisions and either accept the
+// typed slug or surface the conflict. We do NOT auto-suffix the user's
+// input because they're typing the URL they want; surfacing the
+// collision lets them pick a different name.
+
+function SlugRenameAffordance({
+  guide, onChange, onError,
+}: {
+  guide:    StrategyBrandGuide
+  onChange: (guide: StrategyBrandGuide) => void
+  onError:  (msg: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState(guide.slug)
+  const [saving, setSaving] = useState(false)
+  const [validationErr, setValidationErr] = useState<string | null>(null)
+
+  // Reset the draft + clear error when the popover opens, in case the
+  // slug got updated externally (e.g. another tab saved a change).
+  useEffect(() => {
+    if (open) {
+      setDraft(guide.slug)
+      setValidationErr(null)
+    }
+  }, [open, guide.slug])
+
+  const trimmed = draft.trim()
+  const changed = trimmed !== guide.slug
+  // Allow letters, digits, hyphens, and slashes (for state-prefixed
+  // shapes like tx/lakeway). Reject any other character so we don't
+  // accidentally write a malformed slug to the DB.
+  const looksValid = /^[a-z0-9-]+(\/[a-z0-9-]+)*$/.test(trimmed) && trimmed.length > 0
+
+  const save = async () => {
+    if (!changed) { setOpen(false); return }
+    if (!looksValid) {
+      setValidationErr('Slug can only include lowercase letters, digits, hyphens, and slashes.')
+      return
+    }
+    setSaving(true)
+    setValidationErr(null)
+    try {
+      // Check collision: any OTHER guide already using this exact slug?
+      const { data: collision } = await supabase
+        .from('strategy_brand_guides')
+        .select('id')
+        .eq('slug', trimmed)
+        .neq('id', guide.id)
+        .maybeSingle()
+      if (collision) {
+        setValidationErr(`Another guide already uses ${trimmed}. Pick a different name.`)
+        setSaving(false)
+        return
+      }
+      const next = await updateGuideMeta(guide.id, { slug: trimmed } as Partial<StrategyBrandGuide>)
+      onChange(next)
+      setOpen(false)
+    } catch (err) {
+      onError((err as { message?: string })?.message ?? 'Failed to rename slug')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-[11px] text-primary-purple hover:underline font-semibold"
+        title="Rename the slug for this draft guide. Disabled once published."
+      >
+        Edit URL
+      </button>
+    )
+  }
+
+  return (
+    <div className="inline-flex items-center gap-1.5 bg-white border border-lavender rounded-lg px-2 py-1">
+      <span className="text-[10px] text-purple-gray">/brand/</span>
+      <input
+        type="text"
+        value={draft}
+        onChange={e => { setDraft(e.target.value.toLowerCase()); setValidationErr(null) }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); void save() }
+          if (e.key === 'Escape') { e.preventDefault(); setOpen(false) }
+        }}
+        autoFocus
+        spellCheck={false}
+        className="text-[11px] font-mono text-deep-plum bg-transparent outline-none min-w-[160px]"
+        placeholder="tx/lakeway"
+      />
+      <button
+        type="button"
+        onClick={() => void save()}
+        disabled={saving || !changed}
+        className="text-[10px] font-semibold text-primary-purple hover:text-deep-plum disabled:opacity-40"
+      >
+        {saving ? '…' : 'Save'}
+      </button>
+      <button
+        type="button"
+        onClick={() => setOpen(false)}
+        className="text-[10px] text-purple-gray hover:text-deep-plum"
+      >
+        Cancel
+      </button>
+      {validationErr && (
+        <span className="text-[10px] text-red-600 ml-1">{validationErr}</span>
+      )}
+      {!validationErr && changed && looksValid && (
+        <span className="text-[10px] text-purple-gray ml-1">
+          Suggested: <code className="bg-lavender-tint px-1 rounded">{slugify(trimmed) || trimmed}</code>
+        </span>
+      )}
     </div>
   )
 }
