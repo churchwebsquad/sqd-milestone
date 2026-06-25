@@ -1135,6 +1135,14 @@ export interface StrategyWebProject {
   offcanvas_template_ids: string[]
   nav_items: unknown[]                  // jsonb — authored nav structure
 
+  // ── Nav group definitions (v112) ──
+  /** Per-project registry of nav groups. Each entry is {label, sort_order}.
+   *  Holds the canonical list of groups even when no web_pages row carries
+   *  that label yet (so staff can add an empty group and assign pages
+   *  later). Rename / move ops keep this in sync with the matching
+   *  web_pages.nav_group_label / nav_group_sort_order on each row. */
+  nav_group_definitions: Array<{ label: string; sort_order: number }>
+
   // ── Curated Brixies library (v34) — concept_id → [template_id, …] ──
   // Drives the Global Elements workspace and the AI auto-bind pass.
   curated_library: Record<string, string[]>

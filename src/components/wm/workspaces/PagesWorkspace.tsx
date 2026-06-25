@@ -49,7 +49,8 @@ import { PageVersionDrawer } from '../PageVersionDrawer'
 import { snapshotPageVersion } from '../../../lib/webPageVersions'
 import {
   groupPagesByNav, renameNavGroup, moveNavGroup, assignPageToNavGroup,
-  type NavGroup,
+  addNavGroup,
+  type NavGroup, type NavGroupDefinition,
 } from '../../../lib/webPageNavGroups'
 import { AddPageModal } from '../AddPageModal'
 import { ConfirmDialog } from '../ConfirmDialog'
@@ -304,6 +305,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
           )}
           <PageList
             projectId={project.id}
+            navGroupDefinitions={(project.nav_group_definitions ?? []) as NavGroupDefinition[]}
             pages={pages}
             staffPages={staffPages}
             loading={loading}
@@ -313,7 +315,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
             onToggleSelection={togglePageSelection}
             onArchive={requestArchive}
             onAddPageInPhase={(phase) => setAddPageInPhase(phase)}
-            onGroupsChanged={() => void loadPages()}
+            onGroupsChanged={async () => { await loadPages(); await onChange?.() }}
             pageReviewCounts={reviewState?.page_counts ?? {}}
           />
         </aside>
@@ -409,11 +411,16 @@ export function PagesWorkspace({ project, onChange }: Props) {
 // ── Page list ─────────────────────────────────────────────────────────
 
 function PageList({
-  projectId, pages, staffPages, loading, activeId, selectedIds,
+  projectId, navGroupDefinitions,
+  pages, staffPages, loading, activeId, selectedIds,
   onSelect, onToggleSelection, onArchive, onAddPageInPhase, onGroupsChanged,
   pageReviewCounts,
 }: {
   projectId: string
+  /** Project's nav_group_definitions registry (v112). Lets empty groups
+   *  (added but not yet populated with pages) render alongside groups
+   *  derived from page assignments. */
+  navGroupDefinitions: NavGroupDefinition[]
   pages: WebPage[]
   /** Per-staff bio pages (slug LIKE 'staff/%'). Grouped under their
    *  own header so they're easy to spot among the main page list. */
@@ -425,13 +432,13 @@ function PageList({
   onToggleSelection: (id: string) => void
   onArchive: (id: string) => void
   onAddPageInPhase: (phase: string) => void
-  /** Called after a successful group rename / reorder / page reassign
-   *  so the parent re-loads pages. */
+  /** Called after a successful group rename / reorder / page reassign /
+   *  add-group so the parent re-loads pages + the project. */
   onGroupsChanged: () => void
   pageReviewCounts: Record<string, import('../../../lib/webReviews').PageReviewCounts>
 }) {
   const selectionActive = selectedIds.size > 0
-  const navGroups = useMemo(() => groupPagesByNav(pages), [pages])
+  const navGroups = useMemo(() => groupPagesByNav(pages, navGroupDefinitions), [pages, navGroupDefinitions])
 
   if (loading) {
     return (
@@ -515,14 +522,21 @@ function PageList({
         <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
           Pages{pages.length > 0 ? ` · ${pages.length}` : ''}
         </p>
-        <button
-          type="button"
-          onClick={() => onAddPageInPhase('1')}
-          className="text-wm-text-subtle hover:text-wm-accent-strong transition-colors"
-          title="Add a page"
-        >
-          <Plus size={12} />
-        </button>
+        <div className="flex items-center gap-1">
+          <AddGroupAffordance
+            projectId={projectId}
+            existingLabels={navGroups.map(g => g.label).filter((l): l is string => !!l)}
+            onAdded={onGroupsChanged}
+          />
+          <button
+            type="button"
+            onClick={() => onAddPageInPhase('1')}
+            className="text-wm-text-subtle hover:text-wm-accent-strong transition-colors"
+            title="Add a page"
+          >
+            <Plus size={12} />
+          </button>
+        </div>
       </div>
       {pages.length === 0 ? (
         <button
@@ -816,6 +830,84 @@ function PageNavGroupPicker({
       )}
       {busy && <Loader2 size={11} className="animate-spin" />}
       {error && <span className="text-[11px] text-wm-danger">{error}</span>}
+    </div>
+  )
+}
+
+/** Compact "Add group" affordance — small icon button that opens an
+ *  inline name prompt. On save, calls addNavGroup() which persists the
+ *  new (empty) group to strategy_web_projects.nav_group_definitions
+ *  and triggers a project reload via onAdded. */
+function AddGroupAffordance({
+  projectId, existingLabels, onAdded,
+}: {
+  projectId:      string
+  existingLabels: string[]
+  onAdded:        () => void
+}) {
+  const [open, setOpen]     = useState(false)
+  const [draft, setDraft]   = useState('')
+  const [busy, setBusy]     = useState(false)
+  const [error, setError]   = useState<string | null>(null)
+
+  const reset = () => { setOpen(false); setDraft(''); setError(null) }
+
+  const submit = async () => {
+    const trimmed = draft.trim()
+    if (!trimmed)                           { setError('Group name cannot be empty.'); return }
+    if (existingLabels.includes(trimmed))   { setError(`Already have a group named "${trimmed}".`); return }
+    setBusy(true)
+    setError(null)
+    const result = await addNavGroup(projectId, trimmed)
+    setBusy(false)
+    if (!result.ok) { setError(result.error); return }
+    reset()
+    onAdded()
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-wm-text-subtle hover:text-wm-accent-strong transition-colors"
+        title="Add a nav group (e.g. About, Ministries)"
+      >
+        <Plus size={11} />
+        <span>group</span>
+      </button>
+    )
+  }
+
+  return (
+    <div className="inline-flex items-center gap-1 bg-wm-bg-elevated border border-wm-accent/40 rounded px-1.5 py-0.5">
+      <input
+        type="text"
+        value={draft}
+        onChange={(e) => { setDraft(e.target.value); setError(null) }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter')  { e.preventDefault(); void submit() }
+          if (e.key === 'Escape') { e.preventDefault(); reset() }
+        }}
+        autoFocus
+        disabled={busy}
+        placeholder="Group name"
+        className="text-[11px] text-wm-text bg-transparent outline-none w-32"
+      />
+      <button
+        type="button"
+        onClick={() => void submit()}
+        disabled={busy || !draft.trim()}
+        className="text-[10px] font-semibold text-wm-accent-strong hover:underline disabled:opacity-40"
+      >Add</button>
+      <button
+        type="button"
+        onClick={reset}
+        className="text-[10px] text-wm-text-subtle hover:text-wm-text"
+      >×</button>
+      {error && (
+        <span className="text-[10px] text-wm-danger ml-1 max-w-[120px] truncate" title={error}>{error}</span>
+      )}
     </div>
   )
 }
