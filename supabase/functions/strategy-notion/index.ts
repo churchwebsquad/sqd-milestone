@@ -46,6 +46,7 @@ import { promoteActionItem } from './_lib/ops/promote-action-item.ts'
 import { getActionItemContent } from './_lib/ops/get-action-item.ts'
 import { listDatabasePagesWithContent } from './_lib/ops/list-database-pages-with-content.ts'
 import { syncIntakeDocFromNotion } from './_lib/ops/sync-intake-doc-from-notion.ts'
+import { syncStrategyBriefByMember } from './_lib/ops/sync-strategy-brief-by-member.ts'
 import { listPartnerSiteNotes } from './_lib/ops/list-partner-site-notes.ts'
 import type {
   InitiativeWritable, InitiativeCreate, MilestoneWritable, MilestoneCreate,
@@ -320,6 +321,28 @@ serve(async (req: Request) => {
           return json400(`Unsupported category "${category}" — must be 'strategy_brief' or 'content_strategy'.`)
         }
         return json(await syncIntakeDocFromNotion({ projectId, notionUrl, category, uploadedBy: uploadedBy ?? null }))
+      }
+
+      // ── Web intake — Auto-find strategy brief by member ──────────────
+      // Queries the All-In Documents database, filters by
+      // Doc Type="Strategy Brief" + Member # rollup, hands off to the
+      // single-page sync. Used by the intake checklist's "Sync from
+      // Notion" button when no per-project URL has been pasted (the
+      // URL path remains as an override).
+      case 'sync-strategy-brief-by-member': {
+        const { projectId, member, category, uploadedBy } = args as {
+          projectId?: string; member?: number
+          category?:  'strategy_brief' | 'content_strategy'
+          uploadedBy?: string | null
+        }
+        if (!projectId || typeof member !== 'number') {
+          return json400('Missing "projectId" / "member" for sync-strategy-brief-by-member.')
+        }
+        return json(await syncStrategyBriefByMember({
+          projectId, member,
+          category:   category ?? 'strategy_brief',
+          uploadedBy: uploadedBy ?? null,
+        }))
       }
 
       case 'list-doc-comments': {

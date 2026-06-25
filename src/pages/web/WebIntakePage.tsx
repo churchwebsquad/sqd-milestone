@@ -421,9 +421,13 @@ function IntakeRow({
               .eq('id', project.id)
             if (!error) onProjectChange({ strategy_brief_notion_url: v.trim() || null })
           }}
-          label="Notion URL (optional)"
+          label="Notion URL (optional — leave blank to auto-find by Member # in the All-In Documents DB)"
           placeholder="https://www.notion.so/…"
-          syncTarget={{ projectId: project.id, category: 'strategy_brief' }}
+          syncTarget={{
+            projectId: project.id,
+            category:  'strategy_brief',
+            member:    typeof project.member === 'number' ? project.member : undefined,
+          }}
           onSynced={onChange}
         />
       )}
@@ -475,9 +479,18 @@ function NotionUrlField({
   label: string
   placeholder: string
   /** When set, shows a "Sync from Notion" button that pulls the page's
-   *  content into web_intake_documents (category as specified). Disabled
-   *  while the URL input is dirty — the user must save the URL first. */
-  syncTarget?: { projectId: string; category: 'strategy_brief' | 'content_strategy' }
+   *  content into web_intake_documents (category as specified). Two
+   *  modes:
+   *   - URL pasted: legacy per-page sync (sync-intake-doc-from-notion)
+   *   - URL empty + member provided: auto-find in the All-In Documents
+   *     database by Member # + Doc Type (sync-strategy-brief-by-member).
+   *     This is the default path for strategy briefs — staff don't
+   *     need to paste a URL per partner. */
+  syncTarget?: {
+    projectId: string
+    category: 'strategy_brief' | 'content_strategy'
+    member?: number
+  }
   /** Called after a successful sync so the intake checklist can refresh
    *  the document count for this row. */
   onSynced?: () => Promise<void>
@@ -488,7 +501,10 @@ function NotionUrlField({
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
   const dirty = draft.trim() !== (value ?? '').trim()
-  const canSync = !!syncTarget && !!value && !dirty
+  // Sync is available when EITHER a saved URL is pasted (legacy
+  // override) OR a member number is on hand (auto-find against the
+  // shared Documents DB). Mid-edit URLs need to be saved first.
+  const canSync = !!syncTarget && !dirty && (!!value || typeof syncTarget.member === 'number')
 
   const save = async () => {
     setSaving(true)
@@ -499,13 +515,29 @@ function NotionUrlField({
   }
 
   const sync = async () => {
-    if (!syncTarget || !value) return
+    if (!syncTarget) return
     setSyncing(true)
     setSyncMessage(null)
     try {
       const { data: sess } = await supabase.auth.getSession()
       const accessToken = sess.session?.access_token
       if (!accessToken) throw new Error('Not signed in.')
+      // URL takes precedence over auto-find — staff paste-overrides
+      // any time the partner's brief lives in a non-canonical place.
+      const useAutoFind = !value && typeof syncTarget.member === 'number'
+      const body = useAutoFind
+        ? {
+            op:        'sync-strategy-brief-by-member',
+            projectId: syncTarget.projectId,
+            member:    syncTarget.member,
+            category:  syncTarget.category,
+          }
+        : {
+            op:        'sync-intake-doc-from-notion',
+            projectId: syncTarget.projectId,
+            notionUrl: value,
+            category:  syncTarget.category,
+          }
       const res = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/strategy-notion`,
         {
@@ -514,25 +546,24 @@ function NotionUrlField({
             'Content-Type':  'application/json',
             'Authorization': `Bearer ${accessToken}`,
           },
-          body: JSON.stringify({
-            op:         'sync-intake-doc-from-notion',
-            projectId:  syncTarget.projectId,
-            notionUrl:  value,
-            category:   syncTarget.category,
-          }),
+          body: JSON.stringify(body),
         },
       )
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        throw new Error(body?.message || body?.error || `Sync failed (HTTP ${res.status})`)
+      const respBody = await res.json().catch(() => ({}))
+      if (!res.ok || respBody?.ok === false) {
+        throw new Error(respBody?.error || respBody?.message || `Sync failed (HTTP ${res.status})`)
       }
-      setSyncMessage({ kind: 'success', text: `Synced ${Math.round((body.markdown_bytes ?? 0) / 1024)} KB from Notion.` })
+      const kb = Math.round((respBody.markdown_bytes ?? 0) / 1024)
+      const detail = useAutoFind && respBody.notion_page_url
+        ? `Found in Notion (Documents DB) — synced ${kb} KB.`
+        : `Synced ${kb} KB from Notion.`
+      setSyncMessage({ kind: 'success', text: detail })
       if (onSynced) await onSynced()
     } catch (err) {
       setSyncMessage({ kind: 'error', text: err instanceof Error ? err.message : String(err) })
     } finally {
       setSyncing(false)
-      setTimeout(() => setSyncMessage(null), 5000)
+      setTimeout(() => setSyncMessage(null), 6000)
     }
   }
 
@@ -568,16 +599,22 @@ function NotionUrlField({
             onClick={() => void sync()}
             disabled={!canSync || syncing}
             title={
-              !value
-                ? 'Paste a Notion URL above first.'
-                : dirty
-                  ? 'Save the URL first, then sync.'
-                  : 'Pull the page content from Notion into this intake. Re-run any time to refresh.'
+              dirty
+                ? 'Save the URL first, then sync.'
+                : value
+                  ? 'Pull the page content from Notion into this intake. Re-run any time to refresh.'
+                  : typeof syncTarget.member === 'number'
+                    ? 'Auto-find this partner\'s strategy brief in the All-In Documents Notion database by Member # + Doc Type, then sync.'
+                    : 'Paste a Notion URL above first.'
             }
             className="text-[11px] font-semibold rounded-full px-3 py-1.5 border border-primary-purple/30 text-primary-purple bg-white hover:bg-primary-purple/5 transition-colors disabled:opacity-50 inline-flex items-center gap-1"
           >
             {syncing ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-            {syncing ? 'Syncing…' : 'Sync from Notion'}
+            {syncing
+              ? 'Syncing…'
+              : value
+                ? 'Sync from URL'
+                : 'Sync from Notion'}
           </button>
         )}
       </div>
