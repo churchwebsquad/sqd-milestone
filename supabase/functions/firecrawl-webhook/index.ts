@@ -121,8 +121,132 @@ Deno.serve(async (req) => {
     return json({ ok: true, recorded: "failed" }, 200);
   }
 
-  // ── crawl.completed: filter failures, normalize, snippet, store ─
-  const rawPages = Array.isArray(body.data) ? body.data : [];
+  // ── crawl.completed: fetch the actual page data from Firecrawl ──
+  // Firecrawl's webhook payload signals completion but doesn't include
+  // the page array — you have to GET /v1/crawl/{id} to retrieve the
+  // actual data. (The earlier implementation read body.data and got
+  // empty arrays, leaving every crawl_job with 0 pages despite
+  // Firecrawl successfully crawling dozens.)
+  //
+  // Large crawls bloat with detail-page enumerations (/events/<slug>,
+  // /sermons/<title>, /blog/<post>). For Doxology espanol Firecrawl
+  // returned 255 pages — most were per-event detail pages with no
+  // navigable value. We process page-by-page (paginated via Firecrawl's
+  // `next` cursor) and filter via two passes:
+  //   1. Strip html immediately (Webflow HTML is 30-80 KB/page).
+  //   2. Drop URLs under any path prefix that hits PREFIX_KEEP_THRESHOLD.
+  //      Keep the index (e.g. /events) and drop the children
+  //      (/events/baptism, /events/community-groups, ...).
+  // Net: 255 raw pages → ~30 actually-useful pages.
+  const PREFIX_KEEP_THRESHOLD = 3; // ≥3 children → drop them, keep only the index
+  let rawPages: CrawlPage[] = [];
+  const fireKey = Deno.env.get("FIRECRAWL_API_KEY");
+  if (!fireKey) {
+    console.error("[firecrawl-webhook] FIRECRAWL_API_KEY missing — can't fetch crawl data");
+  } else {
+    try {
+      // First pass: paginate /v1/crawl/{id}, strip html, collect URLs +
+      // metadata-light pages. We tally first-segment prefix counts as
+      // we go so we can filter the heavy enumerations out after.
+      const prefixCounts = new Map<string, number>();
+      const stripHtml = (p: CrawlPage): CrawlPage => ({ ...p, html: undefined, rawHtml: undefined } as CrawlPage);
+      const firstSegment = (u: string | undefined): string | null => {
+        if (!u) return null;
+        try {
+          const path = new URL(u).pathname;
+          const seg = path.split('/').filter(Boolean)[0];
+          return seg ? `/${seg}` : null;
+        } catch { return null; }
+      };
+      const ingest = (pages: CrawlPage[]) => {
+        for (const raw of pages) {
+          const stripped = stripHtml(raw);
+          rawPages.push(stripped);
+          const u = stripped.url ?? stripped.metadata?.sourceURL ?? '';
+          const prefix = firstSegment(u);
+          if (prefix) prefixCounts.set(prefix, (prefixCounts.get(prefix) ?? 0) + 1);
+        }
+      };
+      // Paginate via ?limit=N&skip=N. Each page batch is processed
+      // and stripped to essentials (url, title, markdown only) before
+      // appending to rawPages — full Firecrawl objects carry html,
+      // content (dup of markdown), links, metadata which sum to too
+      // much memory for 255-page crawls. We only keep what downstream
+      // consumers (atomize, categorize) actually read.
+      //
+      // Also: hard cap MAX_KEEP. Once we have 75 useful pages, stop
+      // fetching. Church sites with way more than that are usually
+      // padded with event/sermon detail enumerations; the heavy-prefix
+      // filter below catches those after the fact, but we don't even
+      // need to fetch them.
+      const PAGE_SIZE = 20;
+      const MAX_KEEP = 100;
+      const slim = (p: CrawlPage): CrawlPage => ({
+        url:      p.url ?? p.metadata?.sourceURL ?? '',
+        title:    p.metadata?.title ?? p.title ?? '',
+        markdown: p.markdown ?? '',
+        metadata: {
+          sourceURL:  p.metadata?.sourceURL ?? '',
+          statusCode: p.metadata?.statusCode,
+          error:      p.metadata?.error,
+          title:      p.metadata?.title ?? '',
+        },
+      });
+      let skip = 0;
+      let total: number | null = null;
+      const MAX_ITER = 30;
+      for (let i = 0; i < MAX_ITER; i++) {
+        const u = `https://api.firecrawl.dev/v1/crawl/${firecrawlCrawlId}?limit=${PAGE_SIZE}&skip=${skip}`;
+        const r = await fetch(u, { headers: { Authorization: `Bearer ${fireKey}` } });
+        if (!r.ok) {
+          console.error(`[firecrawl-webhook] /v1/crawl page fetch failed at skip=${skip}: ${r.status}`);
+          break;
+        }
+        const b = await r.json() as { data?: CrawlPage[]; status?: string; total?: number };
+        if (typeof b.total === 'number') total = b.total;
+        const batch = Array.isArray(b.data) ? b.data : [];
+        if (batch.length === 0) break;
+        ingest(batch.map(slim));
+        skip += batch.length;
+        if (total !== null && skip >= total) break;
+        if (rawPages.length >= MAX_KEEP) break;
+      }
+      console.log(`[firecrawl-webhook] fetched ${rawPages.length} pages from Firecrawl (reported total ${total ?? 'unknown'})`);
+
+      // Heavy-prefix filter: when a first-path-segment has N+ pages,
+      // it's a detail-page enumeration. Keep only the index (/events)
+      // and drop the children (/events/<slug>). For per-page sites
+      // with ≤2 children the threshold doesn't fire, so /staff/jane
+      // and /staff/john survive on small sites.
+      const heavyPrefixes = new Set<string>();
+      for (const [prefix, count] of prefixCounts.entries()) {
+        if (count >= PREFIX_KEEP_THRESHOLD) heavyPrefixes.add(prefix);
+      }
+      if (heavyPrefixes.size > 0) {
+        const before = rawPages.length;
+        rawPages = rawPages.filter(p => {
+          const u = p.url ?? p.metadata?.sourceURL ?? '';
+          if (!u) return false;
+          let path: string;
+          try { path = new URL(u).pathname; } catch { return false; }
+          // Keep the prefix root itself (/events, /events/) — drop only deeper paths.
+          for (const prefix of heavyPrefixes) {
+            if (path.startsWith(prefix + '/')) {
+              // Allowed: the index itself (path === prefix + '/').
+              const tail = path.slice(prefix.length + 1).replace(/\/$/, '');
+              if (tail.length > 0) return false;
+            }
+          }
+          return true;
+        });
+        console.log(`[firecrawl-webhook] heavy-prefix filter: ${before} → ${rawPages.length} (dropped under ${[...heavyPrefixes].join(', ')})`);
+      }
+    } catch (e) {
+      console.error("[firecrawl-webhook] data fetch threw:", e instanceof Error ? e.message : e);
+    }
+  }
+  // Fallback to body.data in case Firecrawl ever includes it inline.
+  if (rawPages.length === 0 && Array.isArray(body.data)) rawPages = body.data;
   const droppedFailures: Array<{ url: string; statusCode?: number; error?: string }> = [];
   const okPages: CrawlPage[] = [];
   for (const r of rawPages) {
@@ -146,7 +270,15 @@ Deno.serve(async (req) => {
   // shorter inventory; staff can re-fire with proxy:'stealth' via
   // the upcoming payload flag.
 
-  const contentItems = okPages.map(normalizePage).filter(p => p.url);
+  // Strip the `html` field — Webflow / heavy-CSS sites produce 30-80KB
+  // of HTML per page that downstream consumers (atomize, categorize)
+  // never read. For 255-page crawls, keeping HTML pushed the edge
+  // function past its memory limit. Drop it; keep markdown as the
+  // canonical body.
+  const contentItems = okPages
+    .map(normalizePage)
+    .filter(p => p.url)
+    .map(p => ({ ...p, html: '' }));
   const projectId = (job as { project_id: string }).project_id;
   const targetUrl = (job as { target_url: string }).target_url;
 

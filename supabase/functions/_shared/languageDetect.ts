@@ -20,14 +20,27 @@
  */
 
 /**
- * Stopword sets per language. Word lists are deliberately short and
- * orthogonal — only words that are unambiguous in their language
- * (e.g. Spanish "el" is also English "El" the name; we lowercase
- * during tokenize, but English text shouldn't accumulate Spanish-
- * stopword hits unless it really IS Spanish).
+ * Stopword sets per language. Curated to MAXIMIZE between-language
+ * discrimination, not just frequency:
+ *   - Spanish + Portuguese share `que`, `em/en`, `por`, `para`, `con/com`,
+ *     `sobre`, `ser`, `estar`, `é/es`, `están/estão`, `porque`, etc.
+ *     Counting these in BOTH languages makes Spanish content easy to
+ *     misclassify as Portuguese (and vice versa) on small corpora.
+ *   - We list ONLY the words that are characteristic of one language
+ *     and rare/absent in the other Romance language we model.
+ *   - Highly-discriminating Spanish: `el`, `la`, `los`, `las`, `del`,
+ *     `pero`, `nuestro`, `nuestra`, `también`, `más`, `muy`, `son`,
+ *     `esto`, `esta`, `este`. These literally do not occur as
+ *     stopwords in Portuguese (Portuguese uses `o/a/os/as`, `do/da`,
+ *     `mas`, `nosso/nossa`, `também`(overlap), `mais`, `muito`, `são`,
+ *     `isto`/`isso`).
+ *   - Highly-discriminating Portuguese: `o`, `os`, `as`, `do`, `da`,
+ *     `dos`, `das`, `no`, `na`, `nos`, `nas`, `é`, `são`, `ao`, `à`,
+ *     `seu`, `sua`, `nosso`, `nossa`, `isto`, `isso`, `mas`, `mais`,
+ *     `muito`. These are absent from Spanish.
  *
- * If you add a language, keep the list to ~30 high-frequency words
- * — too many false positives if you over-include.
+ * Add languages by listing only the discriminating-against-already-
+ * present-languages stopwords.
  */
 const LANG_STOPWORDS: Record<string, ReadonlySet<string>> = {
   en: new Set([
@@ -38,21 +51,47 @@ const LANG_STOPWORDS: Record<string, ReadonlySet<string>> = {
     'has', 'had', 'do', 'does', 'did', 'be', 'been', 'being',
   ]),
   es: new Set([
-    'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'de', 'del',
-    'y', 'o', 'que', 'qué', 'en', 'por', 'para', 'con', 'sin', 'sobre',
-    'es', 'son', 'está', 'están', 'ser', 'estar', 'al', 'lo', 'le',
-    'les', 'su', 'sus', 'mi', 'tu', 'nuestro', 'nuestra', 'esto',
-    'esta', 'este', 'pero', 'porque', 'cuando', 'donde', 'también',
-    'más', 'muy', 'todo', 'todos', 'todas', 'cada',
+    // Articles: Spanish has masculine/feminine plurals los/las which
+    // Portuguese spells os/as. Spanish "del" is a contraction
+    // Portuguese never uses (Portuguese: "do/da").
+    'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'del',
+    // Verbs / copulas: Spanish-only forms.
+    'son', 'soy', 'eres', 'somos',
+    // Common Spanish-only function words.
+    'pero', 'también', 'más', 'muy', 'todos', 'todas',
+    // Demonstratives — Spanish forms (Portuguese: isto, isso, este, esta — note Portuguese also has esta/este but the cluster of esto/esta/este/estos/estas is Spanish-leaning).
+    'esto', 'esta', 'este', 'estos', 'estas',
+    // Possessives: nuestro/nuestra are Spanish (Portuguese: nosso/nossa).
+    'nuestro', 'nuestra', 'nuestros', 'nuestras',
+    // Other discriminating function words.
+    'mi', 'tu', 'su', 'sus', 'cuando', 'donde', 'porque', 'cada',
   ]),
   pt: new Set([
-    'o', 'a', 'os', 'as', 'um', 'uma', 'uns', 'umas', 'de', 'do', 'da',
-    'dos', 'das', 'e', 'ou', 'que', 'em', 'no', 'na', 'nos', 'nas',
-    'por', 'para', 'com', 'sem', 'sobre', 'é', 'são', 'está', 'estão',
-    'ser', 'estar', 'ao', 'à', 'seu', 'sua', 'seus', 'suas', 'meu',
-    'minha', 'nosso', 'nossa', 'isto', 'isso', 'mas', 'porque',
-    'quando', 'onde', 'também', 'muito', 'todo', 'cada',
+    // Articles: Portuguese has feminine "a" and "as" as articles, and
+    // partitive contractions "do/da/dos/das" which Spanish lacks.
+    'o', 'os', 'as', 'um', 'uma', 'uns', 'umas', 'do', 'da', 'dos', 'das',
+    'no', 'na', 'nos', 'nas', 'pelo', 'pela', 'pelos', 'pelas',
+    // Verbs / copulas: Portuguese-only forms (é, são, ao).
+    'é', 'são', 'ao', 'à', 'às',
+    // Discriminating function words (Portuguese forms).
+    'mas', 'mais', 'muito', 'também', 'tudo',
+    // Possessives Portuguese-side.
+    'seu', 'sua', 'seus', 'suas', 'meu', 'minha', 'meus', 'minhas',
+    'nosso', 'nossa', 'nossos', 'nossas',
+    // Demonstratives Portuguese-side.
+    'isto', 'isso', 'aquilo',
   ]),
+}
+
+/** Strong character-class signal: certain glyphs are ~exclusive to a
+ *  language. ñ → Spanish; ã / õ → Portuguese; ç → Portuguese (some
+ *  French, but we don't model French as a separate lang). Each
+ *  occurrence in the corpus adds a sharp boost to that language's
+ *  score. Bypasses the stopword overlap problem for romance pairs. */
+const CHARACTER_SIGNAL_WEIGHT = 3
+const CHARACTER_SIGNALS: Record<string, RegExp> = {
+  es: /[ñ¿¡]/g,
+  pt: /[ãõç]/g,
 }
 
 /**
@@ -97,6 +136,17 @@ export function detectLanguage(text: string): LanguageDetectionResult {
   for (const tok of tokens) {
     for (const [lang, set] of Object.entries(LANG_STOPWORDS)) {
       if (set.has(tok)) scores[lang]++
+    }
+  }
+  // Character-class signal: add weighted points for language-
+  // exclusive glyphs (ñ→es, ã/õ/ç→pt). One ñ in a five-page Spanish
+  // crawl is more discriminating than ten copies of the word "que".
+  if (text) {
+    for (const [lang, re] of Object.entries(CHARACTER_SIGNALS)) {
+      const matches = text.match(re)
+      if (matches && matches.length > 0) {
+        scores[lang] = (scores[lang] ?? 0) + matches.length * CHARACTER_SIGNAL_WEIGHT
+      }
     }
   }
   if (tokens.length < MIN_TOKENS_FOR_DETECTION) {
