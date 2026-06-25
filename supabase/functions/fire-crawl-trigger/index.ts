@@ -1,25 +1,50 @@
-// fire-crawl-trigger — kicks off a Firecrawl /v1/crawl, polls for
-// completion, normalizes pages, runs the snippet extractor, writes
-// results to web-hub.crawl_jobs.
+// fire-crawl-trigger (v117) — async/webhook architecture.
 //
-// Repeat-prefix expansion: after the initial crawl completes, the
-// trigger inspects the URL set. If 3+ pages share a 2-segment path
-// prefix (e.g. `/leadership/jane`, `/leadership/john`, `/leadership/
-// kate`) — a sign that detail-page enumeration ate the cap — and the
-// crawl hit its page limit, the trigger fires a SECOND crawl with
-// that prefix added to excludePaths and the cap bumped to 50. The
-// second crawl's pages are merged with the first; the snippet
-// extractor sees both. Caps out at one expansion per job to avoid
-// runaway loops on sites with many such patterns.
+// Kicks off a Firecrawl /v1/crawl in webhook mode and returns
+// immediately. Firecrawl POSTs to firecrawl-webhook when the crawl
+// completes; that function records the pages and chains the post-
+// crawl pipeline (atomize, categorize, copy-fixing).
 //
-// IMPORTANT field-mapping fix vs prior versions:
-//   Firecrawl v1 returns each page as { url, markdown, html, links,
-//   metadata: { title, ... } }. Older code wrote result.title and
-//   result.content which Firecrawl doesn't populate — so titles came
-//   out empty and markdown was lost entirely. This version reads from
-//   the correct fields.
+// Why this rewrite: the prior synchronous-polling design blocked
+// the edge function for up to 5 minutes per Firecrawl call. Multi-
+// step flows (initial + repeat-prefix expansion + stealth retries)
+// routinely exceeded Supabase's ~400-second edge-function timeout,
+// leaving crawl_jobs orphaned in_progress with no way for the
+// downstream pipeline to know the crawl failed. Multi-campus
+// (Doxology) made this fatal — three subdomains × 5 min each pinned
+// the function past timeout every time.
+//
+// Body shape:
+//   POST /functions/v1/fire-crawl-trigger
+//   {
+//     "project_id":  "<uuid>",
+//     "target_url":  "https://example.org",
+//     "max_pages":   25,             // optional
+//     "max_depth":   2,              // optional
+//     "proxy":       "basic"          // optional: 'basic' | 'stealth'
+//   }
+//
+// Response: 202 Accepted with { crawl_job_id, firecrawl_crawl_id }.
+// The webhook eventually fills crawl_results and flips status to
+// 'complete'; the UI polls crawl_jobs to know when that happens.
+//
+// Multi-campus / multi-URL crawl is handled by callers firing this
+// function once per URL. Each invocation creates its OWN crawl_job
+// row; downstream consumers (atomize-crawl-into-atoms, crawl-
+// categorize via trg_chain_crawl_categorize) already aggregate /
+// partition across multiple jobs per project.
+
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+
+const DEFAULT_EXCLUDE_PATHS: string[] = [
+  // Resource / static file extensions
+  ".*\\.(jpg|jpeg|png|gif|webp|svg|ico|pdf|mp3|mp4|webm|mov|woff2?|ttf|eot|css|js|xml|json)$",
+  // Common admin / system paths
+  "^/wp-admin/.*", "^/wp-login.*", "^/admin/.*", "^/login.*",
+  // Tag / category / archive enumerations
+  "^/(tag|tags|category|categories|author)/.*",
+];
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,533 +52,149 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const DEFAULT_EXCLUDE_PATHS = [
-  "^/sermons?/[^/]+/?$", "^/messages?/[^/]+/?$", "^/posts?/[^/]+/?$",
-  "^/blog/[^/]+/?$", "^/events?/[^/]+/?$", "^/stories/[^/]+/?$", "^/news/[^/]+/?$",
-  "^/category/.*", "^/tag/.*", "^/author/.*", "/page/\\d+/?$",
-  "^/wp-admin/.*", "^/wp-json/.*", "^/wp-content/.*", "/feed/?$",
-  "\\.(?:pdf|xml|zip|jpe?g|png|gif|webp|svg|mp[34])(?:\\?.*)?$",
-];
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { status: 200, headers: corsHeaders });
-  try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    const supabase = createClient(supabaseUrl, supabaseKey);
-    const payload = await req.json();
-    const maxPages = payload.max_pages ?? 25;
-    const maxDepth = payload.max_depth ?? 2;
-    let excludePaths = Array.isArray(payload.exclude_paths) && payload.exclude_paths.length > 0
-      ? payload.exclude_paths : DEFAULT_EXCLUDE_PATHS;
-
-    if (!payload.project_id || !payload.target_url) {
-      return json({ error: "Missing required fields" }, 400);
-    }
-
-    // EXPAND mode — append new pages to an existing crawl job instead
-    // of creating a new one. Caller passes expand_into_job_id; we read
-    // its crawl_results, derive exclude rules from the URLs already
-    // grabbed, and run a fresh crawl whose pages get appended to that
-    // job. Use case: an initial crawl filled its page cap with post
-    // detail pages (kids-resources/*, mbs-messages/*) and missed core
-    // pages (staff, volunteers). Expansion mode lets the strategist
-    // pick up the missing pages without losing the existing data.
-    let existingJob = null;
-    if (typeof payload.expand_into_job_id === "string") {
-      const { data: ej, error: ejErr } = await supabase
-        .schema("web-hub").from("crawl_jobs")
-        .select("id, project_id, target_url, status, crawl_results, max_pages")
-        .eq("id", payload.expand_into_job_id).maybeSingle();
-      if (ejErr || !ej) return json({ error: "expand_into_job not found", details: ejErr?.message }, 404);
-      if (ej.status !== "complete") {
-        return json({ error: "expand_into_job is not complete — wait for the prior crawl first" }, 409);
-      }
-      existingJob = ej;
-      // Build excludePaths from the existing crawl's URLs + heavy
-      // prefixes. Every URL already grabbed becomes an exact-match
-      // regex so Firecrawl skips it. Every path prefix that has ≥10
-      // pages becomes a wildcard exclude so post-style enumerations
-      // (e.g. /sermons/<slug>, /blog/<slug>) don't keep eating the
-      // cap on a re-expand.
-      //
-      // Note: this prefix-exclude is EXPAND-MODE ONLY. The initial
-      // crawl has no prior pages so this branch never runs there;
-      // initial crawls are unaffected by this threshold.
-      //
-      // Threshold history:
-      //   - Started at ≥2 (aggressive). Choked off legit detail-page
-      //     expansion for thoroughly-crawled sites (Mountain Life:
-      //     /staff with 6 bios, /missionary-bio with 5, /service-date
-      //     with 5, /series with 12 — all flagged as enumerations and
-      //     excluded, leaving the second expand with only 2 candidate
-      //     URLs to try and 0 net additions).
-      //   - Bumped to ≥10. A typical church site has 1-7 staff,
-      //     1-8 missionaries, 1-10 ministries — none cross 10 in
-      //     legitimate detail-page counts. Sermon archives + blog
-      //     posts + event archives (the real enumerations) easily
-      //     cross 10 and stay excluded. Re-expanding into a /staff
-      //     prefix with 6 entries lets us find the 7th if they
-      //     hired someone new since the initial crawl.
-      const PREFIX_EXCLUDE_THRESHOLD = 10;
-      const existingPages = Array.isArray(ej.crawl_results) ? ej.crawl_results : [];
-      const exactPaths = new Set();
-      const prefixCounts = new Map();
-      for (const p of existingPages) {
-        const u = p?.url || p?.metadata?.sourceURL || "";
-        let path = "";
-        try { path = new URL(u).pathname.replace(/\/$/, ""); } catch { continue; }
-        if (path) exactPaths.add(path);
-        const segs = path.split("/").filter(Boolean);
-        if (segs.length >= 1) {
-          const first = "/" + segs[0];
-          prefixCounts.set(first, (prefixCounts.get(first) || 0) + 1);
-        }
-      }
-      const exactExcludes = [...exactPaths].map(p => `^${escapeRegex(p)}/?$`);
-      const prefixExcludes = [];
-      for (const [prefix, count] of prefixCounts.entries()) {
-        if (count >= PREFIX_EXCLUDE_THRESHOLD) prefixExcludes.push(`^${escapeRegex(prefix)}/[^/]+/?$`);
-      }
-      excludePaths = [...new Set([...excludePaths, ...exactExcludes, ...prefixExcludes])];
-    }
-
-    // Either reuse the existing crawl job (expand mode) or insert a new one.
-    let crawlJob;
-    if (existingJob) {
-      // Bump max_pages on the existing job so the UI shows the
-      // new ceiling. The new crawl's `limit` is whatever the
-      // caller passed (default 25); the prior pages are preserved.
-      //
-      // v116 — also reset completed_at to NULL on expand start.
-      // Without this, web_crawl_reconcile_stuck_jobs' Pass 1 sweep
-      // (status='in_progress' AND completed_at IS NOT NULL AND
-      // crawl_results NOT EMPTY → set to 'complete') would mid-flight
-      // mark an actively-running expand as complete, leaving the
-      // partial result with the stale `complete` flag and silently
-      // killing the in-flight crawl from the user's perspective. Fresh
-      // expand → no completed_at until WE write the new one.
-      const { data: updated, error: upErr } = await supabase
-        .schema("web-hub").from("crawl_jobs")
-        .update({
-          status: "in_progress",
-          max_pages: (existingJob.max_pages ?? 25) + maxPages,
-          error_message: null,
-          completed_at: null,
-        })
-        .eq("id", existingJob.id).select().single();
-      if (upErr) return json({ error: "Failed to mark expand job in_progress", details: upErr.message }, 500);
-      crawlJob = updated;
-    } else {
-      const { data: inserted, error: insErr } = await supabase
-        .schema("web-hub").from("crawl_jobs")
-        .insert({
-          project_id: payload.project_id, target_url: payload.target_url,
-          status: "in_progress", pages_crawled: 0,
-          max_pages: maxPages, max_depth: maxDepth,
-          started_at: new Date().toISOString(),
-        }).select().single();
-      if (insErr) return json({ error: "Failed to create crawl job", details: insErr.message }, 500);
-      crawlJob = inserted;
-    }
-
-    const fireCrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY");
-    if (!fireCrawlApiKey) {
-      await supabase.schema("web-hub").from("crawl_jobs").update({ status: "failed", error_message: "API key missing" }).eq("id", crawlJob.id);
-      return json({ error: "FIRECRAWL_API_KEY missing" }, 500);
-    }
-
-    // Wrapper for one Firecrawl crawl call (polled to completion).
-    // Returns { pages, hitCap } where hitCap is true when Firecrawl
-    // returned ≥ requested limit (detail-page enumeration likely
-    // soaked it all up). Throws on permanent failure.
-    // proxy: 'basic' (default; cheapest) | 'stealth' (~5x credits, but
-    // bypasses most Squarespace / Cloudflare bot walls).
-    const runFirecrawl = async (limit, excludePathsForRun, proxyMode = 'basic') => {
-      const startRes = await fetch("https://api.firecrawl.dev/v1/crawl", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${fireCrawlApiKey}` },
-        body: JSON.stringify({
-          url: payload.target_url, limit, maxDepth, excludePaths: excludePathsForRun,
-          allowBackwardLinks: false, allowExternalLinks: false,
-          // onlyMainContent:false includes footer + header chrome so
-          // the LLM categorizer can pick up site-wide details (address,
-          // phone, social links) that live in the footer on most
-          // church sites. The downstream LLM filters nav noise.
-          scrapeOptions: {
-            formats: ["markdown", "html", "links"],
-            onlyMainContent: false,
-            proxy: proxyMode,
-          },
-        }),
-      });
-      if (!startRes.ok) {
-        const t = await startRes.text();
-        throw new Error(`Firecrawl start: ${t}`);
-      }
-      const startData = await startRes.json();
-
-      const maxWaitMs = 300000;
-      const pollMs = 5000;
-      const t0 = Date.now();
-      let done = false;
-      let pages = [];
-      while (!done && Date.now() - t0 < maxWaitMs) {
-        await new Promise(r => setTimeout(r, pollMs));
-        const statRes = await fetch(`https://api.firecrawl.dev/v1/crawl/${startData.id}`, {
-          headers: { Authorization: `Bearer ${fireCrawlApiKey}` },
-        });
-        if (!statRes.ok) break;
-        const stat = await statRes.json();
-        await supabase.schema("web-hub").from("crawl_jobs")
-          .update({ pages_crawled: stat.completed || 0, pages_found: stat.total || limit })
-          .eq("id", crawlJob.id);
-        if (stat.status === "completed") { done = true; pages = stat.data || []; }
-        else if (stat.status === "failed") throw new Error("Firecrawl job failed");
-      }
-      if (!done) {
-        return { pages, hitCap: false, timedOut: true };
-      }
-      return { pages, hitCap: pages.length >= limit, timedOut: false };
-    };
-
-    try {
-      const initial = await runFirecrawl(maxPages, excludePaths);
-      if (initial.timedOut) {
-        await supabase.schema("web-hub").from("crawl_jobs").update({ status: "in_progress", error_message: "Polling timed out" }).eq("id", crawlJob.id);
-        return json({ success: true, crawl_job_id: crawlJob.id, message: "in_progress" }, 202);
-      }
-      let pages = initial.pages;
-
-      // Repeat-prefix detection. Bucket URLs by their first two path
-      // segments. If any prefix has ≥3 URLs (likely detail-page
-      // enumeration: /leadership/jane, /leadership/john, …) AND the
-      // crawl filled its cap, do ONE expansion pass — exclude those
-      // prefixes and crawl again at the EXPANDED cap so the
-      // categorizer sees the next layer of pages instead.
-      if (initial.hitCap) {
-        const prefixCounts = new Map();
-        for (const p of pages) {
-          const u = p.url || (p.metadata && p.metadata.sourceURL) || "";
-          let pathOnly = "";
-          try { pathOnly = new URL(u).pathname; } catch { continue; }
-          const segs = pathOnly.split("/").filter(Boolean);
-          if (segs.length < 2) continue;
-          const prefix = "/" + segs[0];
-          prefixCounts.set(prefix, (prefixCounts.get(prefix) || 0) + 1);
-        }
-        const heavyPrefixes = [];
-        for (const [prefix, count] of prefixCounts.entries()) {
-          // Skip prefixes that are already excluded by default.
-          const alreadyExcluded = excludePaths.some(rule =>
-            rule.includes(prefix.replace(/^\//, "")) || rule.includes(prefix),
-          );
-          if (alreadyExcluded) continue;
-          if (count >= 3) heavyPrefixes.push({ prefix, count });
-        }
-        if (heavyPrefixes.length > 0) {
-          console.log("Repeat-prefix expansion:", heavyPrefixes);
-          const expandedExcludes = [
-            ...excludePaths,
-            ...heavyPrefixes.map(p => `^${p.prefix}/[^/]+/?$`),
-          ];
-          const expandedLimit = 50;
-          try {
-            const expanded = await runFirecrawl(expandedLimit, expandedExcludes);
-            if (!expanded.timedOut && expanded.pages.length > 0) {
-              // Merge by URL — keep first occurrence (initial wins on
-              // duplicates). The expanded pass should mostly add new
-              // URLs since heavy prefixes are now excluded.
-              const seen = new Set(pages.map(p => p.url || (p.metadata && p.metadata.sourceURL) || ""));
-              for (const p of expanded.pages) {
-                const u = p.url || (p.metadata && p.metadata.sourceURL) || "";
-                if (u && !seen.has(u)) { pages.push(p); seen.add(u); }
-              }
-            }
-          } catch (e) {
-            console.error("Expansion crawl failed:", e?.message ?? e);
-            // Soft-fail — initial pages still ship.
-          }
-        }
-      }
-
-      // Drop pages that Firecrawl failed to scrape. Firecrawl returns
-      // failed pages with metadata.statusCode >= 400 + metadata.error
-      // set + markdown body containing the error string ("Invalid
-      // upstream proxy credentials", "Internal server error", etc.).
-      // Without this filter the error strings get stored as page
-      // content and poison everything downstream — categorizer reads
-      // them, web_project_topics inherits them, the partner-facing
-      // Content Collection page displays them. Real example seen on
-      // baysidechurch.net (2026-06-06 crawl): 44 of 66 pages came
-      // back with statusCode 597 + markdown="Invalid upstream proxy
-      // credentials".
-      const isScrapeFailure = (r) => {
-        const meta = r && r.metadata;
-        if (!meta) return false;
-        const status = Number(meta.statusCode);
-        if (Number.isFinite(status) && status >= 400) return true;
-        if (meta.error) return true;
-        return false;
-      };
-      const droppedFailures = [];
-      const okPages = [];
-      for (const r of pages) {
-        if (isScrapeFailure(r)) {
-          droppedFailures.push({
-            url: r.url || (r.metadata && r.metadata.sourceURL) || "",
-            statusCode: r.metadata && r.metadata.statusCode,
-            error: r.metadata && r.metadata.error,
-            proxyUsed: r.metadata && r.metadata.proxyUsed,
-          });
-        } else {
-          okPages.push(r);
-        }
-      }
-      if (droppedFailures.length > 0) {
-        console.warn(`[fire-crawl-trigger] dropped ${droppedFailures.length} scrape failures (basic proxy):`, droppedFailures.slice(0, 10));
-      }
-
-      // ── Stealth proxy fallback ────────────────────────────────────
-      // When the basic proxy fails on a meaningful fraction of pages
-      // (Squarespace, Cloudflare bot walls, anti-scrape on dynamic
-      // pages), retry each failed URL with proxy='stealth' through
-      // Firecrawl's /v1/scrape per-URL endpoint. Stealth uses
-      // residential IPs + browser fingerprinting and gets through
-      // most basic-bot defenses. Costs ~5x credits per page, so we
-      // only run it for the failed subset and only when the failure
-      // rate clears a threshold (don't burn credits when 1 page out
-      // of 50 fails).
-      const totalAttempted = pages.length;
-      const failureRate = totalAttempted > 0 ? droppedFailures.length / totalAttempted : 0;
-      const STEALTH_TRIGGER_RATE = 0.20;            // ≥20% basic failures triggers stealth
-      const STEALTH_TRIGGER_FLOOR = 5;              // OR ≥5 absolute failures
-      const STEALTH_MAX_RETRIES   = 50;             // safety cap on credits
-      const stealthRecoveries = [];
-      const stillFailedAfterStealth = [];
-      if (
-        droppedFailures.length > 0 &&
-        (failureRate >= STEALTH_TRIGGER_RATE || droppedFailures.length >= STEALTH_TRIGGER_FLOOR)
-      ) {
-        const urlsToRetry = droppedFailures.slice(0, STEALTH_MAX_RETRIES).map(f => f.url).filter(Boolean);
-        console.log(`[fire-crawl-trigger] stealth retry: ${urlsToRetry.length} URLs (failure rate ${(failureRate * 100).toFixed(0)}%)`);
-        for (const url of urlsToRetry) {
-          try {
-            const sRes = await fetch("https://api.firecrawl.dev/v1/scrape", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${fireCrawlApiKey}` },
-              body: JSON.stringify({
-                url,
-                formats: ["markdown", "html", "links"],
-                onlyMainContent: false,
-                proxy: "stealth",
-              }),
-            });
-            if (!sRes.ok) {
-              stillFailedAfterStealth.push({ url, http: sRes.status });
-              continue;
-            }
-            const body = await sRes.json();
-            const page = body?.data ?? body;
-            if (isScrapeFailure(page)) {
-              stillFailedAfterStealth.push({
-                url,
-                statusCode: page?.metadata?.statusCode,
-                error: page?.metadata?.error,
-              });
-              continue;
-            }
-            // Stealth recovered the page — merge into okPages.
-            okPages.push(page);
-            stealthRecoveries.push(url);
-          } catch (e) {
-            stillFailedAfterStealth.push({ url, threw: String(e?.message ?? e) });
-          }
-        }
-        console.log(`[fire-crawl-trigger] stealth recovered ${stealthRecoveries.length}/${urlsToRetry.length}; still failed ${stillFailedAfterStealth.length}`);
-      }
-
-      // Map Firecrawl's actual response to our canonical storage shape.
-      // Firecrawl puts title under metadata; markdown at the root;
-      // links as a top-level array.
-      const contentItems = okPages.map((r) => ({
-        url:       r.url || (r.metadata && r.metadata.sourceURL) || "",
-        title:     (r.metadata && r.metadata.title) || "",
-        markdown:  r.markdown || "",
-        content:   r.markdown || "",
-        html:      r.html || r.rawHtml || "",
-        links:     Array.isArray(r.links) ? r.links : [],
-        metadata:  r.metadata || {},
-      }));
-
-      try {
-        const snippets = extractSnippets(contentItems, payload.target_url);
-        if (snippets.length > 0) await upsertSnippets(supabase, payload.project_id, snippets);
-      } catch (e) { console.error("snippet failed:", e); }
-
-      const jobStart = new Date(crawlJob.started_at || crawlJob.created_at);
-      const durSec = Math.floor((Date.now() - jobStart.getTime()) / 1000);
-      const errorMessage = (droppedFailures.length === 0 && stealthRecoveries.length === 0 && stillFailedAfterStealth.length === 0)
-        ? null
-        : [
-            droppedFailures.length > 0 && `Basic proxy failed on ${droppedFailures.length} of ${pages.length} pages.`,
-            stealthRecoveries.length > 0 && `Stealth proxy recovered ${stealthRecoveries.length}.`,
-            stillFailedAfterStealth.length > 0 && `${stillFailedAfterStealth.length} pages still unreachable after stealth retry.`,
-            stillFailedAfterStealth.length > 0 && `Affected URLs (first 3): ${stillFailedAfterStealth.slice(0, 3).map(f => f.url).join(', ')}`,
-          ].filter(Boolean).join(' ');
-      // Expand mode merges new pages with the existing crawl_results
-      // (dedupe by URL — Firecrawl shouldn't return excluded URLs,
-      // but belt-and-suspenders). Fresh-crawl mode just writes the
-      // new array directly.
-      let mergedItems = contentItems;
-      if (existingJob) {
-        const priorPages = Array.isArray(existingJob.crawl_results) ? existingJob.crawl_results : [];
-        const seenUrls = new Set(priorPages.map(p => p?.url || p?.metadata?.sourceURL).filter(Boolean));
-        const additions = contentItems.filter(p => {
-          const u = p?.url || p?.metadata?.sourceURL;
-          return u && !seenUrls.has(u);
-        });
-        mergedItems = [...priorPages, ...additions];
-      }
-      await supabase.schema("web-hub").from("crawl_jobs").update({
-        status: "complete", pages_crawled: mergedItems.length,
-        completed_at: new Date().toISOString(), crawl_results: mergedItems, duration_seconds: durSec,
-        error_message: errorMessage,
-      }).eq("id", crawlJob.id);
-
-      try {
-        await fetch(`${supabaseUrl}/functions/v1/copy-fixing`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${supabaseKey}` },
-          body: JSON.stringify({ project_id: payload.project_id, crawl_job_id: crawlJob.id }),
-        });
-      } catch (e) { console.error("copy-fixing failed:", e); }
-
-      // Atomize the crawl into content_atoms with source_kind='crawl'
-      // so the outline/draft pipeline can lift verbatim from the
-      // partner's existing copy when they're on the `high` band.
-      //
-      // EdgeRuntime.waitUntil keeps the in-flight fetch alive after
-      // we return our response — without it, Deno's runtime may kill
-      // the request once the handler exits. Atomize isn't on the
-      // response critical path; the function is idempotent so a
-      // transient failure can be retried via the backfill script.
-      try {
-        const atomizePromise = fetch(`${supabaseUrl}/functions/v1/atomize-crawl-into-atoms`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${supabaseKey}` },
-          body: JSON.stringify({ project_id: payload.project_id }),
-        }).catch((e) => console.error("atomize-crawl-into-atoms fire failed:", e));
-        // deno-lint-ignore no-explicit-any
-        const er = (globalThis as any).EdgeRuntime;
-        if (er && typeof er.waitUntil === "function") {
-          er.waitUntil(atomizePromise);
-        }
-      } catch (e) { console.error("atomize-crawl-into-atoms invoke failed:", e); }
-
-      return json({ success: true, crawl_job_id: crawlJob.id, pages_crawled: contentItems.length }, 200);
-    } catch (err) {
-      await supabase.schema("web-hub").from("crawl_jobs").update({ status: "failed", error_message: err.message }).eq("id", crawlJob.id);
-      return json({ error: "Crawl failed", details: err.message }, 500);
-    }
-  } catch (err) {
-    return json({ error: "Internal", details: err.message }, 500);
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { status: 200, headers: corsHeaders });
   }
-});
+  if (req.method !== "POST") {
+    return json({ error: "method_not_allowed" }, 405);
+  }
 
-function json(body, status) {
-  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-}
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const fireKey     = Deno.env.get("FIRECRAWL_API_KEY");
+  if (!supabaseUrl || !serviceKey) return json({ error: "supabase_env_missing" }, 500);
+  if (!fireKey) return json({ error: "firecrawl_key_missing" }, 500);
 
-// Escape regex metacharacters in a string so it can be used as a
-// literal-match prefix inside Firecrawl's excludePaths (regex strings).
-function escapeRegex(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-// Crawl-time snippet extraction. Limited to high-confidence URL-pattern
-// candidates and explicit links — phone/email/address/pastor extraction
-// is intentionally left to the LLM categorizer (crawl-categorize),
-// where it gets context and avoids matching unrelated digit sequences.
-// Social URLs are pattern-based and reliable enough to extract here.
-function extractSnippets(pages, originUrl) {
-  const all = pages.map(p => `${p.markdown || ""}\n${p.html || ""}`).join("\n");
-  const out = [];
-  const push = (token, label, value, tag) => {
-    if (!value || value.length < 2) return;
-    if (out.some(r => r.token === token)) return;
-    out.push({ token, label, expansion: value, description: "Auto-extracted from website crawl.", tags: [tag, "auto"] });
+  let payload: {
+    project_id?:   string;
+    target_url?:   string;
+    max_pages?:    number;
+    max_depth?:    number;
+    proxy?:        'basic' | 'stealth';
+    exclude_paths?: string[];
   };
-  const fu = (re) => { const m = all.match(re); return m ? m[0].replace(/[).,;]+$/, "") : null; };
-
-  const fb = fu(/https?:\/\/(?:www\.)?facebook\.com\/[\w\-./]+/i); if (fb) push("facebook_url", "Facebook URL", fb, "social");
-  const ig = fu(/https?:\/\/(?:www\.)?instagram\.com\/[\w\-./]+/i); if (ig) push("instagram_url", "Instagram URL", ig, "social");
-  const yt = fu(/https?:\/\/(?:www\.)?youtube\.com\/(?:@[\w\-.]+|channel\/[\w\-]+|c\/[\w\-]+)/i); if (yt) push("youtube_url", "YouTube URL", yt, "social");
-  const tt = fu(/https?:\/\/(?:www\.)?tiktok\.com\/@[\w\-.]+/i); if (tt) push("tiktok_url", "TikTok URL", tt, "social");
-  const give = fu(/https?:\/\/[\w\-./]*(?:give|giving|donate)[\w\-./?=&%#]*/i); if (give) push("give_url", "Giving URL", give, "actions");
-  const dir = fu(/https?:\/\/(?:www\.)?(?:google\.[a-z.]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl)\/[\w\-./?=&%#@,+]+/i); if (dir) push("directions_url", "Directions URL", dir, "location");
-  const live = fu(/https?:\/\/[\w\-./]*(?:livestream|watch\-live|live\-stream|\/live\b)[\w\-./?=&%#]*/i); if (live) push("livestream_url", "Livestream URL", live, "actions");
-  push("site_url", "Public site URL", originUrl, "site");
-  return out;
-}
-
-// Token → strategy_web_projects column. See crawl-categorize for the
-// authoritative version; this mirrors a subset for the snippets that
-// fire-crawl-trigger itself can produce (social URLs).
-const GLOBAL_TOKEN_MAP = {
-  facebook_url:  "social_facebook_url",
-  instagram_url: "social_instagram_url",
-  youtube_url:   "social_youtube_url",
-  tiktok_url:    "social_tiktok_url",
-};
-
-// Routes crawl-extracted snippets: globals → strategy_web_projects
-// (fill-if-empty); customs → web_project_snippets (skip if token exists).
-async function upsertSnippets(supabase, projectId, snippets) {
-  const seen = new Set();
-  const globalFills = {};
-  const customQueue = [];
-  for (const s of snippets) {
-    if (!s?.token || !s?.expansion) continue;
-    if (seen.has(s.token)) continue;
-    seen.add(s.token);
-    const col = GLOBAL_TOKEN_MAP[s.token];
-    if (col) {
-      if (!(col in globalFills)) globalFills[col] = s.expansion;
-    } else {
-      customQueue.push(s);
-    }
+  try {
+    payload = await req.json();
+  } catch {
+    return json({ error: "invalid_json" }, 400);
+  }
+  if (!payload.project_id || !payload.target_url) {
+    return json({ error: "Missing required fields", required: ["project_id", "target_url"] }, 400);
   }
 
-  if (Object.keys(globalFills).length > 0) {
-    const cols = Object.keys(globalFills);
-    const { data: project } = await supabase
-      .from("strategy_web_projects")
-      .select(`id,${cols.join(",")}`)
-      .eq("id", projectId)
-      .maybeSingle();
-    if (project) {
-      const updates = {};
-      for (const col of cols) {
-        const cur = project[col];
-        if (cur === null || cur === undefined || (typeof cur === "string" && cur.trim() === "")) {
-          updates[col] = globalFills[col];
-        }
-      }
-      if (Object.keys(updates).length > 0) {
-        await supabase.from("strategy_web_projects").update(updates).eq("id", projectId);
-      }
+  const maxPages    = payload.max_pages ?? 50;
+  const maxDepth    = payload.max_depth ?? 3;
+  const proxyMode   = payload.proxy ?? 'basic';
+  const excludePaths = Array.isArray(payload.exclude_paths) && payload.exclude_paths.length > 0
+    ? payload.exclude_paths
+    : DEFAULT_EXCLUDE_PATHS;
+
+  const supabase = createClient(supabaseUrl, serviceKey);
+
+  // 1. Create the crawl_job row up-front so the UI can show "in_progress"
+  //    while Firecrawl runs. firecrawl_crawl_id is filled in step 3 once
+  //    we have it.
+  const { data: insertedRaw, error: insErr } = await supabase
+    .schema("web-hub").from("crawl_jobs")
+    .insert({
+      project_id:   payload.project_id,
+      target_url:   payload.target_url,
+      status:       "in_progress",
+      pages_crawled: 0,
+      max_pages:    maxPages,
+      max_depth:    maxDepth,
+      started_at:   new Date().toISOString(),
+    })
+    .select("id").single();
+  if (insErr || !insertedRaw) {
+    return json({ error: "create_crawl_job_failed", details: insErr?.message }, 500);
+  }
+  const crawlJobId = (insertedRaw as { id: string }).id;
+
+  // 2. Build the webhook URL. Firecrawl will POST here when the
+  //    crawl finishes. Auth is implicit: the webhook handler looks
+  //    up the crawl_job by firecrawl_crawl_id, which is only set on
+  //    rows we created.
+  const webhookUrl = `${supabaseUrl}/functions/v1/firecrawl-webhook`;
+
+  // 3. Start the Firecrawl crawl. This call returns in <1 s with
+  //    just the crawl id; the actual crawl runs on Firecrawl's
+  //    infrastructure.
+  let firecrawlCrawlId: string | null = null;
+  try {
+    const startRes = await fetch("https://api.firecrawl.dev/v1/crawl", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${fireKey}` },
+      body: JSON.stringify({
+        url:                payload.target_url,
+        limit:              maxPages,
+        maxDepth,
+        excludePaths,
+        allowBackwardLinks: false,
+        allowExternalLinks: false,
+        scrapeOptions: {
+          formats:         ["markdown", "html", "links"],
+          // onlyMainContent:false keeps footer + header in the markdown
+          // so the categorizer can pick up site-wide details (address,
+          // phone, socials) that live in the chrome on most church sites.
+          onlyMainContent: false,
+          proxy:           proxyMode,
+        },
+        webhook: {
+          url:    webhookUrl,
+          events: ["completed", "failed"],
+          // Future hardening: HMAC signature via webhook.secret.
+        },
+      }),
+    });
+    if (!startRes.ok) {
+      const errText = await startRes.text();
+      await supabase.schema("web-hub").from("crawl_jobs").update({
+        status:        "failed",
+        completed_at:  new Date().toISOString(),
+        error_message: `Firecrawl start failed: ${errText.slice(0, 500)}`,
+      }).eq("id", crawlJobId);
+      return json({ error: "firecrawl_start_failed", status: startRes.status, details: errText }, 502);
     }
+    const startData = await startRes.json();
+    firecrawlCrawlId = (startData as { id?: string }).id ?? null;
+    if (!firecrawlCrawlId) {
+      await supabase.schema("web-hub").from("crawl_jobs").update({
+        status:        "failed",
+        completed_at:  new Date().toISOString(),
+        error_message: "Firecrawl returned no crawl id",
+      }).eq("id", crawlJobId);
+      return json({ error: "firecrawl_no_id" }, 502);
+    }
+  } catch (e) {
+    await supabase.schema("web-hub").from("crawl_jobs").update({
+      status:        "failed",
+      completed_at:  new Date().toISOString(),
+      error_message: `Firecrawl start threw: ${e instanceof Error ? e.message : String(e)}`,
+    }).eq("id", crawlJobId);
+    return json({ error: "firecrawl_start_threw", details: e instanceof Error ? e.message : String(e) }, 502);
   }
 
-  if (customQueue.length === 0) return;
-  const tokens = customQueue.map(s => s.token);
-  const { data: existing } = await supabase.from("web_project_snippets").select("token").eq("web_project_id", projectId).eq("archived", false).in("token", tokens);
-  const existingTokens = new Set((existing || []).map(r => r.token));
-  const rows = customQueue.filter(s => !existingTokens.has(s.token)).map(s => ({
-    web_project_id: projectId, token: s.token, label: s.label, expansion: s.expansion,
-    description: s.description, tags: s.tags, source: "crawl_prefill", archived: false, used_count: 0,
-  }));
-  if (rows.length === 0) return;
-  await supabase.from("web_project_snippets").insert(rows);
-}
+  // 4. Record the Firecrawl crawl id so the webhook can find this job
+  //    when the callback lands.
+  await supabase.schema("web-hub").from("crawl_jobs").update({
+    firecrawl_crawl_id: firecrawlCrawlId,
+  }).eq("id", crawlJobId);
+
+  // 5. Return immediately. Total time on this path: ~1-2 seconds.
+  return json({
+    success:            true,
+    crawl_job_id:       crawlJobId,
+    firecrawl_crawl_id: firecrawlCrawlId,
+    target_url:         payload.target_url,
+    message:            "Crawl started; webhook will deliver results.",
+  }, 202);
+});
