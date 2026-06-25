@@ -1153,12 +1153,18 @@ export interface StrategyWebProject {
     primary:    boolean
     sort_order: number
     crawl_url:  string | null
+    /** v116 — ISO 639-1. Auto-detected by crawl-categorize. */
+    language?:  string | null
   }>
   /** UI display term for one campus. Defaults to "Campus". Lets a
    *  project use "Congregation" / "Location" / "Site" to match its
    *  denominational terminology. */
   campus_label_singular: string | null
   campus_label_plural:   string | null
+  /** v116 — site-wide language (primary campus's language for multi-
+   *  campus projects). Drives verbatim-only gates downstream when not
+   *  English. */
+  default_language: string | null
 
   // ── Curated Brixies library (v34) — concept_id → [template_id, …] ──
   // Drives the Global Elements workspace and the AI auto-bind pass.

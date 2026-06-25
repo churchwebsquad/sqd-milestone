@@ -63,6 +63,9 @@ export interface InventoryCampus {
   slug:    string
   label:   string
   primary: boolean
+  /** v116 — ISO 639-1. When not 'en', the inventory shows a
+   *  "verbatim only" banner and downstream pipelines skip rewrites. */
+  language?: string | null
 }
 
 export interface Passage  { url: string; title?: string; text: string }
@@ -294,6 +297,11 @@ interface Props {
    *  "Campuses"). Both default to "Campus" / "Campuses". */
   campusLabelSingular?: string | null
   campusLabelPlural?:   string | null
+  /** v116 — site-wide language (primary campus's language for multi-
+   *  campus projects). Used to render a "verbatim only" banner when
+   *  the church isn't English; downstream pipelines treat content as
+   *  keep-as-is. ISO 639-1 (en, es, pt, ...). Defaults to 'en'. */
+  defaultLanguage?:     string | null
   snippetsByToken?: Map<string, SnippetRow>
   reviewMode?:      boolean
   marks?:           Map<string, Mark>
@@ -407,6 +415,7 @@ function StaffGroupAccordion({
 
 export function InventoryView({
   topicRows, campuses, campusLabelSingular, campusLabelPlural,
+  defaultLanguage,
   snippetsByToken, reviewMode = false, marks, saveMark,
   sessionId, attachments, onAttachmentChange,
   externalPrefills = {},
@@ -483,6 +492,12 @@ export function InventoryView({
         reviewMode={reviewMode}
       />
     )}
+    <VerbatimLanguageBanner
+      campuses={campuses ?? []}
+      selectedCampus={selectedCampus}
+      defaultLanguage={defaultLanguage ?? 'en'}
+      labels={labels}
+    />
     <div className="lg:grid lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-6 lg:items-start">
       <InventoryTOC
         entries={tocEntries}
@@ -545,6 +560,78 @@ export function InventoryView({
     </ExternalPrefillContext.Provider>
     </AttachmentContext.Provider>
     </CampusFilterContext.Provider>
+  )
+}
+
+// ── Verbatim-language banner ─────────────────────────────────────────
+//
+// When the partner's content is in a language we don't help rewrite
+// (anything besides English), surface that to staff explicitly. The
+// banner reads above the bucket layout and switches messaging based
+// on whether the active view is a non-English campus tab, the global
+// tab on a mixed-language project, or a single-campus non-English
+// site.
+//
+// Two principles drive the copy:
+//   1. Staff UI stays in English (the staff member running review may
+//      not speak the partner's language).
+//   2. Partner content stays VERBATIM in its original language —
+//      passages render exactly as crawled, no translation, no rewrite.
+//      The banner just sets expectations.
+const LANGUAGE_NAMES: Record<string, string> = {
+  en: 'English',
+  es: 'Spanish',
+  pt: 'Portuguese',
+  fr: 'French',
+}
+function languageLabel(code: string | null | undefined): string {
+  if (!code) return 'English'
+  return LANGUAGE_NAMES[code] ?? code.toUpperCase()
+}
+function VerbatimLanguageBanner({
+  campuses, selectedCampus, defaultLanguage, labels,
+}: {
+  campuses:        InventoryCampus[]
+  selectedCampus:  string | null
+  defaultLanguage: string
+  labels:          { singular: string; plural: string }
+}) {
+  // Pick the language we're about to surface, based on what tab the
+  // staff has selected.
+  const isMultiCampus = campuses.length > 0
+  let language: string = defaultLanguage || 'en'
+  let scopeLabel: string | null = null  // e.g. "Espanol campus" — null for single-campus
+  if (isMultiCampus) {
+    if (selectedCampus === null) {
+      // Church-wide tab: only show banner if it's mixed-language and the
+      // project default is non-English. (e.g. a fully Spanish multi-
+      // campus church.) For mixed cases like Doxology — Southwest +
+      // Alliance English, Espanol Spanish — the default (primary's
+      // language) is English; the church-wide tab stays unbannered.
+      language = defaultLanguage || 'en'
+      scopeLabel = null
+    } else {
+      const c = campuses.find(x => x.slug === selectedCampus)
+      language = c?.language || 'en'
+      scopeLabel = c ? `${c.label} ${labels.singular.toLowerCase()}` : null
+    }
+  }
+  if (language === 'en') return null  // English = the everything-default; no banner needed
+  const langName = languageLabel(language)
+  return (
+    <div className="mb-4 rounded-2xl border border-primary-purple/30 bg-primary-purple/5 p-3 md:p-4 flex items-start gap-3">
+      <span aria-hidden className="text-lg leading-none">🌐</span>
+      <div className="min-w-0">
+        <p className="text-[12px] uppercase tracking-[0.12em] font-bold text-primary-purple">
+          {langName} · Verbatim only
+        </p>
+        <p className="text-[13px] text-deep-plum leading-snug mt-1">
+          {scopeLabel
+            ? <>The <span className="font-semibold">{scopeLabel}</span> content is in {langName}. We&rsquo;re keeping every passage exactly as the partner wrote it — no rewrites, no translation. Our job here is to help organize the inventory and design the site around their copy.</>
+            : <>This church publishes in {langName}. We&rsquo;re keeping every passage exactly as the partner wrote it — no rewrites, no translation. Our job here is to help organize the inventory and design the site around their copy.</>}
+        </p>
+      </div>
+    </div>
   )
 }
 

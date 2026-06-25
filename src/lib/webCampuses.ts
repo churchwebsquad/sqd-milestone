@@ -38,6 +38,11 @@ export interface CampusDefinition {
   primary:    boolean
   sort_order: number
   crawl_url:  string | null
+  /** v116 — ISO 639-1 language code (en, es, pt, ...). Detected
+   *  automatically by crawl-categorize from the campus's pages. Drives
+   *  verbatim-only treatment downstream when not English. NULL until
+   *  the first crawl-categorize run completes. */
+  language?:  string | null
 }
 
 export interface CampusCandidate {

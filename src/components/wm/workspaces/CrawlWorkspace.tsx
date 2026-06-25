@@ -1193,6 +1193,17 @@ function CampusRow({
                 Primary
               </span>
             )}
+            {/* v116 — language badge. Non-English campuses get a
+                colored chip so staff sees the verbatim-only signal
+                without opening the inventory. */}
+            {campus.language && campus.language !== 'en' && (
+              <span
+                className="ml-1.5 text-[9px] font-bold uppercase tracking-wider text-primary-purple bg-primary-purple/10 rounded px-1 py-0.5"
+                title="Detected from crawl. Downstream pipelines lock content to verbatim-only."
+              >
+                🌐 {campus.language} · verbatim
+              </span>
+            )}
           </p>
           <p className="text-[10px] text-wm-text-muted">
             <code className="font-mono">/{campus.slug}</code>

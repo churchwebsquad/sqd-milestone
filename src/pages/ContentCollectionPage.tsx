@@ -212,6 +212,9 @@ export default function ContentCollectionPage() {
   const [campuses, setCampuses]               = useState<InventoryCampus[]>([])
   const [campusLabelSingular, setCampusLabelSingular] = useState<string | null>(null)
   const [campusLabelPlural,   setCampusLabelPlural]   = useState<string | null>(null)
+  // v116 — detected site language. Drives the InventoryView verbatim
+  // banner + hides the "Start fresh" branch for non-English partners.
+  const [defaultLanguage, setDefaultLanguage] = useState<string | null>(null)
   const [snippetsByToken, setSnippets] = useState<Map<string, SnippetRow>>(new Map())
   const [marks, setMarks]         = useState<Map<string, Mark>>(new Map())
   const [recap, setRecap]         = useState<DiscoveryRecap | null>(null)
@@ -289,7 +292,7 @@ export default function ContentCollectionPage() {
           supabase.from('clickup_chat_channels').select('id').eq('memberid', p.member).limit(1).maybeSingle(),
           supabase.from('strategy_content_collection_attachments').select('*').eq('session_id', sessionId),
           supabase.from('strategy_web_projects')
-            .select('social_youtube_url, social_facebook_url, social_instagram_url, social_tiktok_url, campuses, campus_label_singular, campus_label_plural')
+            .select('social_youtube_url, social_facebook_url, social_instagram_url, social_tiktok_url, campuses, campus_label_singular, campus_label_plural, default_language')
             .eq('id', (s as SessionRow).web_project_id)
             .maybeSingle(),
         ])
@@ -298,10 +301,11 @@ export default function ContentCollectionPage() {
         // v115 — campus registry. Empty for the single-campus fleet
         // (the default); non-empty only when staff confirmed locations
         // in the Crawl workspace.
-        const projData = projRes.data as { campuses?: InventoryCampus[]; campus_label_singular?: string | null; campus_label_plural?: string | null } | null
+        const projData = projRes.data as { campuses?: InventoryCampus[]; campus_label_singular?: string | null; campus_label_plural?: string | null; default_language?: string | null } | null
         setCampuses(Array.isArray(projData?.campuses) ? projData!.campuses : [])
         setCampusLabelSingular(projData?.campus_label_singular ?? null)
         setCampusLabelPlural(projData?.campus_label_plural ?? null)
+        setDefaultLanguage(projData?.default_language ?? null)
         const sMap = new Map<string, SnippetRow>()
         for (const r of (snippetsRes.data ?? []) as SnippetRow[]) sMap.set(r.token, r)
         setSnippets(sMap)
@@ -514,6 +518,7 @@ export default function ContentCollectionPage() {
               campuses={campuses}
               campusLabelSingular={campusLabelSingular}
               campusLabelPlural={campusLabelPlural}
+              defaultLanguage={defaultLanguage}
               snippetsByToken={snippetsByToken}
               marks={marks}
               saveMark={saveMark}
@@ -661,7 +666,7 @@ function ProgressBar({ step }: { step: 1 | 2 | 3 }) {
 // ── Step 1: Inventory Review (uses shared InventoryView) ────────────
 
 function Step1Review({
-  topicsByKey, topicRows, campuses, campusLabelSingular, campusLabelPlural,
+  topicsByKey, topicRows, campuses, campusLabelSingular, campusLabelPlural, defaultLanguage,
   snippetsByToken, marks, saveMark, recap, session, attachments, onAttachmentChange, externalPrefills, onContinue, onSupplemental,
 }: {
   topicsByKey:     Map<string, TopicRow>
@@ -673,6 +678,11 @@ function Step1Review({
   campuses:        InventoryCampus[]
   campusLabelSingular: string | null
   campusLabelPlural:   string | null
+  /** v116 — site default language. When not 'en', the verbatim banner
+   *  surfaces inside InventoryView, AND the "Ignore current content &
+   *  Start Fresh" branch is hidden (we can't help a partner produce
+   *  fresh copy in a language we don't speak). */
+  defaultLanguage: string | null
   snippetsByToken: Map<string, SnippetRow>
   marks:           Map<string, Mark>
   saveMark:        SaveMark
@@ -732,7 +742,11 @@ function Step1Review({
               straight to Step 2 (supplemental content form) instead of
               reviewing the crawl inventory. The "use what's on my
               current site" option is implicit — they just keep
-              scrolling and hit the Continue button at the bottom. */}
+              scrolling and hit the Continue button at the bottom.
+              v116: hidden when the partner's site is non-English —
+              we don't write copy in languages we don't speak, so the
+              only path is keep-current-content. */}
+          {(defaultLanguage ?? 'en') === 'en' && (
           <div className="mt-4 rounded-xl border border-lavender bg-cream/40 p-4">
             <p className="text-sm font-semibold text-deep-plum">
               Want to supply fresh content instead?
@@ -752,6 +766,7 @@ function Step1Review({
               </button>
             </div>
           </div>
+          )}
         </div>
       </div>
 
@@ -773,6 +788,7 @@ function Step1Review({
           campuses={campuses}
           campusLabelSingular={campusLabelSingular}
           campusLabelPlural={campusLabelPlural}
+          defaultLanguage={defaultLanguage}
           snippetsByToken={snippetsByToken}
           reviewMode={true}
           marks={marks}

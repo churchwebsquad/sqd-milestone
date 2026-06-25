@@ -13,25 +13,70 @@
 export interface CampusLike {
   /** URL slug (lowercase, hyphen-joined). E.g. "southwest", "alliance". */
   slug: string
+  /** Full crawl URL for this campus. When set, this is the canonical
+   *  match — every URL whose `scheme://host/path` is at-or-under this
+   *  prefix belongs to this campus. Required for subdomain campuses
+   *  (alliance.doxology.church/) or campuses on completely separate
+   *  domains (doxologyespanol.com/) where pathname-prefix matching on
+   *  the slug doesn't apply. */
+  crawl_url?: string | null
 }
 
-/** Match a URL against a campus registry. Returns the campus slug whose
- *  path prefix owns this URL, or null when no campus matches.
+/** Strip a URL to a normalized prefix string suitable for `startsWith`
+ *  comparison. Lowercase scheme + host + path with the trailing slash
+ *  removed. Returns null when the URL fails to parse. */
+function normalizePrefix(rawUrl: string | null | undefined): string | null {
+  if (!rawUrl || typeof rawUrl !== 'string') return null
+  try {
+    const u = new URL(rawUrl)
+    let path = u.pathname
+    if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1)
+    return `${u.protocol}//${u.host.toLowerCase()}${path.toLowerCase()}`
+  } catch {
+    return null
+  }
+}
+
+/** Match a URL against a campus registry. Returns the campus slug
+ *  that owns this URL, or null when no campus matches.
  *
- *  Match rules:
- *    - URL parsing failure → null
- *    - Pathname equals "/<slug>" → matches
- *    - Pathname starts with "/<slug>/" → matches
- *    - Otherwise → null
- *  Case-insensitive on both sides. */
+ *  Two match paths, tried in order:
+ *
+ *  1. **crawl_url prefix** (preferred when set). Any URL whose
+ *     normalized prefix is at-or-under the campus's normalized
+ *     crawl_url belongs to that campus. Handles subdomain campuses
+ *     (alliance.doxology.church/) and cross-domain campuses
+ *     (doxologyespanol.com/) which pathname-only matching can't model.
+ *
+ *  2. **pathname slug prefix** (fallback). Used when a campus has no
+ *     crawl_url set (the lightweight pre-flag path where staff
+ *     register slugs first and worry about URLs later). Matches when
+ *     the URL's pathname is exactly `/<slug>` or starts with
+ *     `/<slug>/`. The case where pathname might match many campuses
+ *     is unlikely — slug naming is partner-supplied and not
+ *     overlapping in practice.
+ *
+ *  Case-insensitive on hosts and paths. URL parsing failure → null.
+ */
 export function urlToCampusSlug(
   url: string | null | undefined,
   campuses: CampusLike[],
 ): string | null {
-  if (!url || typeof url !== 'string') return null
+  const urlPrefix = normalizePrefix(url)
+  if (!urlPrefix) return null
+  // Pass 1 — crawl_url match. Longer prefixes win when multiple
+  // campuses claim overlapping subtrees, so sort by descending length.
+  const withCrawlUrl = campuses
+    .map(c => ({ c, prefix: normalizePrefix(c?.crawl_url) }))
+    .filter((x): x is { c: CampusLike; prefix: string } => !!x.prefix && !!x.c?.slug)
+    .sort((a, b) => b.prefix.length - a.prefix.length)
+  for (const { c, prefix } of withCrawlUrl) {
+    if (urlPrefix === prefix || urlPrefix.startsWith(prefix + '/')) return c.slug
+  }
+  // Pass 2 — pathname slug fallback.
   let pathname: string
   try {
-    pathname = new URL(url).pathname.toLowerCase()
+    pathname = new URL(url!).pathname.toLowerCase()
   } catch {
     return null
   }

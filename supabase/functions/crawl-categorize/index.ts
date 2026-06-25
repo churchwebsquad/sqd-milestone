@@ -97,6 +97,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { urlToCampusSlug } from "../_shared/campusMatching.ts";
+import { detectLanguageFromPages } from "../_shared/languageDetect.ts";
 
 // Each topic that should be guarded by priority filtering declares
 // `priority_url_patterns`. Items with kind='detail' from a source URL
@@ -288,6 +289,53 @@ Deno.serve(async (req) => {
       .eq("id", payload.project_id)
       .maybeSingle();
     const campusRegistry = Array.isArray(projForCampuses?.campuses) ? projForCampuses.campuses : [];
+
+    // ── Language detection (v116) ──
+    // Detect the dominant language across the crawl per campus (when
+    // multi-campus) or across the whole site (when single-campus).
+    // Writes back to strategy_web_projects.default_language (primary
+    // campus's language for multi-campus projects) and to each
+    // campuses[].language entry. Downstream gates use this to force
+    // verbatim-only treatment when language != 'en' — staff can't
+    // help rewrite copy in a language they don't speak.
+    if (campusRegistry.length === 0) {
+      // Single-campus: one detection across all pages.
+      const det = detectLanguageFromPages(pages);
+      console.log(`[Categorize] Language detected (single-campus): ${det.language} (${det.total_tokens} tokens)`);
+      await supabase
+        .from("strategy_web_projects")
+        .update({ default_language: det.language })
+        .eq("id", payload.project_id);
+    } else {
+      // Multi-campus: detect per campus from that campus's pages,
+      // write each detection back into the campuses[] entry. The
+      // primary campus's language also flows into default_language
+      // so single-language consumers (which only check default_language)
+      // still get a sensible answer.
+      const pagesByCampus = new Map<string | null, typeof pages>();
+      for (const page of pages) {
+        const slug = urlToCampusSlug((page as { url?: string }).url, campusRegistry);
+        const bucket = pagesByCampus.get(slug) ?? [];
+        bucket.push(page);
+        pagesByCampus.set(slug, bucket);
+      }
+      const updatedCampuses = campusRegistry.map((c: { slug: string; language?: string }) => {
+        const det = detectLanguageFromPages(pagesByCampus.get(c.slug) ?? []);
+        console.log(`[Categorize] Language detected for ${c.slug}: ${det.language} (${det.total_tokens} tokens)`);
+        return { ...c, language: det.language };
+      });
+      // Primary campus's language → default_language. When no
+      // explicit primary, take the first.
+      const primary = updatedCampuses.find((c: { primary?: boolean }) => c.primary) ?? updatedCampuses[0];
+      const projectDefaultLanguage = (primary as { language?: string })?.language ?? 'en';
+      await supabase
+        .from("strategy_web_projects")
+        .update({
+          campuses: updatedCampuses,
+          default_language: projectDefaultLanguage,
+        })
+        .eq("id", payload.project_id);
+    }
 
     const buckets = {};
     for (const t of TAXONOMY) buckets[t.key] = { passages: [], snippets: [], items: [], source_urls: [], voice_signal: null, storage: null };

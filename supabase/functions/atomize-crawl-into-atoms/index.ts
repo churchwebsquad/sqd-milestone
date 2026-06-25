@@ -29,8 +29,8 @@
 //           404 if project_id has no completed crawls
 //           400 if project_id is missing/invalid
 
-import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
 import { urlToCampusSlug } from "../_shared/campusMatching.ts";
 
 const corsHeaders = {
@@ -46,7 +46,7 @@ function json(body: unknown, status = 200) {
   });
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { status: 200, headers: corsHeaders });
   }

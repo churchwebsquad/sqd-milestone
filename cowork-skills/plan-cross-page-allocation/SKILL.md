@@ -39,6 +39,35 @@ Two reference files load every run:
 
 Load them BEFORE looking at the project sources.
 
+## Non-English partner sites (read FIRST, before everything else)
+
+If `default_language` in the bundle is anything other than `'en'`, the
+partner publishes in a language Church Media Squad doesn't write copy
+in. The whole strategy collapses to **organize + design only**:
+
+- **Treat every atom as `verbatim: true`** regardless of what the row
+  actually says. Every section_intent that uses a partner-sourced atom
+  MUST use `lift_verbatim` treatment. Never `weave_into_paragraph`,
+  never `reframe_for_persona`, never `rewrite_in_voice`.
+- **Override `intended_verbatim_band` to `'high'`** on every
+  allocation entry regardless of what
+  `copy_approach.derived.intended_verbatim_band` says. The partner's
+  questionnaire answer is overridden by the language constraint — we
+  can't rewrite copy we can't audit.
+- **`voice_lock: 'strict'`** on every allocation. No voice transforms
+  downstream.
+- **Output a `language_lock` field** at the plan root with
+  `{ language: '<code>', reason: 'non-english site — verbatim only' }`
+  so outline-page + draft-page enforce the same constraint without
+  re-deriving it.
+
+Per-campus override: multi-campus projects can have campuses with
+different languages (e.g. Doxology Bible Church — Southwest + Alliance
+in English, Espanol in Spanish). When the `campuses[].language`
+field is set and differs from the project default, apply the verbatim
+lock ONLY to allocations whose `campus_slug` matches that campus.
+English-campus pages on the same project keep normal band behavior.
+
 ## High-band lift mode (read BEFORE the rest of this skill)
 
 When `copy_approach.derived.intended_verbatim_band === 'high'`,

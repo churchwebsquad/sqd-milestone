@@ -39,6 +39,9 @@ export function CrawlInventory({ projectId }: Props) {
   const [campuses, setCampuses] = useState<InventoryCampus[]>([])
   const [campusLabelSingular, setCampusLabelSingular] = useState<string | null>(null)
   const [campusLabelPlural,   setCampusLabelPlural]   = useState<string | null>(null)
+  // v116 — drives the InventoryView verbatim-only banner. NULL until
+  // the first crawl-categorize run writes a detected value.
+  const [defaultLanguage, setDefaultLanguage] = useState<string | null>(null)
 
   // Staff-side cleanup: omitting misclassified items writes a mark to
   // strategy_content_collection_marks. We lazy-create a draft session
@@ -117,7 +120,7 @@ export function CrawlInventory({ projectId }: Props) {
         .eq('web_project_id', projectId),
       supabase.from('web_project_snippets')
         .select('token, label, expansion').eq('web_project_id', projectId).eq('archived', false),
-      supabase.from('strategy_web_projects').select('id, member, campuses, campus_label_singular, campus_label_plural').eq('id', projectId).maybeSingle(),
+      supabase.from('strategy_web_projects').select('id, member, campuses, campus_label_singular, campus_label_plural, default_language').eq('id', projectId).maybeSingle(),
     ])
     if (topicsRes.error) setError(topicsRes.error.message)
     setRows((topicsRes.data as TopicRow[] | null) ?? [])
@@ -127,10 +130,11 @@ export function CrawlInventory({ projectId }: Props) {
     // v115 — campus registry from the project. Empty for the existing
     // single-campus fleet; non-empty only for projects where staff
     // confirmed campuses in the CrawlWorkspace.
-    const projCampuses = (projRes.data as { campuses?: InventoryCampus[]; campus_label_singular?: string | null; campus_label_plural?: string | null } | null)
+    const projCampuses = (projRes.data as { campuses?: InventoryCampus[]; campus_label_singular?: string | null; campus_label_plural?: string | null; default_language?: string | null } | null)
     setCampuses(Array.isArray(projCampuses?.campuses) ? projCampuses!.campuses : [])
     setCampusLabelSingular(projCampuses?.campus_label_singular ?? null)
     setCampusLabelPlural(projCampuses?.campus_label_plural ?? null)
+    setDefaultLanguage(projCampuses?.default_language ?? null)
 
     // Active partner-share link (latest non-closed session for this project)
     // + off-crawl prefills assembled the same way ContentCollectionPage does.
@@ -332,6 +336,7 @@ export function CrawlInventory({ projectId }: Props) {
             campuses={campuses}
             campusLabelSingular={campusLabelSingular}
             campusLabelPlural={campusLabelPlural}
+            defaultLanguage={defaultLanguage}
             snippetsByToken={snippetsByToken}
             reviewMode={false}
             groupAccordion

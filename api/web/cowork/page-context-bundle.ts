@@ -60,7 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // every mark + every attachment scoped to those session ids.
   const [projRes, atomsRes, factsRes, topicsRes, templatesRes, ccSessionsRes] = await Promise.all([
     sb.from('strategy_web_projects')
-      .select('id, roadmap_state, member, notion_database_id, notion_database_url, campuses, campus_label_singular, campus_label_plural')
+      .select('id, roadmap_state, member, notion_database_id, notion_database_url, campuses, campus_label_singular, campus_label_plural, default_language')
       .eq('id', projectId)
       .maybeSingle(),
     // v115 — include metadata so the cowork pipeline can read each
@@ -490,6 +490,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       label_singular:         (projData?.campus_label_singular as string | null) ?? null,
       label_plural:           (projData?.campus_label_plural as string | null) ?? null,
     },
+
+    /** v116 — site default language (ISO 639-1). When not 'en' the
+     *  cowork pipeline MUST treat every atom + crawl topic as keep-
+     *  verbatim regardless of what the partner's discovery
+     *  questionnaire says about copy_approach. We don't translate or
+     *  rewrite copy in a language we can't audit. */
+    default_language: (projData?.default_language as string | null) ?? 'en',
     canonical_templates: {
       version:                 templatesRes.data?.version ?? null,
       page_section_templates:  tplSlotsOnly,
