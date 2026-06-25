@@ -2373,6 +2373,26 @@ function ProgramDossier({
           <div className="space-y-2">{programOther.map((it, i) => <GenericRecordRow key={i} item={it} reviewMode={reviewMode} />)}</div>
         </DossierSlot>
       )}
+
+      {/* Partner add affordance — visible only when the program is in
+          edit mode (i.e. the partner clicked Edit at the top). Lets
+          them add a new item (detail, FAQ, meeting time, etc.) to THIS
+          program. The Web Squad slots it into the right section
+          downstream — partner doesn't have to pick a kind. */}
+      {scope.editing && canEdit && bucketKey && saveMark && (
+        <div className="mt-3 pt-3 border-t border-primary-purple/10">
+          <AddMissingButton
+            bucketKey={bucketKey}
+            groupLabel={origName}
+            saveMark={saveMark}
+            marks={marks}
+            programScope={{
+              programSlug: slugify(origName).slice(0, 40) || 'unnamed',
+              programName: origName,
+            }}
+          />
+        </div>
+      )}
       </article>
     </GroupEditContext.Provider>
   )
@@ -3183,7 +3203,7 @@ function StatusPicker({ current, onPick }: { current: MarkStatus | null; onPick:
 }
 
 function AddMissingButton({
-  bucketKey, groupLabel, saveMark, marks, prefillField, compact,
+  bucketKey, groupLabel, saveMark, marks, prefillField, compact, programScope,
 }: {
   bucketKey:    string
   groupLabel:   string
@@ -3198,6 +3218,13 @@ function AddMissingButton({
   /** Render as a compact inline button (for row-level use) instead of
    *  the full-width dashed CTA. */
   compact?:     boolean
+  /** When set, the addition is scoped to a specific program inside the
+   *  bucket. Path embeds `program-<slug>` so the downstream pipeline
+   *  can attach the new item to that program rather than the bucket
+   *  root. Trigger label flips from "Add something we missed in X" to
+   *  "Add an item to {programName}". Re-uses the same target_kind +
+   *  client_note serialization so no schema changes. */
+  programScope?: { programSlug: string; programName: string }
 }) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState(prefillField?.label ?? '')
@@ -3207,22 +3234,25 @@ function AddMissingButton({
   // Path scopes the uniqueness check — baseline-tied additions cluster
   // under their own prefix so a partner can add multiple entries to
   // the same baseline (e.g., several service times) without collision.
+  // Program-scoped additions cluster under `program-<slug>` so the
+  // downstream pipeline can route them to the right program card.
   const pathPrefix = prefillField
     ? `missing:${bucketKey}/baseline-${prefillField.key}-`
-    : `missing:${bucketKey}/`
+    : programScope
+      ? `missing:${bucketKey}/program-${programScope.programSlug}/`
+      : `missing:${bucketKey}/`
   const counter = Array.from(marks?.keys() ?? []).filter(k => k.startsWith(pathPrefix)).length
 
   // Pre-compute the target_path so partners can attach files BEFORE
   // they hit Save — the saved mark uses this same path. Files upload
   // immediately to the bucket with this path baked in.
   const provisionalPath = useMemo(() => {
-    return prefillField
-      ? `${pathPrefix}${counter + 1}`
-      : `missing:${bucketKey}/${slugify(name || 'untitled')}-${counter + 1}`
+    if (prefillField) return `${pathPrefix}${counter + 1}`
+    return `${pathPrefix}${slugify(name || 'untitled')}-${counter + 1}`
     // intentionally not depending on `name` to keep target_path stable
     // for files attached before the partner finalizes the title
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathPrefix, counter, prefillField, bucketKey])
+  }, [pathPrefix, counter, prefillField])
 
   const myAttachments = (attCtx?.attachments ?? []).filter(a => a.target_path === provisionalPath)
 
@@ -3241,7 +3271,9 @@ function AddMissingButton({
     : 'w-full inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-primary-purple border border-dashed border-primary-purple/40 rounded-lg px-3 py-2 hover:border-primary-purple hover:bg-primary-purple/5 transition-colors'
   const triggerLabel = prefillField
     ? `Add ${prefillField.label.toLowerCase()}`
-    : `Add something we missed in ${groupLabel}`
+    : programScope
+      ? `Add an item to ${programScope.programName}`
+      : `Add something we missed in ${groupLabel}`
 
   return (
     <div className={compact ? 'mt-1' : 'mt-3'}>
@@ -3260,10 +3292,15 @@ function AddMissingButton({
               Tagged to <span className="font-semibold text-deep-plum">{prefillField.label}</span> in {groupLabel}.
             </p>
           )}
+          {programScope && !prefillField && (
+            <p className="text-[11px] text-purple-gray">
+              Adding to <span className="font-semibold text-deep-plum">{programScope.programName}</span>. The Web Squad will slot this into the right section (details, meeting time, FAQ, etc.).
+            </p>
+          )}
           <PartnerTextInput
             label="What's it called?"
             required
-            placeholder={prefillField?.label ?? 'e.g. Wednesday Youth Night'}
+            placeholder={prefillField?.label ?? (programScope ? 'e.g. Childcare available' : 'e.g. Wednesday Youth Night')}
             value={name}
             onChange={setName}
           />
