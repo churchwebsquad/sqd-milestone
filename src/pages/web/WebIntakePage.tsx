@@ -20,7 +20,7 @@ import { useEffect, useState, useRef } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowRight, ArrowLeft, Check, CircleAlert, ExternalLink, Loader2,
-  Trash2, Upload,
+  Trash2, Upload, RefreshCw,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { uploadAttachment, removeAttachment } from '../../lib/attachmentUpload'
@@ -423,6 +423,8 @@ function IntakeRow({
           }}
           label="Notion URL (optional)"
           placeholder="https://www.notion.so/…"
+          syncTarget={{ projectId: project.id, category: 'strategy_brief' }}
+          onSynced={onChange}
         />
       )}
       {rowKey === 'brand_handoff' && (
@@ -466,17 +468,27 @@ function StatusPill({ received, hardStop }: { received: boolean; hardStop: boole
 // ── Notion / external URL field ──────────────────────────────────────
 
 function NotionUrlField({
-  value, onSave, label, placeholder,
+  value, onSave, label, placeholder, syncTarget, onSynced,
 }: {
   value: string
   onSave: (v: string) => Promise<void>
   label: string
   placeholder: string
+  /** When set, shows a "Sync from Notion" button that pulls the page's
+   *  content into web_intake_documents (category as specified). Disabled
+   *  while the URL input is dirty — the user must save the URL first. */
+  syncTarget?: { projectId: string; category: 'strategy_brief' | 'content_strategy' }
+  /** Called after a successful sync so the intake checklist can refresh
+   *  the document count for this row. */
+  onSynced?: () => Promise<void>
 }) {
   const [draft, setDraft] = useState(value)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMessage, setSyncMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
   const dirty = draft.trim() !== (value ?? '').trim()
+  const canSync = !!syncTarget && !!value && !dirty
 
   const save = async () => {
     setSaving(true)
@@ -486,12 +498,50 @@ function NotionUrlField({
     setTimeout(() => setSaved(false), 1500)
   }
 
+  const sync = async () => {
+    if (!syncTarget || !value) return
+    setSyncing(true)
+    setSyncMessage(null)
+    try {
+      const { data: sess } = await supabase.auth.getSession()
+      const accessToken = sess.session?.access_token
+      if (!accessToken) throw new Error('Not signed in.')
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/strategy-notion`,
+        {
+          method:  'POST',
+          headers: {
+            'Content-Type':  'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            op:         'sync-intake-doc-from-notion',
+            projectId:  syncTarget.projectId,
+            notionUrl:  value,
+            category:   syncTarget.category,
+          }),
+        },
+      )
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(body?.message || body?.error || `Sync failed (HTTP ${res.status})`)
+      }
+      setSyncMessage({ kind: 'success', text: `Synced ${Math.round((body.markdown_bytes ?? 0) / 1024)} KB from Notion.` })
+      if (onSynced) await onSynced()
+    } catch (err) {
+      setSyncMessage({ kind: 'error', text: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setSyncing(false)
+      setTimeout(() => setSyncMessage(null), 5000)
+    }
+  }
+
   return (
     <div className="mt-3">
       <label className="text-[10px] uppercase tracking-widest font-bold text-purple-gray/80 block mb-1">
         {label}
       </label>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <input
           type="url"
           value={draft}
@@ -512,7 +562,36 @@ function NotionUrlField({
         {saved && !dirty && (
           <span className="text-[11px] text-emerald-700 inline-flex items-center gap-0.5"><Check size={11}/> Saved</span>
         )}
+        {syncTarget && (
+          <button
+            type="button"
+            onClick={() => void sync()}
+            disabled={!canSync || syncing}
+            title={
+              !value
+                ? 'Paste a Notion URL above first.'
+                : dirty
+                  ? 'Save the URL first, then sync.'
+                  : 'Pull the page content from Notion into this intake. Re-run any time to refresh.'
+            }
+            className="text-[11px] font-semibold rounded-full px-3 py-1.5 border border-primary-purple/30 text-primary-purple bg-white hover:bg-primary-purple/5 transition-colors disabled:opacity-50 inline-flex items-center gap-1"
+          >
+            {syncing ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+            {syncing ? 'Syncing…' : 'Sync from Notion'}
+          </button>
+        )}
       </div>
+      {syncMessage && (
+        <p
+          className={[
+            'text-[11px] mt-1.5 inline-flex items-center gap-1',
+            syncMessage.kind === 'success' ? 'text-emerald-700' : 'text-red-600',
+          ].join(' ')}
+        >
+          {syncMessage.kind === 'success' ? <Check size={11}/> : <CircleAlert size={11}/>}
+          {syncMessage.text}
+        </p>
+      )}
     </div>
   )
 }

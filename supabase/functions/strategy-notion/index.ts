@@ -45,6 +45,7 @@ import { suggestActionItem } from './_lib/ops/suggest-action-item.ts'
 import { promoteActionItem } from './_lib/ops/promote-action-item.ts'
 import { getActionItemContent } from './_lib/ops/get-action-item.ts'
 import { listDatabasePagesWithContent } from './_lib/ops/list-database-pages-with-content.ts'
+import { syncIntakeDocFromNotion } from './_lib/ops/sync-intake-doc-from-notion.ts'
 import type {
   InitiativeWritable, InitiativeCreate, MilestoneWritable, MilestoneCreate,
   ProgressWritable, ProgressCreate, DocWritable, DocCreate, StrategyEntity,
@@ -291,6 +292,26 @@ serve(async (req: Request) => {
         const { databaseId } = args as { databaseId?: string }
         if (!databaseId) return json400('Missing "databaseId" for list-database-pages-with-content.')
         return json({ pages: await listDatabasePagesWithContent(databaseId) })
+      }
+
+      // ── Web intake — Notion page sync ─────────────────────────────────
+      // Pull a Notion page's content into a web_intake_documents row so
+      // the strategy_brief / content_strategy categories can be authored
+      // in Notion and read by the cowork pipeline without a separate
+      // upload step. Idempotent per (project_id, page_id).
+      case 'sync-intake-doc-from-notion': {
+        const { projectId, notionUrl, category, uploadedBy } = args as {
+          projectId?: string; notionUrl?: string
+          category?: 'strategy_brief' | 'content_strategy'
+          uploadedBy?: string | null
+        }
+        if (!projectId || !notionUrl || !category) {
+          return json400('Missing "projectId" / "notionUrl" / "category" for sync-intake-doc-from-notion.')
+        }
+        if (category !== 'strategy_brief' && category !== 'content_strategy') {
+          return json400(`Unsupported category "${category}" — must be 'strategy_brief' or 'content_strategy'.`)
+        }
+        return json(await syncIntakeDocFromNotion({ projectId, notionUrl, category, uploadedBy: uploadedBy ?? null }))
       }
 
       case 'list-doc-comments': {

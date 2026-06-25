@@ -1416,6 +1416,13 @@ export interface WebIntakeDocument {
   uploaded_at: string
   uploaded_by_employee_id: string | null
   archived: boolean
+  // Notion-sync metadata (v101). NULL on non-Notion uploads. When set,
+  // the row was synced from a Notion page rather than uploaded by a
+  // staff member or partner.
+  notion_page_id:        string | null
+  notion_database_id:    string | null
+  notion_synced_at:      string | null
+  notion_last_edited_at: string | null
   [key: string]: unknown
 }
 

@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Palette, Plus, Trash2, Download, Save, Loader2, Type, Move, Square,
   Sparkles, ExternalLink, Check, AlertCircle, Layers,
-  FolderOpen, Lightbulb, X, KeyRound, RefreshCw,
+  FolderOpen, Lightbulb, X, KeyRound, RefreshCw, Image as ImageIcon,
 } from 'lucide-react'
 import { scanStrategicPhrases, extractInspirationalUrls } from '../../../lib/cowork/strategicPhraseScanner'
 import { supabase } from '../../../lib/supabase'
@@ -235,6 +235,136 @@ export function DesignWorkspace({ project, onChange }: Props) {
     }
   }
 
+  // ── Logo zip download ──────────────────────────────────────────────
+  // Pulls every logo in strategy_brand_logos for the project's brand
+  // guide and packages them client-side. If the brand guide has an
+  // assets_zip_url already published, we surface it as a direct link
+  // instead of re-zipping (saves a few seconds on large libraries and
+  // keeps the staff version-controlled link).
+  const [logoBusy, setLogoBusy] = useState(false)
+  const [logoStatus, setLogoStatus] = useState<{ kind: 'error' | 'empty'; message: string } | null>(null)
+  const downloadLogosZip = useCallback(async () => {
+    setLogoBusy(true)
+    setLogoStatus(null)
+    try {
+      // Match the same scoring used by populateFromIntake so we hit the
+      // same brand guide row both surfaces have agreed is canonical.
+      const { data: guides, error: guideErr } = await supabase
+        .from('strategy_brand_guides')
+        .select('id, is_published, last_updated_at, updated_at, assets_zip_url')
+        .eq('member', project.member)
+      if (guideErr) throw new Error(guideErr.message)
+      if (!guides || guides.length === 0) {
+        setLogoStatus({ kind: 'empty', message: `No brand guide found for member ${project.member}.` })
+        return
+      }
+
+      const guideIds = guides.map(g => g.id)
+      const { data: logoRowsForRank } = await supabase
+        .from('strategy_brand_logos')
+        .select('brand_guide_id')
+        .in('brand_guide_id', guideIds)
+      const logoCount = new Map<string, number>()
+      for (const r of (logoRowsForRank ?? []) as Array<{ brand_guide_id: string }>) {
+        logoCount.set(r.brand_guide_id, (logoCount.get(r.brand_guide_id) ?? 0) + 1)
+      }
+      const scored = guides.map(g => ({
+        g,
+        score:
+          (g.is_published ? 1_000_000 : 0) +
+          (logoCount.get(g.id) ?? 0) * 1_000 +
+          new Date(g.last_updated_at ?? g.updated_at ?? 0).getTime() / 1_000_000_000,
+      }))
+      scored.sort((a, b) => b.score - a.score)
+      const guide = scored[0].g
+
+      const slug = (project.church_short_name || project.name || 'project')
+        .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+
+      // Fast path — guide carries a pre-made assets zip. Open in a new
+      // tab so the AM doesn't lose context if download is blocked.
+      if (guide.assets_zip_url) {
+        window.open(guide.assets_zip_url, '_blank', 'noopener,noreferrer')
+        return
+      }
+
+      const { data: logos, error: logosErr } = await supabase
+        .from('strategy_brand_logos')
+        .select('id, kind, label, preview_url, download_url, sort_order')
+        .eq('brand_guide_id', guide.id)
+        .order('sort_order')
+      if (logosErr) throw new Error(logosErr.message)
+      const logoList = (logos ?? []) as Array<{
+        id: string; kind: string; label: string | null
+        preview_url: string; download_url: string | null; sort_order: number | null
+      }>
+      if (logoList.length === 0) {
+        setLogoStatus({ kind: 'empty', message: 'Brand guide has no logos uploaded yet.' })
+        return
+      }
+
+      // Build the zip. Fetch each logo in parallel and bail loudly on
+      // any failure — partial zips are worse than no zip.
+      const { zipSync } = await import('fflate')
+      const usedNames = new Set<string>()
+      const files: Record<string, Uint8Array> = {}
+      const failures: string[] = []
+
+      const results = await Promise.allSettled(logoList.map(async (logo) => {
+        const url = logo.download_url || logo.preview_url
+        const res = await fetch(url, { credentials: 'omit' })
+        if (!res.ok) throw new Error(`${logo.kind}${logo.label ? ` (${logo.label})` : ''}: HTTP ${res.status}`)
+        const buf = new Uint8Array(await res.arrayBuffer())
+        const ext = (() => {
+          const fromUrl = url.split('?')[0].split('.').pop()
+          if (fromUrl && /^[a-z0-9]{2,5}$/i.test(fromUrl)) return fromUrl.toLowerCase()
+          const mime = res.headers.get('content-type') ?? ''
+          if (mime.includes('svg')) return 'svg'
+          if (mime.includes('png')) return 'png'
+          if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg'
+          return 'bin'
+        })()
+        const base = logo.label
+          ? logo.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+          : logo.kind
+        let name = `${logo.kind}-${base}.${ext}`
+        // Disambiguate filename collisions (two "primary" logos in the
+        // same guide is rare but real — preserve both).
+        let n = 2
+        while (usedNames.has(name)) { name = `${logo.kind}-${base}-${n}.${ext}`; n++ }
+        usedNames.add(name)
+        files[`${slug}-logos/${name}`] = buf
+      }))
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') {
+          const logo = logoList[i]
+          failures.push(r.reason instanceof Error ? r.reason.message : `${logo.kind} logo failed`)
+        }
+      })
+      if (Object.keys(files).length === 0) {
+        throw new Error(failures.length ? failures.join('; ') : 'All logo fetches failed.')
+      }
+      if (failures.length) {
+        console.warn('[logos-zip] partial failures', failures)
+      }
+
+      const zipped = zipSync(files)
+      const blob = new Blob([zipped as BlobPart], { type: 'application/zip' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${slug}-logos.zip`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setLogoStatus({ kind: 'error', message: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setLogoBusy(false)
+    }
+  }, [project])
+
   const downloadTokensJson = () => {
     const json = JSON.stringify(toTokensStudioJson(spec), null, 2)
     const blob = new Blob([json], { type: 'application/json' })
@@ -287,6 +417,16 @@ export function DesignWorkspace({ project, onChange }: Props) {
               Download tokens.figma.json
             </WMButton>
             <WMButton
+              variant="secondary"
+              size="md"
+              iconLeft={logoBusy ? <Loader2 size={13} className="animate-spin" /> : <ImageIcon size={13} />}
+              onClick={() => void downloadLogosZip()}
+              disabled={logoBusy}
+              title="Bundle every logo from the partner's brand guide into a single .zip for design handoff"
+            >
+              Download logos (.zip)
+            </WMButton>
+            <WMButton
               variant="primary"
               size="md"
               iconLeft={saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
@@ -327,6 +467,22 @@ export function DesignWorkspace({ project, onChange }: Props) {
                 Review the anchors and roles below, then Save to persist.
               </p>
             )}
+          </div>
+        )}
+
+        {logoStatus && (
+          <div
+            className={[
+              'mb-5 rounded-md border px-3 py-2 text-[12px]',
+              logoStatus.kind === 'error'
+                ? 'border-wm-danger/30 bg-wm-danger-bg text-wm-danger'
+                : 'border-wm-border bg-wm-bg-hover text-wm-text-muted',
+            ].join(' ')}
+          >
+            <p className="font-semibold mb-0.5">
+              {logoStatus.kind === 'error' ? 'Logo download failed' : 'No logos to download'}
+            </p>
+            <p>{logoStatus.message}</p>
           </div>
         )}
 
