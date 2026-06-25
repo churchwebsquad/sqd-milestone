@@ -1604,6 +1604,17 @@ export interface WebPage {
    *  punch list as part of the launch checklist. */
   dev_notes: string | null
 
+  // ── Navigation grouping (v111) ──
+  /** Optional group name for the Pages workspace nav grouping
+   *  ("About", "Ministries", etc). NULL = ungrouped. Seeded from
+   *  site_strategy.nav.primary[].children at backfill; staff can
+   *  rename / reassign after the fact. */
+  nav_group_label: string | null
+  /** Sort key for the group itself (NOT the page within the group —
+   *  that stays in sort_order). All pages sharing a nav_group_label
+   *  should share this value too; the UI maintains the invariant. */
+  nav_group_sort_order: number | null
+
   [key: string]: unknown
 }
 

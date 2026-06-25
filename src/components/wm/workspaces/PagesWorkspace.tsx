@@ -33,6 +33,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   FileText, Loader2, Plus, Trash2, Eye, Edit3, Upload, Archive, MoreHorizontal,
   ChevronDown, ChevronRight, MessageSquare, ArrowRight, Copy, X, History, Save, Check,
+  ChevronUp, Pencil,
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { loadEditorSnippets } from '../../../lib/webSnippets'
@@ -46,6 +47,10 @@ import { WMAIAttribution } from '../AIAttribution'
 import { PageBriefImportModal } from '../PageBriefImportModal'
 import { PageVersionDrawer } from '../PageVersionDrawer'
 import { snapshotPageVersion } from '../../../lib/webPageVersions'
+import {
+  groupPagesByNav, renameNavGroup, moveNavGroup, assignPageToNavGroup,
+  type NavGroup,
+} from '../../../lib/webPageNavGroups'
 import { AddPageModal } from '../AddPageModal'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { PagePreview } from '../PagePreview'
@@ -298,6 +303,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
             </div>
           )}
           <PageList
+            projectId={project.id}
             pages={pages}
             staffPages={staffPages}
             loading={loading}
@@ -307,6 +313,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
             onToggleSelection={togglePageSelection}
             onArchive={requestArchive}
             onAddPageInPhase={(phase) => setAddPageInPhase(phase)}
+            onGroupsChanged={() => void loadPages()}
             pageReviewCounts={reviewState?.page_counts ?? {}}
           />
         </aside>
@@ -402,10 +409,11 @@ export function PagesWorkspace({ project, onChange }: Props) {
 // ── Page list ─────────────────────────────────────────────────────────
 
 function PageList({
-  pages, staffPages, loading, activeId, selectedIds,
-  onSelect, onToggleSelection, onArchive, onAddPageInPhase,
+  projectId, pages, staffPages, loading, activeId, selectedIds,
+  onSelect, onToggleSelection, onArchive, onAddPageInPhase, onGroupsChanged,
   pageReviewCounts,
 }: {
+  projectId: string
   pages: WebPage[]
   /** Per-staff bio pages (slug LIKE 'staff/%'). Grouped under their
    *  own header so they're easy to spot among the main page list. */
@@ -417,9 +425,13 @@ function PageList({
   onToggleSelection: (id: string) => void
   onArchive: (id: string) => void
   onAddPageInPhase: (phase: string) => void
+  /** Called after a successful group rename / reorder / page reassign
+   *  so the parent re-loads pages. */
+  onGroupsChanged: () => void
   pageReviewCounts: Record<string, import('../../../lib/webReviews').PageReviewCounts>
 }) {
   const selectionActive = selectedIds.size > 0
+  const navGroups = useMemo(() => groupPagesByNav(pages), [pages])
 
   if (loading) {
     return (
@@ -521,7 +533,13 @@ function PageList({
           + Add a page
         </button>
       ) : (
-        <div>{pages.map(renderPageRow)}</div>
+        <NavGroupedPageList
+          projectId={projectId}
+          groups={navGroups}
+          allGroups={navGroups}
+          renderPageRow={renderPageRow}
+          onGroupsChanged={onGroupsChanged}
+        />
       )}
 
       {/* Staff pages — collapsed accordion at the bottom of the
@@ -544,6 +562,281 @@ function PageList({
         </details>
       )}
     </div>
+  )
+}
+
+// ── Nav-grouped page list ─────────────────────────────────────────────
+//
+// Renders pages organized by nav_group_label. Each group is a
+// collapsible section with inline rename + up/down arrows. Pages
+// without a nav_group_label collapse into an "Ungrouped" bucket at
+// the bottom.
+
+function NavGroupedPageList({
+  projectId, groups, allGroups, renderPageRow, onGroupsChanged,
+}: {
+  projectId:      string
+  groups:         NavGroup[]
+  allGroups:      NavGroup[]
+  renderPageRow:  (p: WebPage) => React.ReactNode
+  onGroupsChanged: () => void
+}) {
+  return (
+    <div className="space-y-1">
+      {groups.map((g, idx) => {
+        // Compute neighbor-aware move flags so the buttons can disable
+        // at the boundaries. The ungrouped bucket never moves.
+        const realGroups = allGroups.filter(x => x.label !== null)
+        const realIdx    = realGroups.findIndex(x => x.label === g.label)
+        const canMoveUp   = g.label !== null && realIdx > 0
+        const canMoveDown = g.label !== null && realIdx >= 0 && realIdx < realGroups.length - 1
+        return (
+          <NavGroupSection
+            key={`${g.label ?? '__null__'}-${idx}`}
+            projectId={projectId}
+            group={g}
+            allGroups={allGroups}
+            canMoveUp={canMoveUp}
+            canMoveDown={canMoveDown}
+            renderPageRow={renderPageRow}
+            onGroupsChanged={onGroupsChanged}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+function NavGroupSection({
+  projectId, group, allGroups, canMoveUp, canMoveDown,
+  renderPageRow, onGroupsChanged,
+}: {
+  projectId:       string
+  group:           NavGroup
+  allGroups:       NavGroup[]
+  canMoveUp:       boolean
+  canMoveDown:     boolean
+  renderPageRow:   (p: WebPage) => React.ReactNode
+  onGroupsChanged: () => void
+}) {
+  const isUngrouped = group.label === null
+  const [open, setOpen] = useState(true)
+  const [renaming, setRenaming] = useState(false)
+  const [draftLabel, setDraftLabel] = useState(group.label ?? '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const commitRename = async () => {
+    if (isUngrouped) return
+    setError(null)
+    setBusy(true)
+    const trimmed = draftLabel.trim()
+    if (!trimmed) { setError('Group name cannot be empty.'); setBusy(false); return }
+    if (trimmed === group.label) { setBusy(false); setRenaming(false); return }
+    const result = await renameNavGroup(projectId, group.label!, trimmed)
+    setBusy(false)
+    if (!result.ok) { setError(result.error); return }
+    setRenaming(false)
+    onGroupsChanged()
+  }
+
+  const move = async (direction: -1 | 1) => {
+    if (isUngrouped || !group.label) return
+    setError(null)
+    setBusy(true)
+    const result = await moveNavGroup(projectId, group.label, direction, allGroups)
+    setBusy(false)
+    if (!result.ok) { setError(result.error); return }
+    onGroupsChanged()
+  }
+
+  return (
+    <details
+      open={open}
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+      className="mx-2 rounded-md border border-wm-border bg-wm-bg-elevated group/section"
+    >
+      <summary className="cursor-pointer list-none px-2 py-1.5 flex items-center gap-1.5 hover:bg-wm-bg-hover/40 rounded-md transition-colors">
+        <ChevronDown size={12} className="shrink-0 text-wm-text-subtle transition-transform group-open/section:rotate-0 -rotate-90" />
+        {renaming && !isUngrouped ? (
+          <input
+            type="text"
+            value={draftLabel}
+            onChange={(e) => setDraftLabel(e.target.value)}
+            onBlur={() => void commitRename()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); void commitRename() }
+              if (e.key === 'Escape') { e.preventDefault(); setRenaming(false); setDraftLabel(group.label ?? '') }
+            }}
+            onClick={(e) => e.stopPropagation()}
+            autoFocus
+            disabled={busy}
+            className="flex-1 min-w-0 text-[11px] uppercase tracking-widest font-bold text-wm-text bg-transparent border-b border-wm-accent outline-none px-1 -my-0.5"
+          />
+        ) : (
+          <span className="flex-1 min-w-0 text-[11px] uppercase tracking-widest font-bold text-wm-text truncate">
+            {group.label ?? 'Ungrouped'} <span className="ml-1 font-normal text-wm-text-subtle">· {group.pages.length}</span>
+          </span>
+        )}
+        {!isUngrouped && (
+          <span className="shrink-0 inline-flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+            <IconBtn
+              onClick={() => move(-1)}
+              disabled={!canMoveUp || busy}
+              title="Move group up"
+            ><ChevronUp size={11} /></IconBtn>
+            <IconBtn
+              onClick={() => move(1)}
+              disabled={!canMoveDown || busy}
+              title="Move group down"
+            ><ChevronDown size={11} /></IconBtn>
+            <IconBtn
+              onClick={() => { setRenaming(true); setDraftLabel(group.label ?? '') }}
+              disabled={busy || renaming}
+              title="Rename group"
+            ><Pencil size={11} /></IconBtn>
+          </span>
+        )}
+      </summary>
+      {error && (
+        <p className="mx-2 mb-1 text-[10px] text-wm-danger bg-wm-danger-bg border border-wm-danger/40 rounded px-1.5 py-1">{error}</p>
+      )}
+      <div className="pb-0.5">{group.pages.map(renderPageRow)}</div>
+    </details>
+  )
+}
+
+/** Page-editor affordance: pick which nav group this page belongs to.
+ *  Lists existing groups (derived from the project's pages) + "New
+ *  group…" + "Ungrouped". On new-group, prompts inline for a name. */
+function PageNavGroupPicker({
+  page, projectPages, onPageChange,
+}: {
+  page:          WebPage
+  projectPages:  WebPage[]
+  /** Same signature as PageEditor.onPageChange — no args, triggers a
+   *  full project-pages reload. We call this after a successful
+   *  group reassign so the side-panel PageList re-buckets. */
+  onPageChange: () => Promise<void>
+}) {
+  const existingLabels = useMemo(() => {
+    const labels = new Set<string>()
+    for (const p of projectPages) {
+      if (p.nav_group_label && p.nav_group_label.trim()) labels.add(p.nav_group_label)
+    }
+    return [...labels].sort((a, b) => a.localeCompare(b))
+  }, [projectPages])
+
+  const [creatingNew, setCreatingNew] = useState(false)
+  const [newLabel, setNewLabel] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const current = page.nav_group_label ?? ''
+
+  const persist = async (label: string | null) => {
+    setBusy(true)
+    setError(null)
+    const result = await assignPageToNavGroup(
+      { id: page.id, web_project_id: page.web_project_id },
+      label,
+    )
+    setBusy(false)
+    if (!result.ok) { setError(result.error); return }
+    // Trigger a full pages reload so the side-panel PageList re-buckets
+    // under the new group label (and reflects newly-created groups).
+    await onPageChange()
+  }
+
+  const onSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const v = e.target.value
+    if (v === '__new__') {
+      setCreatingNew(true)
+      setNewLabel('')
+      return
+    }
+    if (v === '__ungrouped__') {
+      void persist(null)
+      return
+    }
+    void persist(v)
+  }
+
+  const commitNew = async () => {
+    const trimmed = newLabel.trim()
+    if (!trimmed) { setError('Group name cannot be empty.'); return }
+    setCreatingNew(false)
+    await persist(trimmed)
+    setNewLabel('')
+  }
+
+  return (
+    <div className="mt-1.5 flex items-center gap-2 text-[12px] text-wm-text-subtle">
+      <label className="text-[10px] uppercase tracking-wider font-semibold text-wm-text-subtle/80">Nav group</label>
+      {creatingNew ? (
+        <>
+          <input
+            type="text"
+            value={newLabel}
+            onChange={(e) => setNewLabel(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter')  { e.preventDefault(); void commitNew() }
+              if (e.key === 'Escape') { e.preventDefault(); setCreatingNew(false); setNewLabel('') }
+            }}
+            placeholder="New group name"
+            autoFocus
+            disabled={busy}
+            className="bg-wm-bg-elevated border border-wm-accent/60 focus:border-wm-accent outline-none rounded px-2 py-0.5 text-wm-text text-[12px] min-w-0 flex-1 max-w-xs"
+          />
+          <button
+            type="button"
+            onClick={() => void commitNew()}
+            disabled={busy || !newLabel.trim()}
+            className="text-[11px] font-semibold text-wm-accent-strong hover:underline disabled:opacity-40"
+          >Create</button>
+          <button
+            type="button"
+            onClick={() => { setCreatingNew(false); setNewLabel('') }}
+            className="text-[11px] text-wm-text-muted hover:text-wm-text"
+          >Cancel</button>
+        </>
+      ) : (
+        <select
+          value={current === '' ? '__ungrouped__' : current}
+          onChange={onSelectChange}
+          disabled={busy}
+          className="bg-wm-bg-elevated border border-wm-border/60 hover:border-wm-accent/40 focus:border-wm-accent outline-none rounded px-2 py-0.5 text-wm-text text-[12px] cursor-pointer"
+        >
+          <option value="__ungrouped__">— Ungrouped —</option>
+          {existingLabels.map(label => (
+            <option key={label} value={label}>{label}</option>
+          ))}
+          <option value="__new__">+ New group…</option>
+        </select>
+      )}
+      {busy && <Loader2 size={11} className="animate-spin" />}
+      {error && <span className="text-[11px] text-wm-danger">{error}</span>}
+    </div>
+  )
+}
+
+/** Tiny icon button. Inline so we can keep one file-edit. */
+function IconBtn({ children, onClick, disabled, title }: {
+  children: React.ReactNode
+  onClick:  () => void
+  disabled?: boolean
+  title?:   string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="inline-flex items-center justify-center h-5 w-5 rounded text-wm-text-subtle hover:text-wm-text hover:bg-wm-bg-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+    >
+      {children}
+    </button>
   )
 }
 
@@ -1653,6 +1946,7 @@ function PageEditor({
         />
         {savingTitle && <Loader2 size={11} className="animate-spin" />}
       </div>
+      <PageNavGroupPicker page={page} projectPages={projectPages} onPageChange={onPageChange} />
     </header>
   )
 
