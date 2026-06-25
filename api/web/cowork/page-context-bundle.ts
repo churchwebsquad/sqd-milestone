@@ -60,11 +60,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // every mark + every attachment scoped to those session ids.
   const [projRes, atomsRes, factsRes, topicsRes, templatesRes, ccSessionsRes] = await Promise.all([
     sb.from('strategy_web_projects')
-      .select('id, roadmap_state, member, notion_database_id, notion_database_url')
+      .select('id, roadmap_state, member, notion_database_id, notion_database_url, campuses, campus_label_singular, campus_label_plural')
       .eq('id', projectId)
       .maybeSingle(),
+    // v115 — include metadata so the cowork pipeline can read each
+    // atom's campus_slug (atomize-crawl-into-atoms writes it into
+    // metadata.campus_slug). The bundle surfaces it per atom below.
     sb.from('content_atoms')
-      .select('id, topic, body, status, source_kind, source_ref, verbatim, confidence')
+      .select('id, topic, body, status, source_kind, source_ref, verbatim, confidence, metadata')
       .eq('web_project_id', projectId)
       .in('status', ['approved', 'draft']),
     sb.from('church_facts')
@@ -72,7 +75,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('web_project_id', projectId)
       .in('status', ['approved', 'draft']),
     sb.from('web_project_topics')
-      .select('topic_key, topic_label, topic_group, coverage_status, passages, items')
+      .select('topic_key, topic_label, topic_group, coverage_status, passages, items, campus_slug')
       .eq('web_project_id', projectId),
     sb.schema('strategy').from('cowork_templates')
       .select('version, manifest, updated_at')
@@ -364,8 +367,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ── Crawl topics pool — passages capped to keep the bundle compact
+  //
+  // v115 — multi-campus projects can have multiple rows per topic_key
+  // (one per campus + optionally one church-wide row with
+  // campus_slug=NULL). For single-campus projects (the existing fleet,
+  // campuses=[]) every row has campus_slug=NULL and the by_key shape
+  // is exactly what it was before v115 — a flat record per topic_key.
+  // For multi-campus projects, the value is `{ ...common, per_campus:
+  // { '<slug>': {passages, items, ...}, 'global': {...} } }` so skills
+  // can address each campus's slice without losing the original shape.
   const topics = (topicsRes.data ?? []) as Array<Record<string, any>>
-  const crawlByKey: Record<string, unknown> = {}
+  const projData = projRes.data as Record<string, any> | null
+  const projCampuses = Array.isArray(projData?.campuses) ? projData!.campuses as Array<{slug:string;label?:string;primary?:boolean}> : []
+  const isMultiCampusProject = projCampuses.length > 0
+  const crawlByKey: Record<string, any> = {}
   for (const t of topics) {
     const passages = Array.isArray(t.passages) ? t.passages as unknown[] : []
     const truncated = passages.length > PASSAGES_PER_TOPIC_CAP
@@ -378,14 +393,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       return p
     })
-    crawlByKey[String(t.topic_key)] = {
-      topic_label:        t.topic_label ?? null,
-      topic_group:        t.topic_group ?? null,
-      coverage_status:    t.coverage_status ?? null,
+    const payload = {
       passages:           capped,
       passages_total:     passages.length,
       passages_truncated: truncated,
       items:              Array.isArray(t.items) ? t.items : [],
+    }
+    const key = String(t.topic_key)
+    if (!isMultiCampusProject) {
+      // Pre-v115 shape — one flat entry per topic_key.
+      crawlByKey[key] = {
+        topic_label:        t.topic_label ?? null,
+        topic_group:        t.topic_group ?? null,
+        coverage_status:    t.coverage_status ?? null,
+        ...payload,
+      }
+    } else {
+      const campusBucket = (t.campus_slug as string | null | undefined) ?? 'global'
+      if (!crawlByKey[key]) {
+        crawlByKey[key] = {
+          topic_label:        t.topic_label ?? null,
+          topic_group:        t.topic_group ?? null,
+          coverage_status:    t.coverage_status ?? null,  // first-row's status; per-campus statuses live inside per_campus
+          per_campus:         {} as Record<string, unknown>,
+        }
+      }
+      crawlByKey[key].per_campus[campusBucket] = {
+        coverage_status: t.coverage_status ?? null,
+        ...payload,
+      }
     }
   }
 
@@ -429,6 +465,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     stage_1:                  state.stage_1 ?? null,
     ministry_model:           state.ministry_model ?? null,
     strategic_goals_approved: strategicGoalsApproved,
+
+    /** v115 — multi-campus registry. Empty array for single-campus
+     *  projects (the default). When non-empty, the cowork pipeline
+     *  must:
+     *  • At site-strategy time (step 6): decide whether to model each
+     *    ministry as one global page or one page per campus. Default
+     *    is per-campus pages (kids/southwest, kids/alliance,
+     *    kids/espanol) when content is materially different across
+     *    locations; one global page (kids) plus per-campus call-out
+     *    sections when content is shared.
+     *  • At allocation time (step 7): route source rows (atoms,
+     *    facts, crawl topics) into the right per-campus page based on
+     *    each source's campus_slug. NULL/global sources can land on
+     *    any page; campus-tagged sources must only land on that
+     *    campus's page (or a shared "Locations" hub page).
+     *  • At outline/draft time (steps 8-10): each per-campus page
+     *    pulls from atoms with metadata.campus_slug matching the page's
+     *    campus, PLUS NULL/global atoms when shared content is needed.
+     *  Labels (singular/plural) honor staff-set overrides — some
+     *  partners say "Sites" not "Campuses". */
+    campuses: {
+      registry:               projCampuses,
+      label_singular:         (projData?.campus_label_singular as string | null) ?? null,
+      label_plural:           (projData?.campus_label_plural as string | null) ?? null,
+    },
     canonical_templates: {
       version:                 templatesRes.data?.version ?? null,
       page_section_templates:  tplSlotsOnly,

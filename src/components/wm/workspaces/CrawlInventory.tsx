@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ListChecks, Loader2, Sparkles, Send, Copy, X, Link as LinkIcon, ExternalLink, ChevronDown, ChevronUp, RefreshCw, Check } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
-import { InventoryView, type TopicRow, type SnippetRow, type Mark, type SaveMark } from '../inventory/InventoryView'
+import { InventoryView, type TopicRow, type SnippetRow, type Mark, type SaveMark, type InventoryCampus } from '../inventory/InventoryView'
 import { loadStrategyBriefSections, strategyBriefToExternalPrefills } from '../../../lib/webStrategyBrief'
 
 interface Props {
@@ -32,6 +32,13 @@ export function CrawlInventory({ projectId }: Props) {
   // which intake docs were picked up (e.g. "Strategy brief loaded").
   // Cleared after ~4s.
   const [refreshFeedback, setRefreshFeedback] = useState<string | null>(null)
+  // v115 — multi-campus registry from strategy_web_projects.campuses.
+  // Empty array = single-campus project (the default for every church
+  // pre-Doxology). Threaded into InventoryView so the campus chip
+  // selector + per-campus filtering only activate when registered.
+  const [campuses, setCampuses] = useState<InventoryCampus[]>([])
+  const [campusLabelSingular, setCampusLabelSingular] = useState<string | null>(null)
+  const [campusLabelPlural,   setCampusLabelPlural]   = useState<string | null>(null)
 
   // Staff-side cleanup: omitting misclassified items writes a mark to
   // strategy_content_collection_marks. We lazy-create a draft session
@@ -106,17 +113,24 @@ export function CrawlInventory({ projectId }: Props) {
     const intakeFound: string[] = []
     const [topicsRes, snippetsRes, projRes] = await Promise.all([
       supabase.from('web_project_topics')
-        .select('id, topic_key, topic_label, voice_signal, passages, items, added_snippet_tokens, source_page_urls')
+        .select('id, topic_key, topic_label, voice_signal, passages, items, added_snippet_tokens, source_page_urls, campus_slug')
         .eq('web_project_id', projectId),
       supabase.from('web_project_snippets')
         .select('token, label, expansion').eq('web_project_id', projectId).eq('archived', false),
-      supabase.from('strategy_web_projects').select('id, member').eq('id', projectId).maybeSingle(),
+      supabase.from('strategy_web_projects').select('id, member, campuses, campus_label_singular, campus_label_plural').eq('id', projectId).maybeSingle(),
     ])
     if (topicsRes.error) setError(topicsRes.error.message)
     setRows((topicsRes.data as TopicRow[] | null) ?? [])
     const m = new Map<string, SnippetRow>()
     for (const s of (snippetsRes.data as SnippetRow[] | null) ?? []) m.set(s.token, s)
     setSnippets(m)
+    // v115 — campus registry from the project. Empty for the existing
+    // single-campus fleet; non-empty only for projects where staff
+    // confirmed campuses in the CrawlWorkspace.
+    const projCampuses = (projRes.data as { campuses?: InventoryCampus[]; campus_label_singular?: string | null; campus_label_plural?: string | null } | null)
+    setCampuses(Array.isArray(projCampuses?.campuses) ? projCampuses!.campuses : [])
+    setCampusLabelSingular(projCampuses?.campus_label_singular ?? null)
+    setCampusLabelPlural(projCampuses?.campus_label_plural ?? null)
 
     // Active partner-share link (latest non-closed session for this project)
     // + off-crawl prefills assembled the same way ContentCollectionPage does.
@@ -231,12 +245,6 @@ export function CrawlInventory({ projectId }: Props) {
   }
   useEffect(() => { void load() }, [projectId])
 
-  const topicsByKey = (() => {
-    const out = new Map<string, TopicRow>()
-    for (const r of rows) out.set(r.topic_key, r)
-    return out
-  })()
-
   const totalItems = rows.reduce((n, r) => n + (r.items?.length ?? 0) + (r.passages?.length ?? 0), 0)
   const totalSnippets = rows.reduce((n, r) => n + (r.added_snippet_tokens?.length ?? 0), 0)
 
@@ -320,7 +328,10 @@ export function CrawlInventory({ projectId }: Props) {
               but without review pills/marks. Keeps this page
               scrollable when the crawl returns 30+ topics. */}
           <InventoryView
-            topicsByKey={topicsByKey}
+            topicRows={rows}
+            campuses={campuses}
+            campusLabelSingular={campusLabelSingular}
+            campusLabelPlural={campusLabelPlural}
             snippetsByToken={snippetsByToken}
             reviewMode={false}
             groupAccordion

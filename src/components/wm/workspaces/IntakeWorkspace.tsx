@@ -279,7 +279,7 @@ export function IntakeWorkspace({ project, onChange }: Props) {
         {/* Site crawl — formerly its own tab, now lives alongside the
             checklist since intake + crawl together form the "what do
             we know about this church?" surface. */}
-        <CrawlWorkspace project={project} />
+        <CrawlWorkspace project={project} onProjectChange={onChange} />
 
         {/* Partner Responses — what the partner answered on the
             Content Collection portal. Sits between the crawl + the

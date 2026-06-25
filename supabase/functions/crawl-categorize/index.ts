@@ -96,6 +96,7 @@
 // Key Phrases → CTAs → Scripture — not as a flat dump of passages.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { urlToCampusSlug } from "../_shared/campusMatching.ts";
 
 // Each topic that should be guarded by priority filtering declares
 // `priority_url_patterns`. Items with kind='detail' from a source URL
@@ -275,6 +276,19 @@ Deno.serve(async (req) => {
     const pages = Array.isArray(job.crawl_results) ? job.crawl_results : [];
     console.log(`[Categorize v12] ${pages.length} pages, project ${payload.project_id}`);
 
+    // ── Multi-campus (v113/v114) ──
+    // Pull the project's campus registry. If non-empty, we'll compute
+    // a campus_slug for each topic based on its source URLs. Matching
+    // logic lives in ../_shared/campusMatching.ts — same module the
+    // browser uses, so there's no drift between crawler tagging and
+    // UI reading.
+    const { data: projForCampuses } = await supabase
+      .from("strategy_web_projects")
+      .select("campuses")
+      .eq("id", payload.project_id)
+      .maybeSingle();
+    const campusRegistry = Array.isArray(projForCampuses?.campuses) ? projForCampuses.campuses : [];
+
     const buckets = {};
     for (const t of TAXONOMY) buckets[t.key] = { passages: [], snippets: [], items: [], source_urls: [], voice_signal: null, storage: null };
 
@@ -346,37 +360,105 @@ Deno.serve(async (req) => {
     for (const t of TAXONOMY) for (const s of buckets[t.key].snippets) allSnippetCandidates.push(s);
     const { customTokensAdded, globalsFilled } = await routeSnippetsAndUpsert(supabase, payload.project_id, allSnippetCandidates);
 
+    // v115 — partition each bucket by campus before writing. For
+    // single-campus projects (empty registry), the partition map has
+    // exactly one entry keyed by NULL → identical to v100-v114 behavior.
+    // For multi-campus projects, each passage / item / source URL is
+    // routed to the campus partition its URL prefix matches, or to the
+    // NULL/global partition when no prefix matches.
+    //
+    // Voice signal + storage + snippet tokens stay bucket-wide for now:
+    // those are aggregate signals and per-campus voice would multiply
+    // LLM cost without much gain on the first pass. If staff later want
+    // per-campus voice fidelity, we can re-run llmVoiceSignal per
+    // partition in a follow-up.
     let writtenTopics = 0;
+    let writtenRows = 0;
     for (const t of TAXONOMY) {
       const b = buckets[t.key];
       const hasContent = b.passages.length > 0 || b.items.length > 0;
       if (!hasContent && t.key !== "other") continue;
       const topicTokens = new Set(b.snippets.map(s => s?.token).filter(Boolean));
       const myCustoms = customTokensAdded.filter(tok => topicTokens.has(tok));
-      const row = {
-        web_project_id: payload.project_id,
-        topic_key: t.key,
-        topic_label: t.label,
-        topic_group: t.group,
-        inventory_kind: t.inventory_kind,
-        coverage_status: coverageFor(b),
-        voice_signal: b.voice_signal,
-        passages: b.passages,
-        storage: b.storage,
-        items: b.items,
-        added_snippet_tokens: myCustoms,
-        source_page_urls: b.source_urls,
-        last_crawl_job_id: payload.crawl_job_id,
-        llm_processed: Boolean(anthropicKey),
-      };
-      const { error: upErr } = await supabase
-        .from("web_project_topics")
-        .upsert(row, { onConflict: "web_project_id,topic_key" });
-      if (upErr) console.error(`[Categorize] Upsert failed for ${t.key}:`, upErr);
-      else writtenTopics++;
+
+      const partitions = partitionBucketByCampus(b, campusRegistry);
+      const isMultiCampus = campusRegistry.length > 0;
+      let wroteAnyPartition = false;
+      for (const [campusSlug, part] of partitions) {
+        const partHasContent = part.passages.length > 0 || part.items.length > 0;
+        // Always-write "other" rule (pre-v115 behavior) only applies to
+        // the single-campus / global-partition path. We don't want N
+        // empty "other" rows for multi-campus projects.
+        const allowEmptyOther = !isMultiCampus && t.key === "other" && campusSlug === null;
+        if (!partHasContent && !allowEmptyOther) continue;
+        const row = {
+          web_project_id: payload.project_id,
+          topic_key: t.key,
+          topic_label: t.label,
+          topic_group: t.group,
+          inventory_kind: t.inventory_kind,
+          coverage_status: coverageFor(part),
+          voice_signal: b.voice_signal,
+          passages: part.passages,
+          storage: b.storage,
+          items: part.items,
+          added_snippet_tokens: myCustoms,
+          source_page_urls: part.source_urls,
+          // v115 — explicit campus tag. NULL = global (single-campus
+          // projects + cross-campus content on multi-campus sites).
+          campus_slug: campusSlug,
+          last_crawl_job_id: payload.crawl_job_id,
+          llm_processed: Boolean(anthropicKey),
+        };
+        // Conflict target matches the v115 NULLS NOT DISTINCT unique:
+        // (web_project_id, topic_key, campus_slug). Postgres treats
+        // (project, topic, NULL) as identical for upsert, so the global
+        // partition still has the one-row-per-key guarantee.
+        const { error: upErr } = await supabase
+          .from("web_project_topics")
+          .upsert(row, { onConflict: "web_project_id,topic_key,campus_slug" });
+        if (upErr) console.error(`[Categorize] Upsert failed for ${t.key} (campus=${campusSlug ?? "global"}):`, upErr);
+        else { writtenRows++; wroteAnyPartition = true; }
+      }
+      if (wroteAnyPartition) writtenTopics++;
     }
 
-    return j({ ok: true, topics_written: writtenTopics, snippets_added: customTokensAdded.length, globals_filled: globalsFilled, pages_processed: pages.length }, 200);
+    // v115 — also delete any orphaned partitions. If a re-crawl no
+    // longer surfaces /alliance/* pages, the alliance partition of
+    // every topic should disappear instead of lingering with stale
+    // content. We delete rows whose campus_slug is non-NULL and
+    // wasn't written in this run.
+    if (campusRegistry.length > 0) {
+      const writtenKeys = new Set<string>();
+      for (const t of TAXONOMY) {
+        const b = buckets[t.key];
+        const parts = partitionBucketByCampus(b, campusRegistry);
+        for (const [campusSlug, part] of parts) {
+          const partHasContent = part.passages.length > 0 || part.items.length > 0;
+          if (!partHasContent) continue; // matches the write-side skip; multi-campus never writes empty
+          writtenKeys.add(`${t.key}::${campusSlug ?? ""}`);
+        }
+      }
+      const { data: existingRows } = await supabase
+        .from("web_project_topics")
+        .select("id, topic_key, campus_slug")
+        .eq("web_project_id", payload.project_id)
+        .not("campus_slug", "is", null);
+      const orphanIds: string[] = [];
+      for (const r of (existingRows ?? []) as Array<{id: string; topic_key: string; campus_slug: string}>) {
+        if (!writtenKeys.has(`${r.topic_key}::${r.campus_slug}`)) orphanIds.push(r.id);
+      }
+      if (orphanIds.length > 0) {
+        const { error: delErr } = await supabase
+          .from("web_project_topics")
+          .delete()
+          .in("id", orphanIds);
+        if (delErr) console.error(`[Categorize] Failed to clean orphan campus partitions:`, delErr);
+        else console.log(`[Categorize] Cleaned ${orphanIds.length} orphan campus partition(s)`);
+      }
+    }
+
+    return j({ ok: true, topics_written: writtenTopics, rows_written: writtenRows, snippets_added: customTokensAdded.length, globals_filled: globalsFilled, pages_processed: pages.length }, 200);
   } catch (err) {
     console.error("[Categorize] Error:", err);
     return j({ error: "Unexpected", details: err?.message ?? String(err) }, 500);
@@ -392,6 +474,51 @@ function preClassifyUrl(url) {
     for (const re of t.url_patterns) if (re.test(path)) { hits.push(t.key); break; }
   }
   return hits;
+}
+
+// v115 — split a topic bucket into per-campus partitions. Returns a
+// Map keyed by campus slug (or null for global / no-prefix-match
+// content). For single-campus projects (empty registry) returns a
+// single-entry map keyed by null containing the full bucket — that's
+// the original pre-v115 shape, so downstream behavior is unchanged.
+//
+// Pieces (passages / items / source_urls) route by the campus prefix
+// of their URL. Items whose source_url doesn't match any campus go to
+// the null partition — the topic's "church-wide" content for that
+// project. Programs nested under items carry their own source_url so
+// they partition the same way at the top level.
+function partitionBucketByCampus(b, campuses) {
+  const map = new Map();
+  const getPart = (slug) => {
+    let part = map.get(slug);
+    if (!part) {
+      part = { passages: [], items: [], source_urls: [] };
+      map.set(slug, part);
+    }
+    return part;
+  };
+  if (!Array.isArray(campuses) || campuses.length === 0) {
+    // Single-campus / no registry: one global partition.
+    const p = getPart(null);
+    p.passages   = b.passages;
+    p.items      = b.items;
+    p.source_urls = b.source_urls;
+    return map;
+  }
+  for (const passage of b.passages) {
+    const slug = urlToCampusSlug(passage?.url, campuses);
+    getPart(slug).passages.push(passage);
+  }
+  for (const it of b.items) {
+    const slug = urlToCampusSlug(it?.source_url, campuses);
+    getPart(slug).items.push(it);
+  }
+  for (const url of b.source_urls) {
+    const slug = urlToCampusSlug(url, campuses);
+    const part = getPart(slug);
+    if (!part.source_urls.includes(url)) part.source_urls.push(url);
+  }
+  return map;
 }
 
 // Pull a URL's pathname for filter matching. Falls back to the raw

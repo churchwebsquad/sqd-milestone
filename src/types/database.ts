@@ -1143,6 +1143,23 @@ export interface StrategyWebProject {
    *  web_pages.nav_group_label / nav_group_sort_order on each row. */
   nav_group_definitions: Array<{ label: string; sort_order: number }>
 
+  // ── Multi-campus support (v113) ──
+  /** Per-project registry of campuses. Empty array = single-campus
+   *  (default behavior unchanged). Non-empty triggers campus-aware
+   *  crawl, content collection grouping, and site strategy fork. */
+  campuses: Array<{
+    slug:       string
+    label:      string
+    primary:    boolean
+    sort_order: number
+    crawl_url:  string | null
+  }>
+  /** UI display term for one campus. Defaults to "Campus". Lets a
+   *  project use "Congregation" / "Location" / "Site" to match its
+   *  denominational terminology. */
+  campus_label_singular: string | null
+  campus_label_plural:   string | null
+
   // ── Curated Brixies library (v34) — concept_id → [template_id, …] ──
   // Drives the Global Elements workspace and the AI auto-bind pass.
   curated_library: Record<string, string[]>

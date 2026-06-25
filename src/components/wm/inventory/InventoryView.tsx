@@ -50,6 +50,19 @@ export interface TopicRow {
   items:                Item[]
   added_snippet_tokens: string[]
   source_page_urls:     string[]
+  /** v114 — populated by crawl-categorize for multi-campus projects.
+   *  NULL = global / church-wide content (the default). When non-null,
+   *  matches a slug in strategy_web_projects.campuses[]. */
+  campus_slug?:         string | null
+}
+
+/** Lightweight campus shape passed into InventoryView so it can render
+ *  per-campus headings + populate the AddMissing picker. Mirrors the
+ *  registry stored on strategy_web_projects.campuses. */
+export interface InventoryCampus {
+  slug:    string
+  label:   string
+  primary: boolean
 }
 
 export interface Passage  { url: string; title?: string; text: string }
@@ -235,6 +248,26 @@ function GroupEditToolbar({ scope, canEdit, label = 'Edit' }: {
 
 /** Context for external prefills (e.g. photo library URL from
  *  discovery). Keyed `bucketKey/fieldKey`. */
+// v115 — multi-campus filter context. Threads the registered campuses
+// (if any) and the currently-selected campus_slug down through nested
+// components like AddMissingButton so they can tag new entries with
+// the right campus without prop-drilling.
+//
+// `selectedCampus`:
+//   • undefined / null  — "Church-wide" tab is active (campus_slug=null rows)
+//   • '<slug>'          — that campus's tab is active
+// When the registry is empty (single-campus project), the consumer
+// shows no chips and selectedCampus is always null.
+interface CampusFilterContextValue {
+  campuses:               InventoryCampus[]
+  selectedCampus:         string | null
+  labels:                 { singular: string; plural: string }
+}
+const CampusFilterContext = createContext<CampusFilterContextValue>({
+  campuses: [], selectedCampus: null, labels: { singular: 'Campus', plural: 'Campuses' },
+})
+function useCampusFilter() { return useContext(CampusFilterContext) }
+
 const ExternalPrefillContext = createContext<Record<string, string>>({})
 function useExternalPrefill(bucketKey: string, fieldKey: string): string | undefined {
   const map = useContext(ExternalPrefillContext)
@@ -245,7 +278,22 @@ function useExternalPrefillMap(): Record<string, string> {
 }
 
 interface Props {
-  topicsByKey:      Map<string, TopicRow>
+  /** Raw topic rows from web_project_topics for this project. Multi-
+   *  campus projects yield N rows per topic_key (one per campus, plus
+   *  optionally a NULL "church-wide" row). InventoryView builds the
+   *  internal topicsByKey map from these after applying the selected
+   *  campus filter. */
+  topicRows:        TopicRow[]
+  /** Campus registry from strategy_web_projects.campuses. When non-
+   *  empty, the view renders a campus chip selector and filters the
+   *  topic rows accordingly. Single-campus projects pass an empty
+   *  array (or omit) — view renders exactly as before. */
+  campuses?:        InventoryCampus[]
+  /** Display labels customized by staff (singular / plural for the
+   *  campus concept — e.g. "Site" / "Sites" rather than "Campus" /
+   *  "Campuses"). Both default to "Campus" / "Campuses". */
+  campusLabelSingular?: string | null
+  campusLabelPlural?:   string | null
   snippetsByToken?: Map<string, SnippetRow>
   reviewMode?:      boolean
   marks?:           Map<string, Mark>
@@ -358,11 +406,47 @@ function StaffGroupAccordion({
 // ── Top-level component ──────────────────────────────────────────────
 
 export function InventoryView({
-  topicsByKey: rawTopicsByKey, snippetsByToken, reviewMode = false, marks, saveMark,
+  topicRows, campuses, campusLabelSingular, campusLabelPlural,
+  snippetsByToken, reviewMode = false, marks, saveMark,
   sessionId, attachments, onAttachmentChange,
   externalPrefills = {},
   groupAccordion = false,
 }: Props) {
+  const isMultiCampus = (campuses?.length ?? 0) > 0
+  const labels = useMemo(() => ({
+    singular: campusLabelSingular?.trim() || 'Campus',
+    plural:   campusLabelPlural?.trim()   || 'Campuses',
+  }), [campusLabelSingular, campusLabelPlural])
+  // Default to the primary campus when multi-campus. For single-campus
+  // projects, selectedCampus stays null (church-wide / all topics).
+  const [selectedCampus, setSelectedCampus] = useState<string | null>(() => {
+    if (!isMultiCampus) return null
+    const primary = campuses!.find(c => c.primary) ?? campuses![0]
+    return primary?.slug ?? null
+  })
+  // If campuses change (rare), re-anchor selection so we never point at
+  // a slug that doesn't exist anymore.
+  useEffect(() => {
+    if (!isMultiCampus) { setSelectedCampus(null); return }
+    if (selectedCampus !== null && !campuses!.some(c => c.slug === selectedCampus)) {
+      const primary = campuses!.find(c => c.primary) ?? campuses![0]
+      setSelectedCampus(primary?.slug ?? null)
+    }
+  }, [campuses, isMultiCampus, selectedCampus])
+
+  // Build the displayed topicsByKey from the raw rows + current campus
+  // filter. For single-campus projects (no registry), every row has
+  // campus_slug=NULL so the filter is a no-op — selectedCampus stays
+  // null and the filter keeps everything.
+  const filteredRows = useMemo(
+    () => topicRows.filter(r => (r.campus_slug ?? null) === selectedCampus),
+    [topicRows, selectedCampus],
+  )
+  const rawTopicsByKey = useMemo(() => {
+    const m = new Map<string, TopicRow>()
+    for (const r of filteredRows) m.set(r.topic_key, r)
+    return m
+  }, [filteredRows])
   // Partner-facing view: dedupe items that landed in multiple topics
   // (Paradox Youth → kids + students; Young Adults → students +
   // college) and gate out any Church-Media-Squad references so they
@@ -381,9 +465,24 @@ export function InventoryView({
     sessionId && attachments && onAttachmentChange
       ? { sessionId, attachments, onChange: onAttachmentChange }
       : null
+  const campusContextValue: CampusFilterContextValue = useMemo(
+    () => ({ campuses: campuses ?? [], selectedCampus, labels }),
+    [campuses, selectedCampus, labels],
+  )
   return (
+    <CampusFilterContext.Provider value={campusContextValue}>
     <AttachmentContext.Provider value={attachmentCtx}>
     <ExternalPrefillContext.Provider value={externalPrefills}>
+    {isMultiCampus && (
+      <CampusChipSelector
+        campuses={campuses!}
+        labels={labels}
+        selected={selectedCampus}
+        onChange={setSelectedCampus}
+        rowsByCampus={topicRows}
+        reviewMode={reviewMode}
+      />
+    )}
     <div className="lg:grid lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-6 lg:items-start">
       <InventoryTOC
         entries={tocEntries}
@@ -445,6 +544,105 @@ export function InventoryView({
     </div>
     </ExternalPrefillContext.Provider>
     </AttachmentContext.Provider>
+    </CampusFilterContext.Provider>
+  )
+}
+
+// ── Multi-campus chip selector ───────────────────────────────────────
+//
+// Renders above the inventory when a project has registered campuses.
+// One pill per campus + a "Church-wide" pill for cross-campus content
+// (campus_slug=NULL rows). Each pill shows a small count of topics
+// covered in that campus so partners see at a glance which campus
+// still has thin content.
+//
+// Selected campus is purely a view-state filter — switching tabs
+// instantly swaps which subset of rows feeds the bucket layout below.
+// No load / no network on switch.
+function CampusChipSelector({
+  campuses, labels, selected, onChange, rowsByCampus, reviewMode,
+}: {
+  campuses:     InventoryCampus[]
+  labels:       { singular: string; plural: string }
+  selected:     string | null
+  onChange:     (slug: string | null) => void
+  rowsByCampus: TopicRow[]
+  reviewMode:   boolean
+}) {
+  // Per-tab counts: how many topic rows are tagged to that campus_slug
+  // (or null for church-wide). Helps partners spot a thin campus.
+  const counts = useMemo(() => {
+    const m = new Map<string | null, number>()
+    for (const r of rowsByCampus) m.set(r.campus_slug ?? null, (m.get(r.campus_slug ?? null) ?? 0) + 1)
+    return m
+  }, [rowsByCampus])
+  const sortedCampuses = [...campuses].sort(
+    (a, b) => (a.primary === b.primary ? 0 : a.primary ? -1 : 1),
+  )
+  return (
+    <div className="mb-4 rounded-2xl border border-lavender bg-lavender-tint/50 p-3 md:p-4">
+      <div className="flex items-start gap-2 mb-2">
+        <MapPin size={14} className="text-primary-purple mt-0.5 shrink-0" />
+        <div className="min-w-0">
+          <p className="text-[11px] uppercase tracking-[0.12em] font-bold text-primary-purple">
+            {labels.plural}
+          </p>
+          <p className="text-[12px] text-purple-gray">
+            {reviewMode
+              ? `Switch ${labels.singular.toLowerCase()} to review the content specific to that location. "Church-wide" holds anything shared across all ${labels.plural.toLowerCase()}.`
+              : `Filtering the inventory to one ${labels.singular.toLowerCase()} at a time. Switch tabs to see each one's content.`}
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {sortedCampuses.map(c => {
+          const isActive = selected === c.slug
+          const n = counts.get(c.slug) ?? 0
+          return (
+            <button
+              key={c.slug}
+              type="button"
+              onClick={() => onChange(c.slug)}
+              className={[
+                'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-semibold transition-colors',
+                isActive
+                  ? 'bg-deep-plum text-cream'
+                  : 'bg-white border border-lavender text-deep-plum hover:bg-lavender-tint',
+              ].join(' ')}
+            >
+              {c.label}
+              {c.primary && <span className={isActive ? 'text-cream/70' : 'text-primary-purple'}>·</span>}
+              {c.primary && <span className={isActive ? 'text-cream/70' : 'text-primary-purple'}>primary</span>}
+              <span className={[
+                'rounded-full px-1.5 text-[10px] font-mono',
+                isActive ? 'bg-cream/20 text-cream' : 'bg-lavender-tint text-purple-gray',
+              ].join(' ')}>
+                {n}
+              </span>
+            </button>
+          )
+        })}
+        <button
+          type="button"
+          onClick={() => onChange(null)}
+          className={[
+            'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-semibold transition-colors',
+            selected === null
+              ? 'bg-deep-plum text-cream'
+              : 'bg-white border border-lavender text-deep-plum hover:bg-lavender-tint',
+          ].join(' ')}
+          title="Topics shared across every campus (the things you'd say to anyone, regardless of which location they attend)"
+        >
+          Church-wide
+          <span className={[
+            'rounded-full px-1.5 text-[10px] font-mono',
+            selected === null ? 'bg-cream/20 text-cream' : 'bg-lavender-tint text-purple-gray',
+          ].join(' ')}>
+            {counts.get(null) ?? 0}
+          </span>
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -3244,6 +3442,19 @@ function AddMissingButton({
   const [desc, setDesc] = useState('')
   const [ctaUrl, setCtaUrl] = useState('')
   const attCtx = useAttachmentContext()
+  // v115 — multi-campus tagging. When the project has campuses
+  // registered, the form shows a campus picker so partners can specify
+  // which location the addition belongs to. Defaults to the currently-
+  // selected campus chip so the natural "I'm in the Southwest tab and
+  // I want to add a Southwest program" case is a zero-click default.
+  const campusCtx = useCampusFilter()
+  const isMultiCampus = campusCtx.campuses.length > 0
+  const [campusSlug, setCampusSlug] = useState<string | null>(campusCtx.selectedCampus)
+  useEffect(() => {
+    // If the partner switches campus tabs while the form is closed,
+    // re-anchor the picker to the new active campus.
+    if (!open) setCampusSlug(campusCtx.selectedCampus)
+  }, [campusCtx.selectedCampus, open])
 
   // Run the tool detector on every URL change. Cheap (regex+URL parse);
   // safe to recompute on every render.
@@ -3256,13 +3467,21 @@ function AddMissingButton({
   // downstream pipeline can route them to the right program card.
   // CTA additions use a `cta-` prefix so the strategist's downstream
   // review can pre-sort first-class CTAs from generic programs.
+  //
+  // v115 — multi-campus projects embed the campus slug as a path
+  // segment (`missing:bucket:campus-<slug>/...`) so a partner adding
+  // a "Southwest Kids program" doesn't collide with the same-named
+  // entry from Alliance. Global / church-wide adds use `campus-global`.
+  const campusSegment = isMultiCampus
+    ? `campus-${campusSlug ?? 'global'}/`
+    : ''
   const pathPrefix = prefillField
-    ? `missing:${bucketKey}/baseline-${prefillField.key}-`
+    ? `missing:${bucketKey}/${campusSegment}baseline-${prefillField.key}-`
     : programScope
-      ? `missing:${bucketKey}/program-${programScope.programSlug}/`
+      ? `missing:${bucketKey}/${campusSegment}program-${programScope.programSlug}/`
       : addKind === 'cta'
-        ? `missing:${bucketKey}/cta-`
-        : `missing:${bucketKey}/`
+        ? `missing:${bucketKey}/${campusSegment}cta-`
+        : `missing:${bucketKey}/${campusSegment}`
   const counter = Array.from(marks?.keys() ?? []).filter(k => k.startsWith(pathPrefix)).length
 
   // Pre-compute the target_path so partners can attach files BEFORE
@@ -3297,6 +3516,10 @@ function AddMissingButton({
     : (name.trim().length > 0 && desc.trim().length > 0)
   const submit = async () => {
     if (!canSubmit) return
+    // v115 — campus_slug is part of proposed_metadata so downstream
+    // (atomize-crawl-into-atoms in Phase 4) can route the addition to
+    // the right per-campus atom slot. NULL = church-wide.
+    const campusMeta = isMultiCampus ? { campus_slug: campusSlug } : {}
     if (addKind === 'cta') {
       // Compose a human-readable description from the copy + URL so legacy
       // readers that don't know about proposed_metadata still see something
@@ -3314,12 +3537,17 @@ function AddMissingButton({
           tool:   detected.tool,
           copy:   trimmedCopy || null,
           action: name.trim(),
+          ...campusMeta,
         },
       })
     } else {
       await saveMark(provisionalPath, 'missing_program', 'outdated', desc.trim(), {
         proposed_program_name: name.trim(),
         proposed_program_description: desc.trim(),
+        // For program adds we don't usually pass proposed_metadata, but
+        // multi-campus tagging requires it. Single-campus projects keep
+        // the legacy two-field shape (undefined here).
+        ...(isMultiCampus ? { proposed_metadata: campusMeta } : {}),
       })
     }
     setName(prefillField?.label ?? ''); setDesc(''); setCtaUrl(''); setOpen(false)
@@ -3355,6 +3583,46 @@ function AddMissingButton({
             <p className="text-[11px] text-purple-gray">
               Adding to <span className="font-semibold text-deep-plum">{programScope.programName}</span>. The Web Squad will slot this into the right section (details, meeting time, FAQ, etc.).
             </p>
+          )}
+          {/* v115 — multi-campus picker. Defaults to whichever campus
+              chip is active at the top of the inventory, but partners
+              can override if they're adding something that belongs to
+              a different campus or is shared across all of them. */}
+          {isMultiCampus && (
+            <div className="rounded-md border border-lavender bg-lavender-tint/40 p-2">
+              <label className="block text-[11px] font-semibold text-deep-plum mb-1">
+                Which {campusCtx.labels.singular.toLowerCase()} is this for?
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {campusCtx.campuses.map(c => (
+                  <button
+                    key={c.slug}
+                    type="button"
+                    onClick={() => setCampusSlug(c.slug)}
+                    className={[
+                      'rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition-colors',
+                      campusSlug === c.slug
+                        ? 'bg-deep-plum text-cream'
+                        : 'bg-white border border-lavender text-deep-plum hover:bg-lavender-tint',
+                    ].join(' ')}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setCampusSlug(null)}
+                  className={[
+                    'rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition-colors',
+                    campusSlug === null
+                      ? 'bg-deep-plum text-cream'
+                      : 'bg-white border border-lavender text-deep-plum hover:bg-lavender-tint',
+                  ].join(' ')}
+                >
+                  Church-wide
+                </button>
+              </div>
+            </div>
           )}
 
           {/* Kind picker — only shown when there's no baseline prefill

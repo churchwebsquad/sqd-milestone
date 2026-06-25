@@ -94,6 +94,18 @@ the doc speaks; those still apply for fields the doc leaves blank.
   /** OPTIONAL — pages the partner explicitly wants kept from current
    *  site (carryover_slug list). */
   pages_to_carry_forward?: string[]
+  /** Multi-campus registry from strategy_web_projects.campuses. Empty
+   *  array for single-campus churches (the default). When non-empty,
+   *  EVERY ministry decision below must reckon with whether the
+   *  ministry is per-campus or shared — see "Multi-campus discipline"
+   *  below. */
+  campuses?: Array<{
+    slug:       string                // 'southwest', 'alliance', 'espanol'
+    label:      string                // 'Southwest', 'Alliance', 'Español'
+    primary:    boolean               // exactly one campus is primary
+    sort_order: number
+    crawl_url:  string | null
+  }>
 }
 ```
 
@@ -120,6 +132,12 @@ the doc speaks; those still apply for fields the doc leaves blank.
     nav_strategy: 'primary' | 'secondary' | 'footer' | 'contextual_only'
     /** Whether this is a single-page or has children. */
     has_children: boolean
+    /** OPTIONAL — campus slug from input campuses[] when this page is
+     *  scoped to one specific campus (e.g. 'southwest' for a per-
+     *  campus kids page). NULL/absent = global / cross-campus page.
+     *  Required when the project is multi-campus AND the strategist
+     *  decided to split this ministry per-campus. */
+    campus_slug?: string | null
   }>
 
   nav: {
@@ -216,6 +234,33 @@ For each persona's journey:
   page where this persona is most likely to stop. Usually it's the
   transition from `consider` → `visit` (information overwhelm) OR
   `belong` → `commit` (commitment friction).
+
+## Multi-campus discipline
+
+When `campuses` is non-empty (e.g. Doxology Bible Church with Southwest,
+Alliance, Espanol), most ministries split into two shapes:
+
+| Pattern | When to use | Schema |
+|---|---|---|
+| **Per-campus page** | Each campus's content is materially different (its own kids ministry, own service times, own pastor) and the partner wants each campus discoverable. | Add ONE page per campus + per ministry. E.g. `kids-southwest`, `kids-alliance`, `kids-espanol`. Each carries `campus_slug` matching its campus. The crawl_topics + atoms with that `campus_slug` are this page's content. |
+| **Global page + per-campus sections** | Ministry concept is shared but logistics differ (one Sundays page that lists each campus's service times). | One page with `campus_slug: null`. The page's outline includes per-campus call-out sections sourced from `crawl_topics_pool.by_key.<topic>.per_campus.<slug>`. Use this when the partner's strategy treats the ministry as one ministry across all campuses. |
+| **One global page only** | Content is identical across campuses (statement of faith, the gospel, mission/vision). | Single page with `campus_slug: null`. Atoms with `metadata.campus_slug = null` are this page's content. Per-campus atoms shouldn't reach this page. |
+
+Default decision rule when ambiguous: **per-campus pages when the crawl
+shows ≥3 distinct per-campus pages for that topic; global page with
+call-outs otherwise.** Check `crawl_topics_pool.by_key.<topic>.per_campus`
+to count.
+
+Required output:
+- Every per-campus page MUST set `campus_slug` to the matching registry
+  slug.
+- Nav grouping for multi-campus: primary nav typically lists ministries
+  by name once (e.g. "Kids"); the click reveals a campus chooser before
+  the per-campus page renders. Allocation/outline downstream handles
+  the chooser; you just emit the per-campus pages here.
+- Each persona's `journey[]` may need a campus assumption — note
+  per-campus journey variants in `report.coverage_gaps_remaining` if
+  any persona doesn't walk cleanly through one chosen campus's pages.
 
 ## Coverage-gap handling
 

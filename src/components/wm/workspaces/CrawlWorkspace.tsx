@@ -12,11 +12,15 @@
  * and the toggles live on the Settings tab. This tab is read-only
  * status + content viewer.
  */
-import { useEffect, useState } from 'react'
-import { Globe, Loader2, AlertTriangle, CheckCircle2, Play, FlaskConical, ExternalLink, Ban, RefreshCw } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Globe, Loader2, AlertTriangle, CheckCircle2, Play, FlaskConical, ExternalLink, Ban, RefreshCw, MapPin, Plus, X, Check } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { CrawlPageDetail, type CrawlPagePayload } from './CrawlPageDetail'
 import type { StrategyWebProject } from '../../../types/database'
+import {
+  detectCampusCandidates, saveCampuses, saveCampusLabels,
+  type CampusDefinition, type CampusCandidate,
+} from '../../../lib/webCampuses'
 
 interface CrawlIntent {
   id:           string
@@ -42,9 +46,12 @@ interface CrawlJob {
 
 interface Props {
   project: StrategyWebProject
+  /** Optional — called after campus registry writes so the parent can
+   *  reload the project row and re-render the panel with persisted data. */
+  onProjectChange?: () => Promise<void>
 }
 
-export function CrawlWorkspace({ project }: Props) {
+export function CrawlWorkspace({ project, onProjectChange }: Props) {
   const [intent, setIntent] = useState<CrawlIntent | null>(null)
   const [jobs, setJobs] = useState<CrawlJob[]>([])
   const [loading, setLoading] = useState(true)
@@ -553,6 +560,20 @@ export function CrawlWorkspace({ project }: Props) {
         </div>
       )}
 
+      {/* Multi-campus detection + registry. Only useful once a crawl
+          has actually delivered pages — the detector reads the latest
+          completed crawl's results, surfaces URL-prefix clusters that
+          look like campuses, and lets staff confirm before tagging
+          downstream content. Hidden when the crawl hasn't produced
+          anything yet (nothing to detect from). */}
+      {jobs.length > 0 && jobs[0]?.crawl_results && jobs[0].crawl_results.length > 0 && (
+        <CampusPanel
+          project={project}
+          crawlResults={jobs[0].crawl_results}
+          onChanged={() => { if (onProjectChange) void onProjectChange() }}
+        />
+      )}
+
       {/* Hide the "Triggered by" success card when the intent is stuck
           (fired_at set but no crawl_job) — the retry card above already
           explains the state. Showing both was misleading. */}
@@ -855,6 +876,351 @@ function AutoCrawlSwitch({
                  : <Ban size={10} className="text-wm-text-subtle" />}
         </span>
       </button>
+    </div>
+  )
+}
+
+// ── Campus panel ──────────────────────────────────────────────────────
+//
+// Three states:
+//   1. project.campuses[] is empty → run the detector against the
+//      latest crawl results. Show candidates with a "Confirm" button
+//      per candidate + an "Add manually" affordance. Persists nothing
+//      until staff confirms.
+//   2. project.campuses[] is non-empty → render the registered campuses
+//      with edit (label, slug, primary, crawl_url), remove, and add
+//      affordances. The detector still runs and surfaces candidates
+//      that aren't yet in the registry.
+//   3. Detector found nothing AND no campuses registered → show a
+//      one-liner explaining this looks like a single-campus project.
+
+function CampusPanel({
+  project, crawlResults, onChanged,
+}: {
+  project:      StrategyWebProject
+  crawlResults: Array<{ url?: string; title?: string }>
+  onChanged:    () => void
+}) {
+  const detection = useMemo(() => detectCampusCandidates(crawlResults), [crawlResults])
+  const registered: CampusDefinition[] = (project.campuses ?? []) as CampusDefinition[]
+  const registeredSlugs = useMemo(() => new Set(registered.map(c => c.slug)), [registered])
+
+  // Candidates not already registered → render as suggestions.
+  const newCandidates = detection.candidates.filter(c => !registeredSlugs.has(c.slug))
+
+  const [working, setWorking]   = useState<CampusDefinition[]>(registered)
+  const [editing, setEditing]   = useState(false)
+  const [busy, setBusy]         = useState(false)
+  const [error, setError]       = useState<string | null>(null)
+  const [labelEdit, setLabelEdit] = useState(false)
+  const [labelDraft, setLabelDraft] = useState({
+    singular: project.campus_label_singular ?? '',
+    plural:   project.campus_label_plural ?? '',
+  })
+
+  // Re-sync working draft when the persisted registry changes (e.g.
+  // after onChanged refetch). Skip while editing — partner edits
+  // shouldn't get clobbered by an incoming refresh.
+  useEffect(() => {
+    if (editing) return
+    setWorking(registered)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(registered), editing])
+
+  const labels = {
+    singular: project.campus_label_singular || 'Campus',
+    plural:   project.campus_label_plural   || 'Campuses',
+  }
+
+  const confirmCandidate = async (c: CampusCandidate, primary = registered.length === 0) => {
+    setBusy(true); setError(null)
+    const next: CampusDefinition[] = [
+      ...registered,
+      {
+        slug:       c.slug,
+        label:      c.label,
+        primary,
+        sort_order: (registered.length + 1) * 100,
+        crawl_url:  c.crawl_url,
+      },
+    ]
+    const result = await saveCampuses(project.id, next)
+    setBusy(false)
+    if (!result.ok) { setError(result.error); return }
+    onChanged()
+  }
+
+  const persistWorking = async (next: CampusDefinition[]) => {
+    setBusy(true); setError(null)
+    const result = await saveCampuses(project.id, next)
+    setBusy(false)
+    if (!result.ok) { setError(result.error); return }
+    setEditing(false)
+    onChanged()
+  }
+
+  const persistLabels = async () => {
+    setBusy(true); setError(null)
+    const result = await saveCampusLabels(
+      project.id,
+      labelDraft.singular || null,
+      labelDraft.plural || null,
+    )
+    setBusy(false)
+    if (!result.ok) { setError(result.error); return }
+    setLabelEdit(false)
+    onChanged()
+  }
+
+  // Empty state — no registered campuses, no candidates found.
+  if (registered.length === 0 && newCandidates.length === 0) {
+    return (
+      <section className="rounded-xl border border-wm-border bg-wm-bg-elevated p-4">
+        <header className="flex items-center gap-2 mb-1">
+          <MapPin size={13} className="text-wm-text-subtle" />
+          <h2 className="text-[13px] font-bold text-wm-text">Campuses</h2>
+        </header>
+        <p className="text-[12px] text-wm-text-muted">
+          Looks like a single-{labels.singular.toLowerCase()} project — no obvious campus URL clusters in the crawl.
+          {detection.has_campus_selector_landing && (
+            <span className="block mt-1 text-wm-warn">
+              Heads up: the homepage title suggests a campus selector, but no per-campus URL clusters showed up. The crawl may have only seeded one campus.
+            </span>
+          )}
+        </p>
+      </section>
+    )
+  }
+
+  return (
+    <section className="rounded-xl border border-wm-accent/30 bg-wm-accent-tint/20 p-4 space-y-3">
+      <header className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <MapPin size={14} className="text-wm-accent" />
+          <h2 className="text-[13px] font-bold text-wm-text">
+            {labels.plural} {registered.length > 0 && <span className="text-wm-text-muted font-normal">· {registered.length}</span>}
+          </h2>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setLabelEdit(o => !o)}
+            className="text-[10px] text-wm-text-subtle hover:text-wm-text"
+            title="Customize the display term (campus / congregation / location / etc.)"
+          >
+            Rename term
+          </button>
+        </div>
+      </header>
+
+      {labelEdit && (
+        <div className="rounded-md border border-wm-border bg-wm-bg-elevated p-3 space-y-2">
+          <p className="text-[11px] text-wm-text-muted">
+            Use the term your partner uses. Singular shows in places like "Choose a campus";
+            plural in headers like "Our campuses." Leave blank to default to "Campus" / "Campuses".
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              type="text"
+              value={labelDraft.singular}
+              onChange={(e) => setLabelDraft(d => ({ ...d, singular: e.target.value }))}
+              placeholder="Campus"
+              className="text-[12px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 outline-none focus:border-wm-accent"
+            />
+            <input
+              type="text"
+              value={labelDraft.plural}
+              onChange={(e) => setLabelDraft(d => ({ ...d, plural: e.target.value }))}
+              placeholder="Campuses"
+              className="text-[12px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 outline-none focus:border-wm-accent"
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => { setLabelEdit(false); setLabelDraft({ singular: project.campus_label_singular ?? '', plural: project.campus_label_plural ?? '' }) }}
+              className="text-[11px] text-wm-text-muted hover:text-wm-text"
+            >Cancel</button>
+            <button
+              type="button"
+              onClick={() => void persistLabels()}
+              disabled={busy}
+              className="text-[11px] font-semibold text-wm-accent-strong hover:underline disabled:opacity-40"
+            >Save</button>
+          </div>
+        </div>
+      )}
+
+      {/* Registered campuses */}
+      {registered.length > 0 && (
+        <div className="space-y-1.5">
+          {(editing ? working : registered).map((c, idx) => (
+            <CampusRow
+              key={c.slug + idx}
+              campus={c}
+              editing={editing}
+              onChange={(patch) => setWorking(w => w.map((x, i) => i === idx ? { ...x, ...patch } : x))}
+              onRemove={() => setWorking(w => w.filter((_, i) => i !== idx))}
+              onMakePrimary={() => setWorking(w => w.map((x, i) => ({ ...x, primary: i === idx })))}
+            />
+          ))}
+          {editing && (
+            <button
+              type="button"
+              onClick={() => setWorking(w => [...w, {
+                slug:       `${labels.singular.toLowerCase()}-${w.length + 1}`,
+                label:      `${labels.singular} ${w.length + 1}`,
+                primary:    w.length === 0,
+                sort_order: (w.length + 1) * 100,
+                crawl_url:  null,
+              }])}
+              className="text-[11px] font-semibold text-wm-accent-strong hover:underline inline-flex items-center gap-1"
+            >
+              <Plus size={11} /> Add a {labels.singular.toLowerCase()}
+            </button>
+          )}
+          <div className="flex items-center gap-2 pt-1">
+            {editing ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void persistWorking(working)}
+                  disabled={busy}
+                  className="text-[11px] font-semibold text-white bg-wm-accent hover:bg-wm-accent-hover rounded-full px-3 py-1 disabled:opacity-60"
+                >
+                  {busy ? 'Saving…' : 'Save changes'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setWorking(registered); setEditing(false) }}
+                  className="text-[11px] text-wm-text-muted hover:text-wm-text"
+                >Cancel</button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="text-[11px] font-semibold text-wm-accent-strong hover:underline"
+              >Edit {labels.plural.toLowerCase()}</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Detected but not-yet-registered candidates */}
+      {newCandidates.length > 0 && !editing && (
+        <div className="space-y-2">
+          <p className="text-[11px] text-wm-text-muted">
+            {registered.length === 0 ? 'Detected' : 'Detected more'} from the crawl — confirm to add:
+          </p>
+          {newCandidates.map(c => (
+            <div key={c.slug} className="rounded-md border border-wm-border bg-wm-bg-elevated p-2.5 flex items-start gap-2.5">
+              <MapPin size={13} className="text-wm-accent mt-0.5 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[12.5px] font-semibold text-wm-text">{c.label}</p>
+                <p className="text-[10px] text-wm-text-muted">
+                  <code className="font-mono">/{c.slug}/*</code> · {c.page_count} pages · {c.signals.join(', ')}
+                </p>
+                <details className="mt-1">
+                  <summary className="text-[10px] text-wm-text-subtle cursor-pointer hover:text-wm-text">Sample URLs ({c.sample_urls.length})</summary>
+                  <ul className="mt-1 text-[10px] font-mono text-wm-text-muted space-y-0.5">
+                    {c.sample_urls.map(u => <li key={u} className="truncate">{u}</li>)}
+                  </ul>
+                </details>
+              </div>
+              <button
+                type="button"
+                onClick={() => void confirmCandidate(c, registered.length === 0)}
+                disabled={busy}
+                className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold text-wm-accent-strong hover:bg-wm-accent-tint rounded px-1.5 py-0.5 disabled:opacity-40"
+                title="Add this campus to the project. Primary defaults to this one if no campuses exist yet."
+              >
+                <Check size={10} /> Confirm
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {error && (
+        <p className="text-[11px] text-wm-danger bg-wm-danger-bg border border-wm-danger/30 rounded px-2 py-1">{error}</p>
+      )}
+    </section>
+  )
+}
+
+function CampusRow({
+  campus, editing, onChange, onRemove, onMakePrimary,
+}: {
+  campus:        CampusDefinition
+  editing:       boolean
+  onChange:      (patch: Partial<CampusDefinition>) => void
+  onRemove:      () => void
+  onMakePrimary: () => void
+}) {
+  if (!editing) {
+    return (
+      <div className="rounded-md border border-wm-border bg-wm-bg-elevated p-2.5 flex items-center gap-2">
+        <MapPin size={13} className="text-wm-accent shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[12.5px] font-semibold text-wm-text">
+            {campus.label}
+            {campus.primary && (
+              <span className="ml-1.5 text-[9px] font-bold uppercase tracking-wider text-wm-accent-strong bg-wm-accent-tint rounded px-1 py-0.5">
+                Primary
+              </span>
+            )}
+          </p>
+          <p className="text-[10px] text-wm-text-muted">
+            <code className="font-mono">/{campus.slug}</code>
+            {campus.crawl_url && <span> · <a href={campus.crawl_url} target="_blank" rel="noopener noreferrer" className="hover:underline">{campus.crawl_url}</a></span>}
+          </p>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="rounded-md border border-wm-accent/40 bg-wm-bg-elevated p-2.5 space-y-1.5">
+      <div className="flex items-center gap-2">
+        <MapPin size={13} className="text-wm-accent shrink-0" />
+        <input
+          type="text"
+          value={campus.label}
+          onChange={(e) => onChange({ label: e.target.value })}
+          placeholder="Label"
+          className="text-[12.5px] font-semibold text-wm-text bg-transparent border-b border-wm-border focus:border-wm-accent outline-none flex-1 min-w-0 py-0.5"
+        />
+        <button
+          type="button"
+          onClick={onMakePrimary}
+          disabled={campus.primary}
+          className="text-[9px] font-bold uppercase tracking-wider rounded px-1.5 py-0.5 disabled:bg-wm-accent-tint disabled:text-wm-accent-strong disabled:cursor-default hover:bg-wm-bg-hover text-wm-text-muted"
+        >
+          {campus.primary ? 'Primary' : 'Make primary'}
+        </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="text-wm-text-subtle hover:text-wm-danger"
+          title="Remove this campus"
+        ><X size={12} /></button>
+      </div>
+      <div className="grid grid-cols-2 gap-2 pl-5">
+        <input
+          type="text"
+          value={campus.slug}
+          onChange={(e) => onChange({ slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-') })}
+          placeholder="slug"
+          className="text-[11px] font-mono text-wm-text bg-wm-bg border border-wm-border rounded px-1.5 py-0.5 outline-none focus:border-wm-accent"
+        />
+        <input
+          type="text"
+          value={campus.crawl_url ?? ''}
+          onChange={(e) => onChange({ crawl_url: e.target.value || null })}
+          placeholder="https://… (crawl URL)"
+          className="text-[11px] text-wm-text bg-wm-bg border border-wm-border rounded px-1.5 py-0.5 outline-none focus:border-wm-accent"
+        />
+      </div>
     </div>
   )
 }

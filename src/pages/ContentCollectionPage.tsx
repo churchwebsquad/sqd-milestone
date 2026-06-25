@@ -21,7 +21,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Calendar, CheckCircle2, Loader2, AlertCircle, ArrowRight, ArrowLeft, Edit3, EyeOff } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { InventoryView, type TopicRow, type SnippetRow, type Mark as InvMark, type MarkStatus, type SaveMark } from '../components/wm/inventory/InventoryView'
+import { InventoryView, type TopicRow, type SnippetRow, type Mark as InvMark, type MarkStatus, type SaveMark, type InventoryCampus } from '../components/wm/inventory/InventoryView'
 import { WMRichTextEditor } from '../components/wm/RichTextEditor'
 import { FileUploadField } from '../components/contentcollection/FileUploadField'
 import { SupplementalForm, type SupplementalBlockKind } from '../components/contentcollection/SupplementalForm'
@@ -206,6 +206,12 @@ export default function ContentCollectionPage() {
 
   const [session, setSession]     = useState<SessionRow | null>(null)
   const [topics, setTopics]       = useState<TopicRow[]>([])
+  // v115 — multi-campus registry from strategy_web_projects. Empty
+  // for the single-campus fleet. When non-empty, InventoryView renders
+  // a campus chip selector above the inventory.
+  const [campuses, setCampuses]               = useState<InventoryCampus[]>([])
+  const [campusLabelSingular, setCampusLabelSingular] = useState<string | null>(null)
+  const [campusLabelPlural,   setCampusLabelPlural]   = useState<string | null>(null)
   const [snippetsByToken, setSnippets] = useState<Map<string, SnippetRow>>(new Map())
   const [marks, setMarks]         = useState<Map<string, Mark>>(new Map())
   const [recap, setRecap]         = useState<DiscoveryRecap | null>(null)
@@ -267,7 +273,7 @@ export default function ContentCollectionPage() {
         //    surface them for the partner prefill.
         const [topicsRes, snippetsRes, marksRes, recapRes, chanRes, attRes, projRes] = await Promise.all([
           supabase.from('web_project_topics')
-            .select('id, topic_key, topic_label, voice_signal, passages, items, added_snippet_tokens, source_page_urls')
+            .select('id, topic_key, topic_label, voice_signal, passages, items, added_snippet_tokens, source_page_urls, campus_slug')
             .eq('web_project_id', (s as SessionRow).web_project_id),
           supabase.from('web_project_snippets')
             .select('token, label, expansion')
@@ -283,12 +289,19 @@ export default function ContentCollectionPage() {
           supabase.from('clickup_chat_channels').select('id').eq('memberid', p.member).limit(1).maybeSingle(),
           supabase.from('strategy_content_collection_attachments').select('*').eq('session_id', sessionId),
           supabase.from('strategy_web_projects')
-            .select('social_youtube_url, social_facebook_url, social_instagram_url, social_tiktok_url')
+            .select('social_youtube_url, social_facebook_url, social_instagram_url, social_tiktok_url, campuses, campus_label_singular, campus_label_plural')
             .eq('id', (s as SessionRow).web_project_id)
             .maybeSingle(),
         ])
         if (cancelled) return
         setTopics((topicsRes.data ?? []) as TopicRow[])
+        // v115 — campus registry. Empty for the single-campus fleet
+        // (the default); non-empty only when staff confirmed locations
+        // in the Crawl workspace.
+        const projData = projRes.data as { campuses?: InventoryCampus[]; campus_label_singular?: string | null; campus_label_plural?: string | null } | null
+        setCampuses(Array.isArray(projData?.campuses) ? projData!.campuses : [])
+        setCampusLabelSingular(projData?.campus_label_singular ?? null)
+        setCampusLabelPlural(projData?.campus_label_plural ?? null)
         const sMap = new Map<string, SnippetRow>()
         for (const r of (snippetsRes.data ?? []) as SnippetRow[]) sMap.set(r.token, r)
         setSnippets(sMap)
@@ -497,6 +510,10 @@ export default function ContentCollectionPage() {
           {step === 1 && (
             <Step1Review
               topicsByKey={topicsByKey}
+              topicRows={topics}
+              campuses={campuses}
+              campusLabelSingular={campusLabelSingular}
+              campusLabelPlural={campusLabelPlural}
               snippetsByToken={snippetsByToken}
               marks={marks}
               saveMark={saveMark}
@@ -644,9 +661,18 @@ function ProgressBar({ step }: { step: 1 | 2 | 3 }) {
 // ── Step 1: Inventory Review (uses shared InventoryView) ────────────
 
 function Step1Review({
-  topicsByKey, snippetsByToken, marks, saveMark, recap, session, attachments, onAttachmentChange, externalPrefills, onContinue, onSupplemental,
+  topicsByKey, topicRows, campuses, campusLabelSingular, campusLabelPlural,
+  snippetsByToken, marks, saveMark, recap, session, attachments, onAttachmentChange, externalPrefills, onContinue, onSupplemental,
 }: {
   topicsByKey:     Map<string, TopicRow>
+  /** v115 — raw rows for InventoryView's per-campus filter. The
+   *  topicsByKey above is kept for non-campus-aware detection helpers
+   *  inside this page (detectMerchUrl, CmsType etc) — those only need
+   *  to know "does this church have X anywhere", not which campus. */
+  topicRows:       TopicRow[]
+  campuses:        InventoryCampus[]
+  campusLabelSingular: string | null
+  campusLabelPlural:   string | null
   snippetsByToken: Map<string, SnippetRow>
   marks:           Map<string, Mark>
   saveMark:        SaveMark
@@ -743,7 +769,10 @@ function Step1Review({
 
       {!hideInventory && (
         <InventoryView
-          topicsByKey={topicsByKey}
+          topicRows={topicRows}
+          campuses={campuses}
+          campusLabelSingular={campusLabelSingular}
+          campusLabelPlural={campusLabelPlural}
           snippetsByToken={snippetsByToken}
           reviewMode={true}
           marks={marks}

@@ -31,6 +31,7 @@
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { urlToCampusSlug } from "../_shared/campusMatching.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -129,6 +130,19 @@ serve(async (req) => {
     return json({ error: "no_pages_with_markdown", project_id: projectId }, 404);
   }
 
+  // v115 — campus registry. We tag every atom's metadata with the
+  // campus_slug its URL prefix matches, or null for cross-campus /
+  // homepage content. Site strategy + outline pipeline read this to
+  // route content into the right per-campus page bucket.
+  const { data: projForCampuses } = await supabase
+    .from("strategy_web_projects")
+    .select("campuses")
+    .eq("id", projectId)
+    .maybeSingle();
+  const campusRegistry = Array.isArray((projForCampuses as { campuses?: unknown } | null)?.campuses)
+    ? ((projForCampuses as { campuses: Array<{ slug: string }> }).campuses)
+    : [];
+
   // 3. Wipe stale crawl atoms for this project so re-runs produce a
   //    clean set (removed pages drop out, slug renames stop leaving
   //    ghost rows). This is safe: source_kind='crawl' is owned
@@ -157,6 +171,11 @@ serve(async (req) => {
       page_url_source: originalUrl,
       page_title:      page.title ?? null,
       atom_role:       "page_rubric",
+      // v115 — null for single-campus projects + cross-campus URLs
+      // (homepage, shared resources). Multi-campus per-campus URLs
+      // get tagged with their campus slug so the cowork outline
+      // pipeline can route them to the right per-campus page.
+      campus_slug:     urlToCampusSlug(normalizedUrl, campusRegistry),
     },
     source_kind: "crawl",
     source_ref:  normalizedUrl,
