@@ -20,27 +20,21 @@
  */
 
 /**
- * Stopword sets per language. Curated to MAXIMIZE between-language
- * discrimination, not just frequency:
- *   - Spanish + Portuguese share `que`, `em/en`, `por`, `para`, `con/com`,
- *     `sobre`, `ser`, `estar`, `é/es`, `están/estão`, `porque`, etc.
- *     Counting these in BOTH languages makes Spanish content easy to
- *     misclassify as Portuguese (and vice versa) on small corpora.
- *   - We list ONLY the words that are characteristic of one language
- *     and rare/absent in the other Romance language we model.
- *   - Highly-discriminating Spanish: `el`, `la`, `los`, `las`, `del`,
- *     `pero`, `nuestro`, `nuestra`, `también`, `más`, `muy`, `son`,
- *     `esto`, `esta`, `este`. These literally do not occur as
- *     stopwords in Portuguese (Portuguese uses `o/a/os/as`, `do/da`,
- *     `mas`, `nosso/nossa`, `também`(overlap), `mais`, `muito`, `são`,
- *     `isto`/`isso`).
- *   - Highly-discriminating Portuguese: `o`, `os`, `as`, `do`, `da`,
- *     `dos`, `das`, `no`, `na`, `nos`, `nas`, `é`, `são`, `ao`, `à`,
- *     `seu`, `sua`, `nosso`, `nossa`, `isto`, `isso`, `mas`, `mais`,
- *     `muito`. These are absent from Spanish.
+ * Stopword sets per language. CMS partners are essentially never
+ * Portuguese churches — the Spanish-speaking world (Latin America +
+ * the US Hispanic church) is where multilingual sites land. So we
+ * model only English vs Spanish and DON'T try to disambiguate
+ * Portuguese as a separate language; the Romance signal is "this is
+ * Spanish (or close enough that Spanish-verbatim treatment is the
+ * right call)". A Portuguese partner is rare enough that the false
+ * positive is preferable to mistagging a Spanish church as Portuguese
+ * — which would route copy to the wrong verbatim-locked workflow.
  *
- * Add languages by listing only the discriminating-against-already-
- * present-languages stopwords.
+ * Spanish stopwords are curated to MAXIMIZE discrimination against
+ * English specifically. Words shared with Portuguese (que, en/em, por,
+ * para, con/com, sobre, ser, estar, etc.) are EXCLUDED on purpose —
+ * those don't help separate Spanish from English either, since they
+ * also don't appear in English.
  */
 const LANG_STOPWORDS: Record<string, ReadonlySet<string>> = {
   en: new Set([
@@ -51,47 +45,38 @@ const LANG_STOPWORDS: Record<string, ReadonlySet<string>> = {
     'has', 'had', 'do', 'does', 'did', 'be', 'been', 'being',
   ]),
   es: new Set([
-    // Articles: Spanish has masculine/feminine plurals los/las which
-    // Portuguese spells os/as. Spanish "del" is a contraction
-    // Portuguese never uses (Portuguese: "do/da").
+    // Articles — Spanish has unique forms vs Portuguese.
     'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'del',
-    // Verbs / copulas: Spanish-only forms.
+    // Copulas + verb conjugations distinct from Portuguese forms.
     'son', 'soy', 'eres', 'somos',
-    // Common Spanish-only function words.
+    // Common Spanish-only function words / discriminators.
     'pero', 'también', 'más', 'muy', 'todos', 'todas',
-    // Demonstratives — Spanish forms (Portuguese: isto, isso, este, esta — note Portuguese also has esta/este but the cluster of esto/esta/este/estos/estas is Spanish-leaning).
+    // Demonstratives — Spanish forms.
     'esto', 'esta', 'este', 'estos', 'estas',
-    // Possessives: nuestro/nuestra are Spanish (Portuguese: nosso/nossa).
+    // Possessives — Spanish has nuestro/nuestra (Portuguese nosso/nossa).
     'nuestro', 'nuestra', 'nuestros', 'nuestras',
     // Other discriminating function words.
     'mi', 'tu', 'su', 'sus', 'cuando', 'donde', 'porque', 'cada',
-  ]),
-  pt: new Set([
-    // Articles: Portuguese has feminine "a" and "as" as articles, and
-    // partitive contractions "do/da/dos/das" which Spanish lacks.
-    'o', 'os', 'as', 'um', 'uma', 'uns', 'umas', 'do', 'da', 'dos', 'das',
-    'no', 'na', 'nos', 'nas', 'pelo', 'pela', 'pelos', 'pelas',
-    // Verbs / copulas: Portuguese-only forms (é, são, ao).
-    'é', 'são', 'ao', 'à', 'às',
-    // Discriminating function words (Portuguese forms).
-    'mas', 'mais', 'muito', 'também', 'tudo',
-    // Possessives Portuguese-side.
-    'seu', 'sua', 'seus', 'suas', 'meu', 'minha', 'meus', 'minhas',
-    'nosso', 'nossa', 'nossos', 'nossas',
-    // Demonstratives Portuguese-side.
-    'isto', 'isso', 'aquilo',
+    // Romance-language stopwords that nonetheless help separate Spanish
+    // from English. Portuguese also uses some of these but since we
+    // don't try to model Portuguese, including them just makes Spanish
+    // detection more sensitive on small corpora.
+    'que', 'en', 'por', 'para', 'con', 'sin', 'sobre',
+    'es', 'ser', 'estar', 'está', 'están', 'al', 'lo', 'le', 'les',
+    'y', 'o', 'no', 'si', 'sí',
   ]),
 }
 
-/** Strong character-class signal: certain glyphs are ~exclusive to a
- *  language. ñ → Spanish; ã / õ → Portuguese; ç → Portuguese (some
- *  French, but we don't model French as a separate lang). Each
- *  occurrence in the corpus adds a sharp boost to that language's
- *  score. Bypasses the stopword overlap problem for romance pairs. */
-const CHARACTER_SIGNAL_WEIGHT = 3
+/** Strong character-class signal: certain glyphs are essentially
+ *  exclusive to Spanish in a partner-CMS-content context (ñ, ¿, ¡).
+ *  Each occurrence weighted heavily so a bilingual site whose template
+ *  chrome is in English but whose body text is in Spanish still tags
+ *  as Spanish — these characters literally don't appear in English
+ *  outside foreign-name references, so even ~10 occurrences across a
+ *  full crawl mean the partner is writing in Spanish. */
+const CHARACTER_SIGNAL_WEIGHT = 10
 const CHARACTER_SIGNALS: Record<string, RegExp> = {
   es: /[ñ¿¡]/g,
-  pt: /[ãõç]/g,
 }
 
 /**
@@ -138,16 +123,28 @@ export function detectLanguage(text: string): LanguageDetectionResult {
       if (set.has(tok)) scores[lang]++
     }
   }
-  // Character-class signal: add weighted points for language-
-  // exclusive glyphs (ñ→es, ã/õ/ç→pt). One ñ in a five-page Spanish
-  // crawl is more discriminating than ten copies of the word "que".
+  // Character-class signal: count language-exclusive glyphs (ñ, ¿, ¡
+  // for Spanish). Weighted boost on the score, AND a hard override:
+  // ≥ ABSOLUTE_GLYPH_THRESHOLD occurrences of a language-exclusive
+  // glyph in the corpus means we're confident enough that NO amount
+  // of English-template chrome (Squarespace boilerplate, English
+  // markdown link labels, URLs containing English words) should flip
+  // the call. Iglesia Betania has 11 ñ's in body copy across 12 pages
+  // — bilingual site with English template but Spanish content.
+  const ABSOLUTE_GLYPH_THRESHOLD = 5
+  let forcedLanguage: string | null = null
   if (text) {
     for (const [lang, re] of Object.entries(CHARACTER_SIGNALS)) {
       const matches = text.match(re)
-      if (matches && matches.length > 0) {
-        scores[lang] = (scores[lang] ?? 0) + matches.length * CHARACTER_SIGNAL_WEIGHT
+      const n = matches ? matches.length : 0
+      if (n > 0) {
+        scores[lang] = (scores[lang] ?? 0) + n * CHARACTER_SIGNAL_WEIGHT
+        if (n >= ABSOLUTE_GLYPH_THRESHOLD) forcedLanguage = lang
       }
     }
+  }
+  if (forcedLanguage) {
+    return { language: forcedLanguage, scores, total_tokens: tokens.length }
   }
   if (tokens.length < MIN_TOKENS_FOR_DETECTION) {
     return { language: 'en', scores, total_tokens: tokens.length }

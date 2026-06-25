@@ -492,12 +492,14 @@ export function InventoryView({
         reviewMode={reviewMode}
       />
     )}
-    <VerbatimLanguageBanner
-      campuses={campuses ?? []}
-      selectedCampus={selectedCampus}
-      defaultLanguage={defaultLanguage ?? 'en'}
-      labels={labels}
-    />
+    {!reviewMode && (
+      <VerbatimLanguageBanner
+        campuses={campuses ?? []}
+        selectedCampus={selectedCampus}
+        defaultLanguage={defaultLanguage ?? 'en'}
+        labels={labels}
+      />
+    )}
     <div className="lg:grid lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-6 lg:items-start">
       <InventoryTOC
         entries={tocEntries}
@@ -563,21 +565,14 @@ export function InventoryView({
   )
 }
 
-// ── Verbatim-language banner ─────────────────────────────────────────
+// ── Verbatim-language banner (STAFF VIEW ONLY) ───────────────────────
 //
-// When the partner's content is in a language we don't help rewrite
-// (anything besides English), surface that to staff explicitly. The
-// banner reads above the bucket layout and switches messaging based
-// on whether the active view is a non-English campus tab, the global
-// tab on a mixed-language project, or a single-campus non-English
-// site.
-//
-// Two principles drive the copy:
-//   1. Staff UI stays in English (the staff member running review may
-//      not speak the partner's language).
-//   2. Partner content stays VERBATIM in its original language —
-//      passages render exactly as crawled, no translation, no rewrite.
-//      The banner just sets expectations.
+// Surfaces to staff that a partner's content is in a non-English
+// language and the downstream workflow is verbatim-only — no rewrites,
+// no translation, just organize and design. Gated on !reviewMode at
+// the call site so partners NEVER see this — it's CMS-internal jargon
+// (verbatim, organize the inventory) that doesn't belong in a
+// partner-facing surface.
 const LANGUAGE_NAMES: Record<string, string> = {
   en: 'English',
   es: 'Spanish',
