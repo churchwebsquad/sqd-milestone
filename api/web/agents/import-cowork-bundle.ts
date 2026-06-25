@@ -195,6 +195,19 @@ export default async function handler(req: any, res: any) {
       return res.status(500).json({ error: e instanceof Error ? e.message : 'manifest build failed' })
     }
 
+    // Normalize allocation entries: the canonical key is `page_slug`
+    // (the validator + run-outline-page + everything downstream reads
+    // that). Some upstream skill outputs use `slug` instead — coerce
+    // before validation so a misnamed bundle still passes (and so
+    // every downstream reader sees the canonical key).
+    if (Array.isArray(bundle?.allocations)) {
+      bundle.allocations = bundle.allocations.map((a: any) =>
+        (a && typeof a === 'object' && a.page_slug == null && typeof a.slug === 'string')
+          ? { ...a, page_slug: a.slug }
+          : a,
+      )
+    }
+
     // Validate
     const result = validateAllocationPlan(bundle, manifest)
     if (!result.ok) {

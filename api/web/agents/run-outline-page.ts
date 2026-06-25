@@ -577,7 +577,16 @@ async function assembleEndpointInputs(
 
   const roadmap = (project?.roadmap_state ?? {}) as Record<string, any>
   const allocations: any[] = roadmap?.page_allocation_plan?.allocations ?? []
-  const allocation = allocations.find((a: any) => a?.page_slug === pageSlug) ?? null
+  // Allocation entries SHOULD carry `page_slug` (canonical, what the
+  // validator + every other reader expects). Some legacy bundles
+  // imported with just `slug` — fall back to that so the outline tool
+  // still finds the right allocation for those projects. v102 backfill
+  // normalized the existing stragglers, and import-cowork-bundle now
+  // normalizes on write going forward; this defensive read remains
+  // for any future bundle that drifts.
+  const allocation = allocations.find((a: any) =>
+    (a?.page_slug ?? a?.slug) === pageSlug,
+  ) ?? null
 
   // Normalize stage_1 at read time so legacy-pipeline projects (DS,
   // every pre-cowork account) and cowork-pipeline projects both
