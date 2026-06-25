@@ -32,6 +32,7 @@ import BrandHandoffPage from './pages/BrandHandoffPage'
 import PortalReviewPage from './pages/PortalReviewPage'
 import PartnerHubPage from './pages/PartnerHubPage'
 import ContentCollectionPage from './pages/ContentCollectionPage'
+import RegistrarIntakePage from './pages/RegistrarIntakePage'
 import FeedbackPreviewPage from './pages/FeedbackPreviewPage'
 import InitiativesPage from './pages/strategy/InitiativesPage'
 import InitiativeDetailPage from './pages/strategy/InitiativeDetailPage'
@@ -94,6 +95,11 @@ export default function App() {
               rollout so production partner links don't break. */}
           <Route path="/portal/:token/hub" element={<PartnerHubPage />} />
           <Route path="/portal/:token/hub/content-collection/:sessionId" element={<ContentCollectionPage />} />
+          {/* Standalone registrar intake — for partners migrating their
+              current site before content collection is provisioned.
+              Writes to the same row as ContentCollectionPage's
+              DomainSection; whichever is filled first wins. */}
+          <Route path="/portal/:token/registrar-intake" element={<RegistrarIntakePage />} />
           {/* Partner-facing web review portal — token comes from
               web_reviews.partner_token. No login required; partner
               enters their name on first visit. */}

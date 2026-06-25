@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
-import { ChevronDown, ChevronRight, ExternalLink, PartyPopper, Link, Check, Globe, Wrench, Server, ArrowUpRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink, PartyPopper, Link, Check, Globe, Wrench, Server, ArrowUpRight, KeyRound, Loader2, FileText } from 'lucide-react'
 import type { StrategyAccountProgress, WebsiteSupportAudit, MilestoneStatus } from '../../types/database'
 import type { EnrichedSubmission } from '../../pages/ChurchDetailPage'
 import { extractWebPathway, normalizeWebsitePlatform } from '../../types/churches'
@@ -205,6 +205,17 @@ export default function WebSquadSection({ church, submissions, onSave, editing, 
           member to the audit row's CSV cells (append-only). */}
       <WebSupportEvaluationChecklist memberId={memberId} />
 
+      {/* Initial Site Access — pre-evaluation handoff checklist.
+          Backed by 4 nullable booleans on strategy_account_progress
+          (v102). NULL = not yet set; the UI surfaces a 3-state pill
+          so the AM can tell "not asked" apart from "explicitly no". */}
+      <InitialSiteAccessChecklist church={church} onSave={onSave} />
+
+      {/* Partner Site Notes — fetched from the Notion web support
+          database, filtered to rows where `notes type = "Partner site
+          notes"` and the title contains this church's name. */}
+      <PartnerSiteNotesList churchName={church.church_name ?? ''} />
+
       {/* Tools */}
       <div className="mb-4">
         <SubSectionLabel label="Tools" icon={Wrench} variant="tools" />
@@ -280,6 +291,263 @@ export default function WebSquadSection({ church, submissions, onSave, editing, 
         </div>
       </div>
     </section>
+  )
+}
+
+// ── Initial Site Access ────────────────────────────────────────────────
+// Per-checkbox 3-state toggle (null → true → false → null). NULL = not
+// yet set, which is meaningfully different from explicit false ("we
+// asked and they don't have it"). Each row writes to one of four
+// strategy_account_progress.web_squad_* boolean columns.
+
+interface ChecklistItem {
+  field: 'web_squad_site_access_provided' | 'web_squad_login_in_1password' | 'web_squad_ga_access_shared' | 'web_squad_ready_for_evaluation'
+  label: string
+  hint: string
+}
+
+const SITE_ACCESS_ITEMS: ChecklistItem[] = [
+  { field: 'web_squad_site_access_provided', label: 'Site access provided',     hint: "Partner has shared CMS / hosting credentials." },
+  { field: 'web_squad_login_in_1password',   label: 'Login added to 1Password', hint: "Credentials live in the Squad 1Password vault." },
+  { field: 'web_squad_ga_access_shared',     label: 'GA access shared',         hint: "Partner has invited the Squad GA account." },
+  { field: 'web_squad_ready_for_evaluation', label: 'Ready for site evaluation', hint: "All prerequisites met; ready for the evaluation pass." },
+]
+
+function InitialSiteAccessChecklist({
+  church, onSave,
+}: {
+  church: StrategyAccountProgress
+  onSave: (field: string, value: unknown) => Promise<void>
+}) {
+  const [busy, setBusy] = useState<string | null>(null)
+
+  /** Three-state cycle: null → true → false → null. */
+  const cycleValue = (current: boolean | null): boolean | null => {
+    if (current === null) return true
+    if (current === true) return false
+    return null
+  }
+
+  const handleClick = async (field: ChecklistItem['field']) => {
+    const current = (church[field] as boolean | null) ?? null
+    const next = cycleValue(current)
+    setBusy(field)
+    try {
+      await onSave(field, next)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="mb-4">
+      <SubSectionLabel label="Initial Site Access" icon={KeyRound} />
+      <p className="text-[11px] text-purple-gray mb-2">
+        Pre-evaluation handoff. Click each row to cycle: <strong>Not yet → Yes → No → Not yet</strong>.
+      </p>
+      <div className="rounded-xl border border-lavender bg-white divide-y divide-lavender/60">
+        {SITE_ACCESS_ITEMS.map(item => {
+          const value = (church[item.field] as boolean | null) ?? null
+          const isBusy = busy === item.field
+          return (
+            <button
+              key={item.field}
+              type="button"
+              onClick={() => void handleClick(item.field)}
+              disabled={isBusy}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-lavender-tint/40 transition-colors disabled:opacity-60"
+            >
+              <CheckboxBox state={value} busy={isBusy} />
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-semibold text-deep-plum leading-tight">{item.label}</p>
+                <p className="text-[11px] text-purple-gray leading-tight mt-0.5">{item.hint}</p>
+              </div>
+              <StatePill state={value} />
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** Three-state checkbox box. Filled purple when true; outlined red when
+ *  explicit false; hollow lavender when null (not yet set). */
+function CheckboxBox({ state, busy }: { state: boolean | null; busy: boolean }) {
+  if (busy) {
+    return (
+      <div className="w-5 h-5 rounded-md border-2 border-primary-purple/40 bg-white grid place-items-center shrink-0">
+        <Loader2 size={11} className="animate-spin text-primary-purple" />
+      </div>
+    )
+  }
+  if (state === true) {
+    return (
+      <div className="w-5 h-5 rounded-md bg-primary-purple border-2 border-primary-purple grid place-items-center shrink-0">
+        <Check size={13} className="text-white" />
+      </div>
+    )
+  }
+  if (state === false) {
+    return (
+      <div className="w-5 h-5 rounded-md border-2 border-red-400 bg-red-50 grid place-items-center shrink-0">
+        <span className="text-red-500 text-[12px] font-bold leading-none">–</span>
+      </div>
+    )
+  }
+  return <div className="w-5 h-5 rounded-md border-2 border-lavender bg-white shrink-0" />
+}
+
+function StatePill({ state }: { state: boolean | null }) {
+  if (state === true)  return <span className="text-[10px] font-bold uppercase tracking-wide text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">Yes</span>
+  if (state === false) return <span className="text-[10px] font-bold uppercase tracking-wide text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">No</span>
+  return <span className="text-[10px] font-bold uppercase tracking-wide text-purple-gray bg-lavender/30 border border-lavender rounded-full px-2 py-0.5">Not yet</span>
+}
+
+// ── Partner Site Notes (Notion) ────────────────────────────────────────
+// Pulls rows from the Web Support Notion database filtered by
+// `notes type = "Partner site notes"`, then narrows to ones whose title
+// contains the church name. Notion fetch happens via the strategy-notion
+// edge function so the NOTION_TOKEN stays server-side.
+
+interface PartnerSiteNote {
+  page_id:        string
+  title:          string
+  last_edited_at: string | null
+  url:            string
+  preview:        string
+}
+
+function PartnerSiteNotesList({ churchName }: { churchName: string }) {
+  const [notes, setNotes] = useState<PartnerSiteNote[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+
+  // Without a church name we can't meaningfully filter — every Notion
+  // note would surface (firehose). Show the section in a disabled
+  // state so the AM understands why it's empty.
+  const hasFilter = churchName.trim().length > 0
+
+  // Lazy-load: defer the Notion round-trip until the AM opens the
+  // section. Keeps the church-detail render fast for accounts that
+  // don't have site notes yet.
+  useEffect(() => {
+    if (!open || notes !== null || !hasFilter) return
+    let cancelled = false
+    void (async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const { data: sess } = await supabase.auth.getSession()
+        const accessToken = sess.session?.access_token
+        if (!accessToken) throw new Error('Not signed in.')
+        const res = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/strategy-notion`,
+          {
+            method:  'POST',
+            headers: {
+              'Content-Type':  'application/json',
+              'Authorization': `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({
+              op:          'list-partner-site-notes',
+              titleFilter: churchName,
+              limit:       10,
+            }),
+          },
+        )
+        const body = await res.json().catch(() => ({}))
+        if (cancelled) return
+        if (!res.ok) {
+          throw new Error(body?.message || body?.error || `HTTP ${res.status}`)
+        }
+        setNotes((body.notes ?? []) as PartnerSiteNote[])
+      } catch (err) {
+        if (cancelled) return
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [open, churchName, notes])
+
+  return (
+    <div className="mb-4">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        disabled={!hasFilter}
+        className="w-full flex items-center justify-between gap-2 text-left py-2 px-3 rounded-lg border border-lavender bg-lavender-tint/30 hover:bg-lavender-tint/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+        title={hasFilter ? '' : 'Set the church name first so we can filter Notion notes by title.'}
+      >
+        <span className="flex items-center gap-2">
+          <FileText size={14} className="text-primary-purple" />
+          <span className="text-sm font-semibold text-deep-plum">Partner site notes (Notion)</span>
+          {notes && (
+            <span className="text-[10px] text-purple-gray">
+              · {notes.length} note{notes.length === 1 ? '' : 's'}
+            </span>
+          )}
+          {!hasFilter && (
+            <span className="text-[10px] text-purple-gray italic">· church name needed to filter</span>
+          )}
+        </span>
+        {open ? <ChevronDown size={14} className="text-purple-gray" /> : <ChevronRight size={14} className="text-purple-gray" />}
+      </button>
+
+      {open && (
+        <div className="mt-2">
+          {loading && (
+            <div className="text-center py-4 text-purple-gray text-xs inline-flex items-center gap-1.5 w-full justify-center">
+              <Loader2 size={12} className="animate-spin" />
+              Loading from Notion…
+            </div>
+          )}
+          {error && (
+            <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
+              <strong className="font-semibold">Notion fetch failed:</strong> {error}
+              <p className="mt-1 text-red-600">
+                If this is a permission error, the Notion integration may need access to the Web Support database. Share the database with the Squad integration in Notion → Connections.
+              </p>
+            </div>
+          )}
+          {!loading && !error && notes && notes.length === 0 && (
+            <p className="text-xs text-purple-gray italic py-3 px-1">
+              No partner site notes in Notion for "{churchName}" yet.
+            </p>
+          )}
+          {!loading && !error && notes && notes.length > 0 && (
+            <ul className="divide-y divide-lavender/60 border border-lavender rounded-lg bg-white">
+              {notes.map(note => (
+                <li key={note.page_id}>
+                  <a
+                    href={note.url || `https://www.notion.so/${note.page_id.replace(/-/g, '')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block px-3 py-2.5 hover:bg-lavender-tint/30 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-[13px] font-semibold text-deep-plum leading-tight">{note.title}</p>
+                      <ExternalLink size={11} className="text-purple-gray shrink-0 mt-0.5" />
+                    </div>
+                    {note.preview && (
+                      <p className="text-[11px] text-purple-gray leading-snug mt-1 line-clamp-2">{note.preview}</p>
+                    )}
+                    {note.last_edited_at && (
+                      <p className="text-[10px] text-purple-gray/70 mt-1">
+                        Last edited {new Date(note.last_edited_at).toLocaleDateString()}
+                      </p>
+                    )}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 

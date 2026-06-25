@@ -81,6 +81,12 @@ export function CoworkWorkspace({ project, onChange }: Props) {
   const [runningStep, setRunningStep]         = useState<string | null>(null)
   const [drawerStep, setDrawerStep]           = useState<StepCatalogEntry | null>(null)
   const [lastResult, setLastResult]           = useState<{ step: string; ok: boolean; detail: string } | null>(null)
+  // Foundation pipeline = steps 1-6 run as a single sequence. After
+  // Foundation auto-approves atoms + goals, the only human gate is
+  // "review the sitemap (step 6 output)" — every step before that
+  // chains automatically.
+  const [pipelineRunning, setPipelineRunning] = useState(false)
+  const [pipelineProgress, setPipelineProgress] = useState<{ stepNumber: number; title: string } | null>(null)
   // Surfaced AM-handoff timeline notes from strategic_goals (Phase 3).
   // Shown above the progress card so the strategist sees constraints
   // BEFORE they fire any pipeline step.

@@ -46,6 +46,7 @@ import { promoteActionItem } from './_lib/ops/promote-action-item.ts'
 import { getActionItemContent } from './_lib/ops/get-action-item.ts'
 import { listDatabasePagesWithContent } from './_lib/ops/list-database-pages-with-content.ts'
 import { syncIntakeDocFromNotion } from './_lib/ops/sync-intake-doc-from-notion.ts'
+import { listPartnerSiteNotes } from './_lib/ops/list-partner-site-notes.ts'
 import type {
   InitiativeWritable, InitiativeCreate, MilestoneWritable, MilestoneCreate,
   ProgressWritable, ProgressCreate, DocWritable, DocCreate, StrategyEntity,
@@ -299,6 +300,13 @@ serve(async (req: Request) => {
       // the strategy_brief / content_strategy categories can be authored
       // in Notion and read by the cowork pipeline without a separate
       // upload step. Idempotent per (project_id, page_id).
+      // Web support docs — Partner site notes filtered out of the
+      // Web Support database, surfaced on the Church details page.
+      case 'list-partner-site-notes': {
+        const { titleFilter, limit } = args as { titleFilter?: string; limit?: number }
+        return json({ notes: await listPartnerSiteNotes({ titleFilter, limit }) })
+      }
+
       case 'sync-intake-doc-from-notion': {
         const { projectId, notionUrl, category, uploadedBy } = args as {
           projectId?: string; notionUrl?: string
