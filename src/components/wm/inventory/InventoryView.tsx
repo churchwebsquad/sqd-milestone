@@ -29,6 +29,7 @@ import {
 import { PARTNER_GROUPS, type PartnerBucket } from '../../../lib/webPartnerGroups'
 import { computeBaselineCoverage, type BaselineCoverage } from '../../../lib/webPartnerBaselines'
 import { sanitizeTopicsForPartner } from '../../../lib/sanitizeInventoryForPartner'
+import { detectToolFromUrl } from '../../../lib/partnerToolUrl'
 import { WMRichTextEditor } from '../RichTextEditor'
 import { FileUploadField } from '../../contentcollection/FileUploadField'
 import type { AttachmentMetadata } from '../../../lib/contentCollectionAttachments'
@@ -73,7 +74,13 @@ export type SaveMark = (
   kind: 'topic' | 'program' | 'topic_item' | 'missing_program',
   status: MarkStatus,
   note?: string | null,
-  extra?: { proposed_program_name?: string | null; proposed_program_description?: string | null },
+  extra?: {
+    proposed_program_name?:        string | null
+    proposed_program_description?: string | null
+    /** Structured intent (v109). NULL/undefined = legacy/program-shaped
+     *  add. {kind:"cta", url, tool, language?} for first-class CTAs. */
+    proposed_metadata?:            Record<string, unknown> | null
+  },
 ) => Promise<void>
 
 /** Attachment row shape — mirrors strategy_content_collection_attachments.
@@ -3227,20 +3234,35 @@ function AddMissingButton({
   programScope?: { programSlug: string; programName: string }
 }) {
   const [open, setOpen] = useState(false)
+  // Add-kind picker (v109). Two modes:
+  //   - 'program' (default, legacy behavior unchanged): name + description
+  //   - 'cta':    action title + invitation copy + URL + tool detection
+  // Baseline prefills always force program mode — the baseline field
+  // semantics expect a value, not a CTA.
+  const [addKind, setAddKind] = useState<'program' | 'cta'>('program')
   const [name, setName] = useState(prefillField?.label ?? '')
   const [desc, setDesc] = useState('')
+  const [ctaUrl, setCtaUrl] = useState('')
   const attCtx = useAttachmentContext()
+
+  // Run the tool detector on every URL change. Cheap (regex+URL parse);
+  // safe to recompute on every render.
+  const detected = useMemo(() => detectToolFromUrl(ctaUrl), [ctaUrl])
 
   // Path scopes the uniqueness check — baseline-tied additions cluster
   // under their own prefix so a partner can add multiple entries to
   // the same baseline (e.g., several service times) without collision.
   // Program-scoped additions cluster under `program-<slug>` so the
   // downstream pipeline can route them to the right program card.
+  // CTA additions use a `cta-` prefix so the strategist's downstream
+  // review can pre-sort first-class CTAs from generic programs.
   const pathPrefix = prefillField
     ? `missing:${bucketKey}/baseline-${prefillField.key}-`
     : programScope
       ? `missing:${bucketKey}/program-${programScope.programSlug}/`
-      : `missing:${bucketKey}/`
+      : addKind === 'cta'
+        ? `missing:${bucketKey}/cta-`
+        : `missing:${bucketKey}/`
   const counter = Array.from(marks?.keys() ?? []).filter(k => k.startsWith(pathPrefix)).length
 
   // Pre-compute the target_path so partners can attach files BEFORE
@@ -3256,14 +3278,51 @@ function AddMissingButton({
 
   const myAttachments = (attCtx?.attachments ?? []).filter(a => a.target_path === provisionalPath)
 
-  const canSubmit = name.trim().length > 0 && desc.trim().length > 0
+  // CTA submit requires action title + URL that at least parses.
+  // Invitation copy is optional (sometimes the URL + label is enough).
+  // Program submit unchanged.
+  const ctaUrlIsValid = (() => {
+    const v = ctaUrl.trim()
+    if (!v) return false
+    try {
+      // Tolerate "mlc.churchcenter.com/..." (no protocol) by prepending
+      // https:// only for the parse check — what we save is what the
+      // partner typed.
+      new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`)
+      return true
+    } catch { return false }
+  })()
+  const canSubmit = addKind === 'cta'
+    ? (name.trim().length > 0 && ctaUrlIsValid)
+    : (name.trim().length > 0 && desc.trim().length > 0)
   const submit = async () => {
     if (!canSubmit) return
-    await saveMark(provisionalPath, 'missing_program', 'outdated', desc.trim(), {
-      proposed_program_name: name.trim(),
-      proposed_program_description: desc.trim(),
-    })
-    setName(prefillField?.label ?? ''); setDesc(''); setOpen(false)
+    if (addKind === 'cta') {
+      // Compose a human-readable description from the copy + URL so legacy
+      // readers that don't know about proposed_metadata still see something
+      // useful in proposed_program_description.
+      const trimmedCopy = desc.trim()
+      const composed = trimmedCopy
+        ? `${trimmedCopy}\n\n${ctaUrl.trim()}`
+        : ctaUrl.trim()
+      await saveMark(provisionalPath, 'missing_program', 'outdated', composed, {
+        proposed_program_name: name.trim(),
+        proposed_program_description: composed,
+        proposed_metadata: {
+          kind:   'cta',
+          url:    ctaUrl.trim(),
+          tool:   detected.tool,
+          copy:   trimmedCopy || null,
+          action: name.trim(),
+        },
+      })
+    } else {
+      await saveMark(provisionalPath, 'missing_program', 'outdated', desc.trim(), {
+        proposed_program_name: name.trim(),
+        proposed_program_description: desc.trim(),
+      })
+    }
+    setName(prefillField?.label ?? ''); setDesc(''); setCtaUrl(''); setOpen(false)
   }
 
   const triggerCls = compact
@@ -3297,27 +3356,96 @@ function AddMissingButton({
               Adding to <span className="font-semibold text-deep-plum">{programScope.programName}</span>. The Web Squad will slot this into the right section (details, meeting time, FAQ, etc.).
             </p>
           )}
-          <PartnerTextInput
-            label="What's it called?"
-            required
-            placeholder={prefillField?.label ?? (programScope ? 'e.g. Childcare available' : 'e.g. Wednesday Youth Night')}
-            value={name}
-            onChange={setName}
-          />
-          <PartnerRichTextField
-            label="Tell us about it"
-            required
-            minHeight={120}
-          >
-            <WMRichTextEditor
-              value={desc}
-              onChange={setDesc}
-              placeholder={prefillField?.description
-                ? `${prefillField.description}`
-                : 'Who it\'s for, when it meets, where, and any key details you want included on the new site.'}
-              compact
-            />
-          </PartnerRichTextField>
+
+          {/* Kind picker — only shown when there's no baseline prefill
+              (baselines are always program-shaped). Default 'program'
+              preserves the original behavior exactly; 'cta' opts into
+              the structured call-to-action shape (URL + tool tag). */}
+          {!prefillField && (
+            <div className="inline-flex rounded-full border border-lavender bg-cream/60 p-0.5 text-[11px] font-semibold mb-1">
+              <button
+                type="button"
+                onClick={() => setAddKind('program')}
+                className={[
+                  'px-3 py-1 rounded-full transition-colors',
+                  addKind === 'program' ? 'bg-deep-plum text-cream' : 'text-purple-gray hover:text-deep-plum',
+                ].join(' ')}
+              >
+                Item or program
+              </button>
+              <button
+                type="button"
+                onClick={() => setAddKind('cta')}
+                className={[
+                  'px-3 py-1 rounded-full transition-colors',
+                  addKind === 'cta' ? 'bg-deep-plum text-cream' : 'text-purple-gray hover:text-deep-plum',
+                ].join(' ')}
+              >
+                Link / call-to-action
+              </button>
+            </div>
+          )}
+
+          {addKind === 'cta' ? (
+            <>
+              <PartnerTextInput
+                label="What does this help someone do?"
+                required
+                placeholder={detected.actionHint ?? 'e.g. Join a small group, Submit a prayer request'}
+                value={name}
+                onChange={setName}
+              />
+              <PartnerTextInput
+                label="Link"
+                required
+                placeholder="https://..."
+                value={ctaUrl}
+                onChange={setCtaUrl}
+              />
+              {detected.tool && detected.label && (
+                <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1">
+                  Detected: <span className="font-semibold">{detected.label}</span>
+                  {detected.isFormish && ' — looks like a sign-up / form'}
+                  . We'll route this as a call-to-action on your new site.
+                </p>
+              )}
+              <PartnerRichTextField
+                label="Invitation copy (optional)"
+                minHeight={80}
+              >
+                <WMRichTextEditor
+                  value={desc}
+                  onChange={setDesc}
+                  placeholder="Short paragraph that invites someone to click. Skip if the link + label say enough."
+                  compact
+                />
+              </PartnerRichTextField>
+            </>
+          ) : (
+            <>
+              <PartnerTextInput
+                label="What's it called?"
+                required
+                placeholder={prefillField?.label ?? (programScope ? 'e.g. Childcare available' : 'e.g. Wednesday Youth Night')}
+                value={name}
+                onChange={setName}
+              />
+              <PartnerRichTextField
+                label="Tell us about it"
+                required
+                minHeight={120}
+              >
+                <WMRichTextEditor
+                  value={desc}
+                  onChange={setDesc}
+                  placeholder={prefillField?.description
+                    ? `${prefillField.description}`
+                    : 'Who it\'s for, when it meets, where, and any key details you want included on the new site.'}
+                  compact
+                />
+              </PartnerRichTextField>
+            </>
+          )}
           {attCtx && (
             <FileUploadField
               sessionId={attCtx.sessionId}

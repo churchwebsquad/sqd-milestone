@@ -415,7 +415,13 @@ export default function ContentCollectionPage() {
         client_note: note ?? null,
         proposed_program_name: extra?.proposed_program_name ?? null,
         proposed_program_description: extra?.proposed_program_description ?? null,
-      }, { onConflict: 'session_id,target_path' })
+        // v109 — structured intent column. Persisted only when caller
+        // supplies a payload (CTA mode adds {kind, url, tool, ...});
+        // legacy callers pass nothing and the column stays NULL.
+        ...(extra?.proposed_metadata !== undefined
+          ? { proposed_metadata: extra.proposed_metadata }
+          : {}),
+      } as Record<string, unknown>, { onConflict: 'session_id,target_path' })
       .select('id')
       .single()
     if (error) {
