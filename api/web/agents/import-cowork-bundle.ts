@@ -226,6 +226,25 @@ export default async function handler(req: any, res: any) {
     const buildDirectives = Array.isArray(bundle.build_directives) ? bundle.build_directives : []
     delete planForRoadmap.build_directives
 
+    // Stamp _meta.generated_at if the skill didn't include it. The
+    // stepCatalog's computeStatus for plan-cross-page-allocation reads
+    // this timestamp to mark the step done; without it, the step
+    // stays as 'cowork_session' (i.e., "still needs to be run") and
+    // every downstream per-page step (outline / draft / critique) is
+    // gated as blocked_waiting. Canyon Del Oro shipped without this
+    // field and was invisibly stuck until manual backfill. Preserve
+    // any existing _meta the skill wrote; only fill in generated_at
+    // when it's missing.
+    const incomingMeta = (planForRoadmap as { _meta?: Record<string, unknown> })._meta
+    const metaIsObject = incomingMeta && typeof incomingMeta === 'object' && !Array.isArray(incomingMeta)
+    const existingGeneratedAt = metaIsObject ? (incomingMeta as { generated_at?: unknown }).generated_at : undefined
+    if (!existingGeneratedAt || typeof existingGeneratedAt !== 'string') {
+      ;(planForRoadmap as { _meta?: Record<string, unknown> })._meta = {
+        ...(metaIsObject ? incomingMeta : {}),
+        generated_at: new Date().toISOString(),
+      }
+    }
+
     try {
       await setRoadmapStateAtomic(sb, projectId, ['page_allocation_plan'], planForRoadmap)
       if (buildDirectives.length > 0) {
