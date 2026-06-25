@@ -412,24 +412,9 @@ function IntakeRow({
 
       {/* Special per-row affordances */}
       {rowKey === 'strategy_brief' && (
-        <NotionUrlField
-          value={project.strategy_brief_notion_url ?? ''}
-          onSave={async (v) => {
-            const { error } = await supabase
-              .from('strategy_web_projects')
-              .update({ strategy_brief_notion_url: v.trim() || null })
-              .eq('id', project.id)
-            if (!error) onProjectChange({ strategy_brief_notion_url: v.trim() || null })
-          }}
-          label="Notion URL (optional — leave blank to auto-find by Member # in the All-In Documents DB)"
-          placeholder="https://www.notion.so/…"
-          syncTarget={{
-            projectId: project.id,
-            category:  'strategy_brief',
-            member:    typeof project.member === 'number' ? project.member : undefined,
-          }}
-          onSynced={onChange}
-        />
+        <p className="mt-3 text-[11px] text-purple-gray italic">
+          Auto-synced from the All-In Documents Notion database every 15 minutes — matched by Member # + Doc Type=Strategy Brief. No action needed here.
+        </p>
       )}
       {rowKey === 'brand_handoff' && (
         <NotionUrlField

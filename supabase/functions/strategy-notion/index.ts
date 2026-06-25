@@ -47,6 +47,7 @@ import { getActionItemContent } from './_lib/ops/get-action-item.ts'
 import { listDatabasePagesWithContent } from './_lib/ops/list-database-pages-with-content.ts'
 import { syncIntakeDocFromNotion } from './_lib/ops/sync-intake-doc-from-notion.ts'
 import { syncStrategyBriefByMember } from './_lib/ops/sync-strategy-brief-by-member.ts'
+import { autoSyncAllStrategyBriefs } from './_lib/ops/auto-sync-all-strategy-briefs.ts'
 import { listPartnerSiteNotes } from './_lib/ops/list-partner-site-notes.ts'
 import type {
   InitiativeWritable, InitiativeCreate, MilestoneWritable, MilestoneCreate,
@@ -343,6 +344,15 @@ serve(async (req: Request) => {
           category:   category ?? 'strategy_brief',
           uploadedBy: uploadedBy ?? null,
         }))
+      }
+
+      // ── Auto-sync sweeper for ALL strategy briefs ────────────────────
+      // No args. Walks every Strategy Brief in the All-In Documents DB,
+      // matches by Member # rollup against active web projects, and
+      // syncs anything new or freshly-edited. Triggered by pg_cron;
+      // safe to fire manually for backfill.
+      case 'auto-sync-all-strategy-briefs': {
+        return json(await autoSyncAllStrategyBriefs())
       }
 
       case 'list-doc-comments': {
