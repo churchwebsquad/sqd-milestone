@@ -70,17 +70,27 @@ export default function RegistrarIntakePage() {
           .eq('portal_token', token)
           .maybeSingle()
         if (!p) { if (!cancelled) setNotFound(true); return }
+        const partnerMember = (p as { member: number }).member
+        const partnerChurchName = (p as { church_name: string | null }).church_name
 
         // 2. Find the right content collection session for this
-        // partner. Prefer an OPEN session; only fall back to the latest
-        // (submitted/closed) when there's no open one. We do NOT
-        // auto-create — sessions are provisioned by staff so they're
-        // tied to the partner's web project + onboarding state.
+        // partner. Prefer an OPEN session; only fall back to the
+        // latest (submitted/closed) when there's no open one.
+        //
+        // Migration-only intent: this link often arrives BEFORE the
+        // partner enters the redesign pipeline (we share it with
+        // migrate-only churches and pre-redesign partners). If no
+        // session exists yet, lazily provision one so the migration
+        // form works standalone — but skip all downstream automation
+        // (no crawl, no AM Slack notif, no inventory snapshot). The
+        // session is just a parking spot for the registrar/hosting
+        // answers; staff can layer the full content collection on
+        // top later without losing the migration data.
         const sessionCols = 'id, status, created_at, domain_registrar_url, domain_credential_method, domain_invite_confirmed, domain_one_password_invite_url, current_host'
         const { data: openS } = await supabase
           .from('strategy_content_collection_sessions')
           .select(sessionCols)
-          .eq('member', (p as { member: number }).member)
+          .eq('member', partnerMember)
           .eq('status', 'open')
           .order('created_at', { ascending: false })
           .limit(1)
@@ -90,11 +100,15 @@ export default function RegistrarIntakePage() {
           const { data: anyS } = await supabase
             .from('strategy_content_collection_sessions')
             .select(sessionCols)
-            .eq('member', (p as { member: number }).member)
+            .eq('member', partnerMember)
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle()
           s = anyS as (RegistrarFields & { id: string; status: 'open' | 'submitted' | 'closed' }) | null
+        }
+        if (!s) {
+          const provisioned = await provisionMigrationOnlySession(partnerMember, partnerChurchName)
+          if (provisioned) s = provisioned
         }
         if (!s) { if (!cancelled) setNoSession(true); return }
         if (cancelled) return
@@ -120,6 +134,81 @@ export default function RegistrarIntakePage() {
 
     return () => { cancelled = true }
   }, [token])
+
+  /** Lazily provision a content-collection session for a partner who
+   *  hits the migration link before any session exists. Steps:
+   *
+   *    1. Find-or-create a `strategy_web_projects` row for the member
+   *       (kind='redesign' default works fine — we don't have a
+   *       dedicated 'migration-only' kind, and forcing one would
+   *       require schema changes). crawl_excluded=true so any
+   *       downstream crawl-auto-fire logic skips this project.
+   *    2. Insert a `strategy_content_collection_sessions` row tied to
+   *       that project, status='open', empty inventory_snapshot.
+   *
+   *  No edge functions invoked, no Slack notifs, no crawl triggers —
+   *  just two row inserts that mirror what staff would do manually.
+   *  Returns the session in the same shape the loader expects, or
+   *  null on failure (caller falls back to the "no session" message).
+   */
+  async function provisionMigrationOnlySession(
+    member: number,
+    churchName: string | null,
+  ): Promise<(RegistrarFields & { id: string; status: 'open' | 'submitted' | 'closed' }) | null> {
+    try {
+      // Find an existing project for this member, archived or not.
+      let projectId: string | null = null
+      const { data: existingProj } = await supabase
+        .from('strategy_web_projects')
+        .select('id')
+        .eq('member', member)
+        .eq('archived', false)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      projectId = (existingProj as { id: string } | null)?.id ?? null
+
+      if (!projectId) {
+        const projectName = churchName ? `${churchName} — Migration` : `Member ${member} — Migration`
+        const { data: newProj, error: projErr } = await supabase
+          .from('strategy_web_projects')
+          .insert({
+            member,
+            name:           projectName,
+            kind:           'redesign',
+            current_phase:  'intake',
+            roadmap_stage:  'pre_intake',
+            crawl_excluded: true,
+          } as never)
+          .select('id')
+          .maybeSingle()
+        if (projErr || !newProj) {
+          console.error('[registrar-intake] auto-provision project failed', projErr)
+          return null
+        }
+        projectId = (newProj as { id: string }).id
+      }
+
+      const { data: newSession, error: sessErr } = await supabase
+        .from('strategy_content_collection_sessions')
+        .insert({
+          web_project_id:      projectId,
+          member,
+          status:              'open',
+          inventory_snapshot:  {},
+        } as never)
+        .select('id, status, created_at, domain_registrar_url, domain_credential_method, domain_invite_confirmed, domain_one_password_invite_url, current_host')
+        .maybeSingle()
+      if (sessErr || !newSession) {
+        console.error('[registrar-intake] auto-provision session failed', sessErr)
+        return null
+      }
+      return newSession as RegistrarFields & { id: string; status: 'open' | 'submitted' | 'closed' }
+    } catch (err) {
+      console.error('[registrar-intake] auto-provision threw', err)
+      return null
+    }
+  }
 
   /** Persist a single field. Writes go to the same row the main
    *  content collection writes to, so the two surfaces stay in sync

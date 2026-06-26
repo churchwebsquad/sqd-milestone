@@ -463,6 +463,13 @@ export default function PortalReviewPage() {
       .from('web_reviews')
       .update({ notes: merged } as never)
       .eq('id', data.review.id)
+    // Slack notify — fire-and-forget; never blocks. Headline depends
+    // on edit count: "ready for design" (0 edits) vs "schedule
+    // revisions" (1+). Server-side decision so the message stays
+    // accurate even if the partner clicks finish multiple times.
+    void supabase.functions.invoke('notify-web-review-submitted', {
+      body: { review_id: data.review.id },
+    }).catch(err => { console.error('[slack notify] markFinished failed', err) })
     setFinishedAt(stamp)
     setFinishing(false)
   }
@@ -499,6 +506,11 @@ export default function PortalReviewPage() {
       .from('web_reviews')
       .update({ notes: merged } as never)
       .eq('id', data.review.id)
+    // Slack notify — approveSite path means 0 edits, so the headline
+    // will say "ready for design". Same fire-and-forget pattern.
+    void supabase.functions.invoke('notify-web-review-submitted', {
+      body: { review_id: data.review.id },
+    }).catch(err => { console.error('[slack notify] approveSite failed', err) })
     await loadMyComments()
     setFinishedAt(stamp)
     setFinishing(false)
