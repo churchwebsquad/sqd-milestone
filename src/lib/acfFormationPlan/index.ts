@@ -15,6 +15,7 @@ import type { ContentModelPlan, ClassificationRecord } from './types'
 import { loadProjectInputs, type FormationInputs } from './sources'
 import {
   buildAcfFieldGroups,
+  buildDiscoverySections,
   buildWpObjects,
   classifyOne,
   detectFlexibleContentPages,
@@ -74,6 +75,14 @@ export async function computeFormationPlan(
   // Layer 3 — ACF field groups.
   const layer3 = buildAcfFieldGroups(layer2, layer1, inputs)
 
+  // Discovery — per-section "what's here" summaries grouped by page
+  // at render time. The strategist needs this granularity (Pastors
+  // vs Ministry Leaders vs Elders all use the same team_grid template
+  // but carry different schemas + ship to different targets — they
+  // need to be visible as DISTINCT discovery rows even though they
+  // all roll up to the same staff CPT in the analyzer's suggestion).
+  const discoverySections = buildDiscoverySections(inputs, layer1)
+
   // Envelope + _meta.
   const plan: ContentModelPlan = {
     schema_version: 1,
@@ -92,6 +101,7 @@ export async function computeFormationPlan(
     layer_1_classifications:  layer1,
     layer_2_wp_objects:       layer2,
     layer_3_acf_field_groups: layer3,
+    discovery_sections:       discoverySections,
   }
 
   return plan

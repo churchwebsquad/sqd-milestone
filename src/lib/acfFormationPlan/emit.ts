@@ -1493,6 +1493,207 @@ function findSection(inputs: FormationInputs, sectionId: string): WebSection | n
 }
 
 // ═════════════════════════════════════════════════════════════════════
+// PART D bis — Section discovery summaries
+// ═════════════════════════════════════════════════════════════════════
+//
+// One DiscoverySection per approved section (excluding chrome). Carries
+// the section's heading, item count, schema, sample names, and a
+// target hint so the dev handoff can show "what's here" grouped by
+// section (not just by suggested CPT). The strategist's mental model
+// is per-section: "Pastors" and "Ministry Leaders" are both staff-
+// shaped but with different schemas + targets, and they want to see
+// both broken out.
+
+import type { DiscoverySection } from './types'
+
+export function buildDiscoverySections(
+  inputs: FormationInputs,
+  classifications: ClassificationRecord[],
+): DiscoverySection[] {
+  const out: DiscoverySection[] = []
+  for (const page of inputs.approvedPages) {
+    const sections = inputs.sectionsByPage.get(page.id) ?? []
+    for (const section of sections) {
+      // Skip chrome (header/footer/etc.) — they're not editable content.
+      if (section.section_role && CHROME_ROLES.has(section.section_role)) continue
+      const template = section.content_template_id
+        ? inputs.templatesById.get(section.content_template_id) ?? null
+        : null
+      if (!template?.fields) continue
+      const fv = (section.field_values as Record<string, unknown> | null) ?? {}
+
+      // ── Heading: try field_values primary_heading / heading, then
+      //    section_role_label, then template layer_name. ────────────
+      const heading = headingForSection(section, template, fv)
+
+      // ── Item count + schema: walk the FIRST group field and use
+      //    its items array. When the section has no group, treat it
+      //    as a single record and pull the top-level slot keys. ───
+      const { count, schema, sampleNames } = analyzeSectionItems(template, fv)
+
+      // ── Target hint: derive from section_role + CPT suggestion +
+      //    display_preference context. ───────────────────────────
+      const targetHint = inferTargetHint(section.section_role, inputs, classifications)
+
+      // Cross-reference the analyzer's CPT suggestion for this section.
+      const cptRef = classifications
+        .find(c => c.section_id === section.id && c.cpt_subroutine_ref)
+        ?.cpt_subroutine_ref ?? null
+
+      out.push({
+        section_id:        section.id,
+        web_page_id:       section.web_page_id,
+        page_slug:         page.slug,
+        page_name:         page.name ?? page.slug,
+        heading,
+        section_role:      section.section_role,
+        item_count:        count,
+        schema,
+        sample_names:      sampleNames,
+        target_hint:       targetHint,
+        cpt_subroutine_ref: cptRef,
+      })
+    }
+  }
+  return out
+}
+
+function headingForSection(
+  section: WebSection,
+  template: WebContentTemplate,
+  fv: Record<string, unknown>,
+): string {
+  for (const key of ['primary_heading', 'heading', 'title']) {
+    const v = fv[key]
+    if (typeof v === 'string' && v.trim()) return v.trim().replace(/<[^>]+>/g, '').slice(0, 120)
+  }
+  const cw = section.cowork_slot_values as Record<string, unknown> | null
+  if (cw) {
+    for (const key of ['primary_heading', 'heading']) {
+      const v = cw[key]
+      if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 120)
+    }
+  }
+  if (section.section_role_label?.trim()) return section.section_role_label.trim()
+  return template.layer_name ?? '(unnamed section)'
+}
+
+function analyzeSectionItems(
+  template: WebContentTemplate,
+  fv: Record<string, unknown>,
+): { count: number; schema: string[]; sampleNames: string[] } {
+  // Find the section's primary group field — the one whose items
+  // array drives the section's "what's here" view. Heuristic: first
+  // group whose array isn't empty. Recurse one level into nested
+  // groups (row_grid > card_team pattern) so we land on real items.
+  for (const def of template.fields) {
+    if (def.kind !== 'group') continue
+    const arr = fv[def.key]
+    if (!Array.isArray(arr) || arr.length === 0) continue
+    // Recurse into the deepest non-empty group level.
+    const { items, schemaFromGroup } = drillToLeafItems(def, arr)
+    if (items.length === 0) continue
+    return {
+      count:        items.length,
+      schema:       schemaFromGroup,
+      sampleNames:  items.slice(0, 3).map(itemSummary).filter(Boolean) as string[],
+    }
+  }
+  // No group field — treat as a single record. Schema is the
+  // top-level slot keys with non-empty values.
+  const topSchema = template.fields
+    .filter(d => d.kind === 'slot')
+    .map(d => d.key)
+    .filter(k => fv[k] != null && String(fv[k]).trim() !== '')
+  return { count: 1, schema: topSchema, sampleNames: [] }
+}
+
+function drillToLeafItems(
+  group: WebGroupDef,
+  arr: unknown[],
+): { items: Record<string, unknown>[]; schemaFromGroup: string[] } {
+  // If items contain a nested group's array (e.g. row_grid items
+  // each carrying a card_team array), drill in and aggregate ALL
+  // leaf items across the parent's array.
+  const itemSchema = Array.isArray(group.item_schema) ? group.item_schema : []
+  const nestedGroups = itemSchema.filter((f): f is WebGroupDef => f.kind === 'group')
+  if (nestedGroups.length > 0) {
+    const leaves: Record<string, unknown>[] = []
+    for (const item of arr) {
+      if (item == null || typeof item !== 'object') continue
+      const obj = item as Record<string, unknown>
+      for (const ng of nestedGroups) {
+        const subArr = obj[ng.key]
+        if (Array.isArray(subArr) && subArr.length > 0) {
+          const recursed = drillToLeafItems(ng, subArr)
+          leaves.push(...recursed.items)
+        }
+      }
+    }
+    if (leaves.length > 0) {
+      // Schema = the LEAF group's item_schema (one level deeper).
+      const leafSchema = nestedGroups[0].item_schema
+        ?.filter(f => f.kind === 'slot')
+        .map(f => f.key) ?? []
+      return { items: leaves, schemaFromGroup: leafSchema }
+    }
+  }
+  // No nested groups (or none with items) — use this level.
+  const items = arr.filter((x): x is Record<string, unknown> => x != null && typeof x === 'object' && !Array.isArray(x))
+  const schemaFromGroup = itemSchema
+    .filter(f => f.kind === 'slot')
+    .map(f => f.key)
+  return { items, schemaFromGroup }
+}
+
+function itemSummary(item: Record<string, unknown>): string | null {
+  for (const key of ['team_name', 'name', 'title', 'heading', 'item_heading', 'primary_heading']) {
+    const v = item[key]
+    if (typeof v === 'string' && v.trim()) {
+      return v.trim().replace(/<[^>]+>/g, '').slice(0, 80)
+    }
+  }
+  return null
+}
+
+function inferTargetHint(
+  role: SectionRole | null,
+  inputs: FormationInputs,
+  classifications: ClassificationRecord[],
+): DiscoverySection['target_hint'] {
+  if (!role) return 'unknown'
+  // Detail roles always point at individual pages.
+  if (role.endsWith('_detail')) return 'individual-page'
+  // Listing roles (team_grid, blog_listing, etc.) — defer to the
+  // analyzer's CPT recommendation. If single_template enabled,
+  // individual page; else flat list.
+  if (CPT_SECTION_ROLES.has(role)) {
+    const slug = CPT_SLUG_BY_ROLE[role]
+    if (slug) {
+      const cpt = inputs  // reach into classifications to find suggestion
+      const ref = `wp_object.${slug}`
+      const cls = classifications.find(c => c.cpt_subroutine_ref === ref)
+      // Without re-looking-up the WpObject, default by section_role's
+      // single_template default. Conservative default per the
+      // strategist's heuristic: listings (team_grid) → flat-list,
+      // since detail roles are separate (staff_member_detail).
+      void cpt; void cls
+      const isListing = role === 'team_grid' || role === 'team_carousel' ||
+                        role === 'blog_listing' || role === 'blog_featured' ||
+                        role === 'career_listing'
+      return isListing ? 'flat-list' : 'individual-page'
+    }
+  }
+  // Display-preference-driven roles (event_detail, etc.) — derive.
+  if (role === 'event_detail') {
+    const pref = inputs.displayPreferences.events
+    if (pref === 'external' || pref === 'embed') return 'embed'
+    return 'individual-page'
+  }
+  return 'unknown'
+}
+
+// ═════════════════════════════════════════════════════════════════════
 // PART D — Page-level Flexible Content detection (Rule 6)
 // ═════════════════════════════════════════════════════════════════════
 

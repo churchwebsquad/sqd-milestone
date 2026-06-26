@@ -810,91 +810,88 @@ function OpenQuestionRow({
   )
 }
 
-/** "What's sitting here to be organized" — discovery panel. Groups
- *  the partner's content by CONCEPT (Staff / Events / Sermons / etc.)
- *  with record counts, pages, data points, and sample names. This is
- *  the framing McNeel needs to scan first — what's there to model,
- *  not the analyzer's specific structural choices. The analyzer's
- *  recommendation is in CmWpObjectsPanel below as a reference. */
+/** "What's sitting here to be organized" — per-section discovery
+ *  panel. Groups by PAGE; within each page shows one row per content
+ *  section with its heading + item count + schema + sample. Mirrors
+ *  the markdown's discovery framing — section-anchored, not CPT-
+ *  anchored, so the strategist sees Pastors / Ministry Leaders /
+ *  Elders / Board as separate even when they all roll up to the
+ *  same suggested staff CPT. */
 function CmConceptsFoundPanel({ plan }: { plan: ContentModelPlan }) {
-  const cpts    = plan.layer_2_wp_objects.filter(o => o.kind === 'custom_post_type')
+  const ds = plan.discovery_sections ?? []
   const options = plan.layer_2_wp_objects.filter(o => o.kind === 'options_page')
-  if (cpts.length === 0 && options.length === 0) return null
+  if (ds.length === 0 && options.length === 0) return null
 
-  // For each CPT, count records + collect page list from classifications
-  const pagesByCpt = new Map<string, Set<string>>()
-  for (const c of plan.layer_1_classifications) {
-    if (!c.cpt_subroutine_ref) continue
-    const set = pagesByCpt.get(c.cpt_subroutine_ref) ?? new Set<string>()
-    set.add(c.page_slug)
-    pagesByCpt.set(c.cpt_subroutine_ref, set)
+  // Group sections by page slug
+  const byPage = new Map<string, typeof ds>()
+  for (const s of ds) {
+    const list = byPage.get(s.page_slug) ?? []
+    list.push(s)
+    byPage.set(s.page_slug, list)
   }
-  const conceptLabel = (slug: string) => {
-    const known: Record<string, string> = {
-      staff:  'Staff', event: 'Events', sermon: 'Sermons',
-      group:  'Groups', career: 'Careers', post:  'Blog Posts',
-    }
-    if (known[slug]) return known[slug]
-    const cap = slug.charAt(0).toUpperCase() + slug.slice(1)
-    return cap.endsWith('s') ? cap : `${cap}s`
+  const pagesSorted = [...byPage.entries()].sort((a, b) => b[1].length - a[1].length)
+
+  const targetLabel: Record<string, string> = {
+    'individual-page': 'individual detail page per item',
+    'flat-list':       'flat list, no individual pages',
+    'embed':           'embedded from third-party',
+    'external':        'linked out to third-party',
+    'mailto':          'mailto contact',
+    'unknown':         'strategist confirms',
   }
 
   return (
     <div className="mt-5 pt-4 border-t border-wm-border">
       <div className="text-[10px] uppercase tracking-wider text-wm-text-subtle mb-1">What's sitting here to be organized</div>
       <p className="text-[11px] text-wm-text-muted mb-3">
-        Grouped by concept. <strong>Discovery view</strong> — what the analyzer found, not how to model it. Decide your own placement; the analyzer's suggested CPT / Options structure is in the next section.
+        Per-section discovery, grouped by page. Each section gets its own row — same template can carry different schemas + targets (e.g. Pastors get detail pages; Ministry Leaders go flat). Decide model from this; analyzer's suggested CPT structure is in the next section as a reference.
       </p>
-      <div className="space-y-2">
-        {cpts.map(c => {
-          if (c.kind !== 'custom_post_type') return null
-          const group = plan.layer_3_acf_field_groups.find(g =>
-            g.location.some(or => or.some(r => r.param === 'post_type' && r.value === c.slug))
-          )
-          const rows  = group?._content_rows ?? []
-          const pages = pagesByCpt.get(c.id) ?? new Set<string>()
-          const dataPoints = new Set<string>()
-          for (const row of rows) for (const k of Object.keys(row)) if (!k.startsWith('_')) dataPoints.add(k)
-          // Sample names: best-effort pluck the first humanish string per record
-          const sampleNames = rows.slice(0, 3).map(r => {
-            for (const key of ['team_name', 'name', 'title', 'heading', 'item_heading']) {
-              const v = r[key]
-              if (typeof v === 'string' && v.trim()) return v.trim().replace(/<[^>]+>/g, '').slice(0, 50)
-            }
-            return null
-          }).filter(Boolean) as string[]
-          return (
-            <div key={c.id} className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
-              <p className="text-[12.5px] font-bold text-wm-text">{conceptLabel(c.slug)}</p>
-              {rows.length === 0 ? (
-                <p className="text-[11px] text-wm-text-subtle italic mt-1">No records extracted yet — content may still be in template placeholder state, or listing sections haven't been bound.</p>
-              ) : (
-                <>
-                  <p className="text-[11px] text-wm-text-muted mt-0.5">
-                    <strong className="text-wm-text">{rows.length} record{rows.length === 1 ? '' : 's'}</strong> found across <strong className="text-wm-text">{pages.size} page{pages.size === 1 ? '' : 's'}</strong>
-                  </p>
-                  {pages.size > 0 && (
-                    <p className="text-[10.5px] text-wm-text-subtle mt-0.5">
-                      Pages: {[...pages].slice(0, 6).map(p => <code key={p} className="text-[10px] mr-1">/{p}</code>)}
-                      {pages.size > 6 && <span>+{pages.size - 6} more</span>}
+      <div className="space-y-3">
+        {pagesSorted.map(([pageSlug, sections]) => (
+          <details key={pageSlug} className="rounded-md border border-wm-border bg-wm-bg-elevated">
+            <summary className="px-3 py-2 cursor-pointer text-[12px] font-semibold text-wm-text">
+              {sections[0]?.page_name ?? pageSlug} <code className="text-[10px] text-wm-text-subtle ml-1">/{pageSlug}</code>
+              <span className="ml-2 text-[10px] text-wm-text-subtle font-normal">· {sections.length} section{sections.length === 1 ? '' : 's'}</span>
+            </summary>
+            <div className="border-t border-wm-border/60 divide-y divide-wm-border/40">
+              {sections.map(s => {
+                const suggestedCpt = s.cpt_subroutine_ref
+                  ? plan.layer_2_wp_objects.find(o => o.id === s.cpt_subroutine_ref)
+                  : null
+                const cptSuggestion = suggestedCpt?.kind === 'custom_post_type' ? suggestedCpt.slug : null
+                return (
+                  <div key={s.section_id} className="px-3 py-2">
+                    <p className="text-[12px] font-semibold text-wm-text">
+                      {s.heading}
+                      {cptSuggestion && (
+                        <span className="ml-2 text-[10px] font-normal text-wm-text-subtle">
+                          · analyzer suggests CPT <code className="text-[10px]">{cptSuggestion}</code>
+                        </span>
+                      )}
                     </p>
-                  )}
-                  {dataPoints.size > 0 && (
-                    <p className="text-[10.5px] text-wm-text-subtle mt-0.5">
-                      Data points: {[...dataPoints].slice(0, 8).map(d => <code key={d} className="text-[10px] mr-1">{d}</code>)}
-                      {dataPoints.size > 8 && <span>+{dataPoints.size - 8}</span>}
+                    <p className="text-[10.5px] text-wm-text-muted mt-0.5">
+                      <strong className="text-wm-text">{s.item_count}</strong> item{s.item_count === 1 ? '' : 's'}
+                      {' · '}target: <em>{targetLabel[s.target_hint] ?? s.target_hint}</em>
+                      {s.section_role && <> · role: <code className="text-[10px]">{s.section_role}</code></>}
                     </p>
-                  )}
-                  {sampleNames.length > 0 && (
-                    <p className="text-[10.5px] text-wm-text-subtle mt-0.5">
-                      Sample: <em>{sampleNames.join(' · ')}</em>{rows.length > sampleNames.length && <span> · +{rows.length - sampleNames.length} more in the sidecar JSON</span>}
-                    </p>
-                  )}
-                </>
-              )}
+                    {s.schema.length > 0 && (
+                      <p className="text-[10.5px] text-wm-text-subtle mt-0.5">
+                        Schema: {s.schema.slice(0, 8).map(k => <code key={k} className="text-[10px] mr-1">{k}</code>)}
+                        {s.schema.length > 8 && <span>+{s.schema.length - 8}</span>}
+                      </p>
+                    )}
+                    {s.sample_names.length > 0 && (
+                      <p className="text-[10.5px] text-wm-text-subtle mt-0.5">
+                        Sample: <em>{s.sample_names.join(' · ')}</em>
+                        {s.item_count > s.sample_names.length && <span> · +{s.item_count - s.sample_names.length} more</span>}
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
             </div>
-          )
-        })}
+          </details>
+        ))}
         {options.map(o => {
           if (o.kind !== 'options_page') return null
           const group = plan.layer_3_acf_field_groups.find(g =>
@@ -904,8 +901,8 @@ function CmConceptsFoundPanel({ plan }: { plan: ContentModelPlan }) {
           const filled = Object.entries(row).filter(([k, v]) => !k.startsWith('_') && v != null && String(v).trim() !== '')
           return (
             <div key={o.id} className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
-              <p className="text-[12.5px] font-bold text-wm-text">Site-wide globals</p>
-              <p className="text-[11px] text-wm-text-muted mt-0.5">Single-source values reused across the site (church name, contact, social links, etc.).</p>
+              <p className="text-[12px] font-semibold text-wm-text">Site-wide globals <span className="text-[10px] font-normal text-wm-text-subtle">(not page-specific)</span></p>
+              <p className="text-[10.5px] text-wm-text-muted mt-0.5">Single-source values reused across the site (church name, contact, socials).</p>
               <p className="text-[10.5px] text-wm-text-subtle mt-0.5">
                 <strong className="text-wm-text">{filled.length}</strong> value{filled.length === 1 ? '' : 's'} filled in
                 {filled.length > 0 && <>: {filled.slice(0, 6).map(([k]) => <code key={k} className="text-[10px] mr-1">{k}</code>)}{filled.length > 6 && <span>+{filled.length - 6}</span>}</>}

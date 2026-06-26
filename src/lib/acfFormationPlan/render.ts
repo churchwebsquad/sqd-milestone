@@ -9,6 +9,7 @@ import type {
   AcfField,
   AcfFieldGroup,
   ContentModelPlan,
+  DiscoverySection,
   WpObject,
   WpObjectCpt,
   WpObjectOptionsPage,
@@ -242,104 +243,49 @@ export function renderPlanAsMarkdown(plan: ContentModelPlan, opts: RenderMarkdow
 
 // ─── Discovery-first rendering ────────────────────────────────────────
 
-/** Humanize a CPT slug into a display label. "event" → "Events";
- *  "staff" → "Staff"; "career" → "Careers"; etc. Falls back to
- *  Title-Case + 's' for unknown slugs. */
-function conceptLabelForSlug(slug: string): string {
-  const known: Record<string, string> = {
-    staff:  'Staff',
-    event:  'Events',
-    sermon: 'Sermons',
-    group:  'Groups',
-    career: 'Careers',
-    post:   'Blog Posts',
-  }
-  if (known[slug]) return known[slug]
-  const cap = slug.charAt(0).toUpperCase() + slug.slice(1)
-  return cap.endsWith('s') ? cap : `${cap}s`
-}
-
-/** "What's sitting here to be organized" — concept-grouped discovery
- *  view. Leads with what was found, not what to build. Designed so
- *  McNeel can scan, disagree with placement decisions, and form his
- *  own model before reading the analyzer's suggestion. */
+/** "What's sitting here to be organized" — section-anchored discovery
+ *  view, grouped by page. Each section gets its own row showing
+ *  heading, item count, schema, sample names, and target hint. This
+ *  is the framing the strategist + dev actually use: per-section
+ *  semantic labels ("Pastors", "Ministry Leaders", "Elders", "Board")
+ *  rather than per-CPT roll-ups. The analyzer's CPT-grouped
+ *  suggestion is the implementation-side reference at the bottom. */
 function renderConceptsFound(plan: ContentModelPlan, lines: string[]) {
-  const cpts    = plan.layer_2_wp_objects.filter((o): o is WpObjectCpt         => o.kind === 'custom_post_type')
+  const ds = plan.discovery_sections ?? []
   const options = plan.layer_2_wp_objects.filter((o): o is WpObjectOptionsPage => o.kind === 'options_page')
-  if (cpts.length === 0 && options.length === 0) return
+  if (ds.length === 0 && options.length === 0) return
 
   lines.push(`## What's sitting here to be organized`)
   lines.push(``)
-  lines.push(`Grouped by concept. The analyzer's job here is to **show you what's there**, not to decide how it should be modelled. Each concept lists the records found, where they live on the site, and the data points carried per record. The analyzer's suggested WordPress structure for each concept is in the "Recommended model" section at the bottom.`)
+  lines.push(`Sections grouped by page, with the section's heading as the label. Each row shows what's there (item count, schema, sample names) and a target hint. **Discovery framing** — read this to know what you're modelling. The analyzer's suggested CPT / Options structure is in the "Recommended model" section below as a reference; disagree freely.`)
   lines.push(``)
 
-  // CPT concepts — these are the per-content-type groupings
-  for (const cpt of cpts) {
-    const group = findGroupForObject(plan, cpt)
-    const rows = group?._content_rows ?? []
-    const sourcePages = new Set<string>()
-    const sourceSectionCount = group?._source_section_ids?.length ?? 0
-    // Walk classifications to recover the pages this concept appears on
-    for (const c of plan.layer_1_classifications) {
-      if (c.cpt_subroutine_ref === cpt.id) sourcePages.add(c.page_slug)
-    }
-    const pageList = [...sourcePages]
-    lines.push(`### ${conceptLabelForSlug(cpt.slug)}`)
+  // Group discovery sections by page
+  const byPage = new Map<string, DiscoverySection[]>()
+  for (const s of ds) {
+    const list = byPage.get(s.page_slug) ?? []
+    list.push(s)
+    byPage.set(s.page_slug, list)
+  }
+  // Sort pages by section count (richest first) for scanability
+  const pagesSorted = [...byPage.entries()].sort((a, b) => b[1].length - a[1].length)
+  for (const [pageSlug, sections] of pagesSorted) {
+    const pageName = sections[0]?.page_name ?? pageSlug
+    lines.push(`### ${pageName} \`/${pageSlug}\``)
     lines.push(``)
-    if (rows.length === 0) {
-      lines.push(`*No records extracted yet — the content for this concept may still be in template placeholder state, or the listing sections haven't been bound. Confirm with the strategist.*`)
-      lines.push(``)
-      continue
+    for (const s of sections) {
+      renderDiscoverySection(s, plan, lines)
     }
-    lines.push(`**${rows.length} record${rows.length === 1 ? '' : 's'} found** across ${pageList.length} page${pageList.length === 1 ? '' : 's'}${sourceSectionCount > 0 ? ` (${sourceSectionCount} section${sourceSectionCount === 1 ? '' : 's'})` : ''}.`)
-    lines.push(``)
-    if (pageList.length > 0) {
-      lines.push(`**Pages:** ${pageList.slice(0, 8).map(p => `\`/${p}\``).join(', ')}${pageList.length > 8 ? ` (+${pageList.length - 8} more)` : ''}`)
-      lines.push(``)
-    }
-    // Distinct field names observed across records (excluding internal markers)
-    const fieldsSeen = new Set<string>()
-    for (const row of rows) {
-      for (const k of Object.keys(row)) {
-        if (k.startsWith('_')) continue
-        fieldsSeen.add(k)
-      }
-    }
-    if (fieldsSeen.size > 0) {
-      lines.push(`**Data points per record:** ${[...fieldsSeen].map(f => `\`${f}\``).join(' · ')}`)
-      lines.push(``)
-    }
-    // Partner form answers — surface here so it's part of the
-    // discovery, not buried in the "suggested model" section.
-    if (cpt._content_collection_answers) {
-      const filled = cpt._content_collection_answers.fields.filter(({ value }) => value != null && String(value).trim() !== '' && String(value).trim() !== '-')
-      if (filled.length > 0) {
-        lines.push(`**Partner Content Collection answers:**`)
-        lines.push(``)
-        for (const { label, value } of filled) {
-          lines.push(`- *${label}*: ${formatAnswerValue(value)}`)
-        }
-        lines.push(``)
-      }
-    }
-    // Sample records — pull human-readable summaries (names) not raw JSON
-    const sampleNames = rows.slice(0, 5).map(summarizeRow).filter(s => s !== 'Record (no name)')
-    if (sampleNames.length > 0) {
-      lines.push(`**Sample:** ${sampleNames.map(n => `*${n}*`).join(' · ')}${rows.length > sampleNames.length ? ` (+${rows.length - sampleNames.length} more in the sidecar import JSON)` : ''}`)
-      lines.push(``)
-    }
-    lines.push(`*Decide how to model this. The analyzer's suggestion is in [Recommended model](#analyzers-recommended-model-review--adjust) below; full record data + ACF field shape is in the sidecar \`.content-import.json\`.*`)
-    lines.push(``)
   }
 
-  // Options page = site-wide globals concept
+  // Site-wide globals as a top-level concept (separate from per-page sections)
   for (const opt of options) {
     const group = findGroupForObject(plan, opt)
     const row = group?._content_rows?.[0] ?? {}
     const filled = Object.entries(row).filter(([k, v]) => !k.startsWith('_') && v != null && String(v).trim() !== '')
-    lines.push(`### Site-wide globals`)
+    lines.push(`### Site-wide globals (not page-specific)`)
     lines.push(``)
-    lines.push(`Single-source content that appears in multiple places on the site (church name, contact, service times, social links, etc.). Edited once, propagates everywhere.`)
+    lines.push(`Single-source content reused across pages (church name, contact, service times, social links, etc.). Edited once, propagates everywhere.`)
     lines.push(``)
     if (filled.length === 0) {
       lines.push(`*No global values filled in yet — confirm with the strategist if any of these are intentional.*`)
@@ -354,6 +300,40 @@ function renderConceptsFound(plan: ContentModelPlan, lines: string[]) {
       lines.push(``)
     }
   }
+}
+
+const TARGET_HINT_LABEL: Record<DiscoverySection['target_hint'], string> = {
+  'individual-page': 'individual detail page per item',
+  'flat-list':       'flat list, no individual pages',
+  'embed':           'embedded from a third-party system',
+  'external':        'linked out to a third-party system',
+  'mailto':          'mailto contact, no individual page',
+  'unknown':         'strategist confirms',
+}
+
+function renderDiscoverySection(s: DiscoverySection, plan: ContentModelPlan, lines: string[]) {
+  // Pull the suggested CPT for context (if any) so the strategist
+  // sees the analyzer's recommendation as a hint, not a directive.
+  const suggestedCpt = s.cpt_subroutine_ref
+    ? plan.layer_2_wp_objects.find(o => o.id === s.cpt_subroutine_ref) ?? null
+    : null
+  const cptHint = suggestedCpt?.kind === 'custom_post_type'
+    ? ` *(analyzer suggests CPT \`${suggestedCpt.slug}\`)*`
+    : ''
+  lines.push(`#### ${s.heading}${cptHint}`)
+  lines.push(``)
+  lines.push(`- **Items:** ${s.item_count}`)
+  if (s.schema.length > 0) {
+    lines.push(`- **Schema:** ${s.schema.map(k => `\`${k}\``).join(', ')}`)
+  }
+  lines.push(`- **Target:** ${TARGET_HINT_LABEL[s.target_hint]}`)
+  if (s.sample_names.length > 0) {
+    lines.push(`- **Sample:** ${s.sample_names.map(n => `*${n}*`).join(' · ')}${s.item_count > s.sample_names.length ? ` *(+${s.item_count - s.sample_names.length} more)*` : ''}`)
+  }
+  if (s.section_role) {
+    lines.push(`- *Section role: \`${s.section_role}\`*`)
+  }
+  lines.push(``)
 }
 
 // ─── Repeated patterns across pages ───────────────────────────────────

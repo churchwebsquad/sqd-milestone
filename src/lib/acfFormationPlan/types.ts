@@ -324,6 +324,43 @@ export interface AcfFieldGroup {
 
 // ── Top-level envelope ────────────────────────────────────────────────
 
+/** Per-section discovery summary — the human-facing "what's here"
+ *  view that powers the dev handoff's discovery section. One entry
+ *  per approved web_section, grouped by page at render time. Carries
+ *  heading + item count + schema + sample names + target hint so
+ *  McNeel can scan-and-disagree without having to read the analyzer's
+ *  CPT-grouped suggestion. */
+export interface DiscoverySection {
+  section_id:        string
+  web_page_id:       string
+  page_slug:         string
+  page_name:         string
+  /** Display heading lifted from field_values.primary_heading /
+   *  .heading. Falls back to section_role_label, then the template's
+   *  layer_name, then a generic placeholder. */
+  heading:           string
+  section_role:      SectionRole | null
+  /** Number of records in the section's primary repeating field. 1
+   *  when the section has no group/repeater (treats the section
+   *  itself as one record). */
+  item_count:        number
+  /** Distinct field keys observed across the section's items (or the
+   *  top-level slot keys when the section isn't a group). */
+  schema:            string[]
+  /** First 3 humanish names from the items array — what the section
+   *  IS, in the strategist's vocabulary. */
+  sample_names:      string[]
+  /** Strategist-readable hint about what each item should land as.
+   *  Detail role → 'individual-page'; listing role with CPT single
+   *  template enabled → 'individual-page'; listing role without
+   *  single → 'flat-list'; group/contact display preference → 'mailto';
+   *  embed/external display preference → 'embed' or 'external';
+   *  unknown otherwise (strategist confirms). */
+  target_hint:       'individual-page' | 'flat-list' | 'embed' | 'external' | 'mailto' | 'unknown'
+  /** Link to the analyzer's suggested WpObject (for cross-reference). */
+  cpt_subroutine_ref: string | null
+}
+
 /** Persisted at strategy_web_projects.roadmap_state.content_model_plan. */
 export interface ContentModelPlan {
   /** Bumped when the analyzer's output shape changes in a breaking way.
@@ -347,4 +384,8 @@ export interface ContentModelPlan {
   layer_1_classifications: ClassificationRecord[]
   layer_2_wp_objects:      WpObject[]
   layer_3_acf_field_groups: AcfFieldGroup[]
+  /** Per-section discovery (added in v1.4 — the human-facing view).
+   *  Older plans without this field render the discovery section
+   *  empty; recompute to populate. */
+  discovery_sections?:     DiscoverySection[]
 }
