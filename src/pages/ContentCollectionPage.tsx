@@ -17,7 +17,7 @@
  * resume mid-session without losing work. Final submit transitions the
  * session row to status='submitted'.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Calendar, CheckCircle2, Loader2, AlertCircle, ArrowRight, ArrowLeft, Edit3, EyeOff } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -926,10 +926,13 @@ function Step2Form({
         />
         <EventsQuestion session={session} saveField={saveField} />
         <SermonsQuestion session={session} saveField={saveField} />
-        {/* Archive setup only applies when the partner wants to manage
-         *  sermons inside WordPress — for the external-channel flow
-         *  these questions are irrelevant (YouTube/Vimeo handles them). */}
-        {session.sermons_display_preference === 'wordpress' && (
+        {/* Archive-features question fires whenever per-sermon ON-SITE
+         *  pages render (series + per-sermon pages OR full archive +
+         *  per-sermon pages). YouTube-target modes have no on-site
+         *  place for notes/audio/discussion-guides. Legacy `wordpress`
+         *  rows still surface here until they're remapped. */}
+        {(['latest_series_pages', 'archive_pages', 'wordpress'] as const)
+          .includes(session.sermons_display_preference as never) && (
           <SermonArchiveFeaturesQuestion session={session} saveField={saveField} />
         )}
         <GroupsQuestion session={session} saveField={saveField} />
@@ -1106,86 +1109,326 @@ function EventsQuestion({
   )
 }
 
+/** One radio + a live thumbnail of what the partner will see if they
+ *  pick this scope. The thumbnail src points at /public/sermon-examples
+ *  — drop in PNGs to fill them. Missing files render a placeholder
+ *  ("Example image not yet uploaded") rather than a broken icon. */
+function SermonExampleThumb({ src, alt }: { src: string; alt: string }) {
+  const [errored, setErrored] = useState(false)
+  if (errored) {
+    return (
+      <div className="w-full sm:w-56 min-h-[7rem] rounded-lg border border-dashed border-lavender bg-lavender-tint/40 flex items-center justify-center px-3 py-3 text-center shrink-0">
+        <span className="text-[11px] text-purple-gray leading-tight">
+          Example image not yet uploaded<br/>
+          <code className="text-[10px] text-deep-plum">{src.replace(/^\//, '')}</code>
+        </span>
+      </div>
+    )
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      onError={() => setErrored(true)}
+      className="w-full sm:w-56 h-32 sm:h-auto sm:self-stretch object-cover rounded-lg border border-lavender shrink-0"
+    />
+  )
+}
+
+/** Single-row option = ONE border around { thumbnail + radio + text }
+ *  so the example and the choice read as one unit. Built with a
+ *  native radio input rather than the Radio shim, which renders its
+ *  own pill and would double-border the row. */
+function SermonOptionRow({
+  name, value, current, label, help, recommendedFor, imgSrc, imgAlt, onPick, badge,
+}: {
+  name:    string
+  value:   string
+  current: string | null
+  label:   string
+  help:    string
+  /** Optional "recommended for X" note. Rendered below the help as a
+   *  distinct purple-accented callout so the partner can scan it
+   *  separately from the descriptive paragraph. Accepts ReactNode so
+   *  callers can bold key terms inline. */
+  recommendedFor?: ReactNode
+  imgSrc:  string
+  imgAlt:  string
+  onPick:  () => void
+  badge?:  { label: string; tone: 'green' | 'amber' }
+}) {
+  const selected = current === value
+  const badgeCls = badge?.tone === 'green'
+    ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+    : 'bg-amber-100 text-amber-800 border-amber-200'
+  return (
+    <label
+      className={`flex flex-col sm:flex-row gap-4 items-stretch p-3 rounded-xl border-2 transition cursor-pointer
+        ${selected
+          ? 'border-primary-purple bg-lavender-tint/40'
+          : 'border-lavender hover:border-primary-purple/50 bg-white'}`}
+    >
+      <SermonExampleThumb src={imgSrc} alt={imgAlt} />
+      <div className="flex-1 min-w-0 flex items-start gap-3">
+        <input
+          type="radio"
+          name={name}
+          value={value}
+          checked={selected}
+          onChange={onPick}
+          className="mt-1 h-4 w-4 accent-primary-purple shrink-0 cursor-pointer"
+        />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-deep-plum text-sm leading-snug">{label}</span>
+            {badge && (
+              <span className={`inline-block text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${badgeCls}`}>
+                {badge.label}
+              </span>
+            )}
+          </div>
+          <p className="text-purple-gray text-sm mt-1 leading-snug">{help}</p>
+          {recommendedFor && (
+            <p className="text-primary-purple text-sm mt-2 leading-snug">
+              <span className="font-semibold">Recommended for </span>
+              {recommendedFor}
+            </p>
+          )}
+        </div>
+      </div>
+    </label>
+  )
+}
+
+function SermonScopeOption({
+  scope, current, label, help, imgSrc, imgAlt, onPick, badge,
+}: {
+  scope:   'latest_sermon' | 'latest_series' | 'archive'
+  current: 'latest_sermon' | 'latest_series' | 'archive' | null
+  label:   string
+  help:    string
+  imgSrc:  string
+  imgAlt:  string
+  onPick:  (next: 'latest_sermon' | 'latest_series' | 'archive') => void
+  badge?:  { label: string; tone: 'green' | 'amber' }
+}) {
+  return (
+    <SermonOptionRow
+      name="sermon-scope"
+      value={scope}
+      current={current}
+      label={label}
+      help={help}
+      imgSrc={imgSrc}
+      imgAlt={imgAlt}
+      onPick={() => onPick(scope)}
+      badge={badge}
+    />
+  )
+}
+
+function SermonTargetOption({
+  target, current, label, help, recommendedFor, imgSrc, imgAlt, onPick,
+}: {
+  target:  'youtube' | 'pages'
+  current: 'youtube' | 'pages' | null
+  label:   string
+  help:    string
+  recommendedFor?: ReactNode
+  imgSrc:  string
+  imgAlt:  string
+  onPick:  (next: 'youtube' | 'pages') => void
+}) {
+  return (
+    <SermonOptionRow
+      name="sermon-target"
+      value={target}
+      current={current}
+      label={label}
+      help={help}
+      recommendedFor={recommendedFor}
+      imgSrc={imgSrc}
+      imgAlt={imgAlt}
+      onPick={() => onPick(target)}
+    />
+  )
+}
+
+/** Two-question sermon-display picker.
+ *
+ *  Q1 = scope (what shows on the Watch page):
+ *    latest_sermon | latest_series | archive
+ *  Q2 = link target (where a sermon card opens):
+ *    youtube | pages
+ *
+ *  Both answers collapse into ONE persisted enum value on
+ *  `sermons_display_preference` so downstream layout pickers read one
+ *  field. `latest_sermon` locks Q2 to YouTube (no archive to link
+ *  into). Legacy values (`cta_only`, `embed_latest`, `wordpress`)
+ *  derive their scope/target via the maps below — partners on those
+ *  values see the new UI pre-filled correctly until the migration
+ *  remaps them. */
+const SERMON_SCOPE_BY_VALUE: Record<string, 'latest_sermon' | 'latest_series' | 'archive'> = {
+  cta_only:              'latest_sermon',
+  embed_latest:          'latest_sermon',
+  wordpress:             'archive',
+  latest_sermon:         'latest_sermon',
+  latest_series_youtube: 'latest_series',
+  latest_series_pages:   'latest_series',
+  archive_youtube:       'archive',
+  archive_pages:         'archive',
+}
+const SERMON_TARGET_BY_VALUE: Record<string, 'youtube' | 'pages'> = {
+  cta_only:              'youtube',
+  embed_latest:          'youtube',
+  wordpress:             'pages',
+  latest_sermon:         'youtube',
+  latest_series_youtube: 'youtube',
+  latest_series_pages:   'pages',
+  archive_youtube:       'youtube',
+  archive_pages:         'pages',
+}
+function combineSermonValue(
+  scope:  'latest_sermon' | 'latest_series' | 'archive',
+  target: 'youtube' | 'pages',
+): string {
+  if (scope === 'latest_sermon')        return 'latest_sermon'
+  if (scope === 'latest_series')        return target === 'pages' ? 'latest_series_pages' : 'latest_series_youtube'
+  /* archive */                         return target === 'pages' ? 'archive_pages'       : 'archive_youtube'
+}
+
 function SermonsQuestion({
   session, saveField,
 }: {
   session:   SessionRow
   saveField: <K extends keyof SessionRow>(field: K, value: SessionRow[K]) => Promise<void>
 }) {
-  const choice = session.sermons_display_preference
+  const raw    = session.sermons_display_preference ?? ''
+  const scope  = SERMON_SCOPE_BY_VALUE[raw]  ?? null
+  const target = SERMON_TARGET_BY_VALUE[raw] ?? null
+
+  // Q1 changes commit immediately. For latest_sermon, target is locked
+  // to youtube. For latest_series / archive, default to the current
+  // target if present (preserves a partner's prior choice across scope
+  // flips), else default to youtube as the simpler starting point.
+  const onScopeChange = (next: 'latest_sermon' | 'latest_series' | 'archive') => {
+    const nextTarget = next === 'latest_sermon' ? 'youtube' : (target ?? 'youtube')
+    void saveField(
+      'sermons_display_preference',
+      combineSermonValue(next, nextTarget) as SessionRow['sermons_display_preference'],
+    )
+  }
+  // Q2 only fires when scope ≠ latest_sermon. Combine and write.
+  const onTargetChange = (next: 'youtube' | 'pages') => {
+    if (!scope || scope === 'latest_sermon') return
+    void saveField(
+      'sermons_display_preference',
+      combineSermonValue(scope, next) as SessionRow['sermons_display_preference'],
+    )
+  }
+
   return (
     <section className="bg-white border border-lavender rounded-2xl p-5 md:p-6">
-      <h2 className="font-semibold text-deep-plum text-base mb-1">How would you like to manage sermons on your website?</h2>
-      <p className="text-purple-gray text-xs mb-3">Required — pick the level of complexity that fits how you want to maintain this section.</p>
-      <div className="space-y-2">
-        {/* Tier 1 — Easiest. Just a CTA button; no embed on the site. */}
-        <Radio
-          name="sermons"
-          value="cta_only"
-          current={choice}
-          label="CTA button linking to our YouTube / Vimeo channel"
-          tierLabel="Easiest"
-          tierTone="green"
-          onChange={v => saveField('sermons_display_preference', v as SessionRow['sermons_display_preference'])}
-        />
-        {choice === 'cta_only' && (
-          <div className="pl-8 space-y-3">
-            <FieldShort
-              label="Link to your sermon channel"
-              placeholder="https://youtube.com/..."
-              value={session.sermons_external_url}
-              onChange={v => saveField('sermons_external_url', v)}
-            />
-          </div>
-        )}
+      <h2 className="font-semibold text-deep-plum text-base mb-3">
+        How should sermons show up on your new site?
+        <span className="text-red-600 ml-1">*</span>
+      </h2>
 
-        {/* Tier 2 — Recommended. Embed the most recent sermon on the
-            Watch page; everything else still lives on YouTube/Vimeo. */}
-        <Radio
-          name="sermons"
-          value="embed_latest"
-          current={choice}
-          label="Embed the most-recent sermon on our Watch page (everything else stays on YouTube)"
-          tierLabel="Recommended"
-          tierTone="purple"
-          onChange={v => saveField('sermons_display_preference', v as SessionRow['sermons_display_preference'])}
+      <div className="space-y-4">
+        <SermonScopeOption
+          scope="latest_sermon"
+          current={scope}
+          label="Most recent sermon only"
+          help="The sermons page features an embed of the most recent sermon. New sermons will replace the previous one. When clicked, the user is taken to YouTube."
+          imgSrc="/sermon-examples/latest-sermon.jpg"
+          imgAlt="One City — single featured sermon hero"
+          onPick={onScopeChange}
+          badge={{ label: 'Easiest to maintain week to week', tone: 'green' }}
         />
-        {choice === 'embed_latest' && (
-          <div className="pl-8 space-y-3">
-            <FieldShort
-              label="Link to your sermon channel"
-              placeholder="https://youtube.com/..."
-              value={session.sermons_external_url}
-              onChange={v => saveField('sermons_external_url', v)}
-            />
-            <YesNoField
-              label="Do you have a YouTube playlist set up to store your messages?"
-              value={session.sermon_youtube_playlist_exists}
-              onChange={v => saveField('sermon_youtube_playlist_exists', v)}
-            />
-            {session.sermon_youtube_playlist_exists === true && (
-              <FieldShort
-                label="Playlist link"
-                placeholder="https://youtube.com/playlist?list=..."
-                value={session.sermon_youtube_playlist_url}
-                onChange={v => saveField('sermon_youtube_playlist_url', v)}
-              />
-            )}
-          </div>
-        )}
-
-        {/* Tier 3 — Most Complex. Full WordPress archive with per-
-            sermon pages; archive-features question fires next. */}
-        <Radio
-          name="sermons"
-          value="wordpress"
-          current={choice}
-          label="List our entire sermon archive on our website with a single page for each sermon"
-          tierLabel="Most Complex"
-          tierTone="amber"
-          onChange={v => saveField('sermons_display_preference', v as SessionRow['sermons_display_preference'])}
+        <SermonScopeOption
+          scope="latest_series"
+          current={scope}
+          label="Most recent series only"
+          help="The sermons page features the latest series with space to support a series description or series-specific resources such as a discussion booklet. Each week, submit your most recent sermon to TheSquad through your project request form to have new sermons published."
+          imgSrc="/sermon-examples/latest-series.jpg"
+          imgAlt="Mosaic — current series hero + sermon cards"
+          onPick={onScopeChange}
+          badge={{ label: 'Requires weekly management', tone: 'amber' }}
+        />
+        <SermonScopeOption
+          scope="archive"
+          current={scope}
+          label="Full sermon archive"
+          help="The sermons page features a full sermon archive with the option to add categorization and filters for topics, speakers, and series. Each week, submit your most recent sermon to TheSquad through your project request form to have new sermons published."
+          imgSrc="/sermon-examples/archive.jpg"
+          imgAlt="Pentecost — full archive grid with filters"
+          onPick={onScopeChange}
+          badge={{ label: 'Requires weekly management', tone: 'amber' }}
         />
       </div>
+
+      {/* Q2 — link target. Only renders for scopes that have an
+          archive to link into. latest_sermon mode is YouTube-only by
+          design (no archive to point at). */}
+      {scope && scope !== 'latest_sermon' && (
+        <div className="mt-5 pt-5 border-t border-lavender">
+          <h3 className="font-semibold text-deep-plum text-sm mb-3">
+            When someone clicks a sermon, where should they land?
+            <span className="text-red-600 ml-1">*</span>
+          </h3>
+          <div className="space-y-4">
+            <SermonTargetOption
+              target="youtube"
+              current={target}
+              label="Open the YouTube video in a new tab"
+              help="Leverages and promotes your YouTube channel, allowing your visitors to view your full archive, livestreams, and shorts."
+              recommendedFor={<>those who want to grow their YouTube channel and <span className="font-semibold">don't</span> publish weekly resources such as sermon notes, discussion guides, or podcast links.</>}
+              imgSrc="/sermon-examples/target-youtube.png"
+              imgAlt="Sermon click opens YouTube"
+              onPick={onTargetChange}
+            />
+            <SermonTargetOption
+              target="pages"
+              current={target}
+              label="Each sermon gets its own page on the site"
+              help="Creates space for per-sermon resources such as discussion guides, podcast links, or sermon notes."
+              recommendedFor="those who publish weekly resources such as sermon notes, discussion guides, or podcast links."
+              imgSrc="/sermon-examples/target-pages.jpg"
+              imgAlt="Mosaic dark — per-sermon detail page on-site"
+              onPick={onTargetChange}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Channel URL + playlist question — always asked once the scope
+          is picked. The playlist link feeds renderer logic regardless
+          of scope/target so the question is unconditional. */}
+      {scope && (
+        <div className="mt-5 pt-5 border-t border-lavender space-y-3">
+          <FieldShort
+            label="Link to your sermon channel"
+            placeholder="https://youtube.com/..."
+            value={session.sermons_external_url}
+            onChange={v => saveField('sermons_external_url', v)}
+            required
+          />
+          <YesNoField
+            label="Do you have a YouTube playlist set up to store your messages?"
+            value={session.sermon_youtube_playlist_exists}
+            onChange={v => saveField('sermon_youtube_playlist_exists', v)}
+          />
+          {session.sermon_youtube_playlist_exists === true && (
+            <FieldShort
+              label="Playlist link"
+              placeholder="https://youtube.com/playlist?list=..."
+              value={session.sermon_youtube_playlist_url}
+              onChange={v => saveField('sermon_youtube_playlist_url', v)}
+            />
+          )}
+        </div>
+      )}
     </section>
   )
 }
