@@ -341,7 +341,7 @@ Deno.serve(async (req) => {
     for (const t of TAXONOMY) buckets[t.key] = { passages: [], snippets: [], items: [], source_urls: [], voice_signal: null, storage: null };
 
     const extractions = await Promise.all(pages.map(async (page) => {
-      const urlHits = preClassifyUrl(page.url || "");
+      const urlHits = preClassifyUrl(page.url || "", campusRegistry);
       if (anthropicKey) {
         const ex = await llmExtractPage(anthropicKey, page, urlHits);
         return { page, extracted: ex ?? degradeNoLlm(page, urlHits.length > 0 ? urlHits : ["other"]) };
@@ -374,7 +374,7 @@ Deno.serve(async (req) => {
     // that aren't the topic's authoritative source. Programs / staff /
     // events / etc. survive — non-canonical pages can still describe
     // a ministry program. Dropped items route into `other` next.
-    const dropped = filterByPriorityUrl(buckets);
+    const dropped = filterByPriorityUrl(buckets, campusRegistry);
 
     // Regroup the `other` bucket so each source URL becomes a single
     // program card instead of a splatter of individual atoms. Pulls
@@ -507,9 +507,28 @@ Deno.serve(async (req) => {
   }
 });
 
-function preClassifyUrl(url) {
+function preClassifyUrl(url, campusRegistry) {
   let path = url;
   try { path = new URL(url).pathname; } catch {}
+  // v117 — strip the campus prefix before pattern-matching. Doxology
+  // (and any multi-campus church with path-prefix campuses) puts every
+  // topic page under /southwest/*, /alliance/*, etc. The taxonomy
+  // patterns match `/kids`, `/who-we-are`, etc. — they shouldn't have
+  // to also list `/southwest/kids` separately. Strip first, then match.
+  if (Array.isArray(campusRegistry) && campusRegistry.length > 0) {
+    const lower = path.toLowerCase();
+    for (const c of campusRegistry) {
+      const slug = String(c?.slug ?? "").toLowerCase();
+      if (!slug) continue;
+      const segPrefix = `/${slug}/`;
+      const segExact  = `/${slug}`;
+      if (lower === segExact) { path = "/"; break; }
+      if (lower.startsWith(segPrefix)) {
+        path = path.slice(segExact.length) || "/";
+        break;
+      }
+    }
+  }
   const hits = [];
   for (const t of TAXONOMY) {
     if (t.key === "other") continue;
@@ -565,9 +584,26 @@ function partitionBucketByCampus(b, campuses) {
 
 // Pull a URL's pathname for filter matching. Falls back to the raw
 // string when URL parsing fails (e.g. relative URLs).
-function pathFromUrl(url) {
+//
+// v117 — when campusRegistry has entries, strip a matching campus
+// prefix so /southwest/kids becomes /kids before topic patterns are
+// applied. Without this, multi-campus partners (Doxology) would have
+// every page miss the priority-URL filter and have its detail/
+// key_phrase items demoted to the `other` bucket.
+function pathFromUrl(url, campusRegistry) {
   let p = String(url ?? "");
   try { p = new URL(p).pathname; } catch {}
+  if (Array.isArray(campusRegistry) && campusRegistry.length > 0) {
+    const lower = p.toLowerCase();
+    for (const c of campusRegistry) {
+      const slug = String(c?.slug ?? "").toLowerCase();
+      if (!slug) continue;
+      const segPrefix = `/${slug}/`;
+      const segExact  = `/${slug}`;
+      if (lower === segExact) return "/";
+      if (lower.startsWith(segPrefix)) return p.slice(segExact.length) || "/";
+    }
+  }
   return p;
 }
 
@@ -592,7 +628,7 @@ function pathFromUrl(url) {
 //
 // Returns the dropped items so the orchestrator can route them into
 // the `other` bucket as one grouped program per source URL.
-function filterByPriorityUrl(buckets) {
+function filterByPriorityUrl(buckets, campusRegistry) {
   const dropped = { items: [], passages: [] };  // for re-routing to `other`
   for (const t of TAXONOMY) {
     if (t.key === "location_contact" || t.key === "other") continue;
@@ -601,7 +637,7 @@ function filterByPriorityUrl(buckets) {
     if (!bucket) continue;
     const priority = t.priority_url_patterns;
     const matches = (src) => {
-      const path = pathFromUrl(src);
+      const path = pathFromUrl(src, campusRegistry);
       for (const re of priority) if (re.test(path)) return true;
       return false;
     };
