@@ -19,6 +19,7 @@ import {
   X, Image as ImageIcon, LayoutGrid, MousePointerClick, FormInput,
   ChevronDown, ChevronRight, RotateCw, Archive, Trash2,
   MessageSquarePlus, Clock, AlertTriangle, Sparkles, Loader2,
+  History,
 } from 'lucide-react'
 import { SlotEditor } from './SlotEditor'
 import type { SlotAiContext } from './SlotEditor'
@@ -32,6 +33,7 @@ import { SaveToLibraryButton } from './SaveToLibraryButton'
 import { ProjectPagesProvider } from './ProjectPagesContext'
 import { useProjectId } from './ProjectIdContext'
 import { SectionStaffLinkToggle } from './SectionStaffLinkToggle'
+import { PageVersionDrawer } from '../PageVersionDrawer'
 import { summarizeSlotPresence } from '../../../lib/webBrixiesLayoutParser'
 import { SECTION_ROLE_GROUPS, SECTION_ROLE_LABELS } from '../../../lib/webSectionRoles'
 import type { SectionRole } from '../../../types/database'
@@ -127,6 +129,13 @@ export function SectionDetailsPanel({
   const [fieldsRemountKey] = useState(0)
 
   const presence = template ? summarizeSlotPresence(template, values) : null
+  // Page-level version history. The drawer captures full-page
+  // snapshots — the strategist can see when ANY section on the page
+  // last changed and revert the whole page. We surface the button on
+  // every section-editor surface (Review / Comments / Contents) so it's
+  // reachable wherever the strategist is working.
+  const [versionDrawerOpen, setVersionDrawerOpen] = useState(false)
+  const parentPage = pages?.find(p => p.id === section.web_page_id) ?? null
   const fields: WebFieldDef[] = template?.fields ?? []
   // Internal review mode focuses the reviewer on content that's
   // actually present — an empty Tagline row is noise when the goal
@@ -240,6 +249,9 @@ export function SectionDetailsPanel({
           )}
           {template && (
             <PanelButton onClick={onUnbind} icon={<Archive size={11} />} variant="ghost">Unbind</PanelButton>
+          )}
+          {parentPage && (
+            <PanelButton onClick={() => setVersionDrawerOpen(true)} icon={<History size={11} />} variant="ghost">History</PanelButton>
           )}
           <PanelButton onClick={onRemove} icon={<Trash2 size={11} />} variant="danger">Remove</PanelButton>
           <div className="ml-auto">
@@ -523,6 +535,14 @@ export function SectionDetailsPanel({
         )}
       </div>
     </aside>
+    {parentPage && (
+      <PageVersionDrawer
+        pageId={versionDrawerOpen ? parentPage.id : null}
+        pageName={parentPage.name}
+        open={versionDrawerOpen}
+        onClose={() => setVersionDrawerOpen(false)}
+      />
+    )}
     </ProjectPagesProvider>
   )
 }
