@@ -607,7 +607,7 @@ export default function PortalReviewPage() {
               <p>
                 When all feedback is in for your church and you're ready to
                 move on to the next milestone, click{' '}
-                <span className="font-semibold">Approve Copy &amp; Finalize Milestone</span>.
+                <span className="font-semibold">Complete Copy Review and Send Feedback</span>.
               </p>
             </div>
           </div>
@@ -932,7 +932,7 @@ function FeedbackTracker({
             className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-deep-plum text-white text-[12px] font-semibold px-4 py-2.5 hover:bg-primary-purple transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {finishing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-            Approve Copy & Finalize Milestone
+            Complete Copy Review and Send Feedback
           </button>
         )}
         {isInternalReview && (
