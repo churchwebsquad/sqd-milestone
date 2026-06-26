@@ -707,6 +707,26 @@ function Step1Review({
   const hideInventory = copyAllowance.key === 'do_not_use'
   return (
     <div className="space-y-6">
+      {/* Spanish-language notice — partner-facing. Fires when the site's
+       *  primary language detected by the crawl categorizer is Spanish.
+       *  We explicitly disclose the Web Squad's bilingual capability
+       *  limits up front so the partner knows what to expect from us
+       *  vs. what we'll lean on them for. Iglesia Betania is the
+       *  canonical example. */}
+      {defaultLanguage === 'es' && (
+        <div className="bg-white border-2 border-primary-purple rounded-2xl p-5 md:p-6">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple mb-2">
+            Primary Language: Spanish Detected
+          </p>
+          <p className="text-deep-plum text-sm leading-relaxed">
+            This website primarily uses Spanish. While your Web Squad is not fluent in Spanish, we want to ensure your website communicates your ministry clearly, accurately, and authentically. To best serve you, we&rsquo;ll focus primarily on structural, design, and user experience improvements while partnering closely with your team on any content revisions or new Spanish copy.
+          </p>
+          <p className="text-deep-plum text-sm leading-relaxed mt-3">
+            We may make light organizational edits using translation tools where appropriate, but we&rsquo;ll rely on your team&rsquo;s language expertise to review and approve Spanish-language content so the final website faithfully reflects your voice, message, and heart.
+          </p>
+        </div>
+      )}
+
       <div className="bg-white border border-lavender rounded-2xl p-5 md:p-6">
         <p className="font-serif italic text-deep-plum text-lg md:text-xl mb-2">
           You&rsquo;re one step closer to your new website.
