@@ -274,8 +274,42 @@ Deno.serve(async (req) => {
     if (jobErr || !job) return j({ error: "Crawl job not found", details: jobErr?.message }, 404);
     if (job.status !== "complete") return j({ error: `Crawl not complete (${job.status})` }, 409);
 
-    const pages = Array.isArray(job.crawl_results) ? job.crawl_results : [];
-    console.log(`[Categorize v12] ${pages.length} pages, project ${payload.project_id}`);
+    // v117 — aggregate pages across ALL completed crawl_jobs for the
+    // project, not just this triggering job. Without aggregation:
+    //   - Job A (target=doxology.church) crawls /beliefs → categorize
+    //     writes 5 belief faqs to (project, beliefs, null).
+    //   - Job B (target=/southwest) crawls /southwest/beliefs → its
+    //     categorize sees only southwest pages, writes 5 belief faqs
+    //     to (project, beliefs, 'southwest').
+    //   - Result: 10 visible items where there should be 5.
+    // Aggregating means we see both /beliefs and /southwest/beliefs
+    // in the same partition pass, the cross-partition dedup kicks in,
+    // and the result is one canonical row.
+    //
+    // Dedup by URL: same URL from multiple crawls picks the newest
+    // (completed_at desc). The triggering job's pages are guaranteed
+    // included.
+    const { data: allJobs, error: allJobsErr } = await supabase
+      .schema("web-hub").from("crawl_jobs")
+      .select("id, completed_at, crawl_results")
+      .eq("project_id", payload.project_id)
+      .eq("status", "complete")
+      .order("completed_at", { ascending: false, nullsFirst: false });
+    if (allJobsErr) console.error("[Categorize] aggregate-jobs fetch failed:", allJobsErr.message);
+    const byUrl = new Map();
+    const sourceJobs = Array.isArray(allJobs) && allJobs.length > 0 ? allJobs : [job];
+    for (const j2 of sourceJobs) {
+      const list = Array.isArray((j2 as { crawl_results?: unknown }).crawl_results)
+        ? ((j2 as { crawl_results: unknown[] }).crawl_results as Array<{ url?: string }>)
+        : [];
+      for (const p of list) {
+        const u = String((p as { url?: string })?.url ?? "").trim();
+        if (!u || byUrl.has(u)) continue;
+        byUrl.set(u, p);
+      }
+    }
+    const pages = [...byUrl.values()];
+    console.log(`[Categorize v117] ${pages.length} pages unioned across ${sourceJobs.length} crawl_job(s), project ${payload.project_id}`);
 
     // ── Multi-campus (v113/v114) ──
     // Pull the project's campus registry. If non-empty, we'll compute
@@ -422,6 +456,7 @@ Deno.serve(async (req) => {
     // partition in a follow-up.
     let writtenTopics = 0;
     let writtenRows = 0;
+    const writtenKeys = new Set<string>();
     for (const t of TAXONOMY) {
       const b = buckets[t.key];
       const hasContent = b.passages.length > 0 || b.items.length > 0;
@@ -431,6 +466,23 @@ Deno.serve(async (req) => {
 
       const partitions = partitionBucketByCampus(b, campusRegistry);
       const isMultiCampus = campusRegistry.length > 0;
+      // v117 — cross-partition dedup. When the same content appears in
+      // multiple campus partitions (e.g. /beliefs and /southwest/beliefs
+      // both carry the same 5 belief statements), the partition step
+      // copies it to BOTH the global and the southwest row. That makes
+      // the partner-facing inventory show "About: 26 items" when there
+      // are really just 9 unique + 16 unique + 1 unique − duplicates.
+      //
+      // Rule:
+      //   - Item fingerprint appears in global + 1+ campus partitions
+      //     → keep in global, drop from each campus. The item is
+      //       church-wide; the campus copy is template noise.
+      //   - Item fingerprint appears in 2+ campus partitions (no global)
+      //     → consolidate to global, drop from each campus. Same
+      //       content across multiple campuses = church-wide.
+      //   - Item fingerprint appears in exactly 1 partition → keep
+      //     as-is. Genuinely campus-specific content survives.
+      if (isMultiCampus) dedupAcrossPartitions(partitions);
       let wroteAnyPartition = false;
       for (const [campusSlug, part] of partitions) {
         const partHasContent = part.passages.length > 0 || part.items.length > 0;
@@ -466,21 +518,17 @@ Deno.serve(async (req) => {
           .from("web_project_topics")
           .upsert(row, { onConflict: "web_project_id,topic_key,campus_slug" });
         if (upErr) console.error(`[Categorize] Upsert failed for ${t.key} (campus=${campusSlug ?? "global"}):`, upErr);
-        else { writtenRows++; wroteAnyPartition = true; }
+        else { writtenRows++; wroteAnyPartition = true; writtenKeys.add(`${t.key}::${campusSlug ?? ""}`); }
       }
       if (wroteAnyPartition) writtenTopics++;
     }
 
-    // v115 — orphan cleanup ONLY removes partitions for campuses no
-    // longer in the registry. If staff deletes the "alliance" campus
-    // from the registry, every alliance:* topic gets cleaned up.
-    //
-    // We do NOT delete partitions just because the current crawl
-    // didn't touch them. Per-campus crawls (one job per crawl_url)
-    // would otherwise wipe every other campus on every run — the bug
-    // the user flagged when shipping campus-aware crawls. Categorize
-    // gets called against ONE crawl_job whose pages may only cover
-    // one campus; the other campuses' content stays in place untouched.
+    // v117 — orphan cleanup is safe to be aggressive now that
+    // categorize aggregates pages across ALL completed crawl_jobs for
+    // the project. Each run sees the full corpus, so any per-campus
+    // row that DIDN'T get written this run truly has no content
+    // anymore (campus deregistered OR cross-partition dedup
+    // consolidated its content into global). Drop those rows.
     const registeredSlugs = new Set(campusRegistry.map((c: { slug: string }) => c.slug));
     const { data: existingRows } = await supabase
       .from("web_project_topics")
@@ -489,7 +537,8 @@ Deno.serve(async (req) => {
       .not("campus_slug", "is", null);
     const orphanIds: string[] = [];
     for (const r of (existingRows ?? []) as Array<{id: string; topic_key: string; campus_slug: string}>) {
-      if (!registeredSlugs.has(r.campus_slug)) orphanIds.push(r.id);
+      if (!registeredSlugs.has(r.campus_slug)) { orphanIds.push(r.id); continue; }
+      if (!writtenKeys.has(`${r.topic_key}::${r.campus_slug}`)) orphanIds.push(r.id);
     }
     if (orphanIds.length > 0) {
       const { error: delErr } = await supabase
@@ -497,7 +546,7 @@ Deno.serve(async (req) => {
         .delete()
         .in("id", orphanIds);
       if (delErr) console.error(`[Categorize] Failed to clean orphan campus partitions:`, delErr);
-      else console.log(`[Categorize] Cleaned ${orphanIds.length} orphan partition(s) for de-registered campuses`);
+      else console.log(`[Categorize] Cleaned ${orphanIds.length} orphan partition(s)`);
     }
 
     return j({ ok: true, topics_written: writtenTopics, rows_written: writtenRows, snippets_added: customTokensAdded.length, globals_filled: globalsFilled, pages_processed: pages.length }, 200);
@@ -535,6 +584,109 @@ function preClassifyUrl(url, campusRegistry) {
     for (const re of t.url_patterns) if (re.test(path)) { hits.push(t.key); break; }
   }
   return hits;
+}
+
+// v117 — cross-partition item dedup. Same content appearing in
+// global + N campus partitions: keep only the global copy. Same
+// content in 2+ campus partitions (no global): promote to global.
+// Same content in just 1 partition: keep as-is.
+//
+// Fingerprint per kind:
+//   - program / event / camp / etc.: lowercase `name`
+//   - staff: lowercase `name`
+//   - sermon / newsletter_issue: lowercase `title`
+//   - testimony: lowercase `person` + first 60 chars of `story`
+//   - detail / key_phrase: kind + lowercase `label` (or `phrase`) +
+//     first 80 chars of `value` / `context`
+//   - faq: kind + lowercase `question`
+//   - cta / link: kind + lowercase `url`
+//   - meeting_time: kind + lowercase `when`
+//   - location_info: kind + lowercase `address`
+//   - contact_block: kind + lowercase `email` + `phone`
+// Anything that doesn't fit gets a JSON-stringify fallback.
+function fingerprintItem(it) {
+  const kind = String(it?.kind ?? "").toLowerCase();
+  const norm = (s) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (kind === "program" || kind === "event" || kind === "camp" || kind === "tier") {
+    return `${kind}|${norm(it.name)}`;
+  }
+  if (kind === "staff") return `staff|${norm(it.name)}`;
+  if (kind === "sermon" || kind === "newsletter_issue") return `${kind}|${norm(it.title)}`;
+  if (kind === "testimony") return `testimony|${norm(it.person)}|${norm(it.story).slice(0, 60)}`;
+  if (kind === "detail") return `detail|${norm(it.label)}|${norm(it.value).slice(0, 80)}`;
+  if (kind === "key_phrase") return `key_phrase|${norm(it.phrase)}|${norm(it.context).slice(0, 80)}`;
+  if (kind === "doctrine") return `doctrine|${norm(it.name)}|${norm(it.description).slice(0, 80)}`;
+  if (kind === "faq") return `faq|${norm(it.question)}`;
+  if (kind === "cta" || kind === "link") return `${kind}|${norm(it.url)}`;
+  if (kind === "meeting_time") return `meeting_time|${norm(it.when)}`;
+  if (kind === "location_info") return `location_info|${norm(it.address)}`;
+  if (kind === "contact_block") return `contact_block|${norm(it.email)}|${norm(it.phone)}`;
+  if (kind === "scripture") return `scripture|${norm(it.reference)}`;
+  // Fallback: stable JSON sort of keys. Strips source_url since the
+  // same item from /campus/X and /X would have different source_urls
+  // but identical content otherwise.
+  const copy = { ...it };
+  delete copy.source_url;
+  return `fallback|${JSON.stringify(copy)}`;
+}
+function dedupAcrossPartitions(partitions) {
+  // Build fingerprint → list of (campusSlug, itemIndex). campusSlug
+  // null = global.
+  const fpIndex = new Map();
+  for (const [campusSlug, part] of partitions) {
+    const items = Array.isArray(part.items) ? part.items : [];
+    items.forEach((it, idx) => {
+      const fp = fingerprintItem(it);
+      let entry = fpIndex.get(fp);
+      if (!entry) { entry = []; fpIndex.set(fp, entry); }
+      entry.push({ campusSlug, idx });
+    });
+  }
+  // Decide which slot wins for each fingerprint with > 1 occurrence.
+  const dropTargets = new Map();  // campusSlug → Set<itemIdx>
+  const promoteToGlobal = [];     // items to add to the global partition (cloned from first occurrence)
+  for (const [, entry] of fpIndex) {
+    if (entry.length < 2) continue;
+    const hasGlobal = entry.some(e => e.campusSlug === null);
+    if (hasGlobal) {
+      // Drop the non-global copies; keep the global one untouched.
+      for (const e of entry) {
+        if (e.campusSlug === null) continue;
+        let s = dropTargets.get(e.campusSlug);
+        if (!s) { s = new Set(); dropTargets.set(e.campusSlug, s); }
+        s.add(e.idx);
+      }
+    } else {
+      // No global copy — promote one of them to global, drop the rest.
+      // Take the first as the canonical copy.
+      const first = entry[0];
+      const item = partitions.get(first.campusSlug)?.items?.[first.idx];
+      if (item) promoteToGlobal.push(item);
+      for (const e of entry) {
+        let s = dropTargets.get(e.campusSlug);
+        if (!s) { s = new Set(); dropTargets.set(e.campusSlug, s); }
+        s.add(e.idx);
+      }
+    }
+  }
+  // Apply drops to per-campus partitions.
+  for (const [campusSlug, idxSet] of dropTargets) {
+    const part = partitions.get(campusSlug);
+    if (!part) continue;
+    part.items = part.items.filter((_, i) => !idxSet.has(i));
+  }
+  // Append promoted items to global. Create the global partition if it
+  // doesn't exist yet.
+  if (promoteToGlobal.length > 0) {
+    let global = partitions.get(null);
+    if (!global) {
+      global = { passages: [], items: [], source_urls: [] };
+      partitions.set(null, global);
+    }
+    for (const item of promoteToGlobal) {
+      global.items.push(item);
+    }
+  }
 }
 
 // v115 — split a topic bucket into per-campus partitions. Returns a
