@@ -657,6 +657,7 @@ export function DevHandoffWorkspace({ project }: Props) {
             )}
             {cmPlan && <CmDownloadRow plan={cmPlan} answers={cmAnswers} projectSlug={projectSlug} />}
             {cmPlan && <CmOpenQuestionsPanel plan={cmPlan} answers={cmAnswers} onSaveAnswer={saveCmAnswer} />}
+            {cmPlan && <CmPartnerIntentPanel plan={cmPlan} />}
             {cmPlan && <CmConceptsFoundPanel plan={cmPlan} />}
             {cmPlan && <CmWpObjectsPanel plan={cmPlan} />}
           </WMCard>
@@ -744,7 +745,7 @@ function CmOpenQuestionsPanel({
   const all = useMemo(() => aggregateOpenQuestions(plan), [plan])
   if (all.length === 0) return null
   const strategist = all.filter(q => q.owner === 'Strategist')
-  const mcneel     = all.filter(q => q.owner === 'McNeel')
+  const developer  = all.filter(q => q.owner === 'Developer')
   return (
     <div className="mt-5 pt-4 border-t border-wm-border">
       <div className="text-[10px] uppercase tracking-wider text-wm-text-subtle mb-2">Open questions ({all.length})</div>
@@ -759,11 +760,11 @@ function CmOpenQuestionsPanel({
           </div>
         </div>
       )}
-      {mcneel.length > 0 && (
+      {developer.length > 0 && (
         <div className="mb-3">
-          <p className="text-[12px] font-semibold text-wm-text mb-2">For McNeel ({mcneel.length}) — implementation decisions</p>
+          <p className="text-[12px] font-semibold text-wm-text mb-2">For the Developer ({developer.length}) — implementation decisions</p>
           <div className="space-y-2">
-            {mcneel.map((q, i) => (
+            {developer.map((q, i) => (
               <OpenQuestionRow key={q.id} num={`Q${i + 1}`} q={q} answer={answers[q.id] ?? ''} onSave={onSaveAnswer} />
             ))}
           </div>
@@ -810,6 +811,53 @@ function OpenQuestionRow({
   )
 }
 
+/** Partner-intent panel — surfaces the verbatim Content Collection
+ *  answers for events / sermons / groups even when no section on the
+ *  site has been bound to them yet. Dev knows what to model toward. */
+function CmPartnerIntentPanel({ plan }: { plan: ContentModelPlan }) {
+  const cpts = plan.layer_2_wp_objects.filter(o => o.kind === 'custom_post_type')
+  const targets = (['event', 'sermon', 'group'] as const).map(slug => {
+    const c = cpts.find(o => o.kind === 'custom_post_type' && o.slug === slug)
+    if (c?.kind !== 'custom_post_type') return null
+    if (!c._content_collection_answers) return null
+    const filled = c._content_collection_answers.fields.filter(({ value }) =>
+      value != null && String(value).trim() !== '' && String(value).trim() !== '-'
+    )
+    if (filled.length === 0) return null
+    const labelMap: Record<string, string> = { event: 'Events', sermon: 'Sermons', group: 'Groups' }
+    return { label: labelMap[slug], filled }
+  }).filter(Boolean) as Array<{ label: string; filled: Array<{ field: string; label: string; value: unknown }> }>
+  if (targets.length === 0) return null
+
+  return (
+    <div className="mt-5 pt-4 border-t border-wm-border">
+      <div className="text-[10px] uppercase tracking-wider text-wm-text-subtle mb-1">Partner intent — events / sermons / groups</div>
+      <p className="text-[11px] text-wm-text-muted mb-3">
+        Verbatim partner answers from the Content Collection form. Surfaces here even when no section on the site has been bound to these concepts yet — so the dev knows what the partner expects.
+      </p>
+      <div className="space-y-3">
+        {targets.map(t => (
+          <details key={t.label} className="rounded-md border border-wm-border bg-wm-bg-elevated" open>
+            <summary className="px-3 py-2 cursor-pointer text-[12.5px] font-semibold text-wm-text">{t.label}</summary>
+            <ul className="border-t border-wm-border/60 px-3 py-2 text-[11.5px] text-wm-text-muted space-y-0.5">
+              {t.filled.map(({ field, label, value }) => (
+                <li key={field}>
+                  <span className="text-wm-text-subtle">{label}:</span>{' '}
+                  {Array.isArray(value)
+                    ? value.length === 0 ? <em>(empty)</em> : value.map(v => <code key={String(v)} className="text-[10.5px] mr-1">{String(v)}</code>)
+                    : typeof value === 'boolean' ? (value ? 'Yes' : 'No')
+                    : /^https?:\/\//i.test(String(value)) ? <a href={String(value)} target="_blank" rel="noopener noreferrer" className="text-wm-accent underline">{String(value).length > 60 ? String(value).slice(0, 57) + '…' : String(value)}</a>
+                    : <span className="text-wm-text">{String(value)}</span>}
+                </li>
+              ))}
+            </ul>
+          </details>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /** "What's sitting here to be organized" — per-section discovery
  *  panel. Groups by PAGE; within each page shows one row per content
  *  section with its heading + item count + schema + sample. Mirrors
@@ -844,51 +892,61 @@ function CmConceptsFoundPanel({ plan }: { plan: ContentModelPlan }) {
     <div className="mt-5 pt-4 border-t border-wm-border">
       <div className="text-[10px] uppercase tracking-wider text-wm-text-subtle mb-1">What's sitting here to be organized</div>
       <p className="text-[11px] text-wm-text-muted mb-3">
-        Per-section discovery, grouped by page. Each section gets its own row — same template can carry different schemas + targets (e.g. Pastors get detail pages; Ministry Leaders go flat). Decide model from this; analyzer's suggested CPT structure is in the next section as a reference.
+        Per-section discovery grouped by page. Trivial single-item sections (heros, intros, single-CTA banners) are filtered out — only the sections the dev actually needs to model. For event / sermon / group sections, the partner's Content Collection answers (display mode, embed source, filter needs) appear inline.
       </p>
-      <div className="space-y-3">
+      <div className="space-y-4">
         {pagesSorted.map(([pageSlug, sections]) => (
-          <details key={pageSlug} className="rounded-md border border-wm-border bg-wm-bg-elevated">
-            <summary className="px-3 py-2 cursor-pointer text-[12px] font-semibold text-wm-text">
-              {sections[0]?.page_name ?? pageSlug} <code className="text-[10px] text-wm-text-subtle ml-1">/{pageSlug}</code>
-              <span className="ml-2 text-[10px] text-wm-text-subtle font-normal">· {sections.length} section{sections.length === 1 ? '' : 's'}</span>
+          <details key={pageSlug} className="rounded-md border border-wm-border bg-wm-bg-elevated" open>
+            <summary className="px-3 py-2.5 cursor-pointer text-[12.5px] font-semibold text-wm-text">
+              {sections[0]?.page_name ?? pageSlug} <code className="text-[10.5px] text-wm-text-subtle ml-1.5">/{pageSlug}</code>
+              <span className="ml-2 text-[10.5px] text-wm-text-subtle font-normal">· {sections.length} section{sections.length === 1 ? '' : 's'}</span>
             </summary>
-            <div className="border-t border-wm-border/60 divide-y divide-wm-border/40">
-              {sections.map(s => {
-                const suggestedCpt = s.cpt_subroutine_ref
-                  ? plan.layer_2_wp_objects.find(o => o.id === s.cpt_subroutine_ref)
-                  : null
-                const cptSuggestion = suggestedCpt?.kind === 'custom_post_type' ? suggestedCpt.slug : null
-                return (
-                  <div key={s.section_id} className="px-3 py-2">
-                    <p className="text-[12px] font-semibold text-wm-text">
-                      {s.heading}
-                      {cptSuggestion && (
-                        <span className="ml-2 text-[10px] font-normal text-wm-text-subtle">
-                          · analyzer suggests CPT <code className="text-[10px]">{cptSuggestion}</code>
-                        </span>
-                      )}
-                    </p>
-                    <p className="text-[10.5px] text-wm-text-muted mt-0.5">
-                      <strong className="text-wm-text">{s.item_count}</strong> item{s.item_count === 1 ? '' : 's'}
-                      {' · '}target: <em>{targetLabel[s.target_hint] ?? s.target_hint}</em>
-                      {s.section_role && <> · role: <code className="text-[10px]">{s.section_role}</code></>}
-                    </p>
-                    {s.schema.length > 0 && (
-                      <p className="text-[10.5px] text-wm-text-subtle mt-0.5">
-                        Schema: {s.schema.slice(0, 8).map(k => <code key={k} className="text-[10px] mr-1">{k}</code>)}
-                        {s.schema.length > 8 && <span>+{s.schema.length - 8}</span>}
+            <div className="border-t border-wm-border/60 px-3 py-2">
+              <ul className="space-y-3">
+                {sections.map(s => {
+                  const suggestedCpt = s.cpt_subroutine_ref
+                    ? plan.layer_2_wp_objects.find(o => o.id === s.cpt_subroutine_ref)
+                    : null
+                  const cptSuggestion = suggestedCpt?.kind === 'custom_post_type' ? suggestedCpt.slug : null
+                  const ctx = s.partner_context
+                  return (
+                    <li key={s.section_id}>
+                      <p className="text-[12.5px] font-semibold text-wm-text">
+                        {s.heading}
+                        {cptSuggestion && (
+                          <span className="ml-2 text-[10.5px] font-normal italic text-wm-text-subtle">
+                            — analyzer suggests CPT <code className="not-italic text-[10.5px]">{cptSuggestion}</code>
+                          </span>
+                        )}
                       </p>
-                    )}
-                    {s.sample_names.length > 0 && (
-                      <p className="text-[10.5px] text-wm-text-subtle mt-0.5">
-                        Sample: <em>{s.sample_names.join(' · ')}</em>
-                        {s.item_count > s.sample_names.length && <span> · +{s.item_count - s.sample_names.length} more</span>}
-                      </p>
-                    )}
-                  </div>
-                )
-              })}
+                      <ul className="ml-3 mt-1 text-[11.5px] text-wm-text-muted space-y-0.5">
+                        <li>{s.item_count} item{s.item_count === 1 ? '' : 's'}</li>
+                        {s.schema.length > 0 && (
+                          <li>schema: {s.schema.slice(0, 8).map(k => <code key={k} className="text-[10.5px] mr-1">{k}</code>)}{s.schema.length > 8 && <span>+{s.schema.length - 8}</span>}</li>
+                        )}
+                        <li>target: <em>{targetLabel[s.target_hint] ?? s.target_hint}</em></li>
+                        {s.sample_names.length > 0 && (
+                          <li>sample: <em>{s.sample_names.join(' · ')}</em>{s.item_count > s.sample_names.length && <span> · +{s.item_count - s.sample_names.length} more</span>}</li>
+                        )}
+                        {s.section_role && (
+                          <li>section role: <code className="text-[10.5px]">{s.section_role}</code></li>
+                        )}
+                        {ctx && (
+                          <>
+                            {ctx.display_preference && <li>display preference: <code className="text-[10.5px]">{ctx.display_preference}</code></li>}
+                            {ctx.display_format && <li>display format: {ctx.display_format}</li>}
+                            {ctx.external_url && <li>{ctx.display_preference === 'embed' || ctx.display_preference === 'external' ? 'embed / external source' : 'partner sample URL'}: <a href={ctx.external_url} target="_blank" rel="noopener noreferrer" className="text-wm-accent underline">{ctx.external_url.length > 60 ? ctx.external_url.slice(0, 57) + '…' : ctx.external_url}</a></li>}
+                            {ctx.playlist_url && <li>YouTube playlist: <a href={ctx.playlist_url} target="_blank" rel="noopener noreferrer" className="text-wm-accent underline">{ctx.playlist_url.length > 60 ? ctx.playlist_url.slice(0, 57) + '…' : ctx.playlist_url}</a></li>}
+                            {ctx.archive_features && ctx.archive_features.length > 0 && <li>archive features wanted: {ctx.archive_features.map(f => <code key={f} className="text-[10.5px] mr-1">{f}</code>)}</li>}
+                            {ctx.source_of_truth && <li>partner's current system: {ctx.source_of_truth}</li>}
+                            {ctx.frustration && ctx.frustration.trim() !== '-' && <li>partner note: {ctx.frustration}</li>}
+                          </>
+                        )}
+                      </ul>
+                    </li>
+                  )
+                })}
+              </ul>
             </div>
           </details>
         ))}

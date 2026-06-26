@@ -18,11 +18,11 @@ import type {
 
 // ─── Open-question owner routing ──────────────────────────────────────
 
-export type QuestionOwner = 'Strategist' | 'McNeel'
+export type QuestionOwner = 'Strategist' | 'Developer'
 
-/** Decides who needs to answer a given open question. McNeel answers
- *  implementation/display questions; everything else falls to the
- *  strategist (content decisions). */
+/** Decides who needs to answer a given open question. The developer
+ *  answers implementation/display questions; everything else falls
+ *  to the strategist (content decisions). */
 export function ownerForQuestion(q: string): QuestionOwner {
   const lower = q.toLowerCase()
   if (lower.includes('bricks') ||
@@ -31,7 +31,7 @@ export function ownerForQuestion(q: string): QuestionOwner {
       lower.includes('template variant') ||
       lower.includes('field type') ||
       lower.includes('implementation')) {
-    return 'McNeel'
+    return 'Developer'
   }
   return 'Strategist'
 }
@@ -193,6 +193,12 @@ export function renderPlanAsMarkdown(plan: ContentModelPlan, opts: RenderMarkdow
 
   renderOpenQuestions(plan, lines, opts.answers ?? {})
 
+  // ── Partner intent for events / sermons / groups ────────────────
+  // The partner's Content Collection answers regardless of whether
+  // any section currently binds to them. Dev knows what to build for
+  // even when the layout's missing a section.
+  renderPartnerIntent(plan, lines)
+
   // ── Discovery section — what was found, grouped by concept ──────
   renderConceptsFound(plan, lines)
 
@@ -318,22 +324,83 @@ function renderDiscoverySection(s: DiscoverySection, plan: ContentModelPlan, lin
     ? plan.layer_2_wp_objects.find(o => o.id === s.cpt_subroutine_ref) ?? null
     : null
   const cptHint = suggestedCpt?.kind === 'custom_post_type'
-    ? ` *(analyzer suggests CPT \`${suggestedCpt.slug}\`)*`
+    ? ` — *analyzer suggests CPT \`${suggestedCpt.slug}\`*`
     : ''
-  lines.push(`#### ${s.heading}${cptHint}`)
+
+  // Bullet-hierarchy framing matching the user's Arvada-style example —
+  // one top-level bullet per section, sub-bullets for the details.
   lines.push(``)
-  lines.push(`- **Items:** ${s.item_count}`)
+  lines.push(`- **${s.heading}**${cptHint}`)
+  lines.push(`  - ${s.item_count} item${s.item_count === 1 ? '' : 's'}`)
   if (s.schema.length > 0) {
-    lines.push(`- **Schema:** ${s.schema.map(k => `\`${k}\``).join(', ')}`)
+    lines.push(`  - schema: ${s.schema.map(k => `\`${k}\``).join(', ')}`)
   }
-  lines.push(`- **Target:** ${TARGET_HINT_LABEL[s.target_hint]}`)
+  lines.push(`  - target: ${TARGET_HINT_LABEL[s.target_hint]}`)
   if (s.sample_names.length > 0) {
-    lines.push(`- **Sample:** ${s.sample_names.map(n => `*${n}*`).join(' · ')}${s.item_count > s.sample_names.length ? ` *(+${s.item_count - s.sample_names.length} more)*` : ''}`)
+    lines.push(`  - sample: ${s.sample_names.map(n => `*${n}*`).join(' · ')}${s.item_count > s.sample_names.length ? ` *(+${s.item_count - s.sample_names.length} more)*` : ''}`)
   }
   if (s.section_role) {
-    lines.push(`- *Section role: \`${s.section_role}\`*`)
+    lines.push(`  - section role: \`${s.section_role}\``)
   }
+  // Partner-supplied context for events / sermons / groups sections.
+  // This is what makes the section actually buildable — embed source,
+  // filter needs, format, frustration with the current system, etc.
+  if (s.partner_context) {
+    renderPartnerContext(s.partner_context, lines)
+  }
+}
+
+/** Top-level summary of the partner's intent for events / sermons /
+ *  groups. Pulled from the analyzer's WpObjectCpt rows for each kind
+ *  — which carry the verbatim Content Collection answers regardless
+ *  of whether a section is bound to them. Surfaces here so the dev
+ *  sees "the partner said events embed from Church Center" even
+ *  when the events page itself hasn't been built yet. */
+function renderPartnerIntent(plan: ContentModelPlan, lines: string[]) {
+  const cpts = plan.layer_2_wp_objects.filter((o): o is WpObjectCpt => o.kind === 'custom_post_type')
+  const events  = cpts.find(c => c.slug === 'event')
+  const sermons = cpts.find(c => c.slug === 'sermon')
+  const groups  = cpts.find(c => c.slug === 'group')
+  const blocks: Array<{ label: string; cpt: WpObjectCpt }> = []
+  if (events  && events._content_collection_answers)  blocks.push({ label: 'Events',  cpt: events  })
+  if (sermons && sermons._content_collection_answers) blocks.push({ label: 'Sermons', cpt: sermons })
+  if (groups  && groups._content_collection_answers)  blocks.push({ label: 'Groups',  cpt: groups  })
+  if (blocks.length === 0) return
+
+  lines.push(`## Partner intent — events / sermons / groups`)
   lines.push(``)
+  lines.push(`Verbatim partner answers from the Content Collection form. Surfaces here even if no section on the site has been bound to these concepts yet — the dev knows what the partner expects when they get to events / sermons / groups.`)
+  lines.push(``)
+  for (const { label, cpt } of blocks) {
+    const cca = cpt._content_collection_answers!
+    const filled = cca.fields.filter(({ value }) => value != null && String(value).trim() !== '' && String(value).trim() !== '-')
+    if (filled.length === 0) continue
+    lines.push(`### ${label}`)
+    lines.push(``)
+    for (const { label: fl, value } of filled) {
+      lines.push(`- ${fl}: ${formatAnswerValue(value)}`)
+    }
+    lines.push(``)
+  }
+}
+
+function renderPartnerContext(ctx: NonNullable<DiscoverySection['partner_context']>, lines: string[]) {
+  if (ctx.display_preference)   lines.push(`  - display preference: \`${ctx.display_preference}\``)
+  if (ctx.display_format)       lines.push(`  - display format: ${ctx.display_format}`)
+  if (ctx.external_url) {
+    const label = ctx.display_preference === 'embed' || ctx.display_preference === 'external'
+      ? 'embed / external source'
+      : 'partner-provided sample URL'
+    lines.push(`  - ${label}: [${truncate(ctx.external_url, 80)}](${ctx.external_url})`)
+  }
+  if (ctx.playlist_url)         lines.push(`  - YouTube playlist: [${truncate(ctx.playlist_url, 80)}](${ctx.playlist_url})`)
+  if (ctx.archive_features && ctx.archive_features.length > 0) {
+    lines.push(`  - archive features wanted: ${ctx.archive_features.map(f => `\`${f}\``).join(', ')}`)
+  }
+  if (ctx.source_of_truth)      lines.push(`  - partner's current system: ${ctx.source_of_truth}`)
+  if (ctx.frustration && ctx.frustration.trim() !== '-') {
+    lines.push(`  - partner note: ${ctx.frustration}`)
+  }
 }
 
 // ─── Repeated patterns across pages ───────────────────────────────────
@@ -422,7 +489,7 @@ function renderOpenQuestions(plan: ContentModelPlan, lines: string[], answers: R
   const all = aggregateOpenQuestions(plan)
   if (all.length === 0) return
   const strategist = all.filter(q => q.owner === 'Strategist')
-  const mcneel     = all.filter(q => q.owner === 'McNeel')
+  const developer  = all.filter(q => q.owner === 'Developer')
 
   lines.push(`## Open questions — answer before building`)
   lines.push(``)
@@ -431,16 +498,16 @@ function renderOpenQuestions(plan: ContentModelPlan, lines: string[], answers: R
   if (strategist.length > 0) {
     lines.push(`### For the Strategist (${strategist.length})`)
     lines.push(``)
-    lines.push(`Content / modelling decisions — what the site should HAVE, not how it's wired.`)
+    lines.push(`Content decisions — what the site should HAVE.`)
     lines.push(``)
     strategist.forEach((q, i) => renderQuestion(`Q${i + 1}`, q, lines, answers))
   }
-  if (mcneel.length > 0) {
-    lines.push(`### For McNeel (${mcneel.length})`)
+  if (developer.length > 0) {
+    lines.push(`### For the Developer (${developer.length})`)
     lines.push(``)
     lines.push(`Implementation decisions — how to wire what the strategist's already decided.`)
     lines.push(``)
-    mcneel.forEach((q, i) => renderQuestion(`Q${i + 1}`, q, lines, answers))
+    developer.forEach((q, i) => renderQuestion(`Q${i + 1}`, q, lines, answers))
   }
 }
 

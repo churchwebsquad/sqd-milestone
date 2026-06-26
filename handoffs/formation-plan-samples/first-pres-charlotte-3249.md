@@ -1,7 +1,7 @@
 # Formation Plan — Dev Handoff
 
 *Translated from* `first-pres-charlotte-3249.json`
-*Generated* 6/26/2026, 2:40:09 PM *fingerprint* `-rgvu76`
+*Generated* 6/26/2026, 3:25:10 PM *fingerprint* `-rgvu76`
 
 ## How to use this doc
 
@@ -25,21 +25,43 @@ Each question has an **Answer** line. The owner writes their decision back in; o
 
 ### For the Strategist (1)
 
-Content / modelling decisions — what the site should HAVE, not how it's wired.
+Content decisions — what the site should HAVE.
 
-**Q1.** Confirm with McNeel: should the `event` CPT have a single-detail template? Default depends on partner intent.
+**Q1.** Do these event records need their own detail pages on the site, or is a flat listing enough? The partner hasn't been explicit.
 
 - *Affects:* `single-event/heading`, `single-event/featured_image`, `single-event/content`, `single-event/card`, `wp_object.event`
 - **Answer:** ___________________________________________________________
 
-### For McNeel (1)
+### For the Developer (1)
 
 Implementation decisions — how to wire what the strategist's already decided.
 
-**Q1.** Confirm with McNeel: use Bricks native Nestable for this page, or fall back to ACF Flexible Content?
+**Q1.** This page has many sections with high variety — should the dev build the layout with Bricks native nestable sections (recommended for perf), or with ACF Flexible Content for editor flexibility?
 
 - *Affects:* `employment/__page_layout`, `events/__page_layout`, `local-global/__page_layout`, `staff/__page_layout`, `the-history-hallway/__page_layout`, `watch/__page_layout`
 - **Answer:** ___________________________________________________________
+
+## Partner intent — events / sermons / groups
+
+Verbatim partner answers from the Content Collection form. Surfaces here even if no section on the site has been bound to these concepts yet — the dev knows what the partner expects when they get to events / sermons / groups.
+
+### Events
+
+- Display preference: wordpress
+- Display format: Calendar View
+- External URL (sample / migration source): [https://firstpres-charlotte.org/events/grands-camp/](https://firstpres-charlotte.org/events/grands-camp/)
+- Source of truth (current system): Events Calendar Plugin - WordPress
+
+### Sermons
+
+- Display preference: wordpress
+- Sermon channel URL: [https://www.youtube.com/@firstprescharlotte](https://www.youtube.com/@firstprescharlotte)
+
+### Groups
+
+- Display preference: wordpress
+- Source of truth (current system): WordPress
+- Frustration with current system: Groups = Presbyterian Women Circles
 
 ## What's sitting here to be organized
 
@@ -47,1423 +69,690 @@ Sections grouped by page, with the section's heading as the label. Each row show
 
 ### Children Youth `/children-youth`
 
-#### Children & Youth
 
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `hero_home`*
-
-#### A Place for Every Age
-
-- **Items:** 2
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### FPC Kids
-
-- **Items:** 2
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### FPC Kids on Sundays
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Children's Choir
-
-- **Items:** 3
-- **Schema:** `heading_card`, `description_card`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### First Pres Youth
-
-- **Items:** 2
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### First Pres Youth Programs
-
-- **Items:** 1
-- **Schema:** `heading`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Youth Music
-
-- **Items:** 2
-- **Schema:** `heading_card`, `description_card`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Meet Your Leader *(analyzer suggests CPT `staff`)*
-
-- **Items:** 1
-- **Schema:** `team_name`, `team_position`, `team_description`
-- **Target:** flat list, no individual pages
-- **Sample:** *Audrey Webb Kahrs*
-- *Section role: `team_grid`*
-
-#### What's Coming Up for Kids and Youth
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### FPC Preschools
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Your Family Is Ready for This
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-### Adults `/adults`
-
-#### Adults
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `hero_home`*
-
-#### Sunday morning is just the beginning.
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Explore Adult Formation at FPC
-
-- **Items:** 1
-- **Schema:** `heading`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Sunday Morning Classes
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Studies & Resources During the Week
-
-- **Items:** 1
-- **Schema:** `heading`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Young Adult Ministry
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Presbyterian Women
-
-- **Items:** 3
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### PW Circles
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### The Willard Lecture
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### FPC Travels
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### There's More to Explore at First Pres
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-### Care `/care`
-
-#### Care
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `hero_home`*
-
-#### How FPC Cares
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Your Pastoral Team *(analyzer suggests CPT `staff`)*
-
-- **Items:** 3
-- **Schema:** `team_name`, `team_position`, `team_description`
-- **Target:** flat list, no individual pages
-- **Sample:** *Anna Dickson* · *Chuck Williamson* · *Mary Bowman*
-- *Section role: `team_grid`*
-
-#### Content Section 99
-
-- **Items:** 2
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- **Sample:** *To request a pastoral visit:* · *A note about hospital visits:*
-- *Section role: `content_block`*
-
-#### One-on-One Care When You Need It Most
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Content Section 99
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- **Sample:** *To become a Stephen Minister:*
-- *Section role: `content_block`*
-
-#### Professional Counseling in the Heart of Uptown
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Content Section 99
-
-- **Items:** 2
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- **Sample:** *Insurance Accepted:* · *Scheduling An Appointment*
-- *Section role: `content_block`*
-
-#### Meet Our Therapists
-
-- **Items:** 1
-- **Schema:** `heading`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### More Ways This Community Shows Up
-
-- **Items:** 1
-- **Schema:** `heading`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### You Don't Have to Figure It Out Alone
-
-- **Items:** 3
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
+- **A Place for Every Age**
+  - 2 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `content_block`
+
+- **FPC Kids**
+  - 2 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `content_block`
+
+- **Children's Choir**
+  - 3 items
+  - schema: `heading_card`, `description_card`
+  - target: strategist confirms
+  - section role: `content_block`
+
+- **First Pres Youth**
+  - 2 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `content_block`
+
+- **Youth Music**
+  - 2 items
+  - schema: `heading_card`, `description_card`
+  - target: strategist confirms
+  - section role: `content_block`
+
+- **Meet Your Leader** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `team_name`, `team_position`, `team_description`
+  - target: flat list, no individual pages
+  - sample: *Audrey Webb Kahrs*
+  - section role: `team_grid`
 ### Worship `/worship`
 
-#### Worship & Music
 
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `hero_home`*
-
-#### Worship With Us Sundays
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Music at First Presbyterian Church
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-#### Adult Ensembles
-
-- **Items:** 2
-- **Schema:** `heading_card`, `description_card`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Youth Ensembles
-
-- **Items:** 2
-- **Schema:** `heading_card`, `description_card`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Children's Ensembles
-
-- **Items:** 3
-- **Schema:** `heading_card`, `description_card`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Signature Events Every Year
-
-- **Items:** 3
-- **Schema:** `heading_card`, `description_card`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### There's a Place for You in the Music Ministry
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-#### Meet the Music Ministry Team *(analyzer suggests CPT `staff`)*
-
-- **Items:** 5
-- **Schema:** `team_name`, `team_position`, `team_description`
-- **Target:** flat list, no individual pages
-- **Sample:** *Will Young* · *Kaitlyn Davros* · *Trevor Cook* *(+2 more)*
-- *Section role: `team_grid`*
-
-#### Marking Life's Sacred Moments
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Worship Wherever You Are
-
-- **Items:** 2
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-### About `/about`
-
-#### About First Presbyterian Church of Charlotte
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `hero_home`*
-
-#### A Church Born Alongside a City
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Rooted in Reformed Faith, Open to the Whole Story
-
-- **Items:** 2
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Key beliefs held at First Presbyterian Church
-
-- **Items:** 3
-- **Schema:** `title`, `description`
-- **Target:** strategist confirms
-- **Sample:** *Women in Ministry* · *Racial Justice* · *Politics and Public Life*
-- *Section role: `faq_accordion`*
-
-#### A Covenant Community for All of God's Children
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### People Who Love Jesus and Love This City
-
-- **Items:** 2
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-#### Reflecting the love of Christ from the center of our city.
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### The History Hallway
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-#### Come and See for Yourself
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-### Advocacy `/advocacy`
-
-#### Advocacy
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `hero_home`*
-
-#### First Presbyterian's Advocacy Ministry exists to help this congregation learn about the challenges facing their neighbor
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Areas of Focus
-
-- **Items:** 6
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Plowshares Book Club
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Book Club Library
-
-- **Items:** 1
-- **Schema:** `heading`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Resource Hub
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-#### Learn More
-
-- **Items:** 1
-- **Schema:** `show_search`, `show_category`, `category_label`, `show_tag`, `tag_label`, `show_sort`, `sort_label`
-- **Target:** strategist confirms
-- *Section role: `category_filter`*
-
-#### Advocacy Newsletter
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-#### The Work Is Yours to Join
-
-- **Items:** 2
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-### New `/new`
-
-#### There's a Place for You Here
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `hero_home`*
-
-#### Want to Get a Feel for First Presbyterian Church First?
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-#### Join Us This Sunday
-
-- **Items:** 1
-- **Schema:** `image_card`, `heading_card`, `description_card`, `button_card`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### A Full Picture of Sunday Morning
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Kids & Families
-
-- **Items:** 3
-- **Schema:** `heading_card`, `description_card`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Ask Questions and Find Support
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### When You're Ready to Call This Home
-
-- **Items:** 2
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Come This Sunday
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-### Home `/home`
-
-#### For Christ in the Heart of Charlotte
-
-- **Items:** 2
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `hero_home`*
-
-#### Welcome to First Presbyterian Church of Charlotte
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Join Us This Sunday
-
-- **Items:** 1
-- **Schema:** `image_card`, `heading_card`, `description_card`, `button_card`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Faith That Lives Beyond Sunday
-
-- **Items:** 3
-- **Schema:** `heading_card`, `description_card`, `buttons_card`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### What's Happening at First Presbyterian Church of Charlotte
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Continue The Conversation
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-#### There's a Place for You Here
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-### Give `/give`
-
-#### Give
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `hero_home`*
-
-#### Why Generosity Matters
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Content Section 99
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- **Sample:** *Kyle and Courtney Bullard, FPC members*
-- *Section role: `content_block`*
-
-#### Ways to Give
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### The Annual Pledge Campaign
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-#### Leave a Legacy at First Presbyterian Church
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Your Generosity Matters Here
-
-- **Items:** 3
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
+- **Adult Ensembles**
+  - 2 items
+  - schema: `heading_card`, `description_card`
+  - target: strategist confirms
+  - section role: `content_block`
+
+- **Youth Ensembles**
+  - 2 items
+  - schema: `heading_card`, `description_card`
+  - target: strategist confirms
+  - section role: `content_block`
+
+- **Children's Ensembles**
+  - 3 items
+  - schema: `heading_card`, `description_card`
+  - target: strategist confirms
+  - section role: `content_block`
+
+- **Signature Events Every Year**
+  - 3 items
+  - schema: `heading_card`, `description_card`
+  - target: strategist confirms
+  - section role: `content_block`
+
+- **Meet the Music Ministry Team** — *analyzer suggests CPT `staff`*
+  - 5 items
+  - schema: `team_name`, `team_position`, `team_description`
+  - target: flat list, no individual pages
+  - sample: *Will Young* · *Kaitlyn Davros* · *Trevor Cook* *(+2 more)*
+  - section role: `team_grid`
+
+- **Worship Wherever You Are**
+  - 2 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `cta_banner_simple`
+### Care `/care`
+
+
+- **Your Pastoral Team** — *analyzer suggests CPT `staff`*
+  - 3 items
+  - schema: `team_name`, `team_position`, `team_description`
+  - target: flat list, no individual pages
+  - sample: *Anna Dickson* · *Chuck Williamson* · *Mary Bowman*
+  - section role: `team_grid`
+
+- **Content Section 99**
+  - 2 items
+  - schema: `heading`, `description`
+  - target: strategist confirms
+  - sample: *To request a pastoral visit:* · *A note about hospital visits:*
+  - section role: `content_block`
+
+- **Content Section 99**
+  - 2 items
+  - schema: `heading`, `description`
+  - target: strategist confirms
+  - sample: *Insurance Accepted:* · *Scheduling An Appointment*
+  - section role: `content_block`
+
+- **You Don't Have to Figure It Out Alone**
+  - 3 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `cta_banner_simple`
 ### Local Global `/local-global`
 
-#### Local & Global Outreach
 
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `hero_home`*
+- **Serving Charlotte**
+  - 13 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `feature_split`
 
-#### Outreach Philosophy
+- **Serving the World**
+  - 6 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `feature_split`
 
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
+- **Outreach Leadership** — *analyzer suggests CPT `staff`*
+  - 3 items
+  - schema: `team_name`, `team_position`, `team_description`
+  - target: flat list, no individual pages
+  - sample: *Rev. Lucy Crain* · *Flo Bryan* · *Heidi Squires*
+  - section role: `team_grid`
 
-#### Serving Charlotte
+- **The Work Is Already Happening. Come Join It.**
+  - 2 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `cta_banner_simple`
+### About `/about`
 
-- **Items:** 13
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
 
-#### Serving the World
+- **Rooted in Reformed Faith, Open to the Whole Story**
+  - 2 items
+  - schema: `heading`, `description`
+  - target: strategist confirms
+  - section role: `content_block`
 
-- **Items:** 6
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
+- **Key beliefs held at First Presbyterian Church**
+  - 3 items
+  - schema: `title`, `description`
+  - target: strategist confirms
+  - sample: *Women in Ministry* · *Racial Justice* · *Politics and Public Life*
+  - section role: `faq_accordion`
 
-#### Stay in the Loop
+- **People Who Love Jesus and Love This City**
+  - 2 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `cta_banner_simple`
+### Advocacy `/advocacy`
 
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
 
-#### Outreach Leadership *(analyzer suggests CPT `staff`)*
+- **Areas of Focus**
+  - 6 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `feature_split`
 
-- **Items:** 3
-- **Schema:** `team_name`, `team_position`, `team_description`
-- **Target:** flat list, no individual pages
-- **Sample:** *Rev. Lucy Crain* · *Flo Bryan* · *Heidi Squires*
-- *Section role: `team_grid`*
+- **Learn More**
+  - 1 item
+  - schema: `show_search`, `show_category`, `category_label`, `show_tag`, `tag_label`, `show_sort`, `sort_label`
+  - target: strategist confirms
+  - section role: `category_filter`
 
-#### The Work Is Already Happening. Come Join It.
+- **The Work Is Yours to Join**
+  - 2 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `cta_banner_simple`
+### Home `/home`
 
-- **Items:** 2
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
 
+- **For Christ in the Heart of Charlotte**
+  - 2 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `hero_home`
+
+- **Faith That Lives Beyond Sunday**
+  - 3 items
+  - schema: `heading_card`, `description_card`, `buttons_card`
+  - target: strategist confirms
+  - section role: `feature_split`
+### New `/new`
+
+
+- **Kids & Families**
+  - 3 items
+  - schema: `heading_card`, `description_card`
+  - target: strategist confirms
+  - section role: `content_block`
+
+- **When You're Ready to Call This Home**
+  - 2 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `feature_split`
 ### Serve `/serve`
 
-#### Serve
 
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `hero_home`*
+- **Serve Your City**
+  - 12 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `feature_split`
 
-#### Why Serve at First Pres
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Worship Support and Children's Ministry
-
-- **Items:** 1
-- **Schema:** `heading`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Care Ministries
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Serve Your City
-
-- **Items:** 12
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Serve The World
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-#### The Team Is Better With You On It
-
-- **Items:** 2
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-### Employment `/employment`
-
-#### Employment
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `hero_home`*
-
-#### Why Work Here
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Open Positions *(analyzer suggests CPT `career`)*
-
-- **Items:** 1
-- **Schema:** `title`, `location`, `summary`, `apply_cta`
-- **Target:** flat list, no individual pages
-- **Sample:** *Afternoon/Evening Custodian*
-- *Section role: `career_listing`*
-
-#### What This Team Believes About Work
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Church Governance
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-#### Ready to Join This Team?
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
+- **The Team Is Better With You On It**
+  - 2 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `cta_banner_simple`
 ### Staff `/staff`
 
-#### Staff
 
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `hero_home`*
+- **Pastoral Staff** — *analyzer suggests CPT `staff`*
+  - 6 items
+  - schema: `team_name`, `team_position`, `team_description`
+  - target: flat list, no individual pages
+  - sample: *Lewis Galloway* · *Anna Dickson* · *Lucy Crain* *(+3 more)*
+  - section role: `team_grid`
 
-#### Our Staff Values
+- **Program & Support Staff** — *analyzer suggests CPT `staff`*
+  - 39 items
+  - schema: `team_name`, `team_position`, `team_description`
+  - target: flat list, no individual pages
+  - sample: *Andrea Nelson* · *Anita Bennett* · *Audrey Webb Kahrs* *(+36 more)*
+  - section role: `team_grid`
+### Adults `/adults`
 
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
 
-#### Pastoral Staff *(analyzer suggests CPT `staff`)*
+- **Presbyterian Women**
+  - 3 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `content_block`
+### Employment `/employment`
 
-- **Items:** 6
-- **Schema:** `team_name`, `team_position`, `team_description`
-- **Target:** flat list, no individual pages
-- **Sample:** *Lewis Galloway* · *Anna Dickson* · *Lucy Crain* *(+3 more)*
-- *Section role: `team_grid`*
 
-#### Program & Support Staff *(analyzer suggests CPT `staff`)*
-
-- **Items:** 39
-- **Schema:** `team_name`, `team_position`, `team_description`
-- **Target:** flat list, no individual pages
-- **Sample:** *Andrea Nelson* · *Anita Bennett* · *Audrey Webb Kahrs* *(+36 more)*
-- *Section role: `team_grid`*
-
-#### Elders
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Deacons
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
+- **Open Positions** — *analyzer suggests CPT `career`*
+  - 1 item
+  - schema: `title`, `location`, `summary`, `apply_cta`
+  - target: flat list, no individual pages
+  - sample: *Afternoon/Evening Custodian*
+  - section role: `career_listing`
 ### Events `/events`
 
-#### Events
 
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `hero_home`*
+- **Never Miss What's Coming Up**
+  - 2 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `cta_banner_simple`
+### Give `/give`
 
-#### First Presbyterian Church of Charlotte is a community that gathers.
 
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### What's Coming Up
-
-- **Items:** 1
-- **Schema:** `heading`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Happening Every Week
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Never Miss What's Coming Up
-
-- **Items:** 2
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
+- **Your Generosity Matters Here**
+  - 3 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `cta_banner_simple`
 ### The History Hallway `/the-history-hallway`
 
-#### The History Hallway
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `hero_home`*
-
-#### Since 1802
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### The Senior Pastors of First Presbyterian
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Triptych
-
-- **Items:** 2
-- **Schema:** `title`, `description`
-- **Target:** strategist confirms
-- **Sample:** *Repentance and Resurrection Statement* · *Artist’s Statement*
-- *Section role: `faq_accordion`*
-
-#### Walk It Yourself
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
+- **Triptych**
+  - 2 items
+  - schema: `title`, `description`
+  - target: strategist confirms
+  - sample: *Repentance and Resurrection Statement* · *Artist’s Statement*
+  - section role: `faq_accordion`
 ### Watch `/watch`
 
-#### Watch Online
 
-- **Items:** 1
-- **Schema:** `heading`, `accent_description`, `description`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Feature Section 2
-
-- **Items:** 1
-- **Schema:** `description`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-#### Catch Up on Any Message
-
-- **Items:** 1
-- **Schema:** `show_search`, `show_category`, `category_label`, `show_tag`, `tag_label`, `show_sort`, `sort_label`
-- **Target:** strategist confirms
-- *Section role: `category_filter`*
-
-#### Faith Unfiltered Podcast
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-#### Worship With Us in Person
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-### Pastoral Transition `/pastoral-transition`
-
-#### Pastoral Transition
-
-- **Items:** 1
-- **Schema:** `heading`, `description`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-#### Updates from the Pastor Nominating Committee
-
-- **Items:** 1
-- **Schema:** `heading`, `content`
-- **Target:** strategist confirms
-- *Section role: `content_block`*
-
-#### Don't Miss an Update
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-### News & Media `/news-media`
-
-#### News & Publications
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `cta_banner_simple`*
-
-#### Category Filter 4
-
-- **Items:** 1
-- **Schema:** `show_category`, `show_tag`, `tag_label`, `show_sort`, `sort_label`
-- **Target:** strategist confirms
-- *Section role: `category_filter`*
-
-#### Feature Section 2
-
-- **Items:** 1
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
-### {single-sermon} `/single-sermon`
-
-#### Sermon Title
-
-- **Items:** 3
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `intro_text`*
-
-#### Continue Watching
-
-- **Items:** 1
-- **Schema:** `contact`
-- **Target:** strategist confirms
-- *Section role: `feature_split`*
-
+- **Catch Up on Any Message**
+  - 1 item
+  - schema: `show_search`, `show_category`, `category_label`, `show_tag`, `tag_label`, `show_sort`, `sort_label`
+  - target: strategist confirms
+  - section role: `category_filter`
 ### {single-staff} `/single-staff`
 
-#### Staff Member Name *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Staff Member Name** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### {single-event} `/single-event`
 
-#### Single Event Section 4 *(analyzer suggests CPT `event`)*
 
-- **Items:** 1
-- **Target:** individual detail page per item
-- *Section role: `event_detail`*
-
+- **Single Event Section 4** — *analyzer suggests CPT `event`*
+  - 1 item
+  - target: individual detail page per item
+  - section role: `event_detail`
+  - display preference: `wordpress`
+  - display format: Calendar View
+  - partner-provided sample URL: [https://firstpres-charlotte.org/events/grands-camp/](https://firstpres-charlotte.org/events/grands-camp/)
+  - partner's current system: Events Calendar Plugin - WordPress
 ### Lewis Galloway `/staff/lewis-galloway`
 
-#### Lewis Galloway *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
+- **Lewis Galloway** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
+### {single-sermon} `/single-sermon`
 
+
+- **Sermon Title**
+  - 3 items
+  - schema: `contact`
+  - target: strategist confirms
+  - section role: `intro_text`
 ### Anna Dickson `/staff/anna-dickson`
 
-#### Anna Dickson *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
+- **Anna Dickson** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
+### News & Media `/news-media`
 
+
+- **Category Filter 4**
+  - 1 item
+  - schema: `show_category`, `show_tag`, `tag_label`, `show_sort`, `sort_label`
+  - target: strategist confirms
+  - section role: `category_filter`
 ### Lucy Crain `/staff/lucy-crain`
 
-#### Lucy Crain *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Lucy Crain** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### {single-blog-post} `/single-blog-post`
 
-#### Blog Post Heading *(analyzer suggests CPT `post`)*
 
-- **Items:** 1
-- **Schema:** `category_1`, `heading`, `author_bio_author_container`
-- **Target:** individual detail page per item
-- *Section role: `post_detail`*
-
+- **Blog Post Heading** — *analyzer suggests CPT `post`*
+  - 1 item
+  - schema: `category_1`, `heading`, `author_bio_author_container`
+  - target: individual detail page per item
+  - section role: `post_detail`
 ### Chuck Williamson `/staff/chuck-williamson`
 
-#### Chuck Williamson *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Chuck Williamson** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Mary Henderson Bowman `/staff/mary-henderson-bowman`
 
-#### Mary Henderson Bowman *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Mary Henderson Bowman** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Rob Spach `/staff/rob-spach`
 
-#### Rob Spach *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Rob Spach** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Andrea Nelson `/staff/andrea-nelson`
 
-#### Andrea Nelson *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Andrea Nelson** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Anita Bennett `/staff/anita-bennett`
 
-#### Anita Bennett *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Anita Bennett** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Audrey Webb Kahrs `/staff/audrey-webb-kahrs`
 
-#### Audrey Webb Kahrs *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Audrey Webb Kahrs** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Barb Frith `/staff/barb-frith`
 
-#### Barb Frith *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Barb Frith** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Ben Treece `/staff/ben-treece`
 
-#### Ben Treece *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Ben Treece** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Bradley Thompson `/staff/bradley-thompson`
 
-#### Bradley Thompson *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Bradley Thompson** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Brandon Thomas `/staff/brandon-thomas`
 
-#### Brandon Thomas *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Brandon Thomas** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Caroline Schaal `/staff/caroline-schaal`
 
-#### Caroline Schaal *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Caroline Schaal** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Cierra Christian `/staff/cierra-christian`
 
-#### Cierra Christian *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Cierra Christian** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Crystal Sellers `/staff/crystal-sellers`
 
-#### Crystal Sellers *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Crystal Sellers** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Diane Maye `/staff/diane-maye`
 
-#### Diane Maye *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Diane Maye** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Flo Bryan `/staff/flo-bryan`
 
-#### Flo Bryan *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Flo Bryan** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Garrell Keesler `/staff/garrell-keesler`
 
-#### Garrell Keesler *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Garrell Keesler** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Gloria Clark `/staff/gloria-clark`
 
-#### Gloria Clark *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Gloria Clark** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Heidi Squires `/staff/heidi-squires`
 
-#### Heidi Squires *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Heidi Squires** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Jan Gaddis `/staff/jan-gaddis`
 
-#### Jan Gaddis *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Jan Gaddis** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Jane Ives `/staff/jane-ives`
 
-#### Jane Ives *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Jane Ives** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Kaitlyn Davros `/staff/kaitlyn-davros`
 
-#### Kaitlyn Davros *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Kaitlyn Davros** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Kai `/staff/kai`
 
-#### Kai *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Kai** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Kalia Coffey `/staff/kalia-coffey`
 
-#### Kalia Coffey *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Kalia Coffey** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Kelly Deal `/staff/kelly-deal`
 
-#### Kelly Deal *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Kelly Deal** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Kelly Harder `/staff/kelly-harder`
 
-#### Kelly Harder *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Kelly Harder** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### LaTonya Hope `/staff/latonya-hope`
 
-#### LaTonya Hope *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **LaTonya Hope** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Laura Katute `/staff/laura-katute`
 
-#### Laura Katute *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Laura Katute** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Lauren McCrory `/staff/lauren-mccrory`
 
-#### Lauren McCrory *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Lauren McCrory** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Lauren Russell `/staff/lauren-russell`
 
-#### Lauren Russell *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Lauren Russell** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Lucy Baum `/staff/lucy-baum`
 
-#### Lucy Baum *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Lucy Baum** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Mark Pestano `/staff/mark-pestano`
 
-#### Mark Pestano *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Mark Pestano** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Michael DeNise `/staff/michael-denise`
 
-#### Michael DeNise *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Michael DeNise** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Michael O'Rourke `/staff/michael-o-rourke`
 
-#### Michael O'Rourke *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Michael O'Rourke** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Ray Vargas `/staff/ray-vargas`
 
-#### Ray Vargas *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Ray Vargas** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Salesia Dudley `/staff/salesia-dudley`
 
-#### Salesia Dudley *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Salesia Dudley** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Semra Staut `/staff/semra-staut`
 
-#### Semra Staut *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Semra Staut** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Sofia Di Dio `/staff/sofia-di-dio`
 
-#### Sofia Di Dio *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Sofia Di Dio** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Tammy Hatley `/staff/tammy-hatley`
 
-#### Tammy Hatley *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Tammy Hatley** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Tanya Gaspar `/staff/tanya-gaspar`
 
-#### Tanya Gaspar *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Tanya Gaspar** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Trevor Cook `/staff/trevor-cook`
 
-#### Trevor Cook *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Trevor Cook** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Will Celestine `/staff/will-celestine`
 
-#### Will Celestine *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Will Celestine** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Will Young `/staff/will-young`
 
-#### Will Young *(analyzer suggests CPT `staff`)*
 
-- **Items:** 1
-- **Schema:** `tagline`, `heading`, `description`
-- **Target:** individual detail page per item
-- *Section role: `staff_member_detail`*
-
+- **Will Young** — *analyzer suggests CPT `staff`*
+  - 1 item
+  - schema: `tagline`, `heading`, `description`
+  - target: individual detail page per item
+  - section role: `staff_member_detail`
 ### Site-wide globals (not page-specific)
 
 Single-source content reused across pages (church name, contact, service times, social links, etc.). Edited once, propagates everywhere.

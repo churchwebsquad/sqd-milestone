@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "_meta": {
-    "generated_at": "2026-06-26T21:40:09.055Z",
+    "generated_at": "2026-06-26T22:25:10.401Z",
     "generated_by": "analyzer-v1",
     "input_fingerprint": "-rgvu76",
     "counts": {
@@ -17582,7 +17582,7 @@
       "recommended_default": "CUSTOM_POST_TYPE",
       "alternative": null,
       "open_questions": [
-        "Confirm with McNeel: should the `event` CPT have a single-detail template? Default depends on partner intent."
+        "Do these event records need their own detail pages on the site, or is a flat listing enough? The partner hasn't been explicit."
       ],
       "confidence": "medium",
       "cpt_subroutine_ref": "wp_object.event",
@@ -17613,7 +17613,7 @@
       "recommended_default": "CUSTOM_POST_TYPE",
       "alternative": null,
       "open_questions": [
-        "Confirm with McNeel: should the `event` CPT have a single-detail template? Default depends on partner intent."
+        "Do these event records need their own detail pages on the site, or is a flat listing enough? The partner hasn't been explicit."
       ],
       "confidence": "medium",
       "cpt_subroutine_ref": "wp_object.event",
@@ -17644,7 +17644,7 @@
       "recommended_default": "CUSTOM_POST_TYPE",
       "alternative": null,
       "open_questions": [
-        "Confirm with McNeel: should the `event` CPT have a single-detail template? Default depends on partner intent."
+        "Do these event records need their own detail pages on the site, or is a flat listing enough? The partner hasn't been explicit."
       ],
       "confidence": "medium",
       "cpt_subroutine_ref": "wp_object.event",
@@ -17675,7 +17675,7 @@
       "recommended_default": "CUSTOM_POST_TYPE",
       "alternative": null,
       "open_questions": [
-        "Confirm with McNeel: should the `event` CPT have a single-detail template? Default depends on partner intent."
+        "Do these event records need their own detail pages on the site, or is a flat listing enough? The partner hasn't been explicit."
       ],
       "confidence": "medium",
       "cpt_subroutine_ref": "wp_object.event",
@@ -30350,7 +30350,7 @@
       "recommended_default": "BRICKS_NESTABLE_SECTION",
       "alternative": "FLEXIBLE_CONTENT",
       "open_questions": [
-        "Confirm with McNeel: use Bricks native Nestable for this page, or fall back to ACF Flexible Content?"
+        "This page has many sections with high variety — should the dev build the layout with Bricks native nestable sections (recommended for perf), or with ACF Flexible Content for editor flexibility?"
       ],
       "confidence": "medium",
       "cpt_subroutine_ref": null,
@@ -30381,7 +30381,7 @@
       "recommended_default": "BRICKS_NESTABLE_SECTION",
       "alternative": "FLEXIBLE_CONTENT",
       "open_questions": [
-        "Confirm with McNeel: use Bricks native Nestable for this page, or fall back to ACF Flexible Content?"
+        "This page has many sections with high variety — should the dev build the layout with Bricks native nestable sections (recommended for perf), or with ACF Flexible Content for editor flexibility?"
       ],
       "confidence": "medium",
       "cpt_subroutine_ref": null,
@@ -30412,7 +30412,7 @@
       "recommended_default": "BRICKS_NESTABLE_SECTION",
       "alternative": "FLEXIBLE_CONTENT",
       "open_questions": [
-        "Confirm with McNeel: use Bricks native Nestable for this page, or fall back to ACF Flexible Content?"
+        "This page has many sections with high variety — should the dev build the layout with Bricks native nestable sections (recommended for perf), or with ACF Flexible Content for editor flexibility?"
       ],
       "confidence": "medium",
       "cpt_subroutine_ref": null,
@@ -30443,7 +30443,7 @@
       "recommended_default": "BRICKS_NESTABLE_SECTION",
       "alternative": "FLEXIBLE_CONTENT",
       "open_questions": [
-        "Confirm with McNeel: use Bricks native Nestable for this page, or fall back to ACF Flexible Content?"
+        "This page has many sections with high variety — should the dev build the layout with Bricks native nestable sections (recommended for perf), or with ACF Flexible Content for editor flexibility?"
       ],
       "confidence": "medium",
       "cpt_subroutine_ref": null,
@@ -30474,7 +30474,7 @@
       "recommended_default": "BRICKS_NESTABLE_SECTION",
       "alternative": "FLEXIBLE_CONTENT",
       "open_questions": [
-        "Confirm with McNeel: use Bricks native Nestable for this page, or fall back to ACF Flexible Content?"
+        "This page has many sections with high variety — should the dev build the layout with Bricks native nestable sections (recommended for perf), or with ACF Flexible Content for editor flexibility?"
       ],
       "confidence": "medium",
       "cpt_subroutine_ref": null,
@@ -30505,7 +30505,7 @@
       "recommended_default": "BRICKS_NESTABLE_SECTION",
       "alternative": "FLEXIBLE_CONTENT",
       "open_questions": [
-        "Confirm with McNeel: use Bricks native Nestable for this page, or fall back to ACF Flexible Content?"
+        "This page has many sections with high variety — should the dev build the layout with Bricks native nestable sections (recommended for perf), or with ACF Flexible Content for editor flexibility?"
       ],
       "confidence": "medium",
       "cpt_subroutine_ref": null,
@@ -30735,10 +30735,10 @@
         "acf.event"
       ],
       "open_questions": [
-        "Confirm with McNeel: should the `event` CPT have a single-detail template? Default depends on partner intent.",
-        "Confirm with McNeel: should the `event` CPT have a single-detail template? Default depends on partner intent.",
-        "Confirm with McNeel: should the `event` CPT have a single-detail template? Default depends on partner intent.",
-        "Confirm with McNeel: should the `event` CPT have a single-detail template? Default depends on partner intent."
+        "Do these event records need their own detail pages on the site, or is a flat listing enough? The partner hasn't been explicit.",
+        "Do these event records need their own detail pages on the site, or is a flat listing enough? The partner hasn't been explicit.",
+        "Do these event records need their own detail pages on the site, or is a flat listing enough? The partner hasn't been explicit.",
+        "Do these event records need their own detail pages on the site, or is a flat listing enough? The partner hasn't been explicit."
       ],
       "confidence": "medium",
       "_content_collection_answers": {
@@ -37393,40 +37393,6 @@
       "cpt_subroutine_ref": null
     },
     {
-      "section_id": "a2081037-5dfb-4697-aae4-2d85c27891e7",
-      "web_page_id": "1c9408b2-c0dd-4ffa-b5ea-dd48c9ead3df",
-      "page_slug": "home",
-      "page_name": "Home",
-      "heading": "Welcome to First Presbyterian Church of Charlotte",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "0ce00bc1-938f-4f82-ae40-18eb3273bae2",
-      "web_page_id": "1c9408b2-c0dd-4ffa-b5ea-dd48c9ead3df",
-      "page_slug": "home",
-      "page_name": "Home",
-      "heading": "Join Us This Sunday",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "image_card",
-        "heading_card",
-        "description_card",
-        "button_card"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "4ad6542e-553e-4987-9a71-15a62f9e932c",
       "web_page_id": "1c9408b2-c0dd-4ffa-b5ea-dd48c9ead3df",
       "page_slug": "home",
@@ -37438,82 +37404,6 @@
         "heading_card",
         "description_card",
         "buttons_card"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "bcc849b9-77d7-4ef8-a597-33f15ef69fcd",
-      "web_page_id": "1c9408b2-c0dd-4ffa-b5ea-dd48c9ead3df",
-      "page_slug": "home",
-      "page_name": "Home",
-      "heading": "What's Happening at First Presbyterian Church of Charlotte",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "48fd33a4-79bf-4887-82f4-e2abc5de4a14",
-      "web_page_id": "1c9408b2-c0dd-4ffa-b5ea-dd48c9ead3df",
-      "page_slug": "home",
-      "page_name": "Home",
-      "heading": "Continue The Conversation",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "088470ce-b870-43f5-80a3-4ed5d5a272d0",
-      "web_page_id": "1c9408b2-c0dd-4ffa-b5ea-dd48c9ead3df",
-      "page_slug": "home",
-      "page_name": "Home",
-      "heading": "There's a Place for You Here",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "19b2c24a-7d22-4335-9261-3e561dc86a64",
-      "web_page_id": "3c501275-cebd-4d15-9188-a8d0632a9aa5",
-      "page_slug": "about",
-      "page_name": "About",
-      "heading": "About First Presbyterian Church of Charlotte",
-      "section_role": "hero_home",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "377c2f47-5ea2-46e5-b015-e5a4feb0eb5b",
-      "web_page_id": "3c501275-cebd-4d15-9188-a8d0632a9aa5",
-      "page_slug": "about",
-      "page_name": "About",
-      "heading": "A Church Born Alongside a City",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "contact"
       ],
       "sample_names": [],
       "target_hint": "unknown",
@@ -37556,21 +37446,6 @@
       "cpt_subroutine_ref": null
     },
     {
-      "section_id": "58269d43-b1ba-4f57-b3de-68d4872e7784",
-      "web_page_id": "3c501275-cebd-4d15-9188-a8d0632a9aa5",
-      "page_slug": "about",
-      "page_name": "About",
-      "heading": "A Covenant Community for All of God's Children",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "1f8e27db-fb8c-4546-ab74-e9b002f5b614",
       "web_page_id": "3c501275-cebd-4d15-9188-a8d0632a9aa5",
       "page_slug": "about",
@@ -37580,144 +37455,6 @@
       "item_count": 2,
       "schema": [
         "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "6b2a014b-91cd-402c-aede-1ca07e3e02d7",
-      "web_page_id": "3c501275-cebd-4d15-9188-a8d0632a9aa5",
-      "page_slug": "about",
-      "page_name": "About",
-      "heading": "Reflecting the love of Christ from the center of our city.",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "db48e194-56a5-4889-9248-45bde34f45b4",
-      "web_page_id": "3c501275-cebd-4d15-9188-a8d0632a9aa5",
-      "page_slug": "about",
-      "page_name": "About",
-      "heading": "The History Hallway",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "3151de62-f390-45ab-b233-a0be9037ae0d",
-      "web_page_id": "3c501275-cebd-4d15-9188-a8d0632a9aa5",
-      "page_slug": "about",
-      "page_name": "About",
-      "heading": "Come and See for Yourself",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "19f664f7-47ef-42e8-9a5a-cd8ce83db303",
-      "web_page_id": "8bb4daaa-037d-4aaa-986e-4a8128efcb40",
-      "page_slug": "adults",
-      "page_name": "Adults",
-      "heading": "Adults",
-      "section_role": "hero_home",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "dc2c9b65-e991-4330-94ed-6e673f38f2ef",
-      "web_page_id": "8bb4daaa-037d-4aaa-986e-4a8128efcb40",
-      "page_slug": "adults",
-      "page_name": "Adults",
-      "heading": "Sunday morning is just the beginning.",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "fc18dfc4-6a81-4be3-a316-6c3dec7e93f9",
-      "web_page_id": "8bb4daaa-037d-4aaa-986e-4a8128efcb40",
-      "page_slug": "adults",
-      "page_name": "Adults",
-      "heading": "Explore Adult Formation at FPC",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "1f142550-8990-4a72-b2e4-a1bd94e59e56",
-      "web_page_id": "8bb4daaa-037d-4aaa-986e-4a8128efcb40",
-      "page_slug": "adults",
-      "page_name": "Adults",
-      "heading": "Sunday Morning Classes",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "6b71a9ad-b044-4175-8728-69c9eebb8839",
-      "web_page_id": "8bb4daaa-037d-4aaa-986e-4a8128efcb40",
-      "page_slug": "adults",
-      "page_name": "Adults",
-      "heading": "Studies & Resources During the Week",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "ca21708d-a5e3-480b-b254-80b2360ab430",
-      "web_page_id": "8bb4daaa-037d-4aaa-986e-4a8128efcb40",
-      "page_slug": "adults",
-      "page_name": "Adults",
-      "heading": "Young Adult Ministry",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
       ],
       "sample_names": [],
       "target_hint": "unknown",
@@ -37739,98 +37476,6 @@
       "cpt_subroutine_ref": null
     },
     {
-      "section_id": "cce7fbb1-ee2a-483c-896f-91505b7e2a04",
-      "web_page_id": "8bb4daaa-037d-4aaa-986e-4a8128efcb40",
-      "page_slug": "adults",
-      "page_name": "Adults",
-      "heading": "PW Circles",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "36b53af8-93d9-422f-8385-38ef2b4e16de",
-      "web_page_id": "8bb4daaa-037d-4aaa-986e-4a8128efcb40",
-      "page_slug": "adults",
-      "page_name": "Adults",
-      "heading": "The Willard Lecture",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "79399d09-5b9a-4533-b46f-944b40da7942",
-      "web_page_id": "8bb4daaa-037d-4aaa-986e-4a8128efcb40",
-      "page_slug": "adults",
-      "page_name": "Adults",
-      "heading": "FPC Travels",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "909d5798-19e5-41d2-a6c5-fd9da55e17d0",
-      "web_page_id": "8bb4daaa-037d-4aaa-986e-4a8128efcb40",
-      "page_slug": "adults",
-      "page_name": "Adults",
-      "heading": "There's More to Explore at First Pres",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "c12843ec-7d63-4106-87a6-2af73f598bc3",
-      "web_page_id": "41216399-2149-460f-8b06-a00f2b5bfd01",
-      "page_slug": "advocacy",
-      "page_name": "Advocacy",
-      "heading": "Advocacy",
-      "section_role": "hero_home",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "ddb0e88e-09e0-4c0f-8ea1-355eeb77b4d3",
-      "web_page_id": "41216399-2149-460f-8b06-a00f2b5bfd01",
-      "page_slug": "advocacy",
-      "page_name": "Advocacy",
-      "heading": "First Presbyterian's Advocacy Ministry exists to help this congregation learn about the challenges facing their neighbor",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "5e0fbfa6-828e-427a-b43d-73878c9e8674",
       "web_page_id": "41216399-2149-460f-8b06-a00f2b5bfd01",
       "page_slug": "advocacy",
@@ -37840,52 +37485,6 @@
       "item_count": 6,
       "schema": [
         "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "41305e48-4792-41bd-8774-b4c0e5b74f45",
-      "web_page_id": "41216399-2149-460f-8b06-a00f2b5bfd01",
-      "page_slug": "advocacy",
-      "page_name": "Advocacy",
-      "heading": "Plowshares Book Club",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "2170a06b-f5f5-4249-9c42-9b25c4ef5505",
-      "web_page_id": "41216399-2149-460f-8b06-a00f2b5bfd01",
-      "page_slug": "advocacy",
-      "page_name": "Advocacy",
-      "heading": "Book Club Library",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "9ab4d7d7-3740-4d12-8fec-6862370fdd53",
-      "web_page_id": "41216399-2149-460f-8b06-a00f2b5bfd01",
-      "page_slug": "advocacy",
-      "page_name": "Advocacy",
-      "heading": "Resource Hub",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
       ],
       "sample_names": [],
       "target_hint": "unknown",
@@ -37913,21 +37512,6 @@
       "cpt_subroutine_ref": null
     },
     {
-      "section_id": "7ffa5199-ddda-4388-9e8a-51567ce64f0a",
-      "web_page_id": "41216399-2149-460f-8b06-a00f2b5bfd01",
-      "page_slug": "advocacy",
-      "page_name": "Advocacy",
-      "heading": "Advocacy Newsletter",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "8284e4f7-7658-4fff-8d38-2648b03df217",
       "web_page_id": "41216399-2149-460f-8b06-a00f2b5bfd01",
       "page_slug": "advocacy",
@@ -37937,37 +37521,6 @@
       "item_count": 2,
       "schema": [
         "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "6d01d6aa-fac4-4bf1-83f4-3980117dd437",
-      "web_page_id": "ac6c9348-3058-4e00-b5fa-1513d229724a",
-      "page_slug": "care",
-      "page_name": "Care",
-      "heading": "Care",
-      "section_role": "hero_home",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "f6161629-8e10-4c7a-b9bc-9b7cf9a1a91c",
-      "web_page_id": "ac6c9348-3058-4e00-b5fa-1513d229724a",
-      "page_slug": "care",
-      "page_name": "Care",
-      "heading": "How FPC Cares",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
       ],
       "sample_names": [],
       "target_hint": "unknown",
@@ -38014,54 +37567,6 @@
       "cpt_subroutine_ref": null
     },
     {
-      "section_id": "3e5b78c5-0a6f-44fb-bb9e-4db996fceae4",
-      "web_page_id": "ac6c9348-3058-4e00-b5fa-1513d229724a",
-      "page_slug": "care",
-      "page_name": "Care",
-      "heading": "One-on-One Care When You Need It Most",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "0a153018-b8b0-4350-9c3d-93241edfd87a",
-      "web_page_id": "ac6c9348-3058-4e00-b5fa-1513d229724a",
-      "page_slug": "care",
-      "page_name": "Care",
-      "heading": "Content Section 99",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [
-        "To become a Stephen Minister:"
-      ],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "a85062a1-f67e-48f3-93d7-5af61b888e5b",
-      "web_page_id": "ac6c9348-3058-4e00-b5fa-1513d229724a",
-      "page_slug": "care",
-      "page_name": "Care",
-      "heading": "Professional Counseling in the Heart of Uptown",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "ded801a4-959b-4082-802a-4e6498f933c7",
       "web_page_id": "ac6c9348-3058-4e00-b5fa-1513d229724a",
       "page_slug": "care",
@@ -38081,36 +37586,6 @@
       "cpt_subroutine_ref": null
     },
     {
-      "section_id": "a3ab8407-36f4-40d9-a3b8-2e72bb1ba808",
-      "web_page_id": "ac6c9348-3058-4e00-b5fa-1513d229724a",
-      "page_slug": "care",
-      "page_name": "Care",
-      "heading": "Meet Our Therapists",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "586f6280-d966-488b-84ea-919316ada88b",
-      "web_page_id": "ac6c9348-3058-4e00-b5fa-1513d229724a",
-      "page_slug": "care",
-      "page_name": "Care",
-      "heading": "More Ways This Community Shows Up",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "ec121cdd-12e1-458e-b5cf-c0965d02afb4",
       "web_page_id": "ac6c9348-3058-4e00-b5fa-1513d229724a",
       "page_slug": "care",
@@ -38120,22 +37595,6 @@
       "item_count": 3,
       "schema": [
         "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "71a684f1-2ad6-4095-8c3d-50ed5e8bc36a",
-      "web_page_id": "fefa2376-912a-4be0-93a6-36a5d16f9ed0",
-      "page_slug": "children-youth",
-      "page_name": "Children Youth",
-      "heading": "Children & Youth",
-      "section_role": "hero_home",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
       ],
       "sample_names": [],
       "target_hint": "unknown",
@@ -38172,21 +37631,6 @@
       "cpt_subroutine_ref": null
     },
     {
-      "section_id": "d2a38223-eb69-458d-bcb4-1752e42d9140",
-      "web_page_id": "fefa2376-912a-4be0-93a6-36a5d16f9ed0",
-      "page_slug": "children-youth",
-      "page_name": "Children Youth",
-      "heading": "FPC Kids on Sundays",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "185ef67f-df06-4d66-971f-bbccc8e88214",
       "web_page_id": "fefa2376-912a-4be0-93a6-36a5d16f9ed0",
       "page_slug": "children-youth",
@@ -38212,21 +37656,6 @@
       "item_count": 2,
       "schema": [
         "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "a266f025-d392-4bce-9331-2d6fd7964b48",
-      "web_page_id": "fefa2376-912a-4be0-93a6-36a5d16f9ed0",
-      "page_slug": "children-youth",
-      "page_name": "Children Youth",
-      "heading": "First Pres Youth Programs",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading"
       ],
       "sample_names": [],
       "target_hint": "unknown",
@@ -38268,82 +37697,6 @@
       "cpt_subroutine_ref": "wp_object.staff"
     },
     {
-      "section_id": "460faa49-8037-42c4-a0b5-2ee17c7aeafb",
-      "web_page_id": "fefa2376-912a-4be0-93a6-36a5d16f9ed0",
-      "page_slug": "children-youth",
-      "page_name": "Children Youth",
-      "heading": "What's Coming Up for Kids and Youth",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "9ee33905-cf51-4392-b828-16bf6bd9b508",
-      "web_page_id": "fefa2376-912a-4be0-93a6-36a5d16f9ed0",
-      "page_slug": "children-youth",
-      "page_name": "Children Youth",
-      "heading": "FPC Preschools",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "9f9bb58a-0126-4c68-bf7e-1638fa01f0ce",
-      "web_page_id": "fefa2376-912a-4be0-93a6-36a5d16f9ed0",
-      "page_slug": "children-youth",
-      "page_name": "Children Youth",
-      "heading": "Your Family Is Ready for This",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "cce1ec2c-8ed4-4029-a571-7b82d83d108a",
-      "web_page_id": "252239fb-4881-4ffa-b6e6-9e75cf9c4bc4",
-      "page_slug": "employment",
-      "page_name": "Employment",
-      "heading": "Employment",
-      "section_role": "hero_home",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "b92dcd2e-5d8a-4a05-9664-5d9fecde5148",
-      "web_page_id": "252239fb-4881-4ffa-b6e6-9e75cf9c4bc4",
-      "page_slug": "employment",
-      "page_name": "Employment",
-      "heading": "Why Work Here",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "27688bf8-2c69-43d2-a71d-53c32d90332c",
       "web_page_id": "252239fb-4881-4ffa-b6e6-9e75cf9c4bc4",
       "page_slug": "employment",
@@ -38364,114 +37717,6 @@
       "cpt_subroutine_ref": "wp_object.career"
     },
     {
-      "section_id": "2dfae1fa-85c8-4ac6-9e23-487c54c556c4",
-      "web_page_id": "252239fb-4881-4ffa-b6e6-9e75cf9c4bc4",
-      "page_slug": "employment",
-      "page_name": "Employment",
-      "heading": "What This Team Believes About Work",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "a1c07c1f-b279-4552-a966-3f510070d8c9",
-      "web_page_id": "252239fb-4881-4ffa-b6e6-9e75cf9c4bc4",
-      "page_slug": "employment",
-      "page_name": "Employment",
-      "heading": "Church Governance",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "2573ca12-9efd-4d2f-b276-0bedf050c057",
-      "web_page_id": "252239fb-4881-4ffa-b6e6-9e75cf9c4bc4",
-      "page_slug": "employment",
-      "page_name": "Employment",
-      "heading": "Ready to Join This Team?",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "f5987016-0b31-4b8b-bd69-c94b91221060",
-      "web_page_id": "7762c1be-802f-44a4-9570-12883b2366b3",
-      "page_slug": "events",
-      "page_name": "Events",
-      "heading": "Events",
-      "section_role": "hero_home",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "aae86630-50eb-4d4c-847f-c9dea2104a3f",
-      "web_page_id": "7762c1be-802f-44a4-9570-12883b2366b3",
-      "page_slug": "events",
-      "page_name": "Events",
-      "heading": "First Presbyterian Church of Charlotte is a community that gathers.",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "cd8c2533-904b-4577-aad8-68a4140b7794",
-      "web_page_id": "7762c1be-802f-44a4-9570-12883b2366b3",
-      "page_slug": "events",
-      "page_name": "Events",
-      "heading": "What's Coming Up",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "1ff0aeef-a947-49cb-b204-4ad17b7c26b5",
-      "web_page_id": "7762c1be-802f-44a4-9570-12883b2366b3",
-      "page_slug": "events",
-      "page_name": "Events",
-      "heading": "Happening Every Week",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "bdccbae5-4259-412c-811c-6d38570feb47",
       "web_page_id": "7762c1be-802f-44a4-9570-12883b2366b3",
       "page_slug": "events",
@@ -38487,101 +37732,6 @@
       "cpt_subroutine_ref": null
     },
     {
-      "section_id": "c64ddbd4-97e3-4815-8c8c-98dd228295ff",
-      "web_page_id": "720b29f6-bbcf-462f-93c8-3c823aed2387",
-      "page_slug": "give",
-      "page_name": "Give",
-      "heading": "Give",
-      "section_role": "hero_home",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "aa3adbe8-ae76-459b-a85e-4d69cbbcb7ec",
-      "web_page_id": "720b29f6-bbcf-462f-93c8-3c823aed2387",
-      "page_slug": "give",
-      "page_name": "Give",
-      "heading": "Why Generosity Matters",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "043fd5c9-7884-4dc2-be39-550a948debd7",
-      "web_page_id": "720b29f6-bbcf-462f-93c8-3c823aed2387",
-      "page_slug": "give",
-      "page_name": "Give",
-      "heading": "Content Section 99",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [
-        "Kyle and Courtney Bullard, FPC members"
-      ],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "23e1cb96-5930-42bb-8247-6970c9ac69b6",
-      "web_page_id": "720b29f6-bbcf-462f-93c8-3c823aed2387",
-      "page_slug": "give",
-      "page_name": "Give",
-      "heading": "Ways to Give",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "068be70b-4cef-4756-8134-50db8d7b1723",
-      "web_page_id": "720b29f6-bbcf-462f-93c8-3c823aed2387",
-      "page_slug": "give",
-      "page_name": "Give",
-      "heading": "The Annual Pledge Campaign",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "5276a095-0971-47df-8ca9-d01601574d16",
-      "web_page_id": "720b29f6-bbcf-462f-93c8-3c823aed2387",
-      "page_slug": "give",
-      "page_name": "Give",
-      "heading": "Leave a Legacy at First Presbyterian Church",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "54ae38a1-82e0-491b-985e-0232f055703a",
       "web_page_id": "720b29f6-bbcf-462f-93c8-3c823aed2387",
       "page_slug": "give",
@@ -38589,36 +37739,6 @@
       "heading": "Your Generosity Matters Here",
       "section_role": "cta_banner_simple",
       "item_count": 3,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "de834a5d-fa11-4653-aad1-06754172bf43",
-      "web_page_id": "a9280f1b-6b51-4866-a7d0-e097bfc6b927",
-      "page_slug": "local-global",
-      "page_name": "Local Global",
-      "heading": "Local & Global Outreach",
-      "section_role": "hero_home",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "140b32e9-08c5-4348-9e0e-0c1222d24ece",
-      "web_page_id": "a9280f1b-6b51-4866-a7d0-e097bfc6b927",
-      "page_slug": "local-global",
-      "page_name": "Local Global",
-      "heading": "Outreach Philosophy",
-      "section_role": "content_block",
-      "item_count": 1,
       "schema": [
         "contact"
       ],
@@ -38649,21 +37769,6 @@
       "heading": "Serving the World",
       "section_role": "feature_split",
       "item_count": 6,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "cbf95fed-e1d6-405e-9452-e6340f482a6f",
-      "web_page_id": "a9280f1b-6b51-4866-a7d0-e097bfc6b927",
-      "page_slug": "local-global",
-      "page_name": "Local Global",
-      "heading": "Stay in the Loop",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
       "schema": [
         "contact"
       ],
@@ -38708,70 +37813,6 @@
       "cpt_subroutine_ref": null
     },
     {
-      "section_id": "c4a10421-8e59-45f2-b82f-15f928ce3762",
-      "web_page_id": "9f58b491-ac13-442d-82eb-4c4637f4851a",
-      "page_slug": "new",
-      "page_name": "New",
-      "heading": "There's a Place for You Here",
-      "section_role": "hero_home",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "a502870a-dea0-4076-8744-24c044df69f1",
-      "web_page_id": "9f58b491-ac13-442d-82eb-4c4637f4851a",
-      "page_slug": "new",
-      "page_name": "New",
-      "heading": "Want to Get a Feel for First Presbyterian Church First?",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "a7e5b512-5b50-44b2-ac5f-7069185a1f5e",
-      "web_page_id": "9f58b491-ac13-442d-82eb-4c4637f4851a",
-      "page_slug": "new",
-      "page_name": "New",
-      "heading": "Join Us This Sunday",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "image_card",
-        "heading_card",
-        "description_card",
-        "button_card"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "e71961ce-382d-416f-ad64-dab4557c7ff8",
-      "web_page_id": "9f58b491-ac13-442d-82eb-4c4637f4851a",
-      "page_slug": "new",
-      "page_name": "New",
-      "heading": "A Full Picture of Sunday Morning",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "bcf8afd2-75c3-4d5d-a9ff-0b6df357e5ce",
       "web_page_id": "9f58b491-ac13-442d-82eb-4c4637f4851a",
       "page_slug": "new",
@@ -38788,21 +37829,6 @@
       "cpt_subroutine_ref": null
     },
     {
-      "section_id": "fcd84ee1-194d-4b50-baa5-0b33605aa85e",
-      "web_page_id": "9f58b491-ac13-442d-82eb-4c4637f4851a",
-      "page_slug": "new",
-      "page_name": "New",
-      "heading": "Ask Questions and Find Support",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "ef672212-dc82-442c-848f-1a012af1e694",
       "web_page_id": "9f58b491-ac13-442d-82eb-4c4637f4851a",
       "page_slug": "new",
@@ -38810,128 +37836,6 @@
       "heading": "When You're Ready to Call This Home",
       "section_role": "feature_split",
       "item_count": 2,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "3b2e843a-eb24-4e7f-9373-6e30b160d598",
-      "web_page_id": "9f58b491-ac13-442d-82eb-4c4637f4851a",
-      "page_slug": "new",
-      "page_name": "New",
-      "heading": "Come This Sunday",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "f025cbc8-1d36-47e1-a31e-e69379480913",
-      "web_page_id": "4397d7f3-bc48-4b02-867e-b1b9e8cccf76",
-      "page_slug": "pastoral-transition",
-      "page_name": "Pastoral Transition",
-      "heading": "Pastoral Transition",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "ba4e9c8d-2265-4e36-99ef-42c04082320f",
-      "web_page_id": "4397d7f3-bc48-4b02-867e-b1b9e8cccf76",
-      "page_slug": "pastoral-transition",
-      "page_name": "Pastoral Transition",
-      "heading": "Updates from the Pastor Nominating Committee",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "content"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "46218368-8e49-4bda-b874-dfbfc2a9f310",
-      "web_page_id": "4397d7f3-bc48-4b02-867e-b1b9e8cccf76",
-      "page_slug": "pastoral-transition",
-      "page_name": "Pastoral Transition",
-      "heading": "Don't Miss an Update",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "49691258-6105-456f-8736-e39a40ae9d8e",
-      "web_page_id": "8dd305a4-d470-45c3-9bb1-5797e80fa6b8",
-      "page_slug": "serve",
-      "page_name": "Serve",
-      "heading": "Serve",
-      "section_role": "hero_home",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "a1b9f175-7488-48fe-ad74-62f47866e35f",
-      "web_page_id": "8dd305a4-d470-45c3-9bb1-5797e80fa6b8",
-      "page_slug": "serve",
-      "page_name": "Serve",
-      "heading": "Why Serve at First Pres",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "81afbb55-bce9-42fd-bed3-eed8349ad803",
-      "web_page_id": "8dd305a4-d470-45c3-9bb1-5797e80fa6b8",
-      "page_slug": "serve",
-      "page_name": "Serve",
-      "heading": "Worship Support and Children's Ministry",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "84025a15-cbaa-480f-9e22-7ce4ac2e4f0d",
-      "web_page_id": "8dd305a4-d470-45c3-9bb1-5797e80fa6b8",
-      "page_slug": "serve",
-      "page_name": "Serve",
-      "heading": "Care Ministries",
-      "section_role": "feature_split",
-      "item_count": 1,
       "schema": [
         "contact"
       ],
@@ -38955,21 +37859,6 @@
       "cpt_subroutine_ref": null
     },
     {
-      "section_id": "e2c471ad-3d65-45fa-b582-14cb18a553db",
-      "web_page_id": "8dd305a4-d470-45c3-9bb1-5797e80fa6b8",
-      "page_slug": "serve",
-      "page_name": "Serve",
-      "heading": "Serve The World",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "9718c9cc-0639-4318-b097-23bec8bf6946",
       "web_page_id": "8dd305a4-d470-45c3-9bb1-5797e80fa6b8",
       "page_slug": "serve",
@@ -38979,38 +37868,6 @@
       "item_count": 2,
       "schema": [
         "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "5330e9f7-a6e0-491f-81e5-c8b523ea289d",
-      "web_page_id": "28779f57-2fd9-400a-b0e0-cb31bb971748",
-      "page_slug": "staff",
-      "page_name": "Staff",
-      "heading": "Staff",
-      "section_role": "hero_home",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "5ba42a84-238a-4796-aea3-fe3c04a8cf89",
-      "web_page_id": "28779f57-2fd9-400a-b0e0-cb31bb971748",
-      "page_slug": "staff",
-      "page_name": "Staff",
-      "heading": "Our Staff Values",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
       ],
       "sample_names": [],
       "target_hint": "unknown",
@@ -39059,87 +37916,6 @@
       "cpt_subroutine_ref": "wp_object.staff"
     },
     {
-      "section_id": "07777974-2c35-4e14-8073-8c3cf9e81379",
-      "web_page_id": "28779f57-2fd9-400a-b0e0-cb31bb971748",
-      "page_slug": "staff",
-      "page_name": "Staff",
-      "heading": "Elders",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "9b3b63a8-bda4-4b87-b516-14437bcfd5c1",
-      "web_page_id": "28779f57-2fd9-400a-b0e0-cb31bb971748",
-      "page_slug": "staff",
-      "page_name": "Staff",
-      "heading": "Deacons",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "dd0bfc21-0ba3-44e6-bc4a-c2a4e102af44",
-      "web_page_id": "239b172d-fe6c-4bca-9f9c-17d1d5ca479f",
-      "page_slug": "the-history-hallway",
-      "page_name": "The History Hallway",
-      "heading": "The History Hallway",
-      "section_role": "hero_home",
-      "item_count": 1,
-      "schema": [
-        "tagline",
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "da3c05b4-7d7e-44ed-b777-2e4b1c68629e",
-      "web_page_id": "239b172d-fe6c-4bca-9f9c-17d1d5ca479f",
-      "page_slug": "the-history-hallway",
-      "page_name": "The History Hallway",
-      "heading": "Since 1802",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "e022dc73-f74e-4dfd-813c-0617a99963c3",
-      "web_page_id": "239b172d-fe6c-4bca-9f9c-17d1d5ca479f",
-      "page_slug": "the-history-hallway",
-      "page_name": "The History Hallway",
-      "heading": "The Senior Pastors of First Presbyterian",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "b5383643-f025-4abf-beac-2e1057b8dea6",
       "web_page_id": "239b172d-fe6c-4bca-9f9c-17d1d5ca479f",
       "page_slug": "the-history-hallway",
@@ -39159,53 +37935,6 @@
       "cpt_subroutine_ref": null
     },
     {
-      "section_id": "52e4a27c-759e-4d3f-8a13-40e7f1f34ae4",
-      "web_page_id": "239b172d-fe6c-4bca-9f9c-17d1d5ca479f",
-      "page_slug": "the-history-hallway",
-      "page_name": "The History Hallway",
-      "heading": "Walk It Yourself",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "affbb891-ce8b-44c7-a9c1-fa6f085672f3",
-      "web_page_id": "575e43f7-76ab-47d9-be23-6a9a9b1c3851",
-      "page_slug": "watch",
-      "page_name": "Watch",
-      "heading": "Watch Online",
-      "section_role": "content_block",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "accent_description",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "ddfa578f-2e26-44e2-bd46-39b34bd82100",
-      "web_page_id": "575e43f7-76ab-47d9-be23-6a9a9b1c3851",
-      "page_slug": "watch",
-      "page_name": "Watch",
-      "heading": "Feature Section 2",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "9eee567e-6b10-4380-a25f-9ce53859dfa4",
       "web_page_id": "575e43f7-76ab-47d9-be23-6a9a9b1c3851",
       "page_slug": "watch",
@@ -39221,83 +37950,6 @@
         "tag_label",
         "show_sort",
         "sort_label"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "4aea52bc-ddb8-472b-87db-824d2d783955",
-      "web_page_id": "575e43f7-76ab-47d9-be23-6a9a9b1c3851",
-      "page_slug": "watch",
-      "page_name": "Watch",
-      "heading": "Faith Unfiltered Podcast",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "ec663e22-6e3a-4cbb-a5d7-2caccca68a41",
-      "web_page_id": "575e43f7-76ab-47d9-be23-6a9a9b1c3851",
-      "page_slug": "watch",
-      "page_name": "Watch",
-      "heading": "Worship With Us in Person",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "98a89300-6cc7-43d0-8c7e-1518bf75508a",
-      "web_page_id": "5b9988c7-dfd5-4335-8b13-a0af97db8e0c",
-      "page_slug": "worship",
-      "page_name": "Worship",
-      "heading": "Worship & Music",
-      "section_role": "hero_home",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "dfd0d70f-085c-4480-af68-34329a4110ca",
-      "web_page_id": "5b9988c7-dfd5-4335-8b13-a0af97db8e0c",
-      "page_slug": "worship",
-      "page_name": "Worship",
-      "heading": "Worship With Us Sundays",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "3a9a7560-9ac6-4fa6-b777-c5a5c454333c",
-      "web_page_id": "5b9988c7-dfd5-4335-8b13-a0af97db8e0c",
-      "page_slug": "worship",
-      "page_name": "Worship",
-      "heading": "Music at First Presbyterian Church",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
       ],
       "sample_names": [],
       "target_hint": "unknown",
@@ -39368,21 +38020,6 @@
       "cpt_subroutine_ref": null
     },
     {
-      "section_id": "aff347e4-30db-4504-b3ce-ca7bbe72e399",
-      "web_page_id": "5b9988c7-dfd5-4335-8b13-a0af97db8e0c",
-      "page_slug": "worship",
-      "page_name": "Worship",
-      "heading": "There's a Place for You in the Music Ministry",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "3fc2d729-2421-4db5-a603-ac57d5f7fa00",
       "web_page_id": "5b9988c7-dfd5-4335-8b13-a0af97db8e0c",
       "page_slug": "worship",
@@ -39402,22 +38039,6 @@
       ],
       "target_hint": "flat-list",
       "cpt_subroutine_ref": "wp_object.staff"
-    },
-    {
-      "section_id": "cf32569d-9baf-4ca0-9747-c5e4daf0c435",
-      "web_page_id": "5b9988c7-dfd5-4335-8b13-a0af97db8e0c",
-      "page_slug": "worship",
-      "page_name": "Worship",
-      "heading": "Marking Life's Sacred Moments",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "heading",
-        "description"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
     },
     {
       "section_id": "2b2abe7d-23a5-4670-96d1-5787def8db0f",
@@ -39460,7 +38081,15 @@
       "schema": [],
       "sample_names": [],
       "target_hint": "individual-page",
-      "cpt_subroutine_ref": "wp_object.event"
+      "cpt_subroutine_ref": "wp_object.event",
+      "partner_context": {
+        "content_kind": "events",
+        "display_preference": "wordpress",
+        "display_format": "Calendar View",
+        "external_url": "https://firstpres-charlotte.org/events/grands-camp/",
+        "source_of_truth": "Events Calendar Plugin - WordPress",
+        "frustration": "-"
+      }
     },
     {
       "section_id": "17c9541f-35cc-4df4-a176-bc3298e55642",
@@ -39495,21 +38124,6 @@
       "cpt_subroutine_ref": null
     },
     {
-      "section_id": "f80fbb8b-4a8d-4ac4-8889-8969f505c08c",
-      "web_page_id": "239baf99-55ff-4410-84d9-160d5d9d4c38",
-      "page_slug": "single-sermon",
-      "page_name": "{single-sermon}",
-      "heading": "Continue Watching",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "a69c8b7f-6d5e-487f-8725-3586cc8051f8",
       "web_page_id": "c77478de-f84f-493f-aa12-07ec26523cb3",
       "page_slug": "staff/anna-dickson",
@@ -39527,21 +38141,6 @@
       "cpt_subroutine_ref": "wp_object.staff"
     },
     {
-      "section_id": "878df28a-1cfe-443a-8597-1043bf98c341",
-      "web_page_id": "25f6e9a1-7dfe-4cab-9614-b5298438400b",
-      "page_slug": "news-media",
-      "page_name": "News & Media",
-      "heading": "News & Publications",
-      "section_role": "cta_banner_simple",
-      "item_count": 1,
-      "schema": [
-        "contact"
-      ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
       "section_id": "c8d124e8-afd5-41b0-93fc-0def68d2baf9",
       "web_page_id": "25f6e9a1-7dfe-4cab-9614-b5298438400b",
       "page_slug": "news-media",
@@ -39556,19 +38155,6 @@
         "show_sort",
         "sort_label"
       ],
-      "sample_names": [],
-      "target_hint": "unknown",
-      "cpt_subroutine_ref": null
-    },
-    {
-      "section_id": "5df73786-bfb2-4dc1-b449-c3421430ba16",
-      "web_page_id": "25f6e9a1-7dfe-4cab-9614-b5298438400b",
-      "page_slug": "news-media",
-      "page_name": "News & Media",
-      "heading": "Feature Section 2",
-      "section_role": "feature_split",
-      "item_count": 1,
-      "schema": [],
       "sample_names": [],
       "target_hint": "unknown",
       "cpt_subroutine_ref": null

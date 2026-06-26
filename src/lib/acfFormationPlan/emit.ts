@@ -260,7 +260,7 @@ function applyRoutingRules(args: {
     const singleDefault = CPT_SINGLE_TEMPLATE_DEFAULT[sectionRole]
     if (singleDefault === 'maybe') {
       open_questions.push(
-        `Confirm with McNeel: should the \`${slug}\` CPT have a single-detail template? Default depends on partner intent.`
+        `Do these ${slug} records need their own detail pages on the site, or is a flat listing enough? The partner hasn't been explicit.`
       )
     }
     return {
@@ -337,7 +337,7 @@ function applyRoutingRules(args: {
     structure: 'PLAIN_FIELD',
     rationale: 'No rule matched — defaulting to PLAIN_FIELD.',
     confidence: 'low',
-    open_questions: ['Confirm with McNeel: this content piece has no recognized SectionRole or template signal.'],
+    open_questions: ['This content piece has no recognized section role or template signal — strategist needs to tag what it is.'],
     alternative: null,
   }
 }
@@ -520,7 +520,7 @@ function buildOptionsPage(inputs: FormationInputs): WpObjectOptionsPage {
     // Multi-campus → the 7 campus-scoped columns should NOT be
     // flattened into the Options page. Surface as open question.
     open_questions.push(
-      `Multi-campus project — these fields are inherently per-${inputs.campusTerm.singular.toLowerCase()} and should NOT be seeded as flat globals: ${CAMPUS_SCOPED_COLUMNS.map(c => c.col).join(', ')}. Recommend modeling as a "${inputs.campusTerm.singular}" CPT or as a per-${inputs.campusTerm.singular.toLowerCase()} repeater on the Visit page. Confirm with McNeel.`
+      `Multi-${inputs.campusTerm.singular.toLowerCase()} project — these fields are inherently per-${inputs.campusTerm.singular.toLowerCase()} (different value at each ${inputs.campusTerm.singular.toLowerCase()}): ${CAMPUS_SCOPED_COLUMNS.map(c => c.col).join(', ')}. They should NOT be seeded as flat globals. Best modeled as a "${inputs.campusTerm.singular}" CPT or as a per-${inputs.campusTerm.singular.toLowerCase()} repeater on the Visit page.`
     )
   } else {
     seeded.push(...CAMPUS_SCOPED_COLUMNS.map(c => c.col))
@@ -1506,6 +1506,22 @@ function findSection(inputs: FormationInputs, sectionId: string): WebSection | n
 
 import type { DiscoverySection } from './types'
 
+/** Section roles where a 1-item section is just decorative chrome
+ *  (page hero, intro paragraph, single-CTA banner) — not something
+ *  the dev needs to model. Filtered out of the discovery view so the
+ *  doc focuses on dev-relevant work (feature/team/event/sermon/blog/
+ *  group/career sections with real items to build against). Multi-
+ *  item sections of the same role STAY (e.g. a feature_split with
+ *  4 items is dev-relevant). */
+const TRIVIAL_ROLES_WHEN_SINGLE = new Set<SectionRole>([
+  'hero_home', 'hero_innerpage', 'hero_visual',
+  'banner_announcement',
+  'intro_text', 'content_block',
+  'mission_statement', 'verse_callout',
+  'cta_banner_simple', 'cta_banner_split', 'cta_full_bleed',
+  'feature_split',
+])
+
 export function buildDiscoverySections(
   inputs: FormationInputs,
   classifications: ClassificationRecord[],
@@ -1522,26 +1538,34 @@ export function buildDiscoverySections(
       if (!template?.fields) continue
       const fv = (section.field_values as Record<string, unknown> | null) ?? {}
 
-      // ── Heading: try field_values primary_heading / heading, then
-      //    section_role_label, then template layer_name. ────────────
       const heading = headingForSection(section, template, fv)
-
-      // ── Item count + schema: walk the FIRST group field and use
-      //    its items array. When the section has no group, treat it
-      //    as a single record and pull the top-level slot keys. ───
       const { count, schema, sampleNames } = analyzeSectionItems(template, fv)
 
-      // ── Target hint: strategist annotation wins when set, else
-      //    derive from section_role + CPT suggestion + display_preference.
+      // Filter: skip trivial single-item sections (heros / intros /
+      // single-CTA banners) unless the strategist explicitly tagged
+      // the section as dev-relevant via strategist_target_type.
+      const isTrivial =
+        count <= 1 &&
+        section.section_role !== null &&
+        TRIVIAL_ROLES_WHEN_SINGLE.has(section.section_role) &&
+        !section.strategist_target_type
+      if (isTrivial) continue
+
+      // Target hint: strategist annotation wins; else inferred.
       const annotated = section.strategist_target_type as DiscoverySection['target_hint'] | null | undefined
       const targetHint: DiscoverySection['target_hint'] = annotated
         ? annotated
         : inferTargetHint(section.section_role, inputs, classifications)
 
-      // Cross-reference the analyzer's CPT suggestion for this section.
       const cptRef = classifications
         .find(c => c.section_id === section.id && c.cpt_subroutine_ref)
         ?.cpt_subroutine_ref ?? null
+
+      // Partner context: if this section maps to a content-collection
+      // kind (events / sermons / groups), attach the partner's
+      // display_preference + supporting answers so the dev knows
+      // what the section should DO without having to look it up.
+      const partnerContext = derivePartnerContext(section.section_role, cptRef, inputs)
 
       out.push({
         section_id:        section.id,
@@ -1555,10 +1579,56 @@ export function buildDiscoverySections(
         sample_names:      sampleNames,
         target_hint:       targetHint,
         cpt_subroutine_ref: cptRef,
+        ...(partnerContext ? { partner_context: partnerContext } : {}),
       })
     }
   }
   return out
+}
+
+/** Map a section's role / CPT routing to its content-collection kind,
+ *  then pull the partner's answers from the cached session row. Null
+ *  when the section isn't event/sermon/group flavored. */
+function derivePartnerContext(
+  role: SectionRole | null,
+  cptRef: string | null,
+  inputs: FormationInputs,
+): DiscoverySection['partner_context'] | null {
+  const cc = inputs.contentCollection as Record<string, unknown> | null
+  if (!cc) return null
+  let kind: 'events' | 'sermons' | 'groups' | null = null
+  if (cptRef === 'wp_object.event'  || role === 'event_detail')                    kind = 'events'
+  if (cptRef === 'wp_object.sermon' || (role && /sermon/i.test(role)))             kind = 'sermons'
+  if (cptRef === 'wp_object.group'  || (role && /group/i.test(role)))              kind = 'groups'
+  if (!kind) return null
+
+  if (kind === 'events') {
+    return {
+      content_kind:       'events',
+      display_preference: (cc.events_display_preference as string | null) ?? null,
+      display_format:     (cc.events_display_format as string | null) ?? null,
+      external_url:       (cc.events_external_url as string | null) ?? null,
+      source_of_truth:    (cc.events_wordpress_source_of_truth as string | null) ?? null,
+      frustration:        (cc.events_wordpress_frustration as string | null) ?? null,
+    }
+  }
+  if (kind === 'sermons') {
+    return {
+      content_kind:       'sermons',
+      display_preference: (cc.sermons_display_preference as string | null) ?? null,
+      external_url:       (cc.sermons_external_url as string | null) ?? null,
+      playlist_url:       (cc.sermon_youtube_playlist_url as string | null) ?? null,
+      archive_features:   Array.isArray(cc.sermon_archive_features) ? cc.sermon_archive_features as string[] : null,
+    }
+  }
+  // groups
+  return {
+    content_kind:       'groups',
+    display_preference: (cc.groups_display_preference as string | null) ?? null,
+    external_url:       (cc.groups_external_url as string | null) ?? null,
+    source_of_truth:    (cc.groups_wordpress_source_of_truth as string | null) ?? null,
+    frustration:        (cc.groups_wordpress_frustration as string | null) ?? null,
+  }
 }
 
 function headingForSection(
@@ -1751,7 +1821,7 @@ export function detectFlexibleContentPages(
       recommended_default: 'BRICKS_NESTABLE_SECTION',
       alternative:         'FLEXIBLE_CONTENT',
       open_questions:      [
-        'Confirm with McNeel: use Bricks native Nestable for this page, or fall back to ACF Flexible Content?',
+        `This page has many sections with high variety — should the dev build the layout with Bricks native nestable sections (recommended for perf), or with ACF Flexible Content for editor flexibility?`,
       ],
       confidence:          'medium',
       cpt_subroutine_ref:  null,

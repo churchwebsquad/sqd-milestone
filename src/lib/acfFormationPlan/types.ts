@@ -359,6 +359,34 @@ export interface DiscoverySection {
   target_hint:       'individual-page' | 'flat-list' | 'embed' | 'external' | 'mailto' | 'unknown'
   /** Link to the analyzer's suggested WpObject (for cross-reference). */
   cpt_subroutine_ref: string | null
+  /** Partner-supplied context for sections tied to content-collection
+   *  display_preferences (events / sermons / groups). Surfaces the
+   *  partner's own answers about display mode, embed source URL,
+   *  filter needs, CTA target etc. — the missing detail that makes
+   *  these sections actually buildable. Null when the section role
+   *  doesn't map to a content-collection kind. */
+  partner_context?: {
+    content_kind: 'events' | 'sermons' | 'groups'
+    /** Display preference value (e.g. 'wordpress', 'archive_pages',
+     *  'contact', 'embed'). */
+    display_preference: string | null
+    /** Free-text format note ("Calendar view", "Grid"). Events only. */
+    display_format?: string | null
+    /** External source URL — for embeds, this is the third-party
+     *  URL the partner wants the section pulling from. For wordpress
+     *  mode, this is often the partner's current-site sample URL. */
+    external_url?: string | null
+    /** "Current source of truth" answer — what system the partner is
+     *  migrating away from. */
+    source_of_truth?: string | null
+    /** Free-text frustration the partner has with their current
+     *  system. Helps the dev avoid repeating mistakes. */
+    frustration?: string | null
+    /** Sermon-specific: YouTube playlist URL when the partner has one. */
+    playlist_url?: string | null
+    /** Sermon-specific: archive feature flags (notes, audio, podcast, filters). */
+    archive_features?: string[] | null
+  }
 }
 
 /** Persisted at strategy_web_projects.roadmap_state.content_model_plan. */
