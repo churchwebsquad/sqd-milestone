@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "_meta": {
-    "generated_at": "2026-06-26T18:30:54.112Z",
+    "generated_at": "2026-06-26T19:08:11.654Z",
     "generated_by": "analyzer-v1",
     "input_fingerprint": "-rgvu76",
     "counts": {
@@ -30740,7 +30740,42 @@
         "Confirm with McNeel: should the `event` CPT have a single-detail template? Default depends on partner intent.",
         "Confirm with McNeel: should the `event` CPT have a single-detail template? Default depends on partner intent."
       ],
-      "confidence": "medium"
+      "confidence": "medium",
+      "_content_collection_answers": {
+        "content_kind": "events",
+        "fields": [
+          {
+            "field": "events_display_preference",
+            "label": "Display preference",
+            "value": "wordpress"
+          },
+          {
+            "field": "events_display_format",
+            "label": "Display format",
+            "value": "Calendar View"
+          },
+          {
+            "field": "events_external_url",
+            "label": "External URL (sample / migration source)",
+            "value": "https://firstpres-charlotte.org/events/grands-camp/"
+          },
+          {
+            "field": "events_wordpress_source_of_truth",
+            "label": "Source of truth (current system)",
+            "value": "Events Calendar Plugin - WordPress"
+          },
+          {
+            "field": "events_wordpress_frustration",
+            "label": "Frustration with current system",
+            "value": "-"
+          },
+          {
+            "field": "events_wordpress_recurring_needed",
+            "label": "Recurring events needed?",
+            "value": "-"
+          }
+        ]
+      }
     },
     {
       "id": "wp_object.post",
@@ -30890,7 +30925,42 @@
         "acf.sermon"
       ],
       "open_questions": [],
-      "confidence": "high"
+      "confidence": "high",
+      "_content_collection_answers": {
+        "content_kind": "sermons",
+        "fields": [
+          {
+            "field": "sermons_display_preference",
+            "label": "Display preference",
+            "value": "wordpress"
+          },
+          {
+            "field": "sermons_external_url",
+            "label": "Sermon channel URL",
+            "value": "https://www.youtube.com/@firstprescharlotte"
+          },
+          {
+            "field": "sermon_youtube_playlist_exists",
+            "label": "YouTube playlist exists?",
+            "value": null
+          },
+          {
+            "field": "sermon_youtube_playlist_url",
+            "label": "YouTube playlist URL",
+            "value": null
+          },
+          {
+            "field": "sermon_archive_features",
+            "label": "Archive features (filters / notes / podcast / etc.)",
+            "value": []
+          },
+          {
+            "field": "sermon_filters_text",
+            "label": "Filter notes",
+            "value": null
+          }
+        ]
+      }
     },
     {
       "id": "wp_object.group",
@@ -30952,7 +31022,7 @@
         "enabled": true,
         "brixies_template_id": null,
         "cta_target": null,
-        "rationale": "Groups in WP with per-group detail pages, listed via Bricks query loop on /groups."
+        "rationale": "Groups in WP with per-group detail pages, listed via Bricks query loop on /groups. Groups have on-site detail pages; \"Learn more\" buttons go to CPT permalinks. ACF URL field optional for registration links."
       },
       "archive": {
         "enabled": false,
@@ -30966,7 +31036,32 @@
         "acf.group"
       ],
       "open_questions": [],
-      "confidence": "high"
+      "confidence": "high",
+      "_content_collection_answers": {
+        "content_kind": "groups",
+        "fields": [
+          {
+            "field": "groups_display_preference",
+            "label": "Display preference",
+            "value": "wordpress"
+          },
+          {
+            "field": "groups_external_url",
+            "label": "External URL (sample / migration source)",
+            "value": null
+          },
+          {
+            "field": "groups_wordpress_source_of_truth",
+            "label": "Source of truth (current system)",
+            "value": "WordPress"
+          },
+          {
+            "field": "groups_wordpress_frustration",
+            "label": "Frustration with current system",
+            "value": "Groups = Presbyterian Women Circles"
+          }
+        ]
+      }
     },
     {
       "id": "wp_object.home_buttons",
@@ -32942,24 +33037,19 @@
               "key": "field_career_position__apply_cta",
               "name": "apply_cta",
               "label": "Apply CTA",
-              "type": "group",
-              "sub_fields": [
-                {
-                  "key": "field_career_position__apply_cta_label",
-                  "name": "label",
-                  "label": "Label",
-                  "type": "text"
-                },
-                {
-                  "key": "field_career_position__apply_cta_url",
-                  "name": "url",
-                  "label": "URL",
-                  "type": "url"
-                }
-              ],
+              "type": "file",
               "_source": {
                 "web_field_type": "cta",
                 "template_field_key": "apply_cta"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "file": 1
+                },
+                "recommended_acf_type": "file",
+                "reason": "1/1 records link to file downloads (PDF/doc/etc.) — use ACF File field so editors upload assets instead of pasting URLs",
+                "type_promoted": true
               }
             }
           ]
@@ -33372,6 +33462,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 2,
+                "by_route_type": {
+                  "internal-page": 2
+                },
+                "recommended_acf_type": "url",
+                "reason": "2/2 records target internal pages — keep ACF URL field. Bricks dynamic-data resolves CPT permalinks at render; no need for ACF page_link picker.",
+                "type_promoted": false
               }
             }
           ]
@@ -33481,6 +33580,15 @@
               "_source": {
                 "web_field_type": "cta",
                 "template_field_key": "button_card"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "external": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are external URLs — ACF URL field is correct",
+                "type_promoted": false
               }
             }
           ]
@@ -34047,6 +34155,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "external": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are external URLs — ACF URL field is correct",
+                "type_promoted": false
               }
             }
           ]
@@ -34395,6 +34512,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "tel": 1
+                },
+                "recommended_acf_type": "text",
+                "reason": "1/1 records are phone numbers (tel:) — ACF has no native phone type, use Text with a \"tel:...\" placeholder",
+                "type_promoted": false
               }
             }
           ]
@@ -34707,6 +34833,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "internal-anchor": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are page anchors (#section) — keep ACF URL",
+                "type_promoted": false
               }
             }
           ]
@@ -34759,6 +34894,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "internal-anchor": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are page anchors (#section) — keep ACF URL",
+                "type_promoted": false
               }
             }
           ]
@@ -34840,6 +34984,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "external": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are external URLs — ACF URL field is correct",
+                "type_promoted": false
               }
             }
           ]
@@ -34987,6 +35140,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "internal-page": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records target internal pages — keep ACF URL field. Bricks dynamic-data resolves CPT permalinks at render; no need for ACF page_link picker.",
+                "type_promoted": false
               }
             }
           ]
@@ -35450,6 +35612,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "form": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are form URLs — ACF URL field is correct",
+                "type_promoted": false
               }
             }
           ]
@@ -35547,6 +35718,15 @@
               "_source": {
                 "web_field_type": "cta",
                 "template_field_key": "button_card"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "external": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are external URLs — ACF URL field is correct",
+                "type_promoted": false
               }
             }
           ]
@@ -36007,6 +36187,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "internal-anchor": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are page anchors (#section) — keep ACF URL",
+                "type_promoted": false
               }
             }
           ]
@@ -37141,6 +37330,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "external": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are external URLs — ACF URL field is correct",
+                "type_promoted": false
               }
             }
           ]

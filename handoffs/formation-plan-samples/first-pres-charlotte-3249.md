@@ -1,7 +1,7 @@
 # Formation Plan — Dev Handoff
 
 *Translated from* `first-pres-charlotte-3249.json`
-*Generated* 6/26/2026, 11:30:54 AM *fingerprint* `-rgvu76`
+*Generated* 6/26/2026, 12:08:11 PM *fingerprint* `-rgvu76`
 
 ## How to use this doc
 
@@ -150,9 +150,8 @@ Implementation decisions — how to wire what the strategist's already decided.
     - `title` (text, required) — *Position title*
     - `location` (text) — *Location*
     - `summary` (wysiwyg) — *Job summary*
-    - `apply_cta` (group) — *Apply CTA*
-      - `label` (text) — *Label*
-      - `url` (url) — *URL*
+    - `apply_cta` (file) — *Apply CTA* 🔁 **route-promoted**
+      - 🔁 *Promoted from URL to `file` — 1/1 records link to file downloads (PDF/doc/etc.) — use ACF File field so editors upload assets instead of pasting URLs*
   - `buttons` (repeater) — *Buttons*
     - `contact` (text) — *Button label*
   - `career_department` (taxonomy) → `career_department` — *Department*
@@ -200,6 +199,19 @@ Implementation decisions — how to wire what the strategist's already decided.
 - Taxonomies:
   - `event_category` — Category / Categories (hierarchical)
   - `event_campus` — Campus / Campuses (flat)
+
+**Partner content-collection answers (events)**
+
+Verbatim from the partner's Content Collection form — gives the dev context for WHY this CPT looks the way it does.
+
+| Field | Partner's answer |
+|-------|------------------|
+| Display preference | wordpress |
+| Display format | Calendar View |
+| External URL (sample / migration source) | [https://firstpres-charlotte.org/events/grands-camp/](https://firstpres-charlotte.org/events/grands-camp/) |
+| Source of truth (current system) | Events Calendar Plugin - WordPress |
+| Frustration with current system | *(not answered)* |
+| Recurring events needed? | *(not answered)* |
 
 **ACF field group**
 
@@ -279,6 +291,19 @@ Implementation decisions — how to wire what the strategist's already decided.
   - `sermon_speaker` — Speaker / Speakers (flat)
   - `sermon_topic` — Topic / Topics (hierarchical)
 
+**Partner content-collection answers (sermons)**
+
+Verbatim from the partner's Content Collection form — gives the dev context for WHY this CPT looks the way it does.
+
+| Field | Partner's answer |
+|-------|------------------|
+| Display preference | wordpress |
+| Sermon channel URL | [https://www.youtube.com/@firstprescharlotte](https://www.youtube.com/@firstprescharlotte) |
+| YouTube playlist exists? | *(not answered)* |
+| YouTube playlist URL | *(not answered)* |
+| Archive features (filters / notes / podcast / etc.) | *(empty)* |
+| Filter notes | *(not answered)* |
+
 **ACF field group**
 
 - Key: `acf.sermon`
@@ -293,7 +318,7 @@ Implementation decisions — how to wire what the strategist's already decided.
 
 **Registration**
 
-- Single detail page: ✅ yes — Groups in WP with per-group detail pages, listed via Bricks query loop on /groups.
+- Single detail page: ✅ yes — Groups in WP with per-group detail pages, listed via Bricks query loop on /groups. Groups have on-site detail pages; "Learn more" buttons go to CPT permalinks. ACF URL field optional for registration links.
 - Archive page: ❌ no (rendered via query loop on `/groups`)
 - Public: yes · Queryable: yes · REST: yes · In nav menus: yes · In search: yes
 - Supports: title, revisions
@@ -303,6 +328,17 @@ Implementation decisions — how to wire what the strategist's already decided.
   - `group_type` — Type / Types (hierarchical)
   - `group_day` — Day / Days (flat)
   - `group_campus` — Campus / Campuses (flat)
+
+**Partner content-collection answers (groups)**
+
+Verbatim from the partner's Content Collection form — gives the dev context for WHY this CPT looks the way it does.
+
+| Field | Partner's answer |
+|-------|------------------|
+| Display preference | wordpress |
+| External URL (sample / migration source) | *(not answered)* |
+| Source of truth (current system) | WordPress |
+| Frustration with current system | Groups = Presbyterian Women Circles |
 
 **ACF field group**
 
@@ -693,6 +729,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
 - Fields:
   - `buttons` (repeater) — *Buttons*
     - `contact` (text) — *Button label*
+      - *1 CTA observed (1 form). Kept as ACF `url` — 1/1 records are form URLs — ACF URL field is correct*
 
 **CTA / button routing** — 1 destination across this group:
 
@@ -729,6 +766,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
     - `heading_card` (text, required) — *Heading Card*
     - `description_card` (wysiwyg) — *Description Card*
     - `button_card` (group) — *CTA*
+      - *1 CTA observed (1 external). Kept as ACF `url` — 1/1 records are external URLs — ACF URL field is correct*
       - `label` (text) — *Label*
       - `url` (url) — *URL*
 
@@ -978,6 +1016,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
 - Fields:
   - `buttons` (repeater) — *Buttons*
     - `contact` (text) — *Button label*
+      - *1 CTA observed (1 internal-anchor). Kept as ACF `url` — 1/1 records are page anchors (#section) — keep ACF URL*
 
 **CTA / button routing** — 1 destination across this group:
 
@@ -1227,6 +1266,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
 - Fields:
   - `buttons` (repeater) — *Buttons*
     - `contact` (text) — *Button label*
+      - *1 CTA observed (1 external). Kept as ACF `url` — 1/1 records are external URLs — ACF URL field is correct*
 
 **CTA / button routing** — 1 destination across this group:
 
@@ -1432,6 +1472,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
 - Fields:
   - `buttons` (repeater) — *Buttons*
     - `contact` (text) — *Button label*
+      - *2 CTAs observed (2 internal-page). Kept as ACF `url` — 2/2 records target internal pages — keep ACF URL field. Bricks dynamic-data resolves CPT permalinks at render; no need for ACF page_link picker.*
 
 **CTA / button routing** — 2 destinations across this group:
 
@@ -1486,6 +1527,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
     - `heading_card` (text, required) — *Heading Card*
     - `description_card` (wysiwyg) — *Description Card*
     - `button_card` (group) — *CTA*
+      - *1 CTA observed (1 external). Kept as ACF `url` — 1/1 records are external URLs — ACF URL field is correct*
       - `label` (text) — *Label*
       - `url` (url) — *URL*
 
@@ -1562,6 +1604,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
 - Fields:
   - `buttons` (repeater) — *Buttons*
     - `contact` (text) — *Button label*
+      - *1 CTA observed (1 tel). Kept as ACF `text` — 1/1 records are phone numbers (tel:) — ACF has no native phone type, use Text with a "tel:..." placeholder*
 
 **CTA / button routing** — 1 destination across this group:
 
@@ -1718,6 +1761,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
 - Fields:
   - `buttons` (repeater) — *Buttons*
     - `contact` (text) — *Button label*
+      - *1 CTA observed (1 external). Kept as ACF `url` — 1/1 records are external URLs — ACF URL field is correct*
 
 **CTA / button routing** — 1 destination across this group:
 
@@ -1790,6 +1834,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
 - Fields:
   - `buttons` (repeater) — *Buttons*
     - `contact` (text) — *Button label*
+      - *1 CTA observed (1 internal-page). Kept as ACF `url` — 1/1 records target internal pages — keep ACF URL field. Bricks dynamic-data resolves CPT permalinks at render; no need for ACF page_link picker.*
 
 **CTA / button routing** — 1 destination across this group:
 
@@ -2119,6 +2164,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
 - Fields:
   - `buttons` (repeater) — *Buttons*
     - `contact` (text) — *Button label*
+      - *1 CTA observed (1 internal-anchor). Kept as ACF `url` — 1/1 records are page anchors (#section) — keep ACF URL*
 
 **CTA / button routing** — 1 destination across this group:
 
@@ -2274,6 +2320,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
 - Fields:
   - `buttons` (repeater) — *Buttons*
     - `contact` (text) — *Button label*
+      - *1 CTA observed (1 external). Kept as ACF `url` — 1/1 records are external URLs — ACF URL field is correct*
 
 **CTA / button routing** — 1 destination across this group:
 
@@ -2311,6 +2358,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
 - Fields:
   - `buttons` (repeater) — *Buttons*
     - `contact` (text) — *Button label*
+      - *1 CTA observed (1 internal-anchor). Kept as ACF `url` — 1/1 records are page anchors (#section) — keep ACF URL*
 
 **CTA / button routing** — 1 destination across this group:
 

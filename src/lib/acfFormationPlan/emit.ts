@@ -31,6 +31,7 @@ import type {
 import type {
   AcfField,
   AcfFieldGroup,
+  AcfFieldType,
   AcfLocationRule,
   ArchiveSpec,
   ClassificationRecord,
@@ -572,6 +573,14 @@ function buildCptFromRoles(
   const taxonomies: TaxonomySpec[] = buildTaxonomies(slug, inputs.campusTerm)
   const open_questions = relevant.flatMap(c => c.open_questions)
 
+  // If this slug ALSO maps to a content-collection display_preference
+  // kind (events/sermons/groups), surface the partner's answers on
+  // the CPT — even when the role-driven path produced it. Otherwise
+  // the dev never sees what the partner said about events because
+  // event_detail SectionRole shortcuts the display-pref builder.
+  const ccKind = contentKindForCptSlug(slug)
+  const cca = ccKind ? collectContentCollectionAnswers(ccKind, inputs) : undefined
+
   return {
     id:                  `wp_object.${slug}`,
     kind:                'custom_post_type',
@@ -588,7 +597,52 @@ function buildCptFromRoles(
     open_questions,
     confidence:          relevant.some(c => c.confidence === 'medium' || c.confidence === 'low')
                           ? 'medium' : 'high',
+    _content_collection_answers: cca,
   }
+}
+
+/** Reverse lookup: which content-collection kind (events/sermons/
+ *  groups) corresponds to a CPT slug. Returns null for slugs that
+ *  don't have a content-collection block (staff, post, career). */
+function contentKindForCptSlug(slug: string): 'events' | 'sermons' | 'groups' | null {
+  if (slug === 'event')  return 'events'
+  if (slug === 'sermon') return 'sermons'
+  if (slug === 'group')  return 'groups'
+  return null
+}
+
+/** Surfaces what the display_preference means for the dev — names the
+ *  button-target intent across the CPT so McNeel doesn't have to dig
+ *  through field_values to figure out where Watch/Register/Contact
+ *  buttons point. Returns a one-line summary appended to the CPT's
+ *  single_template.rationale. */
+function buttonTargetNoteForDisplayPref(
+  contentKind: 'events' | 'sermons' | 'groups',
+  pref: string | null,
+): string {
+  if (!pref) return ''
+  if (contentKind === 'sermons') {
+    switch (pref) {
+      case 'latest_sermon':         return 'Buttons on sermon cards link out to the YouTube video. ACF URL field per record holds the YT link.'
+      case 'archive_youtube':       return 'Sermons render as cards; each card button links out to YouTube. ACF URL field per record holds the YT link.'
+      case 'latest_series_youtube': return 'Latest-series card buttons link out to YouTube. ACF URL field per record holds the YT link.'
+      case 'archive_pages':         return 'Sermons render as cards linking to individual on-site detail pages. The card button = CPT permalink (Bricks dynamic-data, no ACF storage). ACF URL field still needed on each record for the embedded video on the detail page.'
+      case 'latest_series_pages':   return 'Latest-series cards link to on-site detail pages; card button = CPT permalink. ACF URL field still needed for video embed on detail pages.'
+      case 'wordpress':             return 'Legacy "wordpress" value — treated as archive_pages: cards link to on-site detail pages; ACF URL field powers the embed on each.'
+    }
+  }
+  if (contentKind === 'events') {
+    switch (pref) {
+      case 'wordpress':             return 'Events have on-site detail pages; cards link to CPT permalinks. ACF URL field per record may hold an external registration link (e.g. Church Center) for a secondary CTA.'
+    }
+  }
+  if (contentKind === 'groups') {
+    switch (pref) {
+      case 'wordpress':             return 'Groups have on-site detail pages; "Learn more" buttons go to CPT permalinks. ACF URL field optional for registration links.'
+      case 'contact':               return 'Headless CPT — each group card has a mailto button. ACF Email field per record holds the contact email (no detail page).'
+    }
+  }
+  return ''
 }
 
 function buildCptFromDisplayPref(
@@ -626,7 +680,17 @@ function buildCptFromDisplayPref(
       enabled:             singleEnabled,
       brixies_template_id: null,
       cta_target:          contentKind === 'groups' && headless ? 'mailto' : null,
-      rationale:           shape.rationale,
+      rationale: (() => {
+        const base = shape.rationale
+        const note = buttonTargetNoteForDisplayPref(contentKind, inputs.displayPreferences[contentKind])
+        if (!note || base.includes(note)) return base
+        // Dedup by a substring check on the first 30 chars — covers
+        // the legacy 'wordpress' case where shape.rationale already
+        // mentions archive_pages.
+        const head = note.slice(0, 30)
+        if (base.includes(head)) return base
+        return `${base} ${note}`
+      })(),
     },
     archive: {
       enabled:                       archiveEnabled,
@@ -639,7 +703,49 @@ function buildCptFromDisplayPref(
     field_group_refs: [`acf.${slug}`],
     open_questions:   [],
     confidence:       'high',
+    _content_collection_answers: collectContentCollectionAnswers(contentKind, inputs),
   }
+}
+
+/** Picks the relevant content-collection fields for one content kind
+ *  and shapes them as { field, label, value } records the dev can
+ *  scan. Returns undefined when the session row doesn't exist (no
+ *  empty section under the CPT). Empty values are kept so the dev
+ *  can see what the partner explicitly DIDN'T answer. */
+function collectContentCollectionAnswers(
+  contentKind: 'events' | 'sermons' | 'groups',
+  inputs: FormationInputs,
+): WpObjectCpt['_content_collection_answers'] | undefined {
+  const cc = inputs.contentCollection as Record<string, unknown> | null
+  if (!cc) return undefined
+  const COLUMNS_BY_KIND: Record<typeof contentKind, Array<{ field: string; label: string }>> = {
+    events: [
+      { field: 'events_display_preference',         label: 'Display preference' },
+      { field: 'events_display_format',             label: 'Display format' },
+      { field: 'events_external_url',               label: 'External URL (sample / migration source)' },
+      { field: 'events_wordpress_source_of_truth',  label: 'Source of truth (current system)' },
+      { field: 'events_wordpress_frustration',      label: 'Frustration with current system' },
+      { field: 'events_wordpress_recurring_needed', label: 'Recurring events needed?' },
+    ],
+    sermons: [
+      { field: 'sermons_display_preference',        label: 'Display preference' },
+      { field: 'sermons_external_url',              label: 'Sermon channel URL' },
+      { field: 'sermon_youtube_playlist_exists',    label: 'YouTube playlist exists?' },
+      { field: 'sermon_youtube_playlist_url',       label: 'YouTube playlist URL' },
+      { field: 'sermon_archive_features',           label: 'Archive features (filters / notes / podcast / etc.)' },
+      { field: 'sermon_filters_text',               label: 'Filter notes' },
+    ],
+    groups: [
+      { field: 'groups_display_preference',         label: 'Display preference' },
+      { field: 'groups_external_url',               label: 'External URL (sample / migration source)' },
+      { field: 'groups_wordpress_source_of_truth',  label: 'Source of truth (current system)' },
+      { field: 'groups_wordpress_frustration',      label: 'Frustration with current system' },
+    ],
+  }
+  const fields = COLUMNS_BY_KIND[contentKind].map(({ field, label }) => ({
+    field, label, value: cc[field] ?? null,
+  }))
+  return { content_kind: contentKind, fields }
 }
 
 function inferSingleTemplate(
@@ -873,6 +979,13 @@ function buildCptFieldGroup(
     seenKeys.add(tax.slug)
   }
 
+  const enrichedRows = dedupContentRows(contentRows).map(enrichRowWithCtaRoutes)
+  // Route-driven ACF type refinement: walk fields, look at the
+  // aggregate of route_types per field name, promote to the better
+  // ACF type when a dominant destination exists.
+  const routeByName = aggregateCtaRoutesByFieldName(enrichedRows)
+  refineCtaFieldsWithRouteAnalysis(fields, routeByName)
+
   return {
     key:      `acf.${obj.slug}`,
     title:    `${obj.labels.singular} fields`,
@@ -881,7 +994,7 @@ function buildCptFieldGroup(
     position: 'normal',
     style:    'default',
     _source_section_ids: sourceSectionIds,
-    _content_rows: dedupContentRows(contentRows).map(enrichRowWithCtaRoutes),
+    _content_rows: enrichedRows,
   }
 }
 
@@ -1031,6 +1144,162 @@ function enrichRowWithCtaRoutes(row: Record<string, unknown>): Record<string, un
   return { ...row, _cta_routes: routes }
 }
 
+/** Aggregate route_types per field-name across all content rows.
+ *  Used by the field-tree refinement pass to recommend a better ACF
+ *  field type when a button consistently targets one destination
+ *  (e.g. careers always → PDF file, sermons always → YouTube). */
+function aggregateCtaRoutesByFieldName(rows: Array<Record<string, unknown>>): Map<string, Map<CtaRouteType, number>> {
+  const out = new Map<string, Map<CtaRouteType, number>>()
+  for (const row of rows) {
+    const ctas = row._cta_routes as CtaRoute[] | undefined
+    if (!Array.isArray(ctas)) continue
+    for (const c of ctas) {
+      // Take the LAST path segment and strip `_url` suffix so e.g.
+      // `buttons[0].contact_url` → `contact`, matching the ACF
+      // field's name on the group. Flatten/bare URLs (`social_facebook_url`)
+      // keep their full name as the key, so the analyzer can still
+      // surface them.
+      const lastSeg = c.field.split(/[.\[\]]/).filter(Boolean).pop() ?? c.field
+      const key = lastSeg.endsWith('_url') ? lastSeg.replace(/_url$/, '') : lastSeg
+      const inner = out.get(key) ?? new Map<CtaRouteType, number>()
+      inner.set(c.route_type, (inner.get(c.route_type) ?? 0) + 1)
+      out.set(key, inner)
+      // Also store under the full `_url` form so url-typed fields
+      // (not just group/cta) can be matched.
+      if (lastSeg !== key) {
+        const innerFull = out.get(lastSeg) ?? new Map<CtaRouteType, number>()
+        innerFull.set(c.route_type, (innerFull.get(c.route_type) ?? 0) + 1)
+        out.set(lastSeg, innerFull)
+      }
+    }
+  }
+  return out
+}
+
+interface AcfTypeRecommendation { recommended_acf_type: AcfFieldType; reason: string }
+
+/** Promotion-eligible ACF types — these are the ONLY ACF types we
+ *  upgrade a generic URL field to. Why this is narrower than it might
+ *  look:
+ *
+ *  - `file`   — editor uploads instead of pasting URLs; large
+ *               behavioral change worth promoting when observed.
+ *  - `email`  — mailto destinations want a dedicated email field
+ *               (validation + UI).
+ *  - `text` (for tel:) — ACF has no native phone field; text + a
+ *               "tel:..." placeholder is the closest dev gets.
+ *
+ *  Cases we DO NOT promote (kept as ACF `url` with a note):
+ *
+ *  - YouTube/Vimeo — observed YT URLs at the field-values level
+ *    might just be Brixies template defaults. Whether the button
+ *    links out to YT vs renders as an oembed depends on the
+ *    partner's sermons_display_preference (we surface that signal
+ *    in the CPT's single_template.rationale, separately).
+ *  - internal-page — typically rendered via Bricks dynamic-data
+ *    from the CPT permalink, not stored as a URL. Promoting to
+ *    ACF page_link forces editors to pick from a dropdown when
+ *    the value is auto-derived.
+ *  - social / external / form / church-center / internal-anchor —
+ *    URL is correct; no behavioral upgrade available.
+ */
+const PROMOTABLE_TO: ReadonlySet<AcfFieldType> = new Set(['file', 'email', 'text'])
+
+/** Maps the dominant route to the best ACF field type. Threshold:
+ *  90% of records must share the route for us to promote — anything
+ *  below that and the field stays a generic URL with a notation
+ *  about the mix. */
+function recommendAcfTypeFromRoutes(stats: Map<CtaRouteType, number>): AcfTypeRecommendation | null {
+  const entries = [...stats.entries()].sort((a, b) => b[1] - a[1])
+  if (entries.length === 0) return null
+  const total = entries.reduce((sum, [, n]) => sum + n, 0)
+  const [top, topCount] = entries[0]
+  const ratio = topCount / total
+  if (ratio < 0.9) {
+    const breakdown = entries.map(([r, n]) => `${n} ${r}`).join(', ')
+    return {
+      recommended_acf_type: 'url',
+      reason: `mixed destinations (${breakdown}) — keep as ACF URL field, dev manually validates per record`,
+    }
+  }
+  switch (top) {
+    case 'file':
+      return { recommended_acf_type: 'file',  reason: `${topCount}/${total} records link to file downloads (PDF/doc/etc.) — use ACF File field so editors upload assets instead of pasting URLs` }
+    case 'mailto':
+      return { recommended_acf_type: 'email', reason: `${topCount}/${total} records are email addresses — use ACF Email field` }
+    case 'tel':
+      return { recommended_acf_type: 'text',  reason: `${topCount}/${total} records are phone numbers (tel:) — ACF has no native phone type, use Text with a "tel:..." placeholder` }
+    case 'youtube':
+    case 'vimeo':
+      // Don't promote. Bricks template determines whether this URL
+      // renders as a "Watch" button or an auto-embed widget — both
+      // resolve from an ACF URL field. The partner's display_preference
+      // (sermons_display_preference) is the authoritative signal for
+      // which mode is in use; we surface that on the CPT itself.
+      return { recommended_acf_type: 'url',   reason: `${topCount}/${total} records are ${top} URLs — keep ACF URL field. Whether this renders as a link or auto-embed is decided by the partner's display_preference (see the CPT's single_template.rationale).` }
+    case 'internal-page':
+      return { recommended_acf_type: 'url',   reason: `${topCount}/${total} records target internal pages — keep ACF URL field. Bricks dynamic-data resolves CPT permalinks at render; no need for ACF page_link picker.` }
+    case 'social':
+    case 'external':
+    case 'form':
+    case 'church-center':
+      return { recommended_acf_type: 'url',   reason: `${topCount}/${total} records are ${top} URLs — ACF URL field is correct` }
+    case 'internal-anchor':
+      return { recommended_acf_type: 'url',   reason: `${topCount}/${total} records are page anchors (#section) — keep ACF URL` }
+    default:
+      return null
+  }
+}
+
+/** Walks the ACF field tree and applies route-driven recommendations
+ *  to any field that's CTA-shaped. Promotes ONLY to types in
+ *  PROMOTABLE_TO (file / email / text-for-tel). Everything else
+ *  stays ACF `url` with explanatory notes — for cases like YouTube
+ *  or internal-page, the right ACF storage is still URL; the
+ *  behavioral difference is downstream (Bricks template / display
+ *  preference).
+ *
+ *  Records the analysis on every CTA-shaped field even when no
+ *  promotion happens, so the translator can show the dev what the
+ *  destinations look like + flag any open questions for the
+ *  strategist. */
+function refineCtaFieldsWithRouteAnalysis(
+  fields: AcfField[],
+  byName: Map<string, Map<CtaRouteType, number>>,
+): void {
+  for (const f of fields) {
+    const stats = byName.get(f.name)
+    if (stats) {
+      const rec = recommendAcfTypeFromRoutes(stats)
+      if (rec) {
+        const isCtaShaped =
+          (f.type === 'group' && Array.isArray(f.sub_fields) &&
+           f.sub_fields.some(sf => sf.type === 'url') &&
+           f.sub_fields.some(sf => sf.type === 'text')) ||
+          f.type === 'url'
+        const willPromote =
+          isCtaShaped &&
+          PROMOTABLE_TO.has(rec.recommended_acf_type) &&
+          rec.recommended_acf_type !== f.type
+        f._cta_analysis = {
+          total_records:        [...stats.values()].reduce((a, b) => a + b, 0),
+          by_route_type:        Object.fromEntries(stats),
+          recommended_acf_type: rec.recommended_acf_type,
+          reason:               rec.reason,
+          type_promoted:        willPromote,
+        }
+        if (willPromote) {
+          f.type = rec.recommended_acf_type
+          // file / email are scalar — drop the {label, url} sub-fields.
+          // text (for tel) keeps no sub_fields by default anyway.
+          f.sub_fields = undefined
+        }
+      }
+    }
+    if (Array.isArray(f.sub_fields)) refineCtaFieldsWithRouteAnalysis(f.sub_fields, byName)
+  }
+}
+
 function looksEmpty(v: unknown): boolean {
   if (v == null) return true
   if (typeof v === 'string') {
@@ -1103,6 +1372,10 @@ function buildRepeaterFieldGroup(
     { param: 'page_template', operator: '==', value: `page-${obj.on_page_slug}.php` },
   ]]
 
+  const enrichedRows = contentRows.map(enrichRowWithCtaRoutes)
+  const routeByName = aggregateCtaRoutesByFieldName(enrichedRows)
+  refineCtaFieldsWithRouteAnalysis(fields, routeByName)
+
   return {
     key:      obj.field_group_ref.replace(/^acf\./, 'acf.repeater_'),
     title:    `Repeater: ${obj.on_page_slug} / ${c?.item_label ?? ''}`,
@@ -1111,7 +1384,7 @@ function buildRepeaterFieldGroup(
     position: 'normal',
     style:    'default',
     _source_section_ids: sourceSectionIds,
-    _content_rows: contentRows.map(enrichRowWithCtaRoutes),
+    _content_rows: enrichedRows,
   }
 }
 

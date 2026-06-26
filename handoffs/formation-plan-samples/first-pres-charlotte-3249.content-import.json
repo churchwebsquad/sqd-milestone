@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-26T18:30:54.112Z",
+  "generated_at": "2026-06-26T19:08:11.654Z",
   "options_pages": [
     {
       "slug": "global-site",
@@ -936,24 +936,19 @@
               "key": "field_career_position__apply_cta",
               "name": "apply_cta",
               "label": "Apply CTA",
-              "type": "group",
-              "sub_fields": [
-                {
-                  "key": "field_career_position__apply_cta_label",
-                  "name": "label",
-                  "label": "Label",
-                  "type": "text"
-                },
-                {
-                  "key": "field_career_position__apply_cta_url",
-                  "name": "url",
-                  "label": "URL",
-                  "type": "url"
-                }
-              ],
+              "type": "file",
               "_source": {
                 "web_field_type": "cta",
                 "template_field_key": "apply_cta"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "file": 1
+                },
+                "recommended_acf_type": "file",
+                "reason": "1/1 records link to file downloads (PDF/doc/etc.) — use ACF File field so editors upload assets instead of pasting URLs",
+                "type_promoted": true
               }
             }
           ]
@@ -1284,6 +1279,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 2,
+                "by_route_type": {
+                  "internal-page": 2
+                },
+                "recommended_acf_type": "url",
+                "reason": "2/2 records target internal pages — keep ACF URL field. Bricks dynamic-data resolves CPT permalinks at render; no need for ACF page_link picker.",
+                "type_promoted": false
               }
             }
           ]
@@ -1334,6 +1338,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 2,
+                "by_route_type": {
+                  "internal-page": 2
+                },
+                "recommended_acf_type": "url",
+                "reason": "2/2 records target internal pages — keep ACF URL field. Bricks dynamic-data resolves CPT permalinks at render; no need for ACF page_link picker.",
+                "type_promoted": false
               }
             }
           ]
@@ -1384,6 +1397,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 2,
+                "by_route_type": {
+                  "internal-page": 2
+                },
+                "recommended_acf_type": "url",
+                "reason": "2/2 records target internal pages — keep ACF URL field. Bricks dynamic-data resolves CPT permalinks at render; no need for ACF page_link picker.",
+                "type_promoted": false
               }
             }
           ]
@@ -1692,6 +1714,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "external": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are external URLs — ACF URL field is correct",
+                "type_promoted": false
               }
             }
           ]
@@ -1730,6 +1761,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "external": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are external URLs — ACF URL field is correct",
+                "type_promoted": false
               }
             }
           ]
@@ -1768,6 +1808,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "external": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are external URLs — ACF URL field is correct",
+                "type_promoted": false
               }
             }
           ]
@@ -1806,6 +1855,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "external": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are external URLs — ACF URL field is correct",
+                "type_promoted": false
               }
             }
           ]
@@ -1844,6 +1902,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "tel": 1
+                },
+                "recommended_acf_type": "text",
+                "reason": "1/1 records are phone numbers (tel:) — ACF has no native phone type, use Text with a \"tel:...\" placeholder",
+                "type_promoted": false
               }
             }
           ]
@@ -1883,6 +1950,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "tel": 1
+                },
+                "recommended_acf_type": "text",
+                "reason": "1/1 records are phone numbers (tel:) — ACF has no native phone type, use Text with a \"tel:...\" placeholder",
+                "type_promoted": false
               }
             }
           ]
@@ -1922,6 +1998,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "tel": 1
+                },
+                "recommended_acf_type": "text",
+                "reason": "1/1 records are phone numbers (tel:) — ACF has no native phone type, use Text with a \"tel:...\" placeholder",
+                "type_promoted": false
               }
             }
           ]
@@ -2036,6 +2121,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "internal-anchor": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are page anchors (#section) — keep ACF URL",
+                "type_promoted": false
               }
             }
           ]
@@ -2074,6 +2168,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "internal-anchor": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are page anchors (#section) — keep ACF URL",
+                "type_promoted": false
               }
             }
           ]
@@ -2113,6 +2216,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "internal-anchor": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are page anchors (#section) — keep ACF URL",
+                "type_promoted": false
               }
             }
           ]
@@ -2152,6 +2264,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "external": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are external URLs — ACF URL field is correct",
+                "type_promoted": false
               }
             }
           ]
@@ -2190,6 +2311,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "external": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are external URLs — ACF URL field is correct",
+                "type_promoted": false
               }
             }
           ]
@@ -2228,6 +2358,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "external": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records are external URLs — ACF URL field is correct",
+                "type_promoted": false
               }
             }
           ]
@@ -2266,6 +2405,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "internal-page": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records target internal pages — keep ACF URL field. Bricks dynamic-data resolves CPT permalinks at render; no need for ACF page_link picker.",
+                "type_promoted": false
               }
             }
           ]
@@ -2305,6 +2453,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "internal-page": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records target internal pages — keep ACF URL field. Bricks dynamic-data resolves CPT permalinks at render; no need for ACF page_link picker.",
+                "type_promoted": false
               }
             }
           ]
@@ -2344,6 +2501,15 @@
               "_source": {
                 "web_field_type": "text",
                 "template_field_key": "contact"
+              },
+              "_cta_analysis": {
+                "total_records": 1,
+                "by_route_type": {
+                  "internal-page": 1
+                },
+                "recommended_acf_type": "url",
+                "reason": "1/1 records target internal pages — keep ACF URL field. Bricks dynamic-data resolves CPT permalinks at render; no need for ACF page_link picker.",
+                "type_promoted": false
               }
             }
           ]

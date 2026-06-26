@@ -29,6 +29,13 @@ interface AcfField {
   required?: boolean
   sub_fields?: AcfField[]
   taxonomy?: string
+  _cta_analysis?: {
+    total_records: number
+    by_route_type: Record<string, number>
+    recommended_acf_type: string
+    reason: string
+    type_promoted: boolean
+  }
 }
 
 interface AcfFieldGroup {
@@ -71,6 +78,10 @@ interface WpObject {
   seeded_from_project_columns?: string[]
   field_group_refs?: string[]
   field_group_ref?: string
+  _content_collection_answers?: {
+    content_kind: 'events' | 'sermons' | 'groups'
+    fields: Array<{ field: string; label: string; value: unknown }>
+  }
 }
 
 interface Classification {
@@ -358,9 +369,44 @@ function renderCpt(cpt: WpObject, group: AcfFieldGroup | null, lines: string[]) 
     }
   }
   lines.push(``)
+  // Surface the partner's content-collection answers right under the
+  // CPT's registration block — most relevant when the dev's deciding
+  // how to wire the templates / archive / single-detail vs not.
+  renderContentCollectionAnswers(cpt._content_collection_answers, lines)
   if (group) {
     renderFieldGroup(group, lines, { recordsLabel: 'Existing records to seed' })
   }
+}
+
+function renderContentCollectionAnswers(
+  cca: WpObject['_content_collection_answers'] | undefined,
+  lines: string[],
+) {
+  if (!cca) return
+  lines.push(`**Partner content-collection answers (${cca.content_kind})**`)
+  lines.push(``)
+  lines.push(`Verbatim from the partner's Content Collection form — gives the dev context for WHY this CPT looks the way it does.`)
+  lines.push(``)
+  lines.push(`| Field | Partner's answer |`)
+  lines.push(`|-------|------------------|`)
+  for (const { label, value } of cca.fields) {
+    lines.push(`| ${label} | ${formatAnswerValue(value)} |`)
+  }
+  lines.push(``)
+}
+
+function formatAnswerValue(v: unknown): string {
+  if (v == null) return '*(not answered)*'
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No'
+  if (Array.isArray(v)) return v.length === 0 ? '*(empty)*' : v.map(x => `\`${String(x)}\``).join(', ')
+  const s = String(v).trim()
+  if (!s || s === '-') return '*(not answered)*'
+  // URL detection — render as inline link
+  if (/^https?:\/\//i.test(s)) return `[${truncate(s, 80)}](${s})`
+  // Multiline → fence
+  if (s.includes('\n')) return s.replace(/\|/g, '\\|').replace(/\n+/g, '<br>')
+  // Escape pipes for table cells
+  return s.replace(/\|/g, '\\|')
 }
 
 function renderOptions(opt: WpObject, group: AcfFieldGroup | null, lines: string[]) {
@@ -493,7 +539,22 @@ function renderCtaRouteSummary(rows: Array<Record<string, unknown>>, lines: stri
 function renderField(f: AcfField, lines: string[], indent: number) {
   const pad = '  '.repeat(indent)
   const taxNote = f.taxonomy ? ` → \`${f.taxonomy}\`` : ''
-  lines.push(`${pad}- \`${f.name}\` (${f.type}${f.required ? ', required' : ''})${taxNote} — *${f.label}*`)
+  const promoMark = f._cta_analysis?.type_promoted ? ' 🔁 **route-promoted**' : ''
+  lines.push(`${pad}- \`${f.name}\` (${f.type}${f.required ? ', required' : ''})${taxNote} — *${f.label}*${promoMark}`)
+  // Surface CTA analysis inline so dev sees the routing reasoning
+  // next to the field that's affected.
+  const ca = f._cta_analysis
+  if (ca) {
+    const breakdown = Object.entries(ca.by_route_type)
+      .sort((a, b) => b[1] - a[1])
+      .map(([t, n]) => `${n} ${t}`)
+      .join(', ')
+    if (ca.type_promoted) {
+      lines.push(`${pad}  - 🔁 *Promoted from URL to \`${ca.recommended_acf_type}\` — ${ca.reason}*`)
+    } else {
+      lines.push(`${pad}  - *${ca.total_records} CTA${ca.total_records === 1 ? '' : 's'} observed (${breakdown}). Kept as ACF \`${ca.recommended_acf_type}\` — ${ca.reason}*`)
+    }
+  }
   if (f.sub_fields && f.sub_fields.length > 0) {
     for (const sf of f.sub_fields) renderField(sf, lines, indent + 1)
   }

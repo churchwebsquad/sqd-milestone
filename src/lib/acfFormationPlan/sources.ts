@@ -102,11 +102,27 @@ interface ProjectRow {
 interface ContentCollectionRow {
   id: string
   member: number
-  events_display_preference:  string | null
-  sermons_display_preference: string | null
-  groups_display_preference:  string | null
   status: string
   submitted_at: string | null
+  // Events block
+  events_display_preference:        string | null
+  events_display_format:            string | null
+  events_external_url:              string | null
+  events_wordpress_source_of_truth: string | null
+  events_wordpress_frustration:     string | null
+  events_wordpress_recurring_needed:string | null
+  // Sermons block
+  sermons_display_preference:       string | null
+  sermons_external_url:             string | null
+  sermon_youtube_playlist_exists:   boolean | null
+  sermon_youtube_playlist_url:      string | null
+  sermon_archive_features:          string[] | null
+  sermon_filters_text:              string | null
+  // Groups block
+  groups_display_preference:        string | null
+  groups_external_url:              string | null
+  groups_wordpress_source_of_truth: string | null
+  groups_wordpress_frustration:     string | null
 }
 
 interface SnippetRow {
@@ -227,13 +243,25 @@ export async function loadProjectInputs(
   }
 
   // 6. Latest content-collection session for the partner. May not
-  //    exist (some partners never open one) — null is fine.
+  //    exist (some partners never open one) — null is fine. We pull
+  //    the full block of events/sermons/groups columns so the dev
+  //    handoff can surface what the partner actually answered (URLs,
+  //    "source of truth" systems, frustrations, recurring needs,
+  //    YouTube playlists, etc.) alongside the relevant CPT.
   let contentCollection: ContentCollectionRow | null = null
   const displayPreferences: DisplayPreferences = { events: null, sermons: null, groups: null }
   if (project.member != null) {
     const { data: cc, error: ccErr } = await sb
       .from('strategy_content_collection_sessions')
-      .select('id, member, events_display_preference, sermons_display_preference, groups_display_preference, status, submitted_at')
+      .select([
+        'id, member, status, submitted_at',
+        'events_display_preference, events_display_format, events_external_url',
+        'events_wordpress_source_of_truth, events_wordpress_frustration, events_wordpress_recurring_needed',
+        'sermons_display_preference, sermons_external_url',
+        'sermon_youtube_playlist_exists, sermon_youtube_playlist_url, sermon_archive_features, sermon_filters_text',
+        'groups_display_preference, groups_external_url',
+        'groups_wordpress_source_of_truth, groups_wordpress_frustration',
+      ].join(', '))
       .eq('member', project.member)
       .order('submitted_at', { ascending: false, nullsFirst: false })
       .limit(1)

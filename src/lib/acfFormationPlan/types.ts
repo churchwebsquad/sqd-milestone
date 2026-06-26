@@ -181,6 +181,16 @@ export interface WpObjectCpt {
   field_group_refs: string[]
   open_questions: string[]
   confidence: Confidence
+  /** Verbatim partner answers from the relevant content-collection
+   *  block (events / sermons / groups). Populated only for CPTs that
+   *  derive from a display_preference signal. Surfaces what the
+   *  partner said about their current system, URLs they linked, and
+   *  any context fields. Dev reads this to understand WHY a CPT
+   *  exists, not just THAT it does. */
+  _content_collection_answers?: {
+    content_kind: 'events' | 'sermons' | 'groups'
+    fields: Array<{ field: string; label: string; value: unknown }>
+  }
 }
 
 /** Options Page record (site-wide single-source content). */
@@ -233,7 +243,8 @@ export type WpObject =
 
 /** Subset of ACF field types we'll actually emit. The full ACF type
  *  vocabulary is larger; we map only what the Brixies WebFieldType
- *  vocabulary produces. */
+ *  vocabulary produces, plus the route-driven specializations below
+ *  that the CTA-route analyzer can promote a generic URL field to. */
 export type AcfFieldType =
   | 'text'
   | 'wysiwyg'
@@ -246,6 +257,13 @@ export type AcfFieldType =
   | 'group'
   | 'repeater'
   | 'taxonomy'
+  // Route-driven specializations applied by the CTA-analysis pass
+  // when a button field is consistently used for one destination
+  // type across all records. The original `cta`/`url` field becomes
+  // one of these so McNeel's ACF config matches editor intent:
+  | 'file'          // ACF File — editor uploads instead of pasting URLs
+  | 'oembed'        // ACF oEmbed — auto-embed for YouTube / Vimeo
+  | 'page_link'     // ACF Page Link — picker over existing WP pages
 
 export interface AcfField {
   key: string                             // ACF field key — must start with 'field_'
@@ -260,6 +278,18 @@ export interface AcfField {
   _source?: {
     web_field_type: WebFieldType
     template_field_key: string
+  }
+  /** Set on CTA-shaped fields after the route-classification pass.
+   *  Tells McNeel "this button consistently points at <route> across
+   *  N records → use ACF type X instead of generic URL." */
+  _cta_analysis?: {
+    total_records: number
+    by_route_type: Record<string, number>
+    recommended_acf_type: AcfFieldType
+    reason: string
+    /** Set to true when we promoted the field's `type` based on the
+     *  recommendation (vs leaving it at the Brixies-default mapping). */
+    type_promoted: boolean
   }
 }
 
