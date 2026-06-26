@@ -1531,9 +1531,12 @@ export function buildDiscoverySections(
       //    as a single record and pull the top-level slot keys. ───
       const { count, schema, sampleNames } = analyzeSectionItems(template, fv)
 
-      // ── Target hint: derive from section_role + CPT suggestion +
-      //    display_preference context. ───────────────────────────
-      const targetHint = inferTargetHint(section.section_role, inputs, classifications)
+      // ── Target hint: strategist annotation wins when set, else
+      //    derive from section_role + CPT suggestion + display_preference.
+      const annotated = section.strategist_target_type as DiscoverySection['target_hint'] | null | undefined
+      const targetHint: DiscoverySection['target_hint'] = annotated
+        ? annotated
+        : inferTargetHint(section.section_role, inputs, classifications)
 
       // Cross-reference the analyzer's CPT suggestion for this section.
       const cptRef = classifications

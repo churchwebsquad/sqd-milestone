@@ -1889,6 +1889,12 @@ export interface WebSection {
   figma_swap_at:             string | null
   figma_swap_by:             string | null
 
+  /** Strategist-set "where do items in this section land" hint.
+   *  Overrides the formation plan analyzer's inferred target_hint.
+   *  Null = let the analyzer infer from section_role + display
+   *  preference. See schema/v119. */
+  strategist_target_type?: 'individual-page' | 'flat-list' | 'embed' | 'external' | 'mailto' | null
+
   [key: string]: unknown
 }
 

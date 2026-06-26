@@ -227,6 +227,12 @@ export function SectionDetailsPanel({
                 })}
               />
             </div>
+            <div className="mt-1.5">
+              <TargetTypePicker
+                value={(section.strategist_target_type as 'individual-page' | 'flat-list' | 'embed' | 'external' | 'mailto' | null | undefined) ?? null}
+                onChange={target => onChange({ strategist_target_type: target } as never)}
+              />
+            </div>
           </div>
           <button
             type="button"
@@ -1086,6 +1092,38 @@ function SectionRolePicker({
         ))}
       </select>
     </div>
+  )
+}
+
+/** Strategist's per-section target_type override. Tells the formation
+ *  plan analyzer "items in THIS section land on individual pages"
+ *  vs "flat list", overriding the analyzer's inference (which can't
+ *  distinguish Pastors-with-detail-pages from Ministry-Leaders-flat
+ *  when both use the same team_grid template). Null = analyzer
+ *  infers — the current behaviour. */
+function TargetTypePicker({
+  value, onChange,
+}: {
+  value: 'individual-page' | 'flat-list' | 'embed' | 'external' | 'mailto' | null
+  onChange: (v: 'individual-page' | 'flat-list' | 'embed' | 'external' | 'mailto' | null) => void
+}) {
+  return (
+    <label className="flex items-center gap-1.5 text-[10px] text-wm-text-muted">
+      <span className="shrink-0 uppercase tracking-wider font-bold text-wm-text-subtle">Target</span>
+      <select
+        value={value ?? ''}
+        onChange={e => onChange((e.target.value || null) as Parameters<typeof onChange>[0])}
+        className="text-[10.5px] text-wm-text bg-wm-bg border border-wm-border rounded px-1.5 py-0.5 outline-none focus:border-wm-accent"
+        title="Where items in this section land. Sets the dev-handoff target hint. Leave on Auto to let the analyzer infer."
+      >
+        <option value="">Auto (analyzer infers)</option>
+        <option value="individual-page">Individual detail page per item</option>
+        <option value="flat-list">Flat list, no individual pages</option>
+        <option value="embed">Embedded from third-party</option>
+        <option value="external">Linked out to third-party</option>
+        <option value="mailto">Mailto contact</option>
+      </select>
+    </label>
   )
 }
 
