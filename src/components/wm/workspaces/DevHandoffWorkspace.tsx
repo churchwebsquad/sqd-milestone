@@ -657,6 +657,7 @@ export function DevHandoffWorkspace({ project }: Props) {
             )}
             {cmPlan && <CmDownloadRow plan={cmPlan} answers={cmAnswers} projectSlug={projectSlug} />}
             {cmPlan && <CmOpenQuestionsPanel plan={cmPlan} answers={cmAnswers} onSaveAnswer={saveCmAnswer} />}
+            {cmPlan && <CmConceptsFoundPanel plan={cmPlan} />}
             {cmPlan && <CmWpObjectsPanel plan={cmPlan} />}
           </WMCard>
 
@@ -809,9 +810,118 @@ function OpenQuestionRow({
   )
 }
 
-/** WordPress objects panel — collapsible list of CPTs / Options /
- *  Repeaters / Externals. Each row expands to show the registration
- *  args + ACF field structure + content row count. */
+/** "What's sitting here to be organized" — discovery panel. Groups
+ *  the partner's content by CONCEPT (Staff / Events / Sermons / etc.)
+ *  with record counts, pages, data points, and sample names. This is
+ *  the framing McNeel needs to scan first — what's there to model,
+ *  not the analyzer's specific structural choices. The analyzer's
+ *  recommendation is in CmWpObjectsPanel below as a reference. */
+function CmConceptsFoundPanel({ plan }: { plan: ContentModelPlan }) {
+  const cpts    = plan.layer_2_wp_objects.filter(o => o.kind === 'custom_post_type')
+  const options = plan.layer_2_wp_objects.filter(o => o.kind === 'options_page')
+  if (cpts.length === 0 && options.length === 0) return null
+
+  // For each CPT, count records + collect page list from classifications
+  const pagesByCpt = new Map<string, Set<string>>()
+  for (const c of plan.layer_1_classifications) {
+    if (!c.cpt_subroutine_ref) continue
+    const set = pagesByCpt.get(c.cpt_subroutine_ref) ?? new Set<string>()
+    set.add(c.page_slug)
+    pagesByCpt.set(c.cpt_subroutine_ref, set)
+  }
+  const conceptLabel = (slug: string) => {
+    const known: Record<string, string> = {
+      staff:  'Staff', event: 'Events', sermon: 'Sermons',
+      group:  'Groups', career: 'Careers', post:  'Blog Posts',
+    }
+    if (known[slug]) return known[slug]
+    const cap = slug.charAt(0).toUpperCase() + slug.slice(1)
+    return cap.endsWith('s') ? cap : `${cap}s`
+  }
+
+  return (
+    <div className="mt-5 pt-4 border-t border-wm-border">
+      <div className="text-[10px] uppercase tracking-wider text-wm-text-subtle mb-1">What's sitting here to be organized</div>
+      <p className="text-[11px] text-wm-text-muted mb-3">
+        Grouped by concept. <strong>Discovery view</strong> — what the analyzer found, not how to model it. Decide your own placement; the analyzer's suggested CPT / Options structure is in the next section.
+      </p>
+      <div className="space-y-2">
+        {cpts.map(c => {
+          if (c.kind !== 'custom_post_type') return null
+          const group = plan.layer_3_acf_field_groups.find(g =>
+            g.location.some(or => or.some(r => r.param === 'post_type' && r.value === c.slug))
+          )
+          const rows  = group?._content_rows ?? []
+          const pages = pagesByCpt.get(c.id) ?? new Set<string>()
+          const dataPoints = new Set<string>()
+          for (const row of rows) for (const k of Object.keys(row)) if (!k.startsWith('_')) dataPoints.add(k)
+          // Sample names: best-effort pluck the first humanish string per record
+          const sampleNames = rows.slice(0, 3).map(r => {
+            for (const key of ['team_name', 'name', 'title', 'heading', 'item_heading']) {
+              const v = r[key]
+              if (typeof v === 'string' && v.trim()) return v.trim().replace(/<[^>]+>/g, '').slice(0, 50)
+            }
+            return null
+          }).filter(Boolean) as string[]
+          return (
+            <div key={c.id} className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
+              <p className="text-[12.5px] font-bold text-wm-text">{conceptLabel(c.slug)}</p>
+              {rows.length === 0 ? (
+                <p className="text-[11px] text-wm-text-subtle italic mt-1">No records extracted yet — content may still be in template placeholder state, or listing sections haven't been bound.</p>
+              ) : (
+                <>
+                  <p className="text-[11px] text-wm-text-muted mt-0.5">
+                    <strong className="text-wm-text">{rows.length} record{rows.length === 1 ? '' : 's'}</strong> found across <strong className="text-wm-text">{pages.size} page{pages.size === 1 ? '' : 's'}</strong>
+                  </p>
+                  {pages.size > 0 && (
+                    <p className="text-[10.5px] text-wm-text-subtle mt-0.5">
+                      Pages: {[...pages].slice(0, 6).map(p => <code key={p} className="text-[10px] mr-1">/{p}</code>)}
+                      {pages.size > 6 && <span>+{pages.size - 6} more</span>}
+                    </p>
+                  )}
+                  {dataPoints.size > 0 && (
+                    <p className="text-[10.5px] text-wm-text-subtle mt-0.5">
+                      Data points: {[...dataPoints].slice(0, 8).map(d => <code key={d} className="text-[10px] mr-1">{d}</code>)}
+                      {dataPoints.size > 8 && <span>+{dataPoints.size - 8}</span>}
+                    </p>
+                  )}
+                  {sampleNames.length > 0 && (
+                    <p className="text-[10.5px] text-wm-text-subtle mt-0.5">
+                      Sample: <em>{sampleNames.join(' · ')}</em>{rows.length > sampleNames.length && <span> · +{rows.length - sampleNames.length} more in the sidecar JSON</span>}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )
+        })}
+        {options.map(o => {
+          if (o.kind !== 'options_page') return null
+          const group = plan.layer_3_acf_field_groups.find(g =>
+            g.location.some(or => or.some(r => r.param === 'options_page' && r.value === o.slug))
+          )
+          const row = group?._content_rows?.[0] ?? {}
+          const filled = Object.entries(row).filter(([k, v]) => !k.startsWith('_') && v != null && String(v).trim() !== '')
+          return (
+            <div key={o.id} className="rounded-md border border-wm-border bg-wm-bg-elevated p-3">
+              <p className="text-[12.5px] font-bold text-wm-text">Site-wide globals</p>
+              <p className="text-[11px] text-wm-text-muted mt-0.5">Single-source values reused across the site (church name, contact, social links, etc.).</p>
+              <p className="text-[10.5px] text-wm-text-subtle mt-0.5">
+                <strong className="text-wm-text">{filled.length}</strong> value{filled.length === 1 ? '' : 's'} filled in
+                {filled.length > 0 && <>: {filled.slice(0, 6).map(([k]) => <code key={k} className="text-[10px] mr-1">{k}</code>)}{filled.length > 6 && <span>+{filled.length - 6}</span>}</>}
+              </p>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** Analyzer's suggested model panel. Renders BELOW the discovery
+ *  view as a "here's what I'd build" reference McNeel can disagree
+ *  with freely. Detailed registration args + ACF field structures
+ *  live in the downloadable markdown. */
 function CmWpObjectsPanel({ plan }: { plan: ContentModelPlan }) {
   const cpts    = plan.layer_2_wp_objects.filter(o => o.kind === 'custom_post_type')
   const options = plan.layer_2_wp_objects.filter(o => o.kind === 'options_page')
@@ -819,7 +929,8 @@ function CmWpObjectsPanel({ plan }: { plan: ContentModelPlan }) {
   const exts    = plan.layer_2_wp_objects.filter(o => o.kind === 'external')
   return (
     <div className="mt-5 pt-4 border-t border-wm-border">
-      <div className="text-[10px] uppercase tracking-wider text-wm-text-subtle mb-2">WordPress objects to register</div>
+      <div className="text-[10px] uppercase tracking-wider text-wm-text-subtle mb-1">Analyzer's recommended model (review + adjust)</div>
+      <p className="text-[11px] text-wm-text-muted mb-2">Suggested WP structure for the concepts above. Disagree freely — registration args, field types, and taxonomy slugs are all editable. Full detail in the Markdown handoff.</p>
       {cpts.length > 0 && (
         <details className="mb-2" open>
           <summary className="text-[12px] font-semibold text-wm-text cursor-pointer">Custom Post Types ({cpts.length})</summary>

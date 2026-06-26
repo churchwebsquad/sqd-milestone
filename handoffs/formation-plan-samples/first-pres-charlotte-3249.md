@@ -5,17 +5,17 @@
 
 ## How to use this doc
 
-1. **Open questions section first** — strategist answers the content questions; McNeel answers the implementation ones. Don't start building until they're filled in.
-2. **Build the WP objects** (CPTs + Options page) using the registration args in each "WordPress object" section. Then add the ACF field groups using the structures shown.
-3. **Populate the content** using the sidecar `<filename>.content-import.json` — each WP object has a matching block with records ready to seed via your AI assistant or wp-cli.
+1. **Open questions first** — strategist + McNeel decide the open content/implementation questions. Don't start modelling until they're answered.
+2. **Read "What's sitting here to be organized"** — this is the partner content the analyzer found, grouped by concept. You decide how to model it. The analyzer's suggested CPT / Options / Repeater structure is at the end as a reference, not a directive.
+3. **Populate the content** using the sidecar `<filename>.content-import.json` — each modelled object has a matching block with records ready to seed via your AI assistant or wp-cli.
 
 ## At a glance
 
 | Metric | Count |
 |--------|------:|
 | Classifications (one per piece of content) | 1051 |
-| WordPress objects (CPTs + Options + Repeaters) | 70 |
-| ACF field groups | 70 |
+| WordPress objects suggested | 70 |
+| ACF field groups suggested | 70 |
 | Open questions (need an answer before build) | 14 |
 | Low-confidence classifications | 0 |
 
@@ -41,9 +41,98 @@ Implementation decisions — how to wire what the strategist's already decided.
 - *Affects:* `employment/__page_layout`, `events/__page_layout`, `local-global/__page_layout`, `staff/__page_layout`, `the-history-hallway/__page_layout`, `watch/__page_layout`
 - **Answer:** ___________________________________________________________
 
-## WordPress objects to register
+## What's sitting here to be organized
 
-### Custom Post Types (6)
+Grouped by concept. The analyzer's job here is to **show you what's there**, not to decide how it should be modelled. Each concept lists the records found, where they live on the site, and the data points carried per record. The analyzer's suggested WordPress structure for each concept is in the "Recommended model" section at the bottom.
+
+### Staff
+
+**61 records found** across 51 pages (444 sections).
+
+**Pages:** `/care`, `/children-youth`, `/local-global`, `/staff`, `/worship`, `/single-staff`, `/staff/lewis-galloway`, `/staff/anna-dickson` (+43 more)
+
+**Data points per record:** `team_name` · `team_position` · `team_description` · `contact_kind` · `contact_label` · `contact_target` · `description` · `linkedin` · `description_2`
+
+**Sample:** *Anna Dickson* · *Chuck Williamson* · *Mary Bowman* · *Audrey Webb Kahrs* · *Rev. Lucy Crain* (+56 more in the sidecar import JSON)
+
+*Decide how to model this. The analyzer's suggestion is in [Recommended model](#analyzers-recommended-model-review--adjust) below; full record data + ACF field shape is in the sidecar `.content-import.json`.*
+
+### Careers
+
+**1 record found** across 1 page (5 sections).
+
+**Pages:** `/employment`
+
+**Data points per record:** `title` · `summary` · `location` · `apply_cta_url` · `apply_cta_kind` · `apply_cta_label` · `apply_cta_target`
+
+**Sample:** *Afternoon/Evening Custodian*
+
+*Decide how to model this. The analyzer's suggestion is in [Recommended model](#analyzers-recommended-model-review--adjust) below; full record data + ACF field shape is in the sidecar `.content-import.json`.*
+
+### Events
+
+*No records extracted yet — the content for this concept may still be in template placeholder state, or the listing sections haven't been bound. Confirm with the strategist.*
+
+### Blog Posts
+
+**1 record found** across 1 page (8 sections).
+
+**Pages:** `/single-blog-post`
+
+**Data points per record:** `image` · `category_1` · `heading` · `description` · `avatar_author_container` · `author_name_author_container` · `author_bio_author_container` · `buttons_author_container`
+
+**Sample:** *Blog Post Heading*
+
+*Decide how to model this. The analyzer's suggestion is in [Recommended model](#analyzers-recommended-model-review--adjust) below; full record data + ACF field shape is in the sidecar `.content-import.json`.*
+
+### Sermons
+
+*No records extracted yet — the content for this concept may still be in template placeholder state, or the listing sections haven't been bound. Confirm with the strategist.*
+
+### Groups
+
+*No records extracted yet — the content for this concept may still be in template placeholder state, or the listing sections haven't been bound. Confirm with the strategist.*
+
+### Site-wide globals
+
+Single-source content that appears in multiple places on the site (church name, contact, service times, social links, etc.). Edited once, propagates everywhere.
+
+**10 values filled in.**
+
+- *church_name*: First Presbyterian Church of Charlotte
+- *social_facebook_url*: [https://www.facebook.com/firstprescharlotte](https://www.facebook.com/firstprescharlotte)
+- *social_instagram_url*: [https://www.instagram.com/firstprescharlotte/](https://www.instagram.com/firstprescharlotte/)
+- *social_youtube_url*: [https://www.youtube.com/@firstprescharlotte](https://www.youtube.com/@firstprescharlotte)
+- *address*: 200 W. Trade Street, Charlotte, NC 28202
+- *city_state*: Charlotte, NC
+- *phone*: 704.332.5123
+- *email*: communications@firstpres-charlotte.org
+- *all_service_times*: Sundays, 9 a.m. and 11 a.m.
+- *pastor_name*: Rev. Pendleton Peery
+
+## Repeated patterns across pages
+
+CTAs / buttons / values the analyzer found firing on **3+ pages**. These are candidates for site-wide globals (one editable surface, propagates everywhere) or project-scoped repeaters (one editable list, referenced by multiple page templates). When a button changes frequently — e.g. a weekly bulletin link — globalizing it saves the editor from chasing it across every page.
+
+### `contact` — appears on 10 pages
+
+- **Pages:** `/home`, `/advocacy`, `/care`, `/employment`, `/events`, `/give`, `/local-global`, `/new` (+2 more)
+- **Destination types:** internal-page (11 distinct URLs)
+- **Sample URLs:** `/new` · `/watch` · `https://firstpres-charlotte.us7.list-manage.com/subscribe?u…`
+- *Different URLs per page → could be a project-wide repeater (one editable list, page templates pick which entry) OR genuinely per-page if each page has unique intent. Strategist confirms.*
+
+### `url` — appears on 4 pages
+
+- **Pages:** `/advocacy`, `/local-global`, `/new`, `/serve`
+- **Destination types:** mailto (18 distinct URLs)
+- **Sample URLs:** `mailto:hclarke61@gmail.com` · `mailto:rossloeser@aol.com` · `/the-history-hallway`
+- *Different URLs per page → could be a project-wide repeater (one editable list, page templates pick which entry) OR genuinely per-page if each page has unique intent. Strategist confirms.*
+
+## Analyzer's recommended model (review + adjust)
+
+Suggested WordPress objects + ACF field groups for the content found above. **This is a starting point — disagree freely.** Registration args, taxonomy slugs, ACF field types: all editable. The sidecar `.content-import.json` matches this shape; if you change the model, you'll re-shape the import to match.
+
+### Suggested Custom Post Types (6)
 
 #### `staff` — Staff Member / Staff
 
@@ -350,7 +439,7 @@ Verbatim from the partner's Content Collection form — gives the dev context fo
 
 **Existing records to seed:** *(none extracted)*
 
-### Global Settings / Options Page (1)
+### Suggested Global Settings / Options Page (1)
 
 #### `global-site` — Global Site Settings
 
