@@ -1,0 +1,474 @@
+{
+  "schema_version": 1,
+  "_meta": {
+    "generated_at": "2026-06-26T16:46:46.474Z",
+    "generated_by": "analyzer-v1",
+    "input_fingerprint": "-vmtt3h",
+    "counts": {
+      "classifications": 0,
+      "wp_objects": 4,
+      "acf_field_groups": 4,
+      "open_questions": 1,
+      "low_confidence": 0
+    }
+  },
+  "layer_1_classifications": [],
+  "layer_2_wp_objects": [
+    {
+      "id": "wp_object.global_site",
+      "kind": "options_page",
+      "slug": "global-site",
+      "menu_title": "Global Site Settings",
+      "capability": "manage_options",
+      "field_group_ref": "acf.global_site",
+      "seeded_from_project_columns": [
+        "church_name",
+        "denomination",
+        "social_facebook_url",
+        "social_instagram_url",
+        "social_youtube_url",
+        "social_tiktok_url",
+        "social_twitter_url",
+        "social_linkedin_url"
+      ],
+      "open_questions": [
+        "Multi-campus project — these fields are inherently per-campus and should NOT be seeded as flat globals: address, city_state, phone, email, primary_service_time, all_service_times, pastor_name. Recommend modeling as a \"Campus\" CPT or as a per-campus repeater on the Visit page. Confirm with McNeel."
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "wp_object.event",
+      "kind": "custom_post_type",
+      "slug": "event",
+      "labels": {
+        "singular": "Event",
+        "plural": "Events"
+      },
+      "registration_args": {
+        "public": true,
+        "publicly_queryable": true,
+        "has_archive": false,
+        "show_ui": true,
+        "show_in_menu": true,
+        "show_in_rest": true,
+        "show_in_nav_menus": true,
+        "exclude_from_search": false,
+        "supports": [
+          "title",
+          "editor",
+          "thumbnail",
+          "revisions",
+          "excerpt"
+        ],
+        "menu_icon": "dashicons-calendar-alt",
+        "rewrite": {
+          "slug": "event",
+          "with_front": false
+        }
+      },
+      "taxonomies": [
+        {
+          "slug": "event_category",
+          "labels": {
+            "singular": "Category",
+            "plural": "Categories"
+          },
+          "hierarchical": true,
+          "show_in_rest": true
+        },
+        {
+          "slug": "event_campus",
+          "labels": {
+            "singular": "Campus",
+            "plural": "Campuses"
+          },
+          "hierarchical": false,
+          "show_in_rest": true
+        }
+      ],
+      "single_template": {
+        "enabled": true,
+        "brixies_template_id": null,
+        "cta_target": null,
+        "rationale": "Partner picked \"wordpress\" — events live in WP with per-event detail pages, surfaced via a Bricks query loop on /events."
+      },
+      "archive": {
+        "enabled": false,
+        "rendered_via_query_loop_on": "/events",
+        "rationale": "Partner picked \"wordpress\" — events live in WP with per-event detail pages, surfaced via a Bricks query loop on /events."
+      },
+      "headless": false,
+      "external_system": null,
+      "external_limits": null,
+      "field_group_refs": [
+        "acf.event"
+      ],
+      "open_questions": [],
+      "confidence": "high"
+    },
+    {
+      "id": "wp_object.sermon",
+      "kind": "custom_post_type",
+      "slug": "sermon",
+      "labels": {
+        "singular": "Sermon",
+        "plural": "Sermons"
+      },
+      "registration_args": {
+        "public": true,
+        "publicly_queryable": true,
+        "has_archive": true,
+        "show_ui": true,
+        "show_in_menu": true,
+        "show_in_rest": true,
+        "show_in_nav_menus": true,
+        "exclude_from_search": false,
+        "supports": [
+          "title",
+          "editor",
+          "thumbnail",
+          "revisions",
+          "excerpt"
+        ],
+        "menu_icon": "dashicons-microphone",
+        "rewrite": {
+          "slug": "sermon",
+          "with_front": false
+        }
+      },
+      "taxonomies": [
+        {
+          "slug": "sermon_series",
+          "labels": {
+            "singular": "Series",
+            "plural": "Series"
+          },
+          "hierarchical": false,
+          "show_in_rest": true
+        },
+        {
+          "slug": "sermon_speaker",
+          "labels": {
+            "singular": "Speaker",
+            "plural": "Speakers"
+          },
+          "hierarchical": false,
+          "show_in_rest": true
+        },
+        {
+          "slug": "sermon_topic",
+          "labels": {
+            "singular": "Topic",
+            "plural": "Topics"
+          },
+          "hierarchical": true,
+          "show_in_rest": true
+        }
+      ],
+      "single_template": {
+        "enabled": true,
+        "brixies_template_id": null,
+        "cta_target": null,
+        "rationale": "Legacy \"wordpress\" value — treated as the equivalent of archive_pages (CPT + single template + archive)."
+      },
+      "archive": {
+        "enabled": true,
+        "rendered_via_query_loop_on": null,
+        "rationale": "Legacy \"wordpress\" value — treated as the equivalent of archive_pages (CPT + single template + archive)."
+      },
+      "headless": false,
+      "external_system": null,
+      "external_limits": null,
+      "field_group_refs": [
+        "acf.sermon"
+      ],
+      "open_questions": [],
+      "confidence": "high"
+    },
+    {
+      "id": "wp_object.group",
+      "kind": "custom_post_type",
+      "slug": "group",
+      "labels": {
+        "singular": "Group",
+        "plural": "Groups"
+      },
+      "registration_args": {
+        "public": true,
+        "publicly_queryable": true,
+        "has_archive": false,
+        "show_ui": true,
+        "show_in_menu": true,
+        "show_in_rest": true,
+        "show_in_nav_menus": true,
+        "exclude_from_search": false,
+        "supports": [
+          "title",
+          "revisions"
+        ],
+        "menu_icon": "dashicons-networking",
+        "rewrite": {
+          "slug": "group",
+          "with_front": false
+        }
+      },
+      "taxonomies": [
+        {
+          "slug": "group_type",
+          "labels": {
+            "singular": "Type",
+            "plural": "Types"
+          },
+          "hierarchical": true,
+          "show_in_rest": true
+        },
+        {
+          "slug": "group_day",
+          "labels": {
+            "singular": "Day",
+            "plural": "Days"
+          },
+          "hierarchical": false,
+          "show_in_rest": true
+        },
+        {
+          "slug": "group_campus",
+          "labels": {
+            "singular": "Campus",
+            "plural": "Campuses"
+          },
+          "hierarchical": false,
+          "show_in_rest": true
+        }
+      ],
+      "single_template": {
+        "enabled": true,
+        "brixies_template_id": null,
+        "cta_target": null,
+        "rationale": "Groups in WP with per-group detail pages, listed via Bricks query loop on /groups."
+      },
+      "archive": {
+        "enabled": false,
+        "rendered_via_query_loop_on": "/groups",
+        "rationale": "Groups in WP with per-group detail pages, listed via Bricks query loop on /groups."
+      },
+      "headless": false,
+      "external_system": null,
+      "external_limits": null,
+      "field_group_refs": [
+        "acf.group"
+      ],
+      "open_questions": [],
+      "confidence": "high"
+    }
+  ],
+  "layer_3_acf_field_groups": [
+    {
+      "key": "acf.global_site",
+      "title": "Global Site Settings",
+      "fields": [
+        {
+          "key": "field_global_church_name",
+          "name": "church_name",
+          "label": "Church Name",
+          "type": "text",
+          "_source": {
+            "web_field_type": "text",
+            "template_field_key": "church_name"
+          }
+        },
+        {
+          "key": "field_global_denomination",
+          "name": "denomination",
+          "label": "Denomination",
+          "type": "text",
+          "_source": {
+            "web_field_type": "text",
+            "template_field_key": "denomination"
+          }
+        },
+        {
+          "key": "field_global_social_facebook_url",
+          "name": "social_facebook_url",
+          "label": "Facebook URL",
+          "type": "url",
+          "_source": {
+            "web_field_type": "url",
+            "template_field_key": "social_facebook_url"
+          }
+        },
+        {
+          "key": "field_global_social_instagram_url",
+          "name": "social_instagram_url",
+          "label": "Instagram URL",
+          "type": "url",
+          "_source": {
+            "web_field_type": "url",
+            "template_field_key": "social_instagram_url"
+          }
+        },
+        {
+          "key": "field_global_social_youtube_url",
+          "name": "social_youtube_url",
+          "label": "YouTube URL",
+          "type": "url",
+          "_source": {
+            "web_field_type": "url",
+            "template_field_key": "social_youtube_url"
+          }
+        },
+        {
+          "key": "field_global_social_tiktok_url",
+          "name": "social_tiktok_url",
+          "label": "TikTok URL",
+          "type": "url",
+          "_source": {
+            "web_field_type": "url",
+            "template_field_key": "social_tiktok_url"
+          }
+        },
+        {
+          "key": "field_global_social_twitter_url",
+          "name": "social_twitter_url",
+          "label": "X / Twitter URL",
+          "type": "url",
+          "_source": {
+            "web_field_type": "url",
+            "template_field_key": "social_twitter_url"
+          }
+        },
+        {
+          "key": "field_global_social_linkedin_url",
+          "name": "social_linkedin_url",
+          "label": "LinkedIn URL",
+          "type": "url",
+          "_source": {
+            "web_field_type": "url",
+            "template_field_key": "social_linkedin_url"
+          }
+        }
+      ],
+      "location": [
+        [
+          {
+            "param": "options_page",
+            "operator": "==",
+            "value": "global-site"
+          }
+        ]
+      ],
+      "position": "normal",
+      "style": "default"
+    },
+    {
+      "key": "acf.event",
+      "title": "Event fields",
+      "fields": [
+        {
+          "key": "field_event_event_category",
+          "name": "event_category",
+          "label": "Category",
+          "type": "taxonomy",
+          "taxonomy": "event_category"
+        },
+        {
+          "key": "field_event_event_campus",
+          "name": "event_campus",
+          "label": "Campus",
+          "type": "taxonomy",
+          "taxonomy": "event_campus"
+        }
+      ],
+      "location": [
+        [
+          {
+            "param": "post_type",
+            "operator": "==",
+            "value": "event"
+          }
+        ]
+      ],
+      "position": "normal",
+      "style": "default",
+      "_source_section_ids": []
+    },
+    {
+      "key": "acf.sermon",
+      "title": "Sermon fields",
+      "fields": [
+        {
+          "key": "field_sermon_sermon_series",
+          "name": "sermon_series",
+          "label": "Series",
+          "type": "taxonomy",
+          "taxonomy": "sermon_series"
+        },
+        {
+          "key": "field_sermon_sermon_speaker",
+          "name": "sermon_speaker",
+          "label": "Speaker",
+          "type": "taxonomy",
+          "taxonomy": "sermon_speaker"
+        },
+        {
+          "key": "field_sermon_sermon_topic",
+          "name": "sermon_topic",
+          "label": "Topic",
+          "type": "taxonomy",
+          "taxonomy": "sermon_topic"
+        }
+      ],
+      "location": [
+        [
+          {
+            "param": "post_type",
+            "operator": "==",
+            "value": "sermon"
+          }
+        ]
+      ],
+      "position": "normal",
+      "style": "default",
+      "_source_section_ids": []
+    },
+    {
+      "key": "acf.group",
+      "title": "Group fields",
+      "fields": [
+        {
+          "key": "field_group_group_type",
+          "name": "group_type",
+          "label": "Type",
+          "type": "taxonomy",
+          "taxonomy": "group_type"
+        },
+        {
+          "key": "field_group_group_day",
+          "name": "group_day",
+          "label": "Day",
+          "type": "taxonomy",
+          "taxonomy": "group_day"
+        },
+        {
+          "key": "field_group_group_campus",
+          "name": "group_campus",
+          "label": "Campus",
+          "type": "taxonomy",
+          "taxonomy": "group_campus"
+        }
+      ],
+      "location": [
+        [
+          {
+            "param": "post_type",
+            "operator": "==",
+            "value": "group"
+          }
+        ]
+      ],
+      "position": "normal",
+      "style": "default",
+      "_source_section_ids": []
+    }
+  ]
+}

@@ -1,0 +1,1254 @@
+// Content-Model Formation Plan — Layer 1 / 2 / 3 emitters.
+//
+// Three logical sections:
+//
+//   PART A: classifyOne — runs the §6 routing rules on a single
+//           content piece (one template field on one section) and
+//           returns a ClassificationRecord.
+//
+//   PART B: buildWpObjects — aggregates the classifications into
+//           Layer 2 WpObjects: one Options page + N CPTs + N
+//           Repeater targets + N External references. Multi-campus
+//           aware (campus-scoped globals get an open_question
+//           instead of being seeded flat).
+//
+//   PART C: buildAcfFieldGroups — emits Layer 3 ACF JSON Sync
+//           field groups, mapping WebFieldType → AcfFieldType and
+//           expanding WebGroupDef → ACF repeater with sub_fields.
+//
+// All functions are pure — they read FormationInputs and the
+// upstream layers, return values, mutate nothing.
+
+import type {
+  SectionRole,
+  WebContentTemplate,
+  WebFieldDef,
+  WebGroupDef,
+  WebPage,
+  WebSection,
+  WebSlotDef,
+} from '../../types/database'
+import type {
+  AcfField,
+  AcfFieldGroup,
+  AcfLocationRule,
+  ArchiveSpec,
+  ClassificationRecord,
+  ClassificationSignals,
+  Confidence,
+  CtaTargetKind,
+  CptRegistrationArgs,
+  EditFrequencyProxy,
+  SingleTemplateSpec,
+  Structure,
+  TaxonomySpec,
+  WpObject,
+  WpObjectCpt,
+  WpObjectExternal,
+  WpObjectOptionsPage,
+  WpObjectRepeater,
+} from './types'
+import type { CampusTerm, FormationInputs } from './sources'
+import { extractSnippetTokens, resolveDisplayPreference } from './sources'
+import {
+  ACF_TYPE_BY_FIELD_TYPE,
+  BRICKS_NESTABLE_PREFERRED_ROLES,
+  CAMPUS_SCOPED_COLUMNS,
+  CHROME_ROLES,
+  CHURCH_WIDE_GLOBAL_COLUMNS,
+  CPT_FROM_CONTENT_KIND,
+  CPT_MENU_ICON,
+  CPT_SECTION_ROLES,
+  CPT_SINGLE_TEMPLATE_DEFAULT,
+  CPT_SLUG_BY_ROLE,
+  CPT_SUPPORTS,
+  HIGH_EDIT_ROLES,
+  MULTIPLE_LOCATION_ROLES,
+  STRUCTURE_DEFAULT_BY_ROLE,
+  TAXONOMY_SUGGESTIONS,
+} from './rules'
+
+// ═════════════════════════════════════════════════════════════════════
+// PART A — classify one content piece
+// ═════════════════════════════════════════════════════════════════════
+
+interface ClassifyContext {
+  inputs:       FormationInputs
+  page:         WebPage
+  section:      WebSection
+  template:     WebContentTemplate | null
+  /** When this classification is for a SUB-field of a group (e.g. one
+   *  card's title), this is the parent group's key. Pure-slot top-
+   *  level classifications leave it undefined. */
+  groupKey?:    string
+}
+
+/** Classify a single template field on a single section.
+ *
+ *  Called once per top-level WebFieldDef. Repeater sub-fields are
+ *  emitted as part of the parent's ACF field group, not as separate
+ *  classification records. */
+export function classifyOne(
+  ctx: ClassifyContext,
+  fieldDef: WebFieldDef,
+): ClassificationRecord {
+  const { inputs, page, section } = ctx
+  const sectionRole = section.section_role
+  const filledValue = (section.field_values as Record<string, unknown> | null)?.[fieldDef.key]
+
+  // ── Signals ─────────────────────────────────────────────────────
+  const kindInTemplate: 'slot' | 'group' = fieldDef.kind
+  const defaultCount =
+    fieldDef.kind === 'group' ? fieldDef.default_count : null
+  const actuallyFilledCount = Array.isArray(filledValue)
+    ? filledValue.length
+    : null
+  const reuseCount = sectionRole
+    ? (inputs.sectionRoleCounts.get(sectionRole) ?? 0)
+    : 0
+  const hasClientOverrides = sectionHasOverrides(section)
+  const editFrequencyProxy: EditFrequencyProxy =
+    sectionRole && HIGH_EDIT_ROLES.has(sectionRole)
+      ? 'high'
+      : hasClientOverrides
+        ? 'medium'
+        : 'low'
+  const isFeaturedGlobal =
+    sectionRole != null &&
+    MULTIPLE_LOCATION_ROLES.has(sectionRole) &&
+    reuseCount >= 2
+  const needsOwnUrl =
+    sectionRole != null && [
+      'event_detail',
+      'post_detail',
+      'staff_member_detail',
+      'career_detail',
+    ].includes(sectionRole)
+  const ctaTargetKind = classifyCtaTarget(filledValue)
+  const externalSystem = detectExternalSystem(inputs, sectionRole, filledValue)
+  const signals: ClassificationSignals = {
+    kind_in_template:        kindInTemplate,
+    default_count:           defaultCount,
+    actually_filled_count:   actuallyFilledCount,
+    section_role_reuse_count: reuseCount,
+    edit_frequency_proxy:    editFrequencyProxy,
+    is_featured_global:      isFeaturedGlobal,
+    needs_own_url:           needsOwnUrl,
+    external_system:         externalSystem,
+    cta_target_kind:         ctaTargetKind,
+    has_client_overrides:    hasClientOverrides,
+  }
+
+  // ── Apply routing rules (§6 order) ─────────────────────────────
+  const { structure, rationale, confidence, open_questions, alternative } =
+    applyRoutingRules({ ctx, fieldDef, signals })
+
+  // ── Frequency overlay ──────────────────────────────────────────
+  const overlay: string[] = []
+  if (
+    sectionRole && HIGH_EDIT_ROLES.has(sectionRole) &&
+    (structure === 'PLAIN_FIELD' ||
+     (structure === 'REPEATER' && parentIsFlexible(ctx)))
+  ) {
+    overlay.push(
+      'High-edit content buried under a non-editor-friendly structure — consider promoting to CPT or Options for non-technical editing.'
+    )
+  }
+
+  // ── ID stability: page_slug/item_label so re-runs match prior records ──
+  const itemLabel = deriveItemLabel(fieldDef, sectionRole)
+  const id = `${page.slug}/${itemLabel}`
+
+  // ── CPT linkage ────────────────────────────────────────────────
+  const cptRef =
+    structure === 'CUSTOM_POST_TYPE'
+      ? cptIdForSectionRole(sectionRole)
+      : null
+
+  return {
+    id,
+    page_slug:           page.slug,
+    page_id:             page.id,
+    section_id:          section.id,
+    section_role:        sectionRole,
+    item_label:          itemLabel,
+    structure,
+    signals,
+    rationale: [rationale, ...overlay].filter(Boolean).join(' '),
+    recommended_default: structure,
+    alternative,
+    open_questions,
+    confidence,
+    cpt_subroutine_ref:  cptRef,
+    status:              'suggested',
+    override_reason:     null,
+  }
+}
+
+// ── Rule application ─────────────────────────────────────────────────
+
+interface RuleResult {
+  structure:        Structure
+  rationale:        string
+  confidence:       Confidence
+  open_questions:   string[]
+  alternative:      Structure | null
+}
+
+function applyRoutingRules(args: {
+  ctx: ClassifyContext
+  fieldDef: WebFieldDef
+  signals: ClassificationSignals
+}): RuleResult {
+  const { ctx, fieldDef, signals } = args
+  const sectionRole = ctx.section.section_role
+  const isSlot = fieldDef.kind === 'slot'
+  const slotDef = isSlot ? (fieldDef as WebSlotDef) : null
+
+  // RULE 1 — Auto-populated slot → Options
+  if (slotDef?.auto_populated) {
+    return {
+      structure: 'GLOBAL_OPTIONS',
+      rationale: `Template flagged \`${slotDef.key}\` as auto_populated — bind to the global Options page rather than per-section storage.`,
+      confidence: 'high',
+      open_questions: [],
+      alternative: null,
+    }
+  }
+
+  // RULE 1b — Slot value references a {{token}} that resolves to a project global
+  if (signals.kind_in_template === 'slot') {
+    const filled = (ctx.section.field_values as Record<string, unknown> | null)?.[fieldDef.key]
+    const tokens = extractSnippetTokens(filled)
+    if (tokens.size > 0) {
+      // Treat as Options-bound — the snippet IS the global.
+      return {
+        structure: 'GLOBAL_OPTIONS',
+        rationale: `Field references global token(s) ${[...tokens].map(t => `{{${t}}}`).join(', ')} — bind via the Options page rather than per-section.`,
+        confidence: 'high',
+        open_questions: [],
+        alternative: null,
+      }
+    }
+  }
+
+  // RULE 2 — External display preference (events / sermons / groups)
+  if (sectionRole) {
+    const contentKind = contentKindForSectionRole(sectionRole)
+    if (contentKind) {
+      const shape = resolveDisplayPreference(
+        contentKind,
+        ctx.inputs.displayPreferences[contentKind],
+      )
+      if (shape.kind === 'external') {
+        return {
+          structure: 'EXTERNAL',
+          rationale: shape.rationale,
+          confidence: 'high',
+          open_questions: [],
+          alternative: null,
+        }
+      }
+    }
+  }
+
+  // RULE 3 — Custom Post Type by SectionRole
+  if (sectionRole && CPT_SECTION_ROLES.has(sectionRole)) {
+    const slug = CPT_SLUG_BY_ROLE[sectionRole]
+    const open_questions: string[] = []
+    const singleDefault = CPT_SINGLE_TEMPLATE_DEFAULT[sectionRole]
+    if (singleDefault === 'maybe') {
+      open_questions.push(
+        `Confirm with McNeel: should the \`${slug}\` CPT have a single-detail template? Default depends on partner intent.`
+      )
+    }
+    return {
+      structure: 'CUSTOM_POST_TYPE',
+      rationale: `SectionRole \`${sectionRole}\` maps to CPT \`${slug}\`.`,
+      confidence: singleDefault === 'maybe' ? 'medium' : 'high',
+      open_questions,
+      alternative: null,
+    }
+  }
+
+  // RULE 4 — Cross-page reuse → Global
+  if (
+    sectionRole &&
+    MULTIPLE_LOCATION_ROLES.has(sectionRole) &&
+    signals.section_role_reuse_count >= 2
+  ) {
+    return {
+      structure: 'GLOBAL_OPTIONS',
+      rationale: `SectionRole \`${sectionRole}\` appears on ${signals.section_role_reuse_count} approved pages — promote to Options so edits propagate site-wide.`,
+      confidence: 'high',
+      open_questions: [],
+      alternative: null,
+    }
+  }
+
+  // RULE 5 — Template-declared repeater (WebGroupDef)
+  if (fieldDef.kind === 'group') {
+    const usesNestableDefault =
+      sectionRole != null && BRICKS_NESTABLE_PREFERRED_ROLES.has(sectionRole)
+    return {
+      structure: 'REPEATER',
+      rationale: `Template field \`${fieldDef.key}\` is declared as a group with ${fieldDef.default_count} default items — emit as ACF repeater (or Bricks Nestable section, surfaced as alternative).`,
+      confidence: 'high',
+      open_questions: [],
+      alternative: usesNestableDefault ? 'BRICKS_NESTABLE_SECTION' : null,
+    }
+  }
+
+  // RULE 6 — Flexible Content (page-level signal, not per-field)
+  //   Detected at page-level inside buildWpObjects when the page has
+  //   5+ sections with no shared section_role pattern. Skipped here.
+
+  // RULE 7 — Group (fixed cluster of slots — heuristic: section_role
+  //   is hero_* / cta_banner_*)
+  if (sectionRole && (
+    sectionRole.startsWith('hero_') ||
+    sectionRole.startsWith('cta_banner_') ||
+    sectionRole === 'cta_full_bleed' ||
+    sectionRole === 'feature_split'
+  )) {
+    return {
+      structure: 'GROUP',
+      rationale: `SectionRole \`${sectionRole}\` is a fixed cluster of related slots — emit as ACF group.`,
+      confidence: 'high',
+      open_questions: [],
+      alternative: null,
+    }
+  }
+
+  // RULE 8 — SectionRole default
+  if (sectionRole && STRUCTURE_DEFAULT_BY_ROLE[sectionRole]) {
+    return {
+      structure: STRUCTURE_DEFAULT_BY_ROLE[sectionRole]!,
+      rationale: `SectionRole \`${sectionRole}\` defaults to ${STRUCTURE_DEFAULT_BY_ROLE[sectionRole]} per the curated mapping.`,
+      confidence: 'medium',
+      open_questions: [],
+      alternative: null,
+    }
+  }
+
+  // Fallback — single slot, unknown role → Plain field, low confidence
+  return {
+    structure: 'PLAIN_FIELD',
+    rationale: 'No rule matched — defaulting to PLAIN_FIELD.',
+    confidence: 'low',
+    open_questions: ['Confirm with McNeel: this content piece has no recognized SectionRole or template signal.'],
+    alternative: null,
+  }
+}
+
+// ── Classify helpers ─────────────────────────────────────────────────
+
+function sectionHasOverrides(section: WebSection): boolean {
+  const fp = section.field_provenance as Record<string, { source?: string }> | null
+  if (!fp) return false
+  return Object.values(fp).some(entry => entry?.source === 'override')
+}
+
+function deriveItemLabel(fieldDef: WebFieldDef, role: SectionRole | null): string {
+  // Stable: field key always wins. Fallback to role for sections
+  // whose template hasn't been linked yet.
+  return fieldDef.key || role || 'unknown'
+}
+
+function classifyCtaTarget(value: unknown): CtaTargetKind {
+  const url = extractFirstUrl(value)
+  if (!url) return 'unset'
+  if (url.startsWith('mailto:')) return 'mailto'
+  if (url.startsWith('tel:')) return 'tel'
+  if (url.startsWith('#')) return 'internal-anchor'
+  if (/^https?:\/\//i.test(url)) return 'external'
+  if (url.startsWith('/')) return 'internal-page'
+  return 'unset'
+}
+
+function extractFirstUrl(value: unknown): string | null {
+  if (value == null) return null
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const u = extractFirstUrl(item)
+      if (u) return u
+    }
+    return null
+  }
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    if (typeof obj.url === 'string') return obj.url
+    for (const v of Object.values(obj)) {
+      const u = extractFirstUrl(v)
+      if (u) return u
+    }
+  }
+  return null
+}
+
+function detectExternalSystem(
+  inputs: FormationInputs,
+  role: SectionRole | null,
+  value: unknown,
+): ClassificationSignals['external_system'] {
+  if (!role) return null
+  const contentKind = contentKindForSectionRole(role)
+  if (contentKind) {
+    const shape = resolveDisplayPreference(contentKind, inputs.displayPreferences[contentKind])
+    if (shape.kind === 'external') {
+      const url = extractFirstUrl(value) ?? ''
+      if (/churchcenter|planningcenter/i.test(url)) return 'church-center'
+      if (/ccbchurch|churchcommunitybuilder/i.test(url)) return 'ccb'
+      if (/youtube|youtu\.be/i.test(url)) return 'youtube'
+      if (/vimeo/i.test(url)) return 'vimeo'
+      return 'external'
+    }
+  }
+  return null
+}
+
+function contentKindForSectionRole(role: SectionRole): 'events' | 'sermons' | 'groups' | null {
+  if (role === 'event_detail') return 'events'
+  // sermons + groups roles don't exist in the enum — see §1 of audit.
+  return null
+}
+
+function cptIdForSectionRole(role: SectionRole | null): string | null {
+  if (!role) return null
+  const slug = CPT_SLUG_BY_ROLE[role]
+  return slug ? `wp_object.${slug}` : null
+}
+
+function parentIsFlexible(_ctx: ClassifyContext): boolean {
+  // Page-level Flexible Content detection is done in PART B; this
+  // is a stub used by the frequency overlay to avoid double-counting.
+  return false
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// PART B — build WpObjects (CPTs / Options / Repeaters / Externals)
+// ═════════════════════════════════════════════════════════════════════
+
+/** Aggregates Layer 1 classifications into Layer 2 WpObjects. Also
+ *  emits the multi-campus-aware Options page even when no
+ *  classification routed to GLOBAL_OPTIONS, because the project's
+ *  CHURCH_WIDE_GLOBAL_COLUMNS always seed the Options page. */
+export function buildWpObjects(
+  classifications: ClassificationRecord[],
+  inputs: FormationInputs,
+): WpObject[] {
+  const objects: WpObject[] = []
+
+  // ── Options page (always emitted, multi-campus-aware) ─────────
+  objects.push(buildOptionsPage(inputs))
+
+  // ── CPTs from SectionRole routing ─────────────────────────────
+  const cptSlugsFromRoles = new Set<string>()
+  for (const c of classifications) {
+    if (c.structure !== 'CUSTOM_POST_TYPE' || !c.section_role) continue
+    const slug = CPT_SLUG_BY_ROLE[c.section_role]
+    if (!slug) continue
+    cptSlugsFromRoles.add(slug)
+  }
+  for (const slug of cptSlugsFromRoles) {
+    objects.push(buildCptFromRoles(slug, classifications, inputs))
+  }
+
+  // ── CPTs (and Externals) from content-collection display prefs ─
+  for (const kind of ['events', 'sermons', 'groups'] as const) {
+    const shape = resolveDisplayPreference(kind, inputs.displayPreferences[kind])
+    if (shape.kind === 'skip') continue
+    const slug = CPT_FROM_CONTENT_KIND[kind]
+    if (shape.kind === 'cpt') {
+      // De-dupe against role-driven CPTs (events_detail might have
+      // already produced wp_object.event).
+      if (!objects.some(o => o.kind === 'custom_post_type' && o.slug === slug)) {
+        objects.push(buildCptFromDisplayPref(slug, kind, shape, inputs))
+      }
+    } else {
+      objects.push({
+        id:               `wp_object.external.${kind}`,
+        kind:             'external',
+        section_role:     null,
+        external_system:  null,
+        display_mode:     displayModeFromPref(inputs.displayPreferences[kind]),
+        rationale:        shape.rationale,
+      })
+    }
+  }
+
+  // ── Repeaters per page that landed on REPEATER + don't roll up ─
+  // Dedup by id — multiple sections on the same page can reference
+  // the same template field key (e.g. several sections each have a
+  // `buttons` group), and they should collapse to ONE Repeater
+  // WpObject per (page, item) pair. Layer 3's `buildRepeaterFieldGroup`
+  // walks the first classification matching the dedupe id, so all
+  // sibling sections inherit the same field group binding.
+  const seenRepeaterIds = new Set<string>()
+  for (const c of classifications) {
+    if (c.structure !== 'REPEATER') continue
+    const id = `wp_object.${c.page_slug}_${c.item_label}`
+    if (seenRepeaterIds.has(id)) continue
+    seenRepeaterIds.add(id)
+    objects.push({
+      id,
+      kind:            'repeater',
+      on_page_slug:    c.page_slug,
+      field_group_ref: `acf.${c.page_slug}_${c.item_label}`,
+      rationale:       c.rationale,
+      open_questions:  c.open_questions,
+      confidence:      c.confidence,
+    })
+  }
+
+  return objects
+}
+
+function displayModeFromPref(pref: string | null): WpObjectExternal['display_mode'] {
+  if (pref === 'embed') return 'embed'
+  if (pref === 'contact') return 'contact'
+  return 'link-out'
+}
+
+function buildOptionsPage(inputs: FormationInputs): WpObjectOptionsPage {
+  const seeded: string[] = CHURCH_WIDE_GLOBAL_COLUMNS.map(c => c.col)
+  const open_questions: string[] = []
+
+  if (inputs.isMultiCampus) {
+    // Multi-campus → the 7 campus-scoped columns should NOT be
+    // flattened into the Options page. Surface as open question.
+    open_questions.push(
+      `Multi-campus project — these fields are inherently per-${inputs.campusTerm.singular.toLowerCase()} and should NOT be seeded as flat globals: ${CAMPUS_SCOPED_COLUMNS.map(c => c.col).join(', ')}. Recommend modeling as a "${inputs.campusTerm.singular}" CPT or as a per-${inputs.campusTerm.singular.toLowerCase()} repeater on the Visit page. Confirm with McNeel.`
+    )
+  } else {
+    seeded.push(...CAMPUS_SCOPED_COLUMNS.map(c => c.col))
+  }
+
+  return {
+    id:                          'wp_object.global_site',
+    kind:                        'options_page',
+    slug:                        'global-site',
+    menu_title:                  'Global Site Settings',
+    capability:                  'manage_options',
+    field_group_ref:             'acf.global_site',
+    seeded_from_project_columns: seeded,
+    open_questions,
+    confidence:                  'high',
+  }
+}
+
+function buildCptFromRoles(
+  slug: string,
+  classifications: ClassificationRecord[],
+  inputs: FormationInputs,
+): WpObjectCpt {
+  const relevant = classifications.filter(c =>
+    c.structure === 'CUSTOM_POST_TYPE' &&
+    c.section_role &&
+    CPT_SLUG_BY_ROLE[c.section_role] === slug
+  )
+  const roles = relevant.map(c => c.section_role).filter((r): r is SectionRole => !!r)
+
+  const singleTemplate = inferSingleTemplate(slug, roles, inputs)
+  const archive       = inferArchive(slug, roles)
+  const headless      =
+    !singleTemplate.enabled && !archive.enabled
+
+  const registration: CptRegistrationArgs = {
+    public:              !headless,
+    publicly_queryable:  !headless,
+    has_archive:         archive.enabled,
+    show_ui:             true,
+    show_in_menu:        true,
+    show_in_rest:        true,
+    show_in_nav_menus:   !headless,
+    exclude_from_search: headless,
+    supports:            CPT_SUPPORTS[slug] ?? ['title', 'editor', 'revisions'],
+    menu_icon:           CPT_MENU_ICON[slug] ?? null,
+    rewrite:             headless ? null : { slug, with_front: false },
+  }
+
+  const taxonomies: TaxonomySpec[] = buildTaxonomies(slug, inputs.campusTerm)
+  const open_questions = relevant.flatMap(c => c.open_questions)
+
+  return {
+    id:                  `wp_object.${slug}`,
+    kind:                'custom_post_type',
+    slug,
+    labels:              cptLabels(slug),
+    registration_args:   registration,
+    taxonomies,
+    single_template:     singleTemplate,
+    archive,
+    headless,
+    external_system:     null,
+    external_limits:     null,
+    field_group_refs:    [`acf.${slug}`],
+    open_questions,
+    confidence:          relevant.some(c => c.confidence === 'medium' || c.confidence === 'low')
+                          ? 'medium' : 'high',
+  }
+}
+
+function buildCptFromDisplayPref(
+  slug: string,
+  contentKind: 'events' | 'sermons' | 'groups',
+  shape: { kind: 'cpt'; single_template: 'yes' | 'no'; archive: 'yes' | 'no'; headless: boolean; rationale: string },
+  inputs: FormationInputs,
+): WpObjectCpt {
+  const singleEnabled  = shape.single_template === 'yes'
+  const archiveEnabled = shape.archive === 'yes'
+  const headless       = shape.headless
+
+  const registration: CptRegistrationArgs = {
+    public:              !headless,
+    publicly_queryable:  !headless,
+    has_archive:         archiveEnabled,
+    show_ui:             true,
+    show_in_menu:        true,
+    show_in_rest:        true,
+    show_in_nav_menus:   !headless,
+    exclude_from_search: headless,
+    supports:            CPT_SUPPORTS[slug] ?? ['title', 'editor', 'revisions'],
+    menu_icon:           CPT_MENU_ICON[slug] ?? null,
+    rewrite:             headless ? null : { slug, with_front: false },
+  }
+
+  return {
+    id:                  `wp_object.${slug}`,
+    kind:                'custom_post_type',
+    slug,
+    labels:              cptLabels(slug),
+    registration_args:   registration,
+    taxonomies:          buildTaxonomies(slug, inputs.campusTerm),
+    single_template: {
+      enabled:             singleEnabled,
+      brixies_template_id: null,
+      cta_target:          contentKind === 'groups' && headless ? 'mailto' : null,
+      rationale:           shape.rationale,
+    },
+    archive: {
+      enabled:                       archiveEnabled,
+      rendered_via_query_loop_on:    archiveEnabled ? null : `/${contentKind}`,
+      rationale:                     shape.rationale,
+    },
+    headless,
+    external_system: null,
+    external_limits: null,
+    field_group_refs: [`acf.${slug}`],
+    open_questions:   [],
+    confidence:       'high',
+  }
+}
+
+function inferSingleTemplate(
+  slug: string,
+  roles: SectionRole[],
+  _inputs: FormationInputs,
+): SingleTemplateSpec {
+  // Default: yes if any role in this group has _detail in its name.
+  const anyDetailRole = roles.some(r => r.endsWith('_detail'))
+  const allListingRoles = roles.every(r =>
+    CPT_SINGLE_TEMPLATE_DEFAULT[r] === 'no'
+  )
+  const enabled = anyDetailRole && !allListingRoles
+  return {
+    enabled,
+    brixies_template_id: null,
+    cta_target:          'internal-page',
+    rationale: enabled
+      ? `CPT \`${slug}\` has detail-section roles in the approved pages — single template needed.`
+      : `CPT \`${slug}\` only appears in listing roles in the approved pages — single template disabled, query loop drives the listing instead.`,
+  }
+}
+
+function inferArchive(_slug: string, roles: SectionRole[]): ArchiveSpec {
+  // Heuristic: enable archive only when no role implies the listing
+  // lives on a bespoke query-loop page. Conservative: default false
+  // and let McNeel toggle on if they want /staff to be a WP archive.
+  const allListingRoles = roles.every(r =>
+    CPT_SINGLE_TEMPLATE_DEFAULT[r] === 'no'
+  )
+  if (allListingRoles) {
+    return {
+      enabled: false,
+      rendered_via_query_loop_on: null,
+      rationale: 'All section roles for this CPT are listings — render via Bricks query loop on the appropriate page, no WP archive needed.',
+    }
+  }
+  return {
+    enabled: false,
+    rendered_via_query_loop_on: null,
+    rationale: 'Defaulting to no archive — McNeel can toggle on if a stand-alone archive URL is wanted.',
+  }
+}
+
+function buildTaxonomies(slug: string, campusTerm: CampusTerm): TaxonomySpec[] {
+  const suggestions = TAXONOMY_SUGGESTIONS[slug] ?? []
+  return suggestions.map(t => ({
+    slug: t.slug,
+    labels: {
+      singular: applyCampusTerm(t.singular, campusTerm),
+      plural:   applyCampusTerm(t.plural,   campusTerm),
+    },
+    hierarchical: t.hierarchical,
+    show_in_rest: true,
+  }))
+}
+
+function applyCampusTerm(label: string, term: CampusTerm): string {
+  return label
+    .replace('{campus_term_plural}', term.plural)
+    .replace('{campus_term}',        term.singular)
+}
+
+function cptLabels(slug: string): { singular: string; plural: string } {
+  const titles: Record<string, { singular: string; plural: string }> = {
+    staff:  { singular: 'Staff Member', plural: 'Staff' },
+    event:  { singular: 'Event',        plural: 'Events' },
+    sermon: { singular: 'Sermon',       plural: 'Sermons' },
+    group:  { singular: 'Group',        plural: 'Groups' },
+    career: { singular: 'Career',       plural: 'Careers' },
+    post:   { singular: 'Post',         plural: 'Posts' },
+  }
+  return titles[slug] ?? {
+    singular: slug.charAt(0).toUpperCase() + slug.slice(1),
+    plural:   slug.charAt(0).toUpperCase() + slug.slice(1) + 's',
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// PART C — build AcfFieldGroups (ACF JSON Sync compatible)
+// ═════════════════════════════════════════════════════════════════════
+
+/** Emits one ACF field group per WpObject that needs ACF fields:
+ *
+ *  - Options page → one group, location pinned to options_page
+ *  - CPT          → one group per CPT, location pinned to post_type
+ *  - Repeater     → one group, location pinned to page_template
+ *  - External     → no group (content lives elsewhere)
+ */
+export function buildAcfFieldGroups(
+  wpObjects: WpObject[],
+  classifications: ClassificationRecord[],
+  inputs: FormationInputs,
+): AcfFieldGroup[] {
+  const groups: AcfFieldGroup[] = []
+
+  for (const obj of wpObjects) {
+    if (obj.kind === 'external') continue
+    if (obj.kind === 'options_page') {
+      groups.push(buildOptionsFieldGroup(obj, inputs))
+    } else if (obj.kind === 'custom_post_type') {
+      groups.push(buildCptFieldGroup(obj, classifications, inputs))
+    } else if (obj.kind === 'repeater') {
+      groups.push(buildRepeaterFieldGroup(obj, classifications, inputs))
+    }
+  }
+
+  return groups
+}
+
+function buildOptionsFieldGroup(
+  obj: WpObjectOptionsPage,
+  inputs: FormationInputs,
+): AcfFieldGroup {
+  const cols = inputs.isMultiCampus
+    ? CHURCH_WIDE_GLOBAL_COLUMNS
+    : [...CHURCH_WIDE_GLOBAL_COLUMNS, ...CAMPUS_SCOPED_COLUMNS]
+
+  const fields: AcfField[] = cols.map(c => ({
+    key:   `field_global_${c.col}`,
+    name:  c.col,
+    label: c.label,
+    type:  acfTypeForGlobalColumn(c.type),
+    _source: {
+      web_field_type:     c.type,
+      template_field_key: c.col,
+    },
+  }))
+
+  // Single content row — the project's current global values. Dev's AI
+  // assistant uses this to seed the Options page after registration.
+  const project = inputs.project as unknown as Record<string, unknown>
+  const contentRow: Record<string, unknown> = {}
+  for (const c of cols) {
+    contentRow[c.col] = project[c.col] ?? null
+  }
+
+  return {
+    key:      `acf.global_site`,
+    title:    `Global Site Settings`,
+    fields,
+    location: [[{ param: 'options_page', operator: '==', value: obj.slug }]],
+    position: 'normal',
+    style:    'default',
+    _content_rows: [enrichRowWithCtaRoutes(contentRow)],
+  }
+}
+
+function acfTypeForGlobalColumn(t: 'text' | 'richtext' | 'phone' | 'email' | 'url'): AcfField['type'] {
+  if (t === 'richtext') return 'wysiwyg'
+  if (t === 'url') return 'url'
+  if (t === 'email') return 'email'
+  // 'phone' and 'text' both map to ACF text (ACF has no native phone)
+  return 'text'
+}
+
+function buildCptFieldGroup(
+  obj: WpObjectCpt,
+  classifications: ClassificationRecord[],
+  inputs: FormationInputs,
+): AcfFieldGroup {
+  // For each section that classified as CPT for this slug, walk its
+  // template fields and emit one ACF field per WebFieldDef (with
+  // sub_fields when it's a group). Dedup by field key — multiple
+  // sections of the same role share the same template, so we only
+  // emit the field once.
+  const seenKeys = new Set<string>()
+  const fields: AcfField[] = []
+  const sourceSectionIds: string[] = []
+  const contentRows: Array<Record<string, unknown>> = []
+
+  for (const c of classifications) {
+    if (c.structure !== 'CUSTOM_POST_TYPE') continue
+    if (!c.section_role) continue
+    if (CPT_SLUG_BY_ROLE[c.section_role] !== obj.slug) continue
+    const section = findSection(inputs, c.section_id)
+    if (!section?.content_template_id) continue
+    const template = inputs.templatesById.get(section.content_template_id)
+    if (!template?.fields) continue
+
+    sourceSectionIds.push(section.id)
+    for (const def of template.fields) {
+      if (seenKeys.has(def.key)) continue
+      const acf = webFieldDefToAcfField(def, `field_${obj.slug}_${def.key}`)
+      if (acf) {
+        seenKeys.add(def.key)
+        fields.push(acf)
+      }
+    }
+
+    // Extract per-record content from this section. CPTs typically
+    // surface their records as items inside a group field on a
+    // listing-style section. Brixies templates often double-nest
+    // (`row_grid` > `card_team` > individual staff items), so we
+    // recurse into nested groups and only emit a row at the LEAF
+    // (the innermost group whose items don't contain another group).
+    const fv = (section.field_values as Record<string, unknown> | null) ?? {}
+    for (const def of template.fields) {
+      if (def.kind !== 'group') continue
+      const arr = fv[def.key]
+      if (!Array.isArray(arr)) continue
+      for (const item of arr) {
+        contentRows.push(...extractCptRecordsFromGroup(item, def))
+      }
+    }
+    // If the section is a detail-page section (no group), the section
+    // ITSELF is one record's worth of content — flatten the slot
+    // values directly.
+    if (!template.fields.some(d => d.kind === 'group')) {
+      const row: Record<string, unknown> = {}
+      for (const def of template.fields) {
+        if (def.kind === 'slot') {
+          row[def.key] = fv[def.key] ?? null
+        }
+      }
+      if (Object.keys(row).length > 0) contentRows.push(row)
+    }
+  }
+
+  // Append taxonomy fields for filterable surfaces
+  for (const tax of obj.taxonomies) {
+    const key = `field_${obj.slug}_${tax.slug}`
+    if (seenKeys.has(tax.slug)) continue
+    fields.push({
+      key,
+      name:     tax.slug,
+      label:    tax.labels.singular,
+      type:     'taxonomy',
+      taxonomy: tax.slug,
+    })
+    seenKeys.add(tax.slug)
+  }
+
+  return {
+    key:      `acf.${obj.slug}`,
+    title:    `${obj.labels.singular} fields`,
+    fields,
+    location: [[{ param: 'post_type', operator: '==', value: obj.slug }]],
+    position: 'normal',
+    style:    'default',
+    _source_section_ids: sourceSectionIds,
+    _content_rows: dedupContentRows(contentRows).map(enrichRowWithCtaRoutes),
+  }
+}
+
+/** Recursively pull leaf records out of a nested group. Brixies
+ *  templates often double-nest (`row_grid` > `card_team` > items);
+ *  only the LEAF level is where actual content lives. When an item
+ *  carries a nested group's array, recurse into that array — only
+ *  emit a record when the item itself is a leaf (no nested groups
+ *  with array values). */
+function extractCptRecordsFromGroup(item: unknown, group: WebGroupDef): Array<Record<string, unknown>> {
+  if (item == null || typeof item !== 'object' || Array.isArray(item)) return []
+  const obj = item as Record<string, unknown>
+  const out: Array<Record<string, unknown>> = []
+  const nestedGroups = (Array.isArray(group.item_schema) ? group.item_schema : [])
+    .filter((f): f is WebGroupDef => f.kind === 'group')
+  for (const ng of nestedGroups) {
+    const nested = obj[ng.key]
+    if (Array.isArray(nested)) {
+      for (const nItem of nested) out.push(...extractCptRecordsFromGroup(nItem, ng))
+    }
+  }
+  // If recursion produced records, return those — the current item
+  // is a container, not a leaf. Only emit the current item as a
+  // record when no nested group expanded into anything.
+  if (out.length > 0) return out
+  const leaf = flattenItemForCpt(item, group)
+  return leaf ? [leaf] : []
+}
+
+/** Reshape one item of a group's array into a content row aligned
+ *  with the CPT's flat field set. Walks nested objects shallowly so
+ *  e.g. `{ contact: { label, url } }` collapses to keys we can read.
+ *  Drops empty values and Brixies bracket placeholders. */
+function flattenItemForCpt(item: unknown, def: WebFieldDef): Record<string, unknown> | null {
+  if (item == null || typeof item !== 'object' || Array.isArray(item)) return null
+  const obj = item as Record<string, unknown>
+  const row: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (looksEmpty(v)) continue
+    if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+      // Shallow flatten one level — e.g. CTA { label, url } collapses
+      // to cta_label / cta_url keys for spreadsheet-friendly export.
+      for (const [sk, sv] of Object.entries(v as Record<string, unknown>)) {
+        if (looksEmpty(sv)) continue
+        row[`${k}_${sk}`] = sv
+      }
+    } else {
+      row[k] = v
+    }
+  }
+  // Tag with the source template field key so dev knows which group
+  // produced this row.
+  row._source_group = def.key
+  return row
+}
+
+// ── CTA route classification ────────────────────────────────────────
+//
+// McNeel needs to know the destination type for every button/CTA we
+// extract, not just "there's a CTA here." A sermon button to YouTube
+// is a different build problem from a careers button to a PDF.
+
+export type CtaRouteType =
+  | 'internal-page'      // /sermons, /staff, etc.
+  | 'internal-anchor'    // #section on same page
+  | 'youtube'            // youtube.com, youtu.be
+  | 'vimeo'              // vimeo.com
+  | 'church-center'      // churchcenter.com / planningcenter / CCB
+  | 'social'             // facebook, instagram, tiktok, twitter, linkedin
+  | 'file'               // .pdf, .doc, .docx, .xls, .ppt, .zip, etc.
+  | 'form'               // /apply, /form, /register, /signup pages
+  | 'mailto'
+  | 'tel'
+  | 'external'           // any other https:// destination
+  | 'unset'              // empty / missing URL
+
+interface CtaRoute {
+  field: string                // dotted path: e.g. "buttons.contact_url"
+  url:   string
+  route_type: CtaRouteType
+  hint: string                 // human label: "YouTube channel", ".pdf download", "/staff page", etc.
+}
+
+function classifyCtaRoute(url: string | null | undefined): { type: CtaRouteType; hint: string } {
+  if (!url || typeof url !== 'string') return { type: 'unset', hint: 'no URL' }
+  const u = url.trim()
+  if (!u) return { type: 'unset', hint: 'empty' }
+  if (u.startsWith('mailto:'))    return { type: 'mailto', hint: u.replace(/^mailto:/, '') }
+  if (u.startsWith('tel:'))       return { type: 'tel', hint: u.replace(/^tel:/, '') }
+  if (u.startsWith('#'))          return { type: 'internal-anchor', hint: u }
+  if (u.startsWith('/'))          return { type: 'internal-page', hint: u }
+  const lower = u.toLowerCase()
+  if (/(youtube\.com|youtu\.be)/.test(lower))             return { type: 'youtube', hint: 'YouTube video / channel' }
+  if (/vimeo\.com/.test(lower))                           return { type: 'vimeo', hint: 'Vimeo' }
+  if (/churchcenter\.com|planningcenter/.test(lower))     return { type: 'church-center', hint: 'Church Center / Planning Center' }
+  if (/ccbchurch|churchcommunitybuilder/.test(lower))     return { type: 'church-center', hint: 'Church Community Builder' }
+  if (/facebook\.com|instagram\.com|tiktok\.com|twitter\.com|x\.com|linkedin\.com/.test(lower)) {
+    return { type: 'social', hint: 'social profile / post' }
+  }
+  const fileMatch = lower.match(/\.([a-z0-9]{2,5})(\?|#|$)/)
+  if (fileMatch && /^(pdf|docx?|xlsx?|pptx?|zip|jpe?g|png|mp4|mov|csv)$/.test(fileMatch[1])) {
+    return { type: 'file', hint: `.${fileMatch[1]} download` }
+  }
+  if (/\/(apply|application|form|register|signup|sign-up|join|interest|onboard)/.test(lower)) {
+    return { type: 'form', hint: 'application / signup form' }
+  }
+  return { type: 'external', hint: 'external page' }
+}
+
+/** Walk a content row and emit one CtaRoute per URL field found.
+ *  Recognises both the flattened pattern (`contact_url`,
+ *  `cta_url`, `learn_more_url`) and bare `url` keys nested inside
+ *  named groups. */
+function extractCtaRoutes(row: Record<string, unknown>, prefix = ''): CtaRoute[] {
+  const out: CtaRoute[] = []
+  for (const [k, v] of Object.entries(row)) {
+    if (k.startsWith('_')) continue            // internal markers
+    const path = prefix ? `${prefix}.${k}` : k
+    if (typeof v === 'string') {
+      // *_url, bare `url`, or any string field whose value looks like
+      // a URL — be conservative to avoid catching arbitrary text.
+      const isUrlField = k.endsWith('_url') || k === 'url'
+      if (isUrlField || /^(https?:|mailto:|tel:|#|\/)/i.test(v)) {
+        const r = classifyCtaRoute(v)
+        if (r.type !== 'unset') out.push({ field: path, url: v, route_type: r.type, hint: r.hint })
+      }
+    } else if (v && typeof v === 'object' && !Array.isArray(v)) {
+      out.push(...extractCtaRoutes(v as Record<string, unknown>, path))
+    } else if (Array.isArray(v)) {
+      v.forEach((item, i) => {
+        if (item && typeof item === 'object' && !Array.isArray(item)) {
+          out.push(...extractCtaRoutes(item as Record<string, unknown>, `${path}[${i}]`))
+        }
+      })
+    }
+  }
+  return out
+}
+
+/** Attach an `_cta_routes` array to a content row when any CTA
+ *  destinations are detected inside it. Caller decides whether to
+ *  include this in the public output (we always do — McNeel needs
+ *  the routing info per-record). */
+function enrichRowWithCtaRoutes(row: Record<string, unknown>): Record<string, unknown> {
+  const routes = extractCtaRoutes(row)
+  if (routes.length === 0) return row
+  return { ...row, _cta_routes: routes }
+}
+
+function looksEmpty(v: unknown): boolean {
+  if (v == null) return true
+  if (typeof v === 'string') {
+    const t = v.trim()
+    return t.length === 0 || /^\[(NEEDS INPUT|TODO|PLACEHOLDER):/i.test(t)
+  }
+  if (Array.isArray(v)) return v.length === 0
+  return false
+}
+
+/** Dedup CPT content rows by their JSON-stringified payload (minus
+ *  the _source_group tag). Same staff member listed on two pages
+ *  shouldn't produce two post records. */
+function dedupContentRows(rows: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const seen = new Set<string>()
+  const out: Array<Record<string, unknown>> = []
+  for (const r of rows) {
+    const { _source_group: _g, ...rest } = r
+    const key = JSON.stringify(rest)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(r)
+  }
+  return out
+}
+
+function buildRepeaterFieldGroup(
+  obj: WpObjectRepeater,
+  classifications: ClassificationRecord[],
+  inputs: FormationInputs,
+): AcfFieldGroup {
+  const c = classifications.find(c => `acf.${c.page_slug}_${c.item_label}` === obj.field_group_ref)
+  let fields: AcfField[] = []
+  let sourceSectionIds: string[] = []
+  const contentRows: Array<Record<string, unknown>> = []
+  if (c) {
+    const section = findSection(inputs, c.section_id)
+    if (section?.content_template_id) {
+      const template = inputs.templatesById.get(section.content_template_id)
+      const def = template?.fields.find(d => d.key === c.item_label)
+      if (def) {
+        const acf = webFieldDefToAcfField(def, `field_${c.page_slug}_${def.key}`)
+        if (acf) fields = [acf]
+        // Pull the actual filled items array from field_values so dev
+        // can populate the repeater rows right after WP setup.
+        if (def.kind === 'group') {
+          const fv = (section.field_values as Record<string, unknown> | null) ?? {}
+          const arr = fv[def.key]
+          if (Array.isArray(arr)) {
+            for (const item of arr) {
+              const row = flattenItemForCpt(item, def)
+              if (row && Object.keys(row).length > 0) {
+                // drop the source-group tag for repeaters (it's
+                // redundant — the field group itself names the group)
+                const { _source_group: _g, ...rest } = row
+                contentRows.push(rest)
+              }
+            }
+          }
+        }
+      }
+    }
+    if (section) sourceSectionIds = [section.id]
+  }
+
+  // Repeater field-group location: page_template pinning. We use the
+  // page slug as the template name — dev maps this to the actual
+  // page template at WP-side.
+  const location: AcfLocationRule[][] = [[
+    { param: 'page_template', operator: '==', value: `page-${obj.on_page_slug}.php` },
+  ]]
+
+  return {
+    key:      obj.field_group_ref.replace(/^acf\./, 'acf.repeater_'),
+    title:    `Repeater: ${obj.on_page_slug} / ${c?.item_label ?? ''}`,
+    fields,
+    location,
+    position: 'normal',
+    style:    'default',
+    _source_section_ids: sourceSectionIds,
+    _content_rows: contentRows.map(enrichRowWithCtaRoutes),
+  }
+}
+
+// ── WebFieldDef → AcfField conversion ────────────────────────────────
+
+function webFieldDefToAcfField(def: WebFieldDef, keyPrefix: string): AcfField | null {
+  if (def.kind === 'group') {
+    return webGroupToRepeater(def, keyPrefix)
+  }
+  return webSlotToAcfField(def, keyPrefix)
+}
+
+function webSlotToAcfField(slot: WebSlotDef, key: string): AcfField | null {
+  if (slot.type === 'form-input') return null  // handled by Bricks
+  if (slot.type === 'cta') {
+    return {
+      key,
+      name:  slot.key,
+      label: slot.label ?? humanize(slot.key),
+      type:  'group',
+      sub_fields: [
+        { key: `${key}_label`, name: 'label', label: 'Label', type: 'text' },
+        { key: `${key}_url`,   name: 'url',   label: 'URL',   type: 'url'  },
+      ],
+      _source: { web_field_type: slot.type, template_field_key: slot.key },
+    }
+  }
+  const acfType = ACF_TYPE_BY_FIELD_TYPE[slot.type]
+  if (!acfType) return null
+  return {
+    key,
+    name:  slot.key,
+    label: slot.label ?? humanize(slot.key),
+    type:  acfType,
+    required: slot.required ?? undefined,
+    _source: { web_field_type: slot.type, template_field_key: slot.key },
+  }
+}
+
+function webGroupToRepeater(group: WebGroupDef, key: string): AcfField {
+  // Some templates ship a WebGroupDef without an item_schema (the
+  // schema parser couldn't infer the item shape, or it's a
+  // referenced-template group like card_palette which has no inline
+  // sub-fields). Defend against the null/undefined case so the
+  // analyzer doesn't crash on those rows.
+  const itemSchema = Array.isArray(group.item_schema) ? group.item_schema : []
+  const subFields: AcfField[] = []
+  for (const sub of itemSchema) {
+    const subKey = `${key}__${sub.key}`
+    const acf = webFieldDefToAcfField(sub, subKey)
+    if (acf) subFields.push(acf)
+  }
+  return {
+    key,
+    name:        group.key,
+    label:       humanize(group.key),
+    type:        'repeater',
+    sub_fields:  subFields,
+  }
+}
+
+function humanize(s: string): string {
+  return s
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function findSection(inputs: FormationInputs, sectionId: string): WebSection | null {
+  for (const sections of inputs.sectionsByPage.values()) {
+    const found = sections.find(s => s.id === sectionId)
+    if (found) return found
+  }
+  return null
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// PART D — Page-level Flexible Content detection (Rule 6)
+// ═════════════════════════════════════════════════════════════════════
+
+/** Looks at each approved page's section list. If a page has 5+
+ *  sections with high content_template_id variety and no shared
+ *  section_role pattern, mark its top-level structure as
+ *  FLEXIBLE_CONTENT and surface the Bricks Nestable alternative.
+ *
+ *  Run AFTER classifyOne is done — this adjusts the page-level
+ *  recommendation, not per-field classification. Returns one record
+ *  per affected page, appended to the classifications list. */
+export function detectFlexibleContentPages(
+  inputs: FormationInputs,
+): ClassificationRecord[] {
+  const out: ClassificationRecord[] = []
+  for (const page of inputs.approvedPages) {
+    const sections = inputs.sectionsByPage.get(page.id) ?? []
+    if (sections.length < 5) continue
+
+    const contentSections = sections.filter(s => s.section_role && !CHROME_ROLES.has(s.section_role))
+    const uniqueTemplates = new Set(contentSections.map(s => s.content_template_id).filter(Boolean))
+    const uniqueRoles     = new Set(contentSections.map(s => s.section_role))
+
+    // Heuristic: 5+ content sections, with high template diversity
+    // (>= 4 distinct templates) and no role appearing more than twice.
+    const maxRoleCount = Math.max(...[...uniqueRoles].map(r =>
+      contentSections.filter(s => s.section_role === r).length
+    ), 0)
+    if (uniqueTemplates.size < 4 || maxRoleCount > 2) continue
+
+    out.push({
+      id:                  `${page.slug}/__page_layout`,
+      page_slug:           page.slug,
+      page_id:             page.id,
+      section_id:          'PAGE_LEVEL',
+      section_role:        null,
+      item_label:          '__page_layout',
+      structure:           'BRICKS_NESTABLE_SECTION',
+      signals: {
+        kind_in_template:        null,
+        default_count:           null,
+        actually_filled_count:   contentSections.length,
+        section_role_reuse_count: 0,
+        edit_frequency_proxy:    'medium',
+        is_featured_global:      false,
+        needs_own_url:           false,
+        external_system:         null,
+        cta_target_kind:         'unset',
+        has_client_overrides:    false,
+      },
+      rationale: `Page has ${contentSections.length} sections across ${uniqueTemplates.size} distinct templates with no role appearing >2 times — modular layout. Default to Bricks Nestable sections for perf; ACF Flexible Content surfaced as alternative.`,
+      recommended_default: 'BRICKS_NESTABLE_SECTION',
+      alternative:         'FLEXIBLE_CONTENT',
+      open_questions:      [
+        'Confirm with McNeel: use Bricks native Nestable for this page, or fall back to ACF Flexible Content?',
+      ],
+      confidence:          'medium',
+      cpt_subroutine_ref:  null,
+      status:              'suggested',
+      override_reason:     null,
+    })
+  }
+  return out
+}
