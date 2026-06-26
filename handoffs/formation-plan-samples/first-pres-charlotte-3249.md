@@ -21,7 +21,7 @@
 
 ## Open questions — answer before building
 
-Each question has an empty **Answer** line. The owner writes the decision back in, then the dev unblocks.
+Each question has an **Answer** line. The owner writes their decision back in; once filled in, the dev unblocks.
 
 ### For the Strategist (1)
 
@@ -158,7 +158,7 @@ Implementation decisions — how to wire what the strategist's already decided.
 
 **CTA / button routing** — 1 destination across this group:
 
-- **1** → file download (PDF / doc / etc.) — e.g. `https://firstpres-charlotte.org/wp-content/uploads/2026/01/…`
+- **1** → file download — e.g. `https://firstpres-charlotte.org/wp-content/uploads/2026/01/…`
 
 **Existing records to seed** — 1 record (full data in `.content-import.json`)
 
@@ -1308,7 +1308,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
 **CTA / button routing** — 6 destinations across this group:
 
 - **5** → email (mailto:) — e.g. `mailto:hclarke61@gmail.com`, `mailto:rossloeser@aol.com`, `mailto:lcrain@firstpres-charlotte.org`
-- **1** → internal page (slug like `/sermons`) — e.g. `/the-history-hallway`
+- **1** → internal page — e.g. `/the-history-hallway`
 
 **Existing rows** — 5 records (full data in `.content-import.json`)
 
@@ -1475,7 +1475,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
 
 **CTA / button routing** — 2 destinations across this group:
 
-- **2** → internal page (slug like `/sermons`) — e.g. `/new`, `/watch`
+- **2** → internal page — e.g. `/new`, `/watch`
 
 **Existing rows** — 2 records (full data in `.content-import.json`)
 
@@ -1837,7 +1837,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
 
 **CTA / button routing** — 1 destination across this group:
 
-- **1** → internal page (slug like `/sermons`) — e.g. `/serve`
+- **1** → internal page — e.g. `/serve`
 
 **Existing rows** — 1 record (full data in `.content-import.json`)
 
@@ -2384,4 +2384,4 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
 </details>
 
 ---
-*Regenerate: `tsx scripts/translate-formation-plan.ts handoffs/formation-plan-samples/first-pres-charlotte-3249.json`*
+*Plan stored at `strategy_web_projects.roadmap_state.content_model_plan`.*

@@ -36,6 +36,13 @@ import {
   isButtonShapedSlot,
 } from '../../../lib/cta'
 import { GLOBAL_FIELDS } from '../../../lib/webSnippets'
+import { saveFormationPlan, type ContentModelPlan } from '../../../lib/acfFormationPlan'
+import {
+  aggregateOpenQuestions,
+  buildContentImport,
+  renderPlanAsMarkdown,
+  toAcfJsonSync,
+} from '../../../lib/acfFormationPlan/render'
 import type {
   StrategyWebProject, WebPage, WebSection, WebContentTemplate,
   WebPageSeo, WebFieldDef, CtaValue, WebProjectSnippet,
@@ -98,6 +105,70 @@ export function DevHandoffWorkspace({ project }: Props) {
   // under 'Content Inventory: Technical Details'. The cowork session
   // is keyed on web_project_id; if multiple, take the most recent.
   const [contentSession, setContentSession] = useState<Record<string, unknown> | null>(null)
+
+  // Content-model formation plan — Phase 1 preview. Persists to
+  // strategy_web_projects.roadmap_state.content_model_plan. Answers
+  // to open questions persist SEPARATELY under
+  // .content_model_plan_answers so a recompute doesn't wipe them.
+  const [cmStatus, setCmStatus] = useState<'idle' | 'computing' | 'success' | 'error'>('idle')
+  const [cmError,  setCmError]  = useState<string | null>(null)
+  const [cmPlan,   setCmPlan]   = useState<ContentModelPlan | null>(null)
+  const [cmAnswers, setCmAnswers] = useState<Record<string, string>>({})
+  const [cmStale, setCmStale]   = useState(false)
+  // Seed from any previously saved plan so reloading the page shows
+  // the last counts without re-running the analyzer.
+  useEffect(() => {
+    const rs = project.roadmap_state as Record<string, unknown> | null
+    const existing = rs?.content_model_plan as ContentModelPlan | undefined
+    if (existing?.schema_version === 1) {
+      setCmPlan(existing)
+      setCmStatus('success')
+    }
+    const persistedAnswers = rs?.content_model_plan_answers as Record<string, string> | undefined
+    if (persistedAnswers && typeof persistedAnswers === 'object') {
+      setCmAnswers(persistedAnswers)
+    }
+  }, [project.roadmap_state])
+
+  // Stale detection: if any web_section in this project was updated
+  // after the plan was generated, McNeel should recompute. We don't
+  // auto-trigger because the analyzer is mildly expensive and the
+  // staff team prefers explicit refreshes.
+  useEffect(() => {
+    if (!cmPlan) { setCmStale(false); return }
+    void (async () => {
+      const { data: maxRow } = await supabase
+        .from('web_sections')
+        .select('updated_at, web_page_id, web_pages!inner(web_project_id)')
+        .eq('web_pages.web_project_id', project.id)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      const latest = (maxRow as { updated_at?: string } | null)?.updated_at
+      if (!latest) { setCmStale(false); return }
+      setCmStale(new Date(latest) > new Date(cmPlan._meta.generated_at))
+    })()
+  }, [cmPlan, project.id])
+
+  /** Persist one open-question answer. Writes to
+   *  roadmap_state.content_model_plan_answers as a flat
+   *  question_id → text map. Survives recomputes because the
+   *  analyzer never touches this key. */
+  const saveCmAnswer = async (questionId: string, answer: string) => {
+    const next = { ...cmAnswers, [questionId]: answer }
+    setCmAnswers(next)
+    const { data: row } = await supabase
+      .from('strategy_web_projects')
+      .select('roadmap_state')
+      .eq('id', project.id)
+      .maybeSingle()
+    const rs = ((row as unknown as { roadmap_state?: Record<string, unknown> } | null)?.roadmap_state) ?? {}
+    const nextRs = { ...rs, content_model_plan_answers: next }
+    await supabase
+      .from('strategy_web_projects')
+      .update({ roadmap_state: nextRs } as never)
+      .eq('id', project.id)
+  }
   useEffect(() => {
     void (async () => {
       const { data } = await supabase
@@ -521,8 +592,288 @@ export function DevHandoffWorkspace({ project }: Props) {
             )}
           </WMCard>
 
+          {/* ── Content model plan (Phase 1 preview) ──────────────── */}
+          <WMCard padding="loose">
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+                  <Cog size={13} />
+                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
+                    Content model plan
+                  </h2>
+                </div>
+                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+                  Reads every approved page's sections + template field
+                  schema and recommends a WordPress content model (CPTs,
+                  Options page, ACF field groups, Bricks Nestable vs ACF
+                  Flexible Content). Pure analyzer for now; full UI lands
+                  in Phase 2.
+                </p>
+              </div>
+              <WMButton
+                variant="primary"
+                size="md"
+                iconLeft={<Cog size={13} />}
+                disabled={cmStatus === 'computing'}
+                onClick={async () => {
+                  setCmStatus('computing')
+                  setCmError(null)
+                  try {
+                    const plan = await saveFormationPlan(project.id)
+                    setCmPlan(plan)
+                    setCmStatus('success')
+                  } catch (err) {
+                    setCmError(err instanceof Error ? err.message : String(err))
+                    setCmStatus('error')
+                  }
+                }}
+              >
+                {cmStatus === 'computing' ? 'Computing…' : 'Compute now'}
+              </WMButton>
+            </div>
+            {cmStatus === 'error' && cmError && (
+              <p className="text-[12px] text-red-600">Error: {cmError}</p>
+            )}
+            {cmPlan && (
+              <div className="mt-2 grid grid-cols-2 md:grid-cols-5 gap-3 text-[12px]">
+                <CmStat label="Classifications"     value={cmPlan._meta.counts.classifications} />
+                <CmStat label="WP objects"          value={cmPlan._meta.counts.wp_objects} />
+                <CmStat label="ACF field groups"    value={cmPlan._meta.counts.acf_field_groups} />
+                <CmStat label="Open questions"      value={cmPlan._meta.counts.open_questions} />
+                <CmStat label="Low confidence"      value={cmPlan._meta.counts.low_confidence} />
+              </div>
+            )}
+            {cmPlan && (
+              <p className="text-[11px] text-wm-text-subtle mt-3">
+                Last computed {new Date(cmPlan._meta.generated_at).toLocaleString()} ·
+                input fingerprint <code>{cmPlan._meta.input_fingerprint}</code> ·
+                stored at <code>roadmap_state.content_model_plan</code>.
+              </p>
+            )}
+            {cmStale && cmStatus !== 'computing' && (
+              <div className="mt-2 rounded-md border border-wm-warn/40 bg-wm-warn-bg/60 text-wm-warn text-[11px] px-2.5 py-1.5 inline-flex items-center gap-1.5">
+                <AlertTriangle size={11} /> Plan is stale — sections have been edited since this was last computed. Click <strong>Compute now</strong> to refresh.
+              </div>
+            )}
+            {cmPlan && <CmDownloadRow plan={cmPlan} answers={cmAnswers} projectSlug={projectSlug} />}
+            {cmPlan && <CmOpenQuestionsPanel plan={cmPlan} answers={cmAnswers} onSaveAnswer={saveCmAnswer} />}
+            {cmPlan && <CmWpObjectsPanel plan={cmPlan} />}
+          </WMCard>
+
         </div>
       </div>
+    </div>
+  )
+}
+
+function CmStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="bg-wm-bg-elevated border border-wm-border rounded-md px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wider text-wm-text-subtle">{label}</div>
+      <div className="text-[18px] font-bold text-wm-text">{value}</div>
+    </div>
+  )
+}
+
+/** Download row — produces the four artifacts the dev needs in his
+ *  WP-build workflow:
+ *
+ *   1. Markdown handoff   — human-readable structural plan + open
+ *                            questions + per-CPT detail
+ *   2. Plan JSON          — full raw analyzer output, useful for
+ *                            replaying / diffing
+ *   3. Content import     — sidecar AI / wp-cli can consume to seed
+ *                            WP records after the CPT/Options page
+ *                            is registered
+ *   4. ACF JSON Sync      — field-group definitions ready to drop
+ *                            into wp-content/acf-json/ or paste into
+ *                            ACF Pro Tools > Import Field Groups */
+function CmDownloadRow({ plan, answers, projectSlug }: { plan: ContentModelPlan; answers: Record<string, string>; projectSlug: string }) {
+  const download = (filename: string, mime: string, content: string) => {
+    const blob = new Blob([content], { type: mime })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+  const base = projectSlug || 'project'
+  const btn  = 'inline-flex items-center gap-1.5 text-[11px] font-semibold text-wm-accent-strong border border-wm-border rounded-md px-2.5 py-1.5 hover:bg-wm-accent-tint/40'
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-2">
+      <span className="text-[10px] uppercase tracking-wider text-wm-text-subtle">Downloads</span>
+      <button
+        type="button"
+        className={btn}
+        onClick={() => download(`${base}-formation-plan.md`, 'text/markdown', renderPlanAsMarkdown(plan, { sourceHint: `${base}.json`, answers }))}
+      ><Download size={11} /> Markdown handoff</button>
+      <button
+        type="button"
+        className={btn}
+        onClick={() => download(`${base}-formation-plan.json`, 'application/json', JSON.stringify(plan, null, 2))}
+      ><Download size={11} /> Plan JSON</button>
+      <button
+        type="button"
+        className={btn}
+        onClick={() => download(`${base}-content-import.json`, 'application/json', JSON.stringify(buildContentImport(plan), null, 2))}
+      ><Download size={11} /> Content import JSON</button>
+      <button
+        type="button"
+        className={btn}
+        onClick={() => download(`${base}-acf-json-sync.json`, 'application/json', JSON.stringify(toAcfJsonSync(plan), null, 2))}
+      ><Download size={11} /> ACF JSON Sync</button>
+    </div>
+  )
+}
+
+/** Open questions panel — surfaces what's blocking the build. Owner-
+ *  tagged (Strategist vs McNeel). Each question has an editable
+ *  answer textarea that persists to roadmap_state via onSaveAnswer.
+ *  Answers flow into the markdown download too. */
+function CmOpenQuestionsPanel({
+  plan, answers, onSaveAnswer,
+}: {
+  plan: ContentModelPlan
+  answers: Record<string, string>
+  onSaveAnswer: (questionId: string, answer: string) => Promise<void>
+}) {
+  const all = useMemo(() => aggregateOpenQuestions(plan), [plan])
+  if (all.length === 0) return null
+  const strategist = all.filter(q => q.owner === 'Strategist')
+  const mcneel     = all.filter(q => q.owner === 'McNeel')
+  return (
+    <div className="mt-5 pt-4 border-t border-wm-border">
+      <div className="text-[10px] uppercase tracking-wider text-wm-text-subtle mb-2">Open questions ({all.length})</div>
+      <p className="text-[11px] text-wm-text-muted mb-3">Each question has an answer field — type your decision and it persists on the project. Answers flow into the Markdown download.</p>
+      {strategist.length > 0 && (
+        <div className="mb-4">
+          <p className="text-[12px] font-semibold text-wm-text mb-2">For the strategist ({strategist.length}) — content / modelling decisions</p>
+          <div className="space-y-2">
+            {strategist.map((q, i) => (
+              <OpenQuestionRow key={q.id} num={`Q${i + 1}`} q={q} answer={answers[q.id] ?? ''} onSave={onSaveAnswer} />
+            ))}
+          </div>
+        </div>
+      )}
+      {mcneel.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[12px] font-semibold text-wm-text mb-2">For McNeel ({mcneel.length}) — implementation decisions</p>
+          <div className="space-y-2">
+            {mcneel.map((q, i) => (
+              <OpenQuestionRow key={q.id} num={`Q${i + 1}`} q={q} answer={answers[q.id] ?? ''} onSave={onSaveAnswer} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function OpenQuestionRow({
+  num, q, answer, onSave,
+}: {
+  num:    string
+  q:      { id: string; text: string; sources: string[] }
+  answer: string
+  onSave: (id: string, answer: string) => Promise<void>
+}) {
+  const [draft, setDraft] = useState(answer)
+  const [saving, setSaving] = useState(false)
+  useEffect(() => { setDraft(answer) }, [answer])
+  return (
+    <div className="rounded-md border border-wm-border bg-wm-bg-elevated p-2.5">
+      <p className="text-[12px] text-wm-text"><strong>{num}.</strong> {q.text}</p>
+      <p className="text-[10px] text-wm-text-subtle mt-1">
+        Affects: {q.sources.slice(0, 6).map(s => <code key={s} className="text-[10px] mr-1">{s}</code>)}
+        {q.sources.length > 6 && <span>(+{q.sources.length - 6} more)</span>}
+      </p>
+      <textarea
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={async () => {
+          if (draft === answer) return
+          setSaving(true)
+          await onSave(q.id, draft)
+          setSaving(false)
+        }}
+        placeholder="Type your answer here…"
+        rows={2}
+        className="mt-2 w-full text-[12px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1.5 outline-none focus:border-wm-accent"
+      />
+      {saving && <p className="text-[10px] text-wm-text-subtle mt-1">Saving…</p>}
+      {!saving && answer && draft === answer && <p className="text-[10px] text-wm-success mt-1">✓ Saved</p>}
+    </div>
+  )
+}
+
+/** WordPress objects panel — collapsible list of CPTs / Options /
+ *  Repeaters / Externals. Each row expands to show the registration
+ *  args + ACF field structure + content row count. */
+function CmWpObjectsPanel({ plan }: { plan: ContentModelPlan }) {
+  const cpts    = plan.layer_2_wp_objects.filter(o => o.kind === 'custom_post_type')
+  const options = plan.layer_2_wp_objects.filter(o => o.kind === 'options_page')
+  const reps    = plan.layer_2_wp_objects.filter(o => o.kind === 'repeater')
+  const exts    = plan.layer_2_wp_objects.filter(o => o.kind === 'external')
+  return (
+    <div className="mt-5 pt-4 border-t border-wm-border">
+      <div className="text-[10px] uppercase tracking-wider text-wm-text-subtle mb-2">WordPress objects to register</div>
+      {cpts.length > 0 && (
+        <details className="mb-2" open>
+          <summary className="text-[12px] font-semibold text-wm-text cursor-pointer">Custom Post Types ({cpts.length})</summary>
+          <ul className="mt-1 ml-3 text-[12px] text-wm-text-muted space-y-1">
+            {cpts.map(c => {
+              if (c.kind !== 'custom_post_type') return null
+              const single   = c.single_template.enabled ? '✅ single' : '❌ no single'
+              const archive  = c.archive.enabled ? '✅ archive' : '❌ no archive'
+              const headless = c.headless ? ' · 🔒 headless' : ''
+              const taxList  = c.taxonomies.map(t => t.slug).join(', ')
+              return (
+                <li key={c.id}>
+                  <code className="text-wm-accent-strong">{c.slug}</code> ({c.labels.singular}/{c.labels.plural}) — {single} · {archive}{headless}
+                  {taxList && <span className="text-wm-text-subtle"> · tax: {taxList}</span>}
+                </li>
+              )
+            })}
+          </ul>
+        </details>
+      )}
+      {options.length > 0 && (
+        <details className="mb-2">
+          <summary className="text-[12px] font-semibold text-wm-text cursor-pointer">Options Page ({options.length})</summary>
+          <ul className="mt-1 ml-3 text-[12px] text-wm-text-muted space-y-1">
+            {options.map(o => o.kind === 'options_page' ? (
+              <li key={o.id}>
+                <code className="text-wm-accent-strong">{o.slug}</code> — {o.menu_title} · seeded with {o.seeded_from_project_columns.length} project columns
+              </li>
+            ) : null)}
+          </ul>
+        </details>
+      )}
+      {reps.length > 0 && (
+        <details className="mb-2">
+          <summary className="text-[12px] font-semibold text-wm-text cursor-pointer">Page-scoped Repeaters ({reps.length})</summary>
+          <ul className="mt-1 ml-3 text-[12px] text-wm-text-muted space-y-0.5">
+            {reps.map(r => r.kind === 'repeater' ? (
+              <li key={r.id}>
+                <code className="text-[11px]">/{r.on_page_slug}</code> · <code className="text-[11px]">{r.field_group_ref}</code>
+              </li>
+            ) : null)}
+          </ul>
+        </details>
+      )}
+      {exts.length > 0 && (
+        <details className="mb-2">
+          <summary className="text-[12px] font-semibold text-wm-text cursor-pointer">External (managed elsewhere) ({exts.length})</summary>
+          <ul className="mt-1 ml-3 text-[12px] text-wm-text-muted space-y-1">
+            {exts.map(e => e.kind === 'external' ? (
+              <li key={e.id}><code>{e.id}</code> — {e.display_mode}{e.rationale ? `: ${e.rationale}` : ''}</li>
+            ) : null)}
+          </ul>
+        </details>
+      )}
     </div>
   )
 }
