@@ -39,12 +39,23 @@ export type SectionRole =
 
 /** Per-entry value in strategy_web_projects.figma_layout_swaps. The
  *  designer's site-wide swap "anywhere this template was used, render
- *  THIS template instead" plus the reasoning that informed the choice. */
+ *  THIS template instead" plus the reasoning that informed the choice.
+ *
+ *  to_template_id is the canonical reference when the designer picked
+ *  a template from the catalog. When they typed a free-text name not
+ *  in the catalog (a Brixies variant we haven't catalogued yet),
+ *  to_template_id stays empty and to_template_label carries the typed
+ *  string. Renderers prefer label when present, falling back to
+ *  looking up to_template_id in the templates dict. */
 export interface FigmaLayoutSwapEntry {
-  to_template_id: string
-  note:           string | null
-  swapped_at:     string  // ISO timestamp
-  swapped_by:     string  // user_id
+  to_template_id:    string
+  /** Free-text label — set whenever the designer typed something, even
+   *  when it matches a catalog template. UI shows label preferentially
+   *  so renames stay correct when the catalog updates a layer_name. */
+  to_template_label?: string | null
+  note:              string | null
+  swapped_at:        string  // ISO timestamp
+  swapped_by:        string  // user_id
 }
 
 /** Snapshot of a page + its sections at a point in time. Captured by

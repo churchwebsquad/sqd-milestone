@@ -496,7 +496,19 @@ export function DesignWorkspace({ project, onChange }: Props) {
           <RadiusSection spec={spec} onChange={update} />
           <FigmaStyleGuideSection projectId={project.id} spec={spec} onChange={update} onAutoSave={autoSave} />
           <ImagesSection projectId={project.id} spec={spec} onAutoSave={autoSave} />
-          <LayoutSwapBoard project={project} onChange={onChange} />
+          <LayoutSwapBoard
+            project={project}
+            onChange={onChange}
+            loadedTemplateIds={spec.figma?.loaded_template_ids ?? []}
+            onToggleLoaded={(templateId, loaded) => {
+              const current = new Set(spec.figma?.loaded_template_ids ?? [])
+              if (loaded) current.add(templateId); else current.delete(templateId)
+              void autoSave({
+                ...spec,
+                figma: { ...(spec.figma ?? {}), loaded_template_ids: [...current] },
+              })
+            }}
+          />
           <SquadFigmaPluginSection project={project} onChange={onChange} />
         </div>
       </div>

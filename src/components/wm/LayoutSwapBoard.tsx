@@ -34,6 +34,11 @@ interface Props {
   /** Refresh project from host after the swap map writes — lets the
    *  parent's effective resolver pick up the new state. */
   onChange?: () => Promise<void>
+  /** v2 merge: take the style-guide-load-checklist state. When provided,
+   *  each row renders a "Loaded" checkbox alongside the swap target so
+   *  the designer manages both surfaces from one place. */
+  loadedTemplateIds?: string[]
+  onToggleLoaded?: (templateId: string, loaded: boolean) => Promise<void> | void
 }
 
 interface SectionWithPage extends WebSection {
@@ -42,7 +47,8 @@ interface SectionWithPage extends WebSection {
   pageSortOrder: number
 }
 
-export function LayoutSwapBoard({ project, onChange }: Props) {
+export function LayoutSwapBoard({ project, onChange, loadedTemplateIds, onToggleLoaded }: Props) {
+  const loadedSet = useMemo(() => new Set(loadedTemplateIds ?? []), [loadedTemplateIds])
   const [loading, setLoading] = useState(true)
   const [sections, setSections] = useState<SectionWithPage[]>([])
   /** All templates in the catalog, keyed by id. Used to render names +
@@ -120,21 +126,16 @@ export function LayoutSwapBoard({ project, onChange }: Props) {
     return rows
   }, [sections, templates])
 
-  /** Templates available as a swap target for a given source family.
-   *  Designer picks within the same family by default (a hero swaps to
-   *  another hero, a CTA to another CTA). */
-  const swapCandidatesByFamily = useMemo(() => {
-    const byFamily: Record<string, WebContentTemplate[]> = {}
-    for (const t of Object.values(templates)) {
-      const f = t.family ?? '(uncategorized)'
-      if (!byFamily[f]) byFamily[f] = []
-      byFamily[f].push(t)
-    }
-    for (const f of Object.keys(byFamily)) {
-      byFamily[f].sort((a, b) => (a.layer_name ?? '').localeCompare(b.layer_name ?? ''))
-    }
-    return byFamily
-  }, [templates])
+  /** Every template in the catalog, sorted by layer_name. The free-
+   *  text input on the main row + the per-section override dropdown
+   *  both pull from this. Previously the main row was family-filtered
+   *  ("hero only swaps to hero"); per the strategist + designer ask,
+   *  the swap target is now any Brixies template OR an arbitrary
+   *  free-text label. */
+  const allTemplatesSorted = useMemo(() =>
+    Object.values(templates).slice().sort((a, b) => (a.layer_name ?? '').localeCompare(b.layer_name ?? '')),
+    [templates],
+  )
 
   const saveProjectSwapMap = async (
     nextSwaps: StrategyWebProject['figma_layout_swaps'],
@@ -159,18 +160,28 @@ export function LayoutSwapBoard({ project, onChange }: Props) {
     await onChange?.()
   }
 
-  const handleSiteSwapPick = async (fromTemplateId: string, toTemplateId: string) => {
-    if (!toTemplateId) {
+  /** Save a swap from a free-text input. The designer may type either:
+   *    - A known template's layer_name (we look it up and store the id)
+   *    - An arbitrary string (a Brixies variant not in our catalog yet)
+   *  Empty string clears the swap. */
+  const handleSiteSwapText = async (fromTemplateId: string, text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed) {
       const next = clearProjectSwap(swaps, fromTemplateId)
       await saveProjectSwapMap(next, fromTemplateId)
       return
     }
+    // Lookup by layer_name (case-insensitive). Falls back to free-text
+    // when no catalog template matches.
+    const lower = trimmed.toLowerCase()
+    const match = Object.values(templates).find(t => t.layer_name.toLowerCase() === lower)
     const { data: { session } } = await supabase.auth.getSession()
     const next = setProjectSwap(swaps, fromTemplateId, {
-      to_template_id: toTemplateId,
-      note:           swaps[fromTemplateId]?.note ?? null,
-      swapped_at:     new Date().toISOString(),
-      swapped_by:     session?.user?.id ?? '',
+      to_template_id:    match?.id ?? '',
+      to_template_label: trimmed,
+      note:              swaps[fromTemplateId]?.note ?? null,
+      swapped_at:        new Date().toISOString(),
+      swapped_by:        session?.user?.id ?? '',
     })
     await saveProjectSwapMap(next, fromTemplateId)
   }
@@ -247,9 +258,14 @@ export function LayoutSwapBoard({ project, onChange }: Props) {
             const swapEntry = row.templateId in swaps ? swaps[row.templateId] : null
             const swapTemplate = swapEntry?.to_template_id ? templates[swapEntry.to_template_id] : null
             const family = row.template?.family ?? '(uncategorized)'
-            const candidates = swapCandidatesByFamily[family] ?? []
             const isExpanded = expanded.has(row.templateId)
             const saving = savingSwap === row.templateId
+            const isLoadedInStyleGuide = loadedSet.has(row.templateId)
+            // The displayed swap value: label first (free-text or
+            // designer-typed match), else look up the catalog id.
+            const swapDisplayValue = swapEntry?.to_template_label
+              ?? swapTemplate?.layer_name
+              ?? ''
             return (
               <div key={row.templateId} className="rounded-md border border-wm-border bg-wm-bg-hover/30">
                 <div className="flex items-center gap-3 px-3 py-2.5">
@@ -262,9 +278,32 @@ export function LayoutSwapBoard({ project, onChange }: Props) {
                     {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                   </button>
 
+                  {/* Style-guide load checkbox — only when host wires it.
+                      Lets the designer track "this template is loaded
+                      into the Figma style guide" on the same row as
+                      the swap target. */}
+                  {onToggleLoaded && (
+                    <label
+                      className="inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                      title={isLoadedInStyleGuide ? 'Loaded into the Figma style guide' : 'Not yet loaded into the Figma style guide'}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isLoadedInStyleGuide}
+                        onChange={(e) => { void onToggleLoaded(row.templateId, e.target.checked) }}
+                        className="accent-wm-accent cursor-pointer"
+                        aria-label={`Loaded in style guide: ${row.template?.layer_name ?? 'template'}`}
+                      />
+                      <span className="text-[9px] uppercase tracking-wider font-bold text-wm-text-subtle">Loaded</span>
+                    </label>
+                  )}
+
                   {/* Wireframe layout name + section count */}
                   <div className="min-w-[12rem] shrink-0">
-                    <p className="text-[12px] font-semibold text-wm-text leading-tight">
+                    <p className={[
+                      'text-[12px] font-semibold leading-tight',
+                      isLoadedInStyleGuide ? 'text-wm-text-subtle line-through' : 'text-wm-text',
+                    ].join(' ')}>
                       {row.template?.layer_name ?? '(unknown template)'}
                     </p>
                     <p className="text-[10px] text-wm-text-subtle">
@@ -274,23 +313,30 @@ export function LayoutSwapBoard({ project, onChange }: Props) {
 
                   <ArrowRight size={11} className="text-wm-text-muted shrink-0" />
 
-                  {/* Figma swap picker */}
+                  {/* Figma swap target — free-text input. Designer can
+                      type any Brixies template name; matching catalog
+                      entries autocomplete via the datalist below. Non-
+                      matching values are preserved as free-text labels
+                      (Brixies variants we haven't catalogued). */}
                   <div className="flex-1 min-w-0 flex items-center gap-2">
-                    <select
-                      value={swapEntry?.to_template_id ?? ''}
-                      onChange={e => void handleSiteSwapPick(row.templateId, e.target.value)}
+                    <input
+                      type="text"
+                      list={`tpl-options-${row.templateId}`}
+                      defaultValue={swapDisplayValue}
+                      onBlur={e => void handleSiteSwapText(row.templateId, e.target.value)}
+                      placeholder={`Type a Brixies template name (or leave blank to use ${row.template?.layer_name ?? 'wireframe layout'})`}
                       disabled={saving}
                       className="flex-1 min-w-0 text-[12px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:border-wm-accent focus:outline-none disabled:opacity-50"
-                    >
-                      <option value="">(no swap — use {row.template?.layer_name ?? 'wireframe layout'})</option>
-                      {candidates.map(c => (
-                        <option key={c.id} value={c.id}>{c.layer_name}</option>
+                    />
+                    <datalist id={`tpl-options-${row.templateId}`}>
+                      {allTemplatesSorted.map(t => (
+                        <option key={t.id} value={t.layer_name}>{t.family ?? '(uncategorized)'}</option>
                       ))}
-                    </select>
+                    </datalist>
                     {swapEntry && (
                       <button
                         type="button"
-                        onClick={() => void handleSiteSwapPick(row.templateId, '')}
+                        onClick={() => void handleSiteSwapText(row.templateId, '')}
                         className="text-wm-text-muted hover:text-wm-danger shrink-0"
                         title="Clear swap"
                       >
@@ -330,7 +376,7 @@ export function LayoutSwapBoard({ project, onChange }: Props) {
                             section={s}
                             swapTemplate={swapTemplate ?? null}
                             wireframeTemplate={row.template ?? null}
-                            candidates={candidates}
+                            candidates={allTemplatesSorted}
                             allTemplates={templates}
                             projectSwaps={swaps}
                             onChange={onChange}
