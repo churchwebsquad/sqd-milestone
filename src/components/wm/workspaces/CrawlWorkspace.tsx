@@ -974,7 +974,7 @@ function CampusPanel({
   // Empty state — no registered campuses, no candidates found. Used
   // in two situations:
   //   1. Pre-crawl: no crawl_results yet, staff might already know
-  //      it's a multi-campus church. The "Set up multi-campus" toggle
+  //      it's a multi-campus church. The "Set up multi-campus" button
   //      lets them register campuses upfront so the FIRST crawl
   //      categorizes correctly (no need for the post-detect
   //      auto-recategorize fallback).
@@ -985,32 +985,84 @@ function CampusPanel({
     const seedFirstCampus = () => {
       setEditing(true)
       setWorking([
-        { slug: 'campus-1', label: 'Campus 1', primary: true, sort_order: 100, crawl_url: null },
+        { slug: 'campus-1', label: `${labels.singular} 1`, primary: true, sort_order: 100, crawl_url: null },
       ])
     }
+    const isPreOrInProgress = crawlResults.length === 0
     return (
-      <section className="rounded-xl border border-wm-border bg-wm-bg-elevated p-4 space-y-2">
-        <header className="flex items-center gap-2">
-          <MapPin size={13} className="text-wm-text-subtle" />
-          <h2 className="text-[13px] font-bold text-wm-text">{labels.plural}</h2>
+      <section className="rounded-xl border-2 border-wm-accent/30 bg-wm-accent-tint/15 p-4 space-y-3">
+        <header className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <MapPin size={14} className="text-wm-accent" />
+            <h2 className="text-[13px] font-bold text-wm-text">{labels.plural}</h2>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLabelEdit(o => !o)}
+            className="text-[10px] text-wm-text-subtle hover:text-wm-text"
+            title={`Rename the term "${labels.singular}" / "${labels.plural}" itself (use "Congregation" / "Location" etc.). Does NOT add campuses — see the primary action below.`}
+          >
+            Rename term
+          </button>
         </header>
-        <p className="text-[12px] text-wm-text-muted">
-          {crawlResults.length === 0
-            ? `If this is a multi-${labels.singular.toLowerCase()} church, set up the ${labels.plural.toLowerCase()} here BEFORE the crawl runs so each ${labels.singular.toLowerCase()}'s content gets tagged correctly from the start. Otherwise, leave this alone — single-${labels.singular.toLowerCase()} is the default and works as-is.`
-            : `Looks like a single-${labels.singular.toLowerCase()} project — no obvious campus URL clusters in the crawl.`}
-          {detection.has_campus_selector_landing && (
-            <span className="block mt-1 text-wm-warn">
-              Heads up: the homepage title suggests a campus selector, but no per-campus URL clusters showed up. The crawl may have only seeded one campus.
-            </span>
-          )}
-        </p>
+        {labelEdit && (
+          <div className="rounded-md border border-wm-border bg-wm-bg-elevated p-3 space-y-2">
+            <p className="text-[11px] text-wm-text-muted">
+              <strong>Note:</strong> this only renames the term we display
+              (e.g. "Congregation" / "Location"). It does NOT add campus
+              URLs — use the button below for that.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={labelDraft.singular}
+                onChange={(e) => setLabelDraft(d => ({ ...d, singular: e.target.value }))}
+                placeholder="Campus"
+                className="text-[12px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 outline-none focus:border-wm-accent"
+              />
+              <input
+                type="text"
+                value={labelDraft.plural}
+                onChange={(e) => setLabelDraft(d => ({ ...d, plural: e.target.value }))}
+                placeholder="Campuses"
+                className="text-[12px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 outline-none focus:border-wm-accent"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setLabelEdit(false); setLabelDraft({ singular: project.campus_label_singular ?? '', plural: project.campus_label_plural ?? '' }) }}
+                className="text-[11px] text-wm-text-muted hover:text-wm-text"
+              >Cancel</button>
+              <button
+                type="button"
+                onClick={() => void persistLabels()}
+                disabled={busy}
+                className="text-[11px] font-semibold text-white bg-wm-accent hover:bg-wm-accent-hover rounded-full px-3 py-1 disabled:opacity-60"
+              >{busy ? 'Saving…' : 'Save'}</button>
+            </div>
+          </div>
+        )}
+        {/* Primary action — make this the first prominent thing the
+         *  user sees. Earlier UI buried it as a small text link, and
+         *  staff missed it before auto-crawl fired. */}
         <button
           type="button"
           onClick={seedFirstCampus}
-          className="text-[11px] font-semibold text-wm-accent-strong hover:underline inline-flex items-center gap-1"
+          className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-wm-accent text-white text-[12px] font-semibold px-4 py-2.5 hover:bg-wm-accent-hover transition-colors"
         >
-          <Plus size={11} /> Set up multi-{labels.singular.toLowerCase()}
+          <Plus size={13} /> Add {labels.plural.toLowerCase()} + URLs
         </button>
+        <p className="text-[12px] text-wm-text-muted">
+          {isPreOrInProgress
+            ? `Set up the ${labels.plural.toLowerCase()} here BEFORE the crawl runs so each ${labels.singular.toLowerCase()}'s content gets tagged correctly from the start. Single-${labels.singular.toLowerCase()} is the default — skip this section entirely if that fits.`
+            : `Looks like a single-${labels.singular.toLowerCase()} project — no obvious ${labels.singular.toLowerCase()} URL clusters in the crawl. Click above if you still want to hand-add ${labels.plural.toLowerCase()}.`}
+          {detection.has_campus_selector_landing && (
+            <span className="block mt-1 text-wm-warn font-semibold">
+              ⚠ The homepage title suggests a {labels.singular.toLowerCase()} selector, but no per-{labels.singular.toLowerCase()} URL clusters showed up. Add {labels.plural.toLowerCase()} above before re-running the crawl.
+            </span>
+          )}
+        </p>
       </section>
     )
   }
