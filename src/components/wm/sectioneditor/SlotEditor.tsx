@@ -246,6 +246,12 @@ function ButtonInput({
       if (partial.kind === 'external_url' && !/^https?:\/\//i.test(next.url)) next.url = ''
       if (partial.kind === 'internal_route' && /^https?:\/\//i.test(next.url)) next.url = ''
       if (partial.kind === 'snippet' && !/\{\{\s*[\w.]+\s*\}\}/.test(next.url)) next.url = ''
+      // The granular off-site kinds (file/video/form) all expect an
+      // https:// URL — clear the field if the previous value can't
+      // be reused.
+      if (partial.kind === 'file_download' && !/^https?:\/\//i.test(next.url)) next.url = ''
+      if (partial.kind === 'video_link' && !/^https?:\/\//i.test(next.url)) next.url = ''
+      if (partial.kind === 'application_form' && !/^(https?:\/\/|\/)/i.test(next.url)) next.url = ''
       // Reset target so the inferred default applies.
       next.target = defaultTargetFor(next.kind)
     }

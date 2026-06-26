@@ -1735,6 +1735,22 @@ export type CtaKind =
    *  as opaque by validation; the snippet itself is validated when
    *  added to the project snippet list. */
   | 'snippet'
+  /** Strategist tagged this CTA as pointing at an uploaded file
+   *  (PDF/doc/image/etc.). Drives ACF File field in the dev handoff
+   *  + tells the renderer to treat the URL as a downloadable asset.
+   *  v1 still stores the URL; a file-picker UI replacing the URL
+   *  input is a follow-up. */
+  | 'file_download'
+  /** Video host link (YouTube/Vimeo/etc.). Distinct from external_url
+   *  so the dev handoff knows whether to wire a "Watch" link vs an
+   *  embed surface (the partner's display_preference makes the final
+   *  call about rendering, but the kind is the strategist-tagged
+   *  intent). */
+  | 'video_link'
+  /** External form (Formstack, Google Forms, Typeform, etc.) or an
+   *  internal /apply page. Strategist intent: "this button starts an
+   *  application or signup flow." */
+  | 'application_form'
 
 export interface CtaValue {
   label:  string

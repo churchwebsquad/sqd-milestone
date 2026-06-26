@@ -1,7 +1,7 @@
 # Formation Plan — Dev Handoff
 
 *Translated from* `first-pres-charlotte-3249.json`
-*Generated* 6/26/2026, 12:08:11 PM *fingerprint* `-rgvu76`
+*Generated* 6/26/2026, 12:46:57 PM *fingerprint* `-rgvu76`
 
 ## How to use this doc
 
@@ -906,8 +906,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
 
 **CTA / button routing** — 2 destinations across this group:
 
-- **1** → application or signup form — e.g. `https://form.jotform.com/81076098123153`
-- **1** → email (mailto:) — e.g. `mailto:jives@firstpres-charlotte.org `
+- **2** → email (mailto:) — e.g. `https://form.jotform.com/81076098123153`, `mailto:jives@firstpres-charlotte.org `
 
 **Existing rows** — 2 records (full data in `.content-import.json`)
 
@@ -930,8 +929,8 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
     {
       "field": "buttons[0].contact.url",
       "url": "https://form.jotform.com/81076098123153",
-      "route_type": "form",
-      "hint": "application / signup form"
+      "route_type": "mailto",
+      "hint": "strategist tagged: email"
     }
   ]
 }
@@ -959,7 +958,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
       "field": "buttons[0].contact.url",
       "url": "mailto:jives@firstpres-charlotte.org ",
       "route_type": "mailto",
-      "hint": "jives@firstpres-charlotte.org"
+      "hint": "strategist tagged: email"
     }
   ]
 }
@@ -1111,19 +1110,19 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
       "field": "buttons[0].contact.url",
       "url": "https://www.signupgenius.com/go/8050545AAAA2BA1FE3-59454213-room#/",
       "route_type": "external",
-      "hint": "external page"
+      "hint": "strategist tagged: external page"
     },
     {
       "field": "buttons[1].contact.url",
       "url": "https://www.signupgenius.com/go/10C0E48ABA82AA1FAC61-61068969-room#/",
       "route_type": "external",
-      "hint": "external page"
+      "hint": "strategist tagged: external page"
     },
     {
       "field": "buttons[2].contact.url",
       "url": "mailto:fbryan@firstpres-charlotte.org",
       "route_type": "mailto",
-      "hint": "fbryan@firstpres-charlotte.org"
+      "hint": "strategist tagged: email"
     }
   ]
 }
@@ -1159,13 +1158,13 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
       "field": "buttons[0].contact.url",
       "url": "https://www.signupgenius.com/go/10C0E48ABA82AA1FAC61-47818846-second#/",
       "route_type": "external",
-      "hint": "external page"
+      "hint": "strategist tagged: external page"
     },
     {
       "field": "buttons[1].contact.url",
       "url": "mailto:lcrain@firstpres-charlotte.org",
       "route_type": "mailto",
-      "hint": "lcrain@firstpres-charlotte.org"
+      "hint": "strategist tagged: email"
     }
   ]
 }
@@ -1201,13 +1200,13 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
       "field": "buttons[0].contact.url",
       "url": "https://www.signupgenius.com/go/10C0E48ABA82AA1FAC61-roof1#/",
       "route_type": "external",
-      "hint": "external page"
+      "hint": "strategist tagged: external page"
     },
     {
       "field": "buttons[1].contact.url",
       "url": "mailto:fbryan@firstpres-charlotte.org",
       "route_type": "mailto",
-      "hint": "fbryan@firstpres-charlotte.org"
+      "hint": "strategist tagged: email"
     }
   ]
 }
@@ -1334,7 +1333,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
       "field": "buttons[0].contact.url",
       "url": "mailto:hclarke61@gmail.com",
       "route_type": "mailto",
-      "hint": "hclarke61@gmail.com"
+      "hint": "strategist tagged: email"
     }
   ]
 }
@@ -1369,13 +1368,13 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
       "field": "buttons[0].contact.url",
       "url": "mailto:rossloeser@aol.com",
       "route_type": "mailto",
-      "hint": "rossloeser@aol.com"
+      "hint": "strategist tagged: email"
     },
     {
       "field": "buttons[1].contact.url",
       "url": "/the-history-hallway",
       "route_type": "internal-page",
-      "hint": "/the-history-hallway"
+      "hint": "strategist tagged: internal page"
     }
   ]
 }
@@ -1403,7 +1402,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
       "field": "buttons[0].contact.url",
       "url": "mailto:lcrain@firstpres-charlotte.org",
       "route_type": "mailto",
-      "hint": "lcrain@firstpres-charlotte.org"
+      "hint": "strategist tagged: email"
     }
   ]
 }
@@ -1919,19 +1918,19 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
       "field": "buttons[0].contact.url",
       "url": "https://www.signupgenius.com/go/8050545AAAA2BA1FE3-59454213-room#/",
       "route_type": "external",
-      "hint": "external page"
+      "hint": "strategist tagged: external page"
     },
     {
       "field": "buttons[1].contact.url",
       "url": "https://www.signupgenius.com/go/10C0E48ABA82AA1FAC61-61068969-room#/",
       "route_type": "external",
-      "hint": "external page"
+      "hint": "strategist tagged: external page"
     },
     {
       "field": "buttons[2].contact.url",
       "url": "mailto:fbryan@firstpres-charlotte.org",
       "route_type": "mailto",
-      "hint": "fbryan@firstpres-charlotte.org"
+      "hint": "strategist tagged: email"
     }
   ]
 }
@@ -1959,7 +1958,7 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
       "field": "buttons[0].contact.url",
       "url": "https://www.amazon.com/hz/wishlist/ls/1OXTXO2BF4UIB?ref_=wl_share",
       "route_type": "external",
-      "hint": "external page"
+      "hint": "strategist tagged: external page"
     }
   ]
 }
@@ -1995,13 +1994,13 @@ One ACF repeater field per (page, content piece). Bound to a Bricks page templat
       "field": "buttons[0].contact.url",
       "url": "https://www.signupgenius.com/go/10C0E48ABA82AA1FAC61-47818846-second#/",
       "route_type": "external",
-      "hint": "external page"
+      "hint": "strategist tagged: external page"
     },
     {
       "field": "buttons[1].contact.url",
       "url": "mailto:lcrain@firstpres-charlotte.org",
       "route_type": "mailto",
-      "hint": "lcrain@firstpres-charlotte.org"
+      "hint": "strategist tagged: email"
     }
   ]
 }

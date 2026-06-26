@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "_meta": {
-    "generated_at": "2026-06-26T19:08:11.654Z",
+    "generated_at": "2026-06-26T19:46:57.059Z",
     "generated_by": "analyzer-v1",
     "input_fingerprint": "-rgvu76",
     "counts": {
@@ -34303,7 +34303,7 @@
               "field": "buttons[0].contact.url",
               "url": "mailto:hclarke61@gmail.com",
               "route_type": "mailto",
-              "hint": "hclarke61@gmail.com"
+              "hint": "strategist tagged: email"
             }
           ]
         },
@@ -34332,13 +34332,13 @@
               "field": "buttons[0].contact.url",
               "url": "mailto:rossloeser@aol.com",
               "route_type": "mailto",
-              "hint": "rossloeser@aol.com"
+              "hint": "strategist tagged: email"
             },
             {
               "field": "buttons[1].contact.url",
               "url": "/the-history-hallway",
               "route_type": "internal-page",
-              "hint": "/the-history-hallway"
+              "hint": "strategist tagged: internal page"
             }
           ]
         },
@@ -34360,7 +34360,7 @@
               "field": "buttons[0].contact.url",
               "url": "mailto:lcrain@firstpres-charlotte.org",
               "route_type": "mailto",
-              "hint": "lcrain@firstpres-charlotte.org"
+              "hint": "strategist tagged: email"
             }
           ]
         },
@@ -34382,7 +34382,7 @@
               "field": "buttons[0].contact.url",
               "url": "mailto:johnatate3@gmail.com",
               "route_type": "mailto",
-              "hint": "johnatate3@gmail.com"
+              "hint": "strategist tagged: email"
             }
           ]
         },
@@ -34404,7 +34404,7 @@
               "field": "buttons[0].contact.url",
               "url": "mailto:sara.k.kidd@gmail.com",
               "route_type": "mailto",
-              "hint": "sara.k.kidd@gmail.com"
+              "hint": "strategist tagged: email"
             }
           ]
         }
@@ -35305,19 +35305,19 @@
               "field": "buttons[0].contact.url",
               "url": "https://www.signupgenius.com/go/8050545AAAA2BA1FE3-59454213-room#/",
               "route_type": "external",
-              "hint": "external page"
+              "hint": "strategist tagged: external page"
             },
             {
               "field": "buttons[1].contact.url",
               "url": "https://www.signupgenius.com/go/10C0E48ABA82AA1FAC61-61068969-room#/",
               "route_type": "external",
-              "hint": "external page"
+              "hint": "strategist tagged: external page"
             },
             {
               "field": "buttons[2].contact.url",
               "url": "mailto:fbryan@firstpres-charlotte.org",
               "route_type": "mailto",
-              "hint": "fbryan@firstpres-charlotte.org"
+              "hint": "strategist tagged: email"
             }
           ]
         },
@@ -35339,7 +35339,7 @@
               "field": "buttons[0].contact.url",
               "url": "https://www.amazon.com/hz/wishlist/ls/1OXTXO2BF4UIB?ref_=wl_share",
               "route_type": "external",
-              "hint": "external page"
+              "hint": "strategist tagged: external page"
             }
           ]
         },
@@ -35369,13 +35369,13 @@
               "field": "buttons[0].contact.url",
               "url": "https://www.signupgenius.com/go/10C0E48ABA82AA1FAC61-47818846-second#/",
               "route_type": "external",
-              "hint": "external page"
+              "hint": "strategist tagged: external page"
             },
             {
               "field": "buttons[1].contact.url",
               "url": "mailto:lcrain@firstpres-charlotte.org",
               "route_type": "mailto",
-              "hint": "lcrain@firstpres-charlotte.org"
+              "hint": "strategist tagged: email"
             }
           ]
         },
@@ -35405,13 +35405,13 @@
               "field": "buttons[0].contact.url",
               "url": "https://www.signupgenius.com/go/10C0E48ABA82AA1FAC61-roof1#/",
               "route_type": "external",
-              "hint": "external page"
+              "hint": "strategist tagged: external page"
             },
             {
               "field": "buttons[1].contact.url",
               "url": "mailto:fbryan@firstpres-charlotte.org",
               "route_type": "mailto",
-              "hint": "fbryan@firstpres-charlotte.org"
+              "hint": "strategist tagged: email"
             }
           ]
         },
@@ -35456,19 +35456,19 @@
               "field": "buttons[1].contact.url",
               "url": "https://heartmathtutoring.org/charlotte/#volunteer",
               "route_type": "external",
-              "hint": "external page"
+              "hint": "strategist tagged: external page"
             },
             {
               "field": "buttons[2].contact.url",
               "url": "mailto:cmcghee@alpcharlotte.org",
               "route_type": "mailto",
-              "hint": "cmcghee@alpcharlotte.org"
+              "hint": "strategist tagged: email"
             },
             {
               "field": "buttons[3].contact.url",
               "url": "mailto:hsquires@firstpres-charlotte.org",
               "route_type": "mailto",
-              "hint": "hsquires@firstpres-charlotte.org"
+              "hint": "strategist tagged: email"
             }
           ]
         },
@@ -35490,7 +35490,7 @@
               "field": "buttons[0].contact.url",
               "url": "https://firstpres-charlotte.org/wp-content/uploads/2025/08/250822-Habitat-Rack-Card-2025.pdf]",
               "route_type": "external",
-              "hint": "external page"
+              "hint": "strategist tagged: external page"
             }
           ]
         }
@@ -36054,8 +36054,8 @@
             {
               "field": "buttons[0].contact.url",
               "url": "https://form.jotform.com/81076098123153",
-              "route_type": "form",
-              "hint": "application / signup form"
+              "route_type": "mailto",
+              "hint": "strategist tagged: email"
             }
           ]
         },
@@ -36077,7 +36077,7 @@
               "field": "buttons[0].contact.url",
               "url": "mailto:jives@firstpres-charlotte.org ",
               "route_type": "mailto",
-              "hint": "jives@firstpres-charlotte.org"
+              "hint": "strategist tagged: email"
             }
           ]
         }
@@ -36380,19 +36380,19 @@
               "field": "buttons[0].contact.url",
               "url": "https://www.signupgenius.com/go/8050545AAAA2BA1FE3-59454213-room#/",
               "route_type": "external",
-              "hint": "external page"
+              "hint": "strategist tagged: external page"
             },
             {
               "field": "buttons[1].contact.url",
               "url": "https://www.signupgenius.com/go/10C0E48ABA82AA1FAC61-61068969-room#/",
               "route_type": "external",
-              "hint": "external page"
+              "hint": "strategist tagged: external page"
             },
             {
               "field": "buttons[2].contact.url",
               "url": "mailto:fbryan@firstpres-charlotte.org",
               "route_type": "mailto",
-              "hint": "fbryan@firstpres-charlotte.org"
+              "hint": "strategist tagged: email"
             }
           ]
         },
@@ -36422,13 +36422,13 @@
               "field": "buttons[0].contact.url",
               "url": "https://www.signupgenius.com/go/10C0E48ABA82AA1FAC61-47818846-second#/",
               "route_type": "external",
-              "hint": "external page"
+              "hint": "strategist tagged: external page"
             },
             {
               "field": "buttons[1].contact.url",
               "url": "mailto:lcrain@firstpres-charlotte.org",
               "route_type": "mailto",
-              "hint": "lcrain@firstpres-charlotte.org"
+              "hint": "strategist tagged: email"
             }
           ]
         },
@@ -36458,13 +36458,13 @@
               "field": "buttons[0].contact.url",
               "url": "https://www.signupgenius.com/go/10C0E48ABA82AA1FAC61-roof1#/",
               "route_type": "external",
-              "hint": "external page"
+              "hint": "strategist tagged: external page"
             },
             {
               "field": "buttons[1].contact.url",
               "url": "mailto:fbryan@firstpres-charlotte.org",
               "route_type": "mailto",
-              "hint": "fbryan@firstpres-charlotte.org"
+              "hint": "strategist tagged: email"
             }
           ]
         },
@@ -36509,19 +36509,19 @@
               "field": "buttons[1].contact.url",
               "url": "https://heartmathtutoring.org/charlotte/#volunteer",
               "route_type": "external",
-              "hint": "external page"
+              "hint": "strategist tagged: external page"
             },
             {
               "field": "buttons[2].contact.url",
               "url": "mailto:cmcghee@alpcharlotte.org",
               "route_type": "mailto",
-              "hint": "cmcghee@alpcharlotte.org"
+              "hint": "strategist tagged: email"
             },
             {
               "field": "buttons[3].contact.url",
               "url": "mailto:hsquires@firstpres-charlotte.org",
               "route_type": "mailto",
-              "hint": "hsquires@firstpres-charlotte.org"
+              "hint": "strategist tagged: email"
             }
           ]
         },
@@ -36543,7 +36543,7 @@
               "field": "buttons[0].contact.url",
               "url": "https://firstpres-charlotte.org/wp-content/uploads/2025/08/250822-Habitat-Rack-Card-2025.pdf]",
               "route_type": "external",
-              "hint": "external page"
+              "hint": "strategist tagged: external page"
             }
           ]
         }

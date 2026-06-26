@@ -1104,15 +1104,49 @@ function classifyCtaRoute(url: string | null | undefined): { type: CtaRouteType;
   return { type: 'external', hint: 'external page' }
 }
 
+/** Maps a strategist-tagged CtaKind (from CtaValue.kind on a CTA
+ *  field) to the analyzer's CtaRouteType. The strategist-set kind is
+ *  the AUTHORITATIVE signal — when present, it overrides anything we
+ *  would derive from URL inspection. */
+function routeTypeFromCtaKind(kind: string): { type: CtaRouteType; hint: string } | null {
+  switch (kind) {
+    case 'internal_route':   return { type: 'internal-page',   hint: 'strategist tagged: internal page' }
+    case 'external_url':     return { type: 'external',        hint: 'strategist tagged: external page' }
+    case 'anchor':           return { type: 'internal-anchor', hint: 'strategist tagged: page anchor' }
+    case 'mailto':           return { type: 'mailto',          hint: 'strategist tagged: email' }
+    case 'tel':              return { type: 'tel',             hint: 'strategist tagged: phone' }
+    case 'snippet':          return { type: 'external',        hint: 'strategist tagged: site snippet' }
+    case 'file_download':    return { type: 'file',            hint: 'strategist tagged: file download' }
+    case 'video_link':       return { type: 'youtube',         hint: 'strategist tagged: video link' }
+    case 'application_form': return { type: 'form',            hint: 'strategist tagged: application/signup form' }
+    default: return null
+  }
+}
+
 /** Walk a content row and emit one CtaRoute per URL field found.
  *  Recognises both the flattened pattern (`contact_url`,
  *  `cta_url`, `learn_more_url`) and bare `url` keys nested inside
- *  named groups. */
+ *  named groups. Prefers CtaValue.kind (strategist's explicit choice)
+ *  over URL pattern inspection when both are present. */
 function extractCtaRoutes(row: Record<string, unknown>, prefix = ''): CtaRoute[] {
   const out: CtaRoute[] = []
   for (const [k, v] of Object.entries(row)) {
     if (k.startsWith('_')) continue            // internal markers
     const path = prefix ? `${prefix}.${k}` : k
+    // Strategist-set CtaValue { label, url, kind } — kind is the
+    // authoritative source. Detect and bypass URL inspection.
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const obj = v as Record<string, unknown>
+      if (typeof obj.kind === 'string' && typeof obj.url === 'string') {
+        const fromKind = routeTypeFromCtaKind(obj.kind)
+        if (fromKind && obj.url.trim()) {
+          out.push({ field: `${path}.url`, url: obj.url, route_type: fromKind.type, hint: fromKind.hint })
+          continue
+        }
+      }
+      out.push(...extractCtaRoutes(obj, path))
+      continue
+    }
     if (typeof v === 'string') {
       // *_url, bare `url`, or any string field whose value looks like
       // a URL — be conservative to avoid catching arbitrary text.
@@ -1121,8 +1155,6 @@ function extractCtaRoutes(row: Record<string, unknown>, prefix = ''): CtaRoute[]
         const r = classifyCtaRoute(v)
         if (r.type !== 'unset') out.push({ field: path, url: v, route_type: r.type, hint: r.hint })
       }
-    } else if (v && typeof v === 'object' && !Array.isArray(v)) {
-      out.push(...extractCtaRoutes(v as Record<string, unknown>, path))
     } else if (Array.isArray(v)) {
       v.forEach((item, i) => {
         if (item && typeof item === 'object' && !Array.isArray(item)) {

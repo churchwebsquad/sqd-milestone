@@ -47,24 +47,44 @@ export function inferCtaKind(url: string): CtaKind {
   if (v.startsWith('mailto:'))               return 'mailto'
   if (v.startsWith('tel:'))                  return 'tel'
   if (v.startsWith('#'))                     return 'anchor'
-  if (/^https?:\/\//i.test(v))               return 'external_url'
-  if (v.startsWith('/'))                     return 'internal_route'
+  if (/^https?:\/\//i.test(v)) {
+    // Try to narrow external_url into a more specific kind so the
+    // dev-handoff inventory / formation plan gets the right ACF
+    // field type without re-classifying.
+    const lower = v.toLowerCase()
+    if (/(youtube\.com|youtu\.be|vimeo\.com)/.test(lower))   return 'video_link'
+    const fileExt = lower.match(/\.([a-z0-9]{2,5})(\?|#|$)/)?.[1]
+    if (fileExt && /^(pdf|docx?|xlsx?|pptx?|zip|jpe?g|png|mp4|mov|csv)$/.test(fileExt)) return 'file_download'
+    if (/\/(apply|application|form|register|signup|sign-up|join|interest|onboard)/.test(lower)) return 'application_form'
+    return 'external_url'
+  }
+  if (v.startsWith('/')) {
+    // Internal apply/signup paths classify as application_form too —
+    // matches strategist intent "this button starts a signup flow"
+    // regardless of whether the form lives on-site or off-site.
+    if (/^\/(apply|application|form|register|signup|sign-up|join|interest|onboard)/i.test(v)) return 'application_form'
+    return 'internal_route'
+  }
   // Bare strings like "visit" or "about-us" — most likely intended as
   // internal but not necessarily prefixed. Treat as internal so the
   // page-slug validator in Dev Handoff flags them if they don't match.
   return 'internal_route'
 }
 
-/** Default `target` for a kind. External + mailto + tel naturally
- *  open in a new tab; internal routes + anchors stay in-page. Snippets
- *  default to a new tab because the most common church snippets
- *  (give_url, directions_url, livestream_url) point off-site. */
+/** Default `target` for a kind. External + mailto + tel + the new
+ *  off-site kinds (file/video/form) naturally open in a new tab;
+ *  internal routes + anchors stay in-page. Snippets default to a new
+ *  tab because the most common church snippets (give_url, directions_url,
+ *  livestream_url) point off-site. */
 export function defaultTargetFor(kind: CtaKind): '_self' | '_blank' {
   switch (kind) {
     case 'external_url':
     case 'mailto':
     case 'tel':
     case 'snippet':
+    case 'file_download':
+    case 'video_link':
+    case 'application_form':
       return '_blank'
     default:
       return '_self'
@@ -98,17 +118,24 @@ export function normalizeCtaValue(raw: unknown): CtaValue {
 function isCtaKind(v: unknown): v is CtaKind {
   return v === 'internal_route' || v === 'external_url' ||
          v === 'anchor' || v === 'mailto' || v === 'tel' ||
-         v === 'snippet'
+         v === 'snippet' || v === 'file_download' ||
+         v === 'video_link' || v === 'application_form'
 }
 
-/** Human-readable label for the kind picker + the handoff inventory. */
+/** Human-readable label for the kind picker + the handoff inventory.
+ *  Listed in the order strategists most commonly need them — internal
+ *  page is the default for most clicks, then the off-site categories
+ *  grouped together, then the niche options. */
 export const CTA_KIND_LABELS: Record<CtaKind, string> = {
-  internal_route: 'Internal page',
-  external_url:   'External URL',
-  anchor:         'Anchor on this page',
-  mailto:         'Email link',
-  tel:            'Phone link',
-  snippet:        'Site snippet',
+  internal_route:   'Internal page',
+  external_url:     'External page',
+  file_download:    'File download (PDF, doc, etc.)',
+  video_link:       'Video link (YouTube / Vimeo)',
+  application_form: 'Application or signup form',
+  anchor:           'Anchor on this page',
+  mailto:           'Email link',
+  tel:              'Phone link',
+  snippet:          'Site snippet',
 }
 
 /** Validate a CTA's URL against the set of internal page slugs known
@@ -151,6 +178,25 @@ export function validateCta(
     case 'snippet': {
       if (!url) return 'No snippet set.'
       if (!/\{\{\s*[\w.]+\s*\}\}/.test(url)) return 'Snippet links should contain {{token}}.'
+      return null
+    }
+    case 'file_download': {
+      if (!url) return 'No file URL set.'
+      // Accept any http(s) URL — uploaded WP media URLs vary in
+      // extension. Soft warning if no recognizable file extension.
+      if (!/^https?:\/\//i.test(url)) return 'File URLs must start with https:// (or http://).'
+      return null
+    }
+    case 'video_link': {
+      if (!url) return 'No video URL set.'
+      if (!/^https?:\/\//i.test(url)) return 'Video URLs must start with https://.'
+      return null
+    }
+    case 'application_form': {
+      if (!url) return 'No form URL set.'
+      // Both external (Formstack/etc.) and internal (/apply) paths
+      // are valid — match either an http(s) URL or a leading slash.
+      if (!/^(https?:\/\/|\/)/i.test(url)) return 'Form URLs should be https:// or start with /.'
       return null
     }
   }
