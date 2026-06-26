@@ -115,8 +115,9 @@ Deno.serve(async (req) => {
   //    requestedCount filter in PortalReviewPage.tsx.
   const { data: comments, error: commentsErr } = await supabase
     .from("web_review_comments")
-    .select("kind, author_kind")
+    .select("kind, author_kind, author_external_name, created_at")
     .eq("review_id", review_id)
+    .order("created_at", { ascending: false })
   if (commentsErr) {
     return json({ error: commentsErr.message }, 500)
   }
@@ -124,11 +125,25 @@ Deno.serve(async (req) => {
   const editCount    = partnerComments.filter(c => c.author_kind === "partner" && c.kind === "requested").length
   const commentCount = partnerComments.filter(c => c.author_kind === "partner" && c.kind === "comment").length
 
+  // Submitted-by fallback chain. web_reviews.partner_name isn't
+  // written until the partner clicks finish (see the NameCaptureModal
+  // comment in PortalReviewPage.tsx for the rationale — first visitor
+  // shouldn't claim the review). Historical reviews + any race with
+  // older clients can leave partner_name null, so fall through to the
+  // most recent partner-authored comment's author_external_name, which
+  // the partner DOES type before commenting.
+  const reviewName = review.partner_name?.trim()
+  const fallbackName = partnerComments
+    .find(c => c.author_kind === "partner"
+            && typeof c.author_external_name === "string"
+            && (c.author_external_name as string).trim().length > 0)
+    ?.author_external_name as string | undefined
+  const submittedBy = reviewName || fallbackName?.trim() || "(unnamed partner)"
+
   // 4. Compose the message.
   const headerText = editCount >= 1
     ? "Copywriting edits submitted — schedule revisions"
     : "Copy review complete — ready for design"
-  const submittedBy = review.partner_name?.trim() || "(unnamed partner)"
   const memberLabel = project?.member != null ? `#${project.member}` : "(no member)"
   const fallback = `${churchName} (${memberLabel}) — ${headerText} (${editCount} edits, R${review.round_number})`
 

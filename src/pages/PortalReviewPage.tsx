@@ -459,9 +459,16 @@ export default function PortalReviewPage() {
     const note = `Partner ${partnerName ?? ''} marked review finished at ${stamp}`.trim()
     const existing = (data.review.notes ?? '').trim()
     const merged = existing ? `${existing}\n${note}` : note
+    // Persist partner_name on the review row at submit time so the
+    // Slack notif + staff inbox both have it. We intentionally don't
+    // write partner_name on first visit (see NameCaptureModal handler
+    // above) — writing here is safe because submit is a terminal
+    // action by the actual submitter.
+    const update: Record<string, string> = { notes: merged }
+    if (partnerName && !data.review.partner_name) update.partner_name = partnerName
     await supabase
       .from('web_reviews')
-      .update({ notes: merged } as never)
+      .update(update as never)
       .eq('id', data.review.id)
     // Slack notify — fire-and-forget; never blocks. Headline depends
     // on edit count: "ready for design" (0 edits) vs "schedule
@@ -502,9 +509,13 @@ export default function PortalReviewPage() {
     const note = `Partner ${partnerName ?? ''} APPROVED the site at ${stamp}${finalNote.trim() ? ` — ${finalNote.trim()}` : ''}`.trim()
     const existing = (data.review.notes ?? '').trim()
     const merged = existing ? `${existing}\n${note}` : note
+    // Persist partner_name on the review row at submit time — same
+    // reasoning as markFinished above.
+    const update: Record<string, string> = { notes: merged }
+    if (partnerName && !data.review.partner_name) update.partner_name = partnerName
     await supabase
       .from('web_reviews')
-      .update({ notes: merged } as never)
+      .update(update as never)
       .eq('id', data.review.id)
     // Slack notify — approveSite path means 0 edits, so the headline
     // will say "ready for design". Same fire-and-forget pattern.
