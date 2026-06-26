@@ -206,10 +206,14 @@ export default function WebSquadSection({ church, submissions, onSave, editing, 
       <WebSupportEvaluationChecklist memberId={memberId} />
 
       {/* Initial Site Access — pre-evaluation handoff checklist.
-          Backed by 4 nullable booleans on strategy_account_progress
-          (v102). NULL = not yet set; the UI surfaces a 3-state pill
-          so the AM can tell "not asked" apart from "explicitly no". */}
+          Backed by 6 nullable booleans on strategy_account_progress
+          (v102 / v118). NULL = not yet set; the UI surfaces a 3-state
+          pill so the AM can tell "not asked" apart from "explicitly
+          no". Sub-heading shares the standalone migration intake link
+          so AMs can send it to churches who want to migrate hosting
+          WITHOUT completing the full Content Collection. */}
       <InitialSiteAccessChecklist church={church} onSave={onSave} />
+      <MigrationIntakeShareLink portalToken={portalToken ?? memberId} />
 
       {/* Partner Site Notes — fetched from the Notion web support
           database, filtered to rows where `notes type = "Partner site
@@ -294,6 +298,47 @@ export default function WebSquadSection({ church, submissions, onSave, editing, 
   )
 }
 
+// ── Migration intake share link ───────────────────────────────────────
+// Surfaces a copy-able URL to the standalone /portal/:token/registrar-
+// intake form (RegistrarIntakePage). That form collects current_host
+// + registrar info — same columns the full Content Collection page
+// writes to, so a partner who completes the migration form will see
+// their answers pre-filled if they later open Content Collection.
+//
+// Use case: partners who want to migrate hosting to our infra
+// without doing a full redesign. Their existing site stays as-is;
+// we move it to our WordPress hosting. The AM sends this link to
+// gather just-enough info.
+function MigrationIntakeShareLink({ portalToken }: { portalToken: string | null }) {
+  const [copied, setCopied] = useState(false)
+  if (!portalToken) return null
+  const url = `${window.location.origin}/portal/${portalToken}/registrar-intake`
+  const copy = () => {
+    void navigator.clipboard.writeText(url).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+  return (
+    <div className="mb-4 rounded-xl border border-lavender bg-cream/40 px-3 py-2.5 flex items-center gap-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-[12px] font-semibold text-deep-plum">Migration-only intake link</p>
+        <p className="text-[11px] text-purple-gray leading-tight">
+          Send this to a church migrating to Squad hosting without a full Content Collection — collects current host + domain registrar.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={copy}
+        className="shrink-0 inline-flex items-center gap-1.5 text-[11px] font-semibold text-deep-plum bg-white border border-lavender hover:bg-lavender-tint rounded-full px-3 py-1.5"
+        title={url}
+      >
+        {copied ? <><Check size={11} /> Copied</> : <><Link size={11} /> Copy link</>}
+      </button>
+    </div>
+  )
+}
+
 // ── Initial Site Access ────────────────────────────────────────────────
 // Per-checkbox 3-state toggle (null → true → false → null). NULL = not
 // yet set, which is meaningfully different from explicit false ("we
@@ -301,16 +346,28 @@ export default function WebSquadSection({ church, submissions, onSave, editing, 
 // strategy_account_progress.web_squad_* boolean columns.
 
 interface ChecklistItem {
-  field: 'web_squad_site_access_provided' | 'web_squad_login_in_1password' | 'web_squad_ga_access_shared' | 'web_squad_ready_for_evaluation'
+  field:
+    | 'web_squad_site_access_provided'
+    | 'web_squad_hosting_details_provided'
+    | 'web_squad_domain_registrar_provided'
+    | 'web_squad_login_in_1password'
+    | 'web_squad_ga_access_shared'
+    | 'web_squad_ready_for_evaluation'
   label: string
   hint: string
 }
 
+// v118 — "Site access provided" was overloaded (CMS + hosting + registrar).
+// Split into three distinct prerequisites so each can be tracked
+// independently. Migration intake form fills hosting + registrar
+// fields directly; CMS access is collected separately.
 const SITE_ACCESS_ITEMS: ChecklistItem[] = [
-  { field: 'web_squad_site_access_provided', label: 'Site access provided',     hint: "Partner has shared CMS / hosting credentials." },
-  { field: 'web_squad_login_in_1password',   label: 'Login added to 1Password', hint: "Credentials live in the Squad 1Password vault." },
-  { field: 'web_squad_ga_access_shared',     label: 'GA access shared',         hint: "Partner has invited the Squad GA account." },
-  { field: 'web_squad_ready_for_evaluation', label: 'Ready for site evaluation', hint: "All prerequisites met; ready for the evaluation pass." },
+  { field: 'web_squad_site_access_provided',     label: 'Site access provided',         hint: "Partner has shared CMS / admin login (e.g. WordPress, Squarespace dashboard)." },
+  { field: 'web_squad_hosting_details_provided', label: 'Hosting details provided',     hint: "Partner has shared their current hosting provider + login (Bluehost, SiteGround, Squarespace hosting, etc.)." },
+  { field: 'web_squad_domain_registrar_provided',label: 'Domain registrar confirmation',hint: "Partner has confirmed who manages the domain (GoDaddy, Namecheap, Squarespace, etc.) and shared access." },
+  { field: 'web_squad_login_in_1password',       label: 'Login added to 1Password',     hint: "Credentials live in the Squad 1Password vault." },
+  { field: 'web_squad_ga_access_shared',         label: 'GA access shared',             hint: "Partner has invited the Squad GA account." },
+  { field: 'web_squad_ready_for_evaluation',     label: 'Ready for site evaluation',    hint: "All prerequisites met; the Squad will schedule the evaluation pass." },
 ]
 
 function InitialSiteAccessChecklist({
@@ -334,6 +391,22 @@ function InitialSiteAccessChecklist({
     setBusy(field)
     try {
       await onSave(field, next)
+      // v118 — when "Ready for site evaluation" flips to true, fire
+      // a Slack notification to #am-pm-web with a summary of which
+      // prerequisites are checked off. Fire-and-forget; UI doesn't
+      // wait. Other field flips don't trigger a post.
+      if (field === 'web_squad_ready_for_evaluation' && next === true) {
+        const supabaseUrl = (import.meta as unknown as { env: { VITE_SUPABASE_URL: string } }).env.VITE_SUPABASE_URL
+        const { data: sess } = await supabase.auth.getSession()
+        const accessToken = sess?.session?.access_token
+        if (supabaseUrl && accessToken && church.member != null) {
+          void fetch(`${supabaseUrl}/functions/v1/notify-site-evaluation-ready`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+            body:    JSON.stringify({ member: church.member }),
+          }).catch(err => console.warn('[InitialSiteAccess] Slack notify failed:', err))
+        }
+      }
     } finally {
       setBusy(null)
     }

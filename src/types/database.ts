@@ -127,11 +127,13 @@ export interface StrategyAccountProgress {
   website: string | null
   handoff_brand_form: Record<string, unknown> | null
   handoff_web_form: Record<string, unknown> | null
-  // Web Squad intake flags (v102). NULL = not yet set; true/false = explicit state.
-  web_squad_site_access_provided: boolean | null
-  web_squad_login_in_1password:   boolean | null
-  web_squad_ga_access_shared:     boolean | null
-  web_squad_ready_for_evaluation: boolean | null
+  // Web Squad intake flags (v102 / v118). NULL = not yet set; true/false = explicit state.
+  web_squad_site_access_provided:      boolean | null
+  web_squad_hosting_details_provided:  boolean | null  // v118
+  web_squad_domain_registrar_provided: boolean | null  // v118
+  web_squad_login_in_1password:        boolean | null
+  web_squad_ga_access_shared:          boolean | null
+  web_squad_ready_for_evaluation:      boolean | null
   [key: string]: unknown
 }
 

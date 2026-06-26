@@ -15,7 +15,13 @@ export const DB = {
   // troubleshooting docs, integration playbooks. Filtered by the
   // `notes type` select property; "Partner site notes" rows surface
   // on the Church details page → Web Squad section.
-  WEB_SUPPORT:   '366e83f7-31f6-80db-a10b-eb7a02fa3910',
+  //
+  // ID confirmed via /v1/search against the StrategyDivisionWiki
+  // integration on 2026-06-25: the integration sees the database
+  // named "Web Support Notes" at this ID. The prior 366e83f7… ID
+  // returned 404 (database doesn't exist under that ID for this
+  // integration).
+  WEB_SUPPORT:   '225e83f7-31f6-80da-9752-ecb785cd3f44',
   // All-In Documents database — strategy briefs, audits, roadmaps
   // per partner. Filtered by `Doc Type` (select) and matched to a
   // project via the `Member #` rollup (from the Church relation).

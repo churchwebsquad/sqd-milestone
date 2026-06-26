@@ -104,6 +104,9 @@ interface SessionRow {
   domain_invite_confirmed:           boolean
   domain_one_password_invite_url:    string | null
   hosting_approved:                  boolean
+  /** v118 — current hosting provider (e.g. Squarespace, Wix). Shared
+   *  field with RegistrarIntakePage and the standalone migration form. */
+  current_host:                      string | null
 
   submitted_at:                      string | null
 
@@ -1903,6 +1906,14 @@ function DomainSection({
         In some cases, DNS settings are managed through a different provider than your registrar — if that
         applies to you, we'll request additional info during launch.
       </p>
+
+      <FieldShort
+        label="Current hosting provider"
+        placeholder="Squarespace, Wix, WordPress.com, Bluehost, …"
+        value={session.current_host ?? null}
+        onChange={v => saveField('current_host' as keyof SessionRow, v as SessionRow[keyof SessionRow])}
+        help="Where the existing site lives today. Just the name is enough at this step."
+      />
 
       <FieldShort
         label="Who is your domain registrar?"

@@ -33,6 +33,11 @@ interface RegistrarFields {
   domain_credential_method:       'invite_admin' | 'one_password' | null
   domain_invite_confirmed:        boolean
   domain_one_password_invite_url: string | null
+  // v118 — current hosting provider for migration-only intake. Same
+  // column the ContentCollectionPage migration section writes to, so
+  // a partner who answered it on one surface sees it filled on the
+  // other.
+  current_host:                   string | null
 }
 
 interface PartnerCtx {
@@ -71,7 +76,7 @@ export default function RegistrarIntakePage() {
         // (submitted/closed) when there's no open one. We do NOT
         // auto-create — sessions are provisioned by staff so they're
         // tied to the partner's web project + onboarding state.
-        const sessionCols = 'id, status, created_at, domain_registrar_url, domain_credential_method, domain_invite_confirmed, domain_one_password_invite_url'
+        const sessionCols = 'id, status, created_at, domain_registrar_url, domain_credential_method, domain_invite_confirmed, domain_one_password_invite_url, current_host'
         const { data: openS } = await supabase
           .from('strategy_content_collection_sessions')
           .select(sessionCols)
@@ -106,6 +111,7 @@ export default function RegistrarIntakePage() {
           domain_credential_method:       s.domain_credential_method,
           domain_invite_confirmed:        s.domain_invite_confirmed ?? false,
           domain_one_password_invite_url: s.domain_one_password_invite_url,
+          current_host:                   s.current_host,
         })
       } finally {
         if (!cancelled) setLoading(false)
@@ -187,6 +193,20 @@ export default function RegistrarIntakePage() {
             <strong className="font-semibold">Already submitted.</strong> You can still update the fields below — changes save automatically.
           </div>
         )}
+
+        <section className="bg-white border border-lavender rounded-2xl p-5 md:p-6 shadow-sm">
+          <h2 className="font-serif italic text-xl text-deep-plum mb-1">Where does your site live today?</h2>
+          <p className="text-purple-gray text-sm mb-4">
+            Tell us which hosting service your current website runs on (e.g. <em>Squarespace</em>, <em>Wix</em>, <em>WordPress.com</em>, <em>Bluehost</em>, <em>SiteGround</em>). If you don't know, ask whoever set up the site originally — they'll know.
+          </p>
+          <FieldShort
+            label="Current hosting provider"
+            placeholder="Squarespace, Wix, WordPress.com, Bluehost, …"
+            value={fields.current_host}
+            onChange={v => void save('current_host', v)}
+            help="Just the name is enough at this step. We'll follow up about credentials separately."
+          />
+        </section>
 
         <section className="bg-white border border-lavender rounded-2xl p-5 md:p-6 shadow-sm">
           <h2 className="font-serif italic text-xl text-deep-plum mb-1">Your domain registrar</h2>
