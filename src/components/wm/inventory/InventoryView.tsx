@@ -443,19 +443,44 @@ export function InventoryView({
     }
   }, [campuses, isMultiCampus, selectedCampus])
 
-  // Build the displayed topicsByKey from the raw rows + current campus
-  // filter. For single-campus projects (no registry), every row has
-  // campus_slug=NULL so the filter is a no-op — selectedCampus stays
-  // null and the filter keeps everything.
-  const filteredRows = useMemo(
-    () => topicRows.filter(r => (r.campus_slug ?? null) === selectedCampus),
-    [topicRows, selectedCampus],
-  )
+  // Merge per-campus rows into a single TopicRow per topic_key. Items
+  // and passages from EVERY campus variant get stamped with their
+  // source campus_slug (via `_src_campus` on each item/passage) so
+  // downstream rendering can group + label by campus without us
+  // splitting the existing single-row-per-topic data model. For
+  // single-campus projects every row already has campus_slug=NULL,
+  // so this collapses to the legacy shape with no per-item tags.
   const rawTopicsByKey = useMemo(() => {
-    const m = new Map<string, TopicRow>()
-    for (const r of filteredRows) m.set(r.topic_key, r)
-    return m
-  }, [filteredRows])
+    const groups = new Map<string, TopicRow[]>()
+    for (const r of topicRows) {
+      const arr = groups.get(r.topic_key) ?? []
+      arr.push(r)
+      groups.set(r.topic_key, arr)
+    }
+    const merged = new Map<string, TopicRow>()
+    for (const [key, rows] of groups) {
+      // For singletons we still stamp the source campus on each item
+      // when it's non-null, so per-item badges work in single-campus-
+      // partition views just like in merged-multi-campus views.
+      const allItems: Item[] = []
+      const allPassages: Passage[] = []
+      let stampedTotal = 0
+      for (const r of rows) {
+        const slug = r.campus_slug ?? null
+        for (const it of (r.items ?? [])) {
+          allItems.push(slug ? { ...it, _src_campus: slug } as Item : it)
+          if (slug) stampedTotal++
+        }
+        for (const p of (r.passages ?? [])) {
+          allPassages.push(slug ? { ...p, _src_campus: slug } as Passage & { _src_campus?: string } : p)
+        }
+      }
+      // Use the first row as template for shape; replace items/passages.
+      const base = rows[0]
+      merged.set(key, { ...base, items: allItems, passages: allPassages })
+    }
+    return merged
+  }, [topicRows])
   // Partner-facing view: dedupe items that landed in multiple topics
   // (Paradox Youth → kids + students; Young Adults → students +
   // college) and gate out any Church-Media-Squad references so they
@@ -483,12 +508,10 @@ export function InventoryView({
     <AttachmentContext.Provider value={attachmentCtx}>
     <ExternalPrefillContext.Provider value={externalPrefills}>
     {isMultiCampus && (
-      <CampusChipSelector
+      <CampusOverview
         campuses={campuses!}
         labels={labels}
-        selected={selectedCampus}
-        onChange={setSelectedCampus}
-        rowsByCampus={topicRows}
+        rows={topicRows}
         reviewMode={reviewMode}
       />
     )}
@@ -630,18 +653,143 @@ function VerbatimLanguageBanner({
   )
 }
 
-// ── Multi-campus chip selector ───────────────────────────────────────
+// ── Campus badge ─────────────────────────────────────────────────────
 //
-// Renders above the inventory when a project has registered campuses.
-// One pill per campus + a "Church-wide" pill for cross-campus content
-// (campus_slug=NULL rows). Each pill shows a small count of topics
-// covered in that campus so partners see at a glance which campus
-// still has thin content.
+// Small pill that labels a piece of content with the campus it came
+// from. Used on program headers, detail rows, key-phrase rows, etc.
+// when items in a multi-campus project carry a `_src_campus` field
+// stamped by InventoryView's merge step. Returns null when the
+// project isn't multi-campus or the slug isn't recognized — single-
+// campus projects don't render the badge at all.
+function CampusBadge({ slug }: { slug: string | null | undefined }) {
+  const ctx = useCampusFilter()
+  if (!slug) {
+    // null = church-wide content (cross-campus). Only label it as
+    // such when the project IS multi-campus; otherwise unnecessary.
+    if (ctx.campuses.length === 0) return null
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-full bg-cream border border-lavender text-purple-gray text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 align-middle"
+        title="Content shared across every campus."
+      >
+        Church-wide
+      </span>
+    )
+  }
+  const c = ctx.campuses.find(x => x.slug === slug)
+  if (!c) return null
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full bg-primary-purple/10 border border-primary-purple/30 text-primary-purple text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 align-middle"
+      title={`From the ${c.label} ${ctx.labels.singular.toLowerCase()}.`}
+    >
+      <MapPin size={9} className="opacity-70" />
+      {c.label}
+    </span>
+  )
+}
+
+// Summarize a topic's contributing campuses. When a topic has items
+// from multiple campuses, this surfaces the breakdown at the topic
+// header so the partner sees "Kids ministry — content from Southwest,
+// Alliance, Espanol, and Church-wide". Returns null when the project
+// isn't multi-campus or the topic has only one source.
+function CampusSourcesLine({ items, passages }: { items: Item[]; passages: Passage[] }) {
+  const ctx = useCampusFilter()
+  if (ctx.campuses.length === 0) return null
+  const seen = new Set<string | null>()
+  for (const it of items ?? []) {
+    const s = (it as { _src_campus?: string | null })._src_campus ?? null
+    seen.add(s)
+  }
+  for (const p of passages ?? []) {
+    const s = (p as { _src_campus?: string | null })._src_campus ?? null
+    seen.add(s)
+  }
+  if (seen.size === 0) return null
+  // Order: registered campuses (sort_order), then "Church-wide" last.
+  const ordered = [...ctx.campuses]
+    .sort((a, b) => (a.primary === b.primary ? 0 : a.primary ? -1 : 1))
+    .filter(c => seen.has(c.slug))
+    .map(c => c.label)
+  if (seen.has(null)) ordered.push('Church-wide')
+  if (ordered.length <= 1) return null  // single source — no need to call it out
+  return (
+    <p className="text-[11px] text-purple-gray mt-0.5">
+      <span className="font-semibold">Content from:</span> {ordered.join(' · ')}
+    </p>
+  )
+}
+
+// ── Multi-campus overview ────────────────────────────────────────────
 //
-// Selected campus is purely a view-state filter — switching tabs
-// instantly swaps which subset of rows feeds the bucket layout below.
-// No load / no network on switch.
-function CampusChipSelector({
+// Renders an informational banner above the inventory when a project
+// has registered campuses. Lists each campus and its content count
+// so the partner knows at a glance what we found per location. The
+// inventory below shows ALL campuses stacked (per-item campus badges
+// surface which campus each piece is from); no chip filter, no
+// "switch tab to see this content".
+function CampusOverview({
+  campuses, labels, rows, reviewMode,
+}: {
+  campuses:   InventoryCampus[]
+  labels:     { singular: string; plural: string }
+  rows:       TopicRow[]
+  reviewMode: boolean
+}) {
+  const counts = useMemo(() => {
+    const m = new Map<string | null, number>()
+    for (const r of rows) m.set(r.campus_slug ?? null, (m.get(r.campus_slug ?? null) ?? 0) + 1)
+    return m
+  }, [rows])
+  const sortedCampuses = [...campuses].sort(
+    (a, b) => (a.primary === b.primary ? 0 : a.primary ? -1 : 1),
+  )
+  return (
+    <div className="mb-4 rounded-2xl border border-lavender bg-lavender-tint/50 p-3 md:p-4">
+      <div className="flex items-start gap-2 mb-2">
+        <MapPin size={14} className="text-primary-purple mt-0.5 shrink-0" />
+        <div className="min-w-0">
+          <p className="text-[11px] uppercase tracking-[0.12em] font-bold text-primary-purple">
+            {labels.plural}
+          </p>
+          <p className="text-[12px] text-purple-gray">
+            {reviewMode
+              ? `Your content for each ${labels.singular.toLowerCase()} is shown below — each section is tagged with which ${labels.singular.toLowerCase()} it came from. "Church-wide" is content shared across all ${labels.plural.toLowerCase()}.`
+              : `Inventory shows each topic with per-${labels.singular.toLowerCase()} subsections. Items carry a ${labels.singular.toLowerCase()} badge to make the source clear.`}
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {sortedCampuses.map(c => (
+          <span
+            key={c.slug}
+            className="inline-flex items-center gap-1.5 rounded-full bg-white border border-lavender text-deep-plum px-3 py-1 text-[12px] font-semibold"
+          >
+            {c.label}
+            {c.primary && <span className="text-primary-purple">· primary</span>}
+            <span className="rounded-full bg-lavender-tint text-purple-gray px-1.5 text-[10px] font-mono">
+              {counts.get(c.slug) ?? 0}
+            </span>
+          </span>
+        ))}
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-white border border-lavender text-deep-plum px-3 py-1 text-[12px] font-semibold"
+          title="Topics shared across every campus (the things you'd say to anyone, regardless of which location they attend)"
+        >
+          Church-wide
+          <span className="rounded-full bg-lavender-tint text-purple-gray px-1.5 text-[10px] font-mono">
+            {counts.get(null) ?? 0}
+          </span>
+        </span>
+      </div>
+    </div>
+  )
+}
+
+// Legacy chip selector — retained for potential future "focus mode" UX
+// but currently unused. The default UX shows ALL campuses stacked with
+// per-item badges (CampusOverview above).
+function CampusChipSelector_UNUSED({
   campuses, labels, selected, onChange, rowsByCampus, reviewMode,
 }: {
   campuses:     InventoryCampus[]
@@ -1955,6 +2103,7 @@ function TopicCard({
       className={reviewMode ? '' : 'border-l-2 border-wm-accent/30 pl-3'}
     >
       <h3 className={titleCls}>{topic.topic_label}</h3>
+      <CampusSourcesLine items={topic.items ?? []} passages={topic.passages ?? []} />
 
       {/* Voice — internal-facing only. Partners shouldn't see the raw
           voice signal (it's our internal interpretation, not their
@@ -2495,6 +2644,7 @@ function ProgramDossier({
           {program.audience  ? <Pill text={String(program.audience)}  reviewMode={reviewMode} /> : null}
           {program.duration  ? <Pill text={String(program.duration)}  reviewMode={reviewMode} /> : null}
           {program.scope     ? <Pill text={String(program.scope).toUpperCase()} reviewMode={reviewMode} /> : null}
+          <CampusBadge slug={(program as { _src_campus?: string | null })._src_campus} />
           <GroupEditToolbar scope={scope} canEdit={canEdit} />
         </div>
         {program.tagline && (
