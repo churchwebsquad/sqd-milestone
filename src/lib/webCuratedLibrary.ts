@@ -12,7 +12,7 @@
  * "Ministry Card," regardless of what scores higher in the global
  * catalog.
  */
-import type { WebTemplateKind } from '../types/database'
+import type { SectionRole, WebTemplateKind } from '../types/database'
 
 export interface LibraryConcept {
   /** Stable identifier — used as the jsonb key. Never rename. */
@@ -467,6 +467,64 @@ export const LIBRARY_CONCEPT_BY_ID: Readonly<Record<string, LibraryConcept>> = (
   for (const c of LIBRARY_CONCEPTS) out[c.id] = c
   return out
 })()
+
+/** Template IDs the strategist no longer wants in the catalog picker.
+ *  Templates here are filtered out of CatalogSidePanel's visible list
+ *  and aren't suggested as defaults by the AI auto-bind pass. Keep this
+ *  list short — proper retirement is a deprecation on the template row,
+ *  but a name-list here is the right call for layouts that still exist
+ *  in the DB but shouldn't be shown to new projects. */
+export const HIDDEN_FROM_PICKER: ReadonlySet<string> = new Set<string>([
+  'content-section-91',  // Strategist call: 19/45/55 cover the same use cases more cleanly
+])
+
+/** Concept → default SectionRole. When a section gets auto-bound to a
+ *  template that belongs to one of these concepts (matched via
+ *  findCandidateConcepts), set `web_sections.section_role` from this
+ *  map instead of leaving it null (which the editor renders as
+ *  "(unclassified)"). Only concepts with a clean 1:1 role mapping are
+ *  here — multi-role concepts (e.g. content sections that could be
+ *  content_block OR feature_grid depending on use) stay omitted so
+ *  the strategist can pick. */
+export const CONCEPT_DEFAULT_ROLE: Readonly<Record<string, SectionRole>> = {
+  // Heroes
+  hero_homepage: 'hero_home',
+  hero_inner:    'hero_innerpage',
+  hero_featured: 'hero_visual',
+  // CTAs
+  cta_simple:    'cta_banner_simple',
+  cta_callout:   'cta_banner_split',
+  // FAQ
+  accordion_faq: 'faq_accordion',
+  // Feature sections — cards / split / grid family
+  feature_card_grid:     'card_grid',
+  feature_card_carousel: 'card_carousel',
+  feature_team:          'team_grid',
+  feature_tabbed:        'feature_split',
+  feature_unique:        'feature_grid',
+  // Content sections — most are generic content_block but the ones
+  // that highlight cards or feature items are closer to feature_grid.
+  content_image_text_a: 'content_block',
+  content_image_text_b: 'content_block',
+  content_video:        'content_block',
+  content_featured:     'feature_grid',
+  // Archive
+  archive_filter:         'category_filter',
+  archive_current_series: 'content_block',
+  // Single post templates
+  single_event:  'event_detail',
+  single_sermon: 'event_detail',
+  single_blog:   'post_detail',
+  single_staff:  'staff_member_detail',
+  // Timeline / story
+  timeline_story: 'timeline_chronology',
+  // Testimonials
+  testimonial_written: 'content_block',
+  testimonial_video:   'gallery_carousel',
+  // Contact / Career
+  contact_section: 'content_block',
+  career_section:  'career_listing',
+}
 
 /** Effective bindings for a concept: explicit project bindings if any,
  *  otherwise the concept's `defaultTemplateId` if set, otherwise [].

@@ -42,6 +42,7 @@ export const GLOBAL_FIELDS: GlobalFieldDef[] = [
   { column: 'social_tiktok_url',    token: 'social_tiktok_url',    label: 'TikTok URL' },
   { column: 'social_twitter_url',   token: 'social_twitter_url',   label: 'X / Twitter URL' },
   { column: 'social_linkedin_url',  token: 'social_linkedin_url',  label: 'LinkedIn URL' },
+  { column: 'livestream_url',       token: 'livestream_url',       label: 'Livestream URL' },
   { column: 'podcast_name',         token: 'podcast_name',         label: 'Podcast show name' },
   { column: 'podcast_apple_url',    token: 'podcast_apple_url',    label: 'Apple Podcasts URL' },
   { column: 'podcast_spotify_url',  token: 'podcast_spotify_url',  label: 'Spotify podcast URL' },

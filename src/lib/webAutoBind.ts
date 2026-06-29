@@ -18,7 +18,7 @@
  */
 import { supabase } from './supabase'
 import { snapshotPageVersion } from './webPageVersions'
-import { LIBRARY_CONCEPTS, parseCuratedLibrary, getEffectiveBindings } from './webCuratedLibrary'
+import { LIBRARY_CONCEPTS, parseCuratedLibrary, getEffectiveBindings, findCandidateConcepts, CONCEPT_DEFAULT_ROLE } from './webCuratedLibrary'
 import {
   composeBind, rankVariantsByBrief, extractSectionIdFromNotes,
 } from './webBindTemplate'
@@ -451,11 +451,32 @@ export async function autoBindPageSections(
       nextValues.__bind_report = composed.source_report
     }
 
+    // Set section_role from the chosen template's library concept (if
+    // exactly one candidate concept has a default role mapped). Leaves
+    // the existing role alone when the section already has one set
+    // (preserves strategist overrides). Skips when the concept match
+    // is ambiguous so the strategist can pick manually instead of
+    // landing on a wrong role.
+    const candidateConcepts = findCandidateConcepts({
+      id:     chosenTemplate.id,
+      family: chosenTemplate.family,
+      kind:   chosenTemplate.kind,
+    })
+    const roleFromConcept = (() => {
+      if (plan.webSection.section_role) return null  // don't overwrite
+      const roles = candidateConcepts
+        .map(c => CONCEPT_DEFAULT_ROLE[c.id])
+        .filter((r): r is NonNullable<typeof r> => !!r)
+      const unique = Array.from(new Set(roles))
+      return unique.length === 1 ? unique[0] : null
+    })()
+
     const { error: updateErr } = await supabase
       .from('web_sections')
       .update({
         content_template_id: chosenTemplate.id,
         field_values: nextValues,
+        ...(roleFromConcept ? { section_role: roleFromConcept } : {}),
       } as never)
       .eq('id', plan.webSection.id)
     if (updateErr) {

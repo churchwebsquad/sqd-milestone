@@ -1220,6 +1220,11 @@ export interface StrategyWebProject {
   podcast_spotify_url:  string | null
   mission_statement:    string | null
 
+  // ── v121 — livestream URL promoted to a project-level global. The
+  //          partner baselines already detect it; this is the snippet
+  //          column the editor merges {{livestream_url}} against. ──
+  livestream_url:       string | null
+
   // ── Intake — optional URLs paired with file uploads (v29) ──
   strategy_brief_notion_url:  string | null
   external_brand_guide_url:   string | null

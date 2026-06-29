@@ -18,6 +18,7 @@ import { WMFlyoutPanel } from './FlyoutPanel'
 import { WMButton } from './Button'
 import { WMStatusPill } from './StatusPill'
 import type { WebContentTemplate, WebTemplateKind } from '../../types/database'
+import { HIDDEN_FROM_PICKER } from '../../lib/webCuratedLibrary'
 
 export interface WMCatalogSidePanelProps {
   open: boolean
@@ -126,6 +127,9 @@ export function WMCatalogSidePanel({
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
     const filtered = rows.filter(r => {
+      // Drop strategist-retired templates so they never surface as a
+      // pick option. The id lives in webCuratedLibrary's HIDDEN_FROM_PICKER.
+      if (HIDDEN_FROM_PICKER.has(r.id)) return false
       if (kindFilter && kindFilter.length > 0 && !kindFilter.includes(r.kind)) return false
       if (familyFilterActive && familyFilter && familyFilter.length > 0) {
         const fam = normalizeFamily(r.family)
