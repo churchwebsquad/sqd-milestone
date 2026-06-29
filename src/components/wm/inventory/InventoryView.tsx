@@ -2006,21 +2006,24 @@ function TopicCard({
       faqQAs.add(normValue(String(f.question ?? '')))
       faqQAs.add(normValue(String(f.answer ?? '')))
     }
-    const extras: { label: string; value: string }[] = []
+    const extras: { label: string; value: string; campus?: string | null }[] = []
     for (const s of topicSnippets) extras.push({ label: s.label || s.token, value: s.expansion })
     for (const c of contacts) {
       const lbl = String(c.label ?? '').trim()
-      if (c.email) extras.push({ label: lbl || 'Email', value: String(c.email) })
-      if (c.phone) extras.push({ label: lbl || 'Phone', value: String(c.phone) })
+      const campus = (c as { _src_campus?: string | null })._src_campus ?? null
+      if (c.email) extras.push({ label: lbl || 'Email', value: String(c.email), campus })
+      if (c.phone) extras.push({ label: lbl || 'Phone', value: String(c.phone), campus })
     }
     for (const l of locations) {
       const lbl = String(l.label ?? '').trim()
-      if (l.address) extras.push({ label: lbl || 'Address', value: String(l.address) })
+      const campus = (l as { _src_campus?: string | null })._src_campus ?? null
+      if (l.address) extras.push({ label: lbl || 'Address', value: String(l.address), campus })
     }
     for (const mt of meetingTimes) {
       const audience = mt.audience ? ` (${String(mt.audience)})` : ''
       const where    = mt.location ? ` · ${String(mt.location)}` : ''
-      if (mt.when) extras.push({ label: 'Meets', value: `${String(mt.when)}${where}${audience}` })
+      const campus = (mt as { _src_campus?: string | null })._src_campus ?? null
+      if (mt.when) extras.push({ label: 'Meets', value: `${String(mt.when)}${where}${audience}`, campus })
     }
     return consolidateLabeledValues(details, extras, faqQAs)
   }, [details, topicSnippets, contacts, locations, meetingTimes, faqs])
@@ -2698,37 +2701,55 @@ function ProgramDossier({
 
       {meetingTimes.length > 0 && (
         <DossierSlot icon={Calendar} title="Meeting Times" reviewMode={reviewMode}>
-          {meetingTimes.map((mt, i) => (
-            <div key={i} className={reviewMode ? 'text-sm text-deep-plum' : 'text-[12px] text-wm-text'}>
-              <strong>{String(mt.when ?? '')}</strong>
-              {mt.location ? <span className="text-purple-gray"> · {String(mt.location)}</span> : null}
-              {mt.audience ? <span className="text-purple-gray"> · {String(mt.audience)}</span> : null}
-            </div>
-          ))}
+          {meetingTimes.map((mt, i) => {
+            const campus = (mt as { _src_campus?: string | null })._src_campus ?? null
+            return (
+              <div key={i} className={reviewMode ? 'text-sm text-deep-plum flex items-baseline gap-2 flex-wrap' : 'text-[12px] text-wm-text flex items-baseline gap-2 flex-wrap'}>
+                <span className="flex-1 min-w-0">
+                  <strong>{String(mt.when ?? '')}</strong>
+                  {mt.location ? <span className="text-purple-gray"> · {String(mt.location)}</span> : null}
+                  {mt.audience ? <span className="text-purple-gray"> · {String(mt.audience)}</span> : null}
+                </span>
+                <CampusBadge slug={campus} />
+              </div>
+            )
+          })}
         </DossierSlot>
       )}
 
       {locations.length > 0 && (
         <DossierSlot icon={MapPin} title="Location" reviewMode={reviewMode}>
-          {locations.map((l, i) => (
-            <p key={i} className={reviewMode ? 'text-sm text-deep-plum' : 'text-[12px] text-wm-text'}>
-              <strong>{String(l.address ?? '')}</strong>
-              {l.label ? <span className="text-purple-gray"> · {String(l.label)}</span> : null}
-            </p>
-          ))}
+          {locations.map((l, i) => {
+            const campus = (l as { _src_campus?: string | null })._src_campus ?? null
+            return (
+              <p key={i} className={reviewMode ? 'text-sm text-deep-plum flex items-baseline gap-2 flex-wrap' : 'text-[12px] text-wm-text flex items-baseline gap-2 flex-wrap'}>
+                <span className="flex-1 min-w-0">
+                  <strong>{String(l.address ?? '')}</strong>
+                  {l.label ? <span className="text-purple-gray"> · {String(l.label)}</span> : null}
+                </span>
+                <CampusBadge slug={campus} />
+              </p>
+            )
+          })}
         </DossierSlot>
       )}
 
       {contacts.length > 0 && (
         <DossierSlot icon={MessageCircle} title="Contact" reviewMode={reviewMode}>
-          {contacts.map((c, i) => (
-            <div key={i} className={reviewMode ? 'text-sm text-deep-plum' : 'text-[12px] text-wm-text'}>
-              {c.label && <strong>{String(c.label)}: </strong>}
-              {c.email && <a href={`mailto:${c.email}`} className={reviewMode ? 'text-primary-purple hover:underline' : 'text-wm-accent hover:underline'}>{String(c.email)}</a>}
-              {c.email && c.phone && <span> · </span>}
-              {c.phone && <span>{String(c.phone)}</span>}
-            </div>
-          ))}
+          {contacts.map((c, i) => {
+            const campus = (c as { _src_campus?: string | null })._src_campus ?? null
+            return (
+              <div key={i} className={reviewMode ? 'text-sm text-deep-plum flex items-baseline gap-2 flex-wrap' : 'text-[12px] text-wm-text flex items-baseline gap-2 flex-wrap'}>
+                <span className="flex-1 min-w-0">
+                  {c.label && <strong>{String(c.label)}: </strong>}
+                  {c.email && <a href={`mailto:${c.email}`} className={reviewMode ? 'text-primary-purple hover:underline' : 'text-wm-accent hover:underline'}>{String(c.email)}</a>}
+                  {c.email && c.phone && <span> · </span>}
+                  {c.phone && <span>{String(c.phone)}</span>}
+                </span>
+                <CampusBadge slug={campus} />
+              </div>
+            )
+          })}
         </DossierSlot>
       )}
 
@@ -2853,7 +2874,7 @@ function DossierSlot({ icon: Icon, title, children, reviewMode }: { icon: typeof
 
 // ── Row components ───────────────────────────────────────────────────
 
-interface ConsolidatedEntry { value: string; labels: string[] }
+interface ConsolidatedEntry { value: string; labels: string[]; campuses: string[] }
 
 /** Stable slug for a detail entry's edit-mark path. Derives from the
  *  first label when present; otherwise from the value itself. Same
@@ -2961,6 +2982,11 @@ function ConsolidatedDetailRow({
               Edited
             </span>
           )}
+        </div>
+      )}
+      {entry.campuses.length > 0 && (
+        <div className="shrink-0 flex flex-wrap gap-1 self-start">
+          {entry.campuses.map(c => <CampusBadge key={c} slug={c} />)}
         </div>
       )}
     </div>
@@ -3281,6 +3307,7 @@ function FaqRow({
     })
   }, [groupEdit, editPath, saveMark, origQuestion, origAnswer, question, answer])
 
+  const campus = (item as { _src_campus?: string | null })._src_campus ?? null
   return (
     <div className={[
       reviewMode
@@ -3288,6 +3315,9 @@ function FaqRow({
         : 'bg-wm-bg-hover/40 border border-wm-border rounded-md px-3 py-2',
       edited ? (reviewMode ? 'ring-1 ring-primary-purple/30' : 'ring-1 ring-wm-accent/30') : '',
     ].join(' ')}>
+      <div className="flex justify-end -mb-1">
+        <CampusBadge slug={campus} />
+      </div>
       {editing ? (
         <div className="flex flex-col gap-2">
           <label className="block">
@@ -3337,13 +3367,17 @@ function FaqRow({
 function KeyPhraseRow({ item, reviewMode }: { item: Item; reviewMode: boolean }) {
   const phrase = String(item.phrase ?? item.name ?? item.title ?? '')
   const context = String(item.context ?? item.statement ?? item.description ?? '')
+  const campus = (item as { _src_campus?: string | null })._src_campus ?? null
   return (
     <div className={reviewMode
         ? 'bg-lavender-tint/40 border border-lavender rounded-md px-3 py-2'
         : 'bg-wm-accent-tint/40 border border-wm-accent/20 rounded-md px-3 py-2'}>
-      <p className={reviewMode ? 'text-sm text-deep-plum font-bold' : 'text-[12px] text-wm-text font-bold'}>
-        "{phrase}"
-      </p>
+      <div className="flex items-start gap-2 flex-wrap">
+        <p className={reviewMode ? 'text-sm text-deep-plum font-bold flex-1 min-w-0' : 'text-[12px] text-wm-text font-bold flex-1 min-w-0'}>
+          "{phrase}"
+        </p>
+        <CampusBadge slug={campus} />
+      </div>
       {context && (
         <p className={reviewMode ? 'text-xs text-purple-gray mt-1' : 'text-[11px] text-wm-text-muted mt-1'}>{context}</p>
       )}
@@ -3354,6 +3388,7 @@ function KeyPhraseRow({ item, reviewMode }: { item: Item; reviewMode: boolean })
 function CtaRow({ item, reviewMode }: { item: Item; reviewMode: boolean }) {
   const url = String(item.url ?? '')
   const label = String(item.label ?? item.name ?? '')
+  const campus = (item as { _src_campus?: string | null })._src_campus ?? null
   return (
     <div className={reviewMode
         ? 'bg-cream/30 border border-lavender/40 rounded-md px-3 py-2 flex items-baseline gap-3'
@@ -3373,18 +3408,23 @@ function CtaRow({ item, reviewMode }: { item: Item; reviewMode: boolean }) {
             ? 'text-[10px] font-mono text-purple-gray truncate min-w-0 flex-1'
             : 'text-[10px] font-mono text-wm-text-muted truncate min-w-0 flex-1'}>{url}</code>
       )}
+      <span className="ml-auto shrink-0"><CampusBadge slug={campus} /></span>
     </div>
   )
 }
 
 function ScriptureRow({ item, reviewMode }: { item: Item; reviewMode: boolean }) {
+  const campus = (item as { _src_campus?: string | null })._src_campus ?? null
   return (
     <div className={reviewMode
         ? 'bg-cream/30 border border-lavender/40 rounded-md px-3 py-2'
         : 'bg-wm-bg-hover/30 border border-wm-border rounded-md px-3 py-2'}>
-      <p className={reviewMode ? 'text-[10px] font-mono uppercase tracking-wide text-primary-purple' : 'text-[10px] font-mono uppercase tracking-wide text-wm-accent'}>
-        {String(item.reference ?? '')}
-      </p>
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <p className={reviewMode ? 'text-[10px] font-mono uppercase tracking-wide text-primary-purple flex-1 min-w-0' : 'text-[10px] font-mono uppercase tracking-wide text-wm-accent flex-1 min-w-0'}>
+          {String(item.reference ?? '')}
+        </p>
+        <CampusBadge slug={campus} />
+      </div>
       <p className={reviewMode ? 'text-sm text-deep-plum italic leading-snug mt-0.5' : 'text-[12px] text-wm-text italic leading-snug mt-0.5'}>
         "{String(item.text ?? '')}"
       </p>
@@ -4271,11 +4311,11 @@ function hasSubstance(item: Item): boolean {
  */
 function consolidateLabeledValues(
   detailItems: Item[],
-  extras: { label: string; value: string }[],
+  extras: { label: string; value: string; campus?: string | null }[],
   faqQAs: Set<string>,
 ): ConsolidatedEntry[] {
   const byValue = new Map<string, ConsolidatedEntry>()
-  const push = (rawLabel: string, rawValue: string) => {
+  const push = (rawLabel: string, rawValue: string, campus?: string | null) => {
     const value = String(rawValue ?? '').trim()
     if (!value) return
     if (isBrokenValue(value)) return
@@ -4283,16 +4323,21 @@ function consolidateLabeledValues(
     const key = normValue(value)
     let entry = byValue.get(key)
     if (!entry) {
-      entry = { value, labels: [] }
+      entry = { value, labels: [], campuses: [] }
       byValue.set(key, entry)
     }
     const label = String(rawLabel ?? '').trim()
     if (label && !entry.labels.some(l => normValue(l) === normValue(label))) {
       entry.labels.push(label)
     }
+    const c = (campus ?? '').trim()
+    if (c && !entry.campuses.includes(c)) entry.campuses.push(c)
   }
-  for (const d of detailItems) push(String(d.label ?? ''), String(d.value ?? ''))
-  for (const e of extras) push(e.label, e.value)
+  for (const d of detailItems) {
+    const campus = (d as { _src_campus?: string | null })._src_campus ?? null
+    push(String(d.label ?? ''), String(d.value ?? ''), campus)
+  }
+  for (const e of extras) push(e.label, e.value, e.campus ?? null)
   return dedupeTimeBearingEntries(Array.from(byValue.values()))
 }
 

@@ -37,6 +37,10 @@ import {
 } from '../../../lib/cta'
 import { GLOBAL_FIELDS } from '../../../lib/webSnippets'
 import { saveFormationPlan, setSchemaOverride, type ContentModelPlan } from '../../../lib/acfFormationPlan'
+import {
+  buildRedirectDiff, redirectsToCsv, urlToPath,
+  type CrawlUrlRow, type SitemapPage, type RedirectCandidate,
+} from '../../../lib/urlRedirects'
 import type { DiscoverySection, SchemaName } from '../../../lib/acfFormationPlan/types'
 import { CANONICAL_SCHEMAS } from '../../../lib/acfFormationPlan/rules'
 import {
@@ -99,6 +103,11 @@ export function DevHandoffWorkspace({ project }: Props) {
   const [devNotesRows, setDevNotesRows] = useState<DevNotesRow[]>([])
   const [snippets, setSnippets] = useState<WebProjectSnippet[]>([])
   const [seoCtaLoading, setSeoCtaLoading] = useState(true)
+  // URL redirects — crawled URLs that need to be mapped to the new
+  // sitemap. Computed client-side from web_project_topics +
+  // web_pages; no schema additions needed.
+  const [redirectCandidates, setRedirectCandidates] = useState<RedirectCandidate[]>([])
+  const [redirectsLoading,   setRedirectsLoading]   = useState(false)
   // Software-in-use, surfaced from roadmap_state.strategic_goals (Phase 3).
   // Shown prominently at the top so the dev knows what integrations
   // the build has to plug into BEFORE reading the rest.
@@ -268,6 +277,39 @@ export function DevHandoffWorkspace({ project }: Props) {
             notes: (p.dev_notes ?? '').trim(),
           })),
       )
+
+      // URL redirects — pull every source_page_url from the project's
+      // crawl topics and diff against the new sitemap.
+      setRedirectsLoading(true)
+      const { data: topicRows } = await supabase
+        .from('web_project_topics')
+        .select('topic_key, topic_label, source_page_urls')
+        .eq('web_project_id', project.id)
+      const crawlUrls: CrawlUrlRow[] = []
+      for (const t of (topicRows ?? []) as Array<{
+        topic_key: string; topic_label: string; source_page_urls: string[] | null
+      }>) {
+        for (const url of t.source_page_urls ?? []) {
+          const path = urlToPath(url)
+          if (!path) continue
+          crawlUrls.push({
+            url, path,
+            topic_key:   t.topic_key,
+            topic_label: t.topic_label,
+          })
+        }
+      }
+      const sitemap: SitemapPage[] = pages
+        .filter(p => !p.slug.startsWith('staff/'))
+        .map(p => ({
+          id:               p.id,
+          name:             p.name,
+          slug:             p.slug,
+          nav_group_label:  (p as { nav_group_label?: string | null }).nav_group_label ?? null,
+        }))
+      setRedirectCandidates(buildRedirectDiff(crawlUrls, sitemap))
+      setRedirectsLoading(false)
+
       setSeoCtaLoading(false)
     })()
   }, [project.id])
@@ -670,9 +712,162 @@ export function DevHandoffWorkspace({ project }: Props) {
             {cmPlan && <CmWpObjectsPanel plan={cmPlan} />}
           </WMCard>
 
+          <UrlRedirectsCard
+            loading={redirectsLoading}
+            candidates={redirectCandidates}
+            projectSlug={projectSlug}
+          />
+
         </div>
       </div>
     </div>
+  )
+}
+
+/** URL redirects card — diffs every crawled URL against the new
+ *  sitemap and emits a CSV the dev imports into the WP redirect
+ *  plugin (Redirection, Rank Math, Yoast). 'Exact' rows aren't real
+ *  redirects but stay visible so the dev can confirm nothing moved
+ *  silently. */
+function UrlRedirectsCard({
+  loading, candidates, projectSlug,
+}: {
+  loading:     boolean
+  candidates:  RedirectCandidate[]
+  projectSlug: string
+}) {
+  const counts = useMemo(() => {
+    const c = { exact: 0, high: 0, medium: 0, low: 0 }
+    for (const r of candidates) c[r.confidence]++
+    return c
+  }, [candidates])
+  const downloadCsv = () => {
+    const csv = redirectsToCsv(candidates)
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url
+    a.download = `${projectSlug}-redirects.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+  const realRedirects = candidates.filter(c => c.confidence !== 'exact')
+  return (
+    <WMCard padding="loose">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+            <LinkIcon size={13} />
+            <h2 className="text-[13px] font-bold uppercase tracking-widest">
+              URL redirects
+            </h2>
+          </div>
+          <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+            Every URL the crawl found vs the new sitemap. Exact matches
+            don't need redirects; everything else is a candidate for the
+            dev's WP redirect plugin. Low-confidence rows need manual
+            mapping before import.
+          </p>
+        </div>
+        {realRedirects.length > 0 && (
+          <WMButton
+            variant="primary"
+            size="md"
+            iconLeft={<Download size={13} />}
+            onClick={downloadCsv}
+          >
+            Download CSV
+          </WMButton>
+        )}
+      </div>
+      {loading ? (
+        <p className="text-[12px] text-wm-text-muted">Computing diff…</p>
+      ) : candidates.length === 0 ? (
+        <p className="text-[12px] text-wm-text-muted">
+          No crawl URLs found — this project may predate the crawl, or
+          the partner's site was net-new with no prior URLs to preserve.
+        </p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px] mb-3">
+            <CmStat label="Exact (no redirect)" value={counts.exact} />
+            <CmStat label="High confidence"     value={counts.high} />
+            <CmStat label="Medium confidence"   value={counts.medium} />
+            <CmStat label="Needs manual"        value={counts.low} />
+          </div>
+          <RedirectTable candidates={candidates} />
+        </>
+      )}
+    </WMCard>
+  )
+}
+
+function RedirectTable({ candidates }: { candidates: RedirectCandidate[] }) {
+  const [showExact, setShowExact] = useState(false)
+  const visible = showExact ? candidates : candidates.filter(c => c.confidence !== 'exact')
+  const exactCount = candidates.length - candidates.filter(c => c.confidence !== 'exact').length
+  return (
+    <>
+      {exactCount > 0 && (
+        <button
+          type="button"
+          className="text-[11px] text-wm-accent-strong hover:underline mb-2"
+          onClick={() => setShowExact(s => !s)}
+        >
+          {showExact ? 'Hide' : 'Show'} {exactCount} exact match{exactCount === 1 ? '' : 'es'}
+        </button>
+      )}
+      <div className="border border-wm-border rounded-md overflow-hidden">
+        <table className="w-full text-[12px]">
+          <thead className="bg-wm-bg-elevated text-[10px] uppercase tracking-wider text-wm-text-subtle">
+            <tr>
+              <th className="text-left px-3 py-2 font-semibold">From (crawled)</th>
+              <th className="text-left px-3 py-2 font-semibold">To (new)</th>
+              <th className="text-left px-3 py-2 font-semibold">Topic</th>
+              <th className="text-left px-3 py-2 font-semibold w-28">Confidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((r, i) => (
+              <tr
+                key={`${r.from_path}-${i}`}
+                className={`border-t border-wm-border ${
+                  r.confidence === 'low'    ? 'bg-wm-warn-bg/40' :
+                  r.confidence === 'medium' ? 'bg-wm-bg-hover/40' : ''
+                }`}
+              >
+                <td className="px-3 py-2 font-mono text-[11px] text-wm-text break-all">{r.from_path}</td>
+                <td className="px-3 py-2 font-mono text-[11px] text-wm-text break-all">
+                  {r.to_slug ? `/${r.to_slug}` : (
+                    <span className="text-wm-warn-strong italic">needs mapping</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-wm-text-muted">{r.topic_label}</td>
+                <td className="px-3 py-2">
+                  <span className={
+                    r.confidence === 'exact'   ? 'inline-block px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold bg-wm-success-bg/60 text-wm-success border border-wm-success/30' :
+                    r.confidence === 'high'    ? 'inline-block px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold bg-wm-accent-tint text-wm-accent-strong border border-wm-accent/30' :
+                    r.confidence === 'medium'  ? 'inline-block px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold bg-wm-bg-elevated text-wm-text border border-wm-border' :
+                                                  'inline-block px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold bg-wm-warn-bg text-wm-warn-strong border border-wm-warn/40'
+                  }>
+                    {r.confidence}
+                  </span>
+                </td>
+              </tr>
+            ))}
+            {visible.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-3 py-4 text-center text-wm-text-muted italic">
+                  Every crawled URL maps to the same path on the new site — no redirects needed.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
   )
 }
 

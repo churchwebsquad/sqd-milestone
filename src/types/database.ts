@@ -145,6 +145,11 @@ export interface StrategyAccountProgress {
   web_squad_login_in_1password:        boolean | null
   web_squad_ga_access_shared:          boolean | null
   web_squad_ready_for_evaluation:      boolean | null
+  // Web Squad — nameserver / DNS verification (v122). 3-state same as
+  // the other web_squad_* flags. Note captures "DNS managed elsewhere"
+  // detail (e.g. domain at GoDaddy but DNS at Cloudflare).
+  web_squad_nameservers_verified:      boolean | null
+  web_squad_dns_notes:                 string  | null
   [key: string]: unknown
 }
 

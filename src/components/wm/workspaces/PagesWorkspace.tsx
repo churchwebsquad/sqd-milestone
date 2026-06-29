@@ -28,7 +28,7 @@
  *   - Audit engine scans this surface against heuristics
  */
 
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FileText, Loader2, Plus, Trash2, Eye, Edit3, Upload, Archive, MoreHorizontal,
@@ -1175,6 +1175,32 @@ function PageEditor({
   }
   useEffect(() => { void loadSections() }, [page.id])
 
+  // Auto-snapshot the page on the FIRST edit per page-session so the
+  // version drawer accumulates a row for every editing burst (matching
+  // what the manual Save button does, but without requiring the user
+  // to click it). Resets when the user navigates to a different page.
+  // Only manual edits trigger this — auto-bind already snapshots itself,
+  // so re-running it doesn't double-snapshot.
+  const autoSnapshottedThisSessionRef = useRef<string | null>(null)
+  useEffect(() => { autoSnapshottedThisSessionRef.current = null }, [page.id])
+  const ensureFirstEditSnapshot = async () => {
+    if (autoSnapshottedThisSessionRef.current === page.id) return
+    autoSnapshottedThisSessionRef.current = page.id  // optimistic — prevents repeat calls during the await
+    try {
+      const { data: sess } = await supabase.auth.getSession()
+      await snapshotPageVersion(supabase, page.id, {
+        triggerKind:  'manual_save',
+        triggerLabel: 'Editor edits started',
+        createdBy:    sess.session?.user?.id ?? null,
+      })
+    } catch (e) {
+      // Re-arm so a future edit can retry. Non-fatal — the edit itself
+      // still lands on web_sections; only the version drawer is delayed.
+      autoSnapshottedThisSessionRef.current = null
+      console.warn('[PagesWorkspace] auto-snapshot failed', e)
+    }
+  }
+
   // Project-wide set of content_template_ids currently bound on ANY
   // active page in this project. Drives the catalog's "Active on this
   // site" filter so the strategist can quickly find variants already
@@ -1405,6 +1431,11 @@ function PageEditor({
         }
       }
     }
+
+    // Snapshot the page state on the first edit of this page-session
+    // so the version drawer reflects that edits happened. Fire-and-
+    // forget — don't block the actual save behind the snapshot insert.
+    void ensureFirstEditSnapshot()
 
     setSections(prev => prev.map(s => s.id === sectionId ? { ...s, ...effectivePatch } : s))
     await supabase.from('web_sections').update(effectivePatch).eq('id', sectionId)

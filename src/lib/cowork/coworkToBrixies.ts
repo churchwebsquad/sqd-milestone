@@ -571,6 +571,44 @@ function applyTemplateOverrides(
       return out
     }
 
+    case 'timeline-section-6': {
+      // timeline_story — the Brixies element_timeline group only has
+      // ONE slot per node (tagline_element_timeline), but cowork emits
+      // items with {item_meta, item_heading, item_body}. The manifest
+      // explicitly nulls item_heading + item_body, so the date/year
+      // shows but the per-node heading + body would vanish.
+      //
+      // Workaround until the template gains item_heading + item_body
+      // slots: combine item_meta + item_heading into the tagline (so
+      // "2018 — Mission Trip Begins" reads as one line per node), and
+      // flow per-node bodies into the section-level description as a
+      // headed paragraph block so the prose isn't lost. Strategist can
+      // swap to a content-section that natively holds heading+body
+      // per item if the timeline visual isn't load-bearing.
+      out.element_timeline = items.map(it => {
+        const meta    = typeof it.item_meta    === 'string' ? it.item_meta.trim()    : ''
+        const heading = typeof it.item_heading === 'string' ? it.item_heading.trim() : ''
+        const tagline = meta && heading ? `${meta} — ${heading}` : (meta || heading)
+        return { tagline_element_timeline: tagline }
+      })
+      const bodiesHtml = items.map(it => {
+        const heading = typeof it.item_heading === 'string' ? it.item_heading.trim() : ''
+        const body    = typeof it.item_body    === 'string' ? it.item_body.trim()    : ''
+        if (!heading && !body) return ''
+        const bodyHtml = body ? ensureHtml(body).replace(/^<p>|<\/p>$/g, '') : ''
+        if (heading && bodyHtml) return `<p><strong>${escapeHtml(heading)}</strong> — ${bodyHtml}</p>`
+        if (heading)             return `<p><strong>${escapeHtml(heading)}</strong></p>`
+        return ensureHtml(body)
+      }).filter(Boolean).join('\n')
+      if (bodiesHtml) {
+        const existing = typeof out.description === 'string' ? out.description : ensureHtml(body)
+        out.description = (existing && existing.trim())
+          ? `${existing}\n${bodiesHtml}`
+          : bodiesHtml
+      }
+      return out
+    }
+
     case 'faq-section-10': {
       // accordion_faq — the renderer's heuristic collapses each
       // accordion side to a single leaf node, breaking item

@@ -215,6 +215,19 @@ export default function WebSquadSection({ church, submissions, onSave, editing, 
       <InitialSiteAccessChecklist church={church} onSave={onSave} />
       <MigrationIntakeShareLink portalToken={portalToken ?? memberId} />
 
+      {/* Hosting & Domain Details (dev-facing) — pulls the partner's
+          actual current_host / domain_registrar_url / credential method
+          / 1Password invite from their latest content_collection_session
+          so the dev can see what was collected without clicking out to
+          the form. Pairs with the nameservers_verified row in the
+          checklist above + a free-text DNS notes field for cases where
+          DNS is managed elsewhere (Cloudflare, a third-party, etc.). */}
+      <HostingDomainDevPanel
+        memberId={memberId}
+        dnsNotes={church.web_squad_dns_notes ?? null}
+        onSaveDnsNotes={v => onSave('web_squad_dns_notes', v)}
+      />
+
       {/* Partner Site Notes — fetched from the Notion web support
           database, filtered to rows where `Notes Type = "Partner Site
           Notes"` and the title contains this church's name. */}
@@ -352,6 +365,7 @@ interface ChecklistItem {
     | 'web_squad_domain_registrar_provided'
     | 'web_squad_login_in_1password'
     | 'web_squad_ga_access_shared'
+    | 'web_squad_nameservers_verified'
     | 'web_squad_ready_for_evaluation'
   label: string
   hint: string
@@ -361,12 +375,18 @@ interface ChecklistItem {
 // Split into three distinct prerequisites so each can be tracked
 // independently. Migration intake form fills hosting + registrar
 // fields directly; CMS access is collected separately.
+// v122 — nameserver verification added so the dev can confirm the
+// registrar of record actually controls DNS (vs DNS managed at
+// Cloudflare / a third-party). Sits just before ready-for-evaluation
+// because a "false" here usually blocks evaluation until the partner
+// shares the DNS host's access too.
 const SITE_ACCESS_ITEMS: ChecklistItem[] = [
   { field: 'web_squad_site_access_provided',     label: 'Site access provided',         hint: "Partner has shared CMS / admin login (e.g. WordPress, Squarespace dashboard)." },
   { field: 'web_squad_hosting_details_provided', label: 'Hosting details provided',     hint: "Partner has shared their current hosting provider + login (Bluehost, SiteGround, Squarespace hosting, etc.)." },
   { field: 'web_squad_domain_registrar_provided',label: 'Domain registrar confirmation',hint: "Partner has confirmed who manages the domain (GoDaddy, Namecheap, Squarespace, etc.) and shared access." },
   { field: 'web_squad_login_in_1password',       label: 'Login added to 1Password',     hint: "Credentials live in the Squad 1Password vault." },
   { field: 'web_squad_ga_access_shared',         label: 'GA access shared',             hint: "Partner has invited the Squad GA account." },
+  { field: 'web_squad_nameservers_verified',     label: 'Nameservers verified',         hint: "Dev confirmed nameservers point at the registrar. If DNS is managed elsewhere (Cloudflare etc.), mark NO and record where in the DNS note below." },
   { field: 'web_squad_ready_for_evaluation',     label: 'Ready for site evaluation',    hint: "All prerequisites met; the Squad will schedule the evaluation pass." },
 ]
 
@@ -475,6 +495,172 @@ function StatePill({ state }: { state: boolean | null }) {
   if (state === true)  return <span className="text-[10px] font-bold uppercase tracking-wide text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">Yes</span>
   if (state === false) return <span className="text-[10px] font-bold uppercase tracking-wide text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">No</span>
   return <span className="text-[10px] font-bold uppercase tracking-wide text-purple-gray bg-lavender/30 border border-lavender rounded-full px-2 py-0.5">Not yet</span>
+}
+
+// ── Hosting & Domain Details (dev-facing) ────────────────────────────
+// Read-only summary of the hosting + domain fields the partner submitted
+// via the registrar intake / content collection. The dev needs to see
+// at a glance: current host, registrar URL, credential method, whether
+// the limited-access invite was confirmed, and the 1Password share URL
+// if one was sent. Pairs with the new web_squad_nameservers_verified
+// row in the checklist above + a free-text DNS notes field for the
+// "DNS managed elsewhere" cases (Cloudflare, third-party DNS).
+
+interface HostingDomainSummary {
+  current_host:                   string | null
+  domain_registrar_url:           string | null
+  domain_credential_method:       string | null
+  domain_invite_confirmed:        boolean | null
+  domain_one_password_invite_url: string | null
+}
+
+function HostingDomainDevPanel({
+  memberId, dnsNotes, onSaveDnsNotes,
+}: {
+  memberId:        number | null
+  dnsNotes:        string | null
+  onSaveDnsNotes:  (value: string | null) => Promise<void>
+}) {
+  const [info,    setInfo]    = useState<HostingDomainSummary | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [notesDraft, setNotesDraft] = useState(dnsNotes ?? '')
+  const [savingNotes, setSavingNotes] = useState(false)
+
+  // Keep the draft in sync if the parent reloads the church row.
+  useEffect(() => { setNotesDraft(dnsNotes ?? '') }, [dnsNotes])
+
+  // Resolve member → web_project_id → latest content_collection_session.
+  useEffect(() => {
+    if (memberId == null) return
+    let cancelled = false
+    setLoading(true)
+    void (async () => {
+      try {
+        const { data: project } = await supabase
+          .from('strategy_web_projects')
+          .select('id')
+          .eq('member', memberId)
+          .eq('archived', false)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (!project) { if (!cancelled) setInfo(null); return }
+        const { data: session } = await supabase
+          .from('strategy_content_collection_sessions')
+          .select('current_host, domain_registrar_url, domain_credential_method, domain_invite_confirmed, domain_one_password_invite_url')
+          .eq('web_project_id', (project as { id: string }).id)
+          .order('submitted_at', { ascending: false, nullsFirst: false })
+          .order('updated_at',   { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (!cancelled) setInfo((session as HostingDomainSummary | null) ?? null)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [memberId])
+
+  const handleNotesBlur = async () => {
+    const next = notesDraft.trim()
+    if ((dnsNotes ?? '') === next) return
+    setSavingNotes(true)
+    try { await onSaveDnsNotes(next === '' ? null : next) }
+    finally { setSavingNotes(false) }
+  }
+
+  const hasAnyHostingInfo =
+    info && (info.current_host || info.domain_registrar_url || info.domain_credential_method || info.domain_invite_confirmed || info.domain_one_password_invite_url)
+
+  return (
+    <div className="mb-4">
+      <SubSectionLabel label="Hosting & Domain (Dev)" icon={Server} />
+      <div className="rounded-xl border border-lavender bg-white p-3 space-y-2">
+        {loading && (
+          <p className="text-[11px] text-purple-gray inline-flex items-center gap-1">
+            <Loader2 size={11} className="animate-spin" /> Loading hosting details…
+          </p>
+        )}
+        {!loading && !hasAnyHostingInfo && (
+          <p className="text-[11px] text-purple-gray italic">
+            No hosting or domain details on file yet — partner hasn't submitted the registrar intake / content collection.
+          </p>
+        )}
+        {!loading && hasAnyHostingInfo && info && (
+          <dl className="text-[11.5px] grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1.5">
+            {info.current_host && (
+              <div>
+                <dt className="text-purple-gray text-[10px] uppercase tracking-wide">Current host</dt>
+                <dd className="text-deep-plum font-medium">{info.current_host}</dd>
+              </div>
+            )}
+            {info.domain_registrar_url && (
+              <div>
+                <dt className="text-purple-gray text-[10px] uppercase tracking-wide">Registrar URL</dt>
+                <dd>
+                  {/^https?:\/\//.test(info.domain_registrar_url)
+                    ? <a href={info.domain_registrar_url} target="_blank" rel="noopener noreferrer" className="text-primary-purple underline break-all">{info.domain_registrar_url}</a>
+                    : <span className="text-deep-plum font-medium">{info.domain_registrar_url}</span>}
+                </dd>
+              </div>
+            )}
+            {info.domain_credential_method && (
+              <div>
+                <dt className="text-purple-gray text-[10px] uppercase tracking-wide">Credential method</dt>
+                <dd className="text-deep-plum">{humanizeCredentialMethod(info.domain_credential_method)}</dd>
+              </div>
+            )}
+            {info.domain_credential_method === 'invite_admin' && info.domain_invite_confirmed != null && (
+              <div>
+                <dt className="text-purple-gray text-[10px] uppercase tracking-wide">Invite confirmed</dt>
+                <dd className={info.domain_invite_confirmed ? 'text-green-700 font-semibold' : 'text-amber-700 font-semibold'}>
+                  {info.domain_invite_confirmed ? 'Yes' : 'Not yet'}
+                </dd>
+              </div>
+            )}
+            {info.domain_one_password_invite_url && (
+              <div className="md:col-span-2">
+                <dt className="text-purple-gray text-[10px] uppercase tracking-wide">1Password share</dt>
+                <dd>
+                  <a href={info.domain_one_password_invite_url} target="_blank" rel="noopener noreferrer" className="text-primary-purple underline break-all">
+                    {info.domain_one_password_invite_url}
+                  </a>
+                </dd>
+              </div>
+            )}
+          </dl>
+        )}
+
+        {/* DNS notes — pairs with the nameservers_verified checklist row.
+            When the dev marks nameservers verified=false (DNS managed
+            elsewhere), they record what they found here. */}
+        <div className="pt-2 border-t border-lavender/60">
+          <label className="block text-[10px] uppercase tracking-wide text-purple-gray font-bold mb-1">
+            DNS / Nameserver notes
+          </label>
+          <textarea
+            value={notesDraft}
+            onChange={e => setNotesDraft(e.target.value)}
+            onBlur={() => void handleNotesBlur()}
+            placeholder="e.g. Domain registered at GoDaddy but DNS managed at Cloudflare — collected Cloudflare admin invite, pending acceptance."
+            rows={2}
+            className="w-full text-[11.5px] px-2 py-1.5 rounded-md border border-lavender bg-white focus:border-primary-purple focus:outline-none resize-y"
+          />
+          {savingNotes && <p className="text-[10px] text-purple-gray mt-1 inline-flex items-center gap-1"><Loader2 size={9} className="animate-spin" /> Saving…</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function humanizeCredentialMethod(value: string): string {
+  switch (value) {
+    case 'invite_admin':                                                          return 'Invite admin.websquad as a user'
+    case 'one_password':                                                          return '1Password share link'
+    case 'Directly share login credentials with TheSquad.':                       return 'Direct share'
+    case 'Create a "limited access user account" for TheSquad through your domain registrar.': return 'Limited-access user account'
+    default:                                                                      return value
+  }
 }
 
 // ── Partner Site Notes (Notion) ────────────────────────────────────────
