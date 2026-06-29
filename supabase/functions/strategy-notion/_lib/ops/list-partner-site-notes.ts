@@ -1,9 +1,10 @@
 // List Partner Site Notes from the Notion Web Support database.
 //
-// The database has a `notes type` select property; we filter to rows
-// where the value is "Partner site notes". The Church details page →
+// The database has a `Notes Type` select property; we filter to rows
+// where the value is "Partner Site Notes". The Church details page →
 // Web Squad section calls this op with the partner's church name to
 // further narrow client-side (titles often include the church name).
+// Property name + select value are case-sensitive in Notion's API.
 //
 // Returns the title, last_edited timestamp, public URL, and the first
 // ~280 chars of body content so the AM can scan without leaving the
@@ -15,8 +16,8 @@ import { DB } from './data-sources.ts'
 import { richTextToMarkdown } from '../parsers.ts'
 import type { NotionPage, NotionRichText } from '../types.ts'
 
-const PROPERTY_NAME = 'notes type'
-const FILTER_VALUE  = 'Partner site notes'
+const PROPERTY_NAME = 'Notes Type'
+const FILTER_VALUE  = 'Partner Site Notes'
 /** Body-preview char budget. Long enough to surface a meaningful
  *  first sentence; short enough to keep the list dense. */
 const PREVIEW_CHAR_BUDGET = 280

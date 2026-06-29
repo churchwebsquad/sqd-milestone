@@ -336,11 +336,24 @@ function renderDiscoverySection(s: DiscoverySection, plan: ContentModelPlan, lin
     lines.push(`  - schema: ${s.schema.map(k => `\`${k}\``).join(', ')}`)
   }
   lines.push(`  - target: ${TARGET_HINT_LABEL[s.target_hint]}`)
-  if (s.sample_names.length > 0) {
-    lines.push(`  - sample: ${s.sample_names.map(n => `*${n}*`).join(' · ')}${s.item_count > s.sample_names.length ? ` *(+${s.item_count - s.sample_names.length} more)*` : ''}`)
-  }
   if (s.section_role) {
     lines.push(`  - section role: \`${s.section_role}\``)
+  }
+  // Sample record — first item with every schema field + actual
+  // value. The bit the dev actually scans to understand the shape
+  // of one real instance of this content.
+  if (s.sample_record) {
+    const lines2 = renderSampleRecord(s.sample_record, s.schema)
+    if (lines2.length > 0) {
+      lines.push(`  - sample (first record):`)
+      for (const l of lines2) lines.push(`    - ${l}`)
+    }
+  }
+  // List of additional record names so the dev sees the partner's
+  // own vocabulary across the rest of the items.
+  if (s.sample_names.length > 1 && s.item_count > 1) {
+    const restNames = s.sample_names.slice(1)
+    lines.push(`  - other items: ${restNames.map(n => `*${n}*`).join(' · ')}${s.item_count > s.sample_names.length ? ` *(+${s.item_count - s.sample_names.length} more)*` : ''}`)
   }
   // Partner-supplied context for events / sermons / groups sections.
   // This is what makes the section actually buildable — embed source,
@@ -382,6 +395,74 @@ function renderPartnerIntent(plan: ContentModelPlan, lines: string[]) {
     }
     lines.push(``)
   }
+}
+
+/** Render the sample record as bullet lines. One line per schema
+ *  field, value HTML-stripped + truncated. Schema order preserved so
+ *  the dev reads in template order, not whatever order the underlying
+ *  object happened to iterate. Skips fields the projection produced
+ *  as null/empty so the sample doesn't bloat with `(blank)` noise. */
+function renderSampleRecord(record: Record<string, unknown>, schema: string[]): string[] {
+  const out: string[] = []
+  // Collect ALL keys we want to display: schema fields PLUS any
+  // suffixed siblings the projection produced (cta_label, cta_url,
+  // cta_kind) that derive from a schema field.
+  const display = new Set<string>(schema)
+  for (const k of Object.keys(record)) {
+    for (const s of schema) {
+      if (k.startsWith(`${s}_`)) display.add(k)
+    }
+  }
+  // Preserve schema order first, then any extra suffixed keys grouped
+  // under their parent.
+  const ordered: string[] = []
+  const seen = new Set<string>()
+  for (const s of schema) {
+    if (display.has(s) && !seen.has(s)) { ordered.push(s); seen.add(s) }
+    // Then any *_label / *_url / *_kind siblings produced from this
+    // field by the projection.
+    for (const k of Object.keys(record)) {
+      if (!seen.has(k) && (k === `${s}_label` || k === `${s}_url` || k === `${s}_kind`)) {
+        ordered.push(k); seen.add(k)
+      }
+    }
+  }
+  for (const k of ordered) {
+    const v = record[k]
+    const formatted = formatSampleValue(v)
+    if (formatted === '*(blank)*' && !schema.includes(k)) continue   // skip auxiliary blanks
+    out.push(`*${k}*: ${formatted}`)
+  }
+  return out
+}
+
+function formatSampleValue(v: unknown): string {
+  if (v == null) return '*(blank)*'
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No'
+  if (Array.isArray(v)) {
+    if (v.length === 0) return '*(empty array)*'
+    return `[${v.length} items: ${v.slice(0, 2).map(x => formatSampleValue(x)).join(', ')}${v.length > 2 ? '…' : ''}]`
+  }
+  if (typeof v === 'object') {
+    const s = JSON.stringify(v)
+    return `\`${s.length > 80 ? s.slice(0, 77) + '…' : s}\``
+  }
+  const s = String(v).trim()
+  if (!s) return '*(blank)*'
+  // Strip HTML tags so the markdown sample reads as plain text.
+  const stripped = s.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+  // URL detection — render as inline link.
+  if (/^https?:\/\//i.test(stripped)) {
+    return `[${truncate(stripped, 80)}](${stripped})`
+  }
+  if (stripped.startsWith('mailto:') || stripped.startsWith('tel:')) {
+    return `\`${stripped}\``
+  }
+  // Long text → truncate with hint about original length.
+  if (stripped.length > 200) {
+    return `"${stripped.slice(0, 197)}…" *(${stripped.length} chars total)*`
+  }
+  return `"${stripped}"`
 }
 
 function renderPartnerContext(ctx: NonNullable<DiscoverySection['partner_context']>, lines: string[]) {

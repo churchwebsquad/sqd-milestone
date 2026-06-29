@@ -272,9 +272,6 @@ export default function RegistrarIntakePage() {
           <h1 className="font-serif italic text-3xl text-deep-plum">
             {partner.first_name ? `${partner.first_name}, ` : ''}let's grab your domain details
           </h1>
-          <p className="text-purple-gray mt-2 text-[15px]">
-            We only need this for partners who want to migrate their current website before the new one is designed. Everything else in the content collection can wait — this form just unlocks the technical handoff.
-          </p>
         </header>
 
         {submitted && (
@@ -286,14 +283,13 @@ export default function RegistrarIntakePage() {
         <section className="bg-white border border-lavender rounded-2xl p-5 md:p-6 shadow-sm">
           <h2 className="font-serif italic text-xl text-deep-plum mb-1">Where does your site live today?</h2>
           <p className="text-purple-gray text-sm mb-4">
-            Tell us which hosting service your current website runs on (e.g. <em>Squarespace</em>, <em>Wix</em>, <em>WordPress.com</em>, <em>Bluehost</em>, <em>SiteGround</em>). If you don't know, ask whoever set up the site originally — they'll know.
+            Tell us which hosting service your current website runs on (e.g. <em>Squarespace</em>, <em>Wix</em>, <em>WordPress.com</em>, <em>Bluehost</em>, <em>SiteGround</em>).
           </p>
           <FieldShort
             label="Current hosting provider"
             placeholder="Squarespace, Wix, WordPress.com, Bluehost, …"
             value={fields.current_host}
             onChange={v => void save('current_host', v)}
-            help="Just the name is enough at this step. We'll follow up about credentials separately."
           />
         </section>
 
@@ -370,9 +366,6 @@ export default function RegistrarIntakePage() {
           )}
         </div>
 
-        <p className="text-xs text-purple-gray mt-6 text-center">
-          When you're ready for the full content collection, your account manager will send you that link. Anything you save here will already be filled in.
-        </p>
       </div>
     </div>
   )

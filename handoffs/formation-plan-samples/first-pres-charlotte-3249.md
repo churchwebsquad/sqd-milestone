@@ -1,7 +1,7 @@
 # Formation Plan — Dev Handoff
 
 *Translated from* `first-pres-charlotte-3249.json`
-*Generated* 6/26/2026, 3:25:10 PM *fingerprint* `-rgvu76`
+*Generated* 6/26/2026, 3:31:57 PM *fingerprint* `-rgvu76`
 
 ## How to use this doc
 
@@ -75,37 +75,59 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `contact`
   - target: strategist confirms
   - section role: `content_block`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "FPC Kids"
+    - *contact_url*: "#kids"
+    - *contact_kind*: "anchor"
 
 - **FPC Kids**
   - 2 items
   - schema: `contact`
   - target: strategist confirms
   - section role: `content_block`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Sign Up for the Children's Newsletter"
+    - *contact_url*: [https://fpc.tiny.us/childrensnewsletter](https://fpc.tiny.us/childrensnewsletter)
 
 - **Children's Choir**
   - 3 items
   - schema: `heading_card`, `description_card`
   - target: strategist confirms
   - section role: `content_block`
+  - sample (first record):
+    - *heading_card*: "Carol Choir"
+    - *description_card*: "Ages 4.5 years through 1st Grade Wednesday evenings, 5:45 to 6:45 p.m. | Room P307"
 
 - **First Pres Youth**
   - 2 items
   - schema: `contact`
   - target: strategist confirms
   - section role: `content_block`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Download the Monthly Calendar"
+    - *contact_url*: [https://firstpres-charlotte.org/wp-content/uploads/2025/09/Youth-Calendar-25-26…](https://firstpres-charlotte.org/wp-content/uploads/2025/09/Youth-Calendar-25-26-1.pdf)
 
 - **Youth Music**
   - 2 items
   - schema: `heading_card`, `description_card`
   - target: strategist confirms
   - section role: `content_block`
+  - sample (first record):
+    - *heading_card*: "Ivey Ringers"
+    - *description_card*: "A handbell ensemble for middle and high school ringers. Ivey Ringers rehearse weekly and lead in worship throughout the year. Advanced repertoire, weekend ministry tours, and summer travel opportun…" *(249 chars total)*
 
 - **Meet Your Leader** — *analyzer suggests CPT `staff`*
   - 1 item
   - schema: `team_name`, `team_position`, `team_description`
   - target: flat list, no individual pages
-  - sample: *Audrey Webb Kahrs*
   - section role: `team_grid`
+  - sample (first record):
+    - *team_name*: "Audrey Webb Kahrs"
+    - *team_position*: "Kids Ministry Leader"
+    - *team_description*: "awebb@firstpres-charlotte.org"
 ### Worship `/worship`
 
 
@@ -114,37 +136,57 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `heading_card`, `description_card`
   - target: strategist confirms
   - section role: `content_block`
+  - sample (first record):
+    - *heading_card*: "Sanctuary Choir"
+    - *description_card*: "Rehearsals: Wednesdays, 7 to 8:30 p.m. This choir leads music for the 11 a.m. Sunday service as well as special services and programs throughout the year. The Sanctuary Choir sings across the full …" *(406 chars total)*
 
 - **Youth Ensembles**
   - 2 items
   - schema: `heading_card`, `description_card`
   - target: strategist confirms
   - section role: `content_block`
+  - sample (first record):
+    - *heading_card*: "Ivey Ringers (grades 6th-12th)"
+    - *description_card*: "Rehearsals: Sundays, 4:30 to 5:15 p.m. A handbell ensemble for middle and high school ringers. Ivey Ringers rehearse weekly, lead in worship throughout the year, and take part in weekend and summer…" *(253 chars total)*
 
 - **Children's Ensembles**
   - 3 items
   - schema: `heading_card`, `description_card`
   - target: strategist confirms
   - section role: `content_block`
+  - sample (first record):
+    - *heading_card*: "Carol Choir"
+    - *description_card*: "Ages 4.5 through 1st Grade | Wednesdays, 5:45 to 6:45 p.m. | Room P307 Through songs and games, these young musicians learn the fundamentals of music, faith, and teamwork, and they participate in w…" *(224 chars total)*
 
 - **Signature Events Every Year**
   - 3 items
   - schema: `heading_card`, `description_card`
   - target: strategist confirms
   - section role: `content_block`
+  - sample (first record):
+    - *heading_card*: "Singing in the Season"
+    - *description_card*: "Ages 4.5 through 1st Grade | Wednesdays, 5:45 to 6:45 p.m. | Room P307 In early December, the entire Music Ministry comes together with full orchestra to present this beloved community program, ope…" *(206 chars total)*
 
 - **Meet the Music Ministry Team** — *analyzer suggests CPT `staff`*
   - 5 items
   - schema: `team_name`, `team_position`, `team_description`
   - target: flat list, no individual pages
-  - sample: *Will Young* · *Kaitlyn Davros* · *Trevor Cook* *(+2 more)*
   - section role: `team_grid`
+  - sample (first record):
+    - *team_name*: "Will Young"
+    - *team_position*: "Director of Music Ministries"
+    - *team_description*: *(blank)*
+  - other items: *Kaitlyn Davros* · *Trevor Cook* *(+2 more)*
 
 - **Worship Wherever You Are**
   - 2 items
   - schema: `contact`
   - target: strategist confirms
   - section role: `cta_banner_simple`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Roku Streaming Instructions"
+    - *contact_url*: [https://firstpres-charlotte.org/wp-content/uploads/2025/03/Stream-on-Roku-Instr…](https://firstpres-charlotte.org/wp-content/uploads/2025/03/Stream-on-Roku-Instructions.pdf)
 ### Care `/care`
 
 
@@ -152,28 +194,43 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - 3 items
   - schema: `team_name`, `team_position`, `team_description`
   - target: flat list, no individual pages
-  - sample: *Anna Dickson* · *Chuck Williamson* · *Mary Bowman*
   - section role: `team_grid`
+  - sample (first record):
+    - *team_name*: "Anna Dickson"
+    - *team_position*: "Executive Pastor and Pastor for Congregational Care"
+    - *team_description*: "adickson@firstpres-charlotte.org"
+  - other items: *Chuck Williamson* · *Mary Bowman*
 
 - **Content Section 99**
   - 2 items
   - schema: `heading`, `description`
   - target: strategist confirms
-  - sample: *To request a pastoral visit:* · *A note about hospital visits:*
   - section role: `content_block`
+  - sample (first record):
+    - *heading*: "To request a pastoral visit:"
+    - *description*: "During office hours (Monday through Friday, 8 a.m. to 5 p.m.): call (704) 332-5123. Outside of office hours: call the pastoral emergency line at (704) 927-0256. Your call will be returned promptly."
+  - other items: *A note about hospital visits:*
 
 - **Content Section 99**
   - 2 items
   - schema: `heading`, `description`
   - target: strategist confirms
-  - sample: *Insurance Accepted:* · *Scheduling An Appointment*
   - section role: `content_block`
+  - sample (first record):
+    - *heading*: "Insurance Accepted:"
+    - *description*: "Aetna, BCBS, CBHA, Cigna, Medicare, United Healthcare, and Out-of-Network Benefits. Income-based sliding scale fees are available. Please note: not all counselors accept every insurance. Review ind…" *(245 chars total)*
+  - other items: *Scheduling An Appointment*
 
 - **You Don't Have to Figure It Out Alone**
   - 3 items
   - schema: `contact`
   - target: strategist confirms
   - section role: `cta_banner_simple`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "For Counseling Appointments"
+    - *contact_url*: `tel:+17045549900`
+    - *contact_kind*: "tel"
 ### Local Global `/local-global`
 
 
@@ -182,25 +239,43 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `contact`
   - target: strategist confirms
   - section role: `feature_split`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Sign Up to Host"
+    - *contact_url*: [https://www.signupgenius.com/go/8050545AAAA2BA1FE3-59454213-room#/](https://www.signupgenius.com/go/8050545AAAA2BA1FE3-59454213-room#/)
+    - *contact_kind*: "external_url"
 
 - **Serving the World**
   - 6 items
   - schema: `contact`
   - target: strategist confirms
   - section role: `feature_split`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Contact for upcoming trips"
+    - *contact_url*: `mailto:lcrain@firstpres-charlotte.org`
+    - *contact_kind*: "mailto"
 
 - **Outreach Leadership** — *analyzer suggests CPT `staff`*
   - 3 items
   - schema: `team_name`, `team_position`, `team_description`
   - target: flat list, no individual pages
-  - sample: *Rev. Lucy Crain* · *Flo Bryan* · *Heidi Squires*
   - section role: `team_grid`
+  - sample (first record):
+    - *team_name*: "Rev. Lucy Crain"
+    - *team_position*: *(blank)*
+    - *team_description*: "Associate Pastor for Outreach and Missions"
+  - other items: *Flo Bryan* · *Heidi Squires*
 
 - **The Work Is Already Happening. Come Join It.**
   - 2 items
   - schema: `contact`
   - target: strategist confirms
   - section role: `cta_banner_simple`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Find a Serving Opportunity"
+    - *contact_url*: "/serve"
 ### About `/about`
 
 
@@ -209,19 +284,29 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `heading`, `description`
   - target: strategist confirms
   - section role: `content_block`
+  - sample (first record):
+    - *heading*: *(blank)*
+    - *description*: ""In the name of Christ by the power of the Holy Spirit, the Christian community worships and serves God in shared experiences of life, in personal discipleship, in mutual ministry, and in common mi…" *(218 chars total)*
 
 - **Key beliefs held at First Presbyterian Church**
   - 3 items
   - schema: `title`, `description`
   - target: strategist confirms
-  - sample: *Women in Ministry* · *Racial Justice* · *Politics and Public Life*
   - section role: `faq_accordion`
+  - sample (first record):
+    - *title*: "Women in Ministry"
+    - *description*: "Women serve as pastors, elders, deacons, teachers, and leaders across all ministries. This community joyfully affirms the gifts of women for every form of leadership."
+  - other items: *Racial Justice* · *Politics and Public Life*
 
 - **People Who Love Jesus and Love This City**
   - 2 items
   - schema: `contact`
   - target: strategist confirms
   - section role: `cta_banner_simple`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Meet the Full Team"
+    - *contact_url*: "/staff"
 ### Advocacy `/advocacy`
 
 
@@ -230,18 +315,35 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `contact`
   - target: strategist confirms
   - section role: `feature_split`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Contact Us"
+    - *contact_url*: `mailto:hclarke61@gmail.com`
+    - *contact_kind*: "mailto"
 
 - **Learn More**
   - 1 item
   - schema: `show_search`, `show_category`, `category_label`, `show_tag`, `tag_label`, `show_sort`, `sort_label`
   - target: strategist confirms
   - section role: `category_filter`
+  - sample (first record):
+    - *show_search*: "The Advocacy Ministry maintains a collection of resources like articles, posts, and materials all organized by sub-ministry. Browse by topic to go deeper on any of the areas above."
+    - *show_category*: Yes
+    - *category_label*: "Topic"
+    - *show_tag*: Yes
+    - *tag_label*: "Type of Resource"
+    - *show_sort*: Yes
+    - *sort_label*: "Time Requirement"
 
 - **The Work Is Yours to Join**
   - 2 items
   - schema: `contact`
   - target: strategist confirms
   - section role: `cta_banner_simple`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Find a Serving Opportunity"
+    - *contact_url*: "/serve"
 ### Home `/home`
 
 
@@ -250,12 +352,23 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `contact`
   - target: strategist confirms
   - section role: `hero_home`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Plan Your Visit"
+    - *contact_url*: "/new"
 
 - **Faith That Lives Beyond Sunday**
   - 3 items
   - schema: `heading_card`, `description_card`, `buttons_card`
   - target: strategist confirms
   - section role: `feature_split`
+  - sample (first record):
+    - *heading_card*: "For Your Family"
+    - *description_card*: "From the nursery to 12th grade, there's a place for every child at FPC."
+    - *buttons_card*: *(blank)*
+    - *buttons_card_label*: "Explore Children & Youth"
+    - *buttons_card_url*: "/children-youth"
+    - *buttons_card_kind*: "internal_route"
 ### New `/new`
 
 
@@ -264,12 +377,20 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `heading_card`, `description_card`
   - target: strategist confirms
   - section role: `content_block`
+  - sample (first record):
+    - *heading_card*: "Nursery (Birth through Age 2)"
+    - *description_card*: "The nursery is open beginning at 9:30 a.m. in Room P311. Professionally trained staff provide a safe, loving environment. When children turn three, they&#39;re encouraged to join Sunday School and …" *(210 chars total)*
 
 - **When You're Ready to Call This Home**
   - 2 items
   - schema: `contact`
   - target: strategist confirms
   - section role: `feature_split`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Sign Up for Baptism"
+    - *contact_url*: [https://form.jotform.com/81076098123153](https://form.jotform.com/81076098123153)
+    - *contact_kind*: "mailto"
 ### Serve `/serve`
 
 
@@ -278,12 +399,21 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `contact`
   - target: strategist confirms
   - section role: `feature_split`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Sign Up to Host"
+    - *contact_url*: [https://www.signupgenius.com/go/8050545AAAA2BA1FE3-59454213-room#/](https://www.signupgenius.com/go/8050545AAAA2BA1FE3-59454213-room#/)
+    - *contact_kind*: "external_url"
 
 - **The Team Is Better With You On It**
   - 2 items
   - schema: `contact`
   - target: strategist confirms
   - section role: `cta_banner_simple`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Call (704) 332-5123"
+    - *contact_url*: `tel:+17043325123`
 ### Staff `/staff`
 
 
@@ -291,15 +421,23 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - 6 items
   - schema: `team_name`, `team_position`, `team_description`
   - target: flat list, no individual pages
-  - sample: *Lewis Galloway* · *Anna Dickson* · *Lucy Crain* *(+3 more)*
   - section role: `team_grid`
+  - sample (first record):
+    - *team_name*: "Lewis Galloway"
+    - *team_position*: "Transitional Pastor"
+    - *team_description*: "Dr. Lewis Galloway is a native of Columbia, SC and a graduate of Davidson College (A.B.) and Union Presbyterian Seminary in Richmond, VA (D.Min.; Th.M.). He studied in France for two years at the U…" *(1980 chars total)*
+  - other items: *Anna Dickson* · *Lucy Crain* *(+3 more)*
 
 - **Program & Support Staff** — *analyzer suggests CPT `staff`*
   - 39 items
   - schema: `team_name`, `team_position`, `team_description`
   - target: flat list, no individual pages
-  - sample: *Andrea Nelson* · *Anita Bennett* · *Audrey Webb Kahrs* *(+36 more)*
   - section role: `team_grid`
+  - sample (first record):
+    - *team_name*: "Andrea Nelson"
+    - *team_position*: "Food Service Manager"
+    - *team_description*: "I was born and raised in Flint, MI, and I have lived in Charlotte for 10 years. I attended the Art Institute of Michigan, Novi Culinary School. I have over 15 years of catering experience for speci…" *(361 chars total)*
+  - other items: *Anita Bennett* · *Audrey Webb Kahrs* *(+36 more)*
 ### Adults `/adults`
 
 
@@ -308,6 +446,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `contact`
   - target: strategist confirms
   - section role: `content_block`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Read the PW Newsletter"
+    - *contact_url*: [https://mailchi.mp/firstpres-charlotte/pw-summer-18235218](https://mailchi.mp/firstpres-charlotte/pw-summer-18235218)
 ### Employment `/employment`
 
 
@@ -315,8 +457,15 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - 1 item
   - schema: `title`, `location`, `summary`, `apply_cta`
   - target: flat list, no individual pages
-  - sample: *Afternoon/Evening Custodian*
   - section role: `career_listing`
+  - sample (first record):
+    - *title*: "Afternoon/Evening Custodian"
+    - *location*: "Operations"
+    - *summary*: "The custodian is a 37.5-hour-per-week position working with and reporting to the Director of Operations. Custodians are responsible for maintaining the cleanliness and orderliness of school and chu…" *(467 chars total)*
+    - *apply_cta*: *(blank)*
+    - *apply_cta_label*: "View Full Job Description"
+    - *apply_cta_url*: [https://firstpres-charlotte.org/wp-content/uploads/2026/01/Afternoon_Evening-Cu…](https://firstpres-charlotte.org/wp-content/uploads/2026/01/Afternoon_Evening-Custodian-2026.pdf)
+    - *apply_cta_kind*: "external_url"
 ### Events `/events`
 
 
@@ -325,6 +474,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `contact`
   - target: strategist confirms
   - section role: `cta_banner_simple`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Sign Up for the Weekly Newsletter"
+    - *contact_url*: [https://fpc.tiny.us/news](https://fpc.tiny.us/news)
 ### Give `/give`
 
 
@@ -333,6 +486,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `contact`
   - target: strategist confirms
   - section role: `cta_banner_simple`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Give Online"
+    - *contact_url*: [https://onrealm.org/firstprescharlotte/give/main](https://onrealm.org/firstprescharlotte/give/main)
 ### The History Hallway `/the-history-hallway`
 
 
@@ -340,8 +497,11 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - 2 items
   - schema: `title`, `description`
   - target: strategist confirms
-  - sample: *Repentance and Resurrection Statement* · *Artist’s Statement*
   - section role: `faq_accordion`
+  - sample (first record):
+    - *title*: "Repentance and Resurrection Statement"
+    - *description*: "Teacher, which commandment in the law is the greatest?&nbsp; Jesus said to him, You shall love the Lord your God with all your heart, and with all your soul, and with all your mind… And… You shall …" *(2210 chars total)*
+  - other items: *Artist’s Statement*
 ### Watch `/watch`
 
 
@@ -350,6 +510,14 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `show_search`, `show_category`, `category_label`, `show_tag`, `tag_label`, `show_sort`, `sort_label`
   - target: strategist confirms
   - section role: `category_filter`
+  - sample (first record):
+    - *show_search*: Yes
+    - *show_category*: Yes
+    - *category_label*: "Preacher"
+    - *show_tag*: Yes
+    - *tag_label*: "Service Type"
+    - *show_sort*: Yes
+    - *sort_label*: "Service Year"
 ### {single-staff} `/single-staff`
 
 
@@ -358,6 +526,8 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *description*: ""
 ### {single-event} `/single-event`
 
 
@@ -377,6 +547,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Transitional Pastor"
+    - *heading*: "Lewis Galloway"
+    - *description*: "Dr. Lewis Galloway is a native of Columbia, SC and a graduate of Davidson College (A.B.) and Union Presbyterian Seminary in Richmond, VA (D.Min.; Th.M.). He studied in France for two years at the U…" *(1980 chars total)*
 ### {single-sermon} `/single-sermon`
 
 
@@ -385,6 +559,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `contact`
   - target: strategist confirms
   - section role: `intro_text`
+  - sample (first record):
+    - *contact*: *(blank)*
+    - *contact_label*: "Audio"
+    - *contact_kind*: "internal_route"
 ### Anna Dickson `/staff/anna-dickson`
 
 
@@ -393,6 +571,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Executive Pastor and Pastor for Congregational Care"
+    - *heading*: "Anna Dickson"
+    - *description*: "Having served congregations in both Raleigh and Charlotte since her ordination in 2011, Anna enjoys her call as Pastor for Congregational Care at First Presbyterian Church because of its emphasis o…" *(641 chars total)*
 ### News & Media `/news-media`
 
 
@@ -401,6 +583,12 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `show_category`, `show_tag`, `tag_label`, `show_sort`, `sort_label`
   - target: strategist confirms
   - section role: `category_filter`
+  - sample (first record):
+    - *show_category*: No
+    - *show_tag*: Yes
+    - *tag_label*: "Topic"
+    - *show_sort*: Yes
+    - *sort_label*: "Date"
 ### Lucy Crain `/staff/lucy-crain`
 
 
@@ -409,6 +597,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Associate Pastor for Outreach and Missions"
+    - *heading*: "Lucy Crain"
+    - *description*: "Lucy and her husband, Jim, grew up in the East Tennessee mountains and attended East Tennessee State University. They moved to Charlotte twenty-five years ago, where they raised their three childre…" *(956 chars total)*
 ### {single-blog-post} `/single-blog-post`
 
 
@@ -417,6 +609,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `category_1`, `heading`, `author_bio_author_container`
   - target: individual detail page per item
   - section role: `post_detail`
+  - sample (first record):
+    - *category_1*: "News"
+    - *heading*: "Blog Post Heading"
+    - *author_bio_author_container*: "News &amp; Publications"
 ### Chuck Williamson `/staff/chuck-williamson`
 
 
@@ -425,6 +621,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Parish Associate"
+    - *heading*: "Chuck Williamson"
+    - *description*: "My title, Parish Associate, means I get to fill in wherever needed. That&#39;s one thing I love about ministry — the variety of tasks that a minister is called on to do: preach, teach, study, visit…" *(950 chars total)*
 ### Mary Henderson Bowman `/staff/mary-henderson-bowman`
 
 
@@ -433,6 +633,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Parish Associate"
+    - *heading*: "Mary Henderson Bowman"
+    - *description*: "Mary grew up as the youngest of four children in Columbus, Ohio. She came to North Carolina as a freshman at UNC-Chapel Hill and decided to stay. She and her husband Charles have two adult sons. Ma…" *(974 chars total)*
 ### Rob Spach `/staff/rob-spach`
 
 
@@ -441,6 +645,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Parish Associate"
+    - *heading*: "Rob Spach"
+    - *description*: "Rob Spach grew up in Brazil as the child of Presbyterian educational missionaries. He holds degrees from Davidson College (A.B.), the University of Virginia (M.A.), Princeton Theological Seminary (…" *(685 chars total)*
 ### Andrea Nelson `/staff/andrea-nelson`
 
 
@@ -449,6 +657,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Food Service Manager"
+    - *heading*: "Andrea Nelson"
+    - *description*: "I was born and raised in Flint, MI, and I have lived in Charlotte for 10 years. I attended the Art Institute of Michigan, Novi Culinary School. I have over 15 years of catering experience for speci…" *(361 chars total)*
 ### Anita Bennett `/staff/anita-bennett`
 
 
@@ -457,6 +669,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Weekday School Assistant Director"
+    - *heading*: "Anita Bennett"
+    - *description*: "I first came to First Presbyterian as a Weekday School Teacher in 2016 after leaving the Corporate world behind. In May 2020, I took the position of Assistant Director and Treasurer and joined the …" *(903 chars total)*
 ### Audrey Webb Kahrs `/staff/audrey-webb-kahrs`
 
 
@@ -465,6 +681,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Director of Youth Ministry"
+    - *heading*: "Audrey Webb Kahrs"
+    - *description*: "Audrey is a recent graduate of Austin Presbyterian Theological Seminary and the Center for Youth Ministry Training, where she earned a Master of Arts in Youth Ministry. She is a proud alum of the U…" *(876 chars total)*
 ### Barb Frith `/staff/barb-frith`
 
 
@@ -473,6 +693,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Music Ministry Administrative Assistant"
+    - *heading*: "Barb Frith"
+    - *description*: "I grew up in Connecticut and attended the University of Virginia as an undergraduate, where I met my husband Pat, and then again for law school. Following law school graduation, Pat and I relocated…" *(705 chars total)*
 ### Ben Treece `/staff/ben-treece`
 
 
@@ -481,6 +705,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Director of Technology"
+    - *heading*: "Ben Treece"
+    - *description*: "Ben joined the church as Technical Production Coordinator in 2008. He manages and supports the TV ministry, Audio/Visual Systems, and IT systems for the church. Ben graduated from Middle Tennessee …" *(637 chars total)*
 ### Bradley Thompson `/staff/bradley-thompson`
 
 
@@ -489,6 +717,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Facilities Staff"
+    - *heading*: "Bradley Thompson"
+    - *description*: "I have lived in Charlotte since November of 2025. I have worked in several different fields in my career but the latest was truck driving until joining the church. I enjoy meeting new people and my…" *(360 chars total)*
 ### Brandon Thomas `/staff/brandon-thomas`
 
 
@@ -497,6 +729,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Director of Operations"
+    - *heading*: "Brandon Thomas"
+    - *description*: "Having lived in several states throughout my life, I can honestly say I consider Charlotte home. I have been a Charlottean in the past for several years and have recently moved back to the Queen Ci…" *(705 chars total)*
 ### Caroline Schaal `/staff/caroline-schaal`
 
 
@@ -505,6 +741,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Assistant Director, Child Development Center"
+    - *heading*: "Caroline Schaal"
+    - *description*: "I am a New Jersey native who moved to North Carolina with my husband in 2018. We bought our first home here and together we have formed a beautiful life with our daughter and dog. I hold a bachelor…" *(719 chars total)*
 ### Cierra Christian `/staff/cierra-christian`
 
 
@@ -513,6 +753,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Director of Communications and Digital Engagement"
+    - *heading*: "Cierra Christian"
+    - *description*: "Cierra Christian&#39;s passion for nonprofit and church communication can be traced back to her pre-professional days. She holds an M.A. in Communication from the College of Charleston, where she f…" *(820 chars total)*
 ### Crystal Sellers `/staff/crystal-sellers`
 
 
@@ -521,6 +765,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Director of Children and Family Ministry"
+    - *heading*: "Crystal Sellers"
+    - *description*: "Crystal Sellers, a former First Presbyterian youth mom, is grateful for the opportunity to serve as Director of Children and Family Ministry. She brings to this position a wealth of life experience…" *(660 chars total)*
 ### Diane Maye `/staff/diane-maye`
 
 
@@ -529,6 +777,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Receptionist"
+    - *heading*: "Diane Maye"
+    - *description*: "Baptized at First Presbyterian Church, I moved with my family to Huntersville to open a drug store in 1954. I worked in the family business, worshipped at Huntersville Presbyterian and graduated fr…" *(601 chars total)*
 ### Flo Bryan `/staff/flo-bryan`
 
 
@@ -537,6 +789,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Community Engagement Coordinator"
+    - *heading*: "Flo Bryan"
+    - *description*: "Thirty years ago, my husband Kedar and I moved to Charlotte from Washington, DC and quickly made First Presbyterian our church home primarily because of its community outreach focus. After a career…" *(737 chars total)*
 ### Garrell Keesler `/staff/garrell-keesler`
 
 
@@ -545,6 +801,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "FPC Travels Director"
+    - *heading*: "Garrell Keesler"
+    - *description*: "As a multi-decade member at First Presbyterian Church, I joined the staff in July 2013. I continue to be interested in ways Christian Formation can equip our congregation for ministry inside and ou…" *(846 chars total)*
 ### Gloria Clark `/staff/gloria-clark`
 
 
@@ -553,6 +813,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Receptionist"
+    - *heading*: "Gloria Clark"
+    - *description*: "Gloria has been married for 27 years and has two sons who are both in Charlotte. She worked with Johnson and Wales University for 15 years and has since retired. After retirement, she found working…" *(327 chars total)*
 ### Heidi Squires `/staff/heidi-squires`
 
 
@@ -561,6 +825,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Outreach Coordinator"
+    - *heading*: "Heidi Squires"
+    - *description*: "Heidi is our outreach coordinator focusing on child and family ministries. She is married to Hart and the mother of one daughter, Everly. She is passionate about building relationships and helping …" *(491 chars total)*
 ### Jan Gaddis `/staff/jan-gaddis`
 
 
@@ -569,6 +837,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Director of Finance"
+    - *heading*: "Jan Gaddis"
+    - *description*: "I joined the staff of First Presbyterian Church in July 2010. Before joining FPC, my career spanned roles in auditing and accounting for a public utility and a consulting firm, followed by various …" *(862 chars total)*
 ### Jane Ives `/staff/jane-ives`
 
 
@@ -577,6 +849,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Membership Coordinator"
+    - *heading*: "Jane Ives"
+    - *description*: "My husband, Frasier, and I joined First Presbyterian Church (separately) in 1989. We later met attending Sunday School and got married shortly after. We raised our two boys, Harris and Hunter, here…" *(395 chars total)*
 ### Kaitlyn Davros `/staff/kaitlyn-davros`
 
 
@@ -585,6 +861,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Associate Director of Music"
+    - *heading*: "Kaitlyn Davros"
+    - *description*: "Kaitlyn Davros holds an M.M. in Sacred Music from Westminster Choir College at Rider University and a Bachelor of Music in Organ Performance from Hope College in Holland, MI. She has traveled abroa…" *(1158 chars total)*
 ### Kai `/staff/kai`
 
 
@@ -593,6 +873,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Facilities Staff"
+    - *heading*: "Kai"
+    - *description*: "[Bio not yet available — please provide bio for website]"
 ### Kalia Coffey `/staff/kalia-coffey`
 
 
@@ -601,6 +885,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Operations Administrative Assistant"
+    - *heading*: "Kalia Coffey"
+    - *description*: "I&#39;m a proud graduate of Clemson University, where I earned my degree in Health Science with a deep appreciation for community, leadership, and resilience. Over the past few years, I&#39;ve buil…" *(748 chars total)*
 ### Kelly Deal `/staff/kelly-deal`
 
 
@@ -609,6 +897,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Program Director, Child Development Center"
+    - *heading*: "Kelly Deal"
+    - *description*: "Before joining the CDC three years ago, I taught kindergarten for Charlotte-Mecklenburg Schools and four-year-olds at the Weekday School. I am a member at First Presbyterian Church. I graduated fro…" *(392 chars total)*
 ### Kelly Harder `/staff/kelly-harder`
 
 
@@ -617,6 +909,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Music Associate and Administrative Assistant for Formation"
+    - *heading*: "Kelly Harder"
+    - *description*: "Although I was born and raised in Southern California, I&#39;m now a converted Southerner. I graduated from UNCC with a Bachelor&#39;s degree in Music Education. I currently teach music at Lake Wyl…" *(349 chars total)*
 ### LaTonya Hope `/staff/latonya-hope`
 
 
@@ -625,6 +921,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Kitchen Assistant"
+    - *heading*: "LaTonya Hope"
+    - *description*: "[Bio not yet available — please provide bio for website]"
 ### Laura Katute `/staff/laura-katute`
 
 
@@ -633,6 +933,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Associate Finance Director"
+    - *heading*: "Laura Katute"
+    - *description*: "Laura recently joined the First Presbyterian Church team as Associate Finance Director. She and her husband moved to the United States from Lithuania 15 years ago. Charlotte has become home for the…" *(686 chars total)*
 ### Lauren McCrory `/staff/lauren-mccrory`
 
 
@@ -641,6 +945,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Program Director, Weekday School"
+    - *heading*: "Lauren McCrory"
+    - *description*: "I joined First Presbyterian Church staff as the Weekday School Program Director in 2014. I have a B.A. from the University of Florida and a Masters in Theology from Vanderbilt University. I moved t…" *(600 chars total)*
 ### Lauren Russell `/staff/lauren-russell`
 
 
@@ -649,6 +957,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Administrative Assistant to Associate Pastors"
+    - *heading*: "Lauren Russell"
+    - *description*: "I am going from the Schoolhouse to the Lord&#39;s House! After four wonderful and transformative years within the Charlotte-Mecklenburg School System, I have found my way into a new and exciting po…" *(893 chars total)*
 ### Lucy Baum `/staff/lucy-baum`
 
 
@@ -657,6 +969,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Director of Formation and Fellowship"
+    - *heading*: "Lucy Baum"
+    - *description*: "Lucy Baum (BA Davidson College 2010; MDiv Columbia Theological Seminary 2013) is a North Carolina native, but most recently lived in Atlanta, GA from 2010 to 2025, where she worked at Columbia Theo…" *(654 chars total)*
 ### Mark Pestano `/staff/mark-pestano`
 
 
@@ -665,6 +981,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Head of Maintenance"
+    - *heading*: "Mark Pestano"
+    - *description*: "[Bio not yet available — please provide bio for website]"
 ### Michael DeNise `/staff/michael-denise`
 
 
@@ -673,6 +993,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Executive Director"
+    - *heading*: "Michael DeNise"
+    - *description*: "Michael has a passion for non-profit leadership and helping organizations reach their full potential. He started his career at the YMCA, serving first as an aquatics director, then working his way …" *(881 chars total)*
 ### Michael O'Rourke `/staff/michael-o-rourke`
 
 
@@ -681,6 +1005,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Facilities Staff"
+    - *heading*: "Michael O'Rourke"
+    - *description*: "[Bio not yet available — please provide bio for website]"
 ### Ray Vargas `/staff/ray-vargas`
 
 
@@ -689,6 +1017,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Maintenance Technician"
+    - *heading*: "Ray Vargas"
+    - *description*: "[Bio not yet available — please provide bio for website]"
 ### Salesia Dudley `/staff/salesia-dudley`
 
 
@@ -697,6 +1029,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Assistant Food Service Manager"
+    - *heading*: "Salesia Dudley"
+    - *description*: "[Bio not yet available — please provide bio for website]"
 ### Semra Staut `/staff/semra-staut`
 
 
@@ -705,6 +1041,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Human Resources"
+    - *heading*: "Semra Staut"
+    - *description*: "Semra is a Human Resources professional with a heart for employee engagement, dialogue education, and facilitating others well. She attended undergrad at Virginia Tech, graduate school at the Unive…" *(390 chars total)*
 ### Sofia Di Dio `/staff/sofia-di-dio`
 
 
@@ -713,6 +1053,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Communications Assistant"
+    - *heading*: "Sofia Di Dio"
+    - *description*: "Sofia Di Dio brings a rich and diverse background in media, storytelling, and nonprofit leadership to her role at First Presbyterian Church. A Charlotte native, she returned home in 2020 after year…" *(1248 chars total)*
 ### Tammy Hatley `/staff/tammy-hatley`
 
 
@@ -721,6 +1065,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Head of Security"
+    - *heading*: "Tammy Hatley"
+    - *description*: "[Bio not yet available — please provide bio for website]"
 ### Tanya Gaspar `/staff/tanya-gaspar`
 
 
@@ -729,6 +1077,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Executive Assistant to the Senior Pastor"
+    - *heading*: "Tanya Gaspar"
+    - *description*: "What I&#39;m about to say may surprise people: I&#39;m not from Charlotte. I was born in Brooklyn and raised in south Florida. I graduated from Florida State University (go &#39;Noles!) in 1998 wit…" *(410 chars total)*
 ### Trevor Cook `/staff/trevor-cook`
 
 
@@ -737,6 +1089,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Carol Choir Director"
+    - *heading*: "Trevor Cook"
+    - *description*: "A lifelong member of First Presbyterian, I joined the music department as handbell coordinator in November 2013. I studied music education with an emphasis on percussion at the University of North …" *(561 chars total)*
 ### Will Celestine `/staff/will-celestine`
 
 
@@ -745,6 +1101,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Security Officer"
+    - *heading*: "Will Celestine"
+    - *description*: "Will was born and raised in New Orleans and is a self-proclaimed &quot;mama&#39;s boy.&quot; He moved to Charlotte about three years ago and loves the city and this church. He&#39;s been working in…" *(357 chars total)*
 ### Will Young `/staff/will-young`
 
 
@@ -753,6 +1113,10 @@ Sections grouped by page, with the section's heading as the label. Each row show
   - schema: `tagline`, `heading`, `description`
   - target: individual detail page per item
   - section role: `staff_member_detail`
+  - sample (first record):
+    - *tagline*: "Director of Music Ministries"
+    - *heading*: "Will Young"
+    - *description*: "I joined the staff of First Presbyterian Church in July 2011 after serving for seven years as the Associate Director of Music at Myers Park Presbyterian. My undergraduate degree is in organ perform…" *(600 chars total)*
 ### Site-wide globals (not page-specific)
 
 Single-source content reused across pages (church name, contact, service times, social links, etc.). Edited once, propagates everywhere.

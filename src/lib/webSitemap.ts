@@ -73,6 +73,13 @@ export async function commitSitemapToPages(
 
   const toInsert = pages
     .filter(p => p.slug && !takenSlugs.has(p.slug))
+    // The cowork sitemap LLM has historically proposed a "Meta" page
+    // (slug `_meta`) intended as a placeholder for project-level SEO.
+    // That's not a real page — it just clutters the page tree and
+    // confuses partners during review. Drop it. AddPageModal already
+    // filters slug='_meta' out of the visible list; this is the
+    // upstream defense so the row never gets created in the first place.
+    .filter(p => p.slug !== '_meta' && p.name !== 'Meta')
     .map((p, i) => ({
       web_project_id: webProjectId,
       name: p.name,

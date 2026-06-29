@@ -229,7 +229,7 @@ export const LIBRARY_CONCEPTS: readonly LibraryConcept[] = [
     familyFilter: ['Content Section', 'Feature Section'],
     kindFilter: ['content'],
     maxPicks: 2,
-    defaultTemplateId: 'content-section-89',
+    defaultTemplateId: 'content-section-55',
   },
   {
     id: 'content_video',

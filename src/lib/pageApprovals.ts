@@ -233,7 +233,30 @@ export async function approveCopy(args: {
     .eq('id', args.projectId)
   if (writeErr) return { ok: false, error: writeErr.message }
 
+  // 6. Fire-and-forget: recompute formation plan so the dev handoff
+  //    diagnostic stays fresh. Non-blocking — approval shouldn't fail
+  //    just because the diagnostic ran into trouble. LLM enrichment
+  //    is skipped here (would slow the request); a background cron or
+  //    a manual "Refresh formation plan" click can run LLM later.
+  void recomputeFormationPlanInBackground(sb, args.projectId)
+
   return { ok: true, version: nextVersion }
+}
+
+/** Background recompute of the formation plan. Fire-and-forget;
+ *  logs errors but never throws to the caller. Skips LLM enrichment
+ *  to keep the wall-clock low — the manual refresh button on
+ *  DevHandoffWorkspace can run the full LLM pass. */
+async function recomputeFormationPlanInBackground(
+  sb: SupabaseClient,
+  projectId: string,
+): Promise<void> {
+  try {
+    const mod = await import('./acfFormationPlan/index')
+    await mod.saveFormationPlan(projectId, sb, { skipLlm: true })
+  } catch (e) {
+    console.warn('[pageApprovals] formation plan recompute failed:', e)
+  }
 }
 
 /** Unlock: copy approved record into history, mark status='unlocked',

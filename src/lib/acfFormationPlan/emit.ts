@@ -1505,6 +1505,19 @@ function findSection(inputs: FormationInputs, sectionId: string): WebSection | n
 // both broken out.
 
 import type { DiscoverySection } from './types'
+import { classifySchema } from './classifySchema'
+
+/** True when every key on the item ends in a CTA-flattening suffix
+ *  (_label/_url/_kind/_target). Such items are the rows of a button/
+ *  CTA list, not content cards — they don't carry a schema. */
+function isCtaOnlyItem(item: Record<string, unknown>): boolean {
+  const keys = Object.keys(item)
+  if (keys.length === 0) return false
+  return keys.every(k =>
+    k.endsWith('_label') || k.endsWith('_url') ||
+    k.endsWith('_kind')  || k.endsWith('_target')
+  )
+}
 
 /** Section roles where a 1-item section is just decorative chrome
  *  (page hero, intro paragraph, single-CTA banner) — not something
@@ -1539,7 +1552,7 @@ export function buildDiscoverySections(
       const fv = (section.field_values as Record<string, unknown> | null) ?? {}
 
       const heading = headingForSection(section, template, fv)
-      const { count, schema, sampleNames } = analyzeSectionItems(template, fv)
+      const { count, schema, sampleNames, sampleRecord, projectedItems } = analyzeSectionItems(template, fv, inputs.templatesById)
 
       // Filter: skip trivial single-item sections (heros / intros /
       // single-CTA banners) unless the strategist explicitly tagged
@@ -1550,6 +1563,16 @@ export function buildDiscoverySections(
         TRIVIAL_ROLES_WHEN_SINGLE.has(section.section_role) &&
         !section.strategist_target_type
       if (isTrivial) continue
+
+      // Filter: skip sections whose primary group is a button/CTA list
+      // (every projected-item key ends in _label/_url/_kind/_target).
+      // The "items" here are action buttons under a single copy block,
+      // not repeating content cards — they don't carry a schema worth
+      // diagnosing. Caught here rather than in analyzeSectionItems so
+      // the analyzer stays a pure function.
+      if (projectedItems.length > 0 && projectedItems.every(isCtaOnlyItem) && !section.strategist_target_type) {
+        continue
+      }
 
       // Target hint: strategist annotation wins; else inferred.
       const annotated = section.strategist_target_type as DiscoverySection['target_hint'] | null | undefined
@@ -1567,6 +1590,24 @@ export function buildDiscoverySections(
       // what the section should DO without having to look it up.
       const partnerContext = derivePartnerContext(section.section_role, cptRef, inputs)
 
+      // Content diagnosis (v1.5): classify against canonical schema
+      // vocabulary, compute field fill rates + CTA breakdown + library
+      // coverage gaps. Skip when there are no repeating items — single
+      // copy blocks don't get a schema_name (already filtered above
+      // when the section is also TRIVIAL_ROLES_WHEN_SINGLE, but
+      // sometimes 1-item sections survive that filter).
+      const diagnosis = projectedItems.length > 0
+        ? classifySchema({
+            page_slug:           page.slug,
+            heading,
+            section_role:        section.section_role,
+            items:               projectedItems,
+            template_field_keys: schema,
+            template_id:         section.content_template_id ?? '(unknown)',
+            cpt_subroutine_ref:  cptRef,
+          })
+        : null
+
       out.push({
         section_id:        section.id,
         web_page_id:       section.web_page_id,
@@ -1577,9 +1618,17 @@ export function buildDiscoverySections(
         item_count:        count,
         schema,
         sample_names:      sampleNames,
+        sample_record:     sampleRecord,
         target_hint:       targetHint,
         cpt_subroutine_ref: cptRef,
         ...(partnerContext ? { partner_context: partnerContext } : {}),
+        ...(diagnosis ? {
+          schema_name:              diagnosis.schema_name,
+          schema_confidence:        diagnosis.schema_confidence,
+          schema_field_diagnostics: diagnosis.schema_field_diagnostics,
+          cta_target_breakdown:     diagnosis.cta_target_breakdown,
+          build_time_issues:        diagnosis.build_time_issues,
+        } : {}),
       })
     }
   }
@@ -1654,7 +1703,17 @@ function headingForSection(
 function analyzeSectionItems(
   template: WebContentTemplate,
   fv: Record<string, unknown>,
-): { count: number; schema: string[]; sampleNames: string[] } {
+  templatesById: Map<string, WebContentTemplate>,
+): {
+  count: number
+  schema: string[]
+  sampleNames: string[]
+  sampleRecord: Record<string, unknown> | null
+  /** Full items array projected onto schema. Used by the classifier
+   *  (classifySchema) to compute fill rates + CTA breakdown + library
+   *  coverage gaps. */
+  projectedItems: Record<string, unknown>[]
+} {
   // Find the section's primary group field — the one whose items
   // array drives the section's "what's here" view. Heuristic: first
   // group whose array isn't empty. Recurse one level into nested
@@ -1663,34 +1722,91 @@ function analyzeSectionItems(
     if (def.kind !== 'group') continue
     const arr = fv[def.key]
     if (!Array.isArray(arr) || arr.length === 0) continue
-    // Recurse into the deepest non-empty group level.
-    const { items, schemaFromGroup } = drillToLeafItems(def, arr)
+    const { items, schemaFromGroup } = drillToLeafItems(def, arr, templatesById)
     if (items.length === 0) continue
+    const projectedItems = items.map(it => projectItemOntoSchema(it, schemaFromGroup))
+    // sample_record = first leaf item, projected onto the schema so
+    // every schema field shows up even if the partner left it blank.
     return {
-      count:        items.length,
-      schema:       schemaFromGroup,
-      sampleNames:  items.slice(0, 3).map(itemSummary).filter(Boolean) as string[],
+      count:          items.length,
+      schema:         schemaFromGroup,
+      sampleNames:    items.slice(0, 3).map(itemSummary).filter(Boolean) as string[],
+      sampleRecord:   projectedItems[0] ?? null,
+      projectedItems,
     }
   }
-  // No group field — treat as a single record. Schema is the
-  // top-level slot keys with non-empty values.
+  // No group field — treat the section itself as a single record.
   const topSchema = template.fields
     .filter(d => d.kind === 'slot')
     .map(d => d.key)
     .filter(k => fv[k] != null && String(fv[k]).trim() !== '')
-  return { count: 1, schema: topSchema, sampleNames: [] }
+  // Project the section's field_values onto the slot schema. This
+  // works for hero/intro/content_block sections that have meaningful
+  // heading + body + button content the dev needs to see.
+  const sampleRecord = topSchema.length > 0
+    ? projectItemOntoSchema(fv, topSchema)
+    : null
+  return {
+    count:          1,
+    schema:         topSchema,
+    sampleNames:    [],
+    sampleRecord,
+    projectedItems: sampleRecord ? [sampleRecord] : [],
+  }
+}
+
+/** Project an item onto a schema, flattening nested {label,url} CTAs
+ *  and {kind,target} adornments into top-level keys so a dev reading
+ *  the sample doesn't have to mentally walk nested structure. */
+function projectItemOntoSchema(item: unknown, schema: string[]): Record<string, unknown> {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return {}
+  const src = item as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const key of schema) {
+    const v = src[key]
+    if (v == null) {
+      out[key] = null
+      continue
+    }
+    if (typeof v === 'object' && !Array.isArray(v)) {
+      // Nested object — flatten sensibly. CTAs commonly look like
+      // { label, url, kind, target } — pull these out as suffixed
+      // siblings so each shows up in the sample as its own line.
+      const nested = v as Record<string, unknown>
+      if (typeof nested.url === 'string' || typeof nested.label === 'string') {
+        if (typeof nested.label === 'string' && nested.label) out[`${key}_label`] = nested.label
+        if (typeof nested.url   === 'string' && nested.url)   out[`${key}_url`]   = nested.url
+        if (typeof nested.kind  === 'string')                  out[`${key}_kind`]  = nested.kind
+        continue
+      }
+      // Generic object — keep as-is; render layer truncates JSON.
+      out[key] = v
+      continue
+    }
+    out[key] = v
+  }
+  return out
 }
 
 function drillToLeafItems(
   group: WebGroupDef,
   arr: unknown[],
+  templatesById: Map<string, WebContentTemplate>,
 ): { items: Record<string, unknown>[]; schemaFromGroup: string[] } {
-  // If items contain a nested group's array (e.g. row_grid items
-  // each carrying a card_team array), drill in and aggregate ALL
-  // leaf items across the parent's array.
-  const itemSchema = Array.isArray(group.item_schema) ? group.item_schema : []
+  // Resolve item_schema. Groups can declare it inline OR reference a
+  // sibling template (referenced_template_id). The referenced template
+  // typically has a single top-level group whose item_schema is the
+  // actual item shape — resolve through.
+  const itemSchema = resolveGroupItemSchema(group, templatesById)
+  const slotFields = itemSchema.filter(f => f.kind === 'slot')
   const nestedGroups = itemSchema.filter((f): f is WebGroupDef => f.kind === 'group')
-  if (nestedGroups.length > 0) {
+  // Only descend into a nested group when THIS level has no slot
+  // fields — i.e. this is a pure wrapper around the child group
+  // (row_grid > card_team, or feature-section-2.card > card-193.card).
+  // When the level already carries slot content (heading/description/
+  // etc.) those slots ARE the items' fields; the nested groups are
+  // accessories (e.g. a buttons group on a card). Stay here.
+  if (nestedGroups.length > 0 && slotFields.length === 0) {
     const leaves: Record<string, unknown>[] = []
     for (const item of arr) {
       if (item == null || typeof item !== 'object') continue
@@ -1698,16 +1814,16 @@ function drillToLeafItems(
       for (const ng of nestedGroups) {
         const subArr = obj[ng.key]
         if (Array.isArray(subArr) && subArr.length > 0) {
-          const recursed = drillToLeafItems(ng, subArr)
+          const recursed = drillToLeafItems(ng, subArr, templatesById)
           leaves.push(...recursed.items)
         }
       }
     }
     if (leaves.length > 0) {
       // Schema = the LEAF group's item_schema (one level deeper).
-      const leafSchema = nestedGroups[0].item_schema
-        ?.filter(f => f.kind === 'slot')
-        .map(f => f.key) ?? []
+      const leafSchema = resolveGroupItemSchema(nestedGroups[0], templatesById)
+        .filter(f => f.kind === 'slot')
+        .map(f => f.key)
       return { items: leaves, schemaFromGroup: leafSchema }
     }
   }
@@ -1717,6 +1833,30 @@ function drillToLeafItems(
     .filter(f => f.kind === 'slot')
     .map(f => f.key)
   return { items, schemaFromGroup }
+}
+
+/** Resolve a group's item_schema. Returns the inline definition when
+ *  present; else dereferences `referenced_template_id` and returns the
+ *  referenced template's TOP-LEVEL fields verbatim (which usually
+ *  declare another group whose items are the actual cards — let the
+ *  drilling recursion handle the nesting). Returns an empty array if
+ *  no schema can be resolved. */
+function resolveGroupItemSchema(
+  group: WebGroupDef,
+  templatesById: Map<string, WebContentTemplate>,
+): WebFieldDef[] {
+  if (Array.isArray(group.item_schema) && group.item_schema.length > 0) {
+    return group.item_schema
+  }
+  const refId = (group as { referenced_template_id?: string }).referenced_template_id
+  if (!refId) return []
+  const refTemplate = templatesById.get(refId)
+  if (!refTemplate?.fields) return []
+  // Return the referenced template's top-level fields. card-193 has
+  // fields=[{kind:'group', key:'card', item_schema:[real schema]}],
+  // so the outer card group's items each have a nested 'card' array
+  // that the drilling recursion will descend into.
+  return refTemplate.fields
 }
 
 function itemSummary(item: Record<string, unknown>): string | null {

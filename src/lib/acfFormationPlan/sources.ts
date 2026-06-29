@@ -242,6 +242,36 @@ export async function loadProjectInputs(
     }
   }
 
+  // 5b. Templates referenced indirectly via `referenced_template_id`
+  //     on group fields (e.g. feature-section-2's card group references
+  //     card-193). The diagnostic resolves these to get the actual
+  //     item schema. Walks section templates' fields and pulls in any
+  //     referenced template that wasn't already loaded.
+  const refIds = new Set<string>()
+  for (const t of templatesById.values()) {
+    const fields = (t as { fields?: unknown[] }).fields ?? []
+    for (const f of fields) {
+      if (!f || typeof f !== 'object') continue
+      const def = f as { referenced_template_id?: string }
+      if (def.referenced_template_id && !templatesById.has(def.referenced_template_id)) {
+        refIds.add(def.referenced_template_id)
+      }
+    }
+  }
+  if (refIds.size > 0) {
+    const { data: refTemplates, error: refErr } = await sb
+      .from('web_content_templates')
+      .select('id, layer_name, family, variant, kind, fields, paired_post_template, paired_url_pattern')
+      .in('id', [...refIds])
+    if (refErr) {
+      loadErrors.push({ source: 'web_content_templates(referenced)', message: refErr.message })
+    } else {
+      for (const t of (refTemplates ?? []) as unknown as WebContentTemplate[]) {
+        templatesById.set(t.id, t)
+      }
+    }
+  }
+
   // 6. Latest content-collection session for the partner. May not
   //    exist (some partners never open one) — null is fine. We pull
   //    the full block of events/sermons/groups columns so the dev

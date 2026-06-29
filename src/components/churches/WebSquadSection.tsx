@@ -216,8 +216,8 @@ export default function WebSquadSection({ church, submissions, onSave, editing, 
       <MigrationIntakeShareLink portalToken={portalToken ?? memberId} />
 
       {/* Partner Site Notes — fetched from the Notion web support
-          database, filtered to rows where `notes type = "Partner site
-          notes"` and the title contains this church's name. */}
+          database, filtered to rows where `Notes Type = "Partner Site
+          Notes"` and the title contains this church's name. */}
       <PartnerSiteNotesList churchName={church.church_name ?? ''} />
 
       {/* Tools */}
@@ -479,9 +479,10 @@ function StatePill({ state }: { state: boolean | null }) {
 
 // ── Partner Site Notes (Notion) ────────────────────────────────────────
 // Pulls rows from the Web Support Notion database filtered by
-// `notes type = "Partner site notes"`, then narrows to ones whose title
+// `Notes Type = "Partner Site Notes"`, then narrows to ones whose title
 // contains the church name. Notion fetch happens via the strategy-notion
-// edge function so the NOTION_TOKEN stays server-side.
+// edge function so the NOTION_TOKEN stays server-side. Property name +
+// select value are case-sensitive on the Notion API.
 
 interface PartnerSiteNote {
   page_id:        string

@@ -12,7 +12,7 @@
 // roles for follow-up.
 
 import type { SectionRole, WebFieldType } from '../../types/database'
-import type { AcfFieldType, CptSupportFlag, Structure } from './types'
+import type { AcfFieldType, CptSupportFlag, SchemaName, Structure } from './types'
 
 // ── Section-role groupings ────────────────────────────────────────────
 
@@ -297,4 +297,268 @@ export const STRUCTURE_DEFAULT_BY_ROLE: Partial<Record<SectionRole, Structure>> 
   'banner_announcement':'GLOBAL_OPTIONS',
   'category_filter':    'PLAIN_FIELD',
   'search_bar':         'PLAIN_FIELD',
+}
+
+// ── Canonical schema vocabulary (content diagnosis, v1.5) ─────────────
+//
+// One entry per schema in handoffs/inventory-schema-audit.md Part 2.
+// Consumed by the classifySchema pipeline (classifySchema.ts). When you
+// add a schema to the audit doc, add it here and to SchemaName in
+// types.ts. The classifier is conservative: it only emits a schema_name
+// when 2+ signals align (page_slug + role + heading words + field
+// pattern). When fewer than 2 signals match, the LLM fallback is
+// consulted; when the LLM is also unsure, schema_name is left null
+// (the section gets reported in the handoff with its raw field keys
+// only — never falsely classified).
+
+export interface SchemaSpec {
+  /** Canonical per-item fields. Used to compute `in_bound_template`:
+   *  fields the diagnosed schema expects but the bound template has no
+   *  slot for are flagged as dropped (build-time issue). */
+  canonical_fields: string[]
+  /** Alternative field key names cowork / strategists might use for
+   *  the same concept. The classifier normalizes via these aliases
+   *  before computing the schema match. */
+  field_aliases: Record<string, readonly string[]>
+  /** Page-slug substrings that strongly signal this schema. Substring
+   *  match, case-insensitive. */
+  page_slug_signals: readonly string[]
+  /** SectionRole values that strongly signal this schema. */
+  section_role_signals: readonly SectionRole[]
+  /** Item count hint. When item_count falls within [min, max], one
+   *  signal point is added. null = no signal from count. */
+  typical_item_count: readonly [number, number] | null
+  /** Heading-word signals: lowercase substrings that, when present in
+   *  the section heading, add a signal point. */
+  heading_word_signals: readonly string[]
+  /** Discriminator fields. If NO item in the section has ANY of these
+   *  populated, the schema is strongly downweighted. Distinguishes
+   *  event_card (needs date/time) from feature_card (no temporal
+   *  fields), person_card (needs role) from generic group_card, etc.
+   *  Empty array = no discriminator (fall back to fuzzy signals). */
+  discriminator_fields: readonly string[]
+}
+
+export const CANONICAL_SCHEMAS: Record<SchemaName, SchemaSpec> = {
+  person_card: {
+    canonical_fields: ['name', 'role', 'bio', 'email', 'phone', 'headshot', 'linkedin', 'ministry_area'],
+    field_aliases: {
+      headshot: ['photo_url', 'profile_url', 'image', 'image_url', 'photo'],
+      role:     ['title', 'position'],
+      name:     ['full_name'],
+    },
+    page_slug_signals:    ['staff', 'team', 'leadership', 'pastors', 'elders', 'care', 'counseling'],
+    section_role_signals: ['team_grid', 'team_carousel', 'staff_member_detail'],
+    typical_item_count:   [2, 60],
+    heading_word_signals: ['team', 'staff', 'pastors', 'leadership', 'elders', 'deacons', 'counselors'],
+    discriminator_fields: ['role', 'title', 'position', 'bio'],
+  },
+  sermon_card: {
+    canonical_fields: ['title', 'series', 'speaker', 'date', 'scripture', 'video_url', 'audio_url', 'notes_url', 'transcript_url', 'bulletin_url', 'duration'],
+    field_aliases: {
+      video_url: ['youtube_url', 'vimeo_url', 'watch_url'],
+      title:     ['name', 'sermon_title'],
+      speaker:   ['preacher', 'pastor'],
+    },
+    page_slug_signals:    ['sermons', 'messages', 'watch', 'listen'],
+    section_role_signals: [],
+    typical_item_count:   [0, 200],
+    heading_word_signals: ['sermon', 'message', 'series', 'watch', 'listen', 'latest'],
+    discriminator_fields: ['video_url', 'youtube_url', 'audio_url', 'series', 'scripture', 'speaker', 'preacher'],
+  },
+  event_card: {
+    canonical_fields: ['name', 'description', 'audience', 'start_date', 'end_date', 'time', 'location', 'register_url', 'featured_image', 'cost'],
+    field_aliases: {
+      name:         ['title', 'event_name'],
+      register_url: ['signup_url', 'rsvp_url', 'ticket_url'],
+      start_date:   ['date', 'event_date'],
+    },
+    page_slug_signals:    ['events', 'calendar', 'camps', 'retreats'],
+    section_role_signals: ['event_detail'],
+    typical_item_count:   [0, 100],
+    heading_word_signals: ['event', 'calendar', 'upcoming', 'camp', 'retreat'],
+    discriminator_fields: ['start_date', 'date', 'event_date', 'register_url', 'rsvp_url', 'ticket_url'],
+  },
+  service_time: {
+    canonical_fields: ['name', 'when', 'location', 'description', 'audience', 'note'],
+    field_aliases: {
+      when: ['time', 'day_time', 'schedule'],
+      name: ['service_name', 'label'],
+    },
+    page_slug_signals:    ['sundays', 'plan-visit', 'new-here', 'new', 'home', 'visit', 'services'],
+    section_role_signals: [],
+    typical_item_count:   [1, 6],
+    heading_word_signals: ['service', 'sunday', 'join us', 'gather', 'worship time'],
+    discriminator_fields: ['when', 'time', 'day_time', 'schedule'],
+  },
+  faq_qna: {
+    canonical_fields: ['question', 'answer', 'scripture_ref', 'audience', 'context'],
+    field_aliases: {
+      question:      ['q', 'prompt'],
+      answer:        ['a', 'response'],
+      scripture_ref: ['scripture', 'verse', 'reference'],
+    },
+    page_slug_signals:    ['beliefs', 'baptism', 'plan-visit', 'membership', 'what-to-expect', 'faq'],
+    section_role_signals: ['faq_accordion', 'faq_grid'],
+    typical_item_count:   [3, 30],
+    heading_word_signals: ['faq', 'frequently asked', 'questions', 'beliefs', 'what we believe'],
+    discriminator_fields: ['question', 'q', 'prompt', 'answer', 'a'],
+  },
+  ministry_program_card: {
+    canonical_fields: ['name', 'description', 'audience', 'contact', 'day', 'time', 'location', 'sign_up_url', 'philosophy'],
+    field_aliases: {
+      name:        ['title', 'program_name'],
+      sign_up_url: ['signup_url', 'register_url'],
+      audience:    ['age_range', 'grade'],
+    },
+    page_slug_signals:    ['kids', 'students', 'youth', 'adults', 'college', 'young-adults', 'worship-music', 'care', 'next-gen', 'nextgen'],
+    section_role_signals: ['feature_grid', 'card_grid', 'card_carousel'],
+    typical_item_count:   [2, 20],
+    heading_word_signals: ['ministry', 'community', 'belonging', 'for families', 'for students', 'for kids', 'for adults', 'for women', 'for men', 'for seniors'],
+    discriminator_fields: ['audience', 'age_range', 'grade'],
+  },
+  volunteer_opportunity: {
+    canonical_fields: ['name', 'description', 'audience', 'time_commitment', 'sign_up_url', 'contact'],
+    field_aliases: {
+      sign_up_url: ['signup_url', 'apply_url'],
+      name:        ['role', 'opportunity'],
+    },
+    page_slug_signals:    ['serve', 'missions', 'volunteer', 'outreach', 'opportunities'],
+    section_role_signals: [],
+    typical_item_count:   [2, 30],
+    heading_word_signals: ['serve', 'volunteer', 'mission', 'outreach', 'get involved'],
+    discriminator_fields: ['sign_up_url', 'signup_url', 'apply_url', 'time_commitment'],
+  },
+  group_card: {
+    canonical_fields: ['name', 'description', 'leader', 'day', 'time', 'location', 'audience', 'contact_email', 'duration', 'philosophy', 'meeting_locations', 'focus_areas', 'support_model'],
+    field_aliases: {
+      contact_email: ['email', 'leader_email'],
+      name:          ['title', 'group_name'],
+    },
+    page_slug_signals:    ['groups', 'connect', 'small-groups', 'life-groups', 'community-groups'],
+    section_role_signals: [],
+    typical_item_count:   [2, 200],
+    heading_word_signals: ['groups', 'small group', 'life group', 'community group', 'find your group', 'ways to connect'],
+    discriminator_fields: ['leader', 'meeting_locations', 'day', 'philosophy', 'duration'],
+  },
+  pathway_step: {
+    canonical_fields: ['step_order', 'name', 'description', 'audience', 'action_url', 'duration', 'philosophy'],
+    field_aliases: {
+      action_url: ['next_url', 'cta_url'],
+      name:       ['step_name', 'title'],
+    },
+    page_slug_signals:    ['next-steps', 'discover', 'discipleship', 'pathway', 'membership', 'home'],
+    section_role_signals: ['steps_horizontal', 'steps_vertical'],
+    typical_item_count:   [3, 8],
+    heading_word_signals: ['next steps', 'grow', 'pathway', 'discipleship', 'discover', 'rhythms', 'grow, serve, give'],
+    discriminator_fields: ['step_order', 'action_url', 'next_url'],
+  },
+  blog_post_card: {
+    canonical_fields: ['title', 'author', 'date', 'excerpt', 'body', 'featured_image', 'category', 'tags', 'url'],
+    field_aliases: {
+      title:          ['name', 'post_title'],
+      featured_image: ['image', 'hero_image'],
+    },
+    page_slug_signals:    ['blog', 'news', 'stories', 'articles'],
+    section_role_signals: ['blog_listing', 'blog_featured', 'post_detail'],
+    typical_item_count:   [0, 500],
+    heading_word_signals: ['blog', 'news', 'latest', 'recent posts', 'stories'],
+    discriminator_fields: ['author', 'date', 'category', 'excerpt', 'body', 'tags'],
+  },
+  way_to_give_card: {
+    canonical_fields: ['name', 'description', 'give_now_url', 'reference'],
+    field_aliases: {
+      give_now_url: ['donate_url', 'pledge_url'],
+      name:         ['method', 'channel'],
+    },
+    page_slug_signals:    ['give', 'giving', 'donate'],
+    section_role_signals: [],
+    typical_item_count:   [2, 8],
+    heading_word_signals: ['ways to give', 'giving', 'donate', 'pledge', 'support'],
+    discriminator_fields: ['give_now_url', 'donate_url', 'pledge_url', 'reference'],
+  },
+  featured_campaign_card: {
+    canonical_fields: ['name', 'description', 'target_amount', 'give_now_url', 'image_url', 'audience', 'progress'],
+    field_aliases: {
+      give_now_url: ['donate_url', 'pledge_url'],
+      name:         ['campaign_name', 'title'],
+    },
+    page_slug_signals:    ['give', 'campaign', 'capital-campaign', 'building-fund', 'home'],
+    section_role_signals: [],
+    typical_item_count:   [1, 3],
+    heading_word_signals: ['campaign', 'capital', 'building fund', 'goal', 'raised'],
+    discriminator_fields: ['target_amount', 'progress', 'give_now_url', 'donate_url'],
+  },
+  testimony_card: {
+    canonical_fields: ['name', 'role', 'story', 'scripture_ref', 'format', 'image_url'],
+    field_aliases: {
+      name:      ['person', 'who'],
+      story:     ['testimony', 'description', 'quote'],
+      image_url: ['photo_url', 'image', 'headshot'],
+    },
+    page_slug_signals:    ['testimonies', 'stories'],
+    section_role_signals: [],
+    typical_item_count:   [2, 50],
+    heading_word_signals: ['testimony', 'testimonies', 'stories', 'changed life'],
+    discriminator_fields: ['story', 'testimony', 'quote'],
+  },
+  career_card: {
+    canonical_fields: ['title', 'department', 'location', 'employment_type', 'description', 'apply_url'],
+    field_aliases: {
+      title:     ['role', 'position', 'name'],
+      apply_url: ['signup_url', 'register_url'],
+    },
+    page_slug_signals:    ['careers', 'jobs', 'employment', 'opportunities'],
+    section_role_signals: ['career_listing', 'career_detail'],
+    typical_item_count:   [0, 50],
+    heading_word_signals: ['career', 'jobs', 'open positions', 'hiring'],
+    discriminator_fields: ['apply_url', 'department', 'employment_type'],
+  },
+  location_card: {
+    canonical_fields: ['name', 'address', 'service_times', 'phone', 'email', 'pastor_name', 'description', 'directions_url', 'image_url'],
+    field_aliases: {
+      name:      ['campus_name', 'location_name'],
+      image_url: ['photo_url', 'image'],
+    },
+    page_slug_signals:    ['locations', 'campuses', 'congregations', 'find-a-location'],
+    section_role_signals: [],
+    typical_item_count:   [2, 30],
+    heading_word_signals: ['campus', 'location', 'congregation', 'find a location'],
+    discriminator_fields: ['address', 'service_times', 'directions_url'],
+  },
+  feature_card: {
+    /** Generic marketing tile — name + description ± optional CTA. The
+     *  catch-all for cards that don't fit a domain schema. The classifier
+     *  emits this only when NO other schema's signals reach threshold AND
+     *  the items have <= 3 distinct field keys. */
+    canonical_fields: ['name', 'description', 'cta_label', 'cta_url'],
+    field_aliases: {
+      name:        ['title', 'heading'],
+      description: ['body', 'subtitle'],
+    },
+    page_slug_signals:    [],
+    section_role_signals: ['feature_grid', 'feature_split'],
+    typical_item_count:   [2, 8],
+    heading_word_signals: [],
+    /** Empty: feature_card is the catch-all when nothing else discriminates.
+     *  The classifier only lands on feature_card when no other schema's
+     *  signals reach threshold. */
+    discriminator_fields: [],
+  },
+  Resources: {
+    /** Catch-all for unrecognized "named link with optional metadata"
+     *  content. Bulletins, devotionals, prayer resources, helpful links,
+     *  partner library content. The category is named from the section
+     *  heading at emit time, not from this constant. */
+    canonical_fields: ['name', 'description', 'target_url', 'target_url_type', 'image_url', 'resource_category', 'date', 'author', 'scope'],
+    field_aliases: {
+      target_url: ['url', 'link', 'cta_url'],
+      name:       ['title', 'label'],
+    },
+    page_slug_signals:    ['resources', 'bulletins', 'newsletter', 'devotionals', 'helpful-links', 'archive'],
+    section_role_signals: [],
+    typical_item_count:   [2, 200],
+    heading_word_signals: ['resources', 'bulletins', 'newsletter', 'archive', 'helpful', 'links', 'devotionals'],
+    discriminator_fields: ['target_url', 'url', 'link'],
+  },
 }

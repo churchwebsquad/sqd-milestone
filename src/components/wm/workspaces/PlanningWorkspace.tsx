@@ -336,9 +336,10 @@ export function PlanningWorkspace({ project, onChange }: Props) {
         <WMCard padding="loose">
           <SectionLabel>Build-phase tracked time</SectionLabel>
           <p className="text-[11px] text-wm-text-muted mb-3">
-            Pulls time logged against the <code className="font-mono text-[11px] text-deep-plum">Developer Prep &amp; Build</code> and{' '}
-            <code className="font-mono text-[11px] text-deep-plum">Testing, Revisions, Launch</code> ClickUp tasks under the
-            project's Build Phase. Tracked time only — estimates stay separate.
+            Sums developer time logged in ClickUp across this partner's tasks, via the Squad API
+            (<code className="font-mono text-[11px] text-deep-plum">api.thesqd.com/v1/tasks/list</code>) filtered to the
+            Wordpress Developer's assignee. Tracked time only — estimates stay separate. Refreshing pulls the latest
+            time for <em>every</em> active project at once (≈15s).
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Stat
@@ -355,19 +356,8 @@ export function PlanningWorkspace({ project, onChange }: Props) {
             />
           </div>
           <div className="mt-3 flex items-center gap-3 flex-wrap">
-            <label className="text-[11px] text-wm-text-muted flex items-center gap-2">
-              ClickUp Build Phase task id:
-              <input
-                type="text"
-                value={project.clickup_build_task_id ?? ''}
-                placeholder="86e1zmbgz"
-                onChange={e => void save('clickup_build_task_id', e.target.value.trim() || null)}
-                className="text-[11px] font-mono px-2 py-1 rounded-md border border-wm-border bg-wm-bg-elevated focus:border-wm-accent focus:outline-none w-40"
-              />
-            </label>
             <button
               type="button"
-              disabled={!project.clickup_build_task_id}
               onClick={async () => {
                 setSavingKey('sync_tracked')
                 setError(null)
@@ -375,21 +365,17 @@ export function PlanningWorkspace({ project, onChange }: Props) {
                   const { data: sess } = await supabase.auth.getSession()
                   const token = sess?.session?.access_token
                   if (!token) throw new Error('Not signed in — refresh and try again.')
-                  const res = await fetch('/api/web/clickup-build-phase-sync', {
+                  const supaUrl = (import.meta as unknown as { env: { VITE_SUPABASE_URL: string } }).env.VITE_SUPABASE_URL
+                  const res = await fetch(`${supaUrl}/functions/v1/sync-tracked-hours`, {
                     method:  'POST',
-                    headers: {
-                      'Content-Type':  'application/json',
-                      'Authorization': `Bearer ${token}`,
-                    },
-                    body:    JSON.stringify({ project_id: project.id }),
+                    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
                   })
                   const body = await res.json().catch(() => ({} as Record<string, unknown>))
-                  if (!res.ok) {
-                    const detail = typeof body.details === 'string' ? body.details
-                                 : typeof body.error === 'string' ? body.error
-                                 : `HTTP ${res.status}`
+                  if (!res.ok || body.ok === false) {
+                    const detail = typeof body.error === 'string' ? body.error : `HTTP ${res.status}`
                     throw new Error(detail)
                   }
+                  await plan.refetch()
                   void onChange()
                 } catch (e) {
                   setError(e instanceof Error ? e.message : 'Sync failed')
@@ -400,8 +386,11 @@ export function PlanningWorkspace({ project, onChange }: Props) {
               className="inline-flex items-center gap-1 h-7 px-3 rounded-md text-[11px] font-semibold bg-deep-plum text-white hover:bg-primary-purple disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {savingKey === 'sync_tracked' ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-              Sync tracked time
+              {savingKey === 'sync_tracked' ? 'Syncing all projects…' : 'Refresh from ClickUp'}
             </button>
+            <span className="text-[10.5px] text-wm-text-subtle">
+              Refreshes every active project's tracked hours.
+            </span>
           </div>
         </WMCard>
 

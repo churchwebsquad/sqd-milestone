@@ -11,7 +11,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabase as defaultSupabase } from '../supabase'
-import type { ContentModelPlan, ClassificationRecord } from './types'
+import type { ContentModelPlan, ClassificationRecord, DiscoverySection } from './types'
 import { loadProjectInputs, type FormationInputs } from './sources'
 import {
   buildAcfFieldGroups,
@@ -21,6 +21,10 @@ import {
   detectFlexibleContentPages,
 } from './emit'
 import { CHROME_ROLES } from './rules'
+import { buildInventoryDiscoverySections, loadInventoryTopics } from './inventoryDiagnosis'
+import type { InventoryDiscoveryRow } from './inventoryDiagnosis'
+import { compareInventoryToBound } from './inventoryBoundComparator'
+import { llmEnrichPlan } from './llmVerify'
 
 export { loadProjectInputs } from './sources'
 export type { FormationInputs } from './sources'
@@ -46,6 +50,7 @@ export type {
 export async function computeFormationPlan(
   webProjectId: string,
   sb: SupabaseClient = defaultSupabase,
+  opts?: { skipLlm?: boolean },
 ): Promise<ContentModelPlan> {
   const inputs = await loadProjectInputs(webProjectId, sb)
 
@@ -83,6 +88,59 @@ export async function computeFormationPlan(
   // all roll up to the same staff CPT in the analyzer's suggestion).
   const discoverySections = buildDiscoverySections(inputs, layer1)
 
+  // Inventory diagnosis (v1.6) — classify schemas from
+  // web_project_topics.items BEFORE template binding. Surfaces
+  // schemas that exist in source even when no bound section exists,
+  // AND lets us compare source-vs-bound to catch upstream cowork
+  // compression losses (the real build-time issues).
+  let inventoryDiscovery: InventoryDiscoveryRow[] = []
+  try {
+    const topics = await loadInventoryTopics(webProjectId, sb)
+    inventoryDiscovery = buildInventoryDiscoverySections(topics)
+    // Mutates discoverySections to add upstream_compression_loss
+    // build_time_issues where applicable.
+    compareInventoryToBound(inventoryDiscovery, discoverySections)
+  } catch (e) {
+    // Non-fatal — inventory diagnosis is enrichment, not required.
+    console.warn('[formationPlan] inventory diagnosis failed:', e)
+  }
+
+  // LLM enrichment (v1.6): adversarial verify on low/medium confidence
+  // rows + fallback classification on unclassified rows. Skipped when
+  // skipLlm=true or ANTHROPIC_API_KEY isn't set (graceful no-op).
+  if (!opts?.skipLlm) {
+    try {
+      await llmEnrichPlan(discoverySections, inventoryDiscovery, {
+        concurrency: 4,
+        verify:      true,
+        fallback:    true,
+      })
+    } catch (e) {
+      console.warn('[formationPlan] LLM enrichment failed:', e)
+    }
+  }
+
+  // Preserve strategist overrides across recomputes. Reads any
+  // existing plan's schema_overrides and reapplies them to the
+  // freshly-classified rows. Override = strategist confirmed/changed
+  // the classification; rules should not blow that away.
+  const existingPlan = (inputs.project?.roadmap_state as { content_model_plan?: ContentModelPlan } | null)?.content_model_plan
+  if (existingPlan?.discovery_sections) {
+    const overrideBySectionId = new Map<string, NonNullable<DiscoverySection['schema_override']>>()
+    for (const prev of existingPlan.discovery_sections) {
+      if (prev.schema_override) overrideBySectionId.set(prev.section_id, prev.schema_override)
+    }
+    for (const row of discoverySections) {
+      const ov = overrideBySectionId.get(row.section_id)
+      if (ov) {
+        row.schema_override = ov
+        // Override wins: replace classifier's schema_name + confidence.
+        row.schema_name = ov.schema_name
+        row.schema_confidence = 'high'
+      }
+    }
+  }
+
   // Envelope + _meta.
   const plan: ContentModelPlan = {
     schema_version: 1,
@@ -102,6 +160,7 @@ export async function computeFormationPlan(
     layer_2_wp_objects:       layer2,
     layer_3_acf_field_groups: layer3,
     discovery_sections:       discoverySections,
+    inventory_discovery:      inventoryDiscovery,
   }
 
   return plan
@@ -109,11 +168,62 @@ export async function computeFormationPlan(
 
 /** Computes + writes the plan to roadmap_state.content_model_plan in
  *  a single round-trip. */
+/** Write a strategist override on one discovery section. Reads the
+ *  current plan, finds the row by section_id, sets schema_override,
+ *  writes back. Atomic via single Supabase update. Used by the
+ *  DevHandoffWorkspace per-section "confirm" / "change" / "clear"
+ *  controls. The override survives recomputes via the merge logic in
+ *  computeFormationPlan. */
+export async function setSchemaOverride(args: {
+  webProjectId: string
+  sectionId:    string
+  schemaName:   import('./types').SchemaName | null
+  userId:       string
+  note?:        string
+  /** Pass null/undefined to CLEAR the override. */
+  clear?:       boolean
+  sb?:          SupabaseClient
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const sb = args.sb ?? defaultSupabase
+  const { data: row, error: readErr } = await sb
+    .from('strategy_web_projects')
+    .select('roadmap_state')
+    .eq('id', args.webProjectId)
+    .maybeSingle()
+  if (readErr || !row) return { ok: false, error: readErr?.message ?? 'Project not found' }
+  const rs = ((row as { roadmap_state: Record<string, unknown> | null }).roadmap_state ?? {}) as Record<string, unknown>
+  const plan = rs.content_model_plan as ContentModelPlan | undefined
+  if (!plan?.discovery_sections) return { ok: false, error: 'No discovery_sections — recompute the plan first' }
+  const target = plan.discovery_sections.find(s => s.section_id === args.sectionId)
+  if (!target) return { ok: false, error: `section ${args.sectionId} not in plan` }
+  if (args.clear) {
+    delete target.schema_override
+  } else {
+    target.schema_override = {
+      schema_name:  args.schemaName,
+      confirmed_at: new Date().toISOString(),
+      confirmed_by: args.userId,
+      ...(args.note ? { note: args.note } : {}),
+    }
+    // Apply override to the live row too so the UI reflects it
+    // immediately without another recompute.
+    target.schema_name = args.schemaName
+    target.schema_confidence = 'high'
+  }
+  const { error: writeErr } = await sb
+    .from('strategy_web_projects')
+    .update({ roadmap_state: { ...rs, content_model_plan: plan } } as never)
+    .eq('id', args.webProjectId)
+  if (writeErr) return { ok: false, error: writeErr.message }
+  return { ok: true }
+}
+
 export async function saveFormationPlan(
   webProjectId: string,
   sb: SupabaseClient = defaultSupabase,
+  opts?: { skipLlm?: boolean },
 ): Promise<ContentModelPlan> {
-  const plan = await computeFormationPlan(webProjectId, sb)
+  const plan = await computeFormationPlan(webProjectId, sb, opts)
 
   // Read current roadmap_state, merge in the new plan, write back.
   // We intentionally do NOT touch any other key on roadmap_state

@@ -2491,8 +2491,8 @@ interface PairTarget {
 
 const PAIR_TARGETS_BY_LISTING: Record<string, PairTarget[]> = {
   'category-filter-4': [
-    { label: 'Event',  singleSlug: 'event',  singleName: 'Single Event',  templateId: 'single-event-section-4' },
-    { label: 'Sermon', singleSlug: 'sermon', singleName: 'Single Sermon', templateId: 'single-event-section-4' },
+    { label: 'Event',  singleSlug: '{single-event}',  singleName: 'Single Event',  templateId: 'single-event-section-4' },
+    { label: 'Sermon', singleSlug: '{single-sermon}', singleName: 'Single Sermon', templateId: 'single-event-section-4' },
   ],
 }
 

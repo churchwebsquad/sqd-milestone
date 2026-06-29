@@ -347,9 +347,15 @@ export interface DiscoverySection {
   /** Distinct field keys observed across the section's items (or the
    *  top-level slot keys when the section isn't a group). */
   schema:            string[]
-  /** First 3 humanish names from the items array — what the section
-   *  IS, in the strategist's vocabulary. */
+  /** First 3 humanish names from the items array — useful "preview"
+   *  of what the section contains at a glance. */
   sample_names:      string[]
+  /** One complete record from the section's items array (or the
+   *  section itself when not group-shaped), with every schema field
+   *  + its actual value. Dev reads this to see what a real instance
+   *  of this content looks like in the partner's site. Values are
+   *  raw — HTML stripping + truncation happens at render time. */
+  sample_record:     Record<string, unknown> | null
   /** Strategist-readable hint about what each item should land as.
    *  Detail role → 'individual-page'; listing role with CPT single
    *  template enabled → 'individual-page'; listing role without
@@ -387,7 +393,126 @@ export interface DiscoverySection {
     /** Sermon-specific: archive feature flags (notes, audio, podcast, filters). */
     archive_features?: string[] | null
   }
+
+  // ── Content diagnosis (added in v1.5) ───────────────────────────────
+  // Per-section schema classification + field-level diagnostics. Fed by
+  // the classifySchema pipeline (rules first, LLM fallback). All fields
+  // here are OPTIONAL so existing readers keep working until the
+  // pipeline has run.
+
+  /** Canonical schema name from the inventory-schema-audit.md Part 2
+   *  vocabulary — 'group_card', 'ministry_program_card', 'pathway_step',
+   *  'feature_card', 'service_time', 'person_card', 'event_card',
+   *  'sermon_card', 'faq_qna', 'volunteer_opportunity', 'blog_post_card',
+   *  'way_to_give_card', 'featured_campaign_card', 'location_card',
+   *  'testimony_card', 'career_card', 'pathway_step', 'Resources'.
+   *  Null when no canonical shape fits (the section is copy-only or has
+   *  no repeating items). */
+  schema_name?: SchemaName | null
+
+  /** Confidence in the schema_name classification. 'high' when rules
+   *  match cleanly; 'medium' when LLM fallback resolved; 'low' when the
+   *  LLM was unsure. */
+  schema_confidence?: Confidence
+
+  /** Per-field diagnostic. fill_count/fill_total tracks the partner's
+   *  data quality. in_bound_template flags whether the BOUND template
+   *  carries a slot for this field — when false, the field is in the
+   *  schema (and in the source) but is dropped at render. That's the
+   *  signal that drives build-time-errors.md library coverage entries. */
+  schema_field_diagnostics?: Array<{
+    key: string
+    fill_count: number
+    fill_total: number
+    in_bound_template: boolean
+  }>
+
+  /** CTA target type counts across items in this section. Lets the
+   *  dev see at a glance: "4 external_url + 1 mailto" vs "6 internal_route". */
+  cta_target_breakdown?: Partial<Record<DiagnosedCtaKind, number>>
+
+  /** Build-time issues the diagnostic surfaced on this section. Two
+   *  kinds:
+   *    - library_coverage_gap: the bound template doesn't carry slots
+   *      for fields the schema declares (diagnosed at bound layer).
+   *    - upstream_compression_loss: the source inventory has fields
+   *      that cowork's uniform shape dropped before binding (diagnosed
+   *      by comparing inventory layer to bound layer). These are the
+   *      "real" losses — invisible at bound layer alone.
+   *  Both pipe to handoffs/build-time-errors.md as squad backlog. */
+  build_time_issues?: Array<
+    | {
+        kind: 'library_coverage_gap'
+        template_id: string
+        dropped_fields: string[]
+        severity: 'high' | 'medium' | 'low'
+      }
+    | {
+        kind: 'upstream_compression_loss'
+        /** Schema this loss affects (e.g. 'person_card'). */
+        schema_name: SchemaName
+        /** Fields populated in inventory but absent from every bound
+         *  section of this schema. */
+        dropped_fields: string[]
+        /** Section IDs of bound sections affected by this loss. */
+        affected_section_ids: string[]
+        severity: 'high' | 'medium' | 'low'
+      }
+  >
+
+  /** Strategist confirmation / override on the classifier's output.
+   *  Persisted across recomputes so the strategist's review doesn't
+   *  get blown away. When set, the recompute respects this value
+   *  instead of re-running the rules. */
+  schema_override?: {
+    /** What the strategist chose. Null = "this isn't a schema-bearing
+     *  section, classifier was wrong to label it." */
+    schema_name: SchemaName | null
+    confirmed_at: string
+    confirmed_by: string
+    /** Optional note explaining why (helps train future classifier
+     *  rule changes). */
+    note?: string
+  }
 }
+
+/** Canonical schema vocabulary — kept in sync with
+ *  handoffs/inventory-schema-audit.md Part 2. When you add a new schema
+ *  there, add it here and update CANONICAL_SCHEMAS in rules.ts. */
+export type SchemaName =
+  | 'person_card'
+  | 'sermon_card'
+  | 'event_card'
+  | 'service_time'
+  | 'faq_qna'
+  | 'ministry_program_card'
+  | 'volunteer_opportunity'
+  | 'group_card'
+  | 'pathway_step'
+  | 'blog_post_card'
+  | 'way_to_give_card'
+  | 'featured_campaign_card'
+  | 'testimony_card'
+  | 'career_card'
+  | 'location_card'
+  | 'feature_card'
+  | 'Resources'
+
+/** CTA target types surfaced by the diagnostic. Aligned with the CTA
+ *  target vocabulary in inventory-schema-audit.md Part 1. Distinct from
+ *  CtaTargetKind (which is the existing Layer 1 classifier's narrower
+ *  set) — this vocabulary is finer-grained and reflects what the
+ *  diagnostic emits to the dev. */
+export type DiagnosedCtaKind =
+  | 'internal_route'
+  | 'external_url'
+  | 'mailto'
+  | 'tel'
+  | 'file_download'
+  | 'signup_form'
+  | 'anchor'
+  | 'next_step'
+  | 'no_link'
 
 /** Persisted at strategy_web_projects.roadmap_state.content_model_plan. */
 export interface ContentModelPlan {
@@ -416,4 +541,36 @@ export interface ContentModelPlan {
    *  Older plans without this field render the discovery section
    *  empty; recompute to populate. */
   discovery_sections?:     DiscoverySection[]
+  /** Inventory-layer discovery (added in v1.6). Per-topic rows
+   *  classified from web_project_topics.items BEFORE binding. Lets
+   *  the dev see schemas the partner HAS in source even when no
+   *  bound section exists, and feeds the inventory-vs-bound
+   *  comparator that surfaces real upstream compression losses. */
+  inventory_discovery?:    InventoryDiscoveryRowType[]
+}
+
+/** Type-only re-export to avoid circular import. The runtime type
+ *  lives in inventoryDiagnosis.ts; we mirror the public shape here
+ *  so ContentModelPlan can reference it without pulling the module. */
+export interface InventoryDiscoveryRowType {
+  source:              'inventory'
+  section_id:          string
+  web_page_id:         string
+  page_slug:           string
+  page_name:           string
+  heading:             string
+  section_role:        null
+  item_count:          number
+  schema:              string[]
+  sample_names:        string[]
+  sample_record:       Record<string, unknown> | null
+  target_hint:         DiscoverySection['target_hint']
+  cpt_subroutine_ref:  null
+  total_topic_items:   number
+  dominant_kind:       string | null
+  schema_name?:        DiscoverySection['schema_name']
+  schema_confidence?:  DiscoverySection['schema_confidence']
+  schema_field_diagnostics?: DiscoverySection['schema_field_diagnostics']
+  cta_target_breakdown?:     DiscoverySection['cta_target_breakdown']
+  build_time_issues?:        DiscoverySection['build_time_issues']
 }

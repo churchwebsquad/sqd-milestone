@@ -20,7 +20,7 @@
  * "coming soon" placeholders so the surface is visible end-to-end.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Cog, Download, FileText, AlertCircle, Globe, Link as LinkIcon, ExternalLink, AlertTriangle, FolderOpen, Server, StickyNote } from 'lucide-react'
 import { WMButton } from '../Button'
 import { WMCard } from '../Card'
@@ -36,7 +36,9 @@ import {
   isButtonShapedSlot,
 } from '../../../lib/cta'
 import { GLOBAL_FIELDS } from '../../../lib/webSnippets'
-import { saveFormationPlan, type ContentModelPlan } from '../../../lib/acfFormationPlan'
+import { saveFormationPlan, setSchemaOverride, type ContentModelPlan } from '../../../lib/acfFormationPlan'
+import type { DiscoverySection, SchemaName } from '../../../lib/acfFormationPlan/types'
+import { CANONICAL_SCHEMAS } from '../../../lib/acfFormationPlan/rules'
 import {
   aggregateOpenQuestions,
   buildContentImport,
@@ -658,7 +660,13 @@ export function DevHandoffWorkspace({ project }: Props) {
             {cmPlan && <CmDownloadRow plan={cmPlan} answers={cmAnswers} projectSlug={projectSlug} />}
             {cmPlan && <CmOpenQuestionsPanel plan={cmPlan} answers={cmAnswers} onSaveAnswer={saveCmAnswer} />}
             {cmPlan && <CmPartnerIntentPanel plan={cmPlan} />}
-            {cmPlan && <CmConceptsFoundPanel plan={cmPlan} />}
+            {cmPlan && (
+              <CmConceptsFoundPanel
+                plan={cmPlan}
+                projectId={project.id}
+                onPlanChange={setCmPlan}
+              />
+            )}
             {cmPlan && <CmWpObjectsPanel plan={cmPlan} />}
           </WMCard>
 
@@ -811,6 +819,57 @@ function OpenQuestionRow({
   )
 }
 
+/** Order a sample record's entries by the schema's declared order,
+ *  then append any auxiliary keys (cta_label, cta_url, cta_kind etc.)
+ *  produced by the projection. Mirrors render.ts so the in-app and
+ *  markdown views show identical sample shapes. */
+function orderedSampleEntries(
+  record: Record<string, unknown>,
+  schema: string[],
+): Array<[string, unknown]> {
+  const out: Array<[string, unknown]> = []
+  const seen = new Set<string>()
+  for (const s of schema) {
+    if (s in record) { out.push([s, record[s]]); seen.add(s) }
+    for (const k of Object.keys(record)) {
+      if (seen.has(k)) continue
+      if (k === `${s}_label` || k === `${s}_url` || k === `${s}_kind`) {
+        out.push([k, record[k]]); seen.add(k)
+      }
+    }
+  }
+  // Filter blank auxiliary keys but keep blank schema keys (so the
+  // dev sees fields the partner left empty).
+  return out.filter(([k, v]) => {
+    const isBlank = v == null || (typeof v === 'string' && v.trim() === '')
+    if (isBlank && !schema.includes(k)) return false
+    return true
+  })
+}
+
+function renderSampleCell(v: unknown): ReactNode {
+  if (v == null) return <em className="text-wm-text-subtle">(blank)</em>
+  if (typeof v === 'boolean') return <span className="text-wm-text">{v ? 'Yes' : 'No'}</span>
+  if (Array.isArray(v)) return <em className="text-wm-text-subtle">[{v.length} items]</em>
+  if (typeof v === 'object') {
+    const s = JSON.stringify(v)
+    return <code className="text-[10.5px]">{s.length > 60 ? s.slice(0, 57) + '…' : s}</code>
+  }
+  const s = String(v).trim()
+  if (!s) return <em className="text-wm-text-subtle">(blank)</em>
+  const stripped = s.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+  if (/^https?:\/\//i.test(stripped)) {
+    return <a href={stripped} target="_blank" rel="noopener noreferrer" className="text-wm-accent underline">{stripped.length > 80 ? stripped.slice(0, 77) + '…' : stripped}</a>
+  }
+  if (stripped.startsWith('mailto:') || stripped.startsWith('tel:')) {
+    return <code className="text-[10.5px]">{stripped}</code>
+  }
+  if (stripped.length > 200) {
+    return <span className="text-wm-text">"{stripped.slice(0, 197)}…" <em className="text-wm-text-subtle">({stripped.length} chars total)</em></span>
+  }
+  return <span className="text-wm-text">"{stripped}"</span>
+}
+
 /** Partner-intent panel — surfaces the verbatim Content Collection
  *  answers for events / sermons / groups even when no section on the
  *  site has been bound to them yet. Dev knows what to model toward. */
@@ -865,7 +924,170 @@ function CmPartnerIntentPanel({ plan }: { plan: ContentModelPlan }) {
  *  anchored, so the strategist sees Pastors / Ministry Leaders /
  *  Elders / Board as separate even when they all roll up to the
  *  same suggested staff CPT. */
-function CmConceptsFoundPanel({ plan }: { plan: ContentModelPlan }) {
+/** Per-section strategist override control: confirm classification,
+ *  change to a different canonical schema, or clear an existing
+ *  override. Persists via setSchemaOverride and updates plan state
+ *  optimistically. */
+function SchemaOverrideControl({
+  section,
+  projectId,
+  plan,
+  onPlanChange,
+}: {
+  section: DiscoverySection
+  projectId: string
+  plan: ContentModelPlan
+  onPlanChange: (next: ContentModelPlan) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [selected, setSelected] = useState<SchemaName | null | '__none__'>(
+    section.schema_name ?? '__none__',
+  )
+
+  const isOverridden = !!section.schema_override
+  const schemaOptions = Object.keys(CANONICAL_SCHEMAS) as SchemaName[]
+
+  async function persist(value: SchemaName | null, clear: boolean) {
+    setSaving(true)
+    setError(null)
+    try {
+      const result = await setSchemaOverride({
+        webProjectId: projectId,
+        sectionId:    section.section_id,
+        schemaName:   value,
+        userId:       'current-user',  // TODO: thread real userId from auth context
+        clear,
+      })
+      if (!result.ok) throw new Error(result.error)
+      // Optimistic local update.
+      const nextPlan: ContentModelPlan = JSON.parse(JSON.stringify(plan))
+      const target = nextPlan.discovery_sections?.find(s => s.section_id === section.section_id)
+      if (target) {
+        if (clear) {
+          delete target.schema_override
+        } else {
+          target.schema_name = value
+          target.schema_confidence = 'high'
+          target.schema_override = {
+            schema_name:  value,
+            confirmed_at: new Date().toISOString(),
+            confirmed_by: 'current-user',
+          }
+        }
+      }
+      onPlanChange(nextPlan)
+      setOpen(false)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <div className="mt-1 ml-3 flex items-center gap-2 text-[10.5px]">
+        {isOverridden ? (
+          <>
+            <span className="text-blue-700">✓ override saved</span>
+            <button
+              type="button"
+              className="text-wm-text-subtle underline hover:text-wm-accent"
+              onClick={() => persist(null, true)}
+              disabled={saving}
+            >
+              clear
+            </button>
+            <button
+              type="button"
+              className="text-wm-text-subtle underline hover:text-wm-accent"
+              onClick={() => setOpen(true)}
+            >
+              change
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="text-wm-text-subtle hover:text-wm-accent underline"
+              onClick={() => persist(section.schema_name ?? null, false)}
+              disabled={saving || !section.schema_name}
+              title={section.schema_name ? 'Confirm this classification' : 'No classification to confirm'}
+            >
+              confirm
+            </button>
+            <span className="text-wm-text-subtle">·</span>
+            <button
+              type="button"
+              className="text-wm-text-subtle hover:text-wm-accent underline"
+              onClick={() => setOpen(true)}
+            >
+              change…
+            </button>
+          </>
+        )}
+        {error && <span className="text-red-600 ml-2">err: {error}</span>}
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-1 ml-3 flex items-center flex-wrap gap-2 text-[10.5px]">
+      <span className="text-wm-text-subtle">change to:</span>
+      <select
+        value={selected ?? '__none__'}
+        onChange={e => setSelected(e.target.value === '__none__' ? '__none__' : e.target.value as SchemaName)}
+        className="text-[10.5px] border border-wm-border rounded px-1 py-0.5 bg-white"
+      >
+        <option value="__none__">(no schema — copy block)</option>
+        {schemaOptions.map(s => (
+          <option key={s} value={s}>{s}</option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="text-wm-accent underline hover:text-wm-accent disabled:opacity-50"
+        disabled={saving}
+        onClick={() => persist(selected === '__none__' ? null : selected, false)}
+      >
+        {saving ? 'saving…' : 'save'}
+      </button>
+      <button
+        type="button"
+        className="text-wm-text-subtle underline hover:text-wm-text"
+        disabled={saving}
+        onClick={() => { setOpen(false); setError(null) }}
+      >
+        cancel
+      </button>
+      {error && <span className="text-red-600">err: {error}</span>}
+    </div>
+  )
+}
+
+/** Human-readable "5 min ago" / "2 days ago" relative time. */
+function timeAgo(iso: string): string {
+  const t = Date.parse(iso)
+  if (!t) return iso
+  const seconds = Math.max(0, (Date.now() - t) / 1000)
+  if (seconds < 60)    return `${Math.round(seconds)}s ago`
+  if (seconds < 3600)  return `${Math.round(seconds / 60)}m ago`
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`
+  return `${Math.round(seconds / 86400)}d ago`
+}
+
+function CmConceptsFoundPanel({
+  plan,
+  projectId,
+  onPlanChange,
+}: {
+  plan: ContentModelPlan
+  projectId?: string
+  onPlanChange?: (next: ContentModelPlan) => void
+}) {
   const ds = plan.discovery_sections ?? []
   const options = plan.layer_2_wp_objects.filter(o => o.kind === 'options_page')
   if (ds.length === 0 && options.length === 0) return null
@@ -888,9 +1110,48 @@ function CmConceptsFoundPanel({ plan }: { plan: ContentModelPlan }) {
     'unknown':         'strategist confirms',
   }
 
+  // Diagnostic stats for the header. Counts are over all bound rows
+  // (the inventory rows are surfaced separately further down).
+  const totalBound       = ds.length
+  const classifiedBound  = ds.filter(s => s.schema_name).length
+  const overriddenBound  = ds.filter(s => s.schema_override).length
+  const buildIssueCount  = ds.reduce((sum, s) => sum + (s.build_time_issues?.length ?? 0), 0)
+  const upstreamLossCount = ds.reduce((sum, s) => sum + ((s.build_time_issues ?? []).filter(i => i.kind === 'upstream_compression_loss').length), 0)
+  const inventoryRows    = (plan as ContentModelPlan & { inventory_discovery?: Array<DiscoverySection> }).inventory_discovery ?? []
+  const generatedAt      = plan._meta?.generated_at
+
   return (
     <div className="mt-5 pt-4 border-t border-wm-border">
-      <div className="text-[10px] uppercase tracking-wider text-wm-text-subtle mb-1">What's sitting here to be organized</div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] uppercase tracking-wider text-wm-text-subtle">What's sitting here to be organized</div>
+        {generatedAt && (
+          <div className="text-[9.5px] text-wm-text-subtle font-normal" title={generatedAt}>
+            diagnosed {timeAgo(generatedAt)}
+          </div>
+        )}
+      </div>
+      {/* Header chips: at-a-glance diagnostic state */}
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-wm-bg-elevated border border-wm-border text-wm-text-muted">
+          {classifiedBound}/{totalBound} classified
+        </span>
+        {overriddenBound > 0 && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700">
+            {overriddenBound} strategist override{overriddenBound === 1 ? '' : 's'}
+          </span>
+        )}
+        {inventoryRows.length > 0 && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-50 border border-purple-200 text-purple-700">
+            {inventoryRows.length} inventory concept{inventoryRows.length === 1 ? '' : 's'}
+          </span>
+        )}
+        {buildIssueCount > 0 && (
+          <span className={`text-[10px] px-2 py-0.5 rounded-full border ${upstreamLossCount > 0 ? 'bg-red-50 border-red-300 text-red-800' : 'bg-orange-50 border-orange-200 text-orange-700'}`}>
+            🔴 {buildIssueCount} build-time issue{buildIssueCount === 1 ? '' : 's'}
+            {upstreamLossCount > 0 && ` (${upstreamLossCount} upstream loss${upstreamLossCount === 1 ? '' : 'es'})`}
+          </span>
+        )}
+      </div>
       <p className="text-[11px] text-wm-text-muted mb-3">
         Per-section discovery grouped by page. Trivial single-item sections (heros, intros, single-CTA banners) are filtered out — only the sections the dev actually needs to model. For event / sermon / group sections, the partner's Content Collection answers (display mode, embed source, filter needs) appear inline.
       </p>
@@ -913,6 +1174,19 @@ function CmConceptsFoundPanel({ plan }: { plan: ContentModelPlan }) {
                     <li key={s.section_id}>
                       <p className="text-[12.5px] font-semibold text-wm-text">
                         {s.heading}
+                        {s.schema_name && (
+                          <span
+                            className="ml-2 inline-flex items-center gap-1 text-[10.5px] font-normal italic text-wm-text-subtle"
+                            title={`Confidence: ${s.schema_confidence ?? 'unknown'}`}
+                          >
+                            — diagnosed as <code className="not-italic text-[10.5px]">{s.schema_name}</code>
+                            {s.schema_confidence && (
+                              <span className={`not-italic text-[9.5px] px-1 rounded ${s.schema_confidence === 'high' ? 'bg-green-100 text-green-800' : s.schema_confidence === 'medium' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-600'}`}>
+                                {s.schema_confidence}
+                              </span>
+                            )}
+                          </span>
+                        )}
                         {cptSuggestion && (
                           <span className="ml-2 text-[10.5px] font-normal italic text-wm-text-subtle">
                             — analyzer suggests CPT <code className="not-italic text-[10.5px]">{cptSuggestion}</code>
@@ -924,12 +1198,32 @@ function CmConceptsFoundPanel({ plan }: { plan: ContentModelPlan }) {
                         {s.schema.length > 0 && (
                           <li>schema: {s.schema.slice(0, 8).map(k => <code key={k} className="text-[10.5px] mr-1">{k}</code>)}{s.schema.length > 8 && <span>+{s.schema.length - 8}</span>}</li>
                         )}
-                        <li>target: <em>{targetLabel[s.target_hint] ?? s.target_hint}</em></li>
-                        {s.sample_names.length > 0 && (
-                          <li>sample: <em>{s.sample_names.join(' · ')}</em>{s.item_count > s.sample_names.length && <span> · +{s.item_count - s.sample_names.length} more</span>}</li>
+                        {s.cta_target_breakdown && Object.keys(s.cta_target_breakdown).length > 0 && (
+                          <li>
+                            cta:{' '}
+                            {Object.entries(s.cta_target_breakdown).map(([kind, n]) => (
+                              <code key={kind} className="text-[10.5px] mr-1">{kind}×{n}</code>
+                            ))}
+                          </li>
                         )}
+                        <li>target: <em>{targetLabel[s.target_hint] ?? s.target_hint}</em></li>
                         {s.section_role && (
                           <li>section role: <code className="text-[10.5px]">{s.section_role}</code></li>
+                        )}
+                        {s.sample_record && Object.keys(s.sample_record).length > 0 && (
+                          <li>
+                            <span className="text-wm-text">sample (first record):</span>
+                            <ul className="ml-3 mt-0.5 space-y-0.5">
+                              {orderedSampleEntries(s.sample_record, s.schema).map(([k, v]) => (
+                                <li key={k} className="text-[11px]">
+                                  <em className="text-wm-text-subtle">{k}:</em>{' '}{renderSampleCell(v)}
+                                </li>
+                              ))}
+                            </ul>
+                          </li>
+                        )}
+                        {s.sample_names.length > 1 && s.item_count > 1 && (
+                          <li>other items: <em>{s.sample_names.slice(1).join(' · ')}</em>{s.item_count > s.sample_names.length && <span> · +{s.item_count - s.sample_names.length} more</span>}</li>
                         )}
                         {ctx && (
                           <>
@@ -942,7 +1236,49 @@ function CmConceptsFoundPanel({ plan }: { plan: ContentModelPlan }) {
                             {ctx.frustration && ctx.frustration.trim() !== '-' && <li>partner note: {ctx.frustration}</li>}
                           </>
                         )}
+                        {s.build_time_issues && s.build_time_issues.length > 0 && (
+                          <li className="mt-1">
+                            {s.build_time_issues.map((issue, i) => {
+                              if (issue.kind === 'upstream_compression_loss') {
+                                return (
+                                  <span
+                                    key={i}
+                                    className={`block text-[11px] ${issue.severity === 'high' ? 'text-red-700' : issue.severity === 'medium' ? 'text-orange-700' : 'text-yellow-700'}`}
+                                  >
+                                    ⚠ upstream loss in <code className="text-[10.5px]">{issue.schema_name}</code>
+                                    {' '}— dropped before binding:{' '}
+                                    {issue.dropped_fields.map(f => (
+                                      <code key={f} className="text-[10.5px] mr-1">{f}</code>
+                                    ))}
+                                    <span className="text-[9.5px] font-medium ml-1">({issue.severity})</span>
+                                  </span>
+                                )
+                              }
+                              return (
+                                <span
+                                  key={i}
+                                  className={`block text-[11px] ${issue.severity === 'high' ? 'text-red-700' : issue.severity === 'medium' ? 'text-orange-700' : 'text-yellow-700'}`}
+                                >
+                                  🔴 library coverage gap on <code className="text-[10.5px]">{issue.template_id}</code>
+                                  {' '}— dropped fields:{' '}
+                                  {issue.dropped_fields.map(f => (
+                                    <code key={f} className="text-[10.5px] mr-1">{f}</code>
+                                  ))}
+                                  <span className="text-[9.5px] font-medium ml-1">({issue.severity})</span>
+                                </span>
+                              )
+                            })}
+                          </li>
+                        )}
                       </ul>
+                      {projectId && onPlanChange && (
+                        <SchemaOverrideControl
+                          section={s}
+                          projectId={projectId}
+                          plan={plan}
+                          onPlanChange={onPlanChange}
+                        />
+                      )}
                     </li>
                   )
                 })}
@@ -1175,7 +1511,6 @@ function ContentInventoryTechnicalCard({ session }: { session: Record<string, un
       { key: 'blog_new_filters',       label: 'Filters' },
     ]},
     { heading: 'Ministries & Discipleship', fields: [
-      { key: 'ministries_to_grow',         label: 'Ministries to grow' },
       { key: 'ministries_list_html',       label: 'Ministries list (HTML)' },
       { key: 'discipleship_pathway_html',  label: 'Discipleship pathway (HTML)' },
     ]},

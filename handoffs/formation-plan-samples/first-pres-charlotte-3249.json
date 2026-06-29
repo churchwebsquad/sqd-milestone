@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "_meta": {
-    "generated_at": "2026-06-26T22:25:10.401Z",
+    "generated_at": "2026-06-26T22:31:57.933Z",
     "generated_by": "analyzer-v1",
     "input_fingerprint": "-rgvu76",
     "counts": {
@@ -37389,6 +37389,10 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Plan Your Visit",
+        "contact_url": "/new"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37406,6 +37410,13 @@
         "buttons_card"
       ],
       "sample_names": [],
+      "sample_record": {
+        "heading_card": "For Your Family",
+        "description_card": "<p>From the nursery to 12th grade, there's a place for every child at FPC.</p>",
+        "buttons_card_label": "Explore Children & Youth",
+        "buttons_card_url": "/children-youth",
+        "buttons_card_kind": "internal_route"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37422,6 +37433,10 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "heading": "",
+        "description": "<p><em>\"In the name of Christ by the power of the Holy Spirit, the Christian community worships and serves God in shared experiences of life, in personal discipleship, in mutual ministry, and in common ministry in the world.\"</em></p>"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37442,6 +37457,10 @@
         "Racial Justice",
         "Politics and Public Life"
       ],
+      "sample_record": {
+        "title": "Women in Ministry",
+        "description": "<p>Women serve as pastors, elders, deacons, teachers, and leaders across all ministries. This community joyfully affirms the gifts of women for every form of leadership.</p>"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37457,6 +37476,10 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Meet the Full Team",
+        "contact_url": "/staff"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37472,6 +37495,10 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Read the PW Newsletter",
+        "contact_url": "https://mailchi.mp/firstpres-charlotte/pw-summer-18235218"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37487,6 +37514,11 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Contact Us",
+        "contact_url": "mailto:hclarke61@gmail.com",
+        "contact_kind": "mailto"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37508,6 +37540,15 @@
         "sort_label"
       ],
       "sample_names": [],
+      "sample_record": {
+        "show_search": "The Advocacy Ministry maintains a collection of resources like articles, posts, and materials all organized by sub-ministry. Browse by topic to go deeper on any of the areas above.",
+        "show_category": true,
+        "category_label": "Topic",
+        "show_tag": true,
+        "tag_label": "Type of Resource",
+        "show_sort": true,
+        "sort_label": "Time Requirement"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37523,6 +37564,10 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Find a Serving Opportunity",
+        "contact_url": "/serve"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37544,6 +37589,11 @@
         "Chuck Williamson",
         "Mary Bowman"
       ],
+      "sample_record": {
+        "team_name": "Anna Dickson",
+        "team_position": "Executive Pastor and Pastor for Congregational Care",
+        "team_description": "<p><a target=\"_blank\" rel=\"noopener noreferrer nofollow\" class=\"text-wm-accent-strong underline\" href=\"mailto:adickson@firstpres-charlotte.org\"><u>adickson@firstpres-charlotte.org</u></a></p>"
+      },
       "target_hint": "flat-list",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -37563,6 +37613,10 @@
         "To request a pastoral visit:",
         "A note about hospital visits:"
       ],
+      "sample_record": {
+        "heading": "To request a pastoral visit:",
+        "description": "<p>During office hours (Monday through Friday, 8 a.m. to 5 p.m.): call (704) 332-5123.</p><p>Outside of office hours: call the pastoral emergency line at (704) 927-0256. Your call will be returned promptly.</p>"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37582,6 +37636,10 @@
         "Insurance Accepted:",
         "Scheduling An Appointment"
       ],
+      "sample_record": {
+        "heading": "Insurance Accepted:",
+        "description": "<p></p><p>Aetna, BCBS, CBHA, Cigna, Medicare, United Healthcare, and Out-of-Network Benefits. Income-based sliding scale fees are available. Please note: not all counselors accept every insurance. Review individual counselor profiles for specific details.</p>"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37597,6 +37655,11 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "For Counseling Appointments",
+        "contact_url": "tel:+17045549900",
+        "contact_kind": "tel"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37612,6 +37675,11 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "FPC Kids",
+        "contact_url": "#kids",
+        "contact_kind": "anchor"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37627,6 +37695,10 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Sign Up for the Children's Newsletter",
+        "contact_url": "https://fpc.tiny.us/childrensnewsletter"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37643,6 +37715,10 @@
         "description_card"
       ],
       "sample_names": [],
+      "sample_record": {
+        "heading_card": "Carol Choir",
+        "description_card": "<p><strong>Ages 4.5 years through 1st Grade</strong></p><p>Wednesday evenings, 5:45 to 6:45 p.m. | Room P307</p>"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37658,6 +37734,10 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Download the Monthly Calendar",
+        "contact_url": "https://firstpres-charlotte.org/wp-content/uploads/2025/09/Youth-Calendar-25-26-1.pdf"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37674,6 +37754,10 @@
         "description_card"
       ],
       "sample_names": [],
+      "sample_record": {
+        "heading_card": "Ivey Ringers",
+        "description_card": "<p>A handbell ensemble for middle and high school ringers. Ivey Ringers rehearse weekly and lead in worship throughout the year. Advanced repertoire, weekend ministry tours, and summer travel opportunities are part of this ensemble&#39;s life together.</p>"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37693,6 +37777,11 @@
       "sample_names": [
         "Audrey Webb Kahrs"
       ],
+      "sample_record": {
+        "team_name": "Audrey Webb Kahrs",
+        "team_position": "Kids Ministry Leader",
+        "team_description": "<p><a target=\"_blank\" rel=\"noopener noreferrer nofollow\" class=\"text-wm-accent-strong underline\" href=\"mailto:awebb@firstpres-charlotte.org\">awebb@firstpres-charlotte.org</a></p>"
+      },
       "target_hint": "flat-list",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -37713,6 +37802,14 @@
       "sample_names": [
         "Afternoon/Evening Custodian"
       ],
+      "sample_record": {
+        "title": "Afternoon/Evening Custodian",
+        "location": "Operations",
+        "summary": "<p>The custodian is a 37.5-hour-per-week position working with and reporting to the Director of Operations. Custodians are responsible for maintaining the cleanliness and orderliness of school and church facilities. Primary tasks include setting and resetting meeting room layouts, vacuuming common areas and offices, light cleaning, maintaining property grounds, washing dishes in the church and school kitchen, and ensuring all areas are presentable and ready for use.</p>",
+        "apply_cta_label": "View Full Job Description",
+        "apply_cta_url": "https://firstpres-charlotte.org/wp-content/uploads/2026/01/Afternoon_Evening-Custodian-2026.pdf",
+        "apply_cta_kind": "external_url"
+      },
       "target_hint": "flat-list",
       "cpt_subroutine_ref": "wp_object.career"
     },
@@ -37728,6 +37825,10 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Sign Up for the Weekly Newsletter",
+        "contact_url": "https://fpc.tiny.us/news"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37743,6 +37844,10 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Give Online",
+        "contact_url": "https://onrealm.org/firstprescharlotte/give/main"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37758,6 +37863,11 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Sign Up to Host",
+        "contact_url": "https://www.signupgenius.com/go/8050545AAAA2BA1FE3-59454213-room#/",
+        "contact_kind": "external_url"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37773,6 +37883,11 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Contact for upcoming trips",
+        "contact_url": "mailto:lcrain@firstpres-charlotte.org",
+        "contact_kind": "mailto"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37794,6 +37909,11 @@
         "Flo Bryan",
         "Heidi Squires"
       ],
+      "sample_record": {
+        "team_name": "Rev. Lucy Crain",
+        "team_position": "",
+        "team_description": "<p>Associate Pastor for Outreach and Missions</p>"
+      },
       "target_hint": "flat-list",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -37809,6 +37929,10 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Find a Serving Opportunity",
+        "contact_url": "/serve"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37825,6 +37949,10 @@
         "description_card"
       ],
       "sample_names": [],
+      "sample_record": {
+        "heading_card": "Nursery (Birth through Age 2)",
+        "description_card": "<p>The nursery is open beginning at 9:30 a.m. in Room P311. Professionally trained staff provide a safe, loving environment. When children turn three, they&#39;re encouraged to join Sunday School and First Church.</p>"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37840,6 +37968,11 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Sign Up for Baptism",
+        "contact_url": "https://form.jotform.com/81076098123153",
+        "contact_kind": "mailto"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37855,6 +37988,11 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Sign Up to Host",
+        "contact_url": "https://www.signupgenius.com/go/8050545AAAA2BA1FE3-59454213-room#/",
+        "contact_kind": "external_url"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37870,6 +38008,10 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Call (704) 332-5123",
+        "contact_url": "tel:+17043325123"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37891,6 +38033,11 @@
         "Anna Dickson",
         "Lucy Crain"
       ],
+      "sample_record": {
+        "team_name": "Lewis Galloway",
+        "team_position": "Transitional Pastor",
+        "team_description": "<p>Dr. Lewis Galloway is a native of Columbia, SC and a graduate of Davidson College (A.B.) and Union Presbyterian Seminary in Richmond, VA (D.Min.; Th.M.). He studied in France for two years at the University Paul Valerie in Montpellier and at the Protestant Faculty of Theology in Paris. He is married to Dr. Eleanor (Bunny) Alexander, a native of Charlotte, who grew up with her family at First Presbyterian Church. She is a graduate of Queens University, Union Presbyterian Seminary (D.Min.), a PCUSA pastor, and a retired Pastoral Counselor. They are the parents of three grown children and have two grandchildren. Their son Robert Galloway served as an associate pastor at First Presbyterian Church for five years. In 1977–88, Lewis was the Seminary Intern at First Church. Lewis and Bunny moved to Black Mountain for retirement after serving in Indianapolis for 14 years. In Indianapolis, Bunny was a pastoral counselor at Centerpoint Counseling Center; Lewis was the Senior Pastor of Second Presbyterian Church. While at Second Indianapolis, Lewis was the Program Director of the Lake Fellow Residency Program in Parish Ministry and the Chair of the Indianapolis Interfaith Hunger Initiative. Prior to Indianapolis, Lewis served churches in eastern North Carolina, Norfolk, Virginia, and Columbia, South Carolina. He was the President of the South Carolina Council of Churches, Chair of the Cooperative Ministry, and the Chair of the Mayor&#39;s Task Force on Homelessness. He has served as a member of the Board of Trustees of Union Presbyterian Seminary, Davidson College, and the Montreat Conference Center. He is currently on the boards of the Anderson Foundation and Agnes Scott College. Since his retirement in 2018, Lewis has served for one year as the Transitional Pastor of the First Presbyterian Church in Spartanburg, SC. During COVID, he taught Bible classes online for several churches. In the summer months, he volunteers at the Sally Jones Pottery in Montreat.</p>"
+      },
       "target_hint": "flat-list",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -37912,6 +38059,11 @@
         "Anita Bennett",
         "Audrey Webb Kahrs"
       ],
+      "sample_record": {
+        "team_name": "Andrea Nelson",
+        "team_position": "Food Service Manager",
+        "team_description": "<p>I was born and raised in Flint, MI, and I have lived in Charlotte for 10 years. I attended the Art Institute of Michigan, Novi Culinary School. I have over 15 years of catering experience for special events and youth programs. In my spare time, I enjoy spending time with my husband and three kids. I also enjoy playing board games and doing outdoor activities.</p>"
+      },
       "target_hint": "flat-list",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -37931,6 +38083,10 @@
         "Repentance and Resurrection Statement",
         "Artist’s Statement"
       ],
+      "sample_record": {
+        "title": "Repentance and Resurrection Statement",
+        "description": "<p><em>Teacher, which commandment in the law is the greatest?&nbsp; Jesus said to him, You shall love the Lord your God with all your heart, and with all your soul, and with all your mind… And… You shall love your neighbor as yourself.</em></p><p>Since its founding in 1821, the roots of First Presbyterian Church have wound inextricably through the roots of Charlotte, exerting a powerful impact both as a body of Christ and as a group of dedicated individuals acting throughout the community. Countless examples exist of faithful, compassionate, even courageous ministries spread by FPC and its members.</p><p>But because the Church is a human instrument used by God for divine purposes, there are also examples of human failings and sinfulness. Thus, the soil of our history includes numerous incidents of exclusion, racism, sexism, and other affronts to the promise of God’s inseparable love for all people. In particular, FPC and its members have condoned, sanctioned, and given moral legitimacy to slavery and white supremacy.</p><p><em>We confess these moral failings unequivocally.</em>&nbsp;We do so not as morally superior beings casting judgment on the past, but as sinners in need of God’s grace. The purpose of confession and repentance is to acknowledge our need for grace before God.&nbsp; To be a covenant community means we must own the sins of the past if we are to repent and respond to God’s call to a new and better future together. We are committed both to remembering our history and to continuing to take steps towards repair.</p><p>As we work to repent of our sins, we look forward to the promise of forgiveness, and to the promise of resurrection – both of which remind us that change and a new way of life are not only possible, but are assured through Christ our Redeemer.</p><p><em>In memory of all those who entered and worshipped at First Presbyterian Church as enslaved or otherwise subordinated people, including these described by name in Session minutes: Marie, a colored woman belonging to Rev. Cyrus Johnson; Joe, a slave formerly the property of James Irwin; Charity, a servant girl of Mr. Irwin; Sophia, a servant to Joseph H. White; Charles, a servant belonging to John Williamson; and Alexander, a servant of Mr. Henderson.</em></p>"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37952,6 +38108,15 @@
         "sort_label"
       ],
       "sample_names": [],
+      "sample_record": {
+        "show_search": true,
+        "show_category": true,
+        "category_label": "Preacher",
+        "show_tag": true,
+        "tag_label": "Service Type",
+        "show_sort": true,
+        "sort_label": "Service Year"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37968,6 +38133,10 @@
         "description_card"
       ],
       "sample_names": [],
+      "sample_record": {
+        "heading_card": "Sanctuary Choir",
+        "description_card": "<p><strong>Rehearsals: Wednesdays, 7 to 8:30 p.m.</strong></p><p>This choir leads music for the 11 a.m. Sunday service as well as special services and programs throughout the year. The Sanctuary Choir sings across the full spectrum of sacred music and provides a close-knit community within the church. New voices of all ages are always welcome. Some music-reading ability, pitch-matching skills, and a love of singing are required.</p>"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -37984,6 +38153,10 @@
         "description_card"
       ],
       "sample_names": [],
+      "sample_record": {
+        "heading_card": "Ivey Ringers (grades 6th-12th)",
+        "description_card": "<p><strong>Rehearsals: Sundays, 4:30 to 5:15 p.m.</strong></p><p>A handbell ensemble for middle and high school ringers. Ivey Ringers rehearse weekly, lead in worship throughout the year, and take part in weekend and summer ministry tours to share the love of Christ with others.</p>"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -38000,6 +38173,10 @@
         "description_card"
       ],
       "sample_names": [],
+      "sample_record": {
+        "heading_card": "Carol Choir",
+        "description_card": "<p><strong>Ages 4.5 through 1st Grade | Wednesdays, 5:45 to 6:45 p.m. | Room P307</strong></p><p>Through songs and games, these young musicians learn the fundamentals of music, faith, and teamwork, and they participate in worship through their music.</p>"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -38016,6 +38193,10 @@
         "description_card"
       ],
       "sample_names": [],
+      "sample_record": {
+        "heading_card": "Singing in the Season",
+        "description_card": "<p><strong>Ages 4.5 through 1st Grade | Wednesdays, 5:45 to 6:45 p.m. | Room P307</strong></p><p>In early December, the entire Music Ministry comes together with full orchestra to present this beloved community program, open to all.</p>"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -38037,6 +38218,11 @@
         "Kaitlyn Davros",
         "Trevor Cook"
       ],
+      "sample_record": {
+        "team_name": "Will Young",
+        "team_position": "Director of Music Ministries",
+        "team_description": ""
+      },
       "target_hint": "flat-list",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38052,6 +38238,10 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Roku Streaming Instructions",
+        "contact_url": "https://firstpres-charlotte.org/wp-content/uploads/2025/03/Stream-on-Roku-Instructions.pdf"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -38067,6 +38257,9 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "description": "<p></p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38080,6 +38273,7 @@
       "item_count": 1,
       "schema": [],
       "sample_names": [],
+      "sample_record": null,
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.event",
       "partner_context": {
@@ -38105,6 +38299,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Transitional Pastor",
+        "heading": "Lewis Galloway",
+        "description": "<p>Dr. Lewis Galloway is a native of Columbia, SC and a graduate of Davidson College (A.B.) and Union Presbyterian Seminary in Richmond, VA (D.Min.; Th.M.). He studied in France for two years at the University Paul Valerie in Montpellier and at the Protestant Faculty of Theology in Paris. He is married to Dr. Eleanor (Bunny) Alexander, a native of Charlotte, who grew up with her family at First Presbyterian Church. She is a graduate of Queens University, Union Presbyterian Seminary (D.Min.), a PCUSA pastor, and a retired Pastoral Counselor. They are the parents of three grown children and have two grandchildren. Their son Robert Galloway served as an associate pastor at First Presbyterian Church for five years. In 1977–88, Lewis was the Seminary Intern at First Church. Lewis and Bunny moved to Black Mountain for retirement after serving in Indianapolis for 14 years. In Indianapolis, Bunny was a pastoral counselor at Centerpoint Counseling Center; Lewis was the Senior Pastor of Second Presbyterian Church. While at Second Indianapolis, Lewis was the Program Director of the Lake Fellow Residency Program in Parish Ministry and the Chair of the Indianapolis Interfaith Hunger Initiative. Prior to Indianapolis, Lewis served churches in eastern North Carolina, Norfolk, Virginia, and Columbia, South Carolina. He was the President of the South Carolina Council of Churches, Chair of the Cooperative Ministry, and the Chair of the Mayor&#39;s Task Force on Homelessness. He has served as a member of the Board of Trustees of Union Presbyterian Seminary, Davidson College, and the Montreat Conference Center. He is currently on the boards of the Anderson Foundation and Agnes Scott College. Since his retirement in 2018, Lewis has served for one year as the Transitional Pastor of the First Presbyterian Church in Spartanburg, SC. During COVID, he taught Bible classes online for several churches. In the summer months, he volunteers at the Sally Jones Pottery in Montreat.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38120,6 +38319,10 @@
         "contact"
       ],
       "sample_names": [],
+      "sample_record": {
+        "contact_label": "Audio",
+        "contact_kind": "internal_route"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -38137,6 +38340,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Executive Pastor and Pastor for Congregational Care",
+        "heading": "Anna Dickson",
+        "description": "<p>Having served congregations in both Raleigh and Charlotte since her ordination in 2011, Anna enjoys her call as Pastor for Congregational Care at First Presbyterian Church because of its emphasis on relationship-building and mutual care. She loves the way worship can shape our imagination for more faithful, fulfilled living in God&#39;s world, and is grateful to get to witness the creative discipleship that flows out of FPC&#39;s worship in the heart of Charlotte. Anna is married to CJ, and together they have two children. She holds a BA from Washington and Lee University (2006) and an MDiv from Princeton Theological Seminary (2011).</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38156,6 +38364,13 @@
         "sort_label"
       ],
       "sample_names": [],
+      "sample_record": {
+        "show_category": false,
+        "show_tag": true,
+        "tag_label": "Topic",
+        "show_sort": true,
+        "sort_label": "Date"
+      },
       "target_hint": "unknown",
       "cpt_subroutine_ref": null
     },
@@ -38173,6 +38388,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Associate Pastor for Outreach and Missions",
+        "heading": "Lucy Crain",
+        "description": "<p>Lucy and her husband, Jim, grew up in the East Tennessee mountains and attended East Tennessee State University. They moved to Charlotte twenty-five years ago, where they raised their three children. After graduate school, Lucy began her career as a child and family therapist and enjoyed helping families in times of crisis and journeying with them as they strived to live their best lives. Similarly, her call to ministry has been fueled by a desire for all God&#39;s creation to have the life abundant that Christ desires for us. Throughout her adult life, Lucy had been actively involved in church lay leadership and served in various capacities that helped make clear her desire to pursue congregational ministry. She joined the staff of Covenant Presbyterian Church in 2013, and has spent the past five years serving as the Director of Mission and Outreach. This call led her to pursue a Master of Divinity from Union Presbyterian Seminary Charlotte.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38190,6 +38410,11 @@
         "author_bio_author_container"
       ],
       "sample_names": [],
+      "sample_record": {
+        "category_1": "News",
+        "heading": "Blog Post Heading",
+        "author_bio_author_container": "<p>News &amp; Publications</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.post"
     },
@@ -38207,6 +38432,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Parish Associate",
+        "heading": "Chuck Williamson",
+        "description": "<p>My title, Parish Associate, means I get to fill in wherever needed. That&#39;s one thing I love about ministry — the variety of tasks that a minister is called on to do: preach, teach, study, visit, listen, meditate, pray, sing, interact with colleagues, work with children, youth, adults of all ages. I get to do it all. Thank you for giving me this wonderful opportunity to spend my retirement years in this meaningful way. I came here after 40 years of active ministry, having retired from Philadelphia Presbyterian Church in Mint Hill. Here&#39;s what I learned when I retired: I have way too many neckties and not enough T-shirts. I no longer set an alarm clock! Barbara and I have four children and eight grandchildren. I come from a family of preachers: my father, brother, two uncles and cousin are/were all Presbyterian pastors. For recreation, I do things like water aerobics, needlepoint, cook, read recipe books and other such fun things.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38224,6 +38454,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Parish Associate",
+        "heading": "Mary Henderson Bowman",
+        "description": "<p>Mary grew up as the youngest of four children in Columbus, Ohio. She came to North Carolina as a freshman at UNC-Chapel Hill and decided to stay. She and her husband Charles have two adult sons. Mary and her family were members of First Presbyterian Church before she was ordained as a minister in 2010. While at First Presbyterian, Mary served as a deacon and an elder and was active as a volunteer, including teaching Sunday School, working in outreach, participating in Presbyterian Women, and serving as a Stephen Minister and Leader. Mary is excited to be leading the Contemplative Service as she has studied and explored the contemplative side of Christianity for many years, through centering prayer, silent retreats, and other spiritual practices. Mary is a Spiritual Director and participates on the Presbytery&#39;s Antiracism Ministry Team. She loves to read and learn, to hike and be in nature, to be with others, and to watch for how God is moving in the world.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38241,6 +38476,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Parish Associate",
+        "heading": "Rob Spach",
+        "description": "<p>Rob Spach grew up in Brazil as the child of Presbyterian educational missionaries. He holds degrees from Davidson College (A.B.), the University of Virginia (M.A.), Princeton Theological Seminary (M.Div.), and Columbia Theological Seminary (D.Min.). Prior to his ordination in the PCUSA, he taught English as a Second Language in Portugal and worked as a bookstore manager in Charlottesville, VA. He served as the Chaplain and Director of Religious and Spiritual Life at Davidson College from 1993 until his retirement in 2023. He enjoys reading, playing racquetball, and learning about socially responsible investing. He and his British wife Gail have two children and one grandchild.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38258,6 +38498,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Food Service Manager",
+        "heading": "Andrea Nelson",
+        "description": "<p>I was born and raised in Flint, MI, and I have lived in Charlotte for 10 years. I attended the Art Institute of Michigan, Novi Culinary School. I have over 15 years of catering experience for special events and youth programs. In my spare time, I enjoy spending time with my husband and three kids. I also enjoy playing board games and doing outdoor activities.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38275,6 +38520,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Weekday School Assistant Director",
+        "heading": "Anita Bennett",
+        "description": "<p>I first came to First Presbyterian as a Weekday School Teacher in 2016 after leaving the Corporate world behind. In May 2020, I took the position of Assistant Director and Treasurer and joined the First Presbyterian Church staff. I have a B.A. in Sociology with a concentration in Elementary Education from the University of North Carolina at Chapel Hill. I moved to Charlotte in 1995 after graduating from UNC where I met my husband, Brandt, a fellow Tar Heel and a native Charlottean. Before coming on board at First Pres, I worked as a Project Manager supporting International and Domestic Commercial Real Estate Banking for 20 years. Brandt and I have a son, Wes. Our family loves to travel, watch sports, and spend time with family and friends. I enjoy cooking, running, entertaining, and spoiling my family and friends. In my spare time I love watching HGTV and of course cheering on my Tar Heels.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38292,6 +38542,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Director of Youth Ministry",
+        "heading": "Audrey Webb Kahrs",
+        "description": "<p>Audrey is a recent graduate of Austin Presbyterian Theological Seminary and the Center for Youth Ministry Training, where she earned a Master of Arts in Youth Ministry. She is a proud alum of the University of Alabama (Roll Tide!), where she graduated with a Bachelor of Arts in English and a Bachelor of Science in Human Development and Family Studies. Audrey grew up in Lynchburg, Virginia, where, at one time, her family sat four generations in a church pew. This whole ministry thing is a poorly veiled attempt to be a professional church camp counselor forever, as she had many of her most formative moments at Montreat and Massanetta Springs, at conferences this congregation knows well! Audrey has developed a vision for youth ministry that values fellowship, authenticity, wonder, grace, and gratitude. She and her husband, Walter, are excited to be on the East Coast.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38309,6 +38564,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Music Ministry Administrative Assistant",
+        "heading": "Barb Frith",
+        "description": "<p>I grew up in Connecticut and attended the University of Virginia as an undergraduate, where I met my husband Pat, and then again for law school. Following law school graduation, Pat and I relocated to Charlotte, where I practiced law with Kennedy Covington Lobdell and Hickman (now K&amp;L Gates) in the Corporate and Securities/Transactional practice, before retiring in 1999 to be at home with our three children. For the past 17 years I have worked as the Registrar for North Carolina Swimming. We joined FPC in 1991, and I joined the choir shortly thereafter. In addition to music, I love to travel, especially to see family and our kids in New York and Germany, the beach, skiing, sports and cooking.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38326,6 +38586,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Director of Technology",
+        "heading": "Ben Treece",
+        "description": "<p>Ben joined the church as Technical Production Coordinator in 2008. He manages and supports the TV ministry, Audio/Visual Systems, and IT systems for the church. Ben graduated from Middle Tennessee State University with a B.S in Recording Industry Production. While in school, Ben worked with several recording studios and churches in Nashville, TN doing audio and video production. He holds CTS and CTS-I certifications from Infocomm and is a member of the Audio Engineering Society. Ben is a native Charlottean and an Eagle Scout. In his spare time he enjoys woodworking, seeing new movies and spending time outdoors with his dog Rocky.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38343,6 +38608,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Facilities Staff",
+        "heading": "Bradley Thompson",
+        "description": "<p>I have lived in Charlotte since November of 2025. I have worked in several different fields in my career but the latest was truck driving until joining the church. I enjoy meeting new people and my goal in life is to serve others and help those around me. I enjoy the outdoors and especially hiking and fishing. I also love to play the guitar in my spare time.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38360,6 +38630,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Director of Operations",
+        "heading": "Brandon Thomas",
+        "description": "<p>Having lived in several states throughout my life, I can honestly say I consider Charlotte home. I have been a Charlottean in the past for several years and have recently moved back to the Queen City. After graduating college with a B.S. in Religion and a minor in Business, I worked for the United Way of Central Carolinas for over 5 years as their Building Operations Manager. My first stint in Charlotte involved work with the Men&#39;s Shelter, the homeless shelter, and several youth programs. I am excited to be a part of the FPC family and all of the amazing things they are doing. In my free time I enjoy hiking, playing sports and traveling. I am also a huge Alabama Crimson Tide fan (Roll Tide).</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38377,6 +38652,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Assistant Director, Child Development Center",
+        "heading": "Caroline Schaal",
+        "description": "<p>I am a New Jersey native who moved to North Carolina with my husband in 2018. We bought our first home here and together we have formed a beautiful life with our daughter and dog. I hold a bachelor&#39;s degree in elementary education and spent many years working in kindergarten and first-grade classrooms before focusing on my growing interest in early childhood education. The experience I gained from my previous roles led me to the FPC Child Development Center as the Assistant Director. I am so grateful to have been allowed to work with such a passionate and dedicated team of professionals. In my spare time, I enjoy relaxing with my family at the pool and finding new and interesting places to eat and explore.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38394,6 +38674,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Director of Communications and Digital Engagement",
+        "heading": "Cierra Christian",
+        "description": "<p>Cierra Christian&#39;s passion for nonprofit and church communication can be traced back to her pre-professional days. She holds an M.A. in Communication from the College of Charleston, where she focused on nonprofit communication and marketing throughout her schooling. Cierra comes to FPC by way of Myers Park Presbyterian Church where she served as the Assistant Communications Director, and First (Scots) Presbyterian Church in Charleston, SC prior to moving to Charlotte. She describes herself as a &quot;communicator and creative,&quot; and enjoys working with her coworkers to bring their visions and stories to life. When she&#39;s not at work, she enjoys spending time with her family and their two dogs. She is an avid gardener and houseplant hobbyist who enjoys reading fantasy, photography, and DIY projects.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38411,6 +38696,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Director of Children and Family Ministry",
+        "heading": "Crystal Sellers",
+        "description": "<p>Crystal Sellers, a former First Presbyterian youth mom, is grateful for the opportunity to serve as Director of Children and Family Ministry. She brings to this position a wealth of life experience and a genuine passion for nurturing the spiritual growth of young individuals. A proud graduate of Wake Forest University and Union Presbyterian Seminary (M.A., Christian Education), she and her husband Steve enjoy their empty nest on the shores of Lake Norman. On her nightstand is a revolving collection of reading materials, but it always includes the Bible and Vogue magazine. She believes faith is a continuous journey of wrong turns in the RIGHT direction.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38428,6 +38718,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Receptionist",
+        "heading": "Diane Maye",
+        "description": "<p>Baptized at First Presbyterian Church, I moved with my family to Huntersville to open a drug store in 1954. I worked in the family business, worshipped at Huntersville Presbyterian and graduated from North Mecklenburg High School. After finishing college at UNC-Chapel Hill, I taught English for 34 years at my alma mater North Mecklenburg. In 1992, my son, Dowd, and I joined First Presbyterian, and I have worked at the church since 2012. My now deceased husband, Larry, and I were married for 49 years. I enjoy reading, gardening, flower arranging, interior decorating and vacationing at the beach.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38445,6 +38740,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Community Engagement Coordinator",
+        "heading": "Flo Bryan",
+        "description": "<p>Thirty years ago, my husband Kedar and I moved to Charlotte from Washington, DC and quickly made First Presbyterian our church home primarily because of its community outreach focus. After a career in finance as a stockbroker, I first joined the church staff as a teacher in the Weekday School and discovered a love for storytelling, messy art projects, and preschoolers over fourteen years while also helping to raise our three children. After another career chapter in the world of e-commerce, I re-upped with First Presbyterian as the Outreach Coordinator in 2019. It feels like coming full circle when I can now work to engage our church members in doing the work of Christ in the heart of Charlotte alongside our community partners.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38462,6 +38762,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "FPC Travels Director",
+        "heading": "Garrell Keesler",
+        "description": "<p>As a multi-decade member at First Presbyterian Church, I joined the staff in July 2013. I continue to be interested in ways Christian Formation can equip our congregation for ministry inside and outside our church. My background includes a Math and Business degree from Wake Forest, corporate bank work, five years as First Presbyterian&#39;s Membership Coordinator, a stint as a caterer and 30 years of studying the Bible with a host of insightful and supportive women and men. Learning is a lifelong pursuit and for me includes reading lots of &quot;Jesus&quot; books, being certified to teach yoga and holding several wine certifications. As my family will tell you, cooking is my love language. My husband Lee and I are grateful for time with our children, Andrew and A.C., and for the opportunities to watch them flourish in young adulthood.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38479,6 +38784,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Receptionist",
+        "heading": "Gloria Clark",
+        "description": "<p>Gloria has been married for 27 years and has two sons who are both in Charlotte. She worked with Johnson and Wales University for 15 years and has since retired. After retirement, she found working with other non-profits to be a rewarding experience. In her free time she loves listening to music, playing piano, and traveling.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38496,6 +38806,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Outreach Coordinator",
+        "heading": "Heidi Squires",
+        "description": "<p>Heidi is our outreach coordinator focusing on child and family ministries. She is married to Hart and the mother of one daughter, Everly. She is passionate about building relationships and helping individuals discover outreach experiences that bring them joy, particularly ones that support children and families in our community. In her spare time, she loves to work in her garden, paint kindness rocks to hide around Charlotte, and work her way through the pile of books on her nightstand.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38513,6 +38828,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Director of Finance",
+        "heading": "Jan Gaddis",
+        "description": "<p>I joined the staff of First Presbyterian Church in July 2010. Before joining FPC, my career spanned roles in auditing and accounting for a public utility and a consulting firm, followed by various financial leadership positions within several nonprofit organizations. I earned my Bachelor of Science in Accounting from Gardner-Webb University in 1985. Shortly after, I married my high school sweetheart, Dean. We are the proud parents of two grown sons and grandparents to three energetic grandsons and one sweet granddaughter. Outside of work, I enjoy spending time with family — especially during our highly competitive game nights. I also love tackling jigsaw puzzles, planting and watching things grow, and (to my husband&#39;s dismay) frequently rearranging our furniture. Being part of the First Presbyterian Church community is both a joy and a privilege.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38530,6 +38850,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Membership Coordinator",
+        "heading": "Jane Ives",
+        "description": "<p>My husband, Frasier, and I joined First Presbyterian Church (separately) in 1989. We later met attending Sunday School and got married shortly after. We raised our two boys, Harris and Hunter, here at the church. First Presbyterian is such a special place and has been a blessing in our lives. I love helping others find their place here and to become members of this wonderful church community.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38547,6 +38872,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Associate Director of Music",
+        "heading": "Kaitlyn Davros",
+        "description": "<p>Kaitlyn Davros holds an M.M. in Sacred Music from Westminster Choir College at Rider University and a Bachelor of Music in Organ Performance from Hope College in Holland, MI. She has traveled abroad to Amsterdam, London, and Paris to research, study, and perform. She has studied at the Choral Music Institute at Oxford University, England, holds the Director of Young Singers certificate from the Choristers Guild Institute, and serves on the Presbyterian Association of Musicians Board. In her professional roles, Kaitlyn has served as Associate Director of Music/Organist, Interim Director of Music, and most recently as Director of Traditional Music and Worship. She brings experience in leading a comprehensive music program, including three handbell choirs and a men&#39;s choir, establishing a vibrant children and youth music program, and creating authentic and creative worship from the organ. In her free time, Kaitlyn enjoys collaborating with Temple Beth El and playing for their High Holy Days and occasional Shabbat services. Her husband, Nick, is a biology professor at CPCC, and they have two sweet girls and an energetic black lab, Harbaugh.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38564,6 +38894,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Facilities Staff",
+        "heading": "Kai",
+        "description": "<p>[Bio not yet available — please provide bio for website]</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38581,6 +38916,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Operations Administrative Assistant",
+        "heading": "Kalia Coffey",
+        "description": "<p>I&#39;m a proud graduate of Clemson University, where I earned my degree in Health Science with a deep appreciation for community, leadership, and resilience. Over the past few years, I&#39;ve built a career rooted in real estate and administrative operations, supporting teams through complex logistics, client relations, and organizational growth. I&#39;m known for being resourceful and detail-oriented, and I&#39;ve had the privilege of helping build strong foundations across both corporate and nonprofit spaces. Outside of work, I&#39;m a loving and devoted mother of two. I find joy in hiking, traveling, lake life, and creating meaningful moments with my family. I&#39;m excited to bring my skills, heart, and dedication to my current role.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38598,6 +38938,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Program Director, Child Development Center",
+        "heading": "Kelly Deal",
+        "description": "<p>Before joining the CDC three years ago, I taught kindergarten for Charlotte-Mecklenburg Schools and four-year-olds at the Weekday School. I am a member at First Presbyterian Church. I graduated from Queens University and have been in Charlotte 33 years. I have three grown children. My latest interest is my new German Shepherd puppy. Other interests include book club, gardening and cooking.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38615,6 +38960,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Music Associate and Administrative Assistant for Formation",
+        "heading": "Kelly Harder",
+        "description": "<p>Although I was born and raised in Southern California, I&#39;m now a converted Southerner. I graduated from UNCC with a Bachelor&#39;s degree in Music Education. I currently teach music at Lake Wylie Elementary School. My interests outside of church and school include football (Keep Pounding!), board games, traveling, puzzles, and watching movies.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38632,6 +38982,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Kitchen Assistant",
+        "heading": "LaTonya Hope",
+        "description": "<p>[Bio not yet available — please provide bio for website]</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38649,6 +39004,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Associate Finance Director",
+        "heading": "Laura Katute",
+        "description": "<p>Laura recently joined the First Presbyterian Church team as Associate Finance Director. She and her husband moved to the United States from Lithuania 15 years ago. Charlotte has become home for them and their three children. Laura earned her Bachelor&#39;s and Master&#39;s degrees in Accounting and Auditing from the Kaunas University of Technology. She has a passion for numbers, and math was her favorite subject in school. Locally, she has served as the Treasurer of the Baltic Lithuanian Heritage School and volunteered for other local non-profit organizations. Recently, she became the Chairman of the Board at the Charlotte Lithuanian Community. Laura especially loves to travel.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38666,6 +39026,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Program Director, Weekday School",
+        "heading": "Lauren McCrory",
+        "description": "<p>I joined First Presbyterian Church staff as the Weekday School Program Director in 2014. I have a B.A. from the University of Florida and a Masters in Theology from Vanderbilt University. I moved to the Queen City in 2008 to teach Kindergarten with Teach For America. Before coming on board at First Pres, I worked in new teacher training and educational consulting. I&#39;m married to Wilson, a lifelong member of First Presbyterian Church. We make frequent trips to my hometown, Tampa, Florida, to enjoy the warm weather and quality time with family. I enjoy cooking, working out and watching HGTV.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38683,6 +39048,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Administrative Assistant to Associate Pastors",
+        "heading": "Lauren Russell",
+        "description": "<p>I am going from the Schoolhouse to the Lord&#39;s House! After four wonderful and transformative years within the Charlotte-Mecklenburg School System, I have found my way into a new and exciting position here at First Presbyterian Church of Charlotte. I am a 2018 graduate of Wingate University with a Bachelor of Arts Degree with an Emphasis in Vocal Performance and have been a Resident Artist with OperaCarolina for the past four years. When not learning new roles or pieces, I also assist BachAkademie of Charlotte as their Executive Assistant, sing as a featured soloist and member of Charlotte Master Chorale, and travel for Young Artist Programs. Any moment when I have spare time, you can find me learning a new recipe, tending to my plants, or re-watching anything Disney, Star Wars, and Marvel related. Feel free to stop by for a little ray of sunshine even on the cloudiest of days.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38700,6 +39070,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Director of Formation and Fellowship",
+        "heading": "Lucy Baum",
+        "description": "<p>Lucy Baum (BA Davidson College 2010; MDiv Columbia Theological Seminary 2013) is a North Carolina native, but most recently lived in Atlanta, GA from 2010 to 2025, where she worked at Columbia Theological Seminary and worshipped at Central Presbyterian Church. In addition to her theological training at Columbia Seminary, Lucy also brings experience in communications and project management. Lucy and her husband Matt met at Davidson and were married in 2012. They are delighted to have found a home at First Presbyterian Church of Charlotte! In her free time, Lucy enjoys movies, books, gardening, and hiking, as well as visual art and bluegrass music.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38717,6 +39092,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Head of Maintenance",
+        "heading": "Mark Pestano",
+        "description": "<p>[Bio not yet available — please provide bio for website]</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38734,6 +39114,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Executive Director",
+        "heading": "Michael DeNise",
+        "description": "<p>Michael has a passion for non-profit leadership and helping organizations reach their full potential. He started his career at the YMCA, serving first as an aquatics director, then working his way up to CEO and executive director. Michael spent the last eight years as the director of finance and administration with the North Carolina Synod of the Evangelical Lutheran Church in America (ELCA), overseeing finances, endowments, constitutions, legal matters, and more. Michael is a member of the Church Network and a member of the Advisory Board of the St. John&#39;s Child Development Center (Salisbury). Michael graduated from Old Dominion University, where he swam for the Monarchs all four years. Michael resides in Salisbury with his wife, Danielle, who is a pastor in the ELCA. They have two children: Moses and Olive. He enjoys watching sports, reading, and stand-up comedy.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38751,6 +39136,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Facilities Staff",
+        "heading": "Michael O'Rourke",
+        "description": "<p>[Bio not yet available — please provide bio for website]</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38768,6 +39158,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Maintenance Technician",
+        "heading": "Ray Vargas",
+        "description": "<p>[Bio not yet available — please provide bio for website]</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38785,6 +39180,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Assistant Food Service Manager",
+        "heading": "Salesia Dudley",
+        "description": "<p>[Bio not yet available — please provide bio for website]</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38802,6 +39202,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Human Resources",
+        "heading": "Semra Staut",
+        "description": "<p>Semra is a Human Resources professional with a heart for employee engagement, dialogue education, and facilitating others well. She attended undergrad at Virginia Tech, graduate school at the University of Georgia, and holds an active SPHR certification. Semra enjoys reading, traveling, and meeting people. She moved to Charlotte about 10 years ago by way of Atlanta and Northern Virginia.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38819,6 +39224,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Communications Assistant",
+        "heading": "Sofia Di Dio",
+        "description": "<p>Sofia Di Dio brings a rich and diverse background in media, storytelling, and nonprofit leadership to her role at First Presbyterian Church. A Charlotte native, she returned home in 2020 after years living abroad in Italy and India, where she deepened her calling to creativity, spiritual growth, and service. She began her career in television news and later worked in commercial post-production on national campaigns — including Super Bowl ads — for some of the world&#39;s top agencies. Eventually choosing a slower pace and more soulful path, she moved to the Amalfi Coast of Italy to reconnect with art and beauty. Sofia has since worked as a fine art and portrait photographer, creative consultant, and founder of The Sacred Seed, a nonprofit supporting women and children with special needs in India. Her project Klicks for Kids continues as a biannual photo session offering meaningful portraits for Charlotte families. She also leads transformational women&#39;s journeys to Italy through her business Transform Traveling, and is the author of the poetry collection *In the Twinkling of Life: Poetry Secrets of Hope.* A fluent Italian speaker and lifelong learner, Sofia finds joy in contemplative practice, vegetarian cooking, and hiking.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38836,6 +39246,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Head of Security",
+        "heading": "Tammy Hatley",
+        "description": "<p>[Bio not yet available — please provide bio for website]</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38853,6 +39268,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Executive Assistant to the Senior Pastor",
+        "heading": "Tanya Gaspar",
+        "description": "<p>What I&#39;m about to say may surprise people: I&#39;m not from Charlotte. I was born in Brooklyn and raised in south Florida. I graduated from Florida State University (go &#39;Noles!) in 1998 with a Master&#39;s Degree in Special Education. My husband, Ryan, and I have been masquerading as Charlotteans since moving here in 2006. We have a blended family with two daughters. I&#39;ve been at FPC since 2014.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38870,6 +39290,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Carol Choir Director",
+        "heading": "Trevor Cook",
+        "description": "<p>A lifelong member of First Presbyterian, I joined the music department as handbell coordinator in November 2013.<br>I studied music education with an emphasis on percussion at the University of North Carolina Charlotte, where I graduated cum laude. I perform regularly in the Charlotte area as a jazz drummer and vibraphonist and have performed with the Charlotte Symphony Orchestra both as a section player and featured guest.<br>In addition to music, I enjoy cooking, gardening, and spending time with my wife Susannah, daughter Lila, and our two dogs, Ashe and Bo.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38887,6 +39312,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Security Officer",
+        "heading": "Will Celestine",
+        "description": "<p>Will was born and raised in New Orleans and is a self-proclaimed &quot;mama&#39;s boy.&quot; He moved to Charlotte about three years ago and loves the city and this church. He&#39;s been working in security for 9.5 years. In his free time, Will is an artist who enjoys creating portraits with acrylic paint and graphite. He also enjoys music and basketball.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     },
@@ -38904,6 +39334,11 @@
         "description"
       ],
       "sample_names": [],
+      "sample_record": {
+        "tagline": "Director of Music Ministries",
+        "heading": "Will Young",
+        "description": "<p>I joined the staff of First Presbyterian Church in July 2011 after serving for seven years as the Associate Director of Music at Myers Park Presbyterian. My undergraduate degree is in organ performance from Birmingham-Southern College and I earned my Master&#39;s degree from the Indiana University School of Music in organ performance and church music. I lead the Sanctuary Choir, serve as one of the organists for Sunday worship services, weddings, and funerals, and oversee all aspects of the music ministry. I&#39;m married to Leigh, and we are the proud parents of Jane, Phelps, and Ann Houston.</p>"
+      },
       "target_hint": "individual-page",
       "cpt_subroutine_ref": "wp_object.staff"
     }
