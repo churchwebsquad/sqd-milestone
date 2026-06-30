@@ -24,7 +24,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import {
-  ClipboardList, LayoutGrid, FileText, Palette, Cog, Eye, Loader2, CalendarClock, Rocket, Target,
+  ClipboardList, LayoutGrid, FileText, Palette, Cog, Eye, Loader2, CalendarClock, Rocket, Target, Layers,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { WebManagerShell } from '../../components/wm'
@@ -34,6 +34,7 @@ import { SectionEditingProvider } from '../../components/wm/sectioneditor/Sectio
 import { GlobalElementsWorkspace } from '../../components/wm/workspaces/GlobalElementsWorkspace'
 import { PagesWorkspace } from '../../components/wm/workspaces/PagesWorkspace'
 import { DesignWorkspace } from '../../components/wm/workspaces/DesignWorkspace'
+import { StyleGuideWorkspace } from '../../components/wm/workspaces/StyleGuideWorkspace'
 import { DevHandoffWorkspace } from '../../components/wm/workspaces/DevHandoffWorkspace'
 import { IntakeWorkspace } from '../../components/wm/workspaces/IntakeWorkspace'
 import { ReviewWorkspace } from '../../components/wm/workspaces/ReviewWorkspace'
@@ -50,6 +51,7 @@ type TabKey =
   | 'library'
   | 'pages'
   | 'design'
+  | 'styleguide'
   | 'devhandoff'
   | 'review'
 
@@ -61,6 +63,7 @@ const TABS: readonly WMTabItem<TabKey>[] = [
   { key: 'library',    label: 'Site Library',     icon: <LayoutGrid    size={13} /> },
   { key: 'pages',      label: 'Pages',            icon: <FileText      size={13} /> },
   { key: 'design',     label: 'Design Handoff',   icon: <Palette       size={13} /> },
+  { key: 'styleguide', label: 'Style Guide',      icon: <Layers        size={13} /> },
   { key: 'devhandoff', label: 'Dev Handoff',      icon: <Cog           size={13} /> },
   { key: 'review',     label: 'Review',           icon: <Eye           size={13} /> },
 ]
@@ -83,7 +86,7 @@ export default function WebContentManagerPage() {
     }
     if (rawTab === 'settings') return DEFAULT_TAB   // moved to /web (org-wide)
     if (rawTab === 'crawl')    return 'intake'      // merged into intake
-    const known: ReadonlyArray<TabKey> = ['planning','cowork','intake','foundation','library','pages','design','devhandoff','review']
+    const known: ReadonlyArray<TabKey> = ['planning','cowork','intake','foundation','library','pages','design','styleguide','devhandoff','review']
     return (known as readonly string[]).includes(rawTab) ? (rawTab as TabKey) : DEFAULT_TAB
   })()
 
@@ -168,6 +171,7 @@ export default function WebContentManagerPage() {
         {activeTab === 'library'    && <GlobalElementsWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'pages'      && <PagesWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'design'     && <DesignWorkspace project={project} onChange={loadProject} />}
+        {activeTab === 'styleguide' && <StyleGuideWorkspace project={project} onChange={loadProject} />}
         {activeTab === 'devhandoff' && <DevHandoffWorkspace project={project} />}
         {activeTab === 'review'     && <ReviewWorkspace project={project} />}
       </WebManagerShell>

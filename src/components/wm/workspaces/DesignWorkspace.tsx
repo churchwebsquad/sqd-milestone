@@ -1524,49 +1524,12 @@ function FigmaStyleGuideSection({
         </div>
       </label>
 
-      {swapError && (
-        <div className="mt-3 rounded-md border border-wm-danger/30 bg-wm-danger-bg px-3 py-2 text-[11.5px] text-wm-danger flex items-start gap-2">
-          <span className="flex-1">{swapError}</span>
-          <button
-            type="button"
-            onClick={() => setSwapError(null)}
-            className="text-wm-danger hover:opacity-70 shrink-0"
-            aria-label="Dismiss"
-          ><X size={11} /></button>
-        </div>
-      )}
-
-      <TemplateLoadChecklist
-        loading={loading}
-        used={effectiveUsed}
-        byFamily={byFamily}
-        usageByTemplate={usageByTemplate}
-        usedIdsSet={usedIdsSet}
-        loadedIds={spec.figma?.loaded_template_ids ?? []}
-        swaps={swaps}
-        savingSwap={savingSwap}
-        onSwapText={(fromId, text) => void handleSwapText(fromId, text, allTemplatesById)}
-        allTemplates={allTemplatesSorted}
-        onToggle={(id, next) => {
-          const current = new Set(spec.figma?.loaded_template_ids ?? [])
-          if (next) current.add(id); else current.delete(id)
-          void onAutoSave({
-            ...spec,
-            figma: { ...(spec.figma ?? {}), loaded_template_ids: [...current] },
-          })
-        }}
-        onSetAll={(ids, next) => {
-          const current = new Set(spec.figma?.loaded_template_ids ?? [])
-          if (next) for (const id of ids) current.add(id)
-          else for (const id of ids) current.delete(id)
-          void onAutoSave({
-            ...spec,
-            figma: { ...(spec.figma ?? {}), loaded_template_ids: [...current] },
-          })
-        }}
-        onAdd={addExtraTemplate}
-        onRemove={removeTemplate}
-      />
+      <p className="mt-4 text-[11.5px] text-wm-text-muted">
+        The per-template <span className="font-semibold">load checklist + swap controls</span> now live on the
+        dedicated <span className="font-semibold">Style Guide</span> tab — each row renders a live preview
+        of an actual section using the layout so you can see partner content
+        in context before checking it off or swapping.
+      </p>
     </Section>
   )
 }
