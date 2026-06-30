@@ -56,7 +56,7 @@ export type {
  *  (UI tweaks, unrelated edits). The shape stays at `analyzer-vMAJOR.MINOR`
  *  so the DevHandoff banner can compare lexicographically and skip
  *  the warning when plans match the current code. */
-export const ANALYZER_REVISION = 'analyzer-v1.9' as const
+export const ANALYZER_REVISION = 'analyzer-v1.10' as const
 
 /** Computes the ContentModelPlan for a web project. Pure: doesn't
  *  touch the DB beyond the read side. Use `saveFormationPlan` to

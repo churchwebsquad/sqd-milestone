@@ -517,9 +517,20 @@ export const CANONICAL_SCHEMAS: Record<SchemaName, SchemaSpec> = {
   person_card: {
     canonical_fields: ['name', 'role', 'bio', 'email', 'phone', 'headshot', 'linkedin', 'ministry_area'],
     field_aliases: {
-      headshot: ['photo_url', 'profile_url', 'image', 'image_url', 'photo'],
-      role:     ['title', 'position'],
-      name:     ['full_name'],
+      // team-section-* Brixies templates name their staff slots
+      // `team_name` / `team_position` / `team_description` / `team_email`
+      // rather than the canonical names. Without these aliases the
+      // inventory-vs-bound comparator treats every populated person
+      // field as "dropped before binding" because the bound section's
+      // diagnostic counts zero fills under the canonical keys. Adding
+      // the team_-prefixed forms here resolves the false positives and
+      // leaves only the real losses (headshot, ministry_area, phone)
+      // visible.
+      headshot: ['photo_url', 'profile_url', 'image', 'image_url', 'photo', 'avatar_url'],
+      role:     ['title', 'position', 'team_position'],
+      name:     ['full_name', 'team_name'],
+      bio:      ['description', 'team_description', 'about'],
+      email:    ['team_email', 'contact_email'],
     },
     page_slug_signals:    ['staff', 'team', 'leadership', 'pastors', 'elders', 'care', 'counseling'],
     section_role_signals: ['team_grid', 'team_carousel', 'staff_member_detail'],
