@@ -27,7 +27,7 @@ import { WMCard } from '../Card'
 import { supabase } from '../../../lib/supabase'
 import {
   parseDesignSystemSpec, emptyDesignSystemSpec, toAcssGvmJson,
-  generateAcssShades,
+  generateAcssShades, anchorShadeStep,
   ACSS_ROLES, ACSS_SHADE_STEPS,
   type DesignSystemSpec,
 } from '../../../lib/designSystemSpec'
@@ -1617,7 +1617,15 @@ function AcssVariablePreviewCard({ spec }: { spec: DesignSystemSpec }) {
         </p>
       </div>
       <div className="space-y-4">
-        {filledRoles.map(({ role, anchor, scale }) => (
+        {filledRoles.map(({ role, anchor, scale }) => {
+          // The "Anchor" highlight must land on the step where the
+          // strategist's chosen hex naturally classifies — NOT always
+          // `medium`. Light brand colors land at `light` / `lighter` /
+          // `ultra-light`; dark brand colors land at `dark` / `darker`.
+          // The exporter already uses this step to reference the brand
+          // variable (designSystemSpec.ts:591); this preview now matches.
+          const anchorStep = anchorShadeStep(anchor.hex)
+          return (
           <div key={role} className="rounded border border-wm-border bg-wm-bg-elevated/40 p-3">
             <div className="flex items-baseline gap-2 mb-2">
               <p className="text-[11px] font-bold uppercase tracking-widest text-wm-text">--{role}</p>
@@ -1629,7 +1637,7 @@ function AcssVariablePreviewCard({ spec }: { spec: DesignSystemSpec }) {
             <div className="flex gap-2 flex-wrap">
               {ACSS_SHADE_STEPS.map(step => {
                 const sh = scale[step]
-                const isAnchor = step === 'medium'
+                const isAnchor = step === anchorStep
                 const tokenName = isAnchor ? `--${role}` : `--${role}-${step}`
                 return (
                   <div
@@ -1661,7 +1669,7 @@ function AcssVariablePreviewCard({ spec }: { spec: DesignSystemSpec }) {
               })}
             </div>
           </div>
-        ))}
+        )})}
       </div>
     </WMCard>
   )

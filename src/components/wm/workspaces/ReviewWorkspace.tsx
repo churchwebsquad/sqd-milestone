@@ -48,6 +48,12 @@ export function ReviewWorkspace({ project }: Props) {
   const [pageById, setPageById] = useState<Record<string, { id: string; name: string }>>({})
   const [sectionLabelById, setSectionLabelById] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
+  // Account manager + church name lifted off strategy_account_progress
+  // keyed on project.member. Surfaced so the strategist knows who to
+  // ping when sharing an internal review link.
+  const [partnerInfo, setPartnerInfo] = useState<{ churchName: string | null; accountManager: string | null }>({
+    churchName: null, accountManager: null,
+  })
   const [requestModalOpen, setRequestModalOpen] = useState(false)
   const [partnerLinkCopied, setPartnerLinkCopied] = useState(false)
   const [internalLinkCopied, setInternalLinkCopied] = useState(false)
@@ -122,6 +128,25 @@ export function ReviewWorkspace({ project }: Props) {
   }, [project.id])
 
   useEffect(() => { void load() }, [load])
+
+  // Pull AM + church name off strategy_account_progress. project.member
+  // is the link. Fire-and-forget so a missing row doesn't block the
+  // kanban from rendering.
+  useEffect(() => {
+    if (!project.member) return
+    void (async () => {
+      const { data } = await supabase
+        .from('strategy_account_progress')
+        .select('church_name, css_rep')
+        .eq('member', project.member)
+        .maybeSingle()
+      const row = data as { church_name?: string | null; css_rep?: string | null } | null
+      setPartnerInfo({
+        churchName:     row?.church_name ?? null,
+        accountManager: row?.css_rep ?? null,
+      })
+    })()
+  }, [project.member])
 
   const actions = useFeedbackActions({ projectId: project.id, onChanged: load })
 
@@ -278,6 +303,14 @@ export function ReviewWorkspace({ project }: Props) {
               {feedbackBoards.boards.reduce((n, b) => n + b.counts.resolved, 0)} resolved
               {' · '}
               {feedbackBoards.boards.length} round{feedbackBoards.boards.length === 1 ? '' : 's'}
+            </p>
+          )}
+          {partnerInfo.accountManager && (
+            <p className="text-[11px] text-wm-text-muted mt-1">
+              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">Account manager</span>
+              {' · '}
+              <span className="font-semibold text-wm-text">{partnerInfo.accountManager}</span>
+              <span className="text-wm-text-subtle"> — tag them when sharing the internal review link.</span>
             </p>
           )}
         </div>
