@@ -8,7 +8,7 @@
  * it in a fixed-width flex item.
  */
 import { ChevronDown, MoreHorizontal, Copy, Check, Pencil, X, Trash2 } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { BoardStatusPill } from './BoardStatusPill'
 import { FeedbackCard } from './FeedbackCard'
 import { setBoardStatus } from '../../../lib/webReviews'
@@ -50,7 +50,20 @@ export function FeedbackBoardColumn({
   filter, footerSlot, onOpenEditor,
 }: FeedbackBoardColumnProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
-  const comments = filter ? board.comments.filter(filter) : board.comments
+  // Stable sort: open comments / edits first, completed below.
+  // Within each tier, preserve incoming order (buildFeedbackBoards
+  // already sorts by created_at). Strategist sees what still needs
+  // action at the top of every column without losing the audit trail
+  // of resolved items.
+  const sortedAll = useMemo(() => {
+    const open: WebReviewComment[] = []
+    const done: WebReviewComment[] = []
+    for (const c of board.comments) {
+      if (c.status === 'open') open.push(c); else done.push(c)
+    }
+    return [...open, ...done]
+  }, [board.comments])
+  const comments = filter ? sortedAll.filter(filter) : sortedAll
 
   return (
     <div className="bg-wm-bg-hover/40 border border-wm-border rounded-xl flex flex-col min-h-0">

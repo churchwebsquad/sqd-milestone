@@ -56,9 +56,43 @@ interface TemplateRow {
   section:   SectionWithPage
   /** Count of sections across the project bound to this template. */
   count:     number
+  /** For templates with palette-referenced groups (Feature 2 / 22 / 82
+   *  / 106), the distinct card variants used across the project.
+   *  Empty for templates that don't reference cards. */
+  variants:  CardVariant[]
+}
+
+interface CardVariant {
+  /** Card-family template id (e.g. 'card-193'). */
+  cardTemplateId: string
+  /** Resolved card template. May be null if catalog hasn't loaded yet
+   *  or the saved id no longer exists. */
+  cardTemplate:   WebContentTemplate | null
+  /** Representative section using THIS card variant inside the parent
+   *  template — picks the live preview content. */
+  section:        SectionWithPage
+  /** How many sections in the project use this variant. */
+  count:          number
 }
 
 const BRIXIES_VIEWPORT_PX = 1512
+
+/** Find every palette-shaped value inside a section's field_values.
+ *  Returns the array of `__palette_template_id` strings (one per
+ *  palette-referenced group on the section). A section can have
+ *  multiple palette groups (rare); typical case is one per section. */
+function extractPaletteTemplateIds(fv: Record<string, unknown>): string[] {
+  const out: string[] = []
+  for (const v of Object.values(fv)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const obj = v as { __palette_template_id?: unknown }
+      if (typeof obj.__palette_template_id === 'string' && obj.__palette_template_id.trim()) {
+        out.push(obj.__palette_template_id)
+      }
+    }
+  }
+  return out
+}
 
 export function StyleGuideWorkspace({ project, onChange }: Props) {
   const spec: DesignSystemSpec = useMemo(
@@ -213,7 +247,45 @@ export function StyleGuideWorkspace({ project, onChange }: Props) {
         if (a.pageSortOrder !== b.pageSortOrder) return a.pageSortOrder - b.pageSortOrder
         return (a.sort_order ?? 0) - (b.sort_order ?? 0)
       })
-      out.push({ template, section: sections[0], count: sections.length })
+
+      // Walk the sections looking for palette-referenced card variants.
+      // Feature Section 2 / 22 / 82 / 106 ship with a palette-shaped
+      // group whose card variant lives in field_values; the strategist
+      // can pick any Card-family template per section, so a single
+      // parent layout may render very differently across the site.
+      // Build one variant row per distinct card template id used.
+      const cardVariants = new Map<string, SectionWithPage[]>()
+      for (const s of sections) {
+        const fv = (s.field_values ?? {}) as Record<string, unknown>
+        const ids = extractPaletteTemplateIds(fv)
+        for (const id of ids) {
+          const bucket = cardVariants.get(id) ?? []
+          bucket.push(s)
+          cardVariants.set(id, bucket)
+        }
+      }
+      const variants: CardVariant[] = []
+      for (const [cardId, vSections] of cardVariants.entries()) {
+        vSections.sort((a, b) => {
+          if (a.pageSortOrder !== b.pageSortOrder) return a.pageSortOrder - b.pageSortOrder
+          return (a.sort_order ?? 0) - (b.sort_order ?? 0)
+        })
+        variants.push({
+          cardTemplateId: cardId,
+          cardTemplate:   cardMap[cardId] ?? tplMap[cardId] ?? null,
+          section:        vSections[0],
+          count:          vSections.length,
+        })
+      }
+      // Order variants: most-used first, then alpha by card layer_name.
+      variants.sort((a, b) => {
+        if (a.count !== b.count) return b.count - a.count
+        return (a.cardTemplate?.layer_name ?? a.cardTemplateId).localeCompare(
+          b.cardTemplate?.layer_name ?? b.cardTemplateId,
+        )
+      })
+
+      out.push({ template, section: sections[0], count: sections.length, variants })
     }
     // Order: most-used first, then alpha.
     out.sort((a, b) => {
@@ -312,9 +384,9 @@ export function StyleGuideWorkspace({ project, onChange }: Props) {
                 snippetMap={snippetMap}
                 loaded={loadedSet.has(row.template.id)}
                 onToggleLoaded={(next) => toggleLoaded(row.template.id, next)}
-                swapEntry={swaps?.[row.template.id] ?? null}
-                savingSwap={savingSwap === row.template.id}
-                onSwapText={(text) => void handleSwapText(row.template.id, text)}
+                swaps={swaps}
+                savingSwap={savingSwap}
+                onSwapText={(fromId, text) => void handleSwapText(fromId, text)}
                 allTemplates={allTemplatesSorted}
               />
             ))}
@@ -330,21 +402,27 @@ export function StyleGuideWorkspace({ project, onChange }: Props) {
 function StyleGuideCard({
   row, cardTemplates, snippetMap,
   loaded, onToggleLoaded,
-  swapEntry, savingSwap, onSwapText, allTemplates,
+  swaps, savingSwap, onSwapText, allTemplates,
 }: {
   row:           TemplateRow
   cardTemplates: Record<string, WebContentTemplate>
   snippetMap:    SnippetMap
   loaded:        boolean
   onToggleLoaded: (next: boolean) => void
-  swapEntry:     NonNullable<StrategyWebProject['figma_layout_swaps']>[string] | null
-  savingSwap:    boolean
-  onSwapText:    (text: string) => void
+  /** Full swap map so the card can read both the parent layout swap
+   *  AND any per-variant card swap from the same source. */
+  swaps:         StrategyWebProject['figma_layout_swaps']
+  savingSwap:    string | null
+  /** Save / clear a swap for a specific template id (parent or card). */
+  onSwapText:    (fromTemplateId: string, text: string) => void
   allTemplates:  WebContentTemplate[]
 }) {
-  const { template, section, count } = row
+  const { template, section, count, variants } = row
   const family = template.family ?? '(uncategorized)'
-  const swapDisplayValue = swapEntry?.to_template_label ?? ''
+  const parentSwapEntry = swaps?.[template.id] ?? null
+  const parentSwapValue = parentSwapEntry?.to_template_label ?? ''
+  const parentSaving = savingSwap === template.id
+  const hasVariants = variants.length > 0
 
   return (
     <WMCard padding="loose">
@@ -361,10 +439,19 @@ function StyleGuideCard({
             {template.layer_name}
           </h3>
           <p className="text-[11px] text-wm-text-muted mt-0.5">
-            Previewing <span className="text-wm-text font-medium">{section.pageName}</span>
-            <code className="ml-1 text-[10.5px] text-wm-text-subtle">/{section.pageSlug}</code>
-            {count > 1 && (
-              <span className="ml-2 text-wm-text-subtle">· {count} sections use this layout</span>
+            {hasVariants ? (
+              <>
+                <span className="text-wm-text font-medium">{variants.length}</span> card variant{variants.length === 1 ? '' : 's'} used
+                <span className="ml-2 text-wm-text-subtle">· {count} section{count === 1 ? '' : 's'} total</span>
+              </>
+            ) : (
+              <>
+                Previewing <span className="text-wm-text font-medium">{section.pageName}</span>
+                <code className="ml-1 text-[10.5px] text-wm-text-subtle">/{section.pageSlug}</code>
+                {count > 1 && (
+                  <span className="ml-2 text-wm-text-subtle">· {count} sections use this layout</span>
+                )}
+              </>
             )}
           </p>
         </div>
@@ -381,34 +468,138 @@ function StyleGuideCard({
         </label>
       </div>
 
-      {/* Live preview */}
-      <LivePreview
-        template={template}
-        values={(section.field_values ?? {}) as Record<string, unknown>}
-        snippetMap={snippetMap}
-        cardTemplates={cardTemplates}
-      />
+      {/* Layouts with palette-referenced groups (Feature 2 / 22 / 82 /
+          106) show one preview per distinct card variant the strategist
+          picked across the project. Layouts without variants get the
+          single preview path. */}
+      {hasVariants ? (
+        <div className="space-y-3">
+          {variants.map(v => (
+            <CardVariantRow
+              key={v.cardTemplateId}
+              parentTemplate={template}
+              variant={v}
+              cardTemplates={cardTemplates}
+              snippetMap={snippetMap}
+              swapEntry={swaps?.[v.cardTemplateId] ?? null}
+              saving={savingSwap === v.cardTemplateId}
+              onSwapText={(text) => onSwapText(v.cardTemplateId, text)}
+              allTemplates={allTemplates}
+            />
+          ))}
+        </div>
+      ) : (
+        <LivePreview
+          template={template}
+          values={(section.field_values ?? {}) as Record<string, unknown>}
+          snippetMap={snippetMap}
+          cardTemplates={cardTemplates}
+        />
+      )}
 
-      {/* Swap input */}
+      {/* Parent-layout swap — always present so the designer can ALSO
+          swap the outer Brixies layout independent of any card variant
+          decisions inside. */}
       <div className="mt-3 flex items-center gap-2 flex-wrap">
         <ArrowRight size={12} className="text-wm-text-subtle shrink-0" />
         <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle shrink-0">
-          Swap to
+          Swap {hasVariants ? 'parent layout' : 'to'}
         </span>
         <input
           type="text"
           list={`tpl-options-${template.id}`}
-          defaultValue={swapDisplayValue}
-          key={swapDisplayValue}
-          onBlur={e => onSwapText(e.target.value)}
+          defaultValue={parentSwapValue}
+          key={parentSwapValue}
+          onBlur={e => onSwapText(template.id, e.target.value)}
           placeholder="Type a Brixies template name (or leave blank to keep this layout)"
-          disabled={savingSwap}
+          disabled={parentSaving}
           className="flex-1 min-w-[14rem] text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:border-wm-accent focus:outline-none disabled:opacity-50"
         />
         <datalist id={`tpl-options-${template.id}`}>
           {allTemplates.map(opt => (
             <option key={opt.id} value={opt.layer_name}>{opt.family ?? '(uncategorized)'}</option>
           ))}
+        </datalist>
+        {parentSwapEntry && (
+          <button
+            type="button"
+            onClick={() => onSwapText(template.id, '')}
+            className="text-wm-text-muted hover:text-wm-danger shrink-0"
+            title="Clear swap"
+          >
+            <X size={12} />
+          </button>
+        )}
+        {parentSaving && <Loader2 size={12} className="animate-spin text-wm-accent shrink-0" />}
+      </div>
+    </WMCard>
+  )
+}
+
+/** One row per distinct card variant under a palette-referenced parent
+ *  layout. Renders a live preview of an actual section using THIS
+ *  variant + a swap input that targets the card template id. */
+function CardVariantRow({
+  parentTemplate, variant, cardTemplates, snippetMap,
+  swapEntry, saving, onSwapText, allTemplates,
+}: {
+  parentTemplate: WebContentTemplate
+  variant:        CardVariant
+  cardTemplates:  Record<string, WebContentTemplate>
+  snippetMap:     SnippetMap
+  swapEntry:      NonNullable<StrategyWebProject['figma_layout_swaps']>[string] | null
+  saving:         boolean
+  onSwapText:     (text: string) => void
+  allTemplates:   WebContentTemplate[]
+}) {
+  const swapDisplayValue = swapEntry?.to_template_label ?? ''
+  const cardName = variant.cardTemplate?.layer_name ?? variant.cardTemplateId
+  return (
+    <div className="rounded-md border border-wm-border bg-wm-bg-hover/30 p-3">
+      <div className="flex items-baseline justify-between gap-2 mb-2 flex-wrap">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">
+            Card variant
+          </p>
+          <p className="text-[13px] font-semibold text-wm-text leading-tight">{cardName}</p>
+          <p className="text-[11px] text-wm-text-muted mt-0.5">
+            Previewing <span className="text-wm-text font-medium">{variant.section.pageName}</span>
+            <code className="ml-1 text-[10.5px] text-wm-text-subtle">/{variant.section.pageSlug}</code>
+            {variant.count > 1 && (
+              <span className="ml-2 text-wm-text-subtle">· {variant.count} section{variant.count === 1 ? '' : 's'} use this variant</span>
+            )}
+          </p>
+        </div>
+      </div>
+
+      <LivePreview
+        template={parentTemplate}
+        values={(variant.section.field_values ?? {}) as Record<string, unknown>}
+        snippetMap={snippetMap}
+        cardTemplates={cardTemplates}
+      />
+
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
+        <ArrowRight size={12} className="text-wm-text-subtle shrink-0" />
+        <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle shrink-0">
+          Swap card
+        </span>
+        <input
+          type="text"
+          list={`card-options-${variant.cardTemplateId}`}
+          defaultValue={swapDisplayValue}
+          key={swapDisplayValue}
+          onBlur={e => onSwapText(e.target.value)}
+          placeholder="Type a different card template name (or leave blank to keep this card)"
+          disabled={saving}
+          className="flex-1 min-w-[14rem] text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:border-wm-accent focus:outline-none disabled:opacity-50"
+        />
+        <datalist id={`card-options-${variant.cardTemplateId}`}>
+          {allTemplates
+            .filter(t => t.family === 'Card')
+            .map(opt => (
+              <option key={opt.id} value={opt.layer_name}>{opt.family ?? '(uncategorized)'}</option>
+            ))}
         </datalist>
         {swapEntry && (
           <button
@@ -420,9 +611,9 @@ function StyleGuideCard({
             <X size={12} />
           </button>
         )}
-        {savingSwap && <Loader2 size={12} className="animate-spin text-wm-accent shrink-0" />}
+        {saving && <Loader2 size={12} className="animate-spin text-wm-accent shrink-0" />}
       </div>
-    </WMCard>
+    </div>
   )
 }
 
