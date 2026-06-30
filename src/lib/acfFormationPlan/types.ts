@@ -271,6 +271,11 @@ export interface AcfField {
   label: string
   type: AcfFieldType
   required?: boolean
+  /** ACF Pro's native field-help text. Shown to the editor under the
+   *  field in WP admin AND exported in ACF JSON Sync as `instructions`.
+   *  Populated on canonical CPT fields where the partner expectation
+   *  isn't obvious from the label alone. */
+  instructions?: string
   sub_fields?: AcfField[]                 // populated when type='group' | 'repeater'
   taxonomy?: string                       // populated when type='taxonomy'
   /** Brixies-side reference so dev can trace what each ACF field came

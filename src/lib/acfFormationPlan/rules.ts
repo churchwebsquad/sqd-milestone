@@ -187,6 +187,149 @@ export const CHROME_ROLES: ReadonlySet<SectionRole> = new Set<SectionRole>([
   'nav_header', 'footer_main', 'offcanvas_menu', 'megamenu', 'link_page',
 ])
 
+// ── Canonical CPT fields per content kind ─────────────────────────────
+//
+// When a Sermon, Group, or Event CPT is emitted from the partner's
+// content_collection display_preference answer (NOT from a tagged
+// `sermon_card` / `group_card` / `event_*` section), the field-group
+// builder has zero sections to walk and produces a CPT with only
+// taxonomy fields — useless for the dev who has to populate records.
+//
+// These canonical sets seed the field group with the columns each CPT
+// minimally needs in WordPress, varied by the partner's display
+// preference (e.g. archive_pages adds notes / audio links; the
+// `contact` group flavor requires contact_email).
+//
+// All fields are non-taxonomy — taxonomies are added separately by
+// buildTaxonomies. `title` is the WP built-in post title (driven by
+// `supports: ['title']`) and is intentionally omitted here.
+
+export interface CanonicalCptField {
+  name:        string
+  label:       string
+  type:        AcfFieldType
+  required?:   boolean
+  /** Short blurb so the dev knows what the partner is expected to put
+   *  in this field. Surfaced in the markdown handoff next to the field. */
+  description?: string
+}
+
+/** Sermon CPT canonical fields. Two shapes:
+ *
+ *   - `youtube-only`: cards link out to YouTube; record stores just
+ *     the metadata bound to the YT link. Used for
+ *     archive_youtube / latest_series_youtube / latest_sermon.
+ *
+ *   - `on-site-detail`: cards link to a WP detail page; record stores
+ *     the full sermon (video embed, audio podcast link, sermon notes,
+ *     scripture). Used for archive_pages / latest_series_pages and the
+ *     legacy 'wordpress' value. */
+export const CANONICAL_SERMON_FIELDS: Record<'youtube-only' | 'on-site-detail', CanonicalCptField[]> = {
+  'youtube-only': [
+    { name: 'sermon_date',         label: 'Sermon date',         type: 'date_time_picker', required: true,
+      description: 'When the sermon was preached.' },
+    { name: 'video_url',           label: 'Video URL',           type: 'url',              required: true,
+      description: 'YouTube / Vimeo URL for the sermon. Card buttons link here.' },
+    { name: 'scripture_reference', label: 'Scripture reference', type: 'text',
+      description: 'Primary passage, e.g. "John 3:1-15".' },
+  ],
+  'on-site-detail': [
+    { name: 'sermon_date',         label: 'Sermon date',         type: 'date_time_picker', required: true,
+      description: 'When the sermon was preached.' },
+    { name: 'video_url',           label: 'Video URL',           type: 'url',              required: true,
+      description: 'YouTube / Vimeo URL — embedded on the detail page.' },
+    { name: 'audio_url',           label: 'Audio / podcast URL', type: 'url',
+      description: 'Podcast or audio file URL. Optional.' },
+    { name: 'sermon_notes_url',    label: 'Sermon notes URL',    type: 'url',
+      description: 'Link to a PDF or external doc of notes. Optional.' },
+    { name: 'scripture_reference', label: 'Scripture reference', type: 'text',
+      description: 'Primary passage, e.g. "John 3:1-15".' },
+    { name: 'duration_text',       label: 'Duration',            type: 'text',
+      description: 'Free text like "37 min" or "1:02:15". Optional.' },
+  ],
+}
+
+/** Group CPT canonical fields. Two shapes:
+ *
+ *   - `detail-page`: cards link to a WP detail page (display_preference
+ *     = `wordpress`). Records carry full group info + optional
+ *     registration link.
+ *
+ *   - `headless-mailto`: cards have a mailto contact button only
+ *     (display_preference = `contact`); contact_email is REQUIRED. */
+export const CANONICAL_GROUP_FIELDS: Record<'detail-page' | 'headless-mailto', CanonicalCptField[]> = {
+  'detail-page': [
+    { name: 'meeting_day',     label: 'Meeting day',     type: 'text',
+      description: 'Day of week or schedule pattern, e.g. "Wednesdays" or "2nd & 4th Tuesday".' },
+    { name: 'meeting_time',    label: 'Meeting time',    type: 'text',
+      description: 'Time of day, e.g. "7:00 PM" or "After the 9 AM service".' },
+    { name: 'location_text',   label: 'Location',        type: 'text',
+      description: 'Where the group meets. Free text — "Main Campus, Room 204" / "Leader’s home".' },
+    { name: 'address',         label: 'Address',         type: 'text',
+      description: 'Street address when the group meets off-campus. Optional.' },
+    { name: 'audience',        label: 'Audience',        type: 'text',
+      description: 'Who the group is for — "Adults", "Young Families", "Men 30s+".' },
+    { name: 'leader_name',     label: 'Leader name',     type: 'text',
+      description: 'Group leader’s name as shown on the card.' },
+    { name: 'contact_email',   label: 'Contact email',   type: 'email',
+      description: 'Email surfaced on the detail page for inquiries.' },
+    { name: 'contact_phone',   label: 'Contact phone',   type: 'text',
+      description: 'Optional phone number.' },
+    { name: 'registration_url',label: 'Registration URL',type: 'url',
+      description: 'External signup link (Church Center, Planning Center) if the group takes registrations.' },
+  ],
+  'headless-mailto': [
+    { name: 'contact_email',   label: 'Contact email',   type: 'email', required: true,
+      description: 'REQUIRED — drives the mailto: button on each card.' },
+    { name: 'meeting_day',     label: 'Meeting day',     type: 'text',
+      description: 'Day of week or schedule pattern.' },
+    { name: 'meeting_time',    label: 'Meeting time',    type: 'text',
+      description: 'Time of day.' },
+    { name: 'location_text',   label: 'Location',        type: 'text',
+      description: 'Where the group meets.' },
+    { name: 'audience',        label: 'Audience',        type: 'text',
+      description: 'Who the group is for.' },
+    { name: 'leader_name',     label: 'Leader name',     type: 'text',
+      description: 'Group leader’s name.' },
+  ],
+}
+
+/** Pick the right canonical shape for a sermon CPT given the partner's
+ *  sermons_display_preference. Returns null for prefs that don't map
+ *  to a CPT (the External-routing path handles those). */
+export function sermonCanonicalShape(
+  pref: string | null,
+): 'youtube-only' | 'on-site-detail' | null {
+  switch (pref) {
+    case 'archive_youtube':
+    case 'latest_series_youtube':
+    case 'latest_sermon':
+      return 'youtube-only'
+    case 'archive_pages':
+    case 'latest_series_pages':
+    case 'wordpress':
+      return 'on-site-detail'
+    default:
+      return null
+  }
+}
+
+/** Pick the right canonical shape for a group CPT given the partner's
+ *  groups_display_preference. Returns null for prefs that don't map
+ *  to a CPT. */
+export function groupCanonicalShape(
+  pref: string | null,
+): 'detail-page' | 'headless-mailto' | null {
+  switch (pref) {
+    case 'wordpress':
+      return 'detail-page'
+    case 'contact':
+      return 'headless-mailto'
+    default:
+      return null
+  }
+}
+
 // ── WebFieldType → ACF field type ─────────────────────────────────────
 
 /** Maps Brixies WebFieldType to its closest ACF field type. CTA is

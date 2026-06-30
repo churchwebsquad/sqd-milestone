@@ -55,6 +55,8 @@ import {
   ACF_TYPE_BY_FIELD_TYPE,
   BRICKS_NESTABLE_PREFERRED_ROLES,
   CAMPUS_SCOPED_COLUMNS,
+  CANONICAL_GROUP_FIELDS,
+  CANONICAL_SERMON_FIELDS,
   CHROME_ROLES,
   CHURCH_WIDE_GLOBAL_COLUMNS,
   CPT_FROM_CONTENT_KIND,
@@ -67,6 +69,9 @@ import {
   MULTIPLE_LOCATION_ROLES,
   STRUCTURE_DEFAULT_BY_ROLE,
   TAXONOMY_SUGGESTIONS,
+  groupCanonicalShape,
+  sermonCanonicalShape,
+  type CanonicalCptField,
 } from './rules'
 
 // ═════════════════════════════════════════════════════════════════════
@@ -894,6 +899,26 @@ function buildOptionsFieldGroup(
   }
 }
 
+/** Canonical (minimum) field set for a CPT, varied by the partner's
+ *  display_preference. Returns [] for CPTs we don't have a canonical
+ *  set for (staff / career / post / event). Sermon and group only for
+ *  now — that's where the gap was: display-preference-driven CPTs
+ *  emitted with only taxonomy fields. */
+function canonicalFieldsForCpt(
+  slug: string,
+  inputs: FormationInputs,
+): CanonicalCptField[] {
+  if (slug === 'sermon') {
+    const shape = sermonCanonicalShape(inputs.displayPreferences.sermons)
+    return shape ? CANONICAL_SERMON_FIELDS[shape] : []
+  }
+  if (slug === 'group') {
+    const shape = groupCanonicalShape(inputs.displayPreferences.groups)
+    return shape ? CANONICAL_GROUP_FIELDS[shape] : []
+  }
+  return []
+}
+
 function acfTypeForGlobalColumn(t: 'text' | 'richtext' | 'phone' | 'email' | 'url'): AcfField['type'] {
   if (t === 'richtext') return 'wysiwyg'
   if (t === 'url') return 'url'
@@ -963,6 +988,31 @@ function buildCptFieldGroup(
       }
       if (Object.keys(row).length > 0) contentRows.push(row)
     }
+  }
+
+  // Seed canonical fields for sermon / group CPTs that were emitted
+  // from the partner's display_preference and have no tagged sections
+  // backing them (so `fields` is empty above). Without this, the dev
+  // gets a CPT with only taxonomy fields, which can't hold any real
+  // sermon or group data. Honors the partner's display_preference
+  // (e.g. archive_pages adds notes_url + audio_url; the contact group
+  // flavor requires contact_email).
+  //
+  // We also append canonical fields when the source sections exist
+  // but missed columns the canonical set declares — the canonical set
+  // is the minimum WP shape, not a fallback.
+  const canonical = canonicalFieldsForCpt(obj.slug, inputs)
+  for (const cf of canonical) {
+    if (seenKeys.has(cf.name)) continue
+    seenKeys.add(cf.name)
+    fields.push({
+      key:          `field_${obj.slug}_${cf.name}`,
+      name:         cf.name,
+      label:        cf.label,
+      type:         cf.type,
+      required:     cf.required,
+      instructions: cf.description,
+    })
   }
 
   // Append taxonomy fields for filterable surfaces

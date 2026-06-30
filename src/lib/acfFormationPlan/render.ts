@@ -731,6 +731,9 @@ function renderField(f: AcfField, lines: string[], indent: number) {
   const taxNote = f.taxonomy ? ` → \`${f.taxonomy}\`` : ''
   const promoMark = f._cta_analysis?.type_promoted ? ' 🔁 **route-promoted**' : ''
   lines.push(`${pad}- \`${f.name}\` (${f.type}${f.required ? ', required' : ''})${taxNote} — *${f.label}*${promoMark}`)
+  if (f.instructions) {
+    lines.push(`${pad}  - ${f.instructions}`)
+  }
   const ca = f._cta_analysis
   if (ca) {
     const breakdown = Object.entries(ca.by_route_type)
