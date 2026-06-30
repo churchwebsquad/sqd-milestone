@@ -1644,6 +1644,20 @@ const PLACEHOLDER_URL_RE = new RegExp(
  *  values across all 16 Tab button instances and marks each — when
  *  `tab` is later expanded, its walker hits the marked Tab buttons
  *  and skips, leaving the content slots free to match correctly. */
+/** Clear `data-substituted="1"` from an element and every descendant.
+ *  Needed when cloning an already-substituted element to use it as a
+ *  fresh template for subsequent items — without this clear, every
+ *  data-substituted descendant short-circuits substituteElement and
+ *  the new item never reaches its slot. */
+function clearSubstitutedFlags(root: Element): void {
+  if (root.getAttribute('data-substituted') === '1') {
+    root.removeAttribute('data-substituted')
+  }
+  for (const el of Array.from(root.querySelectorAll('[data-substituted="1"]'))) {
+    el.removeAttribute('data-substituted')
+  }
+}
+
 function preprocessNestedTopLevelGroups(
   root: Element,
   fields: ReadonlyArray<WebFieldDef>,
@@ -1799,7 +1813,17 @@ function preprocessNestedTopLevelGroups(
           const anchor = lastSameLayer?.nextSibling ?? null
           for (let i = matches.length; i < count; i++) {
             const clone = firstMatch.cloneNode(true) as Element
-            clone.removeAttribute('data-substituted')
+            // firstMatch was already substituted with items[0] above.
+            // Cloning carries data-substituted="1" on both the outer
+            // element AND every descendant whose applySlot/applyCta
+            // pass marked it bound. substituteElement short-circuits
+            // on any data-substituted descendant — so without this
+            // deep clear, items[i] never reaches the clone's Contact
+            // and the new button inherits the first item's label.
+            // (Feature Section 22's top buttons exhibit this: 4 user
+            // items, 3 source matches, pad-clones become duplicates
+            // of items[0] instead of items[3].)
+            clearSubstitutedFlags(clone)
             const itemValues = items[i] ?? {}
             substituteElement(clone, itemBinding, itemValues,
               { binding: itemBinding, values: itemValues })
@@ -1830,7 +1854,11 @@ function preprocessNestedTopLevelGroups(
         const anchor = sibs[sibs.length - 1].nextSibling
         for (let i = sibs.length; i < count; i++) {
           const clone = template.cloneNode(true) as Element
-          clone.removeAttribute('data-substituted')
+          // Clear ALL data-substituted markers in the clone subtree —
+          // the source template was substituted with items[0] in the
+          // fill loop above, and any leftover marker on descendants
+          // would short-circuit substituteElement on items[i].
+          clearSubstitutedFlags(clone)
           const itemValues = items[i] ?? {}
           substituteElement(clone, itemBinding, itemValues,
             { binding: itemBinding, values: itemValues })
