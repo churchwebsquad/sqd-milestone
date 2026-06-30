@@ -1755,7 +1755,7 @@ export function buildDiscoverySections(
       const annotated = section.strategist_target_type as DiscoverySection['target_hint'] | null | undefined
       const targetHint: DiscoverySection['target_hint'] = annotated
         ? annotated
-        : inferTargetHint(section.section_role, inputs, classifications)
+        : inferTargetHint(section.section_role, inputs, classifications, fv)
 
       const cptRef = classifications
         .find(c => c.section_id === section.id && c.cpt_subroutine_ref)
@@ -2051,6 +2051,7 @@ function inferTargetHint(
   role: SectionRole | null,
   inputs: FormationInputs,
   classifications: ClassificationRecord[],
+  fieldValues?: Record<string, unknown>,
 ): DiscoverySection['target_hint'] {
   if (!role) return 'unknown'
   // Detail roles always point at individual pages.
@@ -2072,6 +2073,16 @@ function inferTargetHint(
       const isListing = role === 'team_grid' || role === 'team_carousel' ||
                         role === 'blog_listing' || role === 'blog_featured' ||
                         role === 'career_listing'
+      // Team-link override: when the strategist has flipped any card on
+      // this team section to "individual bio page" (per-card
+      // `_display_mode: 'linked'`, set by the team_link toggle in
+      // PagesWorkspace), the section IS targeting individual pages —
+      // /staff/<kebab-name> gets auto-created. Override the
+      // flat-list default so the dev handoff doesn't tell McNeel "no
+      // individual pages" when the strategist has explicitly opted in.
+      if (isListing && (role === 'team_grid' || role === 'team_carousel')) {
+        if (anyTeamCardLinked(fieldValues)) return 'individual-page'
+      }
       return isListing ? 'flat-list' : 'individual-page'
     }
   }
@@ -2082,6 +2093,25 @@ function inferTargetHint(
     return 'individual-page'
   }
   return 'unknown'
+}
+
+/** True when any card in the team section's field_values has been
+ *  flipped to the linked / individual-bio-page display mode. Walks
+ *  every group in the section's field_values looking for items whose
+ *  `_display_mode === 'linked'` (the contract written by the team_link
+ *  toggle in PagesWorkspace; see src/lib/staffLink.ts:10). */
+function anyTeamCardLinked(fv: Record<string, unknown> | undefined): boolean {
+  if (!fv) return false
+  for (const value of Object.values(fv)) {
+    if (!Array.isArray(value)) continue
+    for (const item of value) {
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        const obj = item as Record<string, unknown>
+        if (obj._display_mode === 'linked') return true
+      }
+    }
+  }
+  return false
 }
 
 // ═════════════════════════════════════════════════════════════════════

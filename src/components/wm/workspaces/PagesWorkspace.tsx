@@ -458,7 +458,12 @@ function PageList({
     const isSelected = selectedIds.has(p.id)
     const isActive   = p.id === activeId
     const counts     = pageReviewCounts[p.id]
-    const editCount  = counts ? counts.open_total + counts.resolved_total : 0
+    // Show only OUTSTANDING (open) edits during an active review.
+    // Including resolved_total in the count makes a fully-handled page
+    // look like it still has work to do — e.g. "5 edits" when all 5
+    // are resolved. Resolved-edit history stays accessible on the
+    // Review tab; the sidebar pill is meant to flag remaining work.
+    const editCount  = counts ? counts.open_total : 0
     return (
       <div
         key={p.id}
@@ -2193,6 +2198,10 @@ function PageEditor({
                 surfaces (preview, partner review). Surfaced in the Dev
                 Handoff rollup per page. */}
             <DevNotesBlock page={page} onChange={onPageChange} />
+
+            {/* Designer notes — same write/visibility rules as dev notes,
+                rolled up on the Design workspace instead of Dev Handoff. */}
+            <DesignerNotesBlock page={page} onChange={onPageChange} />
             </>
           )}
         </div>
@@ -2497,6 +2506,57 @@ function DevNotesBlock({
         onChange={(e) => { setDraft(e.target.value); setDirty(true) }}
         onBlur={() => void save()}
         placeholder="Page-scoped notes for the developer (caveats, special routing, embed quirks, redirect needs, etc.)"
+        rows={4}
+        className="w-full rounded-md border border-wm-border bg-wm-bg px-3 py-2 text-[12px] text-wm-text placeholder-wm-text-subtle outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20 font-mono leading-relaxed resize-y"
+      />
+    </div>
+  )
+}
+
+// ── Designer notes block ─────────────────────────────────────────────
+//
+// Same shape as DevNotesBlock but writes to web_pages.designer_notes
+// and rolls up on the Design workspace. Keeps the design and dev punch
+// lists separated so each role sees only what's relevant to them.
+
+function DesignerNotesBlock({
+  page, onChange,
+}: {
+  page: WebPage
+  onChange: () => Promise<void> | void
+}) {
+  const initial = typeof page.designer_notes === 'string' ? page.designer_notes : ''
+  const [draft, setDraft] = useState(initial)
+  const [savingNotes, setSavingNotes] = useState(false)
+  const [dirty, setDirty] = useState(false)
+
+  useEffect(() => { setDraft(initial); setDirty(false) }, [page.id, initial])
+
+  const save = async () => {
+    if (!dirty) return
+    setSavingNotes(true)
+    await supabase.from('web_pages').update({ designer_notes: draft.trim() ? draft : null } as never).eq('id', page.id)
+    setSavingNotes(false); setDirty(false)
+    await onChange()
+  }
+
+  return (
+    <div className="mt-4 rounded-xl border border-wm-border/60 bg-wm-bg-elevated/40 p-4">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Designer notes</p>
+          <p className="text-[11px] text-wm-text-muted leading-snug">
+            For the design team only — won't appear in the page preview or partner review.
+            Rolled up per page in the Design workspace.
+          </p>
+        </div>
+        {savingNotes && <Loader2 size={11} className="animate-spin text-wm-text-subtle shrink-0" />}
+      </div>
+      <textarea
+        value={draft}
+        onChange={(e) => { setDraft(e.target.value); setDirty(true) }}
+        onBlur={() => void save()}
+        placeholder="Page-scoped notes for the designer (visual treatment, hero imagery direction, layout asks, asset gaps, etc.)"
         rows={4}
         className="w-full rounded-md border border-wm-border bg-wm-bg px-3 py-2 text-[12px] text-wm-text placeholder-wm-text-subtle outline-none focus:border-wm-border-focus focus:ring-2 focus:ring-wm-border-focus/20 font-mono leading-relaxed resize-y"
       />

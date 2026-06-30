@@ -510,9 +510,75 @@ export function DesignWorkspace({ project, onChange }: Props) {
             }}
           />
           <SquadFigmaPluginSection project={project} onChange={onChange} />
+          <DesignerNotesRollup projectId={project.id} />
         </div>
       </div>
     </div>
+  )
+}
+
+/** Designer Notes rollup — pulls web_pages.designer_notes for every
+ *  non-archived page on the project and lists them per page. Mirrors
+ *  the Dev Handoff dev_notes rollup but scoped to the designer. */
+function DesignerNotesRollup({ projectId }: { projectId: string }) {
+  const [rows, setRows] = useState<Array<{ id: string; name: string; slug: string; notes: string }>>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      setLoading(true)
+      const { data } = await supabase
+        .from('web_pages')
+        .select('id, name, slug, designer_notes')
+        .eq('web_project_id', projectId)
+        .eq('archived', false)
+        .order('sort_order')
+      if (cancelled) return
+      const filtered = ((data ?? []) as Array<{ id: string; name: string; slug: string; designer_notes: string | null }>)
+        .filter(p => !p.slug.startsWith('staff/'))
+        .filter(p => typeof p.designer_notes === 'string' && p.designer_notes.trim().length > 0)
+        .map(p => ({ id: p.id, name: p.name, slug: p.slug, notes: (p.designer_notes ?? '').trim() }))
+      setRows(filtered)
+      setLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [projectId])
+
+  return (
+    <WMCard padding="loose">
+      <div className="flex items-center gap-2 mb-2 text-wm-accent-strong">
+        <Palette size={13} />
+        <h2 className="text-[13px] font-bold uppercase tracking-widest">
+          Designer notes
+        </h2>
+      </div>
+      <p className="text-[12px] text-wm-text-muted mb-3 max-w-xl">
+        Per-page notes written by the strategist for the designer. Edit
+        any page's notes from the Pages workspace; they roll up here so
+        the designer has a single punch list before kicking off the
+        visual pass.
+      </p>
+      {loading ? (
+        <p className="text-[12px] text-wm-text-muted">Loading…</p>
+      ) : rows.length === 0 ? (
+        <p className="text-[12px] text-wm-text-muted italic">
+          No designer notes on any page yet. Add notes per page in the Pages workspace.
+        </p>
+      ) : (
+        <ul className="space-y-3">
+          {rows.map(r => (
+            <li key={r.id} className="rounded-md border border-wm-border bg-wm-bg-elevated/40 p-3">
+              <div className="flex items-baseline gap-2 mb-1.5">
+                <p className="text-[12.5px] font-semibold text-wm-text">{r.name}</p>
+                <code className="text-[10.5px] text-wm-text-subtle">/{r.slug}</code>
+              </div>
+              <p className="text-[12px] text-wm-text whitespace-pre-wrap font-mono leading-relaxed">{r.notes}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </WMCard>
   )
 }
 

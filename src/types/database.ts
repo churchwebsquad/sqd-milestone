@@ -1658,6 +1658,12 @@ export interface WebPage {
    *  punch list as part of the launch checklist. */
   dev_notes: string | null
 
+  /** v123 — Free-form designer-only notes per page. Sibling to dev_notes,
+   *  same write/visibility rules: NEVER rendered on partner-visible
+   *  surfaces. Rolled up per page in the Design workspace so the
+   *  designer gets the same punch-list view the dev gets. */
+  designer_notes: string | null
+
   // ── Navigation grouping (v111) ──
   /** Optional group name for the Pages workspace nav grouping
    *  ("About", "Ministries", etc). NULL = ungrouped. Seeded from

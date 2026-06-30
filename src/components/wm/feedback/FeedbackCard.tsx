@@ -245,14 +245,17 @@ export function FeedbackCard({
 /** Compact resolution banner — "Applied by Emily M. · Nov 19 · 9:08 AM"
  *  with the right color per outcome. Internal "dismissed" reads as
  *  "Completed" since marking an internal note done isn't a dismissal —
- *  there was nothing to apply in the first place. */
+ *  there was nothing to apply in the first place. Partner "dismissed"
+ *  now reads as "Resolved" — the user-facing framing is that the
+ *  strategist resolved the feedback (with edits or by acknowledging
+ *  it doesn't need action), not that they dismissed the partner. */
 function ResolutionReceipt({
   comment, reviewKind,
 }: { comment: WebReviewComment; reviewKind: 'internal' | 'partner' }) {
   const verb = comment.status === 'applied'  ? 'Applied'
             : comment.status === 'amended'  ? 'Amended'
             : comment.status === 'dismissed'
-              ? (reviewKind === 'internal' ? 'Completed' : 'Dismissed')
+              ? (reviewKind === 'internal' ? 'Completed' : 'Resolved')
               : 'Resolved'
   const tone = comment.status === 'amended' ? 'orange' : 'green'
   const cls = tone === 'green'
