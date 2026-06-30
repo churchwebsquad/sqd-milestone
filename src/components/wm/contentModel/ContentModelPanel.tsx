@@ -13,11 +13,11 @@
  * ones, and provides drill-in to edit each.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../../lib/supabase'
 import {
   loadContentModels, upsertContentModel, connectSectionToModel, disconnectSectionFromModel,
-  findModelForSection, defaultSchemaForName, newContentModelId,
+  findModelForSection, defaultSchemaForName, newContentModelId, setSectionItemBindings,
   type ContentModel, type ContentModelField, type ContentModelFieldType,
 } from '../../../lib/contentModels'
 
@@ -27,9 +27,15 @@ interface Props {
    *  panel renders the project-wide overview instead of section-scoped
    *  attach/create controls. */
   sectionId: string | null
+  /** True when this panel is rendered INSIDE another container that
+   *  already provides padding (e.g. SectionDetailsPanel's `<Section>`
+   *  wrapper). Skips the outer `p-3` so the panel doesn't get nested
+   *  padding. Default false (standalone rail-tab mount). */
+  embedded?: boolean
 }
 
-export function ContentModelPanel({ projectId, sectionId }: Props) {
+export function ContentModelPanel({ projectId, sectionId, embedded = false }: Props) {
+  const outerPad = embedded ? '' : 'p-3'
   const [models, setModels] = useState<ContentModel[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -101,7 +107,7 @@ export function ContentModelPanel({ projectId, sectionId }: Props) {
   if (!sectionId) {
     if (drilled) {
       return (
-        <div className="p-3 space-y-3">
+        <div className={`${outerPad} space-y-3`}>
           <button
             type="button"
             onClick={() => setDrillModelId(null)}
@@ -126,7 +132,7 @@ export function ContentModelPanel({ projectId, sectionId }: Props) {
       )
     }
     return (
-      <div className="p-3 space-y-3">
+      <div className={`${outerPad} space-y-3`}>
         <p className="text-[12px] text-wm-text-muted leading-snug">
           Strategist-owned content models for this project. Select a
           section in the editor to attach it to a model, or manage the
@@ -178,7 +184,7 @@ export function ContentModelPanel({ projectId, sectionId }: Props) {
 
   // Section-scoped mode.
   return (
-    <div className="space-y-3">
+    <div className={`${outerPad} space-y-3`}>
       <p className="text-[11.5px] text-wm-text-muted leading-snug">
         Group sections that feed the same content type (Staff, Events,
         Values, etc.). The dev handoff treats the group as one model
@@ -186,13 +192,19 @@ export function ContentModelPanel({ projectId, sectionId }: Props) {
       </p>
 
       {current ? (
-        <div className="rounded-md border border-wm-accent/40 bg-wm-accent-tint/30 p-3 space-y-2">
+        <div className="rounded-md border border-wm-accent/40 bg-wm-accent-tint/30 p-3 space-y-3">
           <div className="flex items-baseline justify-between gap-2">
             <p className="text-[13px] font-bold text-wm-text">{current.name}</p>
             <span className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">
               {current.section_ids.length} section{current.section_ids.length === 1 ? '' : 's'}
             </span>
           </div>
+          <SectionItemBindingsControl
+            projectId={projectId}
+            model={current}
+            sectionId={sectionId}
+            onSaved={load}
+          />
           <ContentModelSchemaEditor
             projectId={projectId}
             model={current}
@@ -306,6 +318,195 @@ function CreateModelForm({
       </div>
     </div>
   )
+}
+
+/** Per-card binding control. When the active section has multiple
+ *  items in its primary group (e.g. Feature 22 with three cards), the
+ *  strategist can restrict the model to a subset — useful when one
+ *  section mixes "Services" cards with a location/address card that
+ *  doesn't belong to the same content type.
+ *
+ *  Loads the section + its template lazily so the panel doesn't have
+ *  to thread section data through from the parent. Persists each
+ *  toggle via setSectionItemBindings.
+ */
+function SectionItemBindingsControl({
+  projectId, model, sectionId, onSaved,
+}: {
+  projectId: string
+  model:     ContentModel
+  sectionId: string
+  onSaved:   () => Promise<void> | void
+}) {
+  const [items, setItems] = useState<Array<{ index: number; label: string }>>([])
+  const [groupKey, setGroupKey] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      setLoading(true)
+      const { data: section } = await supabase
+        .from('web_sections')
+        .select('id, content_template_id, field_values')
+        .eq('id', sectionId)
+        .maybeSingle()
+      if (cancelled || !section) { setLoading(false); return }
+      const fv = (section.field_values ?? {}) as Record<string, unknown>
+      let tpl: { fields?: unknown[] } | null = null
+      if (section.content_template_id) {
+        const { data: tplRow } = await supabase
+          .from('web_content_templates')
+          .select('fields')
+          .eq('id', section.content_template_id)
+          .maybeSingle()
+        tpl = tplRow as { fields?: unknown[] } | null
+      }
+      if (cancelled) return
+      const found = findItemsForBinding(fv, tpl?.fields)
+      setItems(found.items)
+      setGroupKey(found.groupKey)
+      setLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [sectionId])
+
+  const binding = model.item_bindings?.[sectionId]
+  const selectedIndices = useMemo(() => {
+    if (binding && Array.isArray(binding.indices) && binding.indices.length > 0) {
+      return new Set(binding.indices)
+    }
+    // No override → ALL items belong.
+    return new Set(items.map(it => it.index))
+  }, [binding, items])
+
+  const isPartial = binding != null && binding.indices.length > 0 && binding.indices.length < items.length
+
+  const toggle = async (idx: number) => {
+    setSaving(true)
+    const next = new Set(selectedIndices)
+    if (next.has(idx)) next.delete(idx); else next.add(idx)
+    const arr = [...next].sort((a, b) => a - b)
+    // When all items selected, store no override (whole section binds).
+    const persist = arr.length === items.length ? null : arr
+    await setSectionItemBindings(supabase, projectId, model.id, sectionId, persist, groupKey ?? undefined)
+    await onSaved()
+    setSaving(false)
+  }
+
+  const clearOverride = async () => {
+    if (!binding) return
+    setSaving(true)
+    await setSectionItemBindings(supabase, projectId, model.id, sectionId, null)
+    await onSaved()
+    setSaving(false)
+  }
+
+  if (loading) {
+    return <p className="text-[11px] text-wm-text-subtle">Loading section items…</p>
+  }
+  if (items.length === 0) {
+    return (
+      <p className="text-[11px] text-wm-text-subtle italic">
+        This section has no card list — the whole section binds to {model.name}.
+      </p>
+    )
+  }
+  if (items.length === 1) {
+    return (
+      <p className="text-[11px] text-wm-text-subtle italic">
+        One item in this section — entire section bound to {model.name}.
+      </p>
+    )
+  }
+
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">
+        Which cards in this section belong to {model.name}?
+      </p>
+      <ul className="space-y-1">
+        {items.map(it => {
+          const checked = selectedIndices.has(it.index)
+          return (
+            <li key={it.index} className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => void toggle(it.index)}
+                disabled={saving}
+                className="accent-wm-accent cursor-pointer"
+              />
+              <span className={`text-[12px] ${checked ? 'text-wm-text' : 'text-wm-text-subtle line-through'}`}>
+                {it.label || `Item ${it.index + 1}`}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+      {isPartial && (
+        <button
+          type="button"
+          onClick={() => void clearOverride()}
+          disabled={saving}
+          className="mt-1.5 text-[11px] font-semibold text-wm-text-muted hover:text-wm-text disabled:opacity-50"
+        >
+          Reset to all cards
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** Find the primary group + readable per-item labels for the binding
+ *  checklist. Walks the template fields looking for the first non-
+ *  empty `group` field in field_values; for each item, picks the most
+ *  descriptive text-shaped value (heading, name, title, label) as the
+ *  display label. Returns empty when nothing actionable found. */
+function findItemsForBinding(
+  fv: Record<string, unknown>,
+  templateFields: unknown,
+): { items: Array<{ index: number; label: string }>; groupKey: string | null } {
+  if (!Array.isArray(templateFields)) return { items: [], groupKey: null }
+  for (const f of templateFields) {
+    if (!f || typeof f !== 'object') continue
+    const field = f as { kind?: string; key?: string }
+    if (field.kind !== 'group' || typeof field.key !== 'string') continue
+    const raw = fv[field.key]
+    // Two shapes for groups: plain array (most templates), or palette
+    // envelope `{ __palette_template_id, items: [...] }`.
+    let items: unknown[] = []
+    if (Array.isArray(raw)) items = raw
+    else if (raw && typeof raw === 'object') {
+      const inner = (raw as { items?: unknown[] }).items
+      if (Array.isArray(inner)) items = inner
+    }
+    if (items.length === 0) continue
+    const labeled = items.map((item, i) => ({
+      index: i,
+      label: pickItemLabel(item),
+    }))
+    return { items: labeled, groupKey: field.key }
+  }
+  return { items: [], groupKey: null }
+}
+
+function pickItemLabel(item: unknown): string {
+  if (item == null || typeof item !== 'object') return ''
+  const obj = item as Record<string, unknown>
+  for (const key of ['heading_card', 'card_heading_card', 'heading', 'team_name', 'name', 'title', 'label', 'question']) {
+    const v = obj[key]
+    if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 80)
+  }
+  // Nested card-group items often wrap a card object.
+  for (const v of Object.values(obj)) {
+    if (Array.isArray(v) && v.length > 0 && typeof v[0] === 'object') {
+      const nested = pickItemLabel(v[0])
+      if (nested) return nested
+    }
+  }
+  return ''
 }
 
 /** Editable schema list for a content model — add / remove / rename

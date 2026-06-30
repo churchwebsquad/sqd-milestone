@@ -327,6 +327,7 @@ export function SectionDetailsPanel({
             <ContentModelPanel
               projectId={projectId}
               sectionId={section.id}
+              embedded
             />
           </Section>
         )}

@@ -43,8 +43,18 @@ export interface ContentModel {
   name:         string
   schema:       ContentModelField[]
   cta_target:   'internal-page' | 'external' | 'mailto' | 'tel' | 'anchor' | null
-  /** Section ids (web_sections.id) bound to this model. */
+  /** Section ids (web_sections.id) bound to this model. Default
+   *  behavior: ALL items in the section's primary group belong to
+   *  the model. Override per-section via `item_bindings` below. */
   section_ids:  string[]
+  /** Per-section item-level binding overrides. When a section id
+   *  appears in this map, ONLY the listed item indices belong to the
+   *  model — useful for mixed sections like Feature 22 where one
+   *  card is location info and the other two are service entries.
+   *  Indices reference items in the section's primary group
+   *  (typically the row/card group). When omitted for a section in
+   *  section_ids, the whole section binds. */
+  item_bindings?: Record<string, { indices: number[]; group_key?: string }>
   created_at:   string
   updated_at:   string
 }
@@ -121,6 +131,41 @@ export async function connectSectionToModel(
     ...target,
     section_ids: [...target.section_ids, sectionId],
     updated_at:  new Date().toISOString(),
+  }
+  const next = list.map(m => m.id === modelId ? updated : m)
+  const res = await saveContentModels(sb, projectId, next)
+  if (!res.ok) return res
+  return { ok: true, model: updated }
+}
+
+/** Set the per-item binding for a specific section in a model. Pass
+ *  `null` to clear the override (reverts to whole-section binding).
+ *  Pass an array of indices to restrict the binding to specific items
+ *  in the section's primary group. */
+export async function setSectionItemBindings(
+  sb: SupabaseClient,
+  projectId: string,
+  modelId: string,
+  sectionId: string,
+  indices: number[] | null,
+  groupKey?: string,
+): Promise<{ ok: true; model: ContentModel } | { ok: false; error: string }> {
+  const list = await loadContentModels(sb, projectId)
+  const target = list.find(m => m.id === modelId)
+  if (!target) return { ok: false, error: `Model ${modelId} not found` }
+  const bindings = { ...(target.item_bindings ?? {}) }
+  if (indices == null || indices.length === 0) {
+    delete bindings[sectionId]
+  } else {
+    bindings[sectionId] = {
+      indices: [...indices].sort((a, b) => a - b),
+      ...(groupKey ? { group_key: groupKey } : {}),
+    }
+  }
+  const updated: ContentModel = {
+    ...target,
+    item_bindings: Object.keys(bindings).length > 0 ? bindings : undefined,
+    updated_at:    new Date().toISOString(),
   }
   const next = list.map(m => m.id === modelId ? updated : m)
   const res = await saveContentModels(sb, projectId, next)
