@@ -25,6 +25,7 @@ import {
   Palette, Plus, Trash2, Download, Save, Loader2, Type, Move, Square,
   Sparkles, ExternalLink, Check, AlertCircle, Layers,
   FolderOpen, Lightbulb, X, KeyRound, RefreshCw, Image as ImageIcon,
+  ArrowRight,
 } from 'lucide-react'
 import { scanStrategicPhrases, extractInspirationalUrls } from '../../../lib/cowork/strategicPhraseScanner'
 import { supabase } from '../../../lib/supabase'
@@ -42,7 +43,7 @@ import {
   type RoleShadeMatrix, type FigmaBinding,
 } from '../../../lib/designSystemSpec'
 import type { StrategyWebProject, WebContentTemplate } from '../../../types/database'
-import { LayoutSwapBoard } from '../LayoutSwapBoard'
+import { setProjectSwap, clearProjectSwap } from '../../../lib/webFigmaLayoutSwap'
 
 interface Props {
   project: StrategyWebProject
@@ -494,21 +495,14 @@ export function DesignWorkspace({ project, onChange }: Props) {
           <TypographySection spec={spec} onChange={update} />
           <SpacingSection spec={spec} onChange={update} />
           <RadiusSection spec={spec} onChange={update} />
-          <FigmaStyleGuideSection projectId={project.id} spec={spec} onChange={update} onAutoSave={autoSave} />
-          <ImagesSection projectId={project.id} spec={spec} onAutoSave={autoSave} />
-          <LayoutSwapBoard
+          <FigmaStyleGuideSection
             project={project}
-            onChange={onChange}
-            loadedTemplateIds={spec.figma?.loaded_template_ids ?? []}
-            onToggleLoaded={(templateId, loaded) => {
-              const current = new Set(spec.figma?.loaded_template_ids ?? [])
-              if (loaded) current.add(templateId); else current.delete(templateId)
-              void autoSave({
-                ...spec,
-                figma: { ...(spec.figma ?? {}), loaded_template_ids: [...current] },
-              })
-            }}
+            spec={spec}
+            onChange={update}
+            onAutoSave={autoSave}
+            onProjectChange={onChange}
           />
+          <ImagesSection projectId={project.id} spec={spec} onAutoSave={autoSave} />
           <SquadFigmaPluginSection project={project} onChange={onChange} />
           <DesignerNotesRollup projectId={project.id} />
         </div>
@@ -1111,19 +1105,82 @@ function PxScaleEditor({
 // when an AI agent needs structural access to the Style Guide.
 
 function FigmaStyleGuideSection({
-  projectId, spec, onChange, onAutoSave,
+  project, spec, onChange, onAutoSave, onProjectChange,
 }: {
-  projectId: string
+  project: StrategyWebProject
   spec: DesignSystemSpec
   onChange: (s: DesignSystemSpec) => void
   /** Persist-and-clear-dirty path used by low-friction toggles like
    *  the load checklist below. The URL input + family lists stay on
    *  `onChange` (Save button required) since they're higher-stakes. */
   onAutoSave: (s: DesignSystemSpec) => Promise<void>
+  /** Reload the project row from the host after the swap map writes —
+   *  same hook the rest of DesignWorkspace uses for project refreshes. */
+  onProjectChange: () => Promise<void>
 }) {
+  const projectId = project.id
   const binding: FigmaBinding = spec.figma ?? {}
   const [urlDraft, setUrlDraft] = useState(binding.style_guide_url ?? '')
   const [focused, setFocused] = useState(false)
+
+  // Per-template Figma layout swap (merged in from the old standalone
+  // LayoutSwapBoard — same storage on strategy_web_projects.figma_layout_swaps).
+  // Designer types a Brixies replacement layout name per row on the
+  // checklist; that name carries forward to the dev handoff + Figma
+  // plugin without making them leave the style-guide surface.
+  const [swaps, setSwaps] = useState<StrategyWebProject['figma_layout_swaps']>(project.figma_layout_swaps ?? {})
+  const [savingSwap, setSavingSwap] = useState<string | null>(null)
+  const [swapError, setSwapError] = useState<string | null>(null)
+  useEffect(() => { setSwaps(project.figma_layout_swaps ?? {}) }, [project.figma_layout_swaps])
+
+  const saveSwapMap = useCallback(async (
+    next: StrategyWebProject['figma_layout_swaps'],
+    fromTemplateId: string,
+  ) => {
+    setSavingSwap(fromTemplateId)
+    setSwaps(next)
+    setSwapError(null)
+    const { error } = await supabase
+      .from('strategy_web_projects')
+      .update({ figma_layout_swaps: next })
+      .eq('id', projectId)
+    setSavingSwap(null)
+    if (error) {
+      console.error('[FigmaStyleGuideSection] swap save failed:', error)
+      setSwapError(`Couldn't save swap: ${error.message}`)
+      setSwaps(project.figma_layout_swaps ?? {})
+      return
+    }
+    await onProjectChange()
+  }, [projectId, project.figma_layout_swaps, onProjectChange])
+
+  /** Set / clear the swap target for one wireframe template id from a
+   *  free-text input. Matches the typed name against the catalog by
+   *  layer_name (case-insensitive); preserves the raw label so designer
+   *  edits survive even when the catalog has no exact match. */
+  const handleSwapText = useCallback(async (
+    fromTemplateId: string,
+    text: string,
+    catalog: Record<string, WebContentTemplate>,
+  ) => {
+    const trimmed = text.trim()
+    if (!trimmed) {
+      const next = clearProjectSwap(swaps, fromTemplateId)
+      await saveSwapMap(next, fromTemplateId)
+      return
+    }
+    const lower = trimmed.toLowerCase()
+    const match = Object.values(catalog).find(t => t.layer_name.toLowerCase() === lower)
+    const { data: { session } } = await supabase.auth.getSession()
+    const next = setProjectSwap(swaps, fromTemplateId, {
+      to_template_id:    match?.id ?? '',
+      to_template_label: trimmed,
+      note:              swaps[fromTemplateId]?.note ?? null,
+      swapped_at:        new Date().toISOString(),
+      swapped_by:        session?.user?.id ?? '',
+    })
+    await saveSwapMap(next, fromTemplateId)
+  }, [swaps, saveSwapMap])
 
   // Re-sync the draft when the spec reloads externally — unless the
   // designer is actively typing, in which case we leave them alone.
@@ -1265,6 +1322,33 @@ function FigmaStyleGuideSection({
     return [...filteredAuto, ...dedupedExtras]
   }, [used, extraTemplates, excludedIds])
 
+  // Full Brixies catalog for the swap-target autocomplete on each row.
+  // The "used" set above only carries templates that already appear on
+  // a page; the designer's swap target may point at a layout that isn't
+  // bound yet (the whole point of the swap is to indicate a future
+  // template change). Lightweight columns only — `family` so the
+  // datalist can show the family name as a hint.
+  const [allTemplatesById, setAllTemplatesById] = useState<Record<string, WebContentTemplate>>({})
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const { data } = await supabase
+        .from('web_content_templates')
+        .select('id, layer_name, family')
+        .eq('is_published', true)
+      if (cancelled) return
+      const map: Record<string, WebContentTemplate> = {}
+      for (const t of (data ?? []) as WebContentTemplate[]) map[t.id] = t
+      setAllTemplatesById(map)
+    })()
+    return () => { cancelled = true }
+  }, [])
+  const allTemplatesSorted = useMemo(() =>
+    Object.values(allTemplatesById).slice().sort((a, b) =>
+      (a.layer_name ?? '').localeCompare(b.layer_name ?? '')),
+    [allTemplatesById],
+  )
+
   const byFamily = useMemo(() => {
     const m = new Map<string, WebContentTemplate[]>()
     for (const t of effectiveUsed) {
@@ -1392,6 +1476,18 @@ function FigmaStyleGuideSection({
         </div>
       </label>
 
+      {swapError && (
+        <div className="mt-3 rounded-md border border-wm-danger/30 bg-wm-danger-bg px-3 py-2 text-[11.5px] text-wm-danger flex items-start gap-2">
+          <span className="flex-1">{swapError}</span>
+          <button
+            type="button"
+            onClick={() => setSwapError(null)}
+            className="text-wm-danger hover:opacity-70 shrink-0"
+            aria-label="Dismiss"
+          ><X size={11} /></button>
+        </div>
+      )}
+
       <TemplateLoadChecklist
         loading={loading}
         used={effectiveUsed}
@@ -1399,6 +1495,10 @@ function FigmaStyleGuideSection({
         usageByTemplate={usageByTemplate}
         usedIdsSet={usedIdsSet}
         loadedIds={spec.figma?.loaded_template_ids ?? []}
+        swaps={swaps}
+        savingSwap={savingSwap}
+        onSwapText={(fromId, text) => void handleSwapText(fromId, text, allTemplatesById)}
+        allTemplates={allTemplatesSorted}
         onToggle={(id, next) => {
           const current = new Set(spec.figma?.loaded_template_ids ?? [])
           if (next) current.add(id); else current.delete(id)
@@ -1452,7 +1552,9 @@ function buildUsageLabel(usage: { pageNames: string[]; instances: number; isChro
 }
 
 function TemplateLoadChecklist({
-  loading, used, byFamily, usageByTemplate, usedIdsSet, loadedIds, onToggle, onSetAll, onAdd, onRemove,
+  loading, used, byFamily, usageByTemplate, usedIdsSet, loadedIds,
+  swaps, savingSwap, onSwapText, allTemplates,
+  onToggle, onSetAll, onAdd, onRemove,
 }: {
   loading: boolean
   used: WebContentTemplate[]
@@ -1463,6 +1565,20 @@ function TemplateLoadChecklist({
    *  added so the remove button labels differently. */
   usedIdsSet: Set<string>
   loadedIds: string[]
+  /** Site-wide layout swap map: { from_template_id: { to_template_id,
+   *  to_template_label, ... } }. Merged in from the old standalone
+   *  LayoutSwapBoard so designers can update layouts inline as they
+   *  walk the load checklist. */
+  swaps: StrategyWebProject['figma_layout_swaps']
+  /** Template id currently being saved — shows a spinner next to its
+   *  swap input until the write completes. */
+  savingSwap: string | null
+  /** Save / clear a swap target by free-text input. Empty string
+   *  clears. Non-empty string is matched against the catalog by
+   *  layer_name; an unmatched string is kept as a free-text label. */
+  onSwapText: (fromTemplateId: string, text: string) => void
+  /** Full catalog for the row-level swap autocomplete (datalist). */
+  allTemplates: WebContentTemplate[]
   onToggle: (id: string, next: boolean) => void
   onSetAll: (ids: string[], next: boolean) => void
   onAdd: (id: string) => void
@@ -1535,44 +1651,86 @@ function TemplateLoadChecklist({
                       : (isAutoDerived || isSynthetic
                           ? null
                           : 'Designer-added (not bound to a section)')
+                    // Swap input visibility: only real Brixies templates
+                    // can be swapped (synthetic nav rows have no source
+                    // layout to replace).
+                    const swapEntry = !isSynthetic && (swaps?.[t.id] ?? null)
+                    const swapDisplayValue = swapEntry
+                      ? (swapEntry.to_template_label ?? '')
+                      : ''
+                    const isSavingSwap = savingSwap === t.id
                     return (
-                      <li key={t.id} className="flex items-stretch group">
-                        <label className="flex items-start gap-2 px-3 py-1.5 cursor-pointer hover:bg-wm-bg-hover/40 transition-colors flex-1 min-w-0">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) => onToggle(t.id, e.target.checked)}
-                            className="accent-wm-accent cursor-pointer mt-[3px]"
-                          />
-                          <div className="min-w-0 flex-1">
-                            <p className={[
-                              'text-[11px] font-mono',
-                              checked ? 'text-wm-text-subtle line-through' : 'text-wm-text',
-                            ].join(' ')}>
-                              {t.layer_name}
-                              {!isAutoDerived && !isSynthetic && (
-                                <span className="ml-2 text-[9px] uppercase tracking-widest font-bold text-wm-accent">added</span>
-                              )}
-                            </p>
-                            {pageLabel && (
-                              <p className="text-[10px] text-wm-text-muted leading-snug mt-0.5">
-                                {pageLabel}
+                      <li key={t.id} className="group">
+                        <div className="flex items-stretch">
+                          <label className="flex items-start gap-2 px-3 py-1.5 cursor-pointer hover:bg-wm-bg-hover/40 transition-colors flex-1 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => onToggle(t.id, e.target.checked)}
+                              className="accent-wm-accent cursor-pointer mt-[3px]"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className={[
+                                'text-[11px] font-mono',
+                                checked ? 'text-wm-text-subtle line-through' : 'text-wm-text',
+                              ].join(' ')}>
+                                {t.layer_name}
+                                {!isAutoDerived && !isSynthetic && (
+                                  <span className="ml-2 text-[9px] uppercase tracking-widest font-bold text-wm-accent">added</span>
+                                )}
                               </p>
-                            )}
-                          </div>
-                        </label>
+                              {pageLabel && (
+                                <p className="text-[10px] text-wm-text-muted leading-snug mt-0.5">
+                                  {pageLabel}
+                                </p>
+                              )}
+                            </div>
+                          </label>
+                          {!isSynthetic && (
+                            <button
+                              type="button"
+                              onClick={() => onRemove(t.id, isAutoDerived)}
+                              title={isAutoDerived
+                                ? 'Remove from checklist (the section binding stays; this template just won\'t appear here).'
+                                : 'Remove this designer-added template from the checklist.'}
+                              className="px-2 text-wm-text-subtle hover:text-wm-danger opacity-0 group-hover:opacity-100 transition-opacity"
+                              aria-label={`Remove ${t.layer_name} from checklist`}
+                            >
+                              <X size={12} />
+                            </button>
+                          )}
+                        </div>
                         {!isSynthetic && (
-                          <button
-                            type="button"
-                            onClick={() => onRemove(t.id, isAutoDerived)}
-                            title={isAutoDerived
-                              ? 'Remove from checklist (the section binding stays; this template just won\'t appear here).'
-                              : 'Remove this designer-added template from the checklist.'}
-                            className="px-2 text-wm-text-subtle hover:text-wm-danger opacity-0 group-hover:opacity-100 transition-opacity"
-                            aria-label={`Remove ${t.layer_name} from checklist`}
-                          >
-                            <X size={12} />
-                          </button>
+                          <div className="px-3 pb-2 -mt-0.5 flex items-center gap-2">
+                            <ArrowRight size={11} className="text-wm-text-subtle shrink-0 ml-5" />
+                            <span className="text-[9px] uppercase tracking-widest font-bold text-wm-text-subtle shrink-0">Swap to</span>
+                            <input
+                              type="text"
+                              list={`tpl-options-${t.id}`}
+                              defaultValue={swapDisplayValue}
+                              key={swapDisplayValue}
+                              onBlur={e => onSwapText(t.id, e.target.value)}
+                              placeholder="Type a Brixies template name (or leave blank to keep this layout)"
+                              disabled={isSavingSwap}
+                              className="flex-1 min-w-0 text-[11px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-0.5 focus:border-wm-accent focus:outline-none disabled:opacity-50"
+                            />
+                            <datalist id={`tpl-options-${t.id}`}>
+                              {allTemplates.map(opt => (
+                                <option key={opt.id} value={opt.layer_name}>{opt.family ?? '(uncategorized)'}</option>
+                              ))}
+                            </datalist>
+                            {swapEntry && (
+                              <button
+                                type="button"
+                                onClick={() => onSwapText(t.id, '')}
+                                className="text-wm-text-muted hover:text-wm-danger shrink-0"
+                                title="Clear swap"
+                              >
+                                <X size={11} />
+                              </button>
+                            )}
+                            {isSavingSwap && <Loader2 size={11} className="animate-spin text-wm-accent shrink-0" />}
+                          </div>
                         )}
                       </li>
                     )
