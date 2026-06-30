@@ -167,10 +167,17 @@ export async function loadBrandGuidesForMember(member: number): Promise<MemberBr
 function buildMemberBrandGuides(sqdRows: SqdRow[], prfRows: PrfRow[]): MemberBrandGuides {
   const entries: BrandGuideEntry[] = []
 
-  // SQD parent first, then subbrands sorted by display_name. We resolve
-  // subbrand URLs by joining parent slug + sub slug, mirroring the
-  // route shape used by BrandGuidePortalPage and the legacy /brand/
-  // tree (see lib/portalUrl.ts).
+  // SQD parent first, then subbrands sorted by display_name.
+  //
+  // Subbrand `slug` in strategy_brand_guides is ALREADY the full
+  // composite (createSubbrand in lib/brandGuide.ts calls
+  // generateUniqueSubSlug(parent.slug, displayName) which writes
+  // `{parent}/{ministry}` as the slug verbatim). Earlier code here
+  // re-prepended the parent slug, producing URLs like
+  // `/mountain-life-church/mountain-life-church/advancing-in-faith`
+  // that the RPC couldn't find — symptom: "brand guide isn't
+  // published yet" on URLs that ARE published. Pass `s.slug`
+  // straight through.
   const parents = sqdRows.filter(r => !r.parent_id)
   const subs = sqdRows.filter(r => r.parent_id)
   const parentById = new Map(parents.map(p => [p.id, p]))
@@ -190,14 +197,14 @@ function buildMemberBrandGuides(sqdRows: SqdRow[], prfRows: PrfRow[]): MemberBra
       entries.push({
         kind: 'sqd-sub',
         label: s.display_name,
-        url: buildPortalUrl(`${p.slug}/${s.slug}`),
+        url: buildPortalUrl(s.slug),
         legacy: false,
       })
     }
   }
 
   // Orphan SQD subs (parent missing) — extremely rare but render with
-  // just the sub slug so they don't disappear silently.
+  // the stored composite slug so they don't disappear silently.
   const orphanSubs = subs.filter(s => !parentById.has(s.parent_id ?? ''))
   for (const s of orphanSubs) {
     entries.push({
