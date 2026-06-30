@@ -55,6 +55,7 @@ import {
   ACF_TYPE_BY_FIELD_TYPE,
   BRICKS_NESTABLE_PREFERRED_ROLES,
   CAMPUS_SCOPED_COLUMNS,
+  CANONICAL_CAMPUS_FIELDS,
   CANONICAL_GROUP_FIELDS,
   CANONICAL_SERMON_FIELDS,
   CHROME_ROLES,
@@ -449,6 +450,15 @@ export function buildWpObjects(
   // ── Options page (always emitted, multi-campus-aware) ─────────
   objects.push(buildOptionsPage(inputs))
 
+  // ── Campus CPT (multi-campus projects only) ───────────────────
+  // The 7 campus-scoped columns get punted from the Options page in
+  // multi-campus projects (see buildOptionsPage). Model them as a
+  // dedicated Campus CPT so dev gets a working content surface,
+  // pre-seeded with one record per entry in project.campuses.
+  if (inputs.isMultiCampus && inputs.campuses.length > 0) {
+    objects.push(buildCampusCpt(inputs))
+  }
+
   // ── CPTs from SectionRole routing ─────────────────────────────
   const cptSlugsFromRoles = new Set<string>()
   for (const c of classifications) {
@@ -522,10 +532,15 @@ function buildOptionsPage(inputs: FormationInputs): WpObjectOptionsPage {
   const open_questions: string[] = []
 
   if (inputs.isMultiCampus) {
-    // Multi-campus → the 7 campus-scoped columns should NOT be
-    // flattened into the Options page. Surface as open question.
+    // Multi-campus → the 7 campus-scoped columns get punted from the
+    // Options page and modeled as a Campus CPT (see buildCampusCpt).
+    // Open question carries the binding decision, not the modeling
+    // decision (the CPT is now the recommendation; McNeel confirms
+    // where the data surfaces).
+    const termLower = inputs.campusTerm.singular.toLowerCase()
+    const termPluralLower = inputs.campusTerm.plural.toLowerCase()
     open_questions.push(
-      `Multi-${inputs.campusTerm.singular.toLowerCase()} project — these fields are inherently per-${inputs.campusTerm.singular.toLowerCase()} (different value at each ${inputs.campusTerm.singular.toLowerCase()}): ${CAMPUS_SCOPED_COLUMNS.map(c => c.col).join(', ')}. They should NOT be seeded as flat globals. Best modeled as a "${inputs.campusTerm.singular}" CPT or as a per-${inputs.campusTerm.singular.toLowerCase()} repeater on the Visit page.`
+      `Multi-${termLower} project — these fields (${CAMPUS_SCOPED_COLUMNS.map(c => c.col).join(', ')}) are per-${termLower}, so they're modeled as a "${inputs.campusTerm.singular}" CPT (see wp_object.campus) with one record per ${termLower}, not flat globals. Confirm where ${termPluralLower} surface on the site: (a) Bricks query loop on /visit pulling Campus records, (b) separate /campus/[slug] detail pages, or (c) both. Default: query loop on /visit.`
     )
   } else {
     seeded.push(...CAMPUS_SCOPED_COLUMNS.map(c => c.col))
@@ -542,6 +557,67 @@ function buildOptionsPage(inputs: FormationInputs): WpObjectOptionsPage {
     open_questions,
     confidence:                  'high',
   }
+}
+
+/** Build the Campus CPT for multi-campus projects. One record per
+ *  entry in inputs.campuses; canonical fields hold the per-campus
+ *  values previously punted off the Options page.
+ *
+ *  Slug uses the partner's campus_label_singular when it diverges from
+ *  "Campus" (e.g. Doxology calls them "Locations"). The slug itself is
+ *  the lowercased label — so Doxology gets `location` as the CPT slug,
+ *  Christ Fellowship etc. get `campus`. */
+function buildCampusCpt(inputs: FormationInputs): WpObjectCpt {
+  const slug = campusCptSlug(inputs.campusTerm.singular)
+  const labels = {
+    singular: inputs.campusTerm.singular,
+    plural:   inputs.campusTerm.plural,
+  }
+  const registration: CptRegistrationArgs = {
+    public:              true,
+    publicly_queryable:  true,
+    has_archive:         false,
+    show_ui:             true,
+    show_in_menu:        true,
+    show_in_rest:        true,
+    show_in_nav_menus:   false,
+    exclude_from_search: false,
+    supports:            CPT_SUPPORTS.campus,
+    menu_icon:           CPT_MENU_ICON.campus,
+    rewrite:             { slug, with_front: false },
+  }
+  return {
+    id:                  `wp_object.${slug}`,
+    kind:                'custom_post_type',
+    slug,
+    labels,
+    registration_args:   registration,
+    taxonomies:          [],
+    single_template: {
+      enabled:             true,
+      brixies_template_id: null,
+      cta_target:          'internal-page',
+      rationale:           `Multi-${inputs.campusTerm.singular.toLowerCase()} project — each ${inputs.campusTerm.singular.toLowerCase()} carries unique address / service times / pastor data that belongs on a single template. Bricks query loop on /visit lists them; the single template renders the detail view when partners want stand-alone ${inputs.campusTerm.plural.toLowerCase()} URLs.`,
+    },
+    archive: {
+      enabled:                       false,
+      rendered_via_query_loop_on:    '/visit',
+      rationale:                     `Defaulting to no archive — ${inputs.campusTerm.plural.toLowerCase()} surface via a Bricks query loop on /visit, not a WP archive. McNeel can flip has_archive=true if a stand-alone /${slug} URL is wanted.`,
+    },
+    headless: false,
+    external_system: null,
+    external_limits: null,
+    field_group_refs: [`acf.${slug}`],
+    open_questions:  [],
+    confidence:      'high',
+  }
+}
+
+/** Lowercase + slug-safe form of the partner's campus singular label.
+ *  "Campus" → 'campus', "Location" → 'location', "Parish" → 'parish'. */
+function campusCptSlug(singular: string): string {
+  const cleaned = singular.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  return cleaned || 'campus'
 }
 
 function buildCptFromRoles(
@@ -900,10 +976,9 @@ function buildOptionsFieldGroup(
 }
 
 /** Canonical (minimum) field set for a CPT, varied by the partner's
- *  display_preference. Returns [] for CPTs we don't have a canonical
- *  set for (staff / career / post / event). Sermon and group only for
- *  now — that's where the gap was: display-preference-driven CPTs
- *  emitted with only taxonomy fields. */
+ *  display_preference (sermons / groups) or shape (campus). Returns
+ *  [] for CPTs we don't have a canonical set for (staff / career /
+ *  post / event). */
 function canonicalFieldsForCpt(
   slug: string,
   inputs: FormationInputs,
@@ -915,6 +990,9 @@ function canonicalFieldsForCpt(
   if (slug === 'group') {
     const shape = groupCanonicalShape(inputs.displayPreferences.groups)
     return shape ? CANONICAL_GROUP_FIELDS[shape] : []
+  }
+  if (slug === campusCptSlug(inputs.campusTerm.singular) && inputs.isMultiCampus) {
+    return CANONICAL_CAMPUS_FIELDS
   }
   return []
 }
@@ -1013,6 +1091,34 @@ function buildCptFieldGroup(
       required:     cf.required,
       instructions: cf.description,
     })
+  }
+
+  // Campus CPT — seed one record per entry in project.campuses. The
+  // primary campus carries the project-row column values (those are
+  // the partner's existing primary-campus facts); secondary campuses
+  // get blank fields the dev/partner fills in via WP admin. Without
+  // this seeding, the dev has zero starting data for multi-campus
+  // projects despite the analyzer KNOWING which campuses exist.
+  if (obj.slug === campusCptSlug(inputs.campusTerm.singular) && inputs.isMultiCampus) {
+    const proj = inputs.project as unknown as Record<string, unknown>
+    for (const campus of inputs.campuses) {
+      const row: Record<string, unknown> = {
+        title:       campus.label,
+        is_primary:  campus.primary === true,
+      }
+      if (campus.primary) {
+        // Pre-populate the primary campus with project-row column
+        // values — those values represent this campus already.
+        for (const col of CAMPUS_SCOPED_COLUMNS) {
+          row[col.col] = proj[col.col] ?? null
+        }
+      } else {
+        for (const col of CAMPUS_SCOPED_COLUMNS) {
+          row[col.col] = null
+        }
+      }
+      contentRows.push(row)
+    }
   }
 
   // Append taxonomy fields for filterable surfaces

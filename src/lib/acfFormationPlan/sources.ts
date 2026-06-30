@@ -44,6 +44,10 @@ export interface FormationInputs {
   isMultiCampus: boolean
   /** Resolved per-project campus term (defaults applied). */
   campusTerm: CampusTerm
+  /** Campus registry from strategy_web_projects.campuses. Empty for
+   *  single-campus projects. Used to seed Campus CPT records when
+   *  isMultiCampus. */
+  campuses: Array<{ slug: string; label: string; primary: boolean; sort_order: number }>
   /** Approved pages only. Sorted by sort_order. */
   approvedPages: WebPage[]
   /** Sections per approved page id, in sort_order. */
@@ -340,6 +344,7 @@ export async function loadProjectInputs(
     project,
     isMultiCampus,
     campusTerm,
+    campuses,
     approvedPages,
     sectionsByPage,
     templatesById,

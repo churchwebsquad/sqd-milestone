@@ -147,6 +147,7 @@ export const CPT_MENU_ICON: Record<string, string> = {
   sermon: 'dashicons-microphone',
   group:  'dashicons-networking',
   career: 'dashicons-businessperson',
+  campus: 'dashicons-location-alt',
 }
 
 /** Default `supports` array per CPT slug. Headless CPTs trim to title
@@ -161,6 +162,9 @@ export const CPT_SUPPORTS: Record<string, CptSupportFlag[]> = {
   group:  ['title', 'revisions'],                                   // headless — no editor needed
   career: ['title', 'editor', 'thumbnail', 'revisions'],
   post:   ['title', 'editor', 'thumbnail', 'revisions', 'excerpt', 'custom-fields'],
+  // 'editor' kept so each Campus can carry a longer description /
+  // welcome blurb the partner can edit alongside the metadata fields.
+  campus: ['title', 'editor', 'thumbnail', 'revisions'],
 }
 
 /** Roles whose section-level structure should default to Bricks's
@@ -293,6 +297,33 @@ export const CANONICAL_GROUP_FIELDS: Record<'detail-page' | 'headless-mailto', C
       description: 'Group leader’s name.' },
   ],
 }
+
+/** Campus CPT canonical fields. One record per physical campus —
+ *  carries the per-campus value of the 7 columns that get punted from
+ *  the Options page in multi-campus projects. Plus a "primary" flag
+ *  so dev's Bricks query loops can prioritize the home campus. */
+export const CANONICAL_CAMPUS_FIELDS: CanonicalCptField[] = [
+  { name: 'is_primary',            label: 'Primary campus?',   type: 'true_false',
+    description: 'Tick on exactly ONE record — the home / flagship campus. Used to seed default contact details on global pages.' },
+  { name: 'address',               label: 'Address',           type: 'text',
+    description: 'Street address of this campus.' },
+  { name: 'city_state',            label: 'City, State',       type: 'text',
+    description: 'City and state, e.g. "Charlotte, NC".' },
+  { name: 'phone',                 label: 'Phone',             type: 'text',
+    description: 'Front-desk phone number for this campus.' },
+  { name: 'email',                 label: 'Email',             type: 'email',
+    description: 'Public email address — typically info@ or the campus pastor.' },
+  { name: 'primary_service_time',  label: 'Primary service',   type: 'text',
+    description: 'Headline service time, e.g. "Sundays 10 AM".' },
+  { name: 'all_service_times',     label: 'All service times', type: 'wysiwyg',
+    description: 'Full schedule — supports multiple lines / formatting.' },
+  { name: 'pastor_name',           label: 'Pastor name',       type: 'text',
+    description: 'Campus pastor / lead pastor at this campus.' },
+  { name: 'map_url',               label: 'Map URL',           type: 'url',
+    description: 'Google Maps / Apple Maps link to this campus location. Optional.' },
+  { name: 'directions_text',       label: 'Directions notes',  type: 'wysiwyg',
+    description: 'Parking, entrance, accessibility notes. Optional.' },
+]
 
 /** Pick the right canonical shape for a sermon CPT given the partner's
  *  sermons_display_preference. Returns null for prefs that don't map
