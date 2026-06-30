@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { History, RotateCcw, X, Loader2, Bot, Save, Link2, Link2Off, Undo2, Check } from 'lucide-react'
+import { History, RotateCcw, X, Loader2, Bot, Save, Link2, Link2Off, Undo2, Check, ChevronRight, ChevronDown } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { listPageVersions, revertPageToVersion } from '../../lib/webPageVersions'
 import type { WebPageVersion } from '../../types/database'
@@ -51,6 +51,10 @@ export function PageVersionDrawer({ pageId, pageName, open, onClose, onReverted 
   const [revertingId, setRevertingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [justReverted, setJustReverted] = useState<string | null>(null)
+  // Per-version expand state — lets the user inspect what's actually
+  // IN a snapshot (section list + headings) before committing to a
+  // revert. Stored as a Set so toggling is cheap.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
 
   const load = useCallback(async () => {
     if (!pageId) return
@@ -135,23 +139,44 @@ export function PageVersionDrawer({ pageId, pageName, open, onClose, onReverted 
                 const Icon = TRIGGER_ICON[v.trigger_kind] ?? Save
                 const reverting = revertingId === v.id
                 const reverted  = justReverted === v.id
+                const expanded  = expandedIds.has(v.id)
+                const sections  = Array.isArray(v.sections_snapshot) ? v.sections_snapshot : []
+                const toggle = () => {
+                  setExpandedIds(prev => {
+                    const next = new Set(prev)
+                    if (next.has(v.id)) next.delete(v.id); else next.add(v.id)
+                    return next
+                  })
+                }
                 return (
-                  <li key={v.id} className="px-4 py-3 hover:bg-wm-bg-hover/40 transition-colors">
-                    <div className="flex items-start gap-3">
+                  <li key={v.id} className="hover:bg-wm-bg-hover/40 transition-colors">
+                    <div className="px-4 py-3 flex items-start gap-3">
+                      <button
+                        type="button"
+                        onClick={toggle}
+                        className="text-wm-text-muted hover:text-wm-text mt-0.5 shrink-0"
+                        title={expanded ? 'Collapse snapshot contents' : 'Expand snapshot contents'}
+                      >
+                        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      </button>
                       <Icon size={13} className="text-wm-accent mt-0.5 shrink-0" />
-                      <div className="flex-1 min-w-0">
+                      <button
+                        type="button"
+                        onClick={toggle}
+                        className="flex-1 min-w-0 text-left"
+                      >
                         <p className="text-[12.5px] text-wm-text font-semibold truncate">
                           {v.trigger_label || TRIGGER_LABEL[v.trigger_kind] || v.trigger_kind}
                         </p>
                         <p className="text-[11px] text-wm-text-muted">
-                          {formatRelative(v.created_at)} · {Array.isArray(v.sections_snapshot) ? v.sections_snapshot.length : 0} section{Array.isArray(v.sections_snapshot) && v.sections_snapshot.length === 1 ? '' : 's'}
+                          {formatRelative(v.created_at)} · {sections.length} section{sections.length === 1 ? '' : 's'}
                         </p>
                         {v.reverted_from_version && (
                           <p className="text-[10px] text-wm-text-subtle mt-0.5 italic">
                             (created by a revert)
                           </p>
                         )}
-                      </div>
+                      </button>
                       <button
                         type="button"
                         onClick={() => void handleRevert(v)}
@@ -165,6 +190,11 @@ export function PageVersionDrawer({ pageId, pageName, open, onClose, onReverted 
                         {reverting ? 'Reverting' : reverted ? 'Reverted' : 'Revert'}
                       </button>
                     </div>
+                    {expanded && (
+                      <div className="px-4 pb-3 pl-11 border-t border-wm-border/40 bg-wm-bg-elevated/30">
+                        <SnapshotContents version={v} sections={sections} />
+                      </div>
+                    )}
                   </li>
                 )
               })}
@@ -180,6 +210,71 @@ export function PageVersionDrawer({ pageId, pageName, open, onClose, onReverted 
       </aside>
     </>
   )
+}
+
+/** Read-only preview of what's IN a snapshot. Lists the snapshot's
+ *  page name + slug + status + section list with each section's
+ *  template binding, role, and a one-line preview of its content so
+ *  the user can identify the version before reverting. */
+function SnapshotContents({
+  version, sections,
+}: {
+  version:  WebPageVersion
+  sections: Array<Record<string, unknown>>
+}) {
+  const ps = (version.page_snapshot ?? {}) as Record<string, unknown>
+  const pageName    = typeof ps.name === 'string' ? ps.name : null
+  const pageSlug    = typeof ps.slug === 'string' ? ps.slug : null
+  const contentStatus = typeof ps.content_status === 'string' ? ps.content_status : null
+  return (
+    <div className="pt-2 space-y-2 text-[11.5px]">
+      {(pageName || pageSlug || contentStatus) && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-wm-text-muted">
+          {pageName && <span><span className="text-wm-text-subtle">page:</span> <span className="text-wm-text font-medium">{pageName}</span></span>}
+          {pageSlug && <code className="text-[10.5px] text-wm-text-subtle">/{pageSlug}</code>}
+          {contentStatus && <span><span className="text-wm-text-subtle">status:</span> <span className="text-wm-text">{contentStatus}</span></span>}
+        </div>
+      )}
+      {sections.length === 0 ? (
+        <p className="text-wm-text-subtle italic">No sections in this snapshot.</p>
+      ) : (
+        <ol className="space-y-1.5">
+          {sections.map((s, i) => {
+            const fv = (s.field_values ?? {}) as Record<string, unknown>
+            const role = typeof s.section_role === 'string' ? s.section_role : null
+            const tpl  = typeof s.content_template_id === 'string' ? s.content_template_id : null
+            const headlinePreview = pickHeadline(fv)
+            const sortOrder = typeof s.sort_order === 'number' ? s.sort_order : i
+            return (
+              <li key={String(s.id ?? i)} className="flex items-start gap-2 text-wm-text-muted">
+                <span className="text-wm-text-subtle shrink-0 w-5 tabular-nums text-right">{sortOrder + 1}.</span>
+                <div className="min-w-0 flex-1">
+                  {headlinePreview && (
+                    <p className="text-wm-text truncate" title={headlinePreview}>{headlinePreview}</p>
+                  )}
+                  <p className="text-[10.5px] text-wm-text-subtle flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    {tpl && <code>{tpl}</code>}
+                    {role && <span>· role: <code>{role}</code></span>}
+                  </p>
+                </div>
+              </li>
+            )
+          })}
+        </ol>
+      )}
+    </div>
+  )
+}
+
+/** Pick a one-line headline from a field_values blob — primary_heading
+ *  / heading / tagline / title in priority order. Returns null when
+ *  none of those keys hold a non-empty string. */
+function pickHeadline(fv: Record<string, unknown>): string | null {
+  for (const key of ['primary_heading', 'heading', 'tagline', 'title', 'eyebrow']) {
+    const v = fv[key]
+    if (typeof v === 'string' && v.trim().length > 0) return v.trim().slice(0, 140)
+  }
+  return null
 }
 
 function formatRelative(iso: string): string {

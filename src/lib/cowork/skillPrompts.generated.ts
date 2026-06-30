@@ -8640,7 +8640,7 @@ grid. The rhythm IS the user's mental walk down the page.
     name:         'pages-layout-sidekick',
     model:        'anthropic/claude-opus-4-8',
     version:      '1.0.0',
-    contentHash:  'ea5fcb287f43ac37',
+    contentHash:  'e324b1a832327300',
     references:   [
       'cowork-skills/canonical-templates.json',
     ],
@@ -8728,7 +8728,103 @@ the diff first.**
   \`src/lib/webPageVersions.ts\`) BEFORE any bulk mutation so the
   strategist can revert.
 
-## The four operations you support
+## The six operations you support
+
+### 0. Sitemap edits ("add an /events page", "group these under Connect", "move /staff above /leadership")
+
+The sitemap IS \`web_pages\` filtered to \`archived = false\` and ordered by
+\`(nav_group_sort_order, sort_order)\`. Pages cluster into navigation
+groups via \`nav_group_label\` (the user-facing group name) + their
+\`phase\` (\`global\` | \`1\` | \`2\` | \`nav-only\`).
+
+**Add a page:**
+
+1. **Confirm \`web_project_id\` and slug** with the strategist. Slugs are
+   lowercase + dashes, never leading slash. Nested slugs use \`/\` —
+   e.g. \`staff/lewis-galloway\`, \`single-event\`.
+2. **Check for collisions:**
+   \`SELECT id, name, slug FROM web_pages
+    WHERE web_project_id = $1 AND slug = $2 AND archived = false\`.
+   If a row exists, ask the strategist whether to un-archive vs create
+   a sibling slug.
+3. **Pick the right \`phase\`:**
+    - \`global\` — appears on every page (header, footer, nav chrome)
+    - \`1\` — Phase 1 launch (home, about, visit, ministries, connect)
+    - \`2\` — Phase 2 expansion (sermons archive, blog, careers)
+    - \`nav-only\` — referenced in nav but not built as a real route
+      (placeholder for partner-managed external URLs)
+   When unsure, default to the project's home page's phase.
+4. **Pick the right \`nav_group_label\`:**
+    - Read existing groups —
+      \`SELECT DISTINCT nav_group_label, nav_group_sort_order
+       FROM web_pages WHERE web_project_id = $1 AND archived = false
+         AND nav_group_label IS NOT NULL
+       ORDER BY nav_group_sort_order\`.
+    - Reuse an existing label when the new page semantically fits one
+      ("About", "Ministries", "Connect"). Don't create a new group
+      just because the page name is novel.
+    - When creating a new group, pick \`nav_group_sort_order\` as
+      \`MAX(existing) + 1\` so it lands at the bottom; the strategist can
+      reorder via PageNavGroupPicker in the UI.
+5. **Pick \`sort_order\` within the group:** \`MAX(sort_order WHERE
+   nav_group_label = $group) + 1\` so the new page lands at the end.
+   Strategist can drag-reorder in the sidebar.
+6. **INSERT:**
+    \`\`\`sql
+    INSERT INTO web_pages
+      (web_project_id, name, slug, phase, sort_order, archived,
+       content_status, nav_group_label, nav_group_sort_order)
+    VALUES ($1, $2, $3, $4, $5, false, 'draft', $6, $7)
+    RETURNING id, slug;
+    \`\`\`
+   \`content_status = 'draft'\` is the default — every other status is
+   a workflow transition, not an initial state.
+7. **Do NOT auto-bind a content_template** at page creation. Empty
+   pages are valid; the strategist drops sections from the catalog
+   sidebar as their next step. (Single-* template pairs — see §6 in
+   the worker hard rules — are the only auto-create case, and that's
+   handled by SinglePairPrompt in PagesWorkspace, not by you.)
+
+**Re-group / reorder pages:**
+
+1. Confirm the affected page slugs + the target group/position.
+2. Read current \`(nav_group_label, sort_order)\` for every page in
+   scope. Compute the new integer sequence — never use floats, the
+   column is int.
+3. If moving across groups, update \`nav_group_label\` AND \`sort_order\`
+   in the same UPDATE.
+4. Batch the UPDATE so all changes land atomically:
+    \`\`\`sql
+    UPDATE web_pages SET
+      nav_group_label = CASE id
+        WHEN $1 THEN $2 ...
+      END,
+      sort_order = CASE id
+        WHEN $1 THEN $3 ...
+      END
+    WHERE id IN ($1, ...);
+    \`\`\`
+5. Verify by re-SELECTing the affected rows.
+
+**Archive a page:**
+
+1. **Never DELETE** — set \`archived = true\` so the page stays in
+   \`strategy_web_page_versions\` history.
+2. Before archiving, check for inbound references —
+    \`web_review_edits\`, \`web_review_comments\`, \`web_sections\` (all FK
+    onto web_pages.id). Soft-delete preserves these.
+3. If the page is a \`staff/*\` per-staff bio page, surface that to the
+   strategist before archiving — the parent Team Section 14 card may
+   still reference the staff_fact_id. The team_link toggle's archive
+   path handles this lifecycle; defer to it.
+
+**Sitemap "diff" for the dev handoff:**
+
+Use [\`src/lib/urlRedirects.ts\`](src/lib/urlRedirects.ts) — already
+shipped. The redirect candidate list lives on the Dev Handoff tab;
+don't recompute it yourself.
+
+## The four content operations you support
 
 ### 1. Bulk template swap ("change every X to Y on these pages")
 

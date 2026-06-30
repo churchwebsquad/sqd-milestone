@@ -63,6 +63,7 @@ import { ProjectPagesProvider } from '../sectioneditor/ProjectPagesContext'
 import { ProjectIdProvider } from '../sectioneditor/ProjectIdContext'
 import { SectionClipboardProvider, useSectionClipboard } from '../sectioneditor/SectionClipboard'
 import { syncStaffLinkOnSave } from '../../../lib/staffLink'
+import { COWORK_SKILL_BUNDLES } from '../../../lib/cowork/skillPrompts.generated'
 import {
   fieldValuesToDocHtml, docHtmlToFieldValues, reconcileFieldValuesAcrossTemplates,
   computeUnmappedValues, computeDroppedDeepPaths,
@@ -2005,10 +2006,10 @@ function PageEditor({
             active={viewMode}
             onChange={setViewMode}
           />
-          <button
-            type="button"
-            disabled={savingSnapshot === 'saving'}
-            onClick={async () => {
+          <StatusMenu current={page.content_status} onChange={setStatus} />
+          <PageActionsMenu
+            onArchive={archivePage}
+            onSaveSnapshot={async () => {
               setSavingSnapshot('saving')
               const { data: sess } = await supabase.auth.getSession()
               const userId = sess.session?.user?.id ?? null
@@ -2020,36 +2021,9 @@ function PageEditor({
               setSavingSnapshot(id ? 'saved' : 'failed')
               setTimeout(() => setSavingSnapshot('idle'), id ? 1800 : 3000)
             }}
-            className={[
-              'inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded transition-colors disabled:opacity-60 disabled:cursor-wait',
-              savingSnapshot === 'failed'
-                ? 'text-wm-danger bg-wm-danger-bg hover:bg-wm-danger-bg/80'
-                : 'text-wm-text-muted hover:text-wm-text hover:bg-wm-bg-hover',
-            ].join(' ')}
-            title={
-              savingSnapshot === 'failed'
-                ? 'Snapshot save failed. Check console for details and retry.'
-                : "Capture the page's current state as a revertible snapshot. Open History to restore."
-            }
-          >
-            {savingSnapshot === 'saving' && <Loader2 size={11} className="animate-spin" />}
-            {savingSnapshot === 'saved'  && <Check    size={11} />}
-            {savingSnapshot === 'failed' && <X        size={11} />}
-            {savingSnapshot === 'idle'   && <Save     size={11} />}
-            {savingSnapshot === 'saved'  ? 'Saved'
-              : savingSnapshot === 'failed' ? 'Save failed'
-              : 'Save snapshot'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setHistoryOpen(true)}
-            className="inline-flex items-center gap-1 text-[11px] font-semibold text-wm-text-muted hover:text-wm-text px-2 py-1 rounded hover:bg-wm-bg-hover"
-            title="Version history for this page (revert to any prior agent run or save)"
-          >
-            <History size={11} /> History
-          </button>
-          <StatusMenu current={page.content_status} onChange={setStatus} />
-          <PageActionsMenu onArchive={archivePage} />
+            onOpenHistory={() => setHistoryOpen(true)}
+            savingSnapshot={savingSnapshot}
+          />
         </div>
       </div>
 
@@ -2740,8 +2714,38 @@ function StatusMenu({
 
 // ── Page actions menu ─────────────────────────────────────────────────
 
-function PageActionsMenu({ onArchive }: { onArchive: () => void }) {
+function PageActionsMenu({
+  onArchive, onSaveSnapshot, onOpenHistory, savingSnapshot,
+}: {
+  onArchive:       () => void
+  onSaveSnapshot:  () => void | Promise<void>
+  onOpenHistory:   () => void
+  savingSnapshot:  'idle' | 'saving' | 'saved' | 'failed'
+}) {
   const [open, setOpen] = useState(false)
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+
+  const copySidekickSkill = async () => {
+    try {
+      // The skill md is shipped via the auto-generated bundle and
+      // includes the full frontmatter + body verbatim. Paste into a
+      // Claude conversation to spin up the sidekick.
+      const skill = COWORK_SKILL_BUNDLES['pages-layout-sidekick']
+      if (!skill) {
+        setCopyState('failed')
+        setTimeout(() => setCopyState('idle'), 2500)
+        return
+      }
+      await navigator.clipboard.writeText(skill.systemPrompt)
+      setCopyState('copied')
+      setTimeout(() => setCopyState('idle'), 2500)
+    } catch (err) {
+      console.warn('[PageActionsMenu] copy sidekick skill failed', err)
+      setCopyState('failed')
+      setTimeout(() => setCopyState('idle'), 2500)
+    }
+  }
+
   return (
     <div className="relative">
       <WMIconButton label="More page actions" onClick={() => setOpen(o => !o)}>
@@ -2750,7 +2754,41 @@ function PageActionsMenu({ onArchive }: { onArchive: () => void }) {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 mt-1 w-44 rounded-md border border-wm-border bg-wm-bg-elevated shadow-lg z-20 py-1 animate-wm-slide-in-up">
+          <div className="absolute right-0 mt-1 w-56 rounded-md border border-wm-border bg-wm-bg-elevated shadow-lg z-20 py-1 animate-wm-slide-in-up">
+            <button
+              type="button"
+              disabled={savingSnapshot === 'saving'}
+              onClick={() => { setOpen(false); void onSaveSnapshot() }}
+              className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12px] text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text transition-colors disabled:opacity-60"
+            >
+              {savingSnapshot === 'saving' ? <Loader2 size={11} className="animate-spin" />
+                : savingSnapshot === 'saved' ? <Check size={11} />
+                : savingSnapshot === 'failed' ? <X size={11} className="text-wm-danger" />
+                : <Save size={11} />}
+              {savingSnapshot === 'saved' ? 'Saved' : savingSnapshot === 'failed' ? 'Save failed' : 'Save snapshot'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onOpenHistory() }}
+              className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12px] text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text transition-colors"
+            >
+              <History size={11} />
+              Version history
+            </button>
+            <button
+              type="button"
+              onClick={() => void copySidekickSkill()}
+              className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12px] text-wm-text-muted hover:bg-wm-bg-hover hover:text-wm-text transition-colors"
+              title="Copy the pages-layout-sidekick skill markdown so you can paste it into Claude and pair-program on page layouts."
+            >
+              {copyState === 'copied' ? <Check size={11} className="text-wm-success" /> :
+               copyState === 'failed' ? <X size={11} className="text-wm-danger" /> :
+                                         <Copy size={11} />}
+              {copyState === 'copied' ? 'Skill copied' :
+               copyState === 'failed' ? 'Copy failed' :
+                                         'Copy layout sidekick skill'}
+            </button>
+            <div className="my-1 h-px bg-wm-border" />
             <button
               type="button"
               onClick={() => { setOpen(false); onArchive() }}
