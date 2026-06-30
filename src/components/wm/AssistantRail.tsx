@@ -23,8 +23,9 @@ import { useSearchParams } from 'react-router-dom'
 import {
   Tag, BookOpen, Mic, MessageSquare, AlertTriangle, RotateCw, Search,
   Loader2, SquarePen, Inbox, Plus, Copy, X, Check, ChevronRight, ChevronDown,
-  Globe, UserPlus,
+  Globe, UserPlus, Database,
 } from 'lucide-react'
+import { ContentModelPanel } from './contentModel/ContentModelPanel'
 import { supabase } from '../../lib/supabase'
 import { runAudit } from '../../lib/webAudit'
 import type { AuditFinding, AuditSeverity } from '../../lib/webAudit'
@@ -54,7 +55,7 @@ import { CopywriterNotesPanel } from './CopywriterNotesPanel'
 import { RequestReviewModal } from './RequestReviewModal'
 import { useAuth } from '../../contexts/AuthContext'
 
-type RailTab = 'section' | 'snippets' | 'voice' | 'feedback' | 'seo'
+type RailTab = 'section' | 'snippets' | 'voice' | 'feedback' | 'seo' | 'content_model'
 
 interface Props {
   projectId: string
@@ -103,7 +104,7 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
   const railRequest = params.get('rail') as RailTab | null
   useEffect(() => {
     if (!railRequest) return
-    const valid: RailTab[] = ['section', 'snippets', 'voice', 'feedback', 'seo']
+    const valid: RailTab[] = ['section', 'snippets', 'voice', 'feedback', 'seo', 'content_model']
     if (valid.includes(railRequest)) setTab(railRequest)
     const next = new URLSearchParams(window.location.search)
     next.delete('rail')
@@ -165,7 +166,7 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
   // Feedback so the rail body never goes blank.
   useEffect(() => {
     if (!inReviewMode) return
-    if (tab === 'snippets' || tab === 'voice') {
+    if (tab === 'snippets' || tab === 'voice' || tab === 'content_model') {
       setTab('feedback')
     }
   }, [inReviewMode, tab])
@@ -191,6 +192,13 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
         <RailTabButton tab="feedback"   active={tab} setTab={setTab} icon={<MessageSquare size={13} />}  count={counts.feedback} label="Feedback" />
         {tabUsesSectionContext && activePageId && (
           <RailTabButton tab="seo"      active={tab} setTab={setTab} icon={<Globe size={13} />}          label="SEO" />
+        )}
+        {/* Content Model — strategist-owned modeling. Visible on
+            authoring surfaces (not in pure review mode). Works in
+            section-scoped mode when a section is selected, falls back
+            to project-wide overview otherwise. */}
+        {!inReviewMode && (
+          <RailTabButton tab="content_model" active={tab} setTab={setTab} icon={<Database size={13} />} label="Model" />
         )}
       </div>
 
@@ -248,6 +256,12 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
         {tab === 'seo' && (activePageId
           ? <SeoPanel pageId={activePageId} />
           : <RailUnavailable label="SEO" />
+        )}
+        {tab === 'content_model' && (
+          <ContentModelPanel
+            projectId={projectId}
+            sectionId={sectionDetail?.section.id ?? null}
+          />
         )}
       </div>
     </div>
