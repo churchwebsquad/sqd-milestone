@@ -767,13 +767,39 @@ function UrlRedirectsCard({
   projectSlug:  string
   sitemapEmpty: boolean
 }) {
+  // Per-row manual mappings. Local-only state for now — the dev edits
+  // a row, downloads the CSV with the override applied, imports into
+  // the WP redirect plugin. Survives the session; not persisted.
+  const [overrides, setOverrides] = useState<Record<string, string>>({})
+  const setOverride = (fromPath: string, target: string) => {
+    setOverrides(prev => {
+      const next = { ...prev }
+      const trimmed = target.trim()
+      if (!trimmed) delete next[fromPath]
+      else next[fromPath] = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+      return next
+    })
+  }
   const counts = useMemo(() => {
     const c = { exact: 0, high: 0, medium: 0, low: 0 }
     for (const r of candidates) c[r.confidence]++
     return c
   }, [candidates])
   const downloadCsv = () => {
-    const csv = redirectsToCsv(candidates)
+    // Apply overrides to the candidates before serializing so the CSV
+    // reflects what the dev actually wants to import.
+    const merged = candidates.map(c => {
+      const override = overrides[c.from_path]
+      if (!override) return c
+      const slugOnly = override.replace(/^\//, '')
+      return {
+        ...c,
+        to_slug:    slugOnly || null,
+        confidence: 'high' as const,
+        reason:     `Strategist-mapped (was ${c.confidence === 'low' ? 'unmapped' : c.confidence + ' confidence'})`,
+      }
+    })
+    const csv = redirectsToCsv(merged)
     const blob = new Blob([csv], { type: 'text/csv' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
@@ -832,14 +858,23 @@ function UrlRedirectsCard({
             <CmStat label="Medium confidence"   value={counts.medium} />
             <CmStat label="Needs manual"        value={counts.low} />
           </div>
-          <RedirectTable candidates={candidates} />
+          <RedirectTable candidates={candidates} overrides={overrides} onOverride={setOverride} />
         </>
       )}
     </WMCard>
   )
 }
 
-function RedirectTable({ candidates }: { candidates: RedirectCandidate[] }) {
+function RedirectTable({
+  candidates, overrides, onOverride,
+}: {
+  candidates: RedirectCandidate[]
+  /** Per-row manual mappings keyed by `from_path`. Override wins over
+   *  the analyzer's `to_slug` so the dev can hand-fix low-confidence
+   *  rows in place. */
+  overrides:  Record<string, string>
+  onOverride: (fromPath: string, nextTarget: string) => void
+}) {
   const [showExact, setShowExact] = useState(false)
   const visible = showExact ? candidates : candidates.filter(c => c.confidence !== 'exact')
   const exactCount = candidates.length - candidates.filter(c => c.confidence !== 'exact').length
@@ -859,39 +894,46 @@ function RedirectTable({ candidates }: { candidates: RedirectCandidate[] }) {
           <thead className="bg-wm-bg-elevated text-[10px] uppercase tracking-wider text-wm-text-subtle">
             <tr>
               <th className="text-left px-3 py-2 font-semibold">From (crawled)</th>
-              <th className="text-left px-3 py-2 font-semibold">To (new)</th>
+              <th className="text-left px-3 py-2 font-semibold">To (new) — click to edit</th>
               <th className="text-left px-3 py-2 font-semibold">Topic</th>
               <th className="text-left px-3 py-2 font-semibold w-28">Confidence</th>
             </tr>
           </thead>
           <tbody>
-            {visible.map((r, i) => (
-              <tr
-                key={`${r.from_path}-${i}`}
-                className={`border-t border-wm-border ${
-                  r.confidence === 'low'    ? 'bg-wm-warn-bg/40' :
-                  r.confidence === 'medium' ? 'bg-wm-bg-hover/40' : ''
-                }`}
-              >
-                <td className="px-3 py-2 font-mono text-[11px] text-wm-text break-all">{r.from_path}</td>
-                <td className="px-3 py-2 font-mono text-[11px] text-wm-text break-all">
-                  {r.to_slug ? `/${r.to_slug}` : (
-                    <span className="text-wm-warn-strong italic">needs mapping</span>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-wm-text-muted">{r.topic_label}</td>
-                <td className="px-3 py-2">
-                  <span className={
-                    r.confidence === 'exact'   ? 'inline-block px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold bg-wm-success-bg/60 text-wm-success border border-wm-success/30' :
-                    r.confidence === 'high'    ? 'inline-block px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold bg-wm-accent-tint text-wm-accent-strong border border-wm-accent/30' :
-                    r.confidence === 'medium'  ? 'inline-block px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold bg-wm-bg-elevated text-wm-text border border-wm-border' :
-                                                  'inline-block px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold bg-wm-warn-bg text-wm-warn-strong border border-wm-warn/40'
-                  }>
-                    {r.confidence}
-                  </span>
-                </td>
-              </tr>
-            ))}
+            {visible.map((r, i) => {
+              const override = overrides[r.from_path]
+              const effective = override ?? (r.to_slug ? `/${r.to_slug}` : '')
+              return (
+                <tr
+                  key={`${r.from_path}-${i}`}
+                  className={`border-t border-wm-border ${
+                    r.confidence === 'low'    ? 'bg-wm-warn-bg/40' :
+                    r.confidence === 'medium' ? 'bg-wm-bg-hover/40' : ''
+                  }`}
+                >
+                  <td className="px-3 py-2 font-mono text-[11px] text-wm-text break-all">{r.from_path}</td>
+                  <td className="px-3 py-2">
+                    <RedirectTargetCell
+                      candidate={r}
+                      value={effective}
+                      isOverride={override != null}
+                      onChange={(next) => onOverride(r.from_path, next)}
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-wm-text-muted">{r.topic_label}</td>
+                  <td className="px-3 py-2">
+                    <span className={
+                      r.confidence === 'exact'   ? 'inline-block px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold bg-wm-success-bg/60 text-wm-success border border-wm-success/30' :
+                      r.confidence === 'high'    ? 'inline-block px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold bg-wm-accent-tint text-wm-accent-strong border border-wm-accent/30' :
+                      r.confidence === 'medium'  ? 'inline-block px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold bg-wm-bg-elevated text-wm-text border border-wm-border' :
+                                                    'inline-block px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold bg-wm-warn-bg text-wm-warn-strong border border-wm-warn/40'
+                    }>
+                      {r.confidence}
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
             {visible.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-3 py-4 text-center text-wm-text-muted italic">
@@ -903,6 +945,63 @@ function RedirectTable({ candidates }: { candidates: RedirectCandidate[] }) {
         </table>
       </div>
     </>
+  )
+}
+
+/** Editable "To (new)" cell. Shows the current target (override or
+ *  analyzer suggestion) as text; click reveals an inline input. Empty
+ *  + low-confidence rows surface as warning text so the dev can
+ *  spot what still needs mapping at a glance. */
+function RedirectTargetCell({
+  candidate, value, isOverride, onChange,
+}: {
+  candidate:  RedirectCandidate
+  value:      string
+  isOverride: boolean
+  onChange:   (next: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft,   setDraft]   = useState(value)
+  useEffect(() => { setDraft(value) }, [value])
+
+  if (editing) {
+    return (
+      <input
+        type="text"
+        autoFocus
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={() => { setEditing(false); if (draft !== value) onChange(draft.trim()) }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { setEditing(false); if (draft !== value) onChange(draft.trim()) }
+          if (e.key === 'Escape') { setEditing(false); setDraft(value) }
+        }}
+        placeholder="/new-page-slug"
+        className="w-full text-[11.5px] font-mono text-wm-text bg-wm-bg border border-wm-accent rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-wm-accent"
+      />
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      className="text-left w-full font-mono text-[11px] break-all hover:bg-wm-bg-hover rounded px-1 py-0.5 group inline-flex items-center gap-1.5"
+      title="Click to edit the redirect target"
+    >
+      {value ? (
+        <span className="text-wm-text">{value}</span>
+      ) : candidate.confidence === 'low' ? (
+        <span className="text-wm-warn-strong italic">needs mapping</span>
+      ) : (
+        <span className="text-wm-text-subtle italic">click to set</span>
+      )}
+      {isOverride && (
+        <span className="text-[8.5px] uppercase tracking-widest font-bold text-wm-accent-strong bg-wm-accent-tint px-1.5 py-0.5 rounded-full not-italic">
+          edited
+        </span>
+      )}
+      <span className="text-[10px] text-wm-text-subtle opacity-0 group-hover:opacity-100 transition-opacity">✎</span>
+    </button>
   )
 }
 
@@ -1382,18 +1481,22 @@ function CmConceptsFoundPanel({
           </span>
         )}
       </div>
-      <p className="text-[11px] text-wm-text-muted mb-3">
-        Per-section discovery grouped by page. Trivial single-item sections (heros, intros, single-CTA banners) are filtered out — only the sections the dev actually needs to model. For event / sermon / group sections, the partner's Content Collection answers (display mode, embed source, filter needs) appear inline.
+      <p className="text-[13px] text-wm-text mb-4 leading-relaxed">
+        Each section on every approved page, with a recommended content
+        type and the partner content already filled in. Trivial chrome
+        (heros, intros, single-CTA banners) is hidden so this list
+        focuses on the sections the dev actually needs to wire up.
       </p>
       <div className="space-y-4">
         {pagesSorted.map(([pageSlug, sections]) => (
           <details key={pageSlug} className="rounded-md border border-wm-border bg-wm-bg-elevated" open>
-            <summary className="px-3 py-2.5 cursor-pointer text-[12.5px] font-semibold text-wm-text">
-              {sections[0]?.page_name ?? pageSlug} <code className="text-[10.5px] text-wm-text-subtle ml-1.5">/{pageSlug}</code>
-              <span className="ml-2 text-[10.5px] text-wm-text-subtle font-normal">· {sections.length} section{sections.length === 1 ? '' : 's'}</span>
+            <summary className="px-4 py-3 cursor-pointer text-[14px] font-semibold text-wm-text">
+              {sections[0]?.page_name ?? pageSlug}
+              <code className="text-[12px] text-wm-text-muted ml-2 font-mono">/{pageSlug}</code>
+              <span className="ml-2 text-[12px] text-wm-text-muted font-normal">· {sections.length} section{sections.length === 1 ? '' : 's'}</span>
             </summary>
-            <div className="border-t border-wm-border/60 px-3 py-2">
-              <ul className="space-y-3">
+            <div className="border-t border-wm-border/60 px-4 py-3">
+              <ul className="space-y-5">
                 {sections.map(s => {
                   const suggestedCpt = s.cpt_subroutine_ref
                     ? plan.layer_2_wp_objects.find(o => o.id === s.cpt_subroutine_ref)
@@ -1401,106 +1504,205 @@ function CmConceptsFoundPanel({
                   const cptSuggestion = suggestedCpt?.kind === 'custom_post_type' ? suggestedCpt.slug : null
                   const ctx = s.partner_context
                   return (
-                    <li key={s.section_id}>
-                      <p className="text-[12.5px] font-semibold text-wm-text">
-                        {s.heading}
+                    <li key={s.section_id} className="border-l-2 border-wm-border pl-4">
+                      {/* Section header — heading prominent, diagnosis as
+                          tagged chips not italics-of-italics. */}
+                      <div className="flex items-baseline flex-wrap gap-x-2 gap-y-1 mb-2">
+                        <h4 className="text-[15px] font-bold text-wm-text leading-tight">{s.heading}</h4>
                         {s.schema_name && (
-                          <span
-                            className="ml-2 inline-flex items-center gap-1 text-[10.5px] font-normal italic text-wm-text-subtle"
-                            title={`Confidence: ${s.schema_confidence ?? 'unknown'}`}
-                          >
-                            — diagnosed as <code className="not-italic text-[10.5px]">{s.schema_name}</code>
+                          <span className="inline-flex items-center gap-1.5 text-[11px] text-wm-text-muted">
+                            <span className="text-wm-text-subtle">looks like</span>
+                            <code className="text-[11.5px] text-wm-text font-mono bg-wm-bg-hover px-1.5 py-0.5 rounded">{s.schema_name}</code>
                             {s.schema_confidence && (
-                              <span className={`not-italic text-[9.5px] px-1 rounded ${s.schema_confidence === 'high' ? 'bg-green-100 text-green-800' : s.schema_confidence === 'medium' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-600'}`}>
-                                {s.schema_confidence}
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${s.schema_confidence === 'high' ? 'bg-green-100 text-green-800' : s.schema_confidence === 'medium' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-700'}`}>
+                                {s.schema_confidence} confidence
                               </span>
                             )}
                           </span>
                         )}
                         {cptSuggestion && (
-                          <span className="ml-2 text-[10.5px] font-normal italic text-wm-text-subtle">
-                            — analyzer suggests CPT <code className="not-italic text-[10.5px]">{cptSuggestion}</code>
+                          <span className="inline-flex items-center gap-1.5 text-[11px] text-wm-text-muted">
+                            <span className="text-wm-text-subtle">·</span>
+                            <span className="text-wm-text-subtle">suggested CPT</span>
+                            <code className="text-[11.5px] text-wm-text font-mono bg-wm-accent-tint text-wm-accent-strong px-1.5 py-0.5 rounded">{cptSuggestion}</code>
                           </span>
                         )}
-                      </p>
-                      <ul className="ml-3 mt-1 text-[11.5px] text-wm-text-muted space-y-0.5">
-                        <li>{s.item_count} item{s.item_count === 1 ? '' : 's'}</li>
+                      </div>
+
+                      {/* Body: 2-column grid of labeled facts so the dev
+                          can scan instead of read a wall of small grey
+                          text. Each label is the plain-English question
+                          ("How many?", "What fields the partner filled
+                          in"), each value is full-contrast wm-text. */}
+                      <dl className="grid grid-cols-1 md:grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2 text-[12.5px]">
+                        <dt className="text-wm-text-muted">How many entries</dt>
+                        <dd className="text-wm-text">{s.item_count} item{s.item_count === 1 ? '' : 's'}</dd>
+
                         {s.schema.length > 0 && (
-                          <li>schema: {s.schema.slice(0, 8).map(k => <code key={k} className="text-[10.5px] mr-1">{k}</code>)}{s.schema.length > 8 && <span>+{s.schema.length - 8}</span>}</li>
-                        )}
-                        {s.cta_target_breakdown && Object.keys(s.cta_target_breakdown).length > 0 && (
-                          <li>
-                            cta:{' '}
-                            {Object.entries(s.cta_target_breakdown).map(([kind, n]) => (
-                              <code key={kind} className="text-[10.5px] mr-1">{kind}×{n}</code>
-                            ))}
-                          </li>
-                        )}
-                        <li>target: <em>{targetLabel[s.target_hint] ?? s.target_hint}</em></li>
-                        {s.section_role && (
-                          <li>section role: <code className="text-[10.5px]">{s.section_role}</code></li>
-                        )}
-                        {s.sample_record && Object.keys(s.sample_record).length > 0 && (
-                          <li>
-                            <span className="text-wm-text">sample (first record):</span>
-                            <ul className="ml-3 mt-0.5 space-y-0.5">
-                              {orderedSampleEntries(s.sample_record, s.schema).map(([k, v]) => (
-                                <li key={k} className="text-[11px]">
-                                  <em className="text-wm-text-subtle">{k}:</em>{' '}{renderSampleCell(v)}
-                                </li>
-                              ))}
-                            </ul>
-                          </li>
-                        )}
-                        {s.sample_names.length > 1 && s.item_count > 1 && (
-                          <li>other items: <em>{s.sample_names.slice(1).join(' · ')}</em>{s.item_count > s.sample_names.length && <span> · +{s.item_count - s.sample_names.length} more</span>}</li>
-                        )}
-                        {ctx && (
                           <>
-                            {ctx.display_preference && <li>display preference: <code className="text-[10.5px]">{ctx.display_preference}</code></li>}
-                            {ctx.display_format && <li>display format: {ctx.display_format}</li>}
-                            {ctx.external_url && <li>{ctx.display_preference === 'embed' || ctx.display_preference === 'external' ? 'embed / external source' : 'partner sample URL'}: <a href={ctx.external_url} target="_blank" rel="noopener noreferrer" className="text-wm-accent underline">{ctx.external_url.length > 60 ? ctx.external_url.slice(0, 57) + '…' : ctx.external_url}</a></li>}
-                            {ctx.playlist_url && <li>YouTube playlist: <a href={ctx.playlist_url} target="_blank" rel="noopener noreferrer" className="text-wm-accent underline">{ctx.playlist_url.length > 60 ? ctx.playlist_url.slice(0, 57) + '…' : ctx.playlist_url}</a></li>}
-                            {ctx.archive_features && ctx.archive_features.length > 0 && <li>archive features wanted: {ctx.archive_features.map(f => <code key={f} className="text-[10.5px] mr-1">{f}</code>)}</li>}
-                            {ctx.source_of_truth && <li>partner's current system: {ctx.source_of_truth}</li>}
-                            {ctx.frustration && ctx.frustration.trim() !== '-' && <li>partner note: {ctx.frustration}</li>}
+                            <dt className="text-wm-text-muted">Fields the partner filled in</dt>
+                            <dd className="text-wm-text">
+                              {s.schema.slice(0, 12).map((k, i) => (
+                                <span key={k}>
+                                  {i > 0 && <span className="text-wm-text-subtle mx-1">·</span>}
+                                  <code className="text-[12px] font-mono text-wm-text">{k}</code>
+                                </span>
+                              ))}
+                              {s.schema.length > 12 && <span className="text-wm-text-subtle ml-1">· +{s.schema.length - 12} more</span>}
+                            </dd>
                           </>
                         )}
-                        {s.build_time_issues && s.build_time_issues.length > 0 && (
-                          <li className="mt-1">
-                            {s.build_time_issues.map((issue, i) => {
-                              if (issue.kind === 'upstream_compression_loss') {
-                                return (
-                                  <span
-                                    key={i}
-                                    className={`block text-[11px] ${issue.severity === 'high' ? 'text-red-700' : issue.severity === 'medium' ? 'text-orange-700' : 'text-yellow-700'}`}
-                                  >
-                                    ⚠ upstream loss in <code className="text-[10.5px]">{issue.schema_name}</code>
-                                    {' '}— dropped before binding:{' '}
-                                    {issue.dropped_fields.map(f => (
-                                      <code key={f} className="text-[10.5px] mr-1">{f}</code>
-                                    ))}
-                                    <span className="text-[9.5px] font-medium ml-1">({issue.severity})</span>
-                                  </span>
-                                )
-                              }
-                              return (
-                                <span
-                                  key={i}
-                                  className={`block text-[11px] ${issue.severity === 'high' ? 'text-red-700' : issue.severity === 'medium' ? 'text-orange-700' : 'text-yellow-700'}`}
-                                >
-                                  🔴 library coverage gap on <code className="text-[10.5px]">{issue.template_id}</code>
-                                  {' '}— dropped fields:{' '}
-                                  {issue.dropped_fields.map(f => (
-                                    <code key={f} className="text-[10.5px] mr-1">{f}</code>
-                                  ))}
-                                  <span className="text-[9.5px] font-medium ml-1">({issue.severity})</span>
+
+                        {s.cta_target_breakdown && Object.keys(s.cta_target_breakdown).length > 0 && (
+                          <>
+                            <dt className="text-wm-text-muted">Where the buttons link</dt>
+                            <dd className="text-wm-text">
+                              {Object.entries(s.cta_target_breakdown).map(([kind, n], i) => (
+                                <span key={kind}>
+                                  {i > 0 && <span className="text-wm-text-subtle mx-1">·</span>}
+                                  <span><code className="text-[12px] font-mono text-wm-text">{kind}</code> ({n})</span>
                                 </span>
-                              )
-                            })}
-                          </li>
+                              ))}
+                            </dd>
+                          </>
                         )}
-                      </ul>
+
+                        <dt className="text-wm-text-muted">How visitors reach each entry</dt>
+                        <dd className="text-wm-text">{targetLabel[s.target_hint] ?? s.target_hint}</dd>
+
+                        {s.section_role && (
+                          <>
+                            <dt className="text-wm-text-muted">Brixies section role</dt>
+                            <dd><code className="text-[12px] font-mono text-wm-text">{s.section_role}</code></dd>
+                          </>
+                        )}
+                      </dl>
+
+                      {/* Sample record — own block so the dev can study
+                          the actual partner content without it being
+                          buried in the meta list. */}
+                      {s.sample_record && Object.keys(s.sample_record).length > 0 && (
+                        <div className="mt-3 rounded-md border border-wm-border/60 bg-wm-bg/40 px-3 py-2">
+                          <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">Sample entry — first record</p>
+                          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-[12px]">
+                            {orderedSampleEntries(s.sample_record, s.schema).map(([k, v]) => (
+                              <span key={k} className="contents">
+                                <dt className="text-wm-text-muted font-mono text-[11.5px]">{k}</dt>
+                                <dd className="text-wm-text break-words">{renderSampleCell(v)}</dd>
+                              </span>
+                            ))}
+                          </dl>
+                          {s.sample_names.length > 1 && s.item_count > 1 && (
+                            <p className="mt-2 pt-2 border-t border-wm-border/40 text-[11.5px] text-wm-text-muted">
+                              <span className="text-wm-text-subtle">Other entries: </span>
+                              <span className="text-wm-text">{s.sample_names.slice(1).join(' · ')}</span>
+                              {s.item_count > s.sample_names.length && <span className="text-wm-text-subtle"> · +{s.item_count - s.sample_names.length} more</span>}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Partner-Content-Collection context — separate
+                          callout when present so it stands out from
+                          structural facts. */}
+                      {ctx && (
+                        <div className="mt-3 rounded-md border border-wm-accent/30 bg-wm-accent-tint/30 px-3 py-2">
+                          <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-accent-strong mb-1.5">
+                            What the partner asked for in Content Collection
+                          </p>
+                          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-[12.5px]">
+                            {ctx.display_preference && <>
+                              <dt className="text-wm-text-muted">Display preference</dt>
+                              <dd className="text-wm-text"><code className="text-[12px] font-mono">{ctx.display_preference}</code></dd>
+                            </>}
+                            {ctx.display_format && <>
+                              <dt className="text-wm-text-muted">Display format</dt>
+                              <dd className="text-wm-text">{ctx.display_format}</dd>
+                            </>}
+                            {ctx.external_url && <>
+                              <dt className="text-wm-text-muted">{ctx.display_preference === 'embed' || ctx.display_preference === 'external' ? 'Embed / external source' : 'Partner sample URL'}</dt>
+                              <dd>
+                                <a href={ctx.external_url} target="_blank" rel="noopener noreferrer" className="text-wm-accent-strong underline break-all">
+                                  {ctx.external_url.length > 80 ? ctx.external_url.slice(0, 77) + '…' : ctx.external_url}
+                                </a>
+                              </dd>
+                            </>}
+                            {ctx.playlist_url && <>
+                              <dt className="text-wm-text-muted">YouTube playlist</dt>
+                              <dd>
+                                <a href={ctx.playlist_url} target="_blank" rel="noopener noreferrer" className="text-wm-accent-strong underline break-all">
+                                  {ctx.playlist_url.length > 80 ? ctx.playlist_url.slice(0, 77) + '…' : ctx.playlist_url}
+                                </a>
+                              </dd>
+                            </>}
+                            {ctx.archive_features && ctx.archive_features.length > 0 && <>
+                              <dt className="text-wm-text-muted">Archive features wanted</dt>
+                              <dd className="text-wm-text">{ctx.archive_features.map((f, i) => (
+                                <span key={f}>
+                                  {i > 0 && <span className="text-wm-text-subtle mx-1">·</span>}
+                                  <code className="text-[12px] font-mono">{f}</code>
+                                </span>
+                              ))}</dd>
+                            </>}
+                            {ctx.source_of_truth && <>
+                              <dt className="text-wm-text-muted">Partner's current system</dt>
+                              <dd className="text-wm-text">{ctx.source_of_truth}</dd>
+                            </>}
+                            {ctx.frustration && ctx.frustration.trim() !== '-' && <>
+                              <dt className="text-wm-text-muted">Partner note</dt>
+                              <dd className="text-wm-text italic">{ctx.frustration}</dd>
+                            </>}
+                          </dl>
+                        </div>
+                      )}
+
+                      {/* Build-time issues — keep the red warning but
+                          make it explain WHY and WHAT to do, not just
+                          flag a list of field names. */}
+                      {s.build_time_issues && s.build_time_issues.length > 0 && (
+                        <div className="mt-3 space-y-1.5">
+                          {s.build_time_issues.map((issue, i) => {
+                            const tone =
+                              issue.severity === 'high' ? 'border-red-300 bg-red-50 text-red-900' :
+                              issue.severity === 'medium' ? 'border-orange-300 bg-orange-50 text-orange-900' :
+                              'border-yellow-300 bg-yellow-50 text-yellow-900'
+                            if (issue.kind === 'upstream_compression_loss') {
+                              return (
+                                <div key={i} className={`rounded-md border ${tone} px-3 py-2 text-[12px]`}>
+                                  <p className="font-semibold mb-0.5">⚠ Partner data exists for these fields but isn't bound to any section</p>
+                                  <p>
+                                    Missing from the bound template:{' '}
+                                    {issue.dropped_fields.map((f, idx) => (
+                                      <span key={f}>
+                                        {idx > 0 && ', '}
+                                        <code className="text-[11.5px] font-mono">{f}</code>
+                                      </span>
+                                    ))}
+                                  </p>
+                                  <p className="mt-1 text-[11.5px] opacity-80">
+                                    The dev should either add slots for these fields to the template, or confirm with the strategist that they're intentionally dropped.
+                                  </p>
+                                </div>
+                              )
+                            }
+                            return (
+                              <div key={i} className={`rounded-md border ${tone} px-3 py-2 text-[12px]`}>
+                                <p className="font-semibold mb-0.5">🔴 Brixies library coverage gap on <code className="text-[11.5px] font-mono">{issue.template_id}</code></p>
+                                <p>
+                                  Dropped fields:{' '}
+                                  {issue.dropped_fields.map((f, idx) => (
+                                    <span key={f}>
+                                      {idx > 0 && ', '}
+                                      <code className="text-[11.5px] font-mono">{f}</code>
+                                    </span>
+                                  ))}
+                                </p>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+
                       {projectId && onPlanChange && (
                         <SchemaOverrideControl
                           section={s}
@@ -1990,7 +2192,7 @@ function CtaInventoryTable({
                     </p>
                   </td>
                   <td className="px-2 py-2 whitespace-nowrap">
-                    <span className="inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 bg-lavender-tint text-primary-purple border border-primary-purple/20">
+                    <span className={`inline-flex items-center text-[9px] uppercase tracking-widest font-bold rounded-full px-1.5 py-0.5 border ${ctaKindClass(c.cta.kind)}`}>
                       {CTA_KIND_LABELS[c.cta.kind]}
                     </span>
                     {c.isInline && (
@@ -2026,6 +2228,26 @@ function CtaInventoryTable({
       </div>
     </div>
   )
+}
+
+/** Tailwind class set for the CTA-kind pill — one color per destination
+ *  family so the dev can scan the inventory and immediately see where
+ *  the partner is sending visitors. Internal routes = green (stays on
+ *  site), externals = blue (leaves), mailto/tel = orange (contact),
+ *  file/video = indigo/red (asset), application_form = teal (lead),
+ *  anchor = purple (same-page), snippet = gray (token-resolved). */
+function ctaKindClass(kind: import('../../../types/database').CtaKind): string {
+  switch (kind) {
+    case 'internal_route':   return 'bg-green-50 text-green-800 border-green-300'
+    case 'external_url':     return 'bg-blue-50 text-blue-800 border-blue-300'
+    case 'mailto':           return 'bg-orange-50 text-orange-800 border-orange-300'
+    case 'tel':              return 'bg-amber-50 text-amber-800 border-amber-300'
+    case 'file_download':    return 'bg-indigo-50 text-indigo-800 border-indigo-300'
+    case 'video_link':       return 'bg-red-50 text-red-800 border-red-300'
+    case 'application_form': return 'bg-teal-50 text-teal-800 border-teal-300'
+    case 'anchor':           return 'bg-purple-50 text-purple-800 border-purple-300'
+    case 'snippet':          return 'bg-gray-100 text-gray-700 border-gray-300'
+  }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -2315,7 +2537,13 @@ interface ResolvedSnippet {
 function ChurchSettingsCard({
   snippets, projectSlug, loading,
 }: { snippets: ResolvedSnippet[]; projectSlug: string; loading: boolean }) {
-  const ordered = [...snippets].sort((a, b) => a.token.localeCompare(b.token))
+  // Filter unset rows — the dev doesn't need to see "— not set —" 30
+  // times; the table reads as actionable when only filled rows show.
+  // Strategist still sees the empties on the church-settings editor;
+  // this card is purely the dev's reference for what's available.
+  const ordered = [...snippets]
+    .filter(s => typeof s.value === 'string' && s.value.trim().length > 0)
+    .sort((a, b) => a.token.localeCompare(b.token))
   const downloadJson = () => {
     // Shape: { "<token>": { value, label } } — flat key/value so WP /
     // ACF can ingest directly without a post-process step.
