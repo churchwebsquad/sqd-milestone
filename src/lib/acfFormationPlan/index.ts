@@ -175,6 +175,15 @@ export async function computeFormationPlan(
     layer_3_acf_field_groups: layer3,
     discovery_sections:       discoverySections,
     inventory_discovery:      inventoryDiscovery,
+    declared_content_models:  inputs.declaredContentModels.map(m => ({
+      id:           m.id,
+      name:         m.name,
+      schema:       m.schema.map(f => ({ key: f.key, label: f.label, type: f.type })),
+      cta_target:   m.cta_target,
+      section_ids:  m.section_ids,
+      ...(m.item_bindings ? { item_bindings: m.item_bindings } : {}),
+      updated_at:   m.updated_at,
+    })),
   }
 
   return plan

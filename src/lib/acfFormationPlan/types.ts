@@ -553,6 +553,22 @@ export type DiagnosedCtaKind =
   | 'next_step'
   | 'no_link'
 
+/** Strategist-declared content model — frozen snapshot taken at
+ *  compute-time so the dev handoff UI has the schema + cta_target +
+ *  source list available without a second DB round-trip. Mirrors the
+ *  shape stored on roadmap_state.content_models; copied into the plan
+ *  envelope (rather than fetched live) so the rendered handoff stays
+ *  consistent with the rest of the plan's snapshot semantics. */
+export interface DeclaredContentModelSnapshot {
+  id:                 string
+  name:               string
+  schema:             Array<{ key: string; label: string; type: string }>
+  cta_target:         string | null
+  section_ids:        string[]
+  item_bindings?:     Record<string, { indices: number[]; group_key?: string }>
+  updated_at:         string
+}
+
 /** Persisted at strategy_web_projects.roadmap_state.content_model_plan. */
 export interface ContentModelPlan {
   /** Bumped when the analyzer's output shape changes in a breaking way.
@@ -586,6 +602,14 @@ export interface ContentModelPlan {
    *  bound section exists, and feeds the inventory-vs-bound
    *  comparator that surfaces real upstream compression losses. */
   inventory_discovery?:    InventoryDiscoveryRowType[]
+  /** Strategist-declared content models (added in v1.12). Snapshotted
+   *  from roadmap_state.content_models at compute-time so the dev
+   *  handoff can render the "by declared model" view (the strategist's
+   *  authoritative grouping) without a second DB call. Each model
+   *  carries schema + cta_target + the section_ids it's bound to; the
+   *  UI joins those ids back to discovery_sections to roll up sources
+   *  and sample data per model. */
+  declared_content_models?: DeclaredContentModelSnapshot[]
 }
 
 /** Type-only re-export to avoid circular import. The runtime type

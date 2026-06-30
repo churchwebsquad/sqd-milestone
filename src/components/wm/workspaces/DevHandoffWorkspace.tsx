@@ -1430,9 +1430,21 @@ function CmConceptsFoundPanel({
   const options = plan.layer_2_wp_objects.filter(o => o.kind === 'options_page')
   if (ds.length === 0 && options.length === 0) return null
 
+  // Sections in the per-page accordion exclude those already covered
+  // by a declared model — those roll up into the
+  // DeclaredContentModelsBlock above. When no declared models exist,
+  // every section flows through here as before (back-compat for older
+  // projects). The strategist's declarations are the canonical group;
+  // showing the same section twice (once under its model, once under
+  // its page) is duplicate noise.
+  const hasDeclaredModels = (plan.declared_content_models?.length ?? 0) > 0
+  const unboundSections = hasDeclaredModels
+    ? ds.filter(s => !s.declared_content_model)
+    : ds
+
   // Group sections by page slug
   const byPage = new Map<string, typeof ds>()
-  for (const s of ds) {
+  for (const s of unboundSections) {
     const list = byPage.get(s.page_slug) ?? []
     list.push(s)
     byPage.set(s.page_slug, list)
@@ -1517,6 +1529,27 @@ function CmConceptsFoundPanel({
         (heros, intros, single-CTA banners) is hidden so this list
         focuses on the sections the dev actually needs to wire up.
       </p>
+
+      {/* Declared content models — the strategist's authoritative groups.
+          When present, this is the section the dev should build from:
+          each model carries the schema + target + the sections that
+          feed it (across pages), so a "Staff" model rolls up all 5
+          team grids into one place instead of 5 separate per-page rows.
+          When the strategist hasn't declared anything (typical for
+          older projects), the block is hidden and only the per-page
+          analyzer view below renders. */}
+      <DeclaredContentModelsBlock plan={plan} />
+
+      {/* Per-page analyzer view — keeps the inferred per-section
+          discovery for sections the strategist hasn't declared yet, and
+          for unbound chrome-ish sections the analyzer still surfaces.
+          Sub-labeled so the dev sees this is the SECONDARY view (the
+          declared-models block above is canonical). */}
+      {(plan.declared_content_models?.length ?? 0) > 0 && (
+        <h4 className="text-[12px] font-bold text-wm-text-subtle uppercase tracking-wider mt-6 mb-2">
+          By page — analyzer view (sections not in a declared model)
+        </h4>
+      )}
       <div className="space-y-4">
         {pagesSorted.map(([pageSlug, sections]) => (
           <details key={pageSlug} className="rounded-md border border-wm-border bg-wm-bg-elevated" open>
@@ -1740,6 +1773,145 @@ function CmConceptsFoundPanel({
                 {filled.length > 0 && <>: {filled.slice(0, 6).map(([k]) => <code key={k} className="text-[10px] mr-1">{k}</code>)}{filled.length > 6 && <span>+{filled.length - 6}</span>}</>}
               </p>
             </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** Strategist's declared content models — the canonical "what is this
+ *  partner's site made of" view. Rolls up the section_ids the
+ *  strategist bound to each model, shows the model's schema +
+ *  cta_target + a sample of bound content. The dev builds from THIS,
+ *  not from the analyzer's per-section inference (which lives below
+ *  as a fallback). Hidden entirely when the strategist hasn't declared
+ *  anything yet — older projects keep their per-page analyzer view as
+ *  the only surface, unchanged. */
+function DeclaredContentModelsBlock({ plan }: { plan: ContentModelPlan }) {
+  const models = plan.declared_content_models ?? []
+  if (models.length === 0) return null
+  const ds = plan.discovery_sections ?? []
+  const sectionsById = new Map(ds.map(s => [s.section_id, s]))
+
+  // Pretty labels for cta_target. 'na' is the explicit "no buttons"
+  // choice the strategist makes (vs null = "not decided yet").
+  const ctaLabel: Record<string, string> = {
+    'internal-page': 'Individual page per entry',
+    external:        'External link',
+    mailto:          'Email (mailto:)',
+    tel:             'Phone (tel:)',
+    anchor:          'Anchor on this page',
+    na:              'No buttons on this model',
+  }
+
+  return (
+    <div className="mb-6">
+      <h4 className="text-[12px] font-bold text-wm-accent-strong uppercase tracking-wider mb-2">
+        Declared content models — strategist's groupings
+      </h4>
+      <p className="text-[11.5px] text-wm-text-muted mb-3 leading-relaxed">
+        Build the WP structure from these. Each card is a content model
+        the strategist declared in the Pages workspace, with the
+        sections it pulls from rolled up across the site.
+      </p>
+      <div className="space-y-3">
+        {models.map(m => {
+          const boundRows = m.section_ids
+            .map(id => sectionsById.get(id))
+            .filter((s): s is NonNullable<typeof s> => Boolean(s))
+          const totalItems = boundRows.reduce((sum, s) => sum + s.item_count, 0)
+          // Sample = first bound section's sample_record (already
+          // filtered to the bound indices when per-card binding applied
+          // — see buildDiscoverySections).
+          const firstSample = boundRows.find(s => s.sample_record && Object.keys(s.sample_record).length > 0)
+          const sample = firstSample?.sample_record ?? null
+          const sampleFields = sample
+            ? Object.entries(sample).filter(([_, v]) => v != null && String(v).trim() !== '')
+            : []
+          const ctaText = m.cta_target ? (ctaLabel[m.cta_target] ?? m.cta_target) : 'Strategist confirms later'
+          return (
+            <details key={m.id} className="rounded-md border-2 border-wm-accent/40 bg-wm-accent-tint/20" open>
+              <summary className="px-4 py-3 cursor-pointer flex items-baseline gap-2 flex-wrap">
+                <span className="text-[15px] font-bold text-wm-text">{m.name}</span>
+                <span className="text-[11.5px] text-wm-text-muted">
+                  · {boundRows.length} source section{boundRows.length === 1 ? '' : 's'}
+                  · {totalItems} total item{totalItems === 1 ? '' : 's'}
+                </span>
+                <span className="text-[11px] text-wm-text-subtle ml-auto">
+                  Buttons: <span className="text-wm-text-muted">{ctaText}</span>
+                </span>
+              </summary>
+              <div className="border-t border-wm-accent/30 px-4 py-3 space-y-3">
+                {/* Schema — the strategist's declared field list */}
+                <div>
+                  <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Schema (strategist-declared)</p>
+                  {m.schema.length === 0 ? (
+                    <p className="text-[12px] text-wm-text-muted italic">No fields declared yet.</p>
+                  ) : (
+                    <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[12px]">
+                      {m.schema.map(f => (
+                        <li key={f.key} className="flex items-baseline gap-2">
+                          <code className="text-[11.5px] font-mono text-wm-text">{f.key}</code>
+                          <span className="text-wm-text-muted">{f.label}</span>
+                          <span className="text-[10.5px] text-wm-text-subtle ml-auto">{f.type}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {/* Sources — list of bound sections across pages */}
+                <div>
+                  <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">
+                    Sources ({boundRows.length})
+                  </p>
+                  {boundRows.length === 0 ? (
+                    <p className="text-[12px] text-wm-text-muted italic">
+                      No sections bound yet. Use the Content Model panel on the Pages workspace to connect sections.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1 text-[12px]">
+                      {boundRows.map(s => {
+                        const indices = s.declared_content_model?.item_indices
+                        const applied = s.declared_content_model?.item_indices_applied !== false
+                        return (
+                          <li key={s.section_id} className="flex items-baseline gap-2 flex-wrap">
+                            <code className="text-[11px] font-mono text-wm-text-muted">/{s.page_slug}</code>
+                            <span className="text-wm-text">{s.heading}</span>
+                            <span className="text-[10.5px] text-wm-text-subtle">
+                              · {s.item_count} item{s.item_count === 1 ? '' : 's'}
+                              {indices && (
+                                applied
+                                  ? ` · ${indices.length} of section's cards`
+                                  : ` · ${indices.length} indices — filter not applied`
+                              )}
+                            </span>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </div>
+
+                {/* Sample entry from one of the bound sources */}
+                {sample && sampleFields.length > 0 && (
+                  <div className="rounded-md border border-wm-border/60 bg-wm-bg-elevated/60 px-3 py-2">
+                    <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">
+                      Sample entry — from <code className="text-[10.5px] font-mono">/{firstSample?.page_slug}</code>
+                    </p>
+                    <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-[12px]">
+                      {sampleFields.slice(0, 8).map(([k, v]) => (
+                        <span key={k} className="contents">
+                          <dt className="text-wm-text-muted font-mono text-[11.5px]">{k}</dt>
+                          <dd className="text-wm-text break-words">{renderSampleCell(v)}</dd>
+                        </span>
+                      ))}
+                    </dl>
+                  </div>
+                )}
+              </div>
+            </details>
           )
         })}
       </div>
