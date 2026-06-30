@@ -1711,6 +1711,24 @@ export function buildDiscoverySections(
   inputs: FormationInputs,
   classifications: ClassificationRecord[],
 ): DiscoverySection[] {
+  // Index declared models by section_id → { model, indices? } so per-
+  // section lookup in the page loop is O(1). Multiple models touching
+  // the same section is rare but possible; first-write-wins (the
+  // Content Model panel UI enforces single-model attach today, so this
+  // is defensive).
+  const declaredBySection = new Map<string, { model: { id: string; name: string }; indices?: number[]; groupKey?: string }>()
+  for (const m of inputs.declaredContentModels) {
+    for (const sectionId of m.section_ids) {
+      if (declaredBySection.has(sectionId)) continue
+      const binding = m.item_bindings?.[sectionId]
+      declaredBySection.set(sectionId, {
+        model:    { id: m.id, name: m.name },
+        indices:  binding?.indices,
+        groupKey: binding?.group_key,
+      })
+    }
+  }
+
   const out: DiscoverySection[] = []
   for (const page of inputs.approvedPages) {
     const sections = inputs.sectionsByPage.get(page.id) ?? []
@@ -1724,17 +1742,92 @@ export function buildDiscoverySections(
       const fv = (section.field_values as Record<string, unknown> | null) ?? {}
 
       const heading = headingForSection(section, template, fv)
-      const { count, schema, sampleNames, sampleRecord, projectedItems } = analyzeSectionItems(template, fv, inputs.templatesById)
+      const analyzed = analyzeSectionItems(template, fv, inputs.templatesById)
+      let { count, schema, sampleNames, sampleRecord, projectedItems } = analyzed
+      const { primary_group_key, top_level_count } = analyzed
+
+      // Apply strategist's per-card binding (when present). The
+      // strategist declared which items in this section feed the model
+      // — filter the analyzer's view to match so the dev handoff shows
+      // the model's actual shape, not the section's full composition.
+      //
+      // Safety: only apply when (a) the strategist's group_key (if
+      // recorded) matches the analyzer's primary_group_key AND (b)
+      // projectedItems count equals top_level_count (no nested drilling
+      // expanded the item set). Otherwise we'd be filtering with
+      // indices that no longer map cleanly — fall through, surface the
+      // intent with item_indices_applied=false so the UI can show
+      // "model says items 0,2 but filter wasn't applied."
+      //
+      // Compute the declared-model lookup BEFORE the trivial filters
+      // below so a strategist binding can act as an escape hatch — a
+      // feature_split section that's normally filtered as chrome
+      // surfaces in the discovery when the strategist explicitly bound
+      // it (e.g. Feature Section 22 with 2 of 3 cards as Services).
+      const declared = declaredBySection.get(section.id)
+      let declaredOnRow: DiscoverySection['declared_content_model'] = undefined
+      if (declared) {
+        if (declared.indices && declared.indices.length > 0) {
+          const groupMatches = !declared.groupKey || declared.groupKey === primary_group_key
+          const lengthMatches = projectedItems.length === top_level_count
+          if (groupMatches && lengthMatches) {
+            const keep = new Set(declared.indices)
+            const filtered = projectedItems.filter((_, i) => keep.has(i))
+            if (filtered.length > 0) {
+              projectedItems = filtered
+              count = filtered.length
+              sampleRecord = filtered[0] ?? null
+              // Recompute sample_names against the unprojected items at
+              // the same indices, since itemSummary expects raw items.
+              // analyzed.sampleNames is from the first 3 unfiltered
+              // items, which won't necessarily match the filter; rebuild.
+              sampleNames = []
+              const sortedIdx = [...keep].sort((a, b) => a - b).slice(0, 3)
+              const topArr = fv[primary_group_key ?? ''] as unknown[] | undefined
+              if (Array.isArray(topArr)) {
+                for (const i of sortedIdx) {
+                  const it = topArr[i]
+                  if (it && typeof it === 'object') {
+                    const name = itemSummary(it as Record<string, unknown>)
+                    if (name) sampleNames.push(name)
+                  }
+                }
+              }
+            }
+            declaredOnRow = {
+              id:                   declared.model.id,
+              name:                 declared.model.name,
+              item_indices:         [...keep].sort((a, b) => a - b),
+              item_indices_applied: true,
+            }
+          } else {
+            declaredOnRow = {
+              id:                   declared.model.id,
+              name:                 declared.model.name,
+              item_indices:         [...declared.indices].sort((a, b) => a - b),
+              item_indices_applied: false,
+            }
+          }
+        } else {
+          declaredOnRow = {
+            id:   declared.model.id,
+            name: declared.model.name,
+          }
+        }
+      }
 
       // Filter: skip page-chrome roles (heros / intros / single-CTA
       // banners / feature_split) unconditionally. These are decorative
       // sections regardless of item count — a hero with 5 buttons is
       // still a hero, not a CPT candidate. Strategist's
-      // strategist_target_type escape hatch still wins.
+      // strategist_target_type AND strategist content-model binding
+      // both override (the strategist explicitly said this section
+      // matters — surface it).
       const isAlwaysTrivial =
         section.section_role !== null &&
         ALWAYS_TRIVIAL_ROLES.has(section.section_role) &&
-        !section.strategist_target_type
+        !section.strategist_target_type &&
+        !declaredOnRow
       if (isAlwaysTrivial) continue
 
       // Filter: skip sections whose items are all buttons/CTAs. Catches
@@ -1747,7 +1840,7 @@ export function buildDiscoverySections(
       // The "items" here are action buttons under a single copy block,
       // not repeating content cards — they don't carry a schema worth
       // diagnosing.
-      if (projectedItems.length > 0 && projectedItems.every(isCtaOnlyItem) && !section.strategist_target_type) {
+      if (projectedItems.length > 0 && projectedItems.every(isCtaOnlyItem) && !section.strategist_target_type && !declaredOnRow) {
         continue
       }
 
@@ -1807,6 +1900,7 @@ export function buildDiscoverySections(
           cta_target_breakdown:     diagnosis.cta_target_breakdown,
           build_time_issues:        diagnosis.build_time_issues,
         } : {}),
+        ...(declaredOnRow ? { declared_content_model: declaredOnRow } : {}),
       })
     }
   }
@@ -1891,6 +1985,18 @@ function analyzeSectionItems(
    *  (classifySchema) to compute fill rates + CTA breakdown + library
    *  coverage gaps. */
   projectedItems: Record<string, unknown>[]
+  /** The top-level group field key whose array drives this section's
+   *  items — same first-non-empty-group pick the strategist's Content
+   *  Model panel uses (via findItemsForBinding). Null when the section
+   *  has no group field. Carried so the analyzer can verify per-card
+   *  bindings reference the SAME group the strategist saw. */
+  primary_group_key: string | null
+  /** Item count at the top level BEFORE any nested-group drilling.
+   *  When equal to `count`, no drilling happened and strategist
+   *  indices map 1:1 to projectedItems. When different, drilling
+   *  expanded one top-level item into multiple leaf items, and
+   *  per-card filtering can't be safely applied by index. */
+  top_level_count: number
 } {
   // Find the section's primary group field — the one whose items
   // array drives the section's "what's here" view. Heuristic: first
@@ -1900,17 +2006,20 @@ function analyzeSectionItems(
     if (def.kind !== 'group') continue
     const arr = fv[def.key]
     if (!Array.isArray(arr) || arr.length === 0) continue
+    const topLevelCount = arr.length
     const { items, schemaFromGroup } = drillToLeafItems(def, arr, templatesById)
     if (items.length === 0) continue
     const projectedItems = items.map(it => projectItemOntoSchema(it, schemaFromGroup))
     // sample_record = first leaf item, projected onto the schema so
     // every schema field shows up even if the partner left it blank.
     return {
-      count:          items.length,
-      schema:         schemaFromGroup,
-      sampleNames:    items.slice(0, 3).map(itemSummary).filter(Boolean) as string[],
-      sampleRecord:   projectedItems[0] ?? null,
+      count:             items.length,
+      schema:            schemaFromGroup,
+      sampleNames:       items.slice(0, 3).map(itemSummary).filter(Boolean) as string[],
+      sampleRecord:      projectedItems[0] ?? null,
       projectedItems,
+      primary_group_key: def.key,
+      top_level_count:   topLevelCount,
     }
   }
   // No group field — treat the section itself as a single record.
@@ -1925,11 +2034,13 @@ function analyzeSectionItems(
     ? projectItemOntoSchema(fv, topSchema)
     : null
   return {
-    count:          1,
-    schema:         topSchema,
-    sampleNames:    [],
+    count:             1,
+    schema:            topSchema,
+    sampleNames:       [],
     sampleRecord,
-    projectedItems: sampleRecord ? [sampleRecord] : [],
+    projectedItems:    sampleRecord ? [sampleRecord] : [],
+    primary_group_key: null,
+    top_level_count:   1,
   }
 }
 

@@ -11,6 +11,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabase as defaultSupabase } from '../supabase'
 import { getApprovedSlugs } from '../pageApprovals'
+import { loadContentModels, type ContentModel } from '../contentModels'
 import type {
   SectionRole,
   WebContentTemplate,
@@ -66,6 +67,14 @@ export interface FormationInputs {
   /** Cross-page reuse counter — how many approved pages have a section
    *  with this section_role. */
   sectionRoleCounts: Map<SectionRole, number>
+  /** Strategist-declared content models — the upstream / authoritative
+   *  side of the formation plan. When the strategist has declared a
+   *  "Services" model and bound 2 of 3 cards on Feature Section 22 to
+   *  it via `item_bindings`, the analyzer respects that grouping
+   *  (filters per-card, badges the section with the model name) instead
+   *  of re-inferring from the section's raw items. Empty when the
+   *  strategist hasn't opened the Content Model panel yet. */
+  declaredContentModels: ContentModel[]
   /** Per-source load errors. Non-fatal — analyzer continues with
    *  whatever loaded. */
   loadErrors: LoadError[]
@@ -329,6 +338,22 @@ export async function loadProjectInputs(
     snippets = (snippetRows ?? []) as unknown as SnippetRow[]
   }
 
+  // 7b. Strategist-declared content models from
+  //     roadmap_state.content_models. Same JSONB lives on the project
+  //     row; loadContentModels does a fresh read so we get the latest
+  //     declarations even if `projectRaw.roadmap_state` was cached. Non-
+  //     fatal failure mode — analyzer falls back to inference when this
+  //     errors.
+  let declaredContentModels: ContentModel[] = []
+  try {
+    declaredContentModels = await loadContentModels(sb, webProjectId)
+  } catch (e) {
+    loadErrors.push({
+      source:  'roadmap_state.content_models',
+      message: (e as Error).message,
+    })
+  }
+
   // 8. Section-role cross-page reuse counter. One pass over the
   //    materialized sectionsByPage map.
   const sectionRoleCounts = new Map<SectionRole, number>()
@@ -358,6 +383,7 @@ export async function loadProjectInputs(
     displayPreferences,
     snippets,
     sectionRoleCounts,
+    declaredContentModels,
     loadErrors,
   }
 }

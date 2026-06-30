@@ -1457,6 +1457,19 @@ function CmConceptsFoundPanel({
   const upstreamLossCount = ds.reduce((sum, s) => sum + ((s.build_time_issues ?? []).filter(i => i.kind === 'upstream_compression_loss').length), 0)
   const inventoryRows    = (plan as ContentModelPlan & { inventory_discovery?: Array<DiscoverySection> }).inventory_discovery ?? []
   const generatedAt      = plan._meta?.generated_at
+  // Strategist-declared content model coverage — distinct model ids
+  // touched, total sections bound. Tells the strategist at a glance
+  // "of the N sections here, M are explicitly bound to a declared
+  // model." Models the strategist hasn't declared yet (the bulk on
+  // most projects today) don't appear in this count.
+  const declaredModelIds   = new Set<string>()
+  let declaredSectionCount = 0
+  for (const s of ds) {
+    if (s.declared_content_model) {
+      declaredModelIds.add(s.declared_content_model.id)
+      declaredSectionCount++
+    }
+  }
 
   return (
     <div className="mt-5 pt-4 border-t border-wm-border">
@@ -1476,6 +1489,14 @@ function CmConceptsFoundPanel({
         {overriddenBound > 0 && (
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700">
             {overriddenBound} strategist override{overriddenBound === 1 ? '' : 's'}
+          </span>
+        )}
+        {declaredModelIds.size > 0 && (
+          <span
+            className="text-[10px] px-2 py-0.5 rounded-full bg-wm-accent-tint border border-wm-accent/40 text-wm-accent-strong"
+            title={`Strategist declared ${declaredModelIds.size} content model${declaredModelIds.size === 1 ? '' : 's'} covering ${declaredSectionCount} section${declaredSectionCount === 1 ? '' : 's'}. Sections bound to a declared model show the model name in their header; the analyzer respects per-card bindings (only the bound cards are reflected in the row's counts and sample).`}
+          >
+            {declaredSectionCount} section{declaredSectionCount === 1 ? '' : 's'} bound to {declaredModelIds.size} declared model{declaredModelIds.size === 1 ? '' : 's'}
           </span>
         )}
         {inventoryRows.length > 0 && (
@@ -1522,6 +1543,28 @@ function CmConceptsFoundPanel({
                           dev. */}
                       <div className="flex items-baseline flex-wrap gap-x-2 gap-y-1 mb-2">
                         <h4 className="text-[15px] font-bold text-wm-text leading-tight">{s.heading}</h4>
+                        {s.declared_content_model && (
+                          <span
+                            className="inline-flex items-center gap-1.5 text-[11px]"
+                            title={
+                              s.declared_content_model.item_indices && s.declared_content_model.item_indices_applied === false
+                                ? `Strategist scoped to indices ${s.declared_content_model.item_indices.join(', ')} but the analyzer couldn't apply per-card filtering safely (nested-group drilling). Counts below reflect all items, not just the bound subset.`
+                                : s.declared_content_model.item_indices
+                                  ? `Strategist bound ${s.declared_content_model.item_indices.length} of this section's cards to the model. Counts and sample below are filtered to the bound cards.`
+                                  : 'Strategist declared this entire section feeds the model.'
+                            }
+                          >
+                            <span className="text-wm-text-subtle">bound to model</span>
+                            <code className="text-[11.5px] font-mono bg-wm-accent text-white px-1.5 py-0.5 rounded">{s.declared_content_model.name}</code>
+                            {s.declared_content_model.item_indices && (
+                              <span className={`text-[10.5px] ${s.declared_content_model.item_indices_applied === false ? 'text-orange-600' : 'text-wm-text-muted'}`}>
+                                {s.declared_content_model.item_indices_applied === false
+                                  ? `· ${s.declared_content_model.item_indices.length} card(s) — filter not applied`
+                                  : `· ${s.declared_content_model.item_indices.length} of section's cards`}
+                              </span>
+                            )}
+                          </span>
+                        )}
                         {s.schema_name && (
                           <span className="inline-flex items-center gap-1.5 text-[11px] text-wm-text-muted">
                             <span className="text-wm-text-subtle">looks like</span>

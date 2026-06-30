@@ -479,6 +479,40 @@ export interface DiscoverySection {
      *  rule changes). */
     note?: string
   }
+
+  /** Strategist-declared content model this section feeds (when one
+   *  exists). Populated by buildDiscoverySections when the section's
+   *  id appears in any model's `section_ids` on
+   *  roadmap_state.content_models. Overrides the inferred schema +
+   *  drives the WP-objects layer.
+   *
+   *  When `item_indices` is set, the strategist has restricted the
+   *  binding to a subset of the section's primary-group items (e.g.
+   *  Feature 22 has 3 cards but only 2 are services). The discovery
+   *  row's `item_count`, `schema`, `sample_names`, `sample_record`,
+   *  and `schema_field_diagnostics` reflect the FILTERED items so
+   *  the dev sees the model's actual shape, not the section's raw
+   *  composition. Indices are 0-based into the section's primary
+   *  group as the strategist saw it in the Content Model panel.
+   *
+   *  When per-card filtering can't be applied (e.g. the analyzer
+   *  drilled into a nested group whose count no longer matches the
+   *  strategist's top-level indices), `item_indices` is still set so
+   *  the UI can show the strategist's intent — but counts/schema
+   *  remain unfiltered with `item_indices_applied: false`. */
+  declared_content_model?: {
+    id: string
+    name: string
+    /** Indices the strategist scoped the binding to. Omitted when
+     *  the model covers the whole section. */
+    item_indices?: number[]
+    /** False when the analyzer couldn't safely apply the per-card
+     *  filter because the projectedItems count diverged from the
+     *  top-level group (nested-group drilling case). Lets the UI
+     *  surface "model says items 0,2 — but section drills to a deeper
+     *  group, so the filter wasn't applied." */
+    item_indices_applied?: boolean
+  }
 }
 
 /** Canonical schema vocabulary — kept in sync with

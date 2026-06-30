@@ -56,7 +56,7 @@ export type {
  *  (UI tweaks, unrelated edits). The shape stays at `analyzer-vMAJOR.MINOR`
  *  so the DevHandoff banner can compare lexicographically and skip
  *  the warning when plans match the current code. */
-export const ANALYZER_REVISION = 'analyzer-v1.11' as const
+export const ANALYZER_REVISION = 'analyzer-v1.12' as const
 
 /** Computes the ContentModelPlan for a web project. Pure: doesn't
  *  touch the DB beyond the read side. Use `saveFormationPlan` to
@@ -297,6 +297,16 @@ function computeInputFingerprint(inputs: FormationInputs): string {
     parts.push(`${page.slug}:${page.updated_at}`)
     const sections = inputs.sectionsByPage.get(page.id) ?? []
     for (const s of sections) parts.push(`${s.id}:${s.updated_at}`)
+  }
+  // Declared content models — include id + updated_at + section_ids
+  // + item_bindings so an edit to bindings triggers the stale banner.
+  for (const m of inputs.declaredContentModels) {
+    parts.push(`cm:${m.id}:${m.updated_at}:${m.section_ids.join(',')}`)
+    if (m.item_bindings) {
+      for (const [sectionId, b] of Object.entries(m.item_bindings)) {
+        parts.push(`cmb:${m.id}:${sectionId}:${b.indices.join(',')}`)
+      }
+    }
   }
   const blob = parts.join('|')
   let h = 0
