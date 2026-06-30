@@ -42,8 +42,14 @@ import {
   type FontResource, type AcssRole,
   type RoleShadeMatrix, type FigmaBinding,
 } from '../../../lib/designSystemSpec'
-import type { StrategyWebProject, WebContentTemplate } from '../../../types/database'
+import type {
+  StrategyWebProject, WebContentTemplate,
+  StrategyBrandLogo, StrategyBrandElement,
+} from '../../../types/database'
 import { setProjectSwap, clearProjectSwap } from '../../../lib/webFigmaLayoutSwap'
+import { loadBrandGuidesForMember, type MemberBrandGuides, type BrandGuideEntry } from '../../../lib/brandGuides'
+import { loadMainGuideByMember, type BrandGuideBundle } from '../../../lib/brandGuide'
+import { BookOpen, ChevronDown, ChevronRight } from 'lucide-react'
 
 interface Props {
   project: StrategyWebProject
@@ -67,6 +73,33 @@ export function DesignWorkspace({ project, onChange }: Props) {
   // Surfaced to the designer with a scanned-phrase taxonomy so they
   // see the strategic ASKS, not just URLs.
   const [inspirational, setInspirational] = useState<{ value: string; status: string } | null>(null)
+
+  // Brand handoff cross-load — brand guide library + main guide bundle
+  // (logos + elements) keyed on project.member. Surfaces the SAME
+  // visuals the Brand Squad's BrandHandoffPage shows so the designer
+  // has the asset library + element references on the same surface
+  // they're authoring the design system on.
+  const [brandGuides,  setBrandGuides]  = useState<MemberBrandGuides | null>(null)
+  const [guideBundle,  setGuideBundle]  = useState<BrandGuideBundle | null>(null)
+  useEffect(() => {
+    if (!project.member) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const [libRes, bundleRes] = await Promise.all([
+          loadBrandGuidesForMember(project.member),
+          loadMainGuideByMember(project.member),
+        ])
+        if (cancelled) return
+        setBrandGuides(libRes)
+        setGuideBundle(bundleRes)
+      } catch {
+        // Surface nothing — these sections are additive; a load failure
+        // on a project without a brand guide is normal.
+      }
+    })()
+    return () => { cancelled = true }
+  }, [project.member])
   useEffect(() => {
     void (async () => {
       const { data } = await supabase
@@ -488,6 +521,21 @@ export function DesignWorkspace({ project, onChange }: Props) {
         )}
 
         <div className="space-y-5">
+          {/* Brand handoff cross-load — library + logos + elements
+              pulled from the Brand Squad's brand guide so the designer
+              has source material on the same surface as the spec. */}
+          {brandGuides && brandGuides.entries.length > 0 && (
+            <BrandGuideLibraryDesignSection guides={brandGuides} />
+          )}
+          {guideBundle && guideBundle.logos.length > 0 && (
+            <BrandLogosDesignSection
+              logos={guideBundle.logos}
+              assetsZipUrl={guideBundle.guide?.assets_zip_url ?? null}
+            />
+          )}
+          {guideBundle && guideBundle.elements.length > 0 && (
+            <BrandElementsDesignSection elements={guideBundle.elements} />
+          )}
           {inspirational && <InspirationalSitesSection value={inspirational.value} status={inspirational.status} />}
           <BrandAnchorsSection spec={spec} onChange={update} />
           <RoleAnchorsSection spec={spec} onChange={update} />
@@ -2233,7 +2281,12 @@ function ImageCountChecklist({ projectId }: { projectId: string }) {
       .eq('web_project_id', projectId)
       .eq('archived', false)
       .order('sort_order')
-    const pages = (pageRows ?? []) as Array<{ id: string; name: string; slug: string; sort_order: number; images_ready: boolean | null }>
+    // Drop single-* catch-all template pages (single-event, single-staff,
+    // single-sermon, etc.). Their image slots are shared with their
+    // parent listing — counting them inflates the per-project total and
+    // confuses the designer about what they actually need to produce.
+    const allPages = (pageRows ?? []) as Array<{ id: string; name: string; slug: string; sort_order: number; images_ready: boolean | null }>
+    const pages = allPages.filter(p => !p.slug.startsWith('single-'))
     if (pages.length === 0) {
       setRows([])
       setLoading(false)
@@ -2288,6 +2341,17 @@ function ImageCountChecklist({ projectId }: { projectId: string }) {
   const totalReady  = rows?.filter(r => r.images_ready).length ?? 0
   const totalPagesWithImages = rows?.filter(r => r.image_count > 0).length ?? 0
 
+  // Split per-staff bio pages out of the main flat list — they share a
+  // common template + bio image, and 12+ identical rows in a per-page
+  // checklist crowd out the unique pages the designer actually needs
+  // to triage. Roll them under one accordion that toggles to reveal
+  // the individual rows.
+  const mainRows  = (rows ?? []).filter(r => !r.slug.startsWith('staff/'))
+  const staffRows = (rows ?? []).filter(r =>  r.slug.startsWith('staff/'))
+  const staffImageCount = staffRows.reduce((sum, r) => sum + r.image_count, 0)
+  const staffReadyCount = staffRows.filter(r => r.images_ready).length
+  const [staffOpen, setStaffOpen] = useState(false)
+
   return (
     <div>
       <p className="text-[11px] uppercase tracking-widest font-bold text-wm-text-subtle mb-2">
@@ -2296,6 +2360,9 @@ function ImageCountChecklist({ projectId }: { projectId: string }) {
       <p className="text-[12px] text-wm-text-muted mb-3">
         Per-page count of image slots in bound section templates. Check off
         each page once the corresponding images are in the folder.
+        Single-* templates (single-event, single-staff, etc.) aren't
+        counted — their image slots are shared with the listing page they
+        pair with.
       </p>
       {loading && <p className="text-[12px] text-wm-text-subtle">Loading…</p>}
       {!loading && rows && rows.length === 0 && (
@@ -2309,7 +2376,7 @@ function ImageCountChecklist({ projectId }: { projectId: string }) {
             <strong>{totalReady}</strong> / {totalPagesWithImages} marked ready
           </div>
           <ul className="divide-y divide-wm-border border border-wm-border rounded-md bg-wm-bg-elevated">
-            {rows.map(r => (
+            {mainRows.map(r => (
               <li key={r.page_id} className="flex items-center justify-between px-3 py-2 gap-3">
                 <label className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer">
                   <input
@@ -2329,6 +2396,55 @@ function ImageCountChecklist({ projectId }: { projectId: string }) {
                 </span>
               </li>
             ))}
+            {staffRows.length > 0 && (
+              <li className="bg-wm-bg-hover/30">
+                <button
+                  type="button"
+                  onClick={() => setStaffOpen(o => !o)}
+                  className="w-full flex items-center justify-between px-3 py-2 gap-3 text-left hover:bg-wm-bg-hover/60 transition-colors"
+                  aria-expanded={staffOpen}
+                >
+                  <span className="flex items-center gap-2 min-w-0 flex-1">
+                    {staffOpen
+                      ? <ChevronDown size={12} className="text-wm-text-muted shrink-0" />
+                      : <ChevronRight size={12} className="text-wm-text-muted shrink-0" />}
+                    <span className="text-[13px] font-semibold text-wm-text">
+                      Individual staff bio pages
+                      <span className="ml-1.5 text-[11px] font-normal text-wm-text-subtle">
+                        ({staffRows.length} page{staffRows.length === 1 ? '' : 's'} · {staffReadyCount} / {staffRows.length} ready)
+                      </span>
+                    </span>
+                  </span>
+                  <span className="text-[11px] font-mono text-wm-text-muted shrink-0">
+                    {staffImageCount} image{staffImageCount === 1 ? '' : 's'}
+                  </span>
+                </button>
+                {staffOpen && (
+                  <ul className="divide-y divide-wm-border/40 border-t border-wm-border/40">
+                    {staffRows.map(r => (
+                      <li key={r.page_id} className="flex items-center justify-between px-3 py-1.5 gap-3 pl-9">
+                        <label className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={r.images_ready}
+                            disabled={busyPageId === r.page_id || r.image_count === 0}
+                            onChange={(e) => void toggleReady(r.page_id, e.target.checked)}
+                            className="rounded border-wm-border accent-wm-accent"
+                          />
+                          <span className={`text-[12.5px] truncate ${r.image_count === 0 ? 'text-wm-text-subtle' : 'text-wm-text'}`}>
+                            {r.name}
+                            <span className="text-wm-text-subtle ml-1">/{r.slug}</span>
+                          </span>
+                        </label>
+                        <span className={`text-[11px] font-mono ${r.image_count === 0 ? 'text-wm-text-subtle' : 'text-wm-text-muted'}`}>
+                          {r.image_count} image{r.image_count === 1 ? '' : 's'}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            )}
           </ul>
         </>
       )}
@@ -2349,6 +2465,179 @@ function countImageSlots(fields: unknown): number {
     }
   }
   return n
+}
+
+// ── Brand handoff cross-load sections ───────────────────────────────
+//
+// Three cards lifted from the Brand Squad's BrandHandoffPage so the
+// designer working in the Web Manager sees the same source material
+// without bouncing between surfaces. Visual style adapted to the WM
+// (WMCard + wm-* tokens) but layout + grouping mirror the brand
+// handoff verbatim.
+
+function BrandGuideLibraryDesignSection({ guides }: { guides: MemberBrandGuides }) {
+  const sqdEntries = guides.entries.filter(e => e.kind !== 'standards')
+  const standardsEntries = guides.entries.filter(e => e.kind === 'standards')
+  return (
+    <Section title="Brand guide library" icon={<BookOpen size={13} />}>
+      {sqdEntries.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong mb-1.5">
+            New SQD brand guides
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {sqdEntries.map((e, i) => <BrandGuideLibraryRow key={`sqd-${i}`} entry={e} />)}
+          </div>
+        </div>
+      )}
+      {standardsEntries.length > 0 && (
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-amber-700 mb-1.5">
+            Live on Standards
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {standardsEntries.map((e, i) => <BrandGuideLibraryRow key={`std-${i}`} entry={e} />)}
+          </div>
+        </div>
+      )}
+    </Section>
+  )
+}
+
+function BrandGuideLibraryRow({ entry }: { entry: BrandGuideEntry }) {
+  const isSub = entry.kind === 'sqd-sub'
+  return (
+    <a
+      href={entry.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={[
+        'flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors',
+        entry.legacy
+          ? 'border-amber-200 bg-amber-50/40 text-amber-900 hover:border-amber-300'
+          : 'border-wm-border bg-wm-bg-elevated text-wm-text hover:border-wm-accent hover:text-wm-accent-strong',
+      ].join(' ')}
+    >
+      {isSub && <span aria-hidden className="text-wm-text-subtle">↳</span>}
+      <BookOpen size={12} className={`shrink-0 ${entry.legacy ? 'text-amber-700' : 'text-wm-accent'}`} />
+      <span className="flex-1 min-w-0 truncate font-semibold">{entry.label}</span>
+      <ExternalLink size={11} className={entry.legacy ? 'text-amber-700/70 shrink-0' : 'text-wm-text-muted shrink-0'} />
+    </a>
+  )
+}
+
+function BrandLogosDesignSection({
+  logos, assetsZipUrl,
+}: {
+  logos: StrategyBrandLogo[]
+  assetsZipUrl: string | null
+}) {
+  return (
+    <Section title="Logos" icon={<ImageIcon size={13} />}>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {logos.map(logo => {
+          const src = logo.preview_url
+          const dl = logo.download_url ?? logo.preview_url
+          const animUrl = logo.animation_url ?? null
+          return (
+            <div
+              key={logo.id}
+              className="group rounded-lg border border-wm-border bg-wm-bg-elevated p-3 flex flex-col hover:border-wm-accent transition-colors relative"
+            >
+              {animUrl && (
+                <span className="absolute top-2 right-2 inline-flex items-center gap-0.5 rounded-full bg-wm-accent-tint text-wm-accent-strong text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 z-10">
+                  ▶ Motion
+                </span>
+              )}
+              <a
+                href={dl ?? '#'}
+                download
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block"
+              >
+                <div className="h-20 flex items-center justify-center rounded bg-wm-bg-hover/40 mb-2 overflow-hidden">
+                  {src && !src.endsWith('.mp4') && (
+                    <img src={src} alt={logo.label ?? logo.kind} className="max-h-full max-w-full object-contain" />
+                  )}
+                </div>
+                <p className="text-[11px] font-semibold text-wm-text truncate">{logo.label ?? logo.kind}</p>
+                <p className="text-[10px] text-wm-text-subtle mt-0.5 inline-flex items-center gap-1">
+                  <Download size={9} /> Still
+                </p>
+              </a>
+              {animUrl && (
+                <a
+                  href={animUrl}
+                  download
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] text-wm-accent-strong mt-0.5 inline-flex items-center gap-1 hover:underline"
+                >
+                  <Download size={9} /> Animation
+                </a>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      {assetsZipUrl && (
+        <a
+          href={assetsZipUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold rounded-full bg-wm-accent-strong text-white px-3 py-1.5 hover:bg-wm-accent transition-colors"
+        >
+          <Download size={11} /> Full asset package (.zip)
+        </a>
+      )}
+    </Section>
+  )
+}
+
+function BrandElementsDesignSection({ elements }: { elements: StrategyBrandElement[] }) {
+  const KIND_LABEL: Record<string, string> = {
+    pattern:     'Pattern',
+    texture:     'Texture',
+    application: 'Application',
+  }
+  return (
+    <Section title="Elements & application" icon={<Sparkles size={13} />}>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        {elements.map(el => (
+          <div key={el.id} className="rounded-lg border border-wm-border overflow-hidden bg-wm-bg-elevated">
+            {el.preview_url && (
+              <div className="h-32 bg-wm-bg-hover/40 flex items-center justify-center overflow-hidden">
+                <img
+                  src={el.preview_url}
+                  alt={el.label ?? el.kind}
+                  className="max-h-full max-w-full object-contain"
+                />
+              </div>
+            )}
+            <div className="px-3 py-2">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong mb-0.5">
+                {KIND_LABEL[el.kind] ?? el.kind}
+              </p>
+              {el.label && (
+                <p className="text-xs font-semibold text-wm-text truncate">{el.label}</p>
+              )}
+              {el.download_url && (
+                <a
+                  href={el.download_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 mt-1 text-[11px] text-wm-accent-strong hover:underline"
+                >
+                  <Download size={10} /> Download
+                </a>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Section>
+  )
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
