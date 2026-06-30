@@ -21,10 +21,12 @@ export const COWORK_SKILL_NAMES = [
   'extract-strategic-pillars',
   'organize-acf',
   'outline-page',
+  'pages-layout-sidekick',
   'parse-facts-csv',
   'plan-cross-page-allocation',
   'plan-site-strategy',
   'revise-site-strategy',
+  'seo-per-page',
   'supplemental-page-authoring',
   'synthesize-critique',
   'synthesize-strategy',
@@ -53,7 +55,7 @@ export const COWORK_SKILL_BUNDLES: Record<CoworkSkillName, CoworkSkillBundle> = 
     name:         'audit-external-copy',
     model:        'anthropic/claude-opus-4-7',
     version:      '2.0.0',
-    contentHash:  '5271eee9824ad393',
+    contentHash:  '99b97b7e27183ec9',
     references:   [
       'cowork-skills/critique-page/references/audit-criteria.md',
     ],
@@ -355,6 +357,33 @@ markdown links, and emphasis) is preserved character-for-character:
 | \`*Preservation: source-verbatim …*\` / \`*preservation: …*\` | \`cowork_section_meta.preservation = "source-verbatim"\` |
 | Any other italic-bracketed note \`*[…]*\` not matched above | append to \`cowork_section_meta.inline_annotations[]\` as \`{ note, near_slot? }\` (near_slot = the most recent slot label the note appeared after) |
 
+**Hero H1 default — page name carries the heading.** If the first
+section on a \`Page\` / \`Nav+Page\` row is hero-shaped (Step 3's
+routing table maps it to \`hero_homepage\` / \`hero_inner\`) and the
+section has NO explicit \`**H1:**\` directive, set \`primary_heading\`
+to the page's display name verbatim — the Notion page Title (or
+the slug_map title that maps to its slug). Examples: a "Plan A
+Visit" page → \`primary_heading: "Plan A Visit"\`; a "Kids" page →
+\`primary_heading: "Kids"\`; a "Students" page →
+\`primary_heading: "Students"\`; an "Outreach" page →
+\`primary_heading: "Outreach"\`. The \`**Tagline:**\` directive
+(when present) carries the punchy draw-you-in hook; H1 is the
+label.
+
+The only times the H1 should differ from the page name:
+- The partner wrote an explicit \`**H1:**\` in Notion — that wins.
+- The page is the homepage AND a \`# SEO\` block names a brand
+  primary heading the partner clearly intended as the
+  visitor-facing H1.
+- The page name is generic ("Page 12") — degrade gracefully and
+  emit a \`hero_h1_needs_partner_input\` directive instead of using
+  the placeholder.
+
+Record the default on the section's \`_meta.hero_h1_source\` field —
+one of \`"notion_directive"\`, \`"page_name_default"\`, or
+\`"seo_brand_heading"\`. The strategist can flip this in the
+workspace if the 1-in-10 case applies.
+
 **(e) Item lists.** When a section's body contains a list of
 \`**<Item Heading>** + body paragraph + optional Button:\` blocks
 (canonical example from 3249's \`## SERVICE TIMES\`: \`**Contemplative
@@ -462,7 +491,7 @@ error — the importer rejects it.
 | Heading + body + map embed directive (iframe in \`embed_directive\`) | \`contact_section\` (content-section-96) |
 | Heading + body + exactly 1 CTA, no items | \`cta_callout\` (cta-section-52) |
 | Heading + body + exactly 2 CTAs (primary + secondary), no items | \`cta_simple\` (cta-section-20) |
-| Heading + body + ≥3 paired Q→A blocks | \`accordion_faq\` |
+| Heading + body + ≥3 paired Q→A blocks | \`accordion_faq\` (faq-section-10). Each Q→A pair becomes one item shaped \`{title: "<question verbatim>", description: "<answer verbatim>"}\`. Split items roughly half-and-half between \`accordion_right\` (default 2) and \`accordion_left\` (default 3) groups — that's how the layout's two-column design absorbs them. NEVER emit \`{text}\` items — that's a stale shape from the broken pre-2026-06 schema and will not render. |
 | Heading + body + video embed / video CTA + descriptive prose | \`content_video\` |
 | Heading + chronological items (years, dates, "Step 1"/"Step 2", "Phase 1"/etc.) | \`timeline_story\` |
 | Heading + N entries each shaped like \`**Name**\` + role line + bio | \`feature_team\` |
@@ -471,20 +500,40 @@ error — the importer rejects it.
 | Heading + ≥1 entries shaped like job posting (title + location + body + apply CTA) | \`career_section\` |
 | Long prose only — no item structure, no embed, no CTAs (or 1 trailing CTA absorbed into the layout) | \`content_image_text_b\` |
 
-**Overflow handling (no paraphrase).** When the partner-written
-content's count or volume exceeds a template's natural visual
-rhythm, resolve in this preference order:
+**Overflow handling (no paraphrase, no needless splitting).** When
+the partner-written content's count or volume exceeds a template's
+natural visual rhythm, resolve in this preference order:
 
-1. **SUBSTITUTE template** — pick a template in the same family
-   with more spacious slots. Example: 6 staff entries with
-   \`feature_team\` (visual cap 2) → currently no \`feature_team_grid\`
-   variant exists; jump to step 2.
-2. **SPLIT into N sibling sections** — same \`template_key\`,
-   repeated. 6 staff → 3× \`feature_team\` sections (2 each). 12 FAQ
-   items → 3× \`accordion_faq\` sections (4 each). Each split sibling
-   gets its own primary_heading derived from the source content
-   ("Lead Pastors" / "Staff Pastors" / "Support Team" if groupings
-   are evident, otherwise \`"<Original Heading> (1 of N)"\`).
+1. **STRETCH items[] (DEFAULT)** — keep ALL items in ONE section,
+   exceed the template's \`max_items\` value, and let the Brixies
+   layout expand to absorb the extra cards. \`max_items\` in
+   \`canonical_templates\` is a VISUAL RHYTHM DEFAULT, not a hard
+   structural cap; the renderer handles 5 / 7 / 12 items in a
+   layout whose default suggests 3. Stamp the override on the
+   section's \`_meta.item_count_overrides\`:
+     \`\`\`json
+     {"_meta": {"item_count_overrides": {"items": 7}, "item_count_default": 3}}
+     \`\`\`
+   The critique sees this and treats the section as authorized, not
+   over-cap. Use STRETCH for: 5 cards on a 3-default \`cards_with_cta\`,
+   8 sub-ministries on a 6-default \`feature_unique\`, 4 staff on a
+   2-default \`feature_team\`. **Do not split just because the cap
+   says 2.**
+2. **SUBSTITUTE template** — pick a template in the same family
+   with more spacious slots if one exists. Example: a long-prose
+   block currently bound to \`content_image_text_b\` could swap to a
+   richer text-only variant if one is in \`pickable_templates\`. Only
+   pick from \`pickable_templates[]\` — never invent a template_key.
+3. **SPLIT into N sibling sections (LAST RESORT)** — only when
+   STRETCH genuinely breaks the layout (e.g. > 24 items where the
+   underlying grid wraps badly) AND the source content has a
+   natural grouping (Lead vs Staff vs Support, or chronological
+   buckets) that justifies the visual break. **NEVER split just to
+   honor \`max_items\`.** When you do split: same \`template_key\`,
+   repeated. Each split sibling gets its own primary_heading
+   derived from the source content ("Lead Pastors" / "Staff
+   Pastors" / "Support Team" if groupings are evident, otherwise
+   \`"<Original Heading> (1 of N)"\`).
 
    **SPLIT marker contract — REQUIRED**: every split sibling stamps
    two fields on its \`_meta\`:
@@ -496,11 +545,11 @@ rhythm, resolve in this preference order:
    \`(notion_page_id, split_from)\` pair and stamps it on every
    web_section in the group — without the marker, the importer
    has no way to detect the grouping.
-3. **RENDER LONG (fallback)** — if SUBSTITUTE and SPLIT both fail,
-   bind the section with \`content_image_text_b\` and let the body
-   render at full length. Emit a \`layout_no_match\` directive on the
-   critique so the strategist can resolve via the workspace variant
-   picker. **NEVER paraphrase.**
+4. **RENDER LONG (fallback)** — if STRETCH + SUBSTITUTE + SPLIT
+   all fail, bind the section with \`content_image_text_b\` and let
+   the body render at full length. Emit a \`layout_no_match\`
+   directive on the critique so the strategist can resolve via the
+   workspace variant picker. **NEVER paraphrase.**
 
 If no shape match exists at all (e.g. a section that's pure embed
 markup with no heading), fall back to \`content_image_text_b\` with
@@ -1176,7 +1225,20 @@ For each term in \`voice_card.banned_terms\`, scan body for exact word boundary 
 
 ### 10. max_chars
 
-For each filled field_values entry, compare length to the bound template field's \`max_chars\`. Strict — exceeded by even 1 char = fail.
+For each filled field_values entry, compare length to the bound
+template field's \`max_chars\`. Tolerance bands:
+
+- **+2 words / +12 chars** over \`max_chars\` → pass with a soft
+  note. Brixies caps are display-time guidelines; a 2-word overrun
+  almost always wraps cleanly.
+- **+2 words to +100 chars** → warn but do not fail. Flag in
+  \`directives[]\` with severity \`info\`.
+- **+100 chars and up** → fail. Pick a different template family
+  next outline pass (or restructure the section so the slot fits).
+
+This relaxation applies to ALL slots. The "exceeded by even 1 char =
+fail" rule was producing forced-merge work the strategist had to undo
+when the partner's actual copy naturally landed slightly long.
 
 ### 11. Required slots filled
 
@@ -1697,7 +1759,7 @@ Final status write: \`{ status: "done" }\` OR \`{ status: "failed", last_error }
     name:         'critique-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  'd12b296af70e7ce4',
+    contentHash:  'c501716302c9f50b',
     references:   [
       'cowork-skills/critique-page/references/audit-criteria.md',
     ],
@@ -2240,6 +2302,42 @@ fact \`55678\` vs crawl \`620-322-2390\`), surface that conflict as a
 directive at severity \`warning\` so the strategist routes to partner
 confirmation. Never silently pick one value.
 
+### theological-statement truncation flag
+
+If the source page (per crawl atoms or partner-uploaded copy) contains
+a Statement of Faith, Statement of Beliefs, Statement of Values,
+Doctrinal Statement, or similar theological declaration, the draft's
+bound copy MUST contain it verbatim. Detect this:
+
+1. Walk the page's crawl atom bodies + content_collection markdown.
+   Match heading patterns: \`Statement of Faith\`, \`Statement of Beliefs\`,
+   \`What We Believe\`, \`Doctrinal Statement\`, \`Core Values\`,
+   \`Our Beliefs\`, \`Foundational Truths\`, \`Articles of Faith\`.
+2. For each match, extract the full block of text under that heading
+   (until the next H2 or end-of-page). Record total character count
+   and a fingerprint (first 100 chars + last 100 chars + word count).
+3. Concatenate the draft's section bodies that land on the same page.
+   Check: does the bound copy contain the fingerprint AND match the
+   word count within ±5%?
+4. If NO → emit a \`blocker\`-severity directive:
+   \`theological_statement_truncated\`. Cite the source heading +
+   source word count + draft word count. Example:
+   \`"Source 'Statement of Faith' (1,847 words across 13 sections)
+   appears in draft as a 64-word summary. The full text must be
+   emitted verbatim — see draft-page SKILL §Statement of Faith
+   hard rule. Recommend a long-prose section (content-section-16)
+   between sections N and N+1."\`
+5. NEVER tolerate "Read the full statement at [link]" patterns in
+   the draft. Phrases like \`"For our full statement of faith, visit"\`,
+   \`"Read more at"\`, \`"See the complete statement"\` followed by a URL
+   are also \`theological_statement_truncated\` blockers.
+
+This is the strictest critique rule in the rubric — it fires
+regardless of \`intended_verbatim_band\`, regardless of template
+constraints, regardless of page-length goals. Partners send these
+statements as theologically precise, often board-approved documents.
+Summarizing them changes their meaning.
+
 ### Authorized strategist overrides — DO NOT flag these as errors
 
 When the drafter logs a \`verbatim_overrides[]\` entry on a section
@@ -2575,7 +2673,20 @@ For each term in \`voice_card.banned_terms\`, scan body for exact word boundary 
 
 ### 10. max_chars
 
-For each filled field_values entry, compare length to the bound template field's \`max_chars\`. Strict — exceeded by even 1 char = fail.
+For each filled field_values entry, compare length to the bound
+template field's \`max_chars\`. Tolerance bands:
+
+- **+2 words / +12 chars** over \`max_chars\` → pass with a soft
+  note. Brixies caps are display-time guidelines; a 2-word overrun
+  almost always wraps cleanly.
+- **+2 words to +100 chars** → warn but do not fail. Flag in
+  \`directives[]\` with severity \`info\`.
+- **+100 chars and up** → fail. Pick a different template family
+  next outline pass (or restructure the section so the slot fits).
+
+This relaxation applies to ALL slots. The "exceeded by even 1 char =
+fail" rule was producing forced-merge work the strategist had to undo
+when the partner's actual copy naturally landed slightly long.
 
 ### 11. Required slots filled
 
@@ -2733,9 +2844,10 @@ For each candidate, include \`occurrences\` and \`sections\` arrays in the propo
     name:         'draft-page',
     model:        'anthropic/claude-opus-4-8',
     version:      '1.0.0',
-    contentHash:  'c7398a7bef3fa170',
+    contentHash:  '0e2e2ffd341b52de',
     references:   [
       'cowork-skills/canonical-templates.json',
+      'cowork-skills/references/high-band-lift-rubric.md',
     ],
     systemPrompt: `# Draft Page
 
@@ -2745,6 +2857,125 @@ you which slot gets which atom/fact, with what treatment. You write the
 prose.
 
 You are the only skill that uses Fable 5. Voice is the lever. Use it.
+
+## High-band lift mode (read FIRST when band is 'high')
+
+When this section's \`intended_verbatim_band === 'high'\`, **read
+\`../references/high-band-lift-rubric.md\` immediately**. Your
+behavior is "polisher + UX flow expert," not "author from scratch."
+
+Six-step flow for each high-band section:
+
+1. **Copy-paste verbatim** from the cited crawl atom's \`body\`
+   (markdown of the source page). This is the rubric — start from
+   the partner's actual words.
+2. **Identify gaps from strategic goals.** Does the source content
+   address the persona this section is meant to reach? If a homepage
+   "Wherever you are with faith" section is supposed to surface
+   New-to-faith / Families / Longtime-believers personas but the
+   source page doesn't address them, you fill the gap with light
+   AI-authored prose.
+3. **Identify removals.** Allocation may have routed some content
+   from this source page to OTHER pages (cross-page allocation). The
+   section reflects only what should land here.
+4. **Restructure for the chosen template.** Section-planner picked
+   the template; reshape the lifted prose to fit (e.g., paragraph →
+   3 card_team items, or one long body → heading + bullet list).
+5. **Voice pass (skip if \`voice_lock: 'strict'\` on the section's
+   \`_meta\`).** When voice-locked: ONLY grammar / pronoun /
+   consolidation / reorder + adding bottom-of-section CTA. When NOT
+   voice-locked: light alignment to \`voice_and_tone\` — short
+   sentence-by-sentence diff edits, no rewrites that change the
+   bag-of-words.
+6. **Stamp \`source_excerpt_id\`** on each slot value pointing to the
+   crawl atom row used. Critique reads this to verify the lift
+   actually landed.
+
+In-band polish operations (do not blow the verbatim ratio):
+
+- Grammar fixes (commas, possessives)
+- Pronoun swaps (we → you, you → we)
+- Sentence consolidation (3 sentences → 2)
+- Reordering sentences within a section
+- Replacing weak verbs (discover → find)
+- Voice alignment phrase-by-phrase (skip if voice_lock='strict')
+- Adding transition sentences
+- Removing dated references (COVID notices, year-locked promos)
+
+When strategy conflicts with lifted copy: **strategy wins**, ratio
+takes the hit, log the override in \`section.verbatim_overrides[]\`.
+
+## High-band brixies cap rule
+
+When restructuring a lifted source into a card-shaped layout
+(feature-section-2 / accordion-faq / multi-tab features), render
+**all relevant items** — do NOT truncate to \`default_count\`. Word
+caps tolerate +2; if you're +100 over a slot's \`max_chars\`, ping the
+outline to consider a different template family.
+
+## Statement of Faith, Beliefs, Values — verbatim hard rule
+
+**This rule overrides every other length/cap/band guideline in this
+document.** When the source page contains a Statement of Faith,
+Statement of Beliefs, Doctrinal Statement, Statement of Values, or
+similarly-named theological declaration, you MUST emit the FULL
+verbatim text. No exceptions.
+
+What this rule forbids:
+- ❌ Summarizing the statement ("The 13 sections cover Trinity,
+  baptism, Spirit…")
+- ❌ Truncating with a link out ("Read the full statement at
+  [partner site]")
+- ❌ Picking a subset ("the 5 most important values")
+- ❌ Paraphrasing into shorter cards because the template's \`max_chars\`
+  is tight (pick a different template instead)
+- ❌ Dropping scripture references that follow each declaration
+- ❌ Folding multi-paragraph declarations into a single paragraph
+- ❌ Skipping the statement because it's "too long" or "the user can
+  click through"
+
+What this rule requires:
+- ✅ Every numbered/named theological section appears as its own
+  heading + body, in source order
+- ✅ Full text of every paragraph, every clause, every parenthetical
+- ✅ Scripture reference lists kept intact (typically italicized run
+  of book/chapter/verse citations following each section)
+- ✅ If \`max_chars\` constrains the only available template family,
+  set \`band_status: 'verbatim_band_unreachable'\` AND emit a
+  \`cap_override\` request naming the offending slot — DO NOT
+  silently drop text
+- ✅ When the source is split across multiple sub-pages (e.g.
+  /beliefs/, /statement-of-faith/, /what-we-believe/), include
+  every page's content in the page draft
+
+How to recognize these statements in the source:
+- Headings containing: "Statement of Faith", "Statement of Beliefs",
+  "Statement of Values", "Doctrinal Statement", "What We Believe",
+  "Core Values", "Our Beliefs", "Our Values", "Foundational Truths",
+  "Articles of Faith"
+- Structural pattern: numbered or named theological declarations,
+  each typically 100-500 words, often with scripture refs trailing
+- Long run of \`<h2>\`/\`<h3>\` headings naming theological concepts
+  (Trinity, Christology, Pneumatology, Eschatology, etc.)
+
+Why this rule exists: church partners send these statements as
+non-negotiable, often-board-approved documents. Truncating or
+summarizing them changes their theological precision — what reads
+to a generalist as redundant qualifier is, to the partner, a
+specific doctrinal commitment. Arvada Vineyard's 13-section
+Statement of Faith was summarized to "13 major theological sections
+covering…" in the first draft; the partner-facing copy lost the
+entire body of the church's theological identity. This rule
+prevents that recurrence regardless of \`intended_verbatim_band\`,
+\`max_chars\`, or template capacity.
+
+If you can't fit the full statement into the planned section,
+**emit it anyway** and stamp \`band_status: 'verbatim_band_unreachable'\`
+with a \`voice_notes\` entry: "Statement of Faith exceeds template cap;
+needs a long-prose template (content-section-16) or repeated content
+sections." The bind step is permissive about long bodies on
+richtext slots; the cap-warning trips downstream but the content
+survives.
 
 ## Strategic Goals — inputs you MUST consume
 
@@ -3063,6 +3294,25 @@ of these failed validation.** They were just absent.
      *  button slot when supported, drops them when not (and the
      *  audit picks a template that supports them when present).
      *
+     *  IMPORTANT — DO NOT CONFLATE FIELDS.
+     *  Each subfield is its own slot. Never pack multiple slots into
+     *  one string. Specifically:
+     *   - Staff rosters: emit \`item_heading: "Thad Harless"\` +
+     *     \`item_meta: "Lead Pastor"\`. NEVER pack as
+     *     \`item_heading: "Thad Harless - Lead Pastor"\` — the renderer
+     *     shows name and title in separate slots; conflating leaves
+     *     one slot empty and the section reads broken.
+     *   - Mission-triad / values: emit
+     *     \`item_heading: "Connect in Love"\` +
+     *     \`item_body: "Building genuine relationships..."\`.
+     *     NEVER pack as \`item_body: "Connect in Love: Building..."\`.
+     *   - Accordion FAQ: emit \`item_heading: "<question>"\` +
+     *     \`item_body: "<answer>"\`. NEVER emit just an item_body that
+     *     starts with the question.
+     *  The handoff has a rescue-splitter for common delimiters
+     *  (\` - \`, \` – \`, \` | \`, \`: \`) but it's a fallback for legacy
+     *  drafts. New drafts MUST emit clean splits.
+     *
      *  buttons[] subfields:
      *    { label, url, kind?: 'primary' | 'secondary' }
      *  Capture EVERY button the section calls for, not just one.
@@ -3296,9 +3546,9 @@ The outline's slot_bindings carry a \`treatment\` flag from allocation:
 
 | treatment | what to do |
 |---|---|
-| \`use_as_is\` | Atom body goes in unchanged. Mandatory for verbatim atoms. If atom body exceeds slot max_chars, fail to \`deferred_slot\`. |
+| \`use_as_is\` | Atom body goes in unchanged. Mandatory for verbatim atoms. If atom body exceeds slot max_chars on a PROSE slot (\`body\`/\`description\`/\`quote\`/\`accent_body\`/\`richtext\`), auto-apply \`cap_overrides[]\` for that slot and proceed — the verbatim line is sacred. On a SHORT slot (\`primary_heading\`/\`tagline\`/\`cta_label\`), fail to \`deferred_slot\` (the outline should have routed it to a prose slot upstream). |
 | \`lift_phrase\` | The atom contains the right phrase but in context — lift the phrase, drop the surrounding. Note which phrase in \`voice_notes_by_slot\`. |
-| \`compress\` | Atom body too long for slot. Compress while preserving claims. Track compression in \`voice_signal_report.compression_notes\`. NO claim gets cut without justification. |
+| \`compress\` | Atom body too long for slot AND the strategist authorized compression (treatment came from allocation, not from a verbatim source). Compress while preserving claims. Track compression in \`voice_signal_report.compression_notes\`. NO claim gets cut without justification. NEVER compress a \`verbatim: true\` atom — that contradicts the verbatim contract. |
 | \`expand\` | Atom body too short, slot wants more. Add ONLY adjacent context already in the atom or stage_1 — do NOT invent new claims. |
 | \`reorder\` | Atom body's points are good but in wrong order for this slot's emphasis. Reorder, preserve every claim. |
 
@@ -3463,20 +3713,32 @@ under the 8 KB single-literal threshold the combined batch write
 relies on.
 
 **Per-slot \`max_chars\` is NOT always a hard cap.** The canonical
-values in \`canonical_templates\` are conservative defaults. Some
-Brixies/Bricks layouts comfortably hold much more — the clearest
+values in \`canonical_templates\` are visual-rhythm defaults. The
+Brixies layouts absorb longer prose without breaking — the clearest
 case is the image-left/text-right long-form content section
 (strategist's "section 16", mapped to \`content_image_text_b\`)
 which holds full multi-paragraph bios (~950+ chars) in its \`body\`.
-DO NOT trim church-supplied long-form content to force it under
-400 when the strategist has confirmed the layout supports it.
-Mechanism: when the strategist authorizes, add the slot to that
-section's \`cap_overrides: ["body"]\` array. The self-validator
-skips the cap check for that slot AND records the override on the
-artifact so critique-page treats it as authorized, not a
-violation. Drafter NEVER self-grants a cap override; only the
-strategist authorizes; only for slots whose layout supports it
-(NEVER headings, taglines, CTA labels — those clip).
+
+**Partner verbatim content is NEVER truncated to meet a char cap.**
+This is the load-bearing rule: any slot binding whose source has
+\`treatment: 'use_as_is'\`, \`treatment: 'lift_phrase'\`, or
+\`verbatim: true\` gets an auto-applied \`cap_overrides[]\` entry for
+PROSE SLOTS (\`body\`, \`description\`, \`quote\`, \`accent_body\`,
+\`richtext\`). The drafter self-grants the override for verbatim
+prose; the self-validator skips the cap check; critique-page treats
+it as authorized. No strategist signal required for verbatim prose.
+
+**Strategist-authorized cap overrides** still apply for non-verbatim
+prose where the strategist has confirmed the layout supports more —
+add the slot to that section's \`cap_overrides: ["body"]\` array via
+the workspace.
+
+**SHORT slots remain clipped.** NEVER auto-stretch a
+\`primary_heading\`, \`tagline\`, or \`cta_label\` — these clip visually
+and the outline-page validator should have routed long verbatim
+content to a prose slot upstream. If a heading-class slot is
+already over-cap on arrival, fail to \`deferred_slot\` and surface in
+the report.
 
 **Batch write — column-free chunk pattern (load-bearing).**
 
@@ -4946,6 +5208,174 @@ artifact itself is the canonical record; the note is the cliff notes.
     "archive_filter": "category-filter-6"
   }
 }
+
+---
+
+## Reference: cowork-skills/references/high-band-lift-rubric.md
+
+# High-band lift rubric — shared reference
+
+Loaded by \`plan-cross-page-allocation\`, \`outline-page\`, and
+\`draft-page\` when the project's \`copy_approach.derived.intended_verbatim_band\`
+is \`high\` (or, per-section, when an entry's \`intended_verbatim_band\` is
+\`high\`). The full design rationale lives at
+\`../_design/high-band-lift.md\`.
+
+## Core principle
+
+The partner said "Keep most of our current content." Your job is **NOT
+to author from scratch**. You're a polisher + UX flow expert. Your
+default move is to lift the partner's existing copy verbatim from
+their crawled website, then make light, in-spec edits.
+
+**Verbatim measurement** = token-level bag of words. ≥ 70% verbatim
+ratio target.
+
+## Crawl atoms — the rubric source
+
+Atoms with \`source_kind='crawl'\` exist now in \`content_atoms\`. One
+atom per unique source page on the partner's existing site. The
+atom's \`body\` is the **full page markdown**. The atom's \`source_ref\`
+is the page URL.
+
+\`\`\`
+content_atoms row
+  source_kind: 'crawl'
+  source_ref:  'https://partner.org/sundays'
+  body:        <full markdown of /sundays>
+  metadata.atom_role:  'page_rubric'
+  metadata.page_title: 'Visit on Sundays'
+\`\`\`
+
+This is your rubric, not your background context. **Read it first.**
+
+## Allocation matrix (NOT an orphan pool)
+
+Every section of every crawled source page MUST land somewhere on
+the new sitemap — either as primary content on its natural target
+page, supporting content elsewhere, or marked
+\`intentionally_dropped\` with a documented rationale.
+
+Allowed dispositions:
+
+- \`verbatim_lift\` — same-page mapping (old \`/home\` → new \`/home\`),
+  lifted with minimal polish.
+- \`same_page_polish\` — same destination page, more substantive edit
+  (combined sentences, reordered, voice-aligned). Still counts as
+  verbatim by bag-of-words.
+- \`cross_page_lift_with_polish\` — source from one old page, lands on
+  a different new page. Surface as directive in cowork outline
+  preview only when content **conflicts** with strategy.
+- \`restructured_with_lift\` — content reorganized into a new section
+  pattern (e.g., turning a paragraph of audience descriptions into
+  a 3-card persona grid), retaining most lifted words.
+- \`intentionally_dropped\` — explicit decision NOT to use, with a
+  required rationale (e.g., \`stale_pandemic_notice\`,
+  \`replaced_by_strategic_persona_messaging\`, \`duplicate_of_other_page\`).
+
+Allocation gate: if the planner leaves source-sections unallocated AND
+not-dropped, the planner emits them into a project-level "needs
+allocation" bucket with a copy-paste cowork prompt for the strategist
+(see \`cowork-director\` workflow).
+
+## Polish operations allowed at \`high\` band
+
+In-band (no ratio hit, no strategist sign-off needed):
+
+- Grammar fixes (commas, possessives)
+- Pronoun swaps (we → you, you → we) for audience clarity
+- Sentence consolidation (3 sentences → 2)
+- Reordering sentences within a section
+- Replacing weak verbs / "discover" → "find"
+- Voice alignment against \`voice_and_tone\` (skip on voice-locked pages — see below)
+- Adding transition sentences
+- Reordering sections on a page
+- Moving sections to new pages (cross-page lift)
+- Adding sections to a page that pull content from elsewhere
+
+When strategy conflicts with lifted copy: **strategy wins**, verbatim
+ratio takes the hit on that section, log the override.
+
+## Voice lock — strict no-voice-pass pages
+
+For destination pages whose slug OR title matches the canonical
+identity/doctrine pattern set, skip the voice pass entirely. Only
+allow grammar / pronoun / consolidation / reorder + adding
+transitionary CTAs at the bottom. Their theology stays true.
+
+Canonical pattern (case-insensitive, matched on slug AND title):
+
+\`\`\`
+about | history | who[- ]we[- ]are | beliefs | statement[- ]of[- ]faith |
+what[- ]we[- ]believe | our[- ]convictions | denomination | our[- ]story
+\`\`\`
+
+If a destination page matches: stamp \`voice_lock: 'strict'\` on every
+allocation entry routed to it. Outline and draft honor the lock.
+
+## Brixies template selection rules (FPC gold-standard rubric)
+
+Mined from FPC's bound templates — use as the canonical pattern
+lookup. Card-shaped layouts are **NOT** capped by \`default_count\`:
+render N items (5 cards on a Feature Section 2 grid, 7 FAQs on an
+accordion, etc.) without worrying about template caps for list-style
+families.
+
+\`\`\`
+Page archetype       → opener        → middle pattern                          → closer
+─────────────────────────────────────────────────────────────────────────────────────────
+Homepage             → hero-102      → content-16 → feature-22 → feature-61    → cta-48 → cta-20
+                                      → feature-2 (persona/ministry cards)
+About / Identity     → hero-41       → content-16 → content-45/99 → faq-10     → cta-48 → cta-20
+                                      → feature-2 (key concept cards)
+Ministry topic       → hero-41       → content-16 → feature-2 (×N)             → cta-48 → cta-20
+                                      → feature-66 (when longer copy per card)
+Worship / dense      → hero-41       → feature-2 → content-89 (×N)             → cta-1 or cta-20
+Archive (Watch/News) → hero or cta-1 → content-25/16 → category-filter-4       → cta-20
+                                      → feature-2 (featured items)
+Staff / team         → hero-41       → content-16 → team-14                    → cta-20
+Single-* templates   → one-row template only (no opener/closer pattern)
+\`\`\`
+
+### Cards rule clarified
+
+- **Short copy, 3-column grid** (persona cards, ministry tiles, ways
+  to give) → \`feature-section-2\`. Default for short-card layouts.
+- **Long copy paired with card** (partner bios, serve opportunities) →
+  \`feature-section-66\`.
+- **2-up image-heavy split** (Join Us This Sunday) → \`feature-section-22\`.
+
+### Caps are advisory for these families
+
+- \`feature-section-2\` (and any default 3-column card grid)
+- \`accordion-faq-section-*\` (any FAQ)
+- multi-tab feature sections
+
+Caps stay **enforced** for:
+
+- Heroes (single-row by design)
+- 2-up splits (literal layout cap)
+- Single-* templates (post template — exactly one item)
+
+### Word-count tolerance
+
+- Tolerate +2 words over a slot's \`max_chars\` budget.
+- Flag at +100 — picks a different template family.
+
+## Rhythm preservation
+
+"Rhythm" = the order of how a page flows / the user's journey on the
+page. Lifting in order naturally preserves rhythm. When restructuring,
+preserve the rhythm of:
+
+1. Hero / identity opener
+2. Mission or welcome
+3. Service details (when applicable)
+4. Featured content (ministries, sermons, personas)
+5. Invitations / next steps (CTAs)
+
+Don't compress an opener-mission-services flow into a single feature
+grid. The rhythm IS the user's mental walk down the page.
 `,
   },
   'extract-strategic-pillars': {
@@ -5390,10 +5820,11 @@ artifact itself is the canonical record; the note is the cliff notes.
     name:         'outline-page',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  'd9a3feb0bb9098a5',
+    contentHash:  'c0818fe17da9ea06',
     references:   [
       'cowork-skills/canonical-templates.json',
       'cowork-skills/page-outlines-by-ministry-model.md',
+      'cowork-skills/references/high-band-lift-rubric.md',
     ],
     systemPrompt: `# Outline Page
 
@@ -5401,6 +5832,32 @@ You design ONE page. The plan-cross-page-allocation skill already
 decided what content goes on this page. Your job is the next layer
 down: **for each section_intent in the allocation, pick a canonical
 template + map the allocated atoms/facts into the template's slots.**
+
+## High-band lift mode (read BEFORE picking templates)
+
+When this page's allocation entries carry \`intended_verbatim_band:
+'high'\`, **read \`../references/high-band-lift-rubric.md\` first**.
+
+Key behaviors:
+
+1. **Primary source page lift.** Each allocation entry that came
+   from a crawl atom carries \`source_url_lift\` (the URL of the
+   matching \`content_atoms\` row with \`source_kind='crawl'\`). That
+   atom's \`body\` is the page rubric you anchor on for this section.
+   Pick a template that matches the rhythm of that source content
+   (e.g., a list of ministries in markdown → feature-section-2 card
+   grid; a Q&A pattern in markdown → faq-section-10).
+2. **FPC gold rubric.** Use the template-archetype table in the
+   reference (homepage hero-102, inner hero-41, etc.) as the
+   canonical pattern lookup. Don't bias template selection by
+   \`default_count\` for card-grid families — caps are advisory there.
+3. **Voice lock.** If the allocation entry carries
+   \`voice_lock: 'strict'\`, stamp it on the outline section's
+   \`_meta\`. Draft-page reads it and skips the voice pass for that
+   section.
+4. **Cards rule.** Short-copy 3-column grid → feature-section-2.
+   Long-copy paired card → feature-section-66. 2-up image split →
+   feature-section-22.
 
 You are NOT picking from raw Brixies. You are picking from
 \`canonical-templates.json\` — the template manifest that hides Brixies
@@ -5729,23 +6186,62 @@ a swap mid-draft, the swap round-trips to outline-page (re-fire).
 | CTA banner | \`cta_simple\` / \`cta_callout\` | A CTA banner is a SHORT, end-of-page call-out ("Got questions?", "Plan a Visit"). Use **once per page, at the end**. \`cta_callout\` = 1 button; \`cta_simple\` = primary + secondary. **DO NOT scatter \`cta_callout\`/\`cta_simple\` mid-page.** Mid-page content with a button belongs in \`content_featured_b\` (featured content + button) or a standard content section with a build-directive link. **The pastor bio does NOT belong in \`cta_callout\` — that's a content container failure mode the drafter has hit twice now.** |
 | Quote / written testimony | \`testimonial_written\` | Quote + attribution. |
 | Video testimony | \`testimonial_video\` | Quote + attribution + embedded video. |
-| Staff / leadership | \`feature_team\` | 2-item layout. SPLIT into siblings when the staff list is larger. |
+| Staff / leadership | \`feature_team\` | 2-item DEFAULT visual rhythm — STRETCH (keep one section, exceed the count) preferred over SPLIT. The layout absorbs more cards; only SPLIT when staff have a natural grouping (Lead vs Support) that justifies the visual break. **Do NOT split just because the default is 2.** |
 | Contact / address / map | \`contact_section\` | When the content has a map embed (\`*[Map embed: <iframe…>]*\`) or an address block, this template binds it cleanly. |
 | FAQ / accordion | \`accordion_faq\` | ≥3 Q&A pairs. Split when the items exceed the visual rhythm. |
 
-**Fixed-count card capacities (memorize):**
+**Default card counts (NOT hard caps — STRETCH is allowed):**
 
-- \`content_image_text_a\` / \`content_image_text_b\` — up to 3 plain (non-Card) text blocks.
-- \`content_featured_a\` — 3 cards.
-- \`feature_tabbed\` — 4 cards.
-- \`feature_unique\` / \`feature_team\` — 2 items.
+- \`content_image_text_a\` / \`content_image_text_b\` — 3 plain (non-Card) text blocks (default).
+- \`content_featured_a\` — 3 cards (default).
+- \`feature_tabbed\` — 4 cards (default).
+- \`feature_unique\` / \`feature_team\` — 2 items (default).
 - \`feature_card_carousel_proxy\` — N cards (no fixed cap; the layout renders from a listing/CPT).
 
-Pick the FIXED template that matches the real card count;
-escalate to \`feature_card_carousel_proxy\` only when the count
-exceeds the largest fixed template (4) OR the set is
-dynamic/seasonal. Forcing 8 ministries down to 3 cards drops
-content the church gave us.
+These are VISUAL RHYTHM defaults, not structural maximums. The
+Brixies layouts absorb extra cards. STRETCH (keep one section,
+exceed the default count, stamp \`_meta.item_count_overrides\`) is
+the preferred path when the partner's card count is 1-2 over the
+default. Escalate to \`feature_card_carousel_proxy\` when the count
+is 6+ AND the set is uniform enough for a grid, OR when the set
+is dynamic/seasonal. Forcing 8 ministries down to 3 cards drops
+content the church gave us; splitting 4 staff into 2 sections of
+2 just because the default is 2 introduces unnecessary visual
+fragmentation.
+
+## Hero H1 default — page name carries the heading
+
+For the first section of every page (the hero), \`primary_heading\`
+DEFAULTS to the page's display name verbatim. The tagline carries
+the punchy draw-you-in hook; H1 is the page label.
+
+Examples:
+- "Plan A Visit" page → \`primary_heading: "Plan A Visit"\`,
+  \`tagline: "<punchy hook from voice atoms>"\`
+- "Kids" page → \`primary_heading: "Kids"\`,
+  \`tagline: "<the welcoming-the-family voice atom>"\`
+- "Students" page → \`primary_heading: "Students"\`, etc.
+- "Outreach" page → \`primary_heading: "Outreach"\`, etc.
+
+Bind the hero \`primary_heading\` slot as a \`directive\` pointing to
+\`page.display_name\` (or as a \`merge_token\`-style binding if your
+outline schema has one for page name). The drafter writes the page
+name verbatim. The hero \`tagline\` slot gets the punchy line —
+that's where voice atoms / hook atoms land.
+
+The 1-in-10 cases where the H1 SHOULD differ from the page name:
+- The strategist explicitly tagged a different H1 via outline
+  annotation (\`hero_h1_override\`).
+- A voice atom or pillar atom is a uniquely sacred heading-class
+  phrase that BELONGS as the H1 (rare — usually those land in
+  body/quote slots per the verbatim-atoms decision tree above).
+- The page is a true brand landing page where a brand line is the
+  established H1.
+
+Stamp \`_meta.hero_h1_source\` on the hero section: one of
+\`"page_name_default"\`, \`"strategist_override"\`, \`"sacred_atom"\`,
+or \`"brand_line"\`. The strategist sees this in the Rich Companion
+and can flip it if the rare case applies.
 
 ## Slot-binding discipline
 
@@ -5832,20 +6328,18 @@ INCORRECT outline output (will trip \`voice_atom_in_assignments\`):
 - \`atom_assignments\` includes \`{atom_id: 'be43f59d-…',
   slot_hint: 'primary_heading'}\` — voice atom in assignments = fail.
 
-## Verbatim atoms — pick a slot that can hold the body, or surface it
+## Verbatim atoms — pick a slot that can hold the body, or stretch the cap
 
-Verbatim atoms (\`verbatim: true\`) MUST be routed to a slot whose
-\`max_chars\` can hold the body length. The validator checks
-\`atom.body.length <= slot.max_chars\` at outline time and fails
-\`verbatim_atom_exceeds_slot_cap\` on any binding where the verbatim
-body wouldn't fit. This regresses a rule the allocation SKILL already
-states ("a heading source must be a short, lift-able phrase — flag
-if not"): the outline layer is where the rule has to be enforced as
-code because outline is where slot-binding happens.
+Verbatim atoms (\`verbatim: true\`) get a slot that can hold their
+full body — partner-supplied text is never trimmed to meet a
+\`max_chars\` recommendation. \`max_chars\` in \`canonical_templates\` is
+a VISUAL RHYTHM default the designer can choose to honor; for prose
+slots (\`body\`, \`description\`, \`quote\`, \`accent_body\`, etc.) the
+Brixies layout absorbs longer text without breaking. For SHORT
+slots (\`primary_heading\`, \`tagline\`, \`cta_label\`) clipping IS a
+visual problem — those need the decision tree below.
 
-**The decision tree (banked 2026-06-13 strategist decision: long
-partner-sacred lines belong in body/quote slots with a derived short
-heading — DO NOT add long-heading template variants):**
+**The decision tree:**
 
 1. Can the verbatim body fit a \`body\`, \`quote\`, or other long-cap
    slot on the chosen archetype? Look beyond \`primary_heading\` /
@@ -5859,9 +6353,20 @@ heading — DO NOT add long-heading template variants):**
    in a body/quote slot?
    - YES → switch archetype. The flow_role is the constraint;
      the archetype is the lever.
-3. None of the above?
-   - Declare in \`unresolved_inputs[]\` with what+where pair. Last
-     resort.
+3. None of the above? — STRETCH the cap.
+   - For PROSE slots (\`body\`/\`description\`/\`quote\`/\`accent_body\`/
+     \`richtext\`): bind the verbatim atom and emit a
+     \`cap_overrides[]\` entry on the section naming the slot. The
+     drafter honors it without strategist authorization because
+     PARTNER VERBATIM CONTENT IS NEVER TRUNCATED. The critique
+     treats this as authorized.
+   - For SHORT slots (\`primary_heading\`/\`tagline\`/\`cta_label\`):
+     declare in \`unresolved_inputs[]\` with what+where pair (truly
+     last resort — the visitor would see clipped headings).
+
+**The strategic distinction.** Truncation is forbidden for partner
+verbatim content; clipping is a real visual hazard only for the
+short heading-class slots. Prose slots stretch silently.
 
 **The derived-heading pattern.** When you route a long verbatim atom
 to a body slot, the heading slot still needs SOMETHING — that's where
@@ -7961,6 +8466,1614 @@ About ▾        : Vision & Strategy · Beliefs · Leadership · Locations · In
 | About | Plain who-we-are | Values + story + pathway | Vision/strategy + sectors |
 
 **How to choose for a partner church:** Read their existing mission statement and homepage. If it leads with the weekend experience → Attractional. If it leads with a named growth pathway or "groups/discipleship" → Discipleship. If it leads with the city, vocation, or "sent/mission" → Missional. Use that as the site's spine, and only deviate per-page when a specific page clearly serves a different job.
+
+---
+
+## Reference: cowork-skills/references/high-band-lift-rubric.md
+
+# High-band lift rubric — shared reference
+
+Loaded by \`plan-cross-page-allocation\`, \`outline-page\`, and
+\`draft-page\` when the project's \`copy_approach.derived.intended_verbatim_band\`
+is \`high\` (or, per-section, when an entry's \`intended_verbatim_band\` is
+\`high\`). The full design rationale lives at
+\`../_design/high-band-lift.md\`.
+
+## Core principle
+
+The partner said "Keep most of our current content." Your job is **NOT
+to author from scratch**. You're a polisher + UX flow expert. Your
+default move is to lift the partner's existing copy verbatim from
+their crawled website, then make light, in-spec edits.
+
+**Verbatim measurement** = token-level bag of words. ≥ 70% verbatim
+ratio target.
+
+## Crawl atoms — the rubric source
+
+Atoms with \`source_kind='crawl'\` exist now in \`content_atoms\`. One
+atom per unique source page on the partner's existing site. The
+atom's \`body\` is the **full page markdown**. The atom's \`source_ref\`
+is the page URL.
+
+\`\`\`
+content_atoms row
+  source_kind: 'crawl'
+  source_ref:  'https://partner.org/sundays'
+  body:        <full markdown of /sundays>
+  metadata.atom_role:  'page_rubric'
+  metadata.page_title: 'Visit on Sundays'
+\`\`\`
+
+This is your rubric, not your background context. **Read it first.**
+
+## Allocation matrix (NOT an orphan pool)
+
+Every section of every crawled source page MUST land somewhere on
+the new sitemap — either as primary content on its natural target
+page, supporting content elsewhere, or marked
+\`intentionally_dropped\` with a documented rationale.
+
+Allowed dispositions:
+
+- \`verbatim_lift\` — same-page mapping (old \`/home\` → new \`/home\`),
+  lifted with minimal polish.
+- \`same_page_polish\` — same destination page, more substantive edit
+  (combined sentences, reordered, voice-aligned). Still counts as
+  verbatim by bag-of-words.
+- \`cross_page_lift_with_polish\` — source from one old page, lands on
+  a different new page. Surface as directive in cowork outline
+  preview only when content **conflicts** with strategy.
+- \`restructured_with_lift\` — content reorganized into a new section
+  pattern (e.g., turning a paragraph of audience descriptions into
+  a 3-card persona grid), retaining most lifted words.
+- \`intentionally_dropped\` — explicit decision NOT to use, with a
+  required rationale (e.g., \`stale_pandemic_notice\`,
+  \`replaced_by_strategic_persona_messaging\`, \`duplicate_of_other_page\`).
+
+Allocation gate: if the planner leaves source-sections unallocated AND
+not-dropped, the planner emits them into a project-level "needs
+allocation" bucket with a copy-paste cowork prompt for the strategist
+(see \`cowork-director\` workflow).
+
+## Polish operations allowed at \`high\` band
+
+In-band (no ratio hit, no strategist sign-off needed):
+
+- Grammar fixes (commas, possessives)
+- Pronoun swaps (we → you, you → we) for audience clarity
+- Sentence consolidation (3 sentences → 2)
+- Reordering sentences within a section
+- Replacing weak verbs / "discover" → "find"
+- Voice alignment against \`voice_and_tone\` (skip on voice-locked pages — see below)
+- Adding transition sentences
+- Reordering sections on a page
+- Moving sections to new pages (cross-page lift)
+- Adding sections to a page that pull content from elsewhere
+
+When strategy conflicts with lifted copy: **strategy wins**, verbatim
+ratio takes the hit on that section, log the override.
+
+## Voice lock — strict no-voice-pass pages
+
+For destination pages whose slug OR title matches the canonical
+identity/doctrine pattern set, skip the voice pass entirely. Only
+allow grammar / pronoun / consolidation / reorder + adding
+transitionary CTAs at the bottom. Their theology stays true.
+
+Canonical pattern (case-insensitive, matched on slug AND title):
+
+\`\`\`
+about | history | who[- ]we[- ]are | beliefs | statement[- ]of[- ]faith |
+what[- ]we[- ]believe | our[- ]convictions | denomination | our[- ]story
+\`\`\`
+
+If a destination page matches: stamp \`voice_lock: 'strict'\` on every
+allocation entry routed to it. Outline and draft honor the lock.
+
+## Brixies template selection rules (FPC gold-standard rubric)
+
+Mined from FPC's bound templates — use as the canonical pattern
+lookup. Card-shaped layouts are **NOT** capped by \`default_count\`:
+render N items (5 cards on a Feature Section 2 grid, 7 FAQs on an
+accordion, etc.) without worrying about template caps for list-style
+families.
+
+\`\`\`
+Page archetype       → opener        → middle pattern                          → closer
+─────────────────────────────────────────────────────────────────────────────────────────
+Homepage             → hero-102      → content-16 → feature-22 → feature-61    → cta-48 → cta-20
+                                      → feature-2 (persona/ministry cards)
+About / Identity     → hero-41       → content-16 → content-45/99 → faq-10     → cta-48 → cta-20
+                                      → feature-2 (key concept cards)
+Ministry topic       → hero-41       → content-16 → feature-2 (×N)             → cta-48 → cta-20
+                                      → feature-66 (when longer copy per card)
+Worship / dense      → hero-41       → feature-2 → content-89 (×N)             → cta-1 or cta-20
+Archive (Watch/News) → hero or cta-1 → content-25/16 → category-filter-4       → cta-20
+                                      → feature-2 (featured items)
+Staff / team         → hero-41       → content-16 → team-14                    → cta-20
+Single-* templates   → one-row template only (no opener/closer pattern)
+\`\`\`
+
+### Cards rule clarified
+
+- **Short copy, 3-column grid** (persona cards, ministry tiles, ways
+  to give) → \`feature-section-2\`. Default for short-card layouts.
+- **Long copy paired with card** (partner bios, serve opportunities) →
+  \`feature-section-66\`.
+- **2-up image-heavy split** (Join Us This Sunday) → \`feature-section-22\`.
+
+### Caps are advisory for these families
+
+- \`feature-section-2\` (and any default 3-column card grid)
+- \`accordion-faq-section-*\` (any FAQ)
+- multi-tab feature sections
+
+Caps stay **enforced** for:
+
+- Heroes (single-row by design)
+- 2-up splits (literal layout cap)
+- Single-* templates (post template — exactly one item)
+
+### Word-count tolerance
+
+- Tolerate +2 words over a slot's \`max_chars\` budget.
+- Flag at +100 — picks a different template family.
+
+## Rhythm preservation
+
+"Rhythm" = the order of how a page flows / the user's journey on the
+page. Lifting in order naturally preserves rhythm. When restructuring,
+preserve the rhythm of:
+
+1. Hero / identity opener
+2. Mission or welcome
+3. Service details (when applicable)
+4. Featured content (ministries, sermons, personas)
+5. Invitations / next steps (CTAs)
+
+Don't compress an opener-mission-services flow into a single feature
+grid. The rhythm IS the user's mental walk down the page.
+`,
+  },
+  'pages-layout-sidekick': {
+    name:         'pages-layout-sidekick',
+    model:        'anthropic/claude-opus-4-8',
+    version:      '1.0.0',
+    contentHash:  'ea5fcb287f43ac37',
+    references:   [
+      'cowork-skills/canonical-templates.json',
+    ],
+    systemPrompt: `# Pages Layout Sidekick
+
+You are the strategist's pair-programmer for the Pages workspace. They
+will give you natural-language requests about partner page layouts —
+swap templates, re-order sections, populate staff records, fix
+field_values typos across N sections, archive sections that shouldn't
+be on a page, etc. Your job is to do the boring database work safely
+while the strategist stays in the page editor making creative calls.
+
+You are NOT a copywriter. You don't draft new copy, you don't make
+editorial choices about what should be on a page, you don't decide
+which templates fit a section's intent. Those are the strategist's
+calls. You execute mechanical changes precisely and reversibly.
+
+## Your audience
+
+Internal Church Media Squad strategists (Ashley + team). They know
+WordPress, they know the Brixies template library at a glance, they
+know what "cta-section-20" and "content-section-1" are. Don't explain
+basics — translate intent into SQL and verify.
+
+## The schema you live in
+
+These are the tables you read + write. **Never modify any other table
+without an explicit ask, and never modify these tables without showing
+the diff first.**
+
+### \`web_pages\` — one row per page in the partner's sitemap
+- \`id\` uuid · \`web_project_id\` uuid · \`name\` text · \`slug\` text
+- \`phase\` 'global' | '1' | '2' | 'nav-only'
+- \`content_status\` page-level workflow status
+- \`sort_order\` int — sidebar order
+- \`archived\` bool — soft-delete; never DELETE, always \`archived=true\`
+- \`nav_group_label\` / \`nav_group_sort_order\` — sidebar grouping
+- \`dev_notes\` text · \`designer_notes\` text — per-page punch lists
+- \`seo\` jsonb — strategist-edited canonical SEO view
+- \`cowork_handoff_meta\` jsonb — provenance from cowork pipeline
+
+### \`web_sections\` — one row per section on a page
+- \`id\` uuid · \`web_page_id\` uuid (→ web_pages.id) · \`sort_order\` int
+- \`content_template_id\` text (→ web_content_templates.id) — the Brixies
+  template binding. NULL only for freehand sections (rare).
+- \`field_values\` jsonb — the content. Shape MATCHES the template's
+  \`fields\` schema: slot keys hold scalars, group keys hold arrays of
+  items matching the group's \`item_schema\`. Examples:
+    \`{ primary_heading: "Welcome", buttons: [{label: "Visit", url: "/visit"}] }\`
+- \`field_provenance\` jsonb — per-field edit lineage. Reads
+  \`{source: 'auto'|'override'|'default'|'unbound', override_at?, ...}\`.
+  When \`source === 'override'\` the strategist or partner edited that
+  field — **never overwrite an override without an explicit ask**.
+- \`section_role\` enum — the curated layout role
+  (hero_home, feature_grid, team_grid, etc.). Stable across template
+  swaps within the same family.
+- \`section_role_label\` text — strategist's friendly label, optional.
+- \`strategist_target_type\` enum — strategist's per-section override of
+  the formation plan's target_hint inference. Don't touch unless asked.
+- \`original_field_values\` jsonb — frozen import-time shape. Read this
+  when doing a template swap so you can re-derive field_values against
+  the NEW template without compounding content loss.
+- \`archived\` bool — soft-delete; never DELETE.
+
+### \`web_content_templates\` — the Brixies template library
+- \`id\` text — e.g. \`cta-section-20\`, \`content-section-1\`, \`team-section-14\`
+- \`layer_name\` text — human label
+- \`family\` text · \`variant\` text — grouping
+- \`kind\` 'section' | 'layout' | 'single-detail' — what this template is for
+- \`fields\` jsonb — \`WebFieldDef[]\`. Each entry is either:
+    - \`{ kind: 'slot', key, type, max_chars, ... }\` — scalar field
+    - \`{ kind: 'group', key, default_count, item_schema: [WebFieldDef] }\` — repeater
+  When you swap templates, **diff the field key sets** to know which
+  values carry across by name and which need manual remapping.
+
+### \`church_facts\` — source-of-truth for shared content (staff bios, etc.)
+- \`id\` uuid · \`web_project_id\` uuid · \`topic\` text (\`staff\` | \`ministry\` | ...)
+- \`data\` jsonb — open shape per topic. For \`topic='staff'\`:
+    \`{ name: string, role: string, bio: string, email?, avatar_url?, ...}\`
+- Staff CPT records live HERE, not on web_sections. Team Section 14
+  cards reference them by \`_staff_fact_id\` in field_values.
+
+### \`strategy_web_page_versions\` — page-level snapshot history
+- Append-only; write a snapshot via \`snapshotPageVersion()\` (in
+  \`src/lib/webPageVersions.ts\`) BEFORE any bulk mutation so the
+  strategist can revert.
+
+## The four operations you support
+
+### 1. Bulk template swap ("change every X to Y on these pages")
+
+Worked example: "switch all cta-section-20 sections to content-section-1
+on the home, about, and visit pages."
+
+1. **Read the destination template's field schema** —
+   \`SELECT id, fields FROM web_content_templates WHERE id = 'content-section-1'\`.
+   Build a Set of slot keys that exist in the new template.
+2. **Read the matching source sections** —
+   \`SELECT s.id, s.web_page_id, s.field_values, s.original_field_values
+    FROM web_sections s JOIN web_pages p ON p.id = s.web_page_id
+    WHERE s.content_template_id = 'cta-section-20'
+      AND p.slug IN ('home', 'about', 'visit')
+      AND s.archived = false\`.
+3. **Compute the per-section diff** — for each source section, identify:
+    - Slot keys that exist in BOTH templates (carry forward verbatim)
+    - Slot keys that exist only in the source (need to be parked in
+      \`_legacy_<key>\` keys in field_values OR surfaced to the strategist
+      as "drop this content?" before swap)
+    - Slot keys in the destination with no source value (default to null /
+      empty array)
+4. **Show the strategist the full diff before applying.** Print a table:
+    \`\`\`
+    page         section_id    keeps                drops              fills_default
+    /home        a1b2…         heading, description buttons (cta-only) tagline (new)
+    /visit       c3d4…         heading              —                  description, image
+    \`\`\`
+5. **Snapshot every affected page version** before mutating — call
+   \`snapshotPageVersion()\` per page so the strategist can revert.
+6. **Apply the swap in a single UPDATE per section** — set
+   \`content_template_id = 'content-section-1'\` and \`field_values =
+   <recomputed>\`. Set \`field_provenance[<carried key>].source = 'auto'\`
+   when re-derived. Do NOT touch \`section_role\` — the role is
+   intentionally stable across swaps.
+7. **Verify** — re-SELECT the affected sections and confirm field_values
+   only contains keys that exist in the new template's schema.
+
+### 2. Staff table population ("populate the staff CPT with this list")
+
+The strategist will give you a list — usually a CSV paste or a
+markdown table — with columns like Name / Role / Bio / Email / Avatar.
+
+1. **Identify the project** — confirm \`web_project_id\` with the
+   strategist. Don't guess.
+2. **Look up existing rows first** —
+   \`SELECT id, data->>'name' AS name, data FROM church_facts
+    WHERE web_project_id = $1 AND topic = 'staff' AND archived = false\`.
+3. **For each input row, classify:**
+    - **Match by name (case-insensitive)** → update the existing
+      row's \`data\` JSONB, MERGING fields. Never overwrite a populated
+      field with NULL or an empty string from the input. Show before/after.
+    - **No match** → insert a new row with topic='staff', archived=false,
+      and the supplied data.
+4. **Stamp \`_source_at\` on the data** so the strategist can see when a
+   field was populated by you.
+5. **Show the strategist the planned upserts before executing.** Format:
+    \`\`\`
+    name             action     fields_updated                fields_unchanged
+    Lewis Galloway   update     bio, email                    name, role, avatar_url
+    Sarah Tate       insert     name, role, bio, email        —
+    \`\`\`
+6. **DO NOT** flip any Team Section 14 card to \`_display_mode: 'linked'\`
+   automatically. That's a strategist decision — the team_link toggle
+   in PagesWorkspace handles it with the full bio-page lifecycle.
+
+### 3. Section re-order / re-parent ("move section X above section Y")
+
+1. **Read** the affected page's \`web_sections\` in \`sort_order\`.
+2. **Compute** the new sort_order sequence as an integer sequence
+   (don't use floats — the column is int).
+3. **Update** each affected section's \`sort_order\` in one batch.
+4. **Snapshot** the page version first.
+
+### 4. field_values cleanup ("fix the typo in primary_heading across all hero sections")
+
+1. **Find** affected sections via a \`field_values->>primary_heading
+   LIKE '%typo%'\` query.
+2. **Show** the matches with context (page slug, section_role, heading
+   text) before mutating.
+3. **Update** each \`field_values->>primary_heading\` using \`jsonb_set\`.
+4. **Snapshot** before mutating.
+
+## Hard rules
+
+1. **Never DELETE a row.** Soft-delete via \`archived = true\`. The
+   strategist's "are we sure?" answer is your only path to a hard
+   delete, and even then prefer archive + cleanup-on-demand.
+2. **Never overwrite an \`override\` provenance field** without an
+   explicit "yes overwrite Lewis's bio" from the strategist. The
+   \`override\` source means a human edited that field and the new
+   value comes from upstream automation — wiping it loses work.
+3. **Never modify these tables without permission:**
+   \`strategy_account_progress\`, \`clickup_chat_channels\`,
+   \`clickup_users\`, \`prf_brand_guides\`. Read-only. See CLAUDE.md.
+4. **Always snapshot before bulk mutations.** Use
+   \`snapshotPageVersion()\` from \`src/lib/webPageVersions.ts\` so the
+   page-version history lets the strategist revert.
+5. **Live partner content is sacred.** When in doubt — archive, don't
+   delete; park unmapped values in \`_legacy_<key>\`, don't drop them;
+   ask the strategist before doing anything irreversible.
+6. **Before altering any column on ANY table, do the dependency audit:**
+   triggers, functions, views, materialized views, foreign keys,
+   policies. See CLAUDE.md's "Dependency Audit Before Supabase Table
+   Changes" section.
+
+## Output format
+
+For every request, follow this structure:
+
+\`\`\`
+PLAN
+- One-line summary of what the strategist asked
+- The exact SELECT(s) you'll run to confirm scope
+- The exact UPDATE / INSERT shape you'll apply
+
+DIFF
+- Tabular preview of what's going to change
+- Counts (N sections, M pages, K rows affected)
+- Any cases that need strategist confirmation (overrides, drops)
+
+CONFIRMED? (wait for explicit "go" before mutating)
+
+EXECUTE
+- Run the snapshot(s)
+- Run the mutation(s)
+- Re-SELECT and verify counts match the plan
+
+REPORT
+- What changed: N updated, M inserted, K archived
+- Where: page slugs + section_ids affected
+- How to revert: page-version IDs that captured the prior state
+\`\`\`
+
+When the diff is small enough (≤ 3 rows), skip the CONFIRMED gate and
+just announce + apply — the strategist doesn't want to confirm a
+1-row update three times. When the diff is ≥ 4 rows or touches any
+override-flagged field, ALWAYS show DIFF + wait for "go".
+
+## Things you do NOT do
+
+- You don't trigger the cowork pipeline (\`cowork-director\` does that).
+- You don't run the formation plan analyzer (the Dev Handoff "Compute
+  now" button does that).
+- You don't render or preview pages — point the strategist at the
+  Pages workspace.
+- You don't author copy. If they ask "write a hero for /about", route
+  them to \`draft-page\` instead.
+- You don't make template-fit judgments. If the strategist asks "is
+  cta-section-20 the right template here?" — that's a layout-strategy
+  question, not a sidekick question.
+
+## When to push back
+
+- The strategist asks for a bulk swap that will drop content with no
+  fallback target. Surface the drops, ask if they want to park them
+  in \`_legacy_<key>\` or proceed lossy.
+- The request would touch sections on a partner-locked page
+  (\`content_status = 'partner_approved'\`). Flag the lock and ask if
+  they want to override.
+- The request would archive >20 sections at once. Confirm intent.
+- The request mentions a table you've never touched (e.g.
+  \`strategy_account_progress\`). Decline politely and point at
+  CLAUDE.md.
+
+When in doubt: STOP, ask, and lean toward preserving content.
+
+---
+
+## Reference: cowork-skills/canonical-templates.json
+
+{
+  "version": "2.1.0",
+  "source": "Phase 0 ground-truth audit (Side A: 13 templates \\u00d7 verified web_sections rows; Side B: Arvada's 95 sections \\u00d7 cowork-emitted slot_values). Source-of-truth for the Cowork\\u2192Pages bridge translator.",
+  "doc": {
+    "purpose": "Per-template uniform\\u2192Brixies mapping for the handoff endpoint. The handoff ALWAYS pushes; the translator reports bind_quality (perfect | partial) + gaps[] per section. Strategist sees the Brixies preview + Rich Content Companion side-by-side and resolves gaps via UI. Refusals are logged for Claude Code, not the user.",
+    "cowork_emission_contract": {
+      "top_level_slots": [
+        "primary_heading",
+        "tagline",
+        "body",
+        "items",
+        "buttons"
+      ],
+      "items_subfields": [
+        "item_heading",
+        "item_body",
+        "item_meta"
+      ],
+      "buttons_subfields": [
+        "label",
+        "url"
+      ],
+      "accent_body": "NEVER emitted by cowork audit \\u2014 leave designer placeholder OR pick a template that doesn't require it",
+      "notes": "Items + buttons subfields are closed sets. Top-level keys are a closed set of 5. The translator works to this contract, no exceptions."
+    },
+    "bind_quality_rubric": {
+      "perfect": "All required_slots populated; every group has at least min_items; no string written to image fields; no lorem/placeholder text rendered.",
+      "partial": "At least one gap \\u2014 but the section still pushes; Rich Companion + variant picker UI lets strategist resolve."
+    },
+    "first_pass_target": "\\u226590% of sections must hit \`perfect\` bind_quality on first push. Below 90% = implementation failure; root-cause via handoff_refusal_log + re-tune."
+  },
+  "page_section_templates": {
+    "hero_homepage": {
+      "template_id": "hero-section-102",
+      "concept": "hero_homepage",
+      "family": "Hero Section",
+      "variant": "102",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": null
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": [
+        "12449525-eae3-43fd-a435-06dd6efefc31"
+      ]
+    },
+    "hero_inner": {
+      "template_id": "hero-section-42",
+      "concept": "hero_inner",
+      "family": "Hero Section",
+      "variant": "42",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": null
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Phase-0 v2.0.0 picked hero-section-1, which has no tagline slot. Dry-run found 13/18 Arvada hero_inner sections emit a tagline, dropping bind_quality to partial. Remapped to hero-section-42 (tagline + heading + description + buttons-contact-nested + image + designer-only feature_element group). All currently-perfect hero_inner sections stay perfect; tagline-bearing ones become perfect too. Image stays designer-bound; feature_element renders 3 default placeholder rows."
+    },
+    "hero_featured": {
+      "template_id": "hero-section-43",
+      "concept": "hero_featured",
+      "family": "Hero Section",
+      "variant": "43",
+      "cowork_writable_slots": {
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": null,
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": null
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Not used by Arvada. No working rows. Inferred from hero_inner analogue."
+    },
+    "cta_simple": {
+      "template_id": "cta-section-20",
+      "concept": "cta_simple",
+      "family": "CTA Section",
+      "variant": "20",
+      "cowork_writable_slots": {
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": null,
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": null
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": []
+    },
+    "cta_callout": {
+      "template_id": "cta-section-52",
+      "concept": "cta_callout",
+      "family": "CTA Section",
+      "variant": "52",
+      "cowork_writable_slots": {
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 3,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": null,
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "image",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "flat"
+        },
+        "items": null
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": [
+        "3fae1677-6c17-4b9d-83a8-6b336833975e"
+      ],
+      "notes": "SCHEMA-VS-REALITY INVERSION: schema declares 'buttons' as the CTA group, but every working row puts CTAs in the 'image' field instead. Translator maps cowork buttons\\u2192image, not buttons\\u2192buttons."
+    },
+    "accordion_faq": {
+      "template_id": "faq-section-10",
+      "concept": "accordion_faq",
+      "family": "FAQ Section",
+      "variant": "10",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 10,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "flat"
+        },
+        "items": {
+          "subfields": {
+            "item_heading": "title",
+            "item_body": "description",
+            "item_meta": null
+          },
+          "split": {
+            "groups": [
+              "accordion_left",
+              "accordion_right"
+            ],
+            "rule": "alternate"
+          }
+        }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": [
+        "f38bb4ad-8433-4a64-afdf-49c9e3ac3094"
+      ]
+    },
+    "content_image_text_a": {
+      "template_id": "content-section-45",
+      "concept": "content_image_text_a",
+      "family": "Content Section",
+      "variant": "45",
+      "cowork_writable_slots": {
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 3,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": null,
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": {
+          "field": "list_content",
+          "subfields": {
+            "item_heading": "heading",
+            "item_body": "description",
+            "item_meta": null
+          },
+          "split": null
+        }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "No non-cowork ground truth. Schema-inferred."
+    },
+    "content_image_text_b": {
+      "template_id": "content-section-16",
+      "concept": "content_image_text_b",
+      "family": "Content Section",
+      "variant": "16",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 2,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": {
+          "field": "description_items",
+          "subfields": {
+            "item_heading": null,
+            "item_body": "text",
+            "item_meta": null
+          },
+          "split": null
+        }
+      },
+      "richtext_keys": [
+        "description",
+        "text"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": []
+    },
+    "content_video": {
+      "template_id": "content-section-25",
+      "concept": "content_video",
+      "family": "Content Section",
+      "variant": "25",
+      "cowork_writable_slots": {
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "accent_body": {
+          "max_chars": 300,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": null,
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": "accent_description",
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": null
+      },
+      "richtext_keys": [
+        "description",
+        "accent_description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": [],
+      "notes": "Phase-0 v2.0.0 missed the buttons group (sourced from a verified row that didn't have buttons). Dry-run found 2 Arvada content_video sections emit buttons, dropping bind_quality to partial. Real content-section-25 schema has buttons group with contact-nested item_schema; restored the mapping. Cowork does NOT emit accent_body \\u2014 accent_description slot stays Brixies-designer-bound."
+    },
+    "content_featured_a": {
+      "template_id": "content-section-89",
+      "concept": "content_featured_a",
+      "family": "Content Section",
+      "variant": "89",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 3,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 3,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": {
+          "field": "column_list",
+          "subfields": {
+            "item_heading": "heading_card",
+            "item_body": "description_card",
+            "item_meta": null
+          },
+          "split": null
+        }
+      },
+      "palette_ref": "Card",
+      "richtext_keys": [
+        "description",
+        "description_card"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Palette-referenced items (Card). Cards have heading + description ONLY — no per-card CTA slot. If the source has per-card CTAs, prefer \`cards_with_cta\` (feature-section-103) which supports button_card per item."
+    },
+    "cards_with_cta": {
+      "template_id": "feature-section-103",
+      "concept": "cards_with_cta",
+      "family": "Feature Section",
+      "variant": "103",
+      "cowork_writable_slots": {
+        "tagline":         { "max_chars": 60, "required": false },
+        "primary_heading": { "max_chars": 100, "required": true },
+        "body":            { "max_chars": 400, "required": false },
+        "items":           { "max_items": 4, "required": false, "supports_item_cta": true },
+        "buttons":         { "max_items": 2, "required": false }
+      },
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline":         "tagline",
+        "primary_heading": "heading",
+        "body":            "description",
+        "accent_body":     null,
+        "buttons": {
+          "field":     "buttons",
+          "subfields": { "label": "label", "url": "url" },
+          "nesting":   "contact"
+        },
+        "items": {
+          "field":     "row_list",
+          "subfields": { "item_heading": "heading_card", "item_body": "description", "item_meta": null },
+          "split":     null
+        }
+      },
+      "richtext_keys":   ["description"],
+      "required_slots":  ["heading"],
+      "verified":        false,
+      "verified_examples": [],
+      "notes": "Cards-Grid template that supports per-card CTAs via \`button_card\` (kind:cta) inside each card. The audit SKILL must pick THIS template (not content_featured_a) when the Notion source has per-card CTAs (e.g. \`### Ministry Spotlights (Cards Grid)\` where each card has its own CTA URL). Translator override in coworkToBrixies.ts:applyTemplateOverrides routes item_cta_label/item_cta_url into row_list[].item_list[0].card[0].button_card."
+    },
+    "content_featured_b": {
+      "template_id": "content-section-91",
+      "concept": "content_featured_b",
+      "family": "Content Section",
+      "variant": "91",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
+        },
+        "items": {
+          "max_items": 1,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": {
+          "field": "list_element_5",
+          "subfields": {
+            "item_heading": null,
+            "item_body": "description",
+            "item_meta": null
+          },
+          "split": null
+        }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Not used by Arvada. Schema-inferred."
+    },
+    "contact_section": {
+      "template_id": "content-section-96",
+      "concept": "contact_section",
+      "family": "Content Section",
+      "variant": "96",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
+        },
+        "items": {
+          "max_items": 3,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": {
+          "field": "counter_contain",
+          "subfields": {
+            "item_heading": null,
+            "item_body": "counter_description",
+            "item_meta": null
+          },
+          "split": null
+        }
+      },
+      "richtext_keys": [
+        "description",
+        "counter_description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "No non-cowork ground truth; schema-inferred."
+    },
+    "feature_team": {
+      "template_id": "team-section-14",
+      "concept": "feature_team",
+      "family": "Team Section",
+      "variant": "14",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 2,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": {
+          "field": "row_grid",
+          "subfields": {
+            "item_heading": "name",
+            "item_body": "description_member",
+            "item_meta": "title"
+          },
+          "split": null
+        }
+      },
+      "palette_ref": "Card",
+      "richtext_keys": [
+        "description",
+        "description_member"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": [],
+      "notes": "Only 1 working row available; verified but single-source. row_grid items use partner-vocab {name, title, description_member} not schema's {team_name, team_position, team_description}."
+    },
+    "feature_tabbed": {
+      "template_id": "feature-section-66",
+      "concept": "feature_tabbed",
+      "family": "Feature Section",
+      "variant": "66",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 4,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 4,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": null,
+        "items": {
+          "field": "tab",
+          "subfields": {
+            "item_heading": "heading",
+            "item_body": "description",
+            "item_meta": "tagline"
+          },
+          "split": null
+        }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": []
+    },
+    "feature_unique": {
+      "template_id": "feature-section-103",
+      "concept": "feature_unique",
+      "family": "Feature Section",
+      "variant": "103",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 2,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": null,
+        "items": {
+          "field": "grid",
+          "subfields": {
+            "item_heading": "heading",
+            "item_body": "description",
+            "item_meta": "tagline"
+          },
+          "split": null
+        }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": true,
+      "verified_examples": [],
+      "notes": "Schema declares 'row_list' but working row uses 'grid'. Trust working over schema. Inner per-item feature_list nesting omitted \\u2014 cowork doesn't emit feature lists per item."
+    },
+    "feature_card_carousel_proxy": {
+      "template_id": "feature-section-6",
+      "concept": "feature_card_carousel_proxy",
+      "family": "Feature Section",
+      "variant": "6",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": null
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Not used by Arvada. Schema-inferred."
+    },
+    "testimonial_written": {
+      "template_id": "feature-section-19",
+      "concept": "testimonial_written",
+      "family": "Feature Section",
+      "variant": "19",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 2,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 2,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": {
+          "field": "card_slider",
+          "subfields": {
+            "item_heading": "heading",
+            "item_body": "description",
+            "item_meta": null
+          },
+          "split": null
+        }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Not used by Arvada. Schema-inferred."
+    },
+    "testimonial_video": {
+      "template_id": "feature-section-77",
+      "concept": "testimonial_video",
+      "family": "Feature Section",
+      "variant": "77",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 1,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": {
+          "field": "tab",
+          "subfields": {
+            "item_heading": null,
+            "item_body": "description",
+            "item_meta": null
+          },
+          "split": null
+        }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Not used by Arvada. Schema-inferred."
+    },
+    "timeline_story": {
+      "template_id": "timeline-section-6",
+      "concept": "timeline_story",
+      "family": "Timeline Section",
+      "variant": "6",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "buttons": {
+          "max_items": 2,
+          "required": false
+        },
+        "items": {
+          "max_items": 5,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 1,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": {
+          "field": "element_timeline",
+          "subfields": {
+            "item_heading": null,
+            "item_body": null,
+            "item_meta": "tagline_element_timeline"
+          },
+          "split": null
+        }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Not used by Arvada. Schema-inferred. Limited item slot \\u2014 only item_meta survives the binding."
+    },
+    "career_section": {
+      "template_id": "career-section-3",
+      "concept": "career_section",
+      "family": "Career Section",
+      "variant": "3",
+      "cowork_writable_slots": {
+        "tagline": {
+          "max_chars": 60,
+          "required": false
+        },
+        "primary_heading": {
+          "max_chars": 100,
+          "required": true
+        },
+        "body": {
+          "max_chars": 400,
+          "required": false
+        },
+        "items": {
+          "max_items": 3,
+          "required": false
+        }
+      },
+      "design_handoff_image_count": 0,
+      "uniform_to_brixies": {
+        "tagline": "tagline",
+        "primary_heading": "heading",
+        "body": "description",
+        "accent_body": null,
+        "buttons": {
+          "field": "buttons",
+          "subfields": {
+            "label": "label",
+            "url": "url"
+          },
+          "nesting": "contact"
+        },
+        "items": {
+          "field": "accordion_item",
+          "subfields": {
+            "item_heading": "heading_accordion_item",
+            "item_body": null,
+            "item_meta": null
+          },
+          "split": null
+        }
+      },
+      "richtext_keys": [
+        "description"
+      ],
+      "required_slots": [
+        "heading"
+      ],
+      "verified": false,
+      "verified_examples": [],
+      "notes": "Not used by Arvada. Schema-inferred."
+    }
+  },
+  "post_and_listing_templates_for_design_handoff": {
+    "single_blog": "single-post-section-8",
+    "single_event_or_sermon": "single-event-section-4",
+    "single_staff": "single-team-section-6",
+    "archive_filter": "category-filter-6"
+  }
+}
 `,
   },
   'parse-facts-csv': {
@@ -8121,11 +10234,12 @@ Return JSON matching \`CoworkParseFactsResult\` (see
     name:         'plan-cross-page-allocation',
     model:        'anthropic/claude-opus-4-8',
     version:      '1.1.0',
-    contentHash:  'bc132ceaae50c9d7',
+    contentHash:  '9f03e4f211332970',
     references:   [
       'cowork-skills/page-outlines-by-ministry-model.md',
       'cowork-skills/canonical-templates.json',
       'cowork-skills/plan-cross-page-allocation/references/storybrand-and-flow.md',
+      'cowork-skills/references/high-band-lift-rubric.md',
     ],
     systemPrompt: `# Plan Cross-Page Allocation
 
@@ -8148,7 +10262,72 @@ Two reference files load every run:
 
 Load them BEFORE looking at the project sources.
 
-## What you are NOT doing
+## Non-English partner sites (read FIRST, before everything else)
+
+If \`default_language\` in the bundle is anything other than \`'en'\`, the
+partner publishes in a language Church Media Squad doesn't write copy
+in. The whole strategy collapses to **organize + design only**:
+
+- **Treat every atom as \`verbatim: true\`** regardless of what the row
+  actually says. Every section_intent that uses a partner-sourced atom
+  MUST use \`lift_verbatim\` treatment. Never \`weave_into_paragraph\`,
+  never \`reframe_for_persona\`, never \`rewrite_in_voice\`.
+- **Override \`intended_verbatim_band\` to \`'high'\`** on every
+  allocation entry regardless of what
+  \`copy_approach.derived.intended_verbatim_band\` says. The partner's
+  questionnaire answer is overridden by the language constraint — we
+  can't rewrite copy we can't audit.
+- **\`voice_lock: 'strict'\`** on every allocation. No voice transforms
+  downstream.
+- **Output a \`language_lock\` field** at the plan root with
+  \`{ language: '<code>', reason: 'non-english site — verbatim only' }\`
+  so outline-page + draft-page enforce the same constraint without
+  re-deriving it.
+
+Per-campus override: multi-campus projects can have campuses with
+different languages (e.g. Doxology Bible Church — Southwest + Alliance
+in English, Espanol in Spanish). When the \`campuses[].language\`
+field is set and differs from the project default, apply the verbatim
+lock ONLY to allocations whose \`campus_slug\` matches that campus.
+English-campus pages on the same project keep normal band behavior.
+
+## High-band lift mode (read BEFORE the rest of this skill)
+
+When \`copy_approach.derived.intended_verbatim_band === 'high'\`,
+your behavior changes substantively. **Read
+\`../references/high-band-lift-rubric.md\` IMMEDIATELY** — it carries
+the lift-first rules, FPC template-selection rubric, voice-lock
+pattern, and brixies cap relaxation policy.
+
+Quick summary of what changes at \`high\`:
+
+1. **Lift-first from crawl atoms.** The \`atoms_pool.by_id\` now
+   includes \`source_kind='crawl'\` rows whose \`body\` is the full
+   markdown of a source page on the partner's existing site. These
+   are your rubric, not your background. Each new sitemap page gets
+   mapped to the matching crawl page (by slug + topic similarity).
+2. **Allocation matrix, not orphan pool.** Every section of every
+   crawled source page must be either placed in your \`allocations[]\`
+   OR routed to \`unresolved_sources[]\` with a documented rationale.
+   No silent drops.
+3. **Voice-lock auto-detect.** Pages whose slug or title matches
+   \`about | history | who-we-are | beliefs | statement-of-faith |
+   what-we-believe | our-convictions | denomination | our-story\`
+   get stamped with \`voice_lock: 'strict'\` on every allocation
+   entry. Downstream skills skip voice pass on these.
+4. **Brixies template caps are advisory for card-grid + accordion +
+   multi-tab families.** Pick by layout intent + the FPC gold rubric;
+   don't bias toward "fits in default_count." Card grids → feature-2;
+   long-copy paired cards → feature-66; 2-up image splits →
+   feature-22.
+
+Mid/low band: existing behavior. The high-band reference still
+informs your template-selection rubric — the FPC patterns are good
+defaults regardless of band.
+
+## What you are NOT doing (mid/low band — strategic restructure)
+
+When the band is \`mid\` or \`low\`:
 
 - You are NOT preserving the existing site's structure. If the
   partner's old site has "Our service is 75 minutes long" as a
@@ -10521,13 +12700,181 @@ Walk every page once more and verify:
 5. **Cross-page reuse is intentional.** If a kids ministry pillar
    lands as hook on home, on /kids it should land as \`inform\` or
    \`deepen\`, NOT as another hook.
+
+---
+
+## Reference: cowork-skills/references/high-band-lift-rubric.md
+
+# High-band lift rubric — shared reference
+
+Loaded by \`plan-cross-page-allocation\`, \`outline-page\`, and
+\`draft-page\` when the project's \`copy_approach.derived.intended_verbatim_band\`
+is \`high\` (or, per-section, when an entry's \`intended_verbatim_band\` is
+\`high\`). The full design rationale lives at
+\`../_design/high-band-lift.md\`.
+
+## Core principle
+
+The partner said "Keep most of our current content." Your job is **NOT
+to author from scratch**. You're a polisher + UX flow expert. Your
+default move is to lift the partner's existing copy verbatim from
+their crawled website, then make light, in-spec edits.
+
+**Verbatim measurement** = token-level bag of words. ≥ 70% verbatim
+ratio target.
+
+## Crawl atoms — the rubric source
+
+Atoms with \`source_kind='crawl'\` exist now in \`content_atoms\`. One
+atom per unique source page on the partner's existing site. The
+atom's \`body\` is the **full page markdown**. The atom's \`source_ref\`
+is the page URL.
+
+\`\`\`
+content_atoms row
+  source_kind: 'crawl'
+  source_ref:  'https://partner.org/sundays'
+  body:        <full markdown of /sundays>
+  metadata.atom_role:  'page_rubric'
+  metadata.page_title: 'Visit on Sundays'
+\`\`\`
+
+This is your rubric, not your background context. **Read it first.**
+
+## Allocation matrix (NOT an orphan pool)
+
+Every section of every crawled source page MUST land somewhere on
+the new sitemap — either as primary content on its natural target
+page, supporting content elsewhere, or marked
+\`intentionally_dropped\` with a documented rationale.
+
+Allowed dispositions:
+
+- \`verbatim_lift\` — same-page mapping (old \`/home\` → new \`/home\`),
+  lifted with minimal polish.
+- \`same_page_polish\` — same destination page, more substantive edit
+  (combined sentences, reordered, voice-aligned). Still counts as
+  verbatim by bag-of-words.
+- \`cross_page_lift_with_polish\` — source from one old page, lands on
+  a different new page. Surface as directive in cowork outline
+  preview only when content **conflicts** with strategy.
+- \`restructured_with_lift\` — content reorganized into a new section
+  pattern (e.g., turning a paragraph of audience descriptions into
+  a 3-card persona grid), retaining most lifted words.
+- \`intentionally_dropped\` — explicit decision NOT to use, with a
+  required rationale (e.g., \`stale_pandemic_notice\`,
+  \`replaced_by_strategic_persona_messaging\`, \`duplicate_of_other_page\`).
+
+Allocation gate: if the planner leaves source-sections unallocated AND
+not-dropped, the planner emits them into a project-level "needs
+allocation" bucket with a copy-paste cowork prompt for the strategist
+(see \`cowork-director\` workflow).
+
+## Polish operations allowed at \`high\` band
+
+In-band (no ratio hit, no strategist sign-off needed):
+
+- Grammar fixes (commas, possessives)
+- Pronoun swaps (we → you, you → we) for audience clarity
+- Sentence consolidation (3 sentences → 2)
+- Reordering sentences within a section
+- Replacing weak verbs / "discover" → "find"
+- Voice alignment against \`voice_and_tone\` (skip on voice-locked pages — see below)
+- Adding transition sentences
+- Reordering sections on a page
+- Moving sections to new pages (cross-page lift)
+- Adding sections to a page that pull content from elsewhere
+
+When strategy conflicts with lifted copy: **strategy wins**, verbatim
+ratio takes the hit on that section, log the override.
+
+## Voice lock — strict no-voice-pass pages
+
+For destination pages whose slug OR title matches the canonical
+identity/doctrine pattern set, skip the voice pass entirely. Only
+allow grammar / pronoun / consolidation / reorder + adding
+transitionary CTAs at the bottom. Their theology stays true.
+
+Canonical pattern (case-insensitive, matched on slug AND title):
+
+\`\`\`
+about | history | who[- ]we[- ]are | beliefs | statement[- ]of[- ]faith |
+what[- ]we[- ]believe | our[- ]convictions | denomination | our[- ]story
+\`\`\`
+
+If a destination page matches: stamp \`voice_lock: 'strict'\` on every
+allocation entry routed to it. Outline and draft honor the lock.
+
+## Brixies template selection rules (FPC gold-standard rubric)
+
+Mined from FPC's bound templates — use as the canonical pattern
+lookup. Card-shaped layouts are **NOT** capped by \`default_count\`:
+render N items (5 cards on a Feature Section 2 grid, 7 FAQs on an
+accordion, etc.) without worrying about template caps for list-style
+families.
+
+\`\`\`
+Page archetype       → opener        → middle pattern                          → closer
+─────────────────────────────────────────────────────────────────────────────────────────
+Homepage             → hero-102      → content-16 → feature-22 → feature-61    → cta-48 → cta-20
+                                      → feature-2 (persona/ministry cards)
+About / Identity     → hero-41       → content-16 → content-45/99 → faq-10     → cta-48 → cta-20
+                                      → feature-2 (key concept cards)
+Ministry topic       → hero-41       → content-16 → feature-2 (×N)             → cta-48 → cta-20
+                                      → feature-66 (when longer copy per card)
+Worship / dense      → hero-41       → feature-2 → content-89 (×N)             → cta-1 or cta-20
+Archive (Watch/News) → hero or cta-1 → content-25/16 → category-filter-4       → cta-20
+                                      → feature-2 (featured items)
+Staff / team         → hero-41       → content-16 → team-14                    → cta-20
+Single-* templates   → one-row template only (no opener/closer pattern)
+\`\`\`
+
+### Cards rule clarified
+
+- **Short copy, 3-column grid** (persona cards, ministry tiles, ways
+  to give) → \`feature-section-2\`. Default for short-card layouts.
+- **Long copy paired with card** (partner bios, serve opportunities) →
+  \`feature-section-66\`.
+- **2-up image-heavy split** (Join Us This Sunday) → \`feature-section-22\`.
+
+### Caps are advisory for these families
+
+- \`feature-section-2\` (and any default 3-column card grid)
+- \`accordion-faq-section-*\` (any FAQ)
+- multi-tab feature sections
+
+Caps stay **enforced** for:
+
+- Heroes (single-row by design)
+- 2-up splits (literal layout cap)
+- Single-* templates (post template — exactly one item)
+
+### Word-count tolerance
+
+- Tolerate +2 words over a slot's \`max_chars\` budget.
+- Flag at +100 — picks a different template family.
+
+## Rhythm preservation
+
+"Rhythm" = the order of how a page flows / the user's journey on the
+page. Lifting in order naturally preserves rhythm. When restructuring,
+preserve the rhythm of:
+
+1. Hero / identity opener
+2. Mission or welcome
+3. Service details (when applicable)
+4. Featured content (ministries, sermons, personas)
+5. Invitations / next steps (CTAs)
+
+Don't compress an opener-mission-services flow into a single feature
+grid. The rhythm IS the user's mental walk down the page.
 `,
   },
   'plan-site-strategy': {
     name:         'plan-site-strategy',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  '7f2c79ef84f5f758',
+    contentHash:  '69cb57be61d0e852',
     references:   [
       'cowork-skills/page-outlines-by-ministry-model.md',
     ],
@@ -10611,6 +12958,18 @@ the doc speaks; those still apply for fields the doc leaves blank.
   /** OPTIONAL — pages the partner explicitly wants kept from current
    *  site (carryover_slug list). */
   pages_to_carry_forward?: string[]
+  /** Multi-campus registry from strategy_web_projects.campuses. Empty
+   *  array for single-campus churches (the default). When non-empty,
+   *  EVERY ministry decision below must reckon with whether the
+   *  ministry is per-campus or shared — see "Multi-campus discipline"
+   *  below. */
+  campuses?: Array<{
+    slug:       string                // 'southwest', 'alliance', 'espanol'
+    label:      string                // 'Southwest', 'Alliance', 'Español'
+    primary:    boolean               // exactly one campus is primary
+    sort_order: number
+    crawl_url:  string | null
+  }>
 }
 \`\`\`
 
@@ -10637,6 +12996,12 @@ the doc speaks; those still apply for fields the doc leaves blank.
     nav_strategy: 'primary' | 'secondary' | 'footer' | 'contextual_only'
     /** Whether this is a single-page or has children. */
     has_children: boolean
+    /** OPTIONAL — campus slug from input campuses[] when this page is
+     *  scoped to one specific campus (e.g. 'southwest' for a per-
+     *  campus kids page). NULL/absent = global / cross-campus page.
+     *  Required when the project is multi-campus AND the strategist
+     *  decided to split this ministry per-campus. */
+    campus_slug?: string | null
   }>
 
   nav: {
@@ -10733,6 +13098,33 @@ For each persona's journey:
   page where this persona is most likely to stop. Usually it's the
   transition from \`consider\` → \`visit\` (information overwhelm) OR
   \`belong\` → \`commit\` (commitment friction).
+
+## Multi-campus discipline
+
+When \`campuses\` is non-empty (e.g. Doxology Bible Church with Southwest,
+Alliance, Espanol), most ministries split into two shapes:
+
+| Pattern | When to use | Schema |
+|---|---|---|
+| **Per-campus page** | Each campus's content is materially different (its own kids ministry, own service times, own pastor) and the partner wants each campus discoverable. | Add ONE page per campus + per ministry. E.g. \`kids-southwest\`, \`kids-alliance\`, \`kids-espanol\`. Each carries \`campus_slug\` matching its campus. The crawl_topics + atoms with that \`campus_slug\` are this page's content. |
+| **Global page + per-campus sections** | Ministry concept is shared but logistics differ (one Sundays page that lists each campus's service times). | One page with \`campus_slug: null\`. The page's outline includes per-campus call-out sections sourced from \`crawl_topics_pool.by_key.<topic>.per_campus.<slug>\`. Use this when the partner's strategy treats the ministry as one ministry across all campuses. |
+| **One global page only** | Content is identical across campuses (statement of faith, the gospel, mission/vision). | Single page with \`campus_slug: null\`. Atoms with \`metadata.campus_slug = null\` are this page's content. Per-campus atoms shouldn't reach this page. |
+
+Default decision rule when ambiguous: **per-campus pages when the crawl
+shows ≥3 distinct per-campus pages for that topic; global page with
+call-outs otherwise.** Check \`crawl_topics_pool.by_key.<topic>.per_campus\`
+to count.
+
+Required output:
+- Every per-campus page MUST set \`campus_slug\` to the matching registry
+  slug.
+- Nav grouping for multi-campus: primary nav typically lists ministries
+  by name once (e.g. "Kids"); the click reveals a campus chooser before
+  the per-campus page renders. Allocation/outline downstream handles
+  the chooser; you just emit the per-campus pages here.
+- Each persona's \`journey[]\` may need a campus assumption — note
+  per-campus journey variants in \`report.coverage_gaps_remaining\` if
+  any persona doesn't walk cleanly through one chosen campus's pages.
 
 ## Coverage-gap handling
 
@@ -11527,11 +13919,201 @@ Keep the note tight: aim for 250-400 words. If you need more, the
 artifact itself is the canonical record; the note is the cliff notes.
 `,
   },
+  'seo-per-page': {
+    name:         'seo-per-page',
+    model:        'anthropic/claude-opus-4-7',
+    version:      '1.0.0',
+    contentHash:  'eb831664633aeefa',
+    references:   [],
+    systemPrompt: `# SEO Per Page
+
+You produce per-page SEO + AEO + GEO metadata so the dev team can
+paste it straight into the WordPress page template (Yoast / Rank
+Math / native fields). One row written to \`web_pages.seo\` per
+active page on the project. The Dev Handoff workspace already
+reads from this column and exports it as Markdown — your job is
+just to fill it.
+
+This is a one-shot fill, not an iterative critique. You write
+exactly one UPDATE per page. /staff/ pages are skipped (auto-
+generated per-staff bio pages share the parent Team Section's
+content and don't carry their own SEO).
+
+## Inputs you need before you start
+
+Ask the strategist for these only if they aren't already in
+\`roadmap_state\` or \`church_facts\`:
+
+- The project's \`web_project_id\` (uuid).
+- The church's primary service areas (city + state, neighborhoods,
+  regional context). GEO needs this.
+- The church's voice / tone — one or two sentences. Drives the
+  voice of the meta description.
+
+Everything else you derive from the page's sections.
+
+## Step-by-step
+
+### 1. List every active, non-staff page
+
+\`\`\`sql
+SELECT id, name, slug, seo
+FROM web_pages
+WHERE web_project_id = $1
+  AND archived = false
+  AND slug NOT LIKE 'staff/%'
+ORDER BY sort_order;
+\`\`\`
+
+Skip pages whose \`seo\` already has a non-empty \`seo.title\` AND
+\`seo.meta_description\` — the strategist already filled them.
+
+### 2. For each remaining page, gather context
+
+Read the page's bound sections to get its real content:
+
+\`\`\`sql
+SELECT s.id, s.content_template_id, s.field_values, s.notes
+FROM web_sections s
+WHERE s.web_page_id = $1
+ORDER BY s.sort_order;
+\`\`\`
+
+For each section, extract:
+
+- The hero / first H1 (substitute target \`Heading\` in the bound
+  template's source HTML) — anchors the page's primary topic.
+- Tagline + body copy from the first 1–3 sections — supplies the
+  one-sentence summary you need for meta description.
+- Any explicit Q&A items inside accordion / FAQ sections — these
+  go straight into \`aeo.structured_qa\`.
+
+Also read:
+
+- \`roadmap_state.brand_voice\` — drives the tone of the meta
+  description (terse, warm, formal, etc.).
+- \`roadmap_state.strategic_goals.display_and_technical.*\` — fills
+  service areas + landmark context when not explicit on the page.
+- (optional) the prior crawl's content_results JSON if the dev
+  team needs to preserve existing rankings — match titles to
+  legacy URLs.
+
+### 3. Produce one WebPageSeo blob per page
+
+Shape — write the full object even if some fields are empty:
+
+\`\`\`json
+{
+  "seo": {
+    "title":            "<≤60 chars, ends with church name>",
+    "meta_description": "<≤155 chars, one sentence, partner's voice>",
+    "focus_keywords":   ["primary phrase", "secondary phrase", "..."],
+    "canonical_url":    "<full https URL once domain is live; else null>"
+  },
+  "aeo": {
+    "answer_intent":    "<the one question this page answers>",
+    "structured_qa":    [
+      { "q": "<question>", "a": "<≤200-char answer>" }
+    ]
+  },
+  "geo": {
+    "service_areas":    ["Charlotte, NC", "..."],
+    "local_keywords":   ["uptown Charlotte", "..."],
+    "local_landmarks":  "<free text — neighborhoods, regional context>"
+  }
+}
+\`\`\`
+
+Rules:
+
+- **title** is page-specific. Don't paste the church name 5×
+  across the site — use the page's actual topic. Example:
+  \`"Plan a Visit · First Presbyterian Church of Charlotte"\`.
+- **meta_description** answers "why would I click?" in the
+  partner's voice. No keyword stuffing. Lead with the partner
+  benefit, not the search phrase.
+- **focus_keywords** has 1–5 entries. Primary phrase first.
+- **canonical_url** stays null until the dev confirms the live
+  domain. Don't guess.
+- **answer_intent** is a single question — what someone searching
+  on this topic actually asks. Used by Google's AEO snippet and
+  internal search. Example for a Care page: \`"How do I find
+  pastoral care at First Presbyterian?"\`.
+- **structured_qa** is optional. Include only when the page
+  already has Q&A-style content (FAQ section, accordion, "What
+  to expect" lists). 2–6 entries max.
+- **service_areas** is always present on local pages. Use
+  \`"City, ST"\` format.
+- **local_keywords** are search phrases that include geography
+  (e.g. \`"church in uptown Charlotte"\`). Drop ones that are
+  awkward or unnatural.
+- **local_landmarks** is free text — neighborhoods, schools,
+  hospitals near the church. Used for local pack relevance.
+
+### 4. Persist per page
+
+One UPDATE per page. NEVER batch — if one row's JSON is malformed,
+batching loses every other write.
+
+\`\`\`sql
+UPDATE web_pages
+SET seo = '<json-stringified WebPageSeo>'::jsonb,
+    updated_at = NOW()
+WHERE id = '<page_id>'
+RETURNING id, slug;
+\`\`\`
+
+Verify the RETURNING row matches the page you intended. If it
+doesn't, halt and surface the discrepancy.
+
+### 5. Report when done
+
+A single summary to the strategist:
+
+\`\`\`
+Filled SEO for N pages on <project name> (<N skipped — already had title + description>).
+Pages still missing GEO landmarks: <list>
+Pages still missing canonical_url (waiting on live domain): <list>
+\`\`\`
+
+The Dev Handoff workspace surfaces everything you wrote — no
+separate artifact needed.
+
+## What NOT to do
+
+- Don't write to /staff/* pages. They share the team-link source.
+- Don't write \`canonical_url\` unless the strategist hands you the
+  live domain. Wrong canonicals harm rankings worse than missing
+  ones.
+- Don't paraphrase the partner's voice into "professional SEO
+  speak." Meta descriptions in the partner's actual tone outrank
+  generic ones once Google's RankBrain reweights against pogo-
+  sticking.
+- Don't invent answer_intent questions — only include if the
+  page's content actually answers a clear question.
+- Don't add \`focus_keywords\` with > 5 phrases. Keyword stuffing
+  underperforms tighter targeting in 2025.
+
+## Where the data surfaces
+
+\`web_pages.seo\` is read by:
+
+- \`DevHandoffWorkspace.tsx\` (SEO · AEO · GEO export card) —
+  downloadable as Markdown the dev pastes into WordPress.
+- The page editor's SEO panel (Pages tab) — lets the strategist
+  hand-edit anything you wrote.
+- (future) \`webBrixiesRender.ts\` — when the build ships, the SEO
+  fields will populate the rendered \`<head>\` of each page.
+
+No other consumers. Safe to overwrite freely on re-runs — there's
+no migration log.
+`,
+  },
   'supplemental-page-authoring': {
     name:         'supplemental-page-authoring',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  '4f57514c169fe67a',
+    contentHash:  '7d7c3faae2897b3f',
     references:   [
       'cowork-skills/outline-page/SKILL.md',
       'cowork-skills/draft-page/SKILL.md',
@@ -11767,6 +14349,7 @@ version: '1.0.0'
 references:
   - ../canonical-templates.json
   - ../page-outlines-by-ministry-model.md
+  - ../references/high-band-lift-rubric.md
 ---
 
 # Outline Page
@@ -11775,6 +14358,32 @@ You design ONE page. The plan-cross-page-allocation skill already
 decided what content goes on this page. Your job is the next layer
 down: **for each section_intent in the allocation, pick a canonical
 template + map the allocated atoms/facts into the template's slots.**
+
+## High-band lift mode (read BEFORE picking templates)
+
+When this page's allocation entries carry \`intended_verbatim_band:
+'high'\`, **read \`../references/high-band-lift-rubric.md\` first**.
+
+Key behaviors:
+
+1. **Primary source page lift.** Each allocation entry that came
+   from a crawl atom carries \`source_url_lift\` (the URL of the
+   matching \`content_atoms\` row with \`source_kind='crawl'\`). That
+   atom's \`body\` is the page rubric you anchor on for this section.
+   Pick a template that matches the rhythm of that source content
+   (e.g., a list of ministries in markdown → feature-section-2 card
+   grid; a Q&A pattern in markdown → faq-section-10).
+2. **FPC gold rubric.** Use the template-archetype table in the
+   reference (homepage hero-102, inner hero-41, etc.) as the
+   canonical pattern lookup. Don't bias template selection by
+   \`default_count\` for card-grid families — caps are advisory there.
+3. **Voice lock.** If the allocation entry carries
+   \`voice_lock: 'strict'\`, stamp it on the outline section's
+   \`_meta\`. Draft-page reads it and skips the voice pass for that
+   section.
+4. **Cards rule.** Short-copy 3-column grid → feature-section-2.
+   Long-copy paired card → feature-section-66. 2-up image split →
+   feature-section-22.
 
 You are NOT picking from raw Brixies. You are picking from
 \`canonical-templates.json\` — the template manifest that hides Brixies
@@ -12103,23 +14712,62 @@ a swap mid-draft, the swap round-trips to outline-page (re-fire).
 | CTA banner | \`cta_simple\` / \`cta_callout\` | A CTA banner is a SHORT, end-of-page call-out ("Got questions?", "Plan a Visit"). Use **once per page, at the end**. \`cta_callout\` = 1 button; \`cta_simple\` = primary + secondary. **DO NOT scatter \`cta_callout\`/\`cta_simple\` mid-page.** Mid-page content with a button belongs in \`content_featured_b\` (featured content + button) or a standard content section with a build-directive link. **The pastor bio does NOT belong in \`cta_callout\` — that's a content container failure mode the drafter has hit twice now.** |
 | Quote / written testimony | \`testimonial_written\` | Quote + attribution. |
 | Video testimony | \`testimonial_video\` | Quote + attribution + embedded video. |
-| Staff / leadership | \`feature_team\` | 2-item layout. SPLIT into siblings when the staff list is larger. |
+| Staff / leadership | \`feature_team\` | 2-item DEFAULT visual rhythm — STRETCH (keep one section, exceed the count) preferred over SPLIT. The layout absorbs more cards; only SPLIT when staff have a natural grouping (Lead vs Support) that justifies the visual break. **Do NOT split just because the default is 2.** |
 | Contact / address / map | \`contact_section\` | When the content has a map embed (\`*[Map embed: <iframe…>]*\`) or an address block, this template binds it cleanly. |
 | FAQ / accordion | \`accordion_faq\` | ≥3 Q&A pairs. Split when the items exceed the visual rhythm. |
 
-**Fixed-count card capacities (memorize):**
+**Default card counts (NOT hard caps — STRETCH is allowed):**
 
-- \`content_image_text_a\` / \`content_image_text_b\` — up to 3 plain (non-Card) text blocks.
-- \`content_featured_a\` — 3 cards.
-- \`feature_tabbed\` — 4 cards.
-- \`feature_unique\` / \`feature_team\` — 2 items.
+- \`content_image_text_a\` / \`content_image_text_b\` — 3 plain (non-Card) text blocks (default).
+- \`content_featured_a\` — 3 cards (default).
+- \`feature_tabbed\` — 4 cards (default).
+- \`feature_unique\` / \`feature_team\` — 2 items (default).
 - \`feature_card_carousel_proxy\` — N cards (no fixed cap; the layout renders from a listing/CPT).
 
-Pick the FIXED template that matches the real card count;
-escalate to \`feature_card_carousel_proxy\` only when the count
-exceeds the largest fixed template (4) OR the set is
-dynamic/seasonal. Forcing 8 ministries down to 3 cards drops
-content the church gave us.
+These are VISUAL RHYTHM defaults, not structural maximums. The
+Brixies layouts absorb extra cards. STRETCH (keep one section,
+exceed the default count, stamp \`_meta.item_count_overrides\`) is
+the preferred path when the partner's card count is 1-2 over the
+default. Escalate to \`feature_card_carousel_proxy\` when the count
+is 6+ AND the set is uniform enough for a grid, OR when the set
+is dynamic/seasonal. Forcing 8 ministries down to 3 cards drops
+content the church gave us; splitting 4 staff into 2 sections of
+2 just because the default is 2 introduces unnecessary visual
+fragmentation.
+
+## Hero H1 default — page name carries the heading
+
+For the first section of every page (the hero), \`primary_heading\`
+DEFAULTS to the page's display name verbatim. The tagline carries
+the punchy draw-you-in hook; H1 is the page label.
+
+Examples:
+- "Plan A Visit" page → \`primary_heading: "Plan A Visit"\`,
+  \`tagline: "<punchy hook from voice atoms>"\`
+- "Kids" page → \`primary_heading: "Kids"\`,
+  \`tagline: "<the welcoming-the-family voice atom>"\`
+- "Students" page → \`primary_heading: "Students"\`, etc.
+- "Outreach" page → \`primary_heading: "Outreach"\`, etc.
+
+Bind the hero \`primary_heading\` slot as a \`directive\` pointing to
+\`page.display_name\` (or as a \`merge_token\`-style binding if your
+outline schema has one for page name). The drafter writes the page
+name verbatim. The hero \`tagline\` slot gets the punchy line —
+that's where voice atoms / hook atoms land.
+
+The 1-in-10 cases where the H1 SHOULD differ from the page name:
+- The strategist explicitly tagged a different H1 via outline
+  annotation (\`hero_h1_override\`).
+- A voice atom or pillar atom is a uniquely sacred heading-class
+  phrase that BELONGS as the H1 (rare — usually those land in
+  body/quote slots per the verbatim-atoms decision tree above).
+- The page is a true brand landing page where a brand line is the
+  established H1.
+
+Stamp \`_meta.hero_h1_source\` on the hero section: one of
+\`"page_name_default"\`, \`"strategist_override"\`, \`"sacred_atom"\`,
+or \`"brand_line"\`. The strategist sees this in the Rich Companion
+and can flip it if the rare case applies.
 
 ## Slot-binding discipline
 
@@ -12206,20 +14854,18 @@ INCORRECT outline output (will trip \`voice_atom_in_assignments\`):
 - \`atom_assignments\` includes \`{atom_id: 'be43f59d-…',
   slot_hint: 'primary_heading'}\` — voice atom in assignments = fail.
 
-## Verbatim atoms — pick a slot that can hold the body, or surface it
+## Verbatim atoms — pick a slot that can hold the body, or stretch the cap
 
-Verbatim atoms (\`verbatim: true\`) MUST be routed to a slot whose
-\`max_chars\` can hold the body length. The validator checks
-\`atom.body.length <= slot.max_chars\` at outline time and fails
-\`verbatim_atom_exceeds_slot_cap\` on any binding where the verbatim
-body wouldn't fit. This regresses a rule the allocation SKILL already
-states ("a heading source must be a short, lift-able phrase — flag
-if not"): the outline layer is where the rule has to be enforced as
-code because outline is where slot-binding happens.
+Verbatim atoms (\`verbatim: true\`) get a slot that can hold their
+full body — partner-supplied text is never trimmed to meet a
+\`max_chars\` recommendation. \`max_chars\` in \`canonical_templates\` is
+a VISUAL RHYTHM default the designer can choose to honor; for prose
+slots (\`body\`, \`description\`, \`quote\`, \`accent_body\`, etc.) the
+Brixies layout absorbs longer text without breaking. For SHORT
+slots (\`primary_heading\`, \`tagline\`, \`cta_label\`) clipping IS a
+visual problem — those need the decision tree below.
 
-**The decision tree (banked 2026-06-13 strategist decision: long
-partner-sacred lines belong in body/quote slots with a derived short
-heading — DO NOT add long-heading template variants):**
+**The decision tree:**
 
 1. Can the verbatim body fit a \`body\`, \`quote\`, or other long-cap
    slot on the chosen archetype? Look beyond \`primary_heading\` /
@@ -12233,9 +14879,20 @@ heading — DO NOT add long-heading template variants):**
    in a body/quote slot?
    - YES → switch archetype. The flow_role is the constraint;
      the archetype is the lever.
-3. None of the above?
-   - Declare in \`unresolved_inputs[]\` with what+where pair. Last
-     resort.
+3. None of the above? — STRETCH the cap.
+   - For PROSE slots (\`body\`/\`description\`/\`quote\`/\`accent_body\`/
+     \`richtext\`): bind the verbatim atom and emit a
+     \`cap_overrides[]\` entry on the section naming the slot. The
+     drafter honors it without strategist authorization because
+     PARTNER VERBATIM CONTENT IS NEVER TRUNCATED. The critique
+     treats this as authorized.
+   - For SHORT slots (\`primary_heading\`/\`tagline\`/\`cta_label\`):
+     declare in \`unresolved_inputs[]\` with what+where pair (truly
+     last resort — the visitor would see clipped headings).
+
+**The strategic distinction.** Truncation is forbidden for partner
+verbatim content; clipping is a real visual hazard only for the
+short heading-class slots. Prose slots stretch silently.
 
 **The derived-heading pattern.** When you route a long verbatim atom
 to a body slot, the heading slot still needs SOMETHING — that's where
@@ -12723,6 +15380,7 @@ allowed-tools: Read
 version: '1.0.0'
 references:
   - ../canonical-templates.json
+  - ../references/high-band-lift-rubric.md
 ---
 
 # Draft Page
@@ -12733,6 +15391,125 @@ you which slot gets which atom/fact, with what treatment. You write the
 prose.
 
 You are the only skill that uses Fable 5. Voice is the lever. Use it.
+
+## High-band lift mode (read FIRST when band is 'high')
+
+When this section's \`intended_verbatim_band === 'high'\`, **read
+\`../references/high-band-lift-rubric.md\` immediately**. Your
+behavior is "polisher + UX flow expert," not "author from scratch."
+
+Six-step flow for each high-band section:
+
+1. **Copy-paste verbatim** from the cited crawl atom's \`body\`
+   (markdown of the source page). This is the rubric — start from
+   the partner's actual words.
+2. **Identify gaps from strategic goals.** Does the source content
+   address the persona this section is meant to reach? If a homepage
+   "Wherever you are with faith" section is supposed to surface
+   New-to-faith / Families / Longtime-believers personas but the
+   source page doesn't address them, you fill the gap with light
+   AI-authored prose.
+3. **Identify removals.** Allocation may have routed some content
+   from this source page to OTHER pages (cross-page allocation). The
+   section reflects only what should land here.
+4. **Restructure for the chosen template.** Section-planner picked
+   the template; reshape the lifted prose to fit (e.g., paragraph →
+   3 card_team items, or one long body → heading + bullet list).
+5. **Voice pass (skip if \`voice_lock: 'strict'\` on the section's
+   \`_meta\`).** When voice-locked: ONLY grammar / pronoun /
+   consolidation / reorder + adding bottom-of-section CTA. When NOT
+   voice-locked: light alignment to \`voice_and_tone\` — short
+   sentence-by-sentence diff edits, no rewrites that change the
+   bag-of-words.
+6. **Stamp \`source_excerpt_id\`** on each slot value pointing to the
+   crawl atom row used. Critique reads this to verify the lift
+   actually landed.
+
+In-band polish operations (do not blow the verbatim ratio):
+
+- Grammar fixes (commas, possessives)
+- Pronoun swaps (we → you, you → we)
+- Sentence consolidation (3 sentences → 2)
+- Reordering sentences within a section
+- Replacing weak verbs (discover → find)
+- Voice alignment phrase-by-phrase (skip if voice_lock='strict')
+- Adding transition sentences
+- Removing dated references (COVID notices, year-locked promos)
+
+When strategy conflicts with lifted copy: **strategy wins**, ratio
+takes the hit, log the override in \`section.verbatim_overrides[]\`.
+
+## High-band brixies cap rule
+
+When restructuring a lifted source into a card-shaped layout
+(feature-section-2 / accordion-faq / multi-tab features), render
+**all relevant items** — do NOT truncate to \`default_count\`. Word
+caps tolerate +2; if you're +100 over a slot's \`max_chars\`, ping the
+outline to consider a different template family.
+
+## Statement of Faith, Beliefs, Values — verbatim hard rule
+
+**This rule overrides every other length/cap/band guideline in this
+document.** When the source page contains a Statement of Faith,
+Statement of Beliefs, Doctrinal Statement, Statement of Values, or
+similarly-named theological declaration, you MUST emit the FULL
+verbatim text. No exceptions.
+
+What this rule forbids:
+- ❌ Summarizing the statement ("The 13 sections cover Trinity,
+  baptism, Spirit…")
+- ❌ Truncating with a link out ("Read the full statement at
+  [partner site]")
+- ❌ Picking a subset ("the 5 most important values")
+- ❌ Paraphrasing into shorter cards because the template's \`max_chars\`
+  is tight (pick a different template instead)
+- ❌ Dropping scripture references that follow each declaration
+- ❌ Folding multi-paragraph declarations into a single paragraph
+- ❌ Skipping the statement because it's "too long" or "the user can
+  click through"
+
+What this rule requires:
+- ✅ Every numbered/named theological section appears as its own
+  heading + body, in source order
+- ✅ Full text of every paragraph, every clause, every parenthetical
+- ✅ Scripture reference lists kept intact (typically italicized run
+  of book/chapter/verse citations following each section)
+- ✅ If \`max_chars\` constrains the only available template family,
+  set \`band_status: 'verbatim_band_unreachable'\` AND emit a
+  \`cap_override\` request naming the offending slot — DO NOT
+  silently drop text
+- ✅ When the source is split across multiple sub-pages (e.g.
+  /beliefs/, /statement-of-faith/, /what-we-believe/), include
+  every page's content in the page draft
+
+How to recognize these statements in the source:
+- Headings containing: "Statement of Faith", "Statement of Beliefs",
+  "Statement of Values", "Doctrinal Statement", "What We Believe",
+  "Core Values", "Our Beliefs", "Our Values", "Foundational Truths",
+  "Articles of Faith"
+- Structural pattern: numbered or named theological declarations,
+  each typically 100-500 words, often with scripture refs trailing
+- Long run of \`<h2>\`/\`<h3>\` headings naming theological concepts
+  (Trinity, Christology, Pneumatology, Eschatology, etc.)
+
+Why this rule exists: church partners send these statements as
+non-negotiable, often-board-approved documents. Truncating or
+summarizing them changes their theological precision — what reads
+to a generalist as redundant qualifier is, to the partner, a
+specific doctrinal commitment. Arvada Vineyard's 13-section
+Statement of Faith was summarized to "13 major theological sections
+covering…" in the first draft; the partner-facing copy lost the
+entire body of the church's theological identity. This rule
+prevents that recurrence regardless of \`intended_verbatim_band\`,
+\`max_chars\`, or template capacity.
+
+If you can't fit the full statement into the planned section,
+**emit it anyway** and stamp \`band_status: 'verbatim_band_unreachable'\`
+with a \`voice_notes\` entry: "Statement of Faith exceeds template cap;
+needs a long-prose template (content-section-16) or repeated content
+sections." The bind step is permissive about long bodies on
+richtext slots; the cap-warning trips downstream but the content
+survives.
 
 ## Strategic Goals — inputs you MUST consume
 
@@ -13051,6 +15828,25 @@ of these failed validation.** They were just absent.
      *  button slot when supported, drops them when not (and the
      *  audit picks a template that supports them when present).
      *
+     *  IMPORTANT — DO NOT CONFLATE FIELDS.
+     *  Each subfield is its own slot. Never pack multiple slots into
+     *  one string. Specifically:
+     *   - Staff rosters: emit \`item_heading: "Thad Harless"\` +
+     *     \`item_meta: "Lead Pastor"\`. NEVER pack as
+     *     \`item_heading: "Thad Harless - Lead Pastor"\` — the renderer
+     *     shows name and title in separate slots; conflating leaves
+     *     one slot empty and the section reads broken.
+     *   - Mission-triad / values: emit
+     *     \`item_heading: "Connect in Love"\` +
+     *     \`item_body: "Building genuine relationships..."\`.
+     *     NEVER pack as \`item_body: "Connect in Love: Building..."\`.
+     *   - Accordion FAQ: emit \`item_heading: "<question>"\` +
+     *     \`item_body: "<answer>"\`. NEVER emit just an item_body that
+     *     starts with the question.
+     *  The handoff has a rescue-splitter for common delimiters
+     *  (\` - \`, \` – \`, \` | \`, \`: \`) but it's a fallback for legacy
+     *  drafts. New drafts MUST emit clean splits.
+     *
      *  buttons[] subfields:
      *    { label, url, kind?: 'primary' | 'secondary' }
      *  Capture EVERY button the section calls for, not just one.
@@ -13284,9 +16080,9 @@ The outline's slot_bindings carry a \`treatment\` flag from allocation:
 
 | treatment | what to do |
 |---|---|
-| \`use_as_is\` | Atom body goes in unchanged. Mandatory for verbatim atoms. If atom body exceeds slot max_chars, fail to \`deferred_slot\`. |
+| \`use_as_is\` | Atom body goes in unchanged. Mandatory for verbatim atoms. If atom body exceeds slot max_chars on a PROSE slot (\`body\`/\`description\`/\`quote\`/\`accent_body\`/\`richtext\`), auto-apply \`cap_overrides[]\` for that slot and proceed — the verbatim line is sacred. On a SHORT slot (\`primary_heading\`/\`tagline\`/\`cta_label\`), fail to \`deferred_slot\` (the outline should have routed it to a prose slot upstream). |
 | \`lift_phrase\` | The atom contains the right phrase but in context — lift the phrase, drop the surrounding. Note which phrase in \`voice_notes_by_slot\`. |
-| \`compress\` | Atom body too long for slot. Compress while preserving claims. Track compression in \`voice_signal_report.compression_notes\`. NO claim gets cut without justification. |
+| \`compress\` | Atom body too long for slot AND the strategist authorized compression (treatment came from allocation, not from a verbatim source). Compress while preserving claims. Track compression in \`voice_signal_report.compression_notes\`. NO claim gets cut without justification. NEVER compress a \`verbatim: true\` atom — that contradicts the verbatim contract. |
 | \`expand\` | Atom body too short, slot wants more. Add ONLY adjacent context already in the atom or stage_1 — do NOT invent new claims. |
 | \`reorder\` | Atom body's points are good but in wrong order for this slot's emphasis. Reorder, preserve every claim. |
 
@@ -13451,20 +16247,32 @@ under the 8 KB single-literal threshold the combined batch write
 relies on.
 
 **Per-slot \`max_chars\` is NOT always a hard cap.** The canonical
-values in \`canonical_templates\` are conservative defaults. Some
-Brixies/Bricks layouts comfortably hold much more — the clearest
+values in \`canonical_templates\` are visual-rhythm defaults. The
+Brixies layouts absorb longer prose without breaking — the clearest
 case is the image-left/text-right long-form content section
 (strategist's "section 16", mapped to \`content_image_text_b\`)
 which holds full multi-paragraph bios (~950+ chars) in its \`body\`.
-DO NOT trim church-supplied long-form content to force it under
-400 when the strategist has confirmed the layout supports it.
-Mechanism: when the strategist authorizes, add the slot to that
-section's \`cap_overrides: ["body"]\` array. The self-validator
-skips the cap check for that slot AND records the override on the
-artifact so critique-page treats it as authorized, not a
-violation. Drafter NEVER self-grants a cap override; only the
-strategist authorizes; only for slots whose layout supports it
-(NEVER headings, taglines, CTA labels — those clip).
+
+**Partner verbatim content is NEVER truncated to meet a char cap.**
+This is the load-bearing rule: any slot binding whose source has
+\`treatment: 'use_as_is'\`, \`treatment: 'lift_phrase'\`, or
+\`verbatim: true\` gets an auto-applied \`cap_overrides[]\` entry for
+PROSE SLOTS (\`body\`, \`description\`, \`quote\`, \`accent_body\`,
+\`richtext\`). The drafter self-grants the override for verbatim
+prose; the self-validator skips the cap check; critique-page treats
+it as authorized. No strategist signal required for verbatim prose.
+
+**Strategist-authorized cap overrides** still apply for non-verbatim
+prose where the strategist has confirmed the layout supports more —
+add the slot to that section's \`cap_overrides: ["body"]\` array via
+the workspace.
+
+**SHORT slots remain clipped.** NEVER auto-stretch a
+\`primary_heading\`, \`tagline\`, or \`cta_label\` — these clip visually
+and the outline-page validator should have routed long verbatim
+content to a prose slot upstream. If a heading-class slot is
+already over-cap on arrival, fail to \`deferred_slot\` and surface in
+the report.
 
 **Batch write — column-free chunk pattern (load-bearing).**
 
@@ -14314,6 +17122,42 @@ disagreement between sources (Desert Springs youth: text-to-connect
 fact \`55678\` vs crawl \`620-322-2390\`), surface that conflict as a
 directive at severity \`warning\` so the strategist routes to partner
 confirmation. Never silently pick one value.
+
+### theological-statement truncation flag
+
+If the source page (per crawl atoms or partner-uploaded copy) contains
+a Statement of Faith, Statement of Beliefs, Statement of Values,
+Doctrinal Statement, or similar theological declaration, the draft's
+bound copy MUST contain it verbatim. Detect this:
+
+1. Walk the page's crawl atom bodies + content_collection markdown.
+   Match heading patterns: \`Statement of Faith\`, \`Statement of Beliefs\`,
+   \`What We Believe\`, \`Doctrinal Statement\`, \`Core Values\`,
+   \`Our Beliefs\`, \`Foundational Truths\`, \`Articles of Faith\`.
+2. For each match, extract the full block of text under that heading
+   (until the next H2 or end-of-page). Record total character count
+   and a fingerprint (first 100 chars + last 100 chars + word count).
+3. Concatenate the draft's section bodies that land on the same page.
+   Check: does the bound copy contain the fingerprint AND match the
+   word count within ±5%?
+4. If NO → emit a \`blocker\`-severity directive:
+   \`theological_statement_truncated\`. Cite the source heading +
+   source word count + draft word count. Example:
+   \`"Source 'Statement of Faith' (1,847 words across 13 sections)
+   appears in draft as a 64-word summary. The full text must be
+   emitted verbatim — see draft-page SKILL §Statement of Faith
+   hard rule. Recommend a long-prose section (content-section-16)
+   between sections N and N+1."\`
+5. NEVER tolerate "Read the full statement at [link]" patterns in
+   the draft. Phrases like \`"For our full statement of faith, visit"\`,
+   \`"Read more at"\`, \`"See the complete statement"\` followed by a URL
+   are also \`theological_statement_truncated\` blockers.
+
+This is the strictest critique rule in the rubric — it fires
+regardless of \`intended_verbatim_band\`, regardless of template
+constraints, regardless of page-length goals. Partners send these
+statements as theologically precise, often board-approved documents.
+Summarizing them changes their meaning.
 
 ### Authorized strategist overrides — DO NOT flag these as errors
 
