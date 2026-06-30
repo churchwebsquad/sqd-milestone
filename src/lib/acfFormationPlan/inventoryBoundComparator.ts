@@ -67,15 +67,36 @@ export function compareInventoryToBound(
     if (invFieldsPopulated.length === 0) continue
 
     // For each populated inventory field, check the bound coverage.
+    // We only flag as "upstream loss" when:
+    //   (a) the inventory has the field populated, AND
+    //   (b) NO bound section of the same schema has any fill for it, AND
+    //   (c) AT LEAST ONE bound template structurally CAN hold the field
+    //       (via the canonical schema's field_aliases or Brixies slot
+    //       aliases — i.e. some bound row's diagnostic has
+    //       `in_bound_template === true`).
+    //
+    // (c) is the actionable filter: if NO bound template has a slot for
+    // the field, the partner is using a layout that can't carry that
+    // data — that's an architectural choice the dev can't "fix"
+    // without swapping the template. Surfacing it as a red warning
+    // just confuses the strategist who sees a flag they can't act on.
+    // Pre-(c) the comparator flagged every canonical field absent from
+    // every chosen template; now we narrow to genuinely-droppable
+    // fields that DID have a home in some bound template but missed
+    // its fill across all sections.
     const droppedFields: string[] = []
     for (const field of invFieldsPopulated) {
       const totalBoundFills = matchingBound.reduce((sum, b) => {
         const d = b.schema_field_diagnostics?.find(d => d.key === field)
         return sum + (d?.fill_count ?? 0)
       }, 0)
-      if (totalBoundFills === 0) {
-        droppedFields.push(field)
-      }
+      if (totalBoundFills !== 0) continue
+      const anyTemplateSupports = matchingBound.some(b => {
+        const d = b.schema_field_diagnostics?.find(d => d.key === field)
+        return d?.in_bound_template === true
+      })
+      if (!anyTemplateSupports) continue
+      droppedFields.push(field)
     }
     if (droppedFields.length === 0) continue
 

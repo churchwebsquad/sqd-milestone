@@ -206,6 +206,12 @@ export async function loadProjectInputs(
     } else {
       approvedPages = fromContentStatus
     }
+    // Filter out per-staff bio pages (slug `staff/<kebab-name>`). They're
+    // auto-generated stubs that share a single template with the parent
+    // Team Section; modeling each one separately on the content-model
+    // plan blows out the discovery section with N+1 identical rows. The
+    // staff CPT (when emitted) carries the underlying content model.
+    approvedPages = approvedPages.filter(p => !p.slug.startsWith('staff/'))
   }
 
   // 4. Sections for those pages.

@@ -641,8 +641,20 @@ export const CANONICAL_SCHEMAS: Record<SchemaName, SchemaSpec> = {
   blog_post_card: {
     canonical_fields: ['title', 'author', 'date', 'excerpt', 'body', 'featured_image', 'category', 'tags', 'url'],
     field_aliases: {
-      title:          ['name', 'post_title'],
-      featured_image: ['image', 'hero_image'],
+      title:          ['name', 'post_title', 'heading', 'heading_card'],
+      featured_image: ['image', 'hero_image', 'image_card'],
+      // Bound Brixies blog templates often use compound slot names —
+      // `author_bio_author_container` carries the byline, `description_card`
+      // carries the excerpt, etc. Without these aliases the inventory-vs-
+      // bound comparator flagged every blog field as "dropped before
+      // binding" even when the partner content was there under a
+      // differently-named slot.
+      author:         ['author_bio_author_container', 'byline', 'post_author', 'author_name'],
+      date:           ['post_date', 'published_date', 'publish_date', 'date_published'],
+      body:           ['content', 'post_body', 'body_card', 'description_card', 'description'],
+      excerpt:        ['summary', 'post_excerpt', 'subtitle'],
+      url:            ['permalink', 'post_url', 'link', 'read_more_url'],
+      category:       ['post_category', 'category_1', 'category_2', 'category_card', 'taxonomy'],
     },
     page_slug_signals:    ['blog', 'news', 'stories', 'articles'],
     section_role_signals: ['blog_listing', 'blog_featured', 'post_detail'],
@@ -718,8 +730,16 @@ export const CANONICAL_SCHEMAS: Record<SchemaName, SchemaSpec> = {
      *  the items have <= 3 distinct field keys. */
     canonical_fields: ['name', 'description', 'cta_label', 'cta_url'],
     field_aliases: {
-      name:        ['title', 'heading'],
-      description: ['body', 'subtitle'],
+      name:        ['title', 'heading', 'heading_card', 'card_heading_card'],
+      description: ['body', 'subtitle', 'description_card', 'card_description_card', 'body_card'],
+      // Brixies button slots carry their CTA labels under template-
+      // specific keys (button_card, buttons_card, contact, etc.) that
+      // expand into `<key>_label` / `<key>_url` via the section
+      // projection. Without these aliases, the comparator flags
+      // cta_label/cta_url as dropped on any feature_grid that uses
+      // a Brixies button slot.
+      cta_label:   ['button_card_label', 'buttons_card_label', 'contact_label', 'button_label', 'label'],
+      cta_url:     ['button_card_url',   'buttons_card_url',   'contact_url',   'button_url',   'url'],
     },
     page_slug_signals:    [],
     section_role_signals: ['feature_grid', 'feature_split'],
