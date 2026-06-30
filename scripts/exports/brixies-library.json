@@ -17905,7 +17905,8 @@
                   "label": "Email",
                   "scope": "team",
                   "max_chars": 120,
-                  "layer_name": "Team email"
+                  "layer_name": "Team email",
+                  "injected": true
                 },
                 {
                   "key": "team_description",

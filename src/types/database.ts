@@ -1544,6 +1544,14 @@ export interface WebSlotDef {
   unmapped?: boolean               // taxonomy fallback marker
   control?: 'text' | 'select' | 'checkbox'
   description?: string
+  /** True when the slot has no matching data-layer node in the source
+   *  Brixies HTML — the renderer is expected to inject the element
+   *  post-process (see fixTeamSection14EmailInjection in
+   *  src/lib/webBrixiesRender.ts). Tells findRichestItemTemplate to
+   *  ignore the slot when scoring template candidates, otherwise it
+   *  goes hunting for a "richer" template elsewhere on the page and
+   *  clobbers the real card structure. */
+  injected?: boolean
 }
 
 /** A repeating group in a template's `fields` array. `item_schema` is

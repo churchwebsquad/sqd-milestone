@@ -2383,8 +2383,14 @@ function findRichestItemTemplate(
   groupEl: Element,
 ): Element {
   const itemSchema = Array.isArray(group.item_schema) ? group.item_schema : []
+  // Skip injected slots — they have no source-HTML data-layer (the
+  // renderer creates the element post-process), so counting them as
+  // "missing layers" makes the scorer think baseTemplate is incomplete
+  // and go hunting for a richer template elsewhere on the page. That
+  // hunt routinely picks an unrelated container and clones IT as the
+  // card template, blowing away the actual card markup.
   const slotLayers = itemSchema
-    .filter((f): f is WebSlotDef => f.kind === 'slot')
+    .filter((f): f is WebSlotDef => f.kind === 'slot' && !f.injected)
     .map(f => f.layer_name ?? f.key)
   if (slotLayers.length === 0) return baseTemplate
 
