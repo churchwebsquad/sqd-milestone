@@ -579,39 +579,46 @@ function CardVariantRow({
         cardTemplates={cardTemplates}
       />
 
-      <div className="mt-3 flex items-center gap-2 flex-wrap">
-        <ArrowRight size={12} className="text-wm-text-subtle shrink-0" />
-        <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle shrink-0">
-          Swap card
-        </span>
-        <input
-          type="text"
-          list={`card-options-${variant.cardTemplateId}`}
-          defaultValue={swapDisplayValue}
-          key={swapDisplayValue}
-          onBlur={e => onSwapText(e.target.value)}
-          placeholder="Type a different card template name (or leave blank to keep this card)"
-          disabled={saving}
-          className="flex-1 min-w-[14rem] text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:border-wm-accent focus:outline-none disabled:opacity-50"
-        />
-        <datalist id={`card-options-${variant.cardTemplateId}`}>
-          {allTemplates
-            .filter(t => t.family === 'Card')
-            .map(opt => (
+      <div className="mt-3 rounded-md border border-wm-accent/30 bg-wm-accent-tint/30 p-3">
+        <div className="flex items-center gap-2 mb-1.5">
+          <ArrowRight size={13} className="text-wm-accent-strong shrink-0" />
+          <span className="text-[11.5px] font-bold uppercase tracking-wider text-wm-accent-strong">
+            Swap card or layout
+          </span>
+        </div>
+        <p className="text-[11px] text-wm-text-muted mb-2 leading-snug">
+          Type a different <span className="font-semibold">card template</span> name to redress this
+          variant, or a different <span className="font-semibold">parent layout</span> name to break
+          this case off into a different Brixies section entirely.
+        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            type="text"
+            list={`card-options-${variant.cardTemplateId}`}
+            defaultValue={swapDisplayValue}
+            key={swapDisplayValue}
+            onBlur={e => onSwapText(e.target.value)}
+            placeholder="e.g. Card 65 or Feature Section 22 — blank keeps the current layout"
+            disabled={saving}
+            className="flex-1 min-w-[14rem] text-[13px] text-wm-text bg-wm-bg border border-wm-border rounded px-3 py-1.5 focus:border-wm-accent focus:outline-none disabled:opacity-50"
+          />
+          <datalist id={`card-options-${variant.cardTemplateId}`}>
+            {allTemplates.map(opt => (
               <option key={opt.id} value={opt.layer_name}>{opt.family ?? '(uncategorized)'}</option>
             ))}
-        </datalist>
-        {swapEntry && (
-          <button
-            type="button"
-            onClick={() => onSwapText('')}
-            className="text-wm-text-muted hover:text-wm-danger shrink-0"
-            title="Clear swap"
-          >
-            <X size={12} />
-          </button>
-        )}
-        {saving && <Loader2 size={12} className="animate-spin text-wm-accent shrink-0" />}
+          </datalist>
+          {swapEntry && (
+            <button
+              type="button"
+              onClick={() => onSwapText('')}
+              className="text-wm-text-muted hover:text-wm-danger shrink-0 inline-flex items-center gap-1 text-[11.5px] font-semibold px-2 py-1 rounded hover:bg-wm-danger-bg"
+              title="Clear swap"
+            >
+              <X size={12} /> Clear
+            </button>
+          )}
+          {saving && <Loader2 size={13} className="animate-spin text-wm-accent shrink-0" />}
+        </div>
       </div>
     </div>
   )
