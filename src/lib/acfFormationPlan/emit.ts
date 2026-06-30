@@ -898,6 +898,11 @@ function cptLabels(slug: string): { singular: string; plural: string } {
     group:  { singular: 'Group',        plural: 'Groups' },
     career: { singular: 'Career',       plural: 'Careers' },
     post:   { singular: 'Post',         plural: 'Posts' },
+    // Campus CPT now sets labels directly from inputs.campusTerm in
+    // buildCampusCpt, so this entry is defensive only — guards against
+    // a future path calling cptLabels('campus') and getting the buggy
+    // default 'Campus' / 'Campuss' (the auto-pluralizer appends an 's').
+    campus: { singular: 'Campus',       plural: 'Campuses' },
   }
   return titles[slug] ?? {
     singular: slug.charAt(0).toUpperCase() + slug.slice(1),
@@ -1766,8 +1771,9 @@ export function buildDiscoverySections(
       // vocabulary, compute field fill rates + CTA breakdown + library
       // coverage gaps. Skip when there are no repeating items — single
       // copy blocks don't get a schema_name (already filtered above
-      // when the section is also TRIVIAL_ROLES_WHEN_SINGLE, but
-      // sometimes 1-item sections survive that filter).
+      // when the section is also ALWAYS_TRIVIAL_ROLES, but sometimes
+      // 1-item sections survive that filter when they have a non-trivial
+      // section_role).
       const diagnosis = projectedItems.length > 0
         ? classifySchema({
             page_slug:           page.slug,

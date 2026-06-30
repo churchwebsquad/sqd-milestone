@@ -36,7 +36,7 @@ import {
   isButtonShapedSlot,
 } from '../../../lib/cta'
 import { GLOBAL_FIELDS } from '../../../lib/webSnippets'
-import { saveFormationPlan, setSchemaOverride, type ContentModelPlan } from '../../../lib/acfFormationPlan'
+import { ANALYZER_REVISION, saveFormationPlan, setSchemaOverride, type ContentModelPlan } from '../../../lib/acfFormationPlan'
 import {
   buildRedirectDiff, redirectsToCsv, urlToPath,
   type CrawlUrlRow, type SitemapPage, type RedirectCandidate,
@@ -126,6 +126,12 @@ export function DevHandoffWorkspace({ project }: Props) {
   const [cmPlan,   setCmPlan]   = useState<ContentModelPlan | null>(null)
   const [cmAnswers, setCmAnswers] = useState<Record<string, string>>({})
   const [cmStale, setCmStale]   = useState(false)
+  // Analyzer-code drift detection — distinct from input-drift staleness.
+  // True when the saved plan's `generated_by` doesn't match the current
+  // ANALYZER_REVISION (i.e. the analyzer logic has changed since the
+  // plan was computed). Tells the user "click Compute now to apply
+  // recent analyzer fixes" without surfacing a vague stale state.
+  const [cmCodeDrift, setCmCodeDrift] = useState(false)
   // Seed from any previously saved plan so reloading the page shows
   // the last counts without re-running the analyzer.
   useEffect(() => {
@@ -134,6 +140,9 @@ export function DevHandoffWorkspace({ project }: Props) {
     if (existing?.schema_version === 1) {
       setCmPlan(existing)
       setCmStatus('success')
+      // Code-drift check: stamp on the plan vs current analyzer revision.
+      const savedRev = existing._meta?.generated_by ?? 'analyzer-v1'
+      setCmCodeDrift(savedRev !== ANALYZER_REVISION)
     }
     const persistedAnswers = rs?.content_model_plan_answers as Record<string, string> | undefined
     if (persistedAnswers && typeof persistedAnswers === 'object') {
@@ -666,6 +675,7 @@ export function DevHandoffWorkspace({ project }: Props) {
                     const plan = await saveFormationPlan(project.id)
                     setCmPlan(plan)
                     setCmStatus('success')
+                    setCmCodeDrift(false)  // fresh compute matches current revision
                   } catch (err) {
                     setCmError(err instanceof Error ? err.message : String(err))
                     setCmStatus('error')
@@ -699,6 +709,11 @@ export function DevHandoffWorkspace({ project }: Props) {
                 <AlertTriangle size={11} /> Plan is stale — sections have been edited since this was last computed. Click <strong>Compute now</strong> to refresh.
               </div>
             )}
+            {cmCodeDrift && cmStatus !== 'computing' && (
+              <div className="mt-2 rounded-md border border-wm-accent/40 bg-wm-accent-tint/40 text-wm-accent-strong text-[11px] px-2.5 py-1.5 inline-flex items-center gap-1.5">
+                <AlertTriangle size={11} /> Analyzer logic has been updated since this plan was computed (saved <code>{cmPlan?._meta.generated_by ?? 'unknown'}</code> · current <code>{ANALYZER_REVISION}</code>). Click <strong>Compute now</strong> to apply the new logic.
+              </div>
+            )}
             {cmPlan && <CmDownloadRow plan={cmPlan} answers={cmAnswers} projectSlug={projectSlug} />}
             {cmPlan && <CmOpenQuestionsPanel plan={cmPlan} answers={cmAnswers} onSaveAnswer={saveCmAnswer} />}
             {cmPlan && <CmPartnerIntentPanel plan={cmPlan} />}
@@ -716,6 +731,7 @@ export function DevHandoffWorkspace({ project }: Props) {
             loading={redirectsLoading}
             candidates={redirectCandidates}
             projectSlug={projectSlug}
+            sitemapEmpty={seoRows.length === 0}
           />
 
         </div>
@@ -730,11 +746,12 @@ export function DevHandoffWorkspace({ project }: Props) {
  *  redirects but stay visible so the dev can confirm nothing moved
  *  silently. */
 function UrlRedirectsCard({
-  loading, candidates, projectSlug,
+  loading, candidates, projectSlug, sitemapEmpty,
 }: {
-  loading:     boolean
-  candidates:  RedirectCandidate[]
-  projectSlug: string
+  loading:      boolean
+  candidates:   RedirectCandidate[]
+  projectSlug:  string
+  sitemapEmpty: boolean
 }) {
   const counts = useMemo(() => {
     const c = { exact: 0, high: 0, medium: 0, low: 0 }
@@ -788,6 +805,10 @@ function UrlRedirectsCard({
         <p className="text-[12px] text-wm-text-muted">
           No crawl URLs found — this project may predate the crawl, or
           the partner's site was net-new with no prior URLs to preserve.
+        </p>
+      ) : sitemapEmpty ? (
+        <p className="text-[12px] text-wm-warn-strong">
+          {candidates.length} crawled URL{candidates.length === 1 ? '' : 's'} found, but the new sitemap is empty — no approved pages to map to. Approve pages in the Pages workspace first; redirects will populate automatically once a sitemap exists.
         </p>
       ) : (
         <>

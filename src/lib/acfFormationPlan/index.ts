@@ -44,6 +44,20 @@ export type {
 
 // ── Top-level orchestration ──────────────────────────────────────────
 
+/** Bumped whenever the analyzer's output shape or classification logic
+ *  changes in a way that means cached plans should be recomputed. Used
+ *  by the DevHandoffWorkspace stale-plan banner to detect "code moved
+ *  on, plan didn't" — distinct from input drift (section edits), which
+ *  is covered by the existing updated_at comparison.
+ *
+ *  Bumping rules: increment whenever a meaningful analyzer change ships
+ *  (filter changes, new canonical fields, new CPT routing, new
+ *  classification heuristics). Don't bump for non-analyzer changes
+ *  (UI tweaks, unrelated edits). The shape stays at `analyzer-vMAJOR.MINOR`
+ *  so the DevHandoff banner can compare lexicographically and skip
+ *  the warning when plans match the current code. */
+export const ANALYZER_REVISION = 'analyzer-v1.8' as const
+
 /** Computes the ContentModelPlan for a web project. Pure: doesn't
  *  touch the DB beyond the read side. Use `saveFormationPlan` to
  *  persist. */
@@ -146,7 +160,7 @@ export async function computeFormationPlan(
     schema_version: 1,
     _meta: {
       generated_at: new Date().toISOString(),
-      generated_by: 'analyzer-v1',
+      generated_by: ANALYZER_REVISION,
       input_fingerprint: computeInputFingerprint(inputs),
       counts: {
         classifications:  layer1.length,
