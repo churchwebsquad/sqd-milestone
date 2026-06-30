@@ -108,6 +108,7 @@ export function renderSectionToHtml(
   fixFeatureSection61Stacking(root)
   fixContentSection89Wrap(root)
   fixTeamSection14Wrap(root)
+  fixTeamSection14EmailInjection(root, values, template.id ?? '')
   fixTeamSection14LinkedCards(root, values, template.id ?? '')
   fixCategoryFilter4Visibility(root, values, template.id ?? '')
   fixSingleTeamSection6EmptyContact(root, values, template.id ?? '')
@@ -302,6 +303,78 @@ function fixTeamSection14LinkedCards(
       while (card.firstChild) a.appendChild(card.firstChild)
       card.appendChild(a)
     }
+  }
+}
+
+/** Team Section 14 email injection — Phase 2.
+ *
+ *  The Brixies source HTML for Team Section 14 ships card_team items
+ *  with `Team Name`, `Team position`, and `Team description` layers
+ *  but NO email layer. Adding `team_email` as a fourth slot in the
+ *  template fields makes it appear in the editor sidebar, but
+ *  substituteElement skips it at render time because there's no
+ *  matching data-layer node in the source HTML.
+ *
+ *  Strategy: after Brixies render, walk each Card team in row-major
+ *  order (same cursor as fixTeamSection14LinkedCards), look up the
+ *  corresponding row_grid[r].card_team[c].team_email value, and inject
+ *  a new line as a clone of the Team position node — same typography,
+ *  same color, same spacing — with its text replaced by the email
+ *  wrapped in a mailto: anchor.
+ *
+ *  Cards with an empty team_email get no email line. */
+function fixTeamSection14EmailInjection(
+  root: Element,
+  values: Record<string, unknown>,
+  templateId: string,
+): void {
+  if (templateId !== 'team-section-14') return
+
+  // Row-major cursor — values.row_grid[r].card_team[c]. Same shape the
+  // staff-link helper above uses; if you change one, change both.
+  const emailsByIndex: Array<string | null> = []
+  const rowGrid = Array.isArray(values.row_grid) ? (values.row_grid as Array<Record<string, unknown>>) : []
+  for (const row of rowGrid) {
+    const cards = Array.isArray(row?.card_team) ? (row.card_team as Array<Record<string, unknown>>) : []
+    for (const cell of cards) {
+      const raw = typeof cell.team_email === 'string' ? cell.team_email.trim() : ''
+      emailsByIndex.push(raw.length > 0 ? raw : null)
+    }
+  }
+
+  const cardEls = Array.from(root.querySelectorAll<HTMLElement>('[data-layer="Card team"]'))
+  for (let i = 0; i < cardEls.length && i < emailsByIndex.length; i++) {
+    const card = cardEls[i]
+    const email = emailsByIndex[i]
+    if (!email) continue
+
+    // Skip if a previous render already injected the email line —
+    // re-renders shouldn't accumulate.
+    if (card.querySelector<HTMLElement>('[data-layer="Team email"]')) continue
+
+    // Clone Team position as the visual template. Same font, size,
+    // color, leading, spacing — guaranteed match per the user's
+    // "same formatting as the role title" ask.
+    const position = card.querySelector<HTMLElement>('[data-layer="Team position"]')
+    if (!position) continue
+
+    const emailEl = position.cloneNode(true) as HTMLElement
+    emailEl.setAttribute('data-layer', 'Team email')
+
+    // Replace the cloned text with an anchor to mailto:<email>.
+    const doc = root.ownerDocument!
+    const a = doc.createElement('a')
+    a.setAttribute('href', `mailto:${email}`)
+    a.style.color = 'inherit'
+    a.style.textDecoration = 'none'
+    a.textContent = email
+    // Clear cloned children + insert the anchor.
+    while (emailEl.firstChild) emailEl.removeChild(emailEl.firstChild)
+    emailEl.appendChild(a)
+
+    // Insert immediately after Team position so it stacks below role
+    // in the card's vertical flex layout.
+    position.parentNode?.insertBefore(emailEl, position.nextSibling)
   }
 }
 

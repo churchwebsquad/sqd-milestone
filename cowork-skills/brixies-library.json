@@ -17919,6 +17919,15 @@
                   "layer_name": "Team position"
                 },
                 {
+                  "key": "team_email",
+                  "kind": "slot",
+                  "type": "email",
+                  "label": "Email",
+                  "scope": "team",
+                  "max_chars": 120,
+                  "layer_name": "Team email"
+                },
+                {
                   "key": "team_description",
                   "kind": "slot",
                   "type": "richtext",
