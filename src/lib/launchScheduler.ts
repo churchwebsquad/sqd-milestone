@@ -533,7 +533,28 @@ function computeScheduleInner(
     const fallback = mondayOf(parseD(cfg.schedule_start))
     const finalDevStart = devStart ?? fallback
     const finalDevEnd   = devEnd   ?? finalDevStart
-    const finalLaunch   = st.launchDate ?? addCal(finalDevEnd, cfg.launch_tail_days)
+    let finalLaunch     = st.launchDate ?? addCal(finalDevEnd, cfg.launch_tail_days)
+
+    // Rolling projection — when a site's computed launch date lands
+    // in the past but the site isn't actually marked launched (still
+    // in `active`, status !== 'launched'), bump the projection to
+    // tomorrow. Without this, a site that completed its dev work but
+    // is stuck waiting for partner sign-off keeps reporting a launch
+    // date that's already past, which (a) confuses the planning view
+    // ("did this launch?") and (b) makes the gap between the stale
+    // date and today read as available downstream capacity that
+    // doesn't actually exist. The scheduler re-runs daily, so the
+    // projection rolls forward one day at a time until the site is
+    // either marked launched or its dev work actually completes.
+    const tomorrow = (() => {
+      const d = new Date()
+      d.setUTCDate(d.getUTCDate() + 1)
+      d.setUTCHours(0, 0, 0, 0)
+      return d
+    })()
+    if (finalLaunch.getTime() < tomorrow.getTime()) {
+      finalLaunch = tomorrow
+    }
 
     res[s.id] = {
       startWeek:           weekIdxFromDate(finalDevStart),

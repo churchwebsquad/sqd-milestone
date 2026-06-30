@@ -54,7 +54,7 @@ import { CopywriterNotesPanel } from './CopywriterNotesPanel'
 import { RequestReviewModal } from './RequestReviewModal'
 import { useAuth } from '../../contexts/AuthContext'
 
-type RailTab = 'section' | 'snippets' | 'voice' | 'heuristics' | 'feedback' | 'audit' | 'seo'
+type RailTab = 'section' | 'snippets' | 'voice' | 'feedback' | 'seo'
 
 interface Props {
   projectId: string
@@ -70,7 +70,7 @@ interface Props {
 export function AssistantRail({ projectId, activeTab, project, onProjectChange }: Props) {
   const [tab, setTab] = useState<RailTab>('snippets')
   const [query, setQuery] = useState('')
-  const [counts, setCounts] = useState({ snippets: 0, feedback: 0, audit: 0 })
+  const [counts, setCounts] = useState({ snippets: 0, feedback: 0 })
   const [params, setParams] = useSearchParams()
   // Both the Pages workspace and the Review workspace use ?page= and
   // ?section= for selection. Honor either so the rail's Section /
@@ -103,7 +103,7 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
   const railRequest = params.get('rail') as RailTab | null
   useEffect(() => {
     if (!railRequest) return
-    const valid: RailTab[] = ['section', 'snippets', 'voice', 'heuristics', 'feedback', 'audit', 'seo']
+    const valid: RailTab[] = ['section', 'snippets', 'voice', 'feedback', 'seo']
     if (valid.includes(railRequest)) setTab(railRequest)
     const next = new URLSearchParams(window.location.search)
     next.delete('rail')
@@ -153,7 +153,7 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
   // Workspaces hosted in the rail (Snippets / Voice / Heuristics)
   // render their own filter UI internally, so the rail's search box
   // only applies to the simple list tabs.
-  const showSearchBox = tab === 'feedback' || tab === 'audit'
+  const showSearchBox = tab === 'feedback'
 
   // The Review workspace puts the strategist in feedback-only mode —
   // they're commenting on existing content, not authoring. Hide the
@@ -165,7 +165,7 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
   // Feedback so the rail body never goes blank.
   useEffect(() => {
     if (!inReviewMode) return
-    if (tab === 'snippets' || tab === 'voice' || tab === 'heuristics' || tab === 'audit') {
+    if (tab === 'snippets' || tab === 'voice') {
       setTab('feedback')
     }
   }, [inReviewMode, tab])
@@ -176,23 +176,21 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
         {sectionTabAvailable && (
           <RailTabButton tab="section" active={tab} setTab={setTab} icon={<SquarePen size={13} />} label="Section" />
         )}
-        {/* Snippets / Voice / Heuristics / Audit are authoring tools.
-            On the Review tab the strategist is in feedback mode, not
-            authoring, and those tabs are noise. Feedback + SEO stay
-            because they're directly useful while reviewing. */}
+        {/* Snippets + Voice are authoring tools. On the Review tab
+            the strategist is in feedback mode, not authoring, and
+            those tabs are noise. Feedback + SEO stay because they're
+            directly useful while reviewing. Heuristics + Audit
+            (writing-rules scanner) tabs were removed — see commit
+            log for rationale. */}
         {!inReviewMode && (
           <>
             <RailTabButton tab="snippets"   active={tab} setTab={setTab} icon={<Tag size={13} />}            count={counts.snippets} label="Snippets" />
             <RailTabButton tab="voice"      active={tab} setTab={setTab} icon={<Mic size={13} />}            label="Voice" />
-            <RailTabButton tab="heuristics" active={tab} setTab={setTab} icon={<BookOpen size={13} />}       label="Heuristics" />
           </>
         )}
         <RailTabButton tab="feedback"   active={tab} setTab={setTab} icon={<MessageSquare size={13} />}  count={counts.feedback} label="Feedback" />
         {tabUsesSectionContext && activePageId && (
           <RailTabButton tab="seo"      active={tab} setTab={setTab} icon={<Globe size={13} />}          label="SEO" />
-        )}
-        {!inReviewMode && (
-          <RailTabButton tab="audit"    active={tab} setTab={setTab} icon={<AlertTriangle size={13} />}  count={counts.audit} label="Audit" />
         )}
       </div>
 
@@ -246,16 +244,11 @@ export function AssistantRail({ projectId, activeTab, project, onProjectChange }
           ? <VoiceWorkspace project={project} />
           : <RailUnavailable label="Voice" />
         )}
-        {tab === 'heuristics' && (project
-          ? <HeuristicsWorkspace project={project} />
-          : <RailUnavailable label="Heuristics" />
-        )}
         {tab === 'feedback' && <FeedbackTab projectId={projectId} query={query} onJumpToSection={jumpToSection} />}
         {tab === 'seo' && (activePageId
           ? <SeoPanel pageId={activePageId} />
           : <RailUnavailable label="SEO" />
         )}
-        {tab === 'audit' && <AuditTab projectId={projectId} activePageId={activePageId} query={query} onCount={n => setCounts(c => ({ ...c, audit: n }))} />}
       </div>
     </div>
   )

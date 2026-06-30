@@ -238,7 +238,15 @@ export function DevHandoffWorkspace({ project }: Props) {
         .eq('web_project_id', project.id)
         .eq('archived', false)
         .order('sort_order')
-      const pages = (pageRows ?? []) as Array<Pick<WebPage, 'id' | 'name' | 'slug' | 'seo' | 'dev_notes'>>
+      // /staff/<name> pages are auto-generated stubs that share the
+      // source-of-truth bio with the parent Team Section. Surfacing
+      // them across the Dev Handoff (SEO, CTA inventory, URL
+      // redirects, dev notes, content model) muddies the doc with N
+      // identical rows that the dev can't act on independently. Drop
+      // them at the source so downstream slices don't have to repeat
+      // the filter.
+      const pages = ((pageRows ?? []) as Array<Pick<WebPage, 'id' | 'name' | 'slug' | 'seo' | 'dev_notes'>>)
+        .filter(p => !p.slug.startsWith('staff/'))
 
       const pageIds = pages.map(p => p.id)
       // Dev handoff enumerates ACTUAL page implementations, not the
@@ -294,6 +302,7 @@ export function DevHandoffWorkspace({ project }: Props) {
 
       setDevNotesRows(
         pages
+          .filter(p => !p.slug.startsWith('staff/'))
           .filter(p => typeof p.dev_notes === 'string' && p.dev_notes.trim().length > 0)
           .map(p => ({
             pageId: p.id, pageName: p.name, pageSlug: p.slug,
@@ -1505,19 +1514,18 @@ function CmConceptsFoundPanel({
                   const ctx = s.partner_context
                   return (
                     <li key={s.section_id} className="border-l-2 border-wm-border pl-4">
-                      {/* Section header — heading prominent, diagnosis as
-                          tagged chips not italics-of-italics. */}
+                      {/* Section header — heading prominent. Confidence
+                          + confirm/change controls live on the Pages
+                          workspace's Content Model panel now (where
+                          the strategist owns the model up-front);
+                          this page is a read-only handoff for the
+                          dev. */}
                       <div className="flex items-baseline flex-wrap gap-x-2 gap-y-1 mb-2">
                         <h4 className="text-[15px] font-bold text-wm-text leading-tight">{s.heading}</h4>
                         {s.schema_name && (
                           <span className="inline-flex items-center gap-1.5 text-[11px] text-wm-text-muted">
                             <span className="text-wm-text-subtle">looks like</span>
                             <code className="text-[11.5px] text-wm-text font-mono bg-wm-bg-hover px-1.5 py-0.5 rounded">{s.schema_name}</code>
-                            {s.schema_confidence && (
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${s.schema_confidence === 'high' ? 'bg-green-100 text-green-800' : s.schema_confidence === 'medium' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-700'}`}>
-                                {s.schema_confidence} confidence
-                              </span>
-                            )}
                           </span>
                         )}
                         {cptSuggestion && (
@@ -1656,61 +1664,16 @@ function CmConceptsFoundPanel({
                         </div>
                       )}
 
-                      {/* Build-time issues — keep the red warning but
-                          make it explain WHY and WHAT to do, not just
-                          flag a list of field names. */}
-                      {s.build_time_issues && s.build_time_issues.length > 0 && (
-                        <div className="mt-3 space-y-1.5">
-                          {s.build_time_issues.map((issue, i) => {
-                            const tone =
-                              issue.severity === 'high' ? 'border-red-300 bg-red-50 text-red-900' :
-                              issue.severity === 'medium' ? 'border-orange-300 bg-orange-50 text-orange-900' :
-                              'border-yellow-300 bg-yellow-50 text-yellow-900'
-                            if (issue.kind === 'upstream_compression_loss') {
-                              return (
-                                <div key={i} className={`rounded-md border ${tone} px-3 py-2 text-[12px]`}>
-                                  <p className="font-semibold mb-0.5">⚠ Partner data exists for these fields but isn't bound to any section</p>
-                                  <p>
-                                    Missing from the bound template:{' '}
-                                    {issue.dropped_fields.map((f, idx) => (
-                                      <span key={f}>
-                                        {idx > 0 && ', '}
-                                        <code className="text-[11.5px] font-mono">{f}</code>
-                                      </span>
-                                    ))}
-                                  </p>
-                                  <p className="mt-1 text-[11.5px] opacity-80">
-                                    The dev should either add slots for these fields to the template, or confirm with the strategist that they're intentionally dropped.
-                                  </p>
-                                </div>
-                              )
-                            }
-                            return (
-                              <div key={i} className={`rounded-md border ${tone} px-3 py-2 text-[12px]`}>
-                                <p className="font-semibold mb-0.5">🔴 Brixies library coverage gap on <code className="text-[11.5px] font-mono">{issue.template_id}</code></p>
-                                <p>
-                                  Dropped fields:{' '}
-                                  {issue.dropped_fields.map((f, idx) => (
-                                    <span key={f}>
-                                      {idx > 0 && ', '}
-                                      <code className="text-[11.5px] font-mono">{f}</code>
-                                    </span>
-                                  ))}
-                                </p>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
-
-                      {projectId && onPlanChange && (
-                        <SchemaOverrideControl
-                          section={s}
-                          projectId={projectId}
-                          plan={plan}
-                          onPlanChange={onPlanChange}
-                        />
-                      )}
+                      {/* Build-time issues + schema-override controls
+                          were removed from this surface. The dev
+                          handoff is a READ view of finalized models;
+                          flagging "field X is missing on this binding"
+                          here is too late in the flow — by the time the
+                          dev opens this tab, the content model needs
+                          should already be locked. The strategist owns
+                          the model up-front via the Pages workspace
+                          Content Model panel, which is where any
+                          confirm / change / merge happens. */}
                     </li>
                   )
                 })}
