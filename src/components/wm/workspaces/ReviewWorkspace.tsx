@@ -47,6 +47,11 @@ export function ReviewWorkspace({ project }: Props) {
   const [requests, setRequests] = useState<WebReviewRequest[]>([])
   const [pageById, setPageById] = useState<Record<string, { id: string; name: string }>>({})
   const [sectionLabelById, setSectionLabelById] = useState<Record<string, string>>({})
+  // Section field_values keyed by section id — needed by FeedbackCard so
+  // the Apply / Amend actions on edit-bearing comments can patch the
+  // right field. Without this map, canApplyOrAmend gates them off and
+  // strategists only see the "Mark complete" path.
+  const [sectionFieldValuesById, setSectionFieldValuesById] = useState<Record<string, Record<string, unknown>>>({})
   const [loading, setLoading] = useState(true)
   // Account manager + church name lifted off strategy_account_progress
   // keyed on project.member. Surfaced so the strategist knows who to
@@ -99,7 +104,7 @@ export function ReviewWorkspace({ project }: Props) {
     if (sectionIds.length > 0) {
       const { data: sections } = await supabase
         .from('web_sections')
-        .select('id, content_template_id, sort_order')
+        .select('id, content_template_id, sort_order, field_values')
         .in('id', sectionIds)
       const tplIds = Array.from(new Set(
         ((sections ?? []) as Array<{ content_template_id: string | null }>)
@@ -116,12 +121,15 @@ export function ReviewWorkspace({ project }: Props) {
         }
       }
       const smap: Record<string, string> = {}
-      for (const sec of (sections ?? []) as Array<{ id: string; content_template_id: string | null; sort_order: number | null }>) {
+      const fmap: Record<string, Record<string, unknown>> = {}
+      for (const sec of (sections ?? []) as Array<{ id: string; content_template_id: string | null; sort_order: number | null; field_values: Record<string, unknown> | null }>) {
         smap[sec.id] = sec.content_template_id
           ? (tplMap[sec.content_template_id] ?? 'Section')
           : `Section · ${(sec.sort_order ?? 0) + 1}`
+        fmap[sec.id] = (sec.field_values ?? {}) as Record<string, unknown>
       }
       setSectionLabelById(smap)
+      setSectionFieldValuesById(fmap)
     }
 
     setLoading(false)
@@ -426,6 +434,7 @@ export function ReviewWorkspace({ project }: Props) {
           boards={visibleBoards}
           pageNameFor={pageNameFor}
           sectionLabelFor={sectionLabelFor}
+          sectionFieldValuesFor={(id) => id ? sectionFieldValuesById[id] : undefined}
           onJumpToLocation={(c) => {
             if (c.web_section_id) jumpToSection(c.web_page_id, c.web_section_id)
           }}

@@ -323,6 +323,7 @@ function FeedbackTab({
   // pattern the old FeedbackTab used.
   const [pageById, setPageById] = useState<Record<string, { id: string; name: string }>>({})
   const [sectionLabelById, setSectionLabelById] = useState<Record<string, string>>({})
+  const [sectionFieldValuesById, setSectionFieldValuesById] = useState<Record<string, Record<string, unknown>>>({})
   const [loading, setLoading] = useState(true)
   const [mutating, setMutating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -365,9 +366,11 @@ function FeedbackTab({
     }
     if (sectionIds.length > 0) {
       // Resolve to template layer_name when bound; else "Freehand".
+      // Also pull field_values so FeedbackCard's Apply / Amend actions
+      // have what they need to patch the right slot.
       const { data: sections } = await supabase
         .from('web_sections')
-        .select('id, content_template_id, sort_order')
+        .select('id, content_template_id, sort_order, field_values')
         .in('id', sectionIds)
       const tplIds = Array.from(new Set(
         ((sections ?? []) as Array<{ content_template_id: string | null }>)
@@ -384,12 +387,15 @@ function FeedbackTab({
         }
       }
       const smap: Record<string, string> = {}
-      for (const s of (sections ?? []) as Array<{ id: string; content_template_id: string | null; sort_order: number | null }>) {
+      const fmap: Record<string, Record<string, unknown>> = {}
+      for (const s of (sections ?? []) as Array<{ id: string; content_template_id: string | null; sort_order: number | null; field_values: Record<string, unknown> | null }>) {
         smap[s.id] = s.content_template_id
           ? (tplMap[s.content_template_id] ?? 'Section')
           : `Section · ${(s.sort_order ?? 0) + 1}`
+        fmap[s.id] = (s.field_values ?? {}) as Record<string, unknown>
       }
       setSectionLabelById(smap)
+      setSectionFieldValuesById(fmap)
     }
 
     setLoading(false)
@@ -619,6 +625,7 @@ function FeedbackTab({
           boards={visibleBoards}
           pageNameFor={pageNameFor}
           sectionLabelFor={sectionLabelFor}
+          sectionFieldValuesFor={(id) => id ? sectionFieldValuesById[id] : undefined}
           onJumpToLocation={(c) => {
             if (c.web_section_id) onJumpToSection(c.web_page_id, c.web_section_id)
           }}
