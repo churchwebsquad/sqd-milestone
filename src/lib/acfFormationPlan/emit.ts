@@ -1663,26 +1663,37 @@ function findSection(inputs: FormationInputs, sectionId: string): WebSection | n
 import type { DiscoverySection } from './types'
 import { classifySchema } from './classifySchema'
 
-/** True when every key on the item ends in a CTA-flattening suffix
- *  (_label/_url/_kind/_target). Such items are the rows of a button/
- *  CTA list, not content cards — they don't carry a schema. */
+/** True when every key on the item is CTA-shaped — either the flattened
+ *  suffix form (`name_label`/`name_url`/`name_kind`/`name_target` from
+ *  projectItemOntoSchema) OR the raw form (`label`/`url`/`kind`/`target`
+ *  from a buttons group whose items are flat CTA records). Such items
+ *  are the rows of a button/CTA list, not content cards — they don't
+ *  carry a schema worth modeling. */
 function isCtaOnlyItem(item: Record<string, unknown>): boolean {
   const keys = Object.keys(item)
   if (keys.length === 0) return false
+  const RAW_CTA_KEYS = new Set(['label', 'url', 'kind', 'target', 'href', 'text'])
   return keys.every(k =>
     k.endsWith('_label') || k.endsWith('_url') ||
-    k.endsWith('_kind')  || k.endsWith('_target')
+    k.endsWith('_kind')  || k.endsWith('_target') ||
+    RAW_CTA_KEYS.has(k)
   )
 }
 
-/** Section roles where a 1-item section is just decorative chrome
- *  (page hero, intro paragraph, single-CTA banner) — not something
- *  the dev needs to model. Filtered out of the discovery view so the
- *  doc focuses on dev-relevant work (feature/team/event/sermon/blog/
- *  group/career sections with real items to build against). Multi-
- *  item sections of the same role STAY (e.g. a feature_split with
- *  4 items is dev-relevant). */
-const TRIVIAL_ROLES_WHEN_SINGLE = new Set<SectionRole>([
+/** Section roles that are page chrome — decorative copy + buttons, not
+ *  modelable content. Always filtered out of discovery regardless of
+ *  item count, because a hero with 5 buttons or a feature_split with
+ *  2 columns still doesn't represent a CPT or repeater the dev needs
+ *  to model. The buttons inside these sections live in the section's
+ *  own ACF field group (handled by the per-page Repeater path), not
+ *  in a separate content model.
+ *
+ *  Note: dropped the earlier `count <= 1` guard — a hero with 3 buttons
+ *  still has count=3 because the analyzer found the buttons group, but
+ *  the section is conceptually still a hero. The strategist's
+ *  `strategist_target_type` annotation is the escape hatch when an
+ *  unusual section needs surfacing. */
+const ALWAYS_TRIVIAL_ROLES = new Set<SectionRole>([
   'hero_home', 'hero_innerpage', 'hero_visual',
   'banner_announcement',
   'intro_text', 'content_block',
@@ -1710,22 +1721,27 @@ export function buildDiscoverySections(
       const heading = headingForSection(section, template, fv)
       const { count, schema, sampleNames, sampleRecord, projectedItems } = analyzeSectionItems(template, fv, inputs.templatesById)
 
-      // Filter: skip trivial single-item sections (heros / intros /
-      // single-CTA banners) unless the strategist explicitly tagged
-      // the section as dev-relevant via strategist_target_type.
-      const isTrivial =
-        count <= 1 &&
+      // Filter: skip page-chrome roles (heros / intros / single-CTA
+      // banners / feature_split) unconditionally. These are decorative
+      // sections regardless of item count — a hero with 5 buttons is
+      // still a hero, not a CPT candidate. Strategist's
+      // strategist_target_type escape hatch still wins.
+      const isAlwaysTrivial =
         section.section_role !== null &&
-        TRIVIAL_ROLES_WHEN_SINGLE.has(section.section_role) &&
+        ALWAYS_TRIVIAL_ROLES.has(section.section_role) &&
         !section.strategist_target_type
-      if (isTrivial) continue
+      if (isAlwaysTrivial) continue
 
-      // Filter: skip sections whose primary group is a button/CTA list
-      // (every projected-item key ends in _label/_url/_kind/_target).
+      // Filter: skip sections whose items are all buttons/CTAs. Catches
+      // both shapes: (a) projected-key form (`name_label`/`name_url` —
+      // from a single CTA slot flattened by projectItemOntoSchema), and
+      // (b) raw form (`label`/`url`/`kind`/`target` — from a buttons
+      // group where each item is a flat CTA record). The latter is the
+      // common case (every Brixies template's `buttons` group), so the
+      // earlier suffix-only check was missing most CTA-only sections.
       // The "items" here are action buttons under a single copy block,
       // not repeating content cards — they don't carry a schema worth
-      // diagnosing. Caught here rather than in analyzeSectionItems so
-      // the analyzer stays a pure function.
+      // diagnosing.
       if (projectedItems.length > 0 && projectedItems.every(isCtaOnlyItem) && !section.strategist_target_type) {
         continue
       }
