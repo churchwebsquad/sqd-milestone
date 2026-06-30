@@ -497,23 +497,32 @@ function StyleGuideCard({
         />
       )}
 
-      {/* Parent-layout swap — always present so the designer can ALSO
-          swap the outer Brixies layout independent of any card variant
-          decisions inside. */}
-      <div className="mt-3 flex items-center gap-2 flex-wrap">
-        <ArrowRight size={12} className="text-wm-text-subtle shrink-0" />
-        <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle shrink-0">
-          Swap {hasVariants ? 'parent layout' : 'to'}
-        </span>
+      {/* Parent-layout swap — same prominence as the variant-row swap
+          (lavender callout, accent-strong label, helper copy, larger
+          input). The designer can swap the outer Brixies layout
+          independent of any card variant decisions inside. */}
+      <div className="mt-3 rounded-md border border-wm-accent/30 bg-wm-accent-tint/30 p-3">
+        <div className="flex items-center gap-2 mb-1.5">
+          <ArrowRight size={13} className="text-wm-accent-strong shrink-0" />
+          <span className="text-[11.5px] font-bold uppercase tracking-wider text-wm-accent-strong">
+            Swap {hasVariants ? 'parent layout' : 'to'}
+          </span>
+        </div>
+        <p className="text-[11px] text-wm-text-muted mb-2 leading-snug">
+          {hasVariants
+            ? <>Type a different <span className="font-semibold">parent layout</span> to replace this Brixies section everywhere it's used. Per-variant card swaps above stay scoped to their card.</>
+            : <>Type a different <span className="font-semibold">Brixies template name</span> to call out a redesign — applies everywhere this layout is used.</>}
+        </p>
+        <div className="flex items-center gap-2 flex-wrap">
         <input
           type="text"
           list={`tpl-options-${template.id}`}
           defaultValue={parentSwapValue}
           key={parentSwapValue}
           onBlur={e => onSwapText(template.id, e.target.value)}
-          placeholder="Type a Brixies template name (or leave blank to keep this layout)"
+          placeholder="e.g. Content Section 18 — blank keeps the current layout"
           disabled={parentSaving}
-          className="flex-1 min-w-[14rem] text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:border-wm-accent focus:outline-none disabled:opacity-50"
+          className="flex-1 min-w-[14rem] text-[13px] text-wm-text bg-wm-bg border border-wm-border rounded px-3 py-1.5 focus:border-wm-accent focus:outline-none disabled:opacity-50"
         />
         <datalist id={`tpl-options-${template.id}`}>
           {allTemplates.map(opt => (
@@ -524,13 +533,14 @@ function StyleGuideCard({
           <button
             type="button"
             onClick={() => onSwapText(template.id, '')}
-            className="text-wm-text-muted hover:text-wm-danger shrink-0"
+            className="text-wm-text-muted hover:text-wm-danger shrink-0 inline-flex items-center gap-1 text-[11.5px] font-semibold px-2 py-1 rounded hover:bg-wm-danger-bg"
             title="Clear swap"
           >
-            <X size={12} />
+            <X size={12} /> Clear
           </button>
         )}
-        {parentSaving && <Loader2 size={12} className="animate-spin text-wm-accent shrink-0" />}
+        {parentSaving && <Loader2 size={13} className="animate-spin text-wm-accent shrink-0" />}
+        </div>
       </div>
     </WMCard>
   )

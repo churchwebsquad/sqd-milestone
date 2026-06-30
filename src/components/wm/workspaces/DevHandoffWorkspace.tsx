@@ -36,6 +36,7 @@ import {
   isButtonShapedSlot,
 } from '../../../lib/cta'
 import { GLOBAL_FIELDS } from '../../../lib/webSnippets'
+import { composeSectionName } from '../../../lib/webSectionRoles'
 import { ANALYZER_REVISION, saveFormationPlan, setSchemaOverride, type ContentModelPlan } from '../../../lib/acfFormationPlan'
 import {
   buildRedirectDiff, redirectsToCsv, urlToPath,
@@ -63,7 +64,17 @@ interface CtaRow {
   pageName:    string
   pageSlug:    string
   sectionId:   string
+  /** Partner-facing section identifier — page name + ordinal + role
+   *  label, e.g. "Give · Section 2 · Hero home". This is what reads
+   *  naturally in conversation; the technical Brixies layout name
+   *  rides alongside as the secondary identifier. */
   sectionLabel: string
+  /** The Brixies layout the section is bound to — typically the
+   *  template's layer_name (e.g. "Hero Section 12"). When the
+   *  designer has set a Style Guide swap, this carries the SWAP
+   *  TARGET'S layer name instead so the dev sees the layout the
+   *  Figma file actually contains. */
+  brixiesLayout: string | null
   fieldKey:    string
   fieldLabel:  string
   cta:         CtaValue
@@ -265,7 +276,10 @@ export function DevHandoffWorkspace({ project }: Props) {
         .map(p => ({
           pageId: p.id, pageName: p.name, pageSlug: p.slug, seo: p.seo ?? null,
         })))
-      setCtaRows(extractCtaInventory({ pages, sections, templates }))
+      setCtaRows(extractCtaInventory({
+        pages, sections, templates,
+        swaps: project.figma_layout_swaps,
+      }))
 
       // Snippets — surfaced in Church Settings and used to resolve
       // any CTA whose route is a {{token}} so the dev can see the
@@ -1990,10 +2004,15 @@ function CtaInventoryTable({
                       </span>
                     )}
                   </td>
-                  <td className="px-2 py-2 max-w-[200px] align-top">
+                  <td className="px-2 py-2 max-w-[220px] align-top">
                     <p className="text-wm-text break-words" title={c.sectionLabel}>{c.sectionLabel}</p>
+                    {c.brixiesLayout && (
+                      <p className="text-[10px] text-wm-text-subtle break-words font-mono" title={`Brixies layout: ${c.brixiesLayout}`}>
+                        {c.brixiesLayout}
+                      </p>
+                    )}
                     {c.fieldLabel && c.fieldLabel !== c.fieldKey && (
-                      <p className="text-[10px] text-wm-text-subtle break-words" title={c.fieldLabel}>{c.fieldLabel}</p>
+                      <p className="text-[10px] text-wm-text-subtle break-words mt-0.5" title={c.fieldLabel}>{c.fieldLabel}</p>
                     )}
                   </td>
                 </tr>
@@ -2015,17 +2034,39 @@ function extractCtaInventory(opts: {
   pages:     Array<Pick<WebPage, 'id' | 'name' | 'slug'>>
   sections:  WebSection[]
   templates: Record<string, WebContentTemplate>
+  /** Project's figma_layout_swaps map — when a swap target is set for
+   *  a template, the Brixies layout label in the CTA inventory carries
+   *  the SWAP TARGET'S name (what's actually in the Figma file) instead
+   *  of the original Brixies template. */
+  swaps?:    StrategyWebProject['figma_layout_swaps']
 }): CtaRow[] {
   const pageById: Record<string, { name: string; slug: string }> = {}
   for (const p of opts.pages) pageById[p.id] = { name: p.name, slug: p.slug }
   const slugSet = new Set(opts.pages.map(p => p.slug))
+  const swaps = opts.swaps ?? {}
 
   const rows: CtaRow[] = []
   for (const s of opts.sections) {
     const page = pageById[s.web_page_id]
     if (!page) continue
     const template = s.content_template_id ? opts.templates[s.content_template_id] : null
-    const sectionLabel = template?.layer_name ?? `Section · ${s.sort_order + 1}`
+    // Friendly section identifier first — the partner-facing label
+    // (page + ordinal + role) reads naturally in conversation. The
+    // technical Brixies layout rides alongside as a secondary
+    // identifier, swapped if the Style Guide has redirected it.
+    const sectionLabel = composeSectionName({
+      page:    { name: page.name },
+      section: s,
+    })
+    const swapEntry = template ? swaps[template.id] : null
+    const swapTarget = swapEntry?.to_template_id
+      ? opts.templates[swapEntry.to_template_id]
+      : null
+    const brixiesLayout =
+      swapEntry?.to_template_label ??
+      swapTarget?.layer_name ??
+      template?.layer_name ??
+      null
     const values = (s.field_values ?? {}) as Record<string, unknown>
     walkFieldsForCtas(template?.fields ?? [], values, (entry) => {
       if (entry.kind === 'button') {
@@ -2036,6 +2077,7 @@ function extractCtaInventory(opts: {
           pageSlug:        page.slug,
           sectionId:       s.id,
           sectionLabel,
+          brixiesLayout,
           fieldKey:        entry.fieldKey,
           fieldLabel:      entry.fieldLabel,
           cta,
@@ -2054,6 +2096,7 @@ function extractCtaInventory(opts: {
           pageSlug:        page.slug,
           sectionId:       s.id,
           sectionLabel,
+          brixiesLayout,
           fieldKey:        `${entry.fieldKey}.inline.${idx}`,
           fieldLabel:      `${entry.fieldLabel} › inline link${entry.inlineLinks.length > 1 ? ` #${idx + 1}` : ''}`,
           cta,
@@ -2220,13 +2263,14 @@ function downloadDevNotesMarkdown(projectSlug: string, projectName: string, rows
 function downloadCtaCsv(projectSlug: string, rows: CtaRow[]): void {
   const cells = (s: string) => `"${s.replace(/"/g, '""')}"`
   const csv: string[] = [
-    ['Page', 'Slug', 'Section', 'Field', 'Label', 'Kind', 'Source', 'URL', 'Target', 'Status']
+    ['Page', 'Slug', 'Section', 'Brixies layout', 'Field', 'Label', 'Kind', 'Source', 'URL', 'Target', 'Status']
       .map(cells).join(','),
   ]
   for (const r of rows) {
     const target = r.cta.target ?? defaultTargetFor(r.cta.kind)
     csv.push([
-      r.pageName, `/${r.pageSlug}`, r.sectionLabel, r.fieldLabel || r.fieldKey,
+      r.pageName, `/${r.pageSlug}`, r.sectionLabel, r.brixiesLayout ?? '',
+      r.fieldLabel || r.fieldKey,
       r.cta.label, CTA_KIND_LABELS[r.cta.kind],
       r.isInline ? 'inline body link' : 'button',
       r.cta.url,
