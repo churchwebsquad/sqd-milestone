@@ -557,6 +557,7 @@ function ContentModelSchemaEditor({
     { value: 'url',      label: 'URL' },
     { value: 'email',    label: 'Email' },
     { value: 'date',     label: 'Date' },
+    { value: 'category', label: 'Category / Tag' },
   ]
 
   return (
@@ -608,6 +609,7 @@ function ContentModelSchemaEditor({
           className="w-full text-[12px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent"
         >
           <option value="">(strategist confirms later)</option>
+          <option value="na">N/A — no buttons on this model</option>
           <option value="internal-page">Individual page per entry (CPT detail)</option>
           <option value="external">External link</option>
           <option value="mailto">Email (mailto:)</option>

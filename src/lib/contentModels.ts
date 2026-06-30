@@ -30,7 +30,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 export type ContentModelFieldType =
-  | 'text' | 'richtext' | 'image' | 'cta' | 'url' | 'email' | 'date'
+  | 'text' | 'richtext' | 'image' | 'cta' | 'url' | 'email' | 'date' | 'category'
 
 export interface ContentModelField {
   key:   string
@@ -42,7 +42,7 @@ export interface ContentModel {
   id:           string
   name:         string
   schema:       ContentModelField[]
-  cta_target:   'internal-page' | 'external' | 'mailto' | 'tel' | 'anchor' | null
+  cta_target:   'internal-page' | 'external' | 'mailto' | 'tel' | 'anchor' | 'na' | null
   /** Section ids (web_sections.id) bound to this model. Default
    *  behavior: ALL items in the section's primary group belong to
    *  the model. Override per-section via `item_bindings` below. */
