@@ -37,6 +37,8 @@ import { WMStatusPill, type WMStatusTone } from '../StatusPill'
 import { getCoworkSteps, type CoworkPipelineState, type StepCatalogEntry, type StepStatus } from '../../../lib/cowork/stepCatalog'
 import { expandCoworkTokens } from '../../../lib/cowork/coworkPromptContext'
 import { CoworkArtifactDrawer } from './CoworkArtifactDrawer'
+import { SitemapReviewEditor } from '../sitemapReview/SitemapReviewEditor'
+import { ApprovedSitemapBanner } from '../sitemapReview/ApprovedSitemapBanner'
 import type { StrategyWebProject } from '../../../types/database'
 
 interface Props {
@@ -96,6 +98,10 @@ export function CoworkWorkspace({ project, onChange }: Props) {
   // Shown above the progress card so the strategist sees constraints
   // BEFORE they fire any pipeline step.
   const [timelineNotes, setTimelineNotes]     = useState<string | null>(null)
+  // Partner-facing sitemap review overlay — opened from the "Sitemap
+  // ready" banner once step 6 is done. Composes a client-safe review
+  // from personas + pages + nav, publishes to /portal/sitemap/:token.
+  const [sitemapReviewOpen, setSitemapReviewOpen] = useState(false)
 
   // ─── Data loaders ───────────────────────────────────────────────
 
@@ -660,12 +666,27 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         </div>
       )}
 
+      {sitemapReviewOpen && (
+        <SitemapReviewEditor
+          projectId={project.id}
+          churchName={project.church_name ?? undefined}
+          onClose={() => setSitemapReviewOpen(false)}
+        />
+      )}
+
+      <ApprovedSitemapBanner
+        projectId={project.id}
+        churchName={project.church_name ?? undefined}
+        showAllStatuses
+      />
+
       <FoundationPipelineBanner
         state={state}
         pipelineRunning={pipelineRunning}
         pipelineProgress={pipelineProgress}
         onRun={() => void runFoundationPipeline(false)}
         onForceRun={() => void runFoundationPipeline(true)}
+        onOpenPartnerReview={() => setSitemapReviewOpen(true)}
       />
 
       <div className="flex flex-col gap-4">
@@ -719,13 +740,16 @@ export function CoworkWorkspace({ project, onChange }: Props) {
 // ────────────────────────────────────────────────────────────────────
 
 function FoundationPipelineBanner({
-  state, pipelineRunning, pipelineProgress, onRun, onForceRun,
+  state, pipelineRunning, pipelineProgress, onRun, onForceRun, onOpenPartnerReview,
 }: {
   state:             CoworkPipelineState | null
   pipelineRunning:   boolean
   pipelineProgress:  { stepNumber: number; title: string } | null
   onRun:             () => void
   onForceRun:        () => void
+  /** Fires when the strategist clicks "Partner sitemap review" on the
+   *  sitemap-ready callout. Parent opens the SitemapReviewEditor. */
+  onOpenPartnerReview: () => void
 }) {
   if (!state) return null
 
@@ -747,30 +771,42 @@ function FoundationPipelineBanner({
   const doneCount = checks.filter(c => c.done).length
 
   // Sitemap done state — the only human gate. Surface it as a clear
-  // call-to-action: "scroll to step 6 / review the sitemap."
+  // call-to-action: "scroll to step 6 / review the sitemap" + a
+  // prominent "Partner sitemap review" button so the strategist can
+  // compose the client-safe version without hunting for a hidden entry.
   if (sitemapReady && doneCount === 6) {
     return (
-      <div className="mb-4 rounded-xl border border-wm-success bg-wm-success-bg px-4 py-3 flex items-start justify-between gap-3">
+      <div className="mb-4 rounded-xl border border-wm-success bg-wm-success-bg px-4 py-3 flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
           <p className="text-[13px] font-semibold text-wm-success">Sitemap ready for review.</p>
           <p className="text-[11px] text-wm-success/80 mt-0.5">
-            Sub-steps 1-6 complete. Open <strong>Plan the sitemap and navigation</strong> below to inspect the sitemap, then re-run any step if changes are needed.
+            Sub-steps 1-6 complete. Open <strong>Plan the sitemap and navigation</strong> below to inspect the sitemap, then compose the partner-facing review to share with the client.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            // Force-re-run is destructive — overwrites the existing
-            // sitemap + every upstream artifact. Confirm before firing.
-            if (confirm('Force-re-run the entire foundation pipeline? This overwrites every artifact from atoms through the sitemap.')) {
-              onForceRun()
-            }
-          }}
-          className="shrink-0 text-[11px] font-semibold px-2.5 py-1 rounded-md border border-wm-success/40 text-wm-success hover:bg-wm-success/10"
-          title="Force-re-run the entire foundation pipeline. Use when the content collection changed and the sitemap needs to reflect new inputs."
-        >
-          Re-run all
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onOpenPartnerReview}
+            className="inline-flex items-center gap-1.5 text-[12px] font-semibold rounded-full bg-wm-accent-strong text-white px-4 py-1.5 hover:bg-wm-accent"
+            title="Compose a partner-facing sitemap + navigation review with per-page purpose, persona posture, and consolidation rationale. Publish to a shareable partner link."
+          >
+            Partner sitemap review →
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              // Force-re-run is destructive — overwrites the existing
+              // sitemap + every upstream artifact. Confirm before firing.
+              if (confirm('Force-re-run the entire foundation pipeline? This overwrites every artifact from atoms through the sitemap.')) {
+                onForceRun()
+              }
+            }}
+            className="text-[11px] font-semibold px-2.5 py-1 rounded-md border border-wm-success/40 text-wm-success hover:bg-wm-success/10"
+            title="Force-re-run the entire foundation pipeline. Use when the content collection changed and the sitemap needs to reflect new inputs."
+          >
+            Re-run all
+          </button>
+        </div>
       </div>
     )
   }
