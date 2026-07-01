@@ -30,6 +30,7 @@ import BrandGuidePortalPage from './pages/BrandGuidePortalPage'
 import BrandingIndexPage from './pages/BrandingIndexPage'
 import BrandHandoffPage from './pages/BrandHandoffPage'
 import PortalReviewPage from './pages/PortalReviewPage'
+import SitemapReviewPortalPage from './pages/SitemapReviewPortalPage'
 import PartnerHubPage from './pages/PartnerHubPage'
 import ContentCollectionPage from './pages/ContentCollectionPage'
 import RegistrarIntakePage from './pages/RegistrarIntakePage'
@@ -111,6 +112,11 @@ export default function App() {
               web_reviews.partner_token. No login required; partner
               enters their name on first visit. */}
           <Route path="/portal/review/:token" element={<PortalReviewPage />} />
+          {/* Partner-facing sitemap-and-navigation review — token
+              comes from roadmap_state.sitemap_review.token. Public;
+              partner reads + edits inline, edits round-trip through
+              save_sitemap_review_by_token RPC. */}
+          <Route path="/portal/sitemap/:token" element={<SitemapReviewPortalPage />} />
           {/* Dev-only fixture preview for the feedback UI primitives. */}
           <Route path="/dev/feedback-preview" element={<FeedbackPreviewPage />} />
           {/* Legacy brand-guide URLs — kept live so old links don't rot. New

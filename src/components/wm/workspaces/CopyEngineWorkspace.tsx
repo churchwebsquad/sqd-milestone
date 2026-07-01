@@ -25,6 +25,8 @@ import { supabase } from '../../../lib/supabase'
 import type { StrategyWebProject } from '../../../types/database'
 import { SitemapPreview as RichSitemapPreview } from '../pipeline/previews/SitemapPreview'
 import { SitemapCoveragePreview } from '../pipeline/previews/SitemapCoveragePreview'
+import { SitemapReviewEditor } from '../sitemapReview/SitemapReviewEditor'
+import { ApprovedSitemapBanner } from '../sitemapReview/ApprovedSitemapBanner'
 
 interface SitemapShape {
   pages?: Array<{ name: string; slug: string }>
@@ -151,6 +153,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
   const [routePreview, setRoutePreview] = useState<RoutePayload | null>(null)
   const [routing,     setRouting]     = useState(false)
   const [sitemapOpen, setSitemapOpen] = useState(false)
+  const [sitemapReviewOpen, setSitemapReviewOpen] = useState(false)
   const [revisingSitemap, setRevisingSitemap] = useState(false)
   const [sitemapFeedback, setSitemapFeedback] = useState('')
   const [sitemapConvo, setSitemapConvo] = useState<Array<{
@@ -1178,6 +1181,18 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
 
   return (
     <div className="px-4 md:px-6 py-6 max-w-6xl mx-auto space-y-6">
+      {sitemapReviewOpen && (
+        <SitemapReviewEditor
+          projectId={project.id}
+          churchName={project.church_name ?? undefined}
+          onClose={() => setSitemapReviewOpen(false)}
+        />
+      )}
+      <ApprovedSitemapBanner
+        projectId={project.id}
+        churchName={project.church_name ?? undefined}
+        showAllStatuses
+      />
       <header className="flex items-baseline justify-between gap-4">
         <div>
           <h2 className="text-[20px] font-semibold text-wm-text">Copy Engine</h2>
@@ -1294,6 +1309,15 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
             >
               {sitemapOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
               {sitemapOpen ? 'Hide' : 'View'}
+            </button>
+          )}
+          {hasStage2 && (
+            <button
+              onClick={() => setSitemapReviewOpen(true)}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-wm-accent-strong hover:underline px-2 py-1"
+              title="Compose a partner-facing sitemap + navigation review with per-page purpose, persona posture, and consolidation rationale."
+            >
+              Partner sitemap review →
             </button>
           )}
           {hasStage2 && (

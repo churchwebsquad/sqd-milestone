@@ -87,6 +87,7 @@ import { parseCuratedLibrary, getEffectiveLibraryIds } from '../../../lib/webCur
 import { augmentTemplate } from '../../../lib/webBrixiesSchemaAugment'
 import { loadProjectReviewState, type ProjectReviewState } from '../../../lib/webReviews'
 import type { SnippetMap } from '../../../lib/webBrixiesRender'
+import { ApprovedSitemapBanner } from '../sitemapReview/ApprovedSitemapBanner'
 import type {
   StrategyWebProject, WebPage, WebSection, WebContentTemplate,
   WebTemplateKind, FieldProvenanceMap,
@@ -276,6 +277,16 @@ export function PagesWorkspace({ project, onChange }: Props) {
           className="w-72 shrink-0 border-r border-wm-border bg-wm-bg-elevated overflow-y-auto flex flex-col sticky self-start"
           style={{ top: 'var(--wm-header-h, 88px)', height: 'calc(100vh - var(--wm-header-h, 88px))' }}
         >
+          {/* Approved sitemap-review indicator — clicking reopens the
+              editor. Only surfaces when a review exists (any status),
+              so pre-review projects don't see it. */}
+          <div className="px-3 pt-3">
+            <ApprovedSitemapBanner
+              projectId={project.id}
+              churchName={project.church_name ?? undefined}
+              showAllStatuses
+            />
+          </div>
           {/* Import action — always available */}
           <div className="p-3 border-b border-wm-border sticky top-0 bg-wm-bg-elevated z-10">
             <WMButton

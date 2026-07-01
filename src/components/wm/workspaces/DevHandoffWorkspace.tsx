@@ -44,6 +44,7 @@ import {
 } from '../../../lib/urlRedirects'
 import type { DiscoverySection, SchemaName } from '../../../lib/acfFormationPlan/types'
 import { CANONICAL_SCHEMAS } from '../../../lib/acfFormationPlan/rules'
+import { ApprovedSitemapBanner } from '../sitemapReview/ApprovedSitemapBanner'
 import {
   aggregateOpenQuestions,
   buildContentImport,
@@ -419,6 +420,13 @@ export function DevHandoffWorkspace({ project }: Props) {
             the site. Generated from the project's design system, sections,
             and brief.
           </p>
+          <div className="mt-3">
+            <ApprovedSitemapBanner
+              projectId={project.id}
+              churchName={project.church_name ?? undefined}
+              showAllStatuses
+            />
+          </div>
         </header>
 
         <div className="space-y-5">
