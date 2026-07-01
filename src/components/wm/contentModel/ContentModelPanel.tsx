@@ -117,7 +117,12 @@ export function ContentModelPanel({ projectId, sectionId, embedded = false }: Pr
           </button>
           <div className="rounded-md border border-wm-accent/40 bg-wm-accent-tint/30 p-3 space-y-2">
             <div className="flex items-baseline justify-between gap-2">
-              <p className="text-[14px] font-bold text-wm-text">{drilled.name}</p>
+              <ModelNameHeading
+                projectId={projectId}
+                model={drilled}
+                sizeClass="text-[14px]"
+                onSaved={load}
+              />
               <span className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">
                 {drilled.section_ids.length} section{drilled.section_ids.length === 1 ? '' : 's'}
               </span>
@@ -194,7 +199,12 @@ export function ContentModelPanel({ projectId, sectionId, embedded = false }: Pr
       {current ? (
         <div className="rounded-md border border-wm-accent/40 bg-wm-accent-tint/30 p-3 space-y-3">
           <div className="flex items-baseline justify-between gap-2">
-            <p className="text-[13px] font-bold text-wm-text">{current.name}</p>
+            <ModelNameHeading
+              projectId={projectId}
+              model={current}
+              sizeClass="text-[13px]"
+              onSaved={load}
+            />
             <span className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">
               {current.section_ids.length} section{current.section_ids.length === 1 ? '' : 's'}
             </span>
@@ -273,6 +283,107 @@ export function ContentModelPanel({ projectId, sectionId, embedded = false }: Pr
         )}
       </div>
     </div>
+  )
+}
+
+/** Inline-editable model name. Reads as bold text, becomes an input
+ *  on click of the pencil affordance. Enter or "Save" commits via
+ *  upsertContentModel; Escape or "Cancel" reverts. Trim + non-empty
+ *  gate — refuses to save a blank name (rename to "" would break every
+ *  place that keys off `name`). */
+function ModelNameHeading({
+  projectId, model, sizeClass, onSaved,
+}: {
+  projectId: string
+  model:     ContentModel
+  /** Tailwind text-size class applied to both the read and edit
+   *  states so the heading doesn't jump when switching modes. */
+  sizeClass: string
+  onSaved:   () => Promise<void> | void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft]     = useState(model.name)
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+
+  // Reset draft whenever the model prop changes (e.g. after save, or
+  // when the panel drills into a different model).
+  useEffect(() => { setDraft(model.name); setError(null) }, [model.id, model.name])
+
+  const commit = async () => {
+    const next = draft.trim()
+    if (!next) {
+      setError('Name cannot be empty')
+      return
+    }
+    if (next === model.name) {
+      setEditing(false)
+      return
+    }
+    setSaving(true)
+    setError(null)
+    const res = await upsertContentModel(supabase, projectId, {
+      ...model,
+      name:       next,
+      updated_at: new Date().toISOString(),
+    })
+    setSaving(false)
+    if (!res.ok) {
+      setError(res.error)
+      return
+    }
+    setEditing(false)
+    await onSaved()
+  }
+
+  if (!editing) {
+    return (
+      <span className="inline-flex items-baseline gap-1.5">
+        <p className={`${sizeClass} font-bold text-wm-text`}>{model.name}</p>
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="text-[10.5px] text-wm-text-subtle hover:text-wm-accent-strong hover:underline"
+          title="Rename this content model"
+        >
+          rename
+        </button>
+      </span>
+    )
+  }
+
+  return (
+    <span className="inline-flex items-baseline gap-1.5 flex-wrap">
+      <input
+        type="text"
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter')  { e.preventDefault(); void commit() }
+          if (e.key === 'Escape') { setEditing(false); setDraft(model.name); setError(null) }
+        }}
+        disabled={saving}
+        autoFocus
+        className={`${sizeClass} font-bold text-wm-text bg-white border border-wm-accent rounded px-1.5 py-0.5 focus:outline-none min-w-0`}
+      />
+      <button
+        type="button"
+        onClick={() => void commit()}
+        disabled={saving || !draft.trim() || draft.trim() === model.name}
+        className="text-[10.5px] font-semibold text-wm-accent-strong hover:underline disabled:opacity-40 disabled:no-underline"
+      >
+        {saving ? 'saving…' : 'save'}
+      </button>
+      <button
+        type="button"
+        onClick={() => { setEditing(false); setDraft(model.name); setError(null) }}
+        disabled={saving}
+        className="text-[10.5px] text-wm-text-subtle hover:text-wm-text"
+      >
+        cancel
+      </button>
+      {error && <span className="text-[10.5px] text-red-600">err: {error}</span>}
+    </span>
   )
 }
 
