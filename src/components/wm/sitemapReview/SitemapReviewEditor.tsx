@@ -62,9 +62,15 @@ export function SitemapReviewEditor({
       return
     }
     // No review yet — compose one from current project state.
+    // Pull roadmap_state so composeSitemapReview can read
+    // site_strategy (the cowork sitemap step output — has rich
+    // per-page purposes, primary_audience, funnel_stage, curated nav,
+    // persona journeys, and pages_considered_dropped for the "where
+    // content went" section). Without site_strategy every field starts
+    // blank; with it, the review pre-fills with the strategist's work.
     const [{ data: proj }, { data: pgs }] = await Promise.all([
       supabase.from('strategy_web_projects')
-        .select('id, church_name, personas, nav_group_definitions')
+        .select('id, church_name, personas, nav_group_definitions, roadmap_state')
         .eq('id', projectId).maybeSingle(),
       supabase.from('web_pages')
         .select('id, slug, name, phase, sort_order, nav_group_label, user_journey_step')
@@ -314,7 +320,7 @@ function PagesEditor({
       <ul className="space-y-2">
         {review.pages.map(p => (
           <li key={p.id} className="border border-wm-border rounded p-2.5 bg-wm-bg">
-            <div className="flex items-baseline gap-2 mb-1">
+            <div className="flex items-baseline gap-2 mb-1 flex-wrap">
               <input
                 type="text"
                 defaultValue={p.name}
@@ -327,6 +333,20 @@ function PagesEditor({
                 <span className="text-[10.5px] text-wm-text-subtle ml-auto">{p.nav_position}</span>
               )}
             </div>
+            {(p.primary_audience || p.funnel_stage) && (
+              <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+                {p.primary_audience && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-wm-accent-tint border border-wm-accent/30 text-wm-accent-strong">
+                    Audience: {p.primary_audience}
+                  </span>
+                )}
+                {p.funnel_stage && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-wm-bg-elevated border border-wm-border text-wm-text-muted">
+                    Funnel: {p.funnel_stage}
+                  </span>
+                )}
+              </div>
+            )}
             <textarea
               defaultValue={p.purpose}
               placeholder="What this page is for — 1-2 sentences the partner will read"
@@ -380,7 +400,27 @@ function PersonaPosturesEditor({
       <div className="space-y-3">
         {review.persona_postures.map(p => (
           <div key={p.persona_id} className="border border-wm-border rounded p-3 bg-wm-bg">
-            <p className="text-[13px] font-bold text-wm-text mb-1">{p.persona_name}</p>
+            <div className="flex items-baseline gap-2 flex-wrap mb-1">
+              <p className="text-[13px] font-bold text-wm-text">{p.persona_name}</p>
+              {p.entry_points && p.entry_points.length > 0 && (
+                <span className="text-[10.5px] text-wm-text-subtle">
+                  Enters at: {p.entry_points.map(s => `/${s}`).join(', ')}
+                </span>
+              )}
+            </div>
+            {p.drop_off_risk && (
+              <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5">
+                <p className="text-[10px] uppercase tracking-widest font-bold text-amber-800 mb-0.5">
+                  Drop-off risk at /{p.drop_off_risk.at_slug}
+                </p>
+                <p className="text-[11.5px] text-amber-900 leading-snug">{p.drop_off_risk.reason}</p>
+                {p.drop_off_risk.mitigation && (
+                  <p className="text-[11px] text-amber-800 leading-snug mt-0.5">
+                    <span className="font-semibold">Mitigation:</span> {p.drop_off_risk.mitigation}
+                  </p>
+                )}
+              </div>
+            )}
             <textarea
               defaultValue={p.posture_summary}
               placeholder={`How the site meets ${p.persona_name} — what they see first, how the message lands, tone`}

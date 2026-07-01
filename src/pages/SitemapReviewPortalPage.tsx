@@ -233,6 +233,20 @@ function PagePortalCard({
           <span className="text-[10.5px] text-wm-text-subtle">{page.nav_position}</span>
         )}
       </div>
+      {(page.primary_audience || page.funnel_stage) && (
+        <div className="flex items-center gap-1.5 flex-wrap mb-2">
+          {page.primary_audience && (
+            <span className="text-[10.5px] px-2 py-0.5 rounded-full bg-wm-accent-tint border border-wm-accent/30 text-wm-accent-strong">
+              For: {page.primary_audience}
+            </span>
+          )}
+          {page.funnel_stage && (
+            <span className="text-[10.5px] px-2 py-0.5 rounded-full bg-wm-bg-elevated border border-wm-border text-wm-text-muted">
+              Funnel: {page.funnel_stage}
+            </span>
+          )}
+        </div>
+      )}
       <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Purpose</p>
       <textarea
         defaultValue={page.purpose}

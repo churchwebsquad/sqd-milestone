@@ -49,6 +49,17 @@ export interface PersonaPosture {
   /** Slugs of the pages most critical to this persona's success on
    *  the site. Used to highlight "these are your pages" per persona. */
   key_page_slugs: string[]
+  /** Pages this persona is likely to LAND on first. Pulled from the
+   *  cowork sitemap step's `persona_journeys[].entry_points`. Empty
+   *  when unknown. */
+  entry_points?: string[]
+  /** Where the strategist predicts this persona might bail. Pulled
+   *  from `persona_journeys[].drop_off_risk`. Optional. */
+  drop_off_risk?: {
+    at_slug:    string
+    reason:     string
+    mitigation: string
+  }
 }
 
 /** One page in the review's pages list. Independent from the real
@@ -73,6 +84,16 @@ export interface ReviewPage {
   /** Persona ids this page is primarily for. Cross-referenced against
    *  persona_postures[].persona_id. */
   persona_relevance?: string[]
+  /** Primary audience label lifted from the cowork sitemap
+   *  (site_strategy.pages[].primary_audience). Free text —
+   *  "general", persona name, "Jordan & Ashley", etc. */
+  primary_audience?: string | null
+  /** Funnel stage this page serves (site_strategy.pages[].primary_funnel).
+   *  Typically "discover" / "consider" / "visit" / "commit". */
+  funnel_stage?: string | null
+  /** Where in the nav this page lives (site_strategy.pages[].nav_strategy).
+   *  "primary" / "secondary" / "footer" / "contextual_only" / etc. */
+  nav_strategy?: string | null
 }
 
 export interface NavItem {
@@ -210,12 +231,52 @@ interface ComposeSourceWebPage {
   user_journey_step?: number | null
 }
 
-/** Compose a first-draft sitemap review from the current project state
- *  — pages, personas, nav groups, existing strategist proposal. Fills
- *  in reasonable defaults for every field; the strategist edits from
- *  there. Idempotent when re-run against an existing review: preserves
- *  fields the strategist already authored (purpose, posture_summary,
- *  etc.) and only fills in blanks. */
+/** Shape of `roadmap_state.site_strategy` — the cowork "plan-site-strategy"
+ *  step output. Loosely typed because we defensively index; only the
+ *  fields we consume are documented here. */
+interface SiteStrategyBlob {
+  pages?: Array<{
+    name?:              string
+    slug?:              string
+    purpose?:           string
+    nav_order?:         number
+    nav_strategy?:      string
+    primary_audience?:  string
+    primary_funnel?:    string
+    has_children?:      boolean
+    parent_slug?:       string | null
+  }>
+  nav?: {
+    primary?:  Array<{ slug?: string; label?: string; children?: Array<{ slug?: string; label?: string }> } | string>
+    footer?:   Array<{ slug?: string; label?: string } | string>
+    cta_only?: Array<{ slug?: string; label?: string } | string>
+  }
+  persona_journeys?: Array<{
+    persona?:       string
+    journey?:       string[]
+    entry_points?:  string[]
+    drop_off_risk?: { at_slug?: string; reason?: string; mitigation?: string }
+  }>
+  pages_considered_dropped?: Array<{
+    slug?:       string
+    from_label?: string
+    reason?:     string
+    merged_to?:  string
+  }>
+}
+
+/** Compose a first-draft sitemap review from the current project state.
+ *
+ *  Prefers `roadmap_state.site_strategy` (the cowork plan-site-strategy
+ *  step output) as the source of truth — that has rich per-page context
+ *  (purpose, primary audience, funnel stage, nav strategy), curated nav
+ *  layout, persona journeys, and pages_considered_dropped rationale.
+ *  Falls back to raw `web_pages` + `nav_group_definitions` when
+ *  site_strategy hasn't run yet.
+ *
+ *  Idempotent when re-run against an existing review: preserves fields
+ *  the strategist already authored (purpose overrides, posture_summary
+ *  edits, added user_journey steps, etc.) and only fills blanks. */
 export function composeSitemapReview(args: {
   project:  ComposeSourceProject
   pages:    ComposeSourceWebPage[]
@@ -224,48 +285,132 @@ export function composeSitemapReview(args: {
   const { project, pages, existing } = args
   const now = new Date().toISOString()
 
+  const rs = (project.roadmap_state ?? {}) as Record<string, unknown>
+  const strategy = (rs.site_strategy ?? null) as SiteStrategyBlob | null
+
   const existingPagesBySlug = new Map<string, ReviewPage>()
   for (const p of existing?.pages ?? []) existingPagesBySlug.set(p.slug, p)
 
-  const composedPages: ReviewPage[] = pages
-    .filter(p => p.slug && p.slug !== '_meta')
-    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-    .map((p, i) => {
-      const prior = existingPagesBySlug.get(p.slug)
-      return {
-        id:             prior?.id ?? cryptoRandomId(),
-        web_page_id:    p.id,
-        slug:           p.slug,
-        name:           p.name ?? p.slug,
-        purpose:        prior?.purpose ?? '',
-        nav_position:   prior?.nav_position ?? (p.nav_group_label ? `Header → ${p.nav_group_label}` : undefined),
-        parent_slug:    prior?.parent_slug,
-        order:          i,
-        persona_relevance: prior?.persona_relevance ?? [],
-      }
-    })
+  // Web-pages lookup so we can back-fill web_page_id when the strategist
+  // list references a slug that's already committed as a real row.
+  const webPageBySlug = new Map<string, ComposeSourceWebPage>()
+  for (const p of pages) webPageBySlug.set(p.slug, p)
+
+  // Nav-position labeling — derives a human-readable "where in the nav"
+  // from site_strategy.nav (primary / footer / cta_only) so the review
+  // renders "Header · primary" instead of leaving nav_position blank.
+  const navPositionBySlug = buildNavPositionMap(strategy?.nav)
+
+  // Prefer site_strategy.pages when present; fall back to raw web_pages.
+  const strategyPages = Array.isArray(strategy?.pages) ? strategy!.pages! : []
+  const composedPages: ReviewPage[] = (strategyPages.length > 0
+    ? strategyPages
+        .filter(p => typeof p.slug === 'string' && p.slug && p.slug !== '_meta')
+        .sort((a, b) => (a.nav_order ?? 0) - (b.nav_order ?? 0))
+        .map((sp, i) => {
+          const slug = sp.slug as string
+          const prior = existingPagesBySlug.get(slug)
+          const wp = webPageBySlug.get(slug)
+          const navPos = navPositionBySlug.get(slug) ?? (sp.nav_strategy ? capitalize(sp.nav_strategy) : undefined)
+          return {
+            id:                prior?.id ?? cryptoRandomId(),
+            web_page_id:       wp?.id ?? prior?.web_page_id,
+            slug,
+            name:              prior?.name ?? sp.name ?? slug,
+            purpose:           prior?.purpose && prior.purpose.trim() ? prior.purpose : (sp.purpose ?? ''),
+            nav_position:      prior?.nav_position ?? navPos,
+            parent_slug:       prior?.parent_slug ?? sp.parent_slug ?? null,
+            order:             i,
+            persona_relevance: prior?.persona_relevance ?? [],
+            primary_audience:  prior?.primary_audience ?? sp.primary_audience ?? null,
+            funnel_stage:      prior?.funnel_stage ?? sp.primary_funnel ?? null,
+            nav_strategy:      prior?.nav_strategy ?? sp.nav_strategy ?? null,
+          }
+        })
+    : pages
+        .filter(p => p.slug && p.slug !== '_meta')
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map((p, i) => {
+          const prior = existingPagesBySlug.get(p.slug)
+          return {
+            id:                prior?.id ?? cryptoRandomId(),
+            web_page_id:       p.id,
+            slug:              p.slug,
+            name:              prior?.name ?? p.name ?? p.slug,
+            purpose:           prior?.purpose ?? '',
+            nav_position:      prior?.nav_position ?? (p.nav_group_label ? `Header → ${p.nav_group_label}` : undefined),
+            parent_slug:       prior?.parent_slug,
+            order:             i,
+            persona_relevance: prior?.persona_relevance ?? [],
+            primary_audience:  prior?.primary_audience ?? null,
+            funnel_stage:      prior?.funnel_stage ?? null,
+            nav_strategy:      prior?.nav_strategy ?? null,
+          }
+        })
+  )
 
   const existingPosturesById = new Map<string, PersonaPosture>()
   for (const pp of existing?.persona_postures ?? []) existingPosturesById.set(pp.persona_id, pp)
 
+  // Persona journeys from site_strategy — keyed by persona NAME
+  // (strategy stores lowercase name, personas[] has a name field).
+  const journeyByPersonaName = new Map<string, NonNullable<SiteStrategyBlob['persona_journeys']>[number]>()
+  for (const j of strategy?.persona_journeys ?? []) {
+    if (typeof j.persona === 'string') journeyByPersonaName.set(j.persona.toLowerCase(), j)
+  }
+
   const composedPostures: PersonaPosture[] = (project.personas ?? []).map(persona => {
     const prior = existingPosturesById.get(persona.id)
+    const journey = journeyByPersonaName.get(persona.name.toLowerCase())
+    const seededSteps: JourneyStep[] = journey?.journey
+      ? journey.journey.map(slug => ({ step_label: `→ /${slug}`, page_slug: slug }))
+      : []
     return {
       persona_id:      persona.id,
       persona_name:    persona.name,
-      posture_summary: prior?.posture_summary ?? '',
-      user_journey:    prior?.user_journey ?? [],
-      key_page_slugs:  prior?.key_page_slugs ?? [],
+      posture_summary: prior?.posture_summary ?? persona.description ?? '',
+      user_journey:    prior?.user_journey && prior.user_journey.length > 0 ? prior.user_journey : seededSteps,
+      key_page_slugs:  prior?.key_page_slugs && prior.key_page_slugs.length > 0
+        ? prior.key_page_slugs
+        : (journey?.entry_points ?? []),
+      entry_points:    prior?.entry_points ?? journey?.entry_points ?? undefined,
+      drop_off_risk:   prior?.drop_off_risk ?? (
+        journey?.drop_off_risk?.at_slug && journey?.drop_off_risk?.reason
+          ? {
+              at_slug:    journey.drop_off_risk.at_slug,
+              reason:     journey.drop_off_risk.reason ?? '',
+              mitigation: journey.drop_off_risk.mitigation ?? '',
+            }
+          : undefined
+      ),
     }
   })
 
-  // Nav layout: seed from existing or from nav_group_definitions.
-  const composedNav: NavLayout = existing?.nav_layout ?? {
-    header: (project.nav_group_definitions ?? [])
-      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-      .map(g => ({ label: g.label })),
-    footer_sections: [],
-  }
+  // Nav layout: prefer site_strategy.nav when present; fall back to
+  // existing review or nav_group_definitions.
+  const composedNav: NavLayout = existing?.nav_layout ?? buildNavLayoutFromStrategy(strategy, composedPages)
+    ?? {
+      header: (project.nav_group_definitions ?? [])
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map(g => ({ label: g.label })),
+      footer_sections: [],
+    }
+
+  // Content migrations: seed from pages_considered_dropped when the
+  // strategist hasn't authored any yet. Each dropped-page entry becomes
+  // a "This existed on your old site; here's why it doesn't now" card.
+  const composedMigrations: ContentMigration[] =
+    existing?.content_migrations && existing.content_migrations.length > 0
+      ? existing.content_migrations
+      : (strategy?.pages_considered_dropped ?? [])
+          .filter(d => typeof d.slug === 'string' && (d.reason ?? '').trim())
+          .map(d => ({
+            id:          cryptoRandomId(),
+            title:       d.from_label ?? formatSlugAsTitle(d.slug as string),
+            merged_from: [d.from_label ?? formatSlugAsTitle(d.slug as string)],
+            merged_to:   d.merged_to ?? '(consolidated across the new site)',
+            rationale:   d.reason ?? '',
+          }))
 
   return {
     schema_version:     1,
@@ -283,10 +428,89 @@ export function composeSitemapReview(args: {
     pages:              composedPages,
     persona_postures:   composedPostures,
     nav_layout:         composedNav,
-    content_migrations: existing?.content_migrations ?? [],
+    content_migrations: composedMigrations,
     partner_notes:      existing?.partner_notes,
     edit_history:       existing?.edit_history ?? [],
   }
+}
+
+/** site_strategy nav → NavLayout translation. Handles the polymorphic
+ *  primary/footer entries (strings-of-slugs OR objects). Returns null
+ *  when strategy has no nav data so the caller can fall back to
+ *  nav_group_definitions. */
+function buildNavLayoutFromStrategy(
+  strategy: SiteStrategyBlob | null,
+  pages: ReviewPage[],
+): NavLayout | null {
+  const nav = strategy?.nav
+  if (!nav || (!nav.primary && !nav.footer)) return null
+
+  const nameBySlug = new Map<string, string>()
+  for (const p of pages) nameBySlug.set(p.slug, p.name)
+
+  const primaryItems: NavItem[] = (nav.primary ?? []).map(item => {
+    if (typeof item === 'string') {
+      return { label: nameBySlug.get(item) ?? formatSlugAsTitle(item), slug: item }
+    }
+    const slug = item.slug
+    const label = item.label ?? (slug ? (nameBySlug.get(slug) ?? formatSlugAsTitle(slug)) : '')
+    const children = (item.children ?? [])
+      .map(c => {
+        if (typeof c === 'string') return { label: nameBySlug.get(c) ?? formatSlugAsTitle(c), slug: c }
+        const cs = (c as { slug?: string; label?: string }).slug
+        return { label: (c as { label?: string }).label ?? (cs ? (nameBySlug.get(cs) ?? formatSlugAsTitle(cs)) : ''), slug: cs }
+      })
+      .filter(c => c.label)
+    return { label, slug, ...(children.length > 0 ? { children } : {}) }
+  }).filter(it => it.label)
+
+  const footerItems: NavItem[] = (nav.footer ?? []).map(item => {
+    if (typeof item === 'string') {
+      return { label: nameBySlug.get(item) ?? formatSlugAsTitle(item), slug: item }
+    }
+    const slug = item.slug
+    return { label: item.label ?? (slug ? (nameBySlug.get(slug) ?? formatSlugAsTitle(slug)) : ''), slug }
+  }).filter(it => it.label)
+
+  return {
+    header:          primaryItems,
+    footer_sections: footerItems.length > 0
+      ? [{ label: 'Footer', items: footerItems }]
+      : [],
+  }
+}
+
+/** Map slug → human-readable nav position string ("Header · primary",
+ *  "Footer", "Sub-nav of /about"). Used to prefill ReviewPage.nav_position
+ *  without duplicating the nav_layout tree. */
+function buildNavPositionMap(nav: SiteStrategyBlob['nav'] | undefined): Map<string, string> {
+  const map = new Map<string, string>()
+  if (!nav) return map
+  for (const item of nav.primary ?? []) {
+    if (typeof item === 'string') { map.set(item, 'Header · primary'); continue }
+    if (item.slug) map.set(item.slug, 'Header · primary')
+    for (const c of item.children ?? []) {
+      if (typeof c === 'string') map.set(c, `Header · under ${item.label ?? item.slug ?? '(parent)'}`)
+      else if ((c as { slug?: string }).slug) map.set((c as { slug: string }).slug, `Header · under ${item.label ?? item.slug ?? '(parent)'}`)
+    }
+  }
+  for (const item of nav.footer ?? []) {
+    if (typeof item === 'string') { map.set(item, 'Footer'); continue }
+    if (item.slug) map.set(item.slug, 'Footer')
+  }
+  for (const item of nav.cta_only ?? []) {
+    if (typeof item === 'string') { map.set(item, 'CTA button only'); continue }
+    if (item.slug) map.set(item.slug, 'CTA button only')
+  }
+  return map
+}
+
+function formatSlugAsTitle(slug: string): string {
+  return slug.split(/[-_/]/).filter(Boolean).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ')
+}
+
+function capitalize(s: string): string {
+  return s.length === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1)
 }
 
 // ── Status transitions ───────────────────────────────────────────────
