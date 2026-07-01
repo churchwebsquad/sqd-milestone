@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../../lib/supabase'
 import {
   loadContentModels, upsertContentModel, connectSectionToModel, disconnectSectionFromModel,
+  deleteContentModel,
   findModelForSection, defaultSchemaForName, newContentModelId, setSectionItemBindings,
   type ContentModel, type ContentModelField, type ContentModelFieldType,
 } from '../../../lib/contentModels'
@@ -131,6 +132,11 @@ export function ContentModelPanel({ projectId, sectionId, embedded = false }: Pr
               projectId={projectId}
               model={drilled}
               onSaved={load}
+            />
+            <DeleteModelControl
+              projectId={projectId}
+              model={drilled}
+              onDeleted={async () => { setDrillModelId(null); await load() }}
             />
           </div>
         </div>
@@ -384,6 +390,77 @@ function ModelNameHeading({
       </button>
       {error && <span className="text-[10.5px] text-red-600">err: {error}</span>}
     </span>
+  )
+}
+
+/** Two-click delete control for a content model. First click flips
+ *  into a confirmation state showing "Delete <name>? — cancel" so
+ *  the user can't nuke a model with a stray click. Second click
+ *  actually deletes; sections that were bound get silently unbound
+ *  (see deleteContentModel). */
+function DeleteModelControl({
+  projectId, model, onDeleted,
+}: {
+  projectId: string
+  model:     ContentModel
+  onDeleted: () => Promise<void> | void
+}) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleDelete = async () => {
+    setBusy(true)
+    setError(null)
+    const res = await deleteContentModel(supabase, projectId, model.id)
+    setBusy(false)
+    if (!res.ok) {
+      setError(res.error)
+      return
+    }
+    await onDeleted()
+  }
+
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        onClick={() => setConfirming(true)}
+        className="text-[11px] font-semibold text-wm-text-muted hover:text-wm-danger"
+      >
+        Delete this model
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap text-[11px]">
+      <span className="text-wm-text-muted">
+        Delete <strong className="text-wm-text">{model.name}</strong>?
+        {model.section_ids.length > 0 && (
+          <span className="text-wm-text-subtle">
+            {' '}({model.section_ids.length} section{model.section_ids.length === 1 ? '' : 's'} will be unbound)
+          </span>
+        )}
+      </span>
+      <button
+        type="button"
+        onClick={() => void handleDelete()}
+        disabled={busy}
+        className="font-semibold text-wm-danger hover:underline disabled:opacity-50"
+      >
+        {busy ? 'deleting…' : 'yes, delete'}
+      </button>
+      <button
+        type="button"
+        onClick={() => { setConfirming(false); setError(null) }}
+        disabled={busy}
+        className="text-wm-text-subtle hover:text-wm-text"
+      >
+        cancel
+      </button>
+      {error && <span className="text-red-600">err: {error}</span>}
+    </div>
   )
 }
 
@@ -675,6 +752,8 @@ function ContentModelSchemaEditor({
     { value: 'cta',      label: 'Button (CTA)' },
     { value: 'url',      label: 'URL' },
     { value: 'email',    label: 'Email' },
+    { value: 'phone',    label: 'Phone' },
+    { value: 'address',  label: 'Address' },
     { value: 'date',     label: 'Date' },
     { value: 'category', label: 'Category / Tag' },
   ]

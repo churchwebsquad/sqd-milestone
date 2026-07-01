@@ -30,7 +30,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 export type ContentModelFieldType =
-  | 'text' | 'richtext' | 'image' | 'file' | 'cta' | 'url' | 'email' | 'date' | 'category'
+  | 'text' | 'richtext' | 'image' | 'file' | 'cta' | 'url' | 'email' | 'phone' | 'address' | 'date' | 'category'
 
 export interface ContentModelField {
   key:   string
@@ -181,6 +181,22 @@ export async function setSectionItemBindings(
   const res = await saveContentModels(sb, projectId, next)
   if (!res.ok) return res
   return { ok: true, model: updated }
+}
+
+/** Delete a content model entirely. Removes it from the project's
+ *  content_models list; any section that was bound to it is silently
+ *  unbound (the analyzer will fall back to inference for those
+ *  sections on next recompute). Safe to call for a model id that
+ *  doesn't exist — returns ok. */
+export async function deleteContentModel(
+  sb: SupabaseClient,
+  projectId: string,
+  modelId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const list = await loadContentModels(sb, projectId)
+  const next = list.filter(m => m.id !== modelId)
+  if (next.length === list.length) return { ok: true }  // no-op
+  return saveContentModels(sb, projectId, next)
 }
 
 /** Disconnect a section from a model. */
