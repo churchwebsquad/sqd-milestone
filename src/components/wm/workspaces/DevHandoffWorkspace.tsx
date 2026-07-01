@@ -1885,12 +1885,13 @@ function DeclaredContentModelsBlock({ plan }: { plan: ContentModelPlan }) {
                   {m.schema.length === 0 ? (
                     <p className="text-[12px] text-wm-text-muted italic">No fields declared yet.</p>
                   ) : (
-                    <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-[12px]">
+                    <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
                       {m.schema.map(f => (
                         <li key={f.key} className="flex items-baseline gap-2 min-w-0">
-                          <code className="text-[11.5px] font-mono text-wm-text shrink-0">{f.key}</code>
-                          <span className="text-wm-text-muted truncate">{f.label}</span>
-                          <span className="text-[10.5px] text-wm-text-subtle italic shrink-0">· {f.type}</span>
+                          <span className="text-[13.5px] text-wm-text truncate">{f.label || f.key}</span>
+                          <span className="text-[11px] font-semibold text-wm-accent-strong bg-wm-accent-tint border border-wm-accent/30 px-2 py-0.5 rounded-full shrink-0">
+                            {f.type}
+                          </span>
                         </li>
                       ))}
                     </ul>
