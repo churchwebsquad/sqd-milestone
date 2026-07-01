@@ -37,7 +37,7 @@ import {
 } from '../../../lib/cta'
 import { GLOBAL_FIELDS } from '../../../lib/webSnippets'
 import { composeSectionName } from '../../../lib/webSectionRoles'
-import { ANALYZER_REVISION, saveFormationPlan, setSchemaOverride, type ContentModelPlan } from '../../../lib/acfFormationPlan'
+import { ANALYZER_REVISION, computeFormationPlan, saveFormationPlan, setSchemaOverride, type ContentModelPlan } from '../../../lib/acfFormationPlan'
 import {
   buildRedirectDiff, redirectsToCsv, urlToPath,
   type CrawlUrlRow, type SitemapPage, type RedirectCandidate,
@@ -144,8 +144,19 @@ export function DevHandoffWorkspace({ project }: Props) {
   // plan was computed). Tells the user "click Compute now to apply
   // recent analyzer fixes" without surfacing a vague stale state.
   const [cmCodeDrift, setCmCodeDrift] = useState(false)
+  // Track whether we've kicked off the auto-compute yet, to avoid
+  // re-firing on every roadmap_state change once the initial one is
+  // in flight. Scoped to project.id so a project switch triggers a
+  // fresh auto-compute.
+  const [autoComputedFor, setAutoComputedFor] = useState<string | null>(null)
   // Seed from any previously saved plan so reloading the page shows
-  // the last counts without re-running the analyzer.
+  // the last counts without re-running the analyzer. When no persisted
+  // plan exists, auto-compute one in memory (skipping the expensive
+  // LLM enrichment) so the strategist-declared content models are
+  // visible immediately without waiting on a "Compute now" click.
+  // The in-memory result is not saved to the DB — clicking Compute
+  // now still writes the full plan (with LLM enrichment on if enabled)
+  // and persists it.
   useEffect(() => {
     const rs = project.roadmap_state as Record<string, unknown> | null
     const existing = rs?.content_model_plan as ContentModelPlan | undefined
@@ -155,12 +166,32 @@ export function DevHandoffWorkspace({ project }: Props) {
       // Code-drift check: stamp on the plan vs current analyzer revision.
       const savedRev = existing._meta?.generated_by ?? 'analyzer-v1'
       setCmCodeDrift(savedRev !== ANALYZER_REVISION)
+    } else if (autoComputedFor !== project.id) {
+      // No persisted plan for this project — kick off a background
+      // compute (skipLlm) once per project session so the panel isn't
+      // blank on first open. Non-blocking; the full "Compute now"
+      // affordance stays available for the persisted, LLM-enriched run.
+      setAutoComputedFor(project.id)
+      let cancelled = false
+      void (async () => {
+        try {
+          const plan = await computeFormationPlan(project.id, supabase, { skipLlm: true })
+          if (cancelled) return
+          setCmPlan(plan)
+          setCmStatus('success')
+        } catch (e) {
+          if (cancelled) return
+          // Silent — this is a background nicety, not the primary path.
+          console.warn('[DevHandoff] auto-compute failed:', e)
+        }
+      })()
+      return () => { cancelled = true }
     }
     const persistedAnswers = rs?.content_model_plan_answers as Record<string, string> | undefined
     if (persistedAnswers && typeof persistedAnswers === 'object') {
       setCmAnswers(persistedAnswers)
     }
-  }, [project.roadmap_state])
+  }, [project.roadmap_state, project.id, autoComputedFor])
 
   // Stale detection: if any web_section in this project was updated
   // after the plan was generated, McNeel should recompute. We don't
