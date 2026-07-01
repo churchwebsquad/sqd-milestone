@@ -671,6 +671,7 @@ function ContentModelSchemaEditor({
     { value: 'text',     label: 'Text' },
     { value: 'richtext', label: 'Rich text' },
     { value: 'image',    label: 'Image' },
+    { value: 'file',     label: 'File (PDF/doc/etc.)' },
     { value: 'cta',      label: 'Button (CTA)' },
     { value: 'url',      label: 'URL' },
     { value: 'email',    label: 'Email' },

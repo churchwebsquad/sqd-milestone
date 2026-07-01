@@ -30,7 +30,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 export type ContentModelFieldType =
-  | 'text' | 'richtext' | 'image' | 'cta' | 'url' | 'email' | 'date' | 'category'
+  | 'text' | 'richtext' | 'image' | 'file' | 'cta' | 'url' | 'email' | 'date' | 'category'
 
 export interface ContentModelField {
   key:   string
