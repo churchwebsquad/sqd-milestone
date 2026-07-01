@@ -43,6 +43,16 @@ export interface ContentModel {
   name:         string
   schema:       ContentModelField[]
   cta_target:   'internal-page' | 'external' | 'mailto' | 'tel' | 'anchor' | 'na' | null
+  /** Optional pairing with a content-collection topic. When set, the
+   *  dev handoff card for this model surfaces the partner's answers
+   *  from strategy_content_collection_sessions (display_preference,
+   *  external source URLs, source-of-truth systems, frustrations,
+   *  playlist URLs, archive features) — the "What the partner asked
+   *  for in Content Collection" callout — right on the model card
+   *  instead of on the individual sections. Null when the model
+   *  doesn't align to any content-collection topic (Staff, Ways to
+   *  Give, generic Feature cards, etc.). */
+  paired_content_kind?: 'events' | 'sermons' | 'groups' | null
   /** Section ids (web_sections.id) bound to this model. Default
    *  behavior: ALL items in the section's primary group belong to
    *  the model. Override per-section via `item_bindings` below. */

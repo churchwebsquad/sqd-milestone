@@ -175,15 +175,50 @@ export async function computeFormationPlan(
     layer_3_acf_field_groups: layer3,
     discovery_sections:       discoverySections,
     inventory_discovery:      inventoryDiscovery,
-    declared_content_models:  inputs.declaredContentModels.map(m => ({
-      id:           m.id,
-      name:         m.name,
-      schema:       m.schema.map(f => ({ key: f.key, label: f.label, type: f.type })),
-      cta_target:   m.cta_target,
-      section_ids:  m.section_ids,
-      ...(m.item_bindings ? { item_bindings: m.item_bindings } : {}),
-      updated_at:   m.updated_at,
-    })),
+    declared_content_models:  inputs.declaredContentModels.map(m => {
+      const pairedKind = m.paired_content_kind ?? null
+      const cc = inputs.contentCollection as Record<string, unknown> | null
+      let paired_content_context: import('./types').DeclaredContentModelSnapshot['paired_content_context'] = null
+      if (pairedKind && cc) {
+        if (pairedKind === 'events') {
+          paired_content_context = {
+            content_kind:       'events',
+            display_preference: (cc.events_display_preference as string | null) ?? null,
+            display_format:     (cc.events_display_format as string | null) ?? null,
+            external_url:       (cc.events_external_url as string | null) ?? null,
+            source_of_truth:    (cc.events_wordpress_source_of_truth as string | null) ?? null,
+            frustration:        (cc.events_wordpress_frustration as string | null) ?? null,
+          }
+        } else if (pairedKind === 'sermons') {
+          paired_content_context = {
+            content_kind:       'sermons',
+            display_preference: (cc.sermons_display_preference as string | null) ?? null,
+            external_url:       (cc.sermons_external_url as string | null) ?? null,
+            playlist_url:       (cc.sermon_youtube_playlist_url as string | null) ?? null,
+            archive_features:   Array.isArray(cc.sermon_archive_features) ? cc.sermon_archive_features as string[] : null,
+          }
+        } else {
+          paired_content_context = {
+            content_kind:       'groups',
+            display_preference: (cc.groups_display_preference as string | null) ?? null,
+            external_url:       (cc.groups_external_url as string | null) ?? null,
+            source_of_truth:    (cc.groups_wordpress_source_of_truth as string | null) ?? null,
+            frustration:        (cc.groups_wordpress_frustration as string | null) ?? null,
+          }
+        }
+      }
+      return {
+        id:                     m.id,
+        name:                   m.name,
+        schema:                 m.schema.map(f => ({ key: f.key, label: f.label, type: f.type })),
+        cta_target:             m.cta_target,
+        paired_content_kind:    pairedKind,
+        ...(paired_content_context ? { paired_content_context } : {}),
+        section_ids:            m.section_ids,
+        ...(m.item_bindings ? { item_bindings: m.item_bindings } : {}),
+        updated_at:             m.updated_at,
+      }
+    }),
   }
 
   return plan

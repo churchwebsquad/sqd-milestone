@@ -712,11 +712,13 @@ export function DevHandoffWorkspace({ project }: Props) {
               <p className="text-[12px] text-red-600">Error: {cmError}</p>
             )}
             {cmPlan && (
-              <div className="mt-2 grid grid-cols-2 md:grid-cols-5 gap-3 text-[12px]">
+              <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
                 <CmStat label="Classifications"     value={cmPlan._meta.counts.classifications} />
-                <CmStat label="WP objects"          value={cmPlan._meta.counts.wp_objects} />
+                <CmStat
+                  label="Custom Post Types"
+                  value={cmPlan.layer_2_wp_objects.filter(o => o.kind === 'custom_post_type').length}
+                />
                 <CmStat label="ACF field groups"    value={cmPlan._meta.counts.acf_field_groups} />
-                <CmStat label="Open questions"      value={cmPlan._meta.counts.open_questions} />
                 <CmStat label="Low confidence"      value={cmPlan._meta.counts.low_confidence} />
               </div>
             )}
@@ -738,7 +740,6 @@ export function DevHandoffWorkspace({ project }: Props) {
               </div>
             )}
             {cmPlan && <CmDownloadRow plan={cmPlan} answers={cmAnswers} projectSlug={projectSlug} />}
-            {cmPlan && <CmOpenQuestionsPanel plan={cmPlan} answers={cmAnswers} onSaveAnswer={saveCmAnswer} />}
             {cmPlan && <CmPartnerIntentPanel plan={cmPlan} />}
             {cmPlan && (
               <CmConceptsFoundPanel
@@ -1531,25 +1532,20 @@ function CmConceptsFoundPanel({
       </p>
 
       {/* Declared content models — the strategist's authoritative groups.
-          When present, this is the section the dev should build from:
-          each model carries the schema + target + the sections that
-          feed it (across pages), so a "Staff" model rolls up all 5
-          team grids into one place instead of 5 separate per-page rows.
-          When the strategist hasn't declared anything (typical for
-          older projects), the block is hidden and only the per-page
-          analyzer view below renders. */}
+          This is now the sole "what to build" surface on the dev
+          handoff. The per-page analyzer view (previously rendered
+          below) was removed because it duplicated the declared-model
+          view and added noise for sections the strategist had already
+          organized. When the strategist hasn't declared anything yet,
+          the analyzer's per-page inference still renders as a
+          fallback so older projects don't lose their view. */}
       <DeclaredContentModelsBlock plan={plan} />
 
-      {/* Per-page analyzer view — keeps the inferred per-section
-          discovery for sections the strategist hasn't declared yet, and
-          for unbound chrome-ish sections the analyzer still surfaces.
-          Sub-labeled so the dev sees this is the SECONDARY view (the
-          declared-models block above is canonical). */}
-      {(plan.declared_content_models?.length ?? 0) > 0 && (
-        <h4 className="text-[12px] font-bold text-wm-text-subtle uppercase tracking-wider mt-6 mb-2">
-          By page — analyzer view (sections not in a declared model)
-        </h4>
-      )}
+      {/* Fallback per-page view — ONLY renders when no declared
+          models exist. Once the strategist declares at least one,
+          the declared-models block above is authoritative and this
+          block is hidden entirely. */}
+      {(plan.declared_content_models?.length ?? 0) === 0 && (
       <div className="space-y-4">
         {pagesSorted.map(([pageSlug, sections]) => (
           <details key={pageSlug} className="rounded-md border border-wm-border bg-wm-bg-elevated" open>
@@ -1776,6 +1772,7 @@ function CmConceptsFoundPanel({
           )
         })}
       </div>
+      )}
     </div>
   )
 }
@@ -1893,6 +1890,66 @@ function DeclaredContentModelsBlock({ plan }: { plan: ContentModelPlan }) {
                     </ul>
                   )}
                 </div>
+
+                {/* Partner Content Collection callout — shown here on
+                    the declared-model card when the strategist paired
+                    this model with a content-collection topic (Events,
+                    Sermons, Groups). Same fields that used to appear
+                    on individual section rows; relocating here means
+                    the dev sees the partner's intent alongside the
+                    model that will carry it, not scattered per section. */}
+                {m.paired_content_context && (
+                  <div className="rounded-md border border-wm-accent/50 bg-wm-accent-tint/50 px-3 py-2">
+                    <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-accent-strong mb-1.5">
+                      What the partner asked for in Content Collection ({m.paired_content_context.content_kind})
+                    </p>
+                    <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-[12.5px]">
+                      {m.paired_content_context.display_preference && <>
+                        <dt className="text-wm-text-muted">Display preference</dt>
+                        <dd className="text-wm-text"><code className="text-[12px] font-mono">{m.paired_content_context.display_preference}</code></dd>
+                      </>}
+                      {m.paired_content_context.display_format && <>
+                        <dt className="text-wm-text-muted">Display format</dt>
+                        <dd className="text-wm-text">{m.paired_content_context.display_format}</dd>
+                      </>}
+                      {m.paired_content_context.external_url && <>
+                        <dt className="text-wm-text-muted">
+                          {m.paired_content_context.display_preference === 'embed' || m.paired_content_context.display_preference === 'external' ? 'Embed / external source' : 'Partner sample URL'}
+                        </dt>
+                        <dd>
+                          <a href={m.paired_content_context.external_url} target="_blank" rel="noopener noreferrer" className="text-wm-accent-strong underline break-all">
+                            {m.paired_content_context.external_url.length > 80 ? m.paired_content_context.external_url.slice(0, 77) + '…' : m.paired_content_context.external_url}
+                          </a>
+                        </dd>
+                      </>}
+                      {m.paired_content_context.playlist_url && <>
+                        <dt className="text-wm-text-muted">YouTube playlist</dt>
+                        <dd>
+                          <a href={m.paired_content_context.playlist_url} target="_blank" rel="noopener noreferrer" className="text-wm-accent-strong underline break-all">
+                            {m.paired_content_context.playlist_url.length > 80 ? m.paired_content_context.playlist_url.slice(0, 77) + '…' : m.paired_content_context.playlist_url}
+                          </a>
+                        </dd>
+                      </>}
+                      {m.paired_content_context.archive_features && m.paired_content_context.archive_features.length > 0 && <>
+                        <dt className="text-wm-text-muted">Archive features wanted</dt>
+                        <dd className="text-wm-text">{m.paired_content_context.archive_features.map((f, i) => (
+                          <span key={f}>
+                            {i > 0 && <span className="text-wm-text-subtle mx-1">·</span>}
+                            <code className="text-[12px] font-mono">{f}</code>
+                          </span>
+                        ))}</dd>
+                      </>}
+                      {m.paired_content_context.source_of_truth && <>
+                        <dt className="text-wm-text-muted">Partner's current system</dt>
+                        <dd className="text-wm-text">{m.paired_content_context.source_of_truth}</dd>
+                      </>}
+                      {m.paired_content_context.frustration && m.paired_content_context.frustration.trim() !== '-' && <>
+                        <dt className="text-wm-text-muted">Partner note</dt>
+                        <dd className="text-wm-text italic">{m.paired_content_context.frustration}</dd>
+                      </>}
+                    </dl>
+                  </div>
+                )}
 
                 {/* Sample entry from one of the bound sources */}
                 {sample && sampleFields.length > 0 && (

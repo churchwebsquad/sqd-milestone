@@ -564,6 +564,24 @@ export interface DeclaredContentModelSnapshot {
   name:               string
   schema:             Array<{ key: string; label: string; type: string }>
   cta_target:         string | null
+  /** Content-collection topic the strategist explicitly paired this
+   *  model with (events / sermons / groups). Null when unpaired. */
+  paired_content_kind?: 'events' | 'sermons' | 'groups' | null
+  /** Snapshotted answers from strategy_content_collection_sessions
+   *  for `paired_content_kind`. Populated at compute-time so the dev
+   *  handoff can render the "What the partner asked for in Content
+   *  Collection" callout directly on the model card without a
+   *  second DB read. Null when the model isn't paired. */
+  paired_content_context?: {
+    content_kind:        'events' | 'sermons' | 'groups'
+    display_preference?: string | null
+    display_format?:     string | null
+    external_url?:       string | null
+    source_of_truth?:    string | null
+    frustration?:        string | null
+    playlist_url?:       string | null
+    archive_features?:   string[] | null
+  } | null
   section_ids:        string[]
   item_bindings?:     Record<string, { indices: number[]; group_key?: string }>
   updated_at:         string

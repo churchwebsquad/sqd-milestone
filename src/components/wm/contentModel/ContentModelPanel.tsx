@@ -631,20 +631,27 @@ function ContentModelSchemaEditor({
 }) {
   const [draft, setDraft] = useState<ContentModelField[]>(model.schema)
   const [ctaTarget, setCtaTarget] = useState<ContentModel['cta_target']>(model.cta_target)
+  const [pairedKind, setPairedKind] = useState<ContentModel['paired_content_kind']>(model.paired_content_kind ?? null)
   const [saving, setSaving] = useState(false)
-  useEffect(() => { setDraft(model.schema); setCtaTarget(model.cta_target) }, [model.schema, model.cta_target, model.id])
+  useEffect(() => {
+    setDraft(model.schema)
+    setCtaTarget(model.cta_target)
+    setPairedKind(model.paired_content_kind ?? null)
+  }, [model.schema, model.cta_target, model.paired_content_kind, model.id])
 
   const dirty =
     JSON.stringify(draft) !== JSON.stringify(model.schema)
     || ctaTarget !== model.cta_target
+    || (pairedKind ?? null) !== (model.paired_content_kind ?? null)
 
   const save = async () => {
     if (!dirty) return
     setSaving(true)
     await upsertContentModel(supabase, projectId, {
       ...model,
-      schema:     draft,
-      cta_target: ctaTarget,
+      schema:               draft,
+      cta_target:           ctaTarget,
+      paired_content_kind:  pairedKind ?? null,
     })
     await onSaved()
     setSaving(false)
@@ -729,6 +736,27 @@ function ContentModelSchemaEditor({
         </select>
       </div>
 
+      <div>
+        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">
+          Pair with Content Collection
+        </p>
+        <p className="text-[10.5px] text-wm-text-muted mb-1 leading-snug">
+          Attach this model to a partner topic from Content Collection.
+          The dev handoff will show the partner's answers (display
+          preference, source URL, playlist, etc.) alongside this model.
+        </p>
+        <select
+          value={pairedKind ?? ''}
+          onChange={e => setPairedKind((e.target.value || null) as ContentModel['paired_content_kind'])}
+          className="w-full text-[12px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent"
+        >
+          <option value="">(no pairing — generic content model)</option>
+          <option value="events">Events</option>
+          <option value="sermons">Sermons</option>
+          <option value="groups">Groups</option>
+        </select>
+      </div>
+
       {dirty && (
         <div className="flex items-center gap-2">
           <button
@@ -741,7 +769,7 @@ function ContentModelSchemaEditor({
           </button>
           <button
             type="button"
-            onClick={() => { setDraft(model.schema); setCtaTarget(model.cta_target) }}
+            onClick={() => { setDraft(model.schema); setCtaTarget(model.cta_target); setPairedKind(model.paired_content_kind ?? null) }}
             disabled={saving}
             className="text-[11px] font-semibold text-wm-text-muted hover:text-wm-text"
           >
