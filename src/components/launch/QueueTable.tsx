@@ -13,13 +13,14 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, ExternalLink, Flag, GripVertical } from 'lucide-react'
+import { ArrowRight, Download, ExternalLink, Flag, GripVertical } from 'lucide-react'
 import {
   weekStart,
   type SchedulerSite, type SchedulerConfig, type SiteSchedule,
 } from '../../lib/launchScheduler'
 import type { RecoveryResult } from '../../lib/launchRecoverySolver'
 import type { ProjectLaunchRow } from '../../hooks/useLaunchPlan'
+import { downloadQueueCsv } from '../../lib/queueCsvExport'
 
 interface Props {
   rows:        ProjectLaunchRow[]
@@ -83,12 +84,23 @@ export function QueueTable({
 
   return (
     <div className="rounded-2xl border border-lavender bg-white overflow-hidden">
-      <div className="px-4 py-3 border-b border-lavender bg-lavender-tint/30">
-        <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">Build queue</p>
-        <p className="text-sm text-purple-gray mt-0.5">
-          Drag to reorder priority. Dev runs top-to-bottom at <strong className="text-deep-plum">{cfg.base_weekly_cap} hrs/wk</strong>.
-          Behind-target rows show whether help can recover the date — or whether the date stands.
-        </p>
+      <div className="px-4 py-3 border-b border-lavender bg-lavender-tint/30 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple">Build queue</p>
+          <p className="text-sm text-purple-gray mt-0.5">
+            Drag to reorder priority. Dev runs top-to-bottom at <strong className="text-deep-plum">{cfg.base_weekly_cap} hrs/wk</strong>.
+            Behind-target rows show whether help can recover the date — or whether the date stands.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => downloadQueueCsv({ rows, sites, schedule })}
+          className="inline-flex items-center gap-1.5 shrink-0 rounded-full border border-lavender bg-white text-[11px] font-semibold text-deep-plum px-3 py-1.5 hover:border-primary-purple hover:text-primary-purple transition-colors"
+          title="Download every row (active, paused, blocked, launched) with all visible columns as a CSV."
+        >
+          <Download size={12} />
+          Export CSV
+        </button>
       </div>
 
       <div className="overflow-x-auto">
