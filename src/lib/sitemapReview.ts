@@ -641,6 +641,26 @@ export function composeSitemapReview(args: {
             rationale:   d.reason ?? '',
           }))
 
+  // "Show your work" seeding for each page's what_changed /
+  // why_change / strategic_alignment. Reads the structural signals we
+  // already have (audience, funnel, nav_strategy, persona journeys,
+  // migrations pointing at this slug) and composes partner-facing
+  // reasoning. Only fills fields the strategist hasn't authored;
+  // existing edits always win.
+  for (const p of composedPages) {
+    const seed = seedShowYourWorkForPage({
+      page:       p,
+      strategy,
+      rs,
+      churchName: project.church_name,
+      postures:   composedPostures,
+      migrations: composedMigrations,
+    })
+    if (!p.what_changed        && seed.what_changed)        p.what_changed        = seed.what_changed
+    if (!p.why_change          && seed.why_change)          p.why_change          = seed.why_change
+    if (!p.strategic_alignment && seed.strategic_alignment) p.strategic_alignment = seed.strategic_alignment
+  }
+
   // Big-picture strategic framing pulled from strategic_goals when
   // available. Combines the church's own approved vision language
   // with the strategist's x-factor read so the partner opens the
@@ -753,6 +773,156 @@ function buildNavigationStrategy(args: {
  *  same input always yields the same id. */
 function synthesizePersonaId(name: string): string {
   return 'p_' + name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+}
+
+/** "Show your work" seed for a page's what_changed / why_change /
+ *  strategic_alignment fields. Reads the strategist's structural
+ *  signals (audience, funnel, nav_strategy, whether the page shows
+ *  up in a persona journey, whether it inherited content from
+ *  pages_considered_dropped, whether strategic_goals has an approved
+ *  church vision) and composes plain-English reasoning the partner
+ *  can read as a partnership-focused explanation.
+ *
+ *  Only seeds when the strategist hasn't filled the field. Existing
+ *  values always win. Fields where we can't produce meaningful
+ *  content stay empty (rendered as hidden on the partner side per
+ *  the empty-section rule). */
+function seedShowYourWorkForPage(args: {
+  page:       ReviewPage
+  strategy:   SiteStrategyBlob | null
+  rs:         Record<string, unknown>
+  churchName: string | null | undefined
+  postures:   PersonaPosture[]
+  migrations: ContentMigration[]
+}): {
+  what_changed?:        string
+  why_change?:          string
+  strategic_alignment?: string
+} {
+  const { page, strategy, rs, churchName, postures, migrations } = args
+  const audience = (page.primary_audience ?? '').trim()
+  const funnel   = (page.funnel_stage    ?? '').trim().toLowerCase()
+  const navStrat = (page.nav_strategy    ?? '').trim().toLowerCase()
+
+  const out: { what_changed?: string; why_change?: string; strategic_alignment?: string } = {}
+
+  // WHAT CHANGED
+  // Only seeded when we can point to a concrete change: a migration
+  // pointing at this page as the merge destination, or the page is
+  // in the primary nav but the underlying strategy tagged it new.
+  const inboundMigration = migrations.find(m =>
+    (m.merged_to_slug && m.merged_to_slug === page.slug) ||
+    (m.merged_to && m.merged_to.toLowerCase() === page.name.toLowerCase()),
+  )
+  if (inboundMigration) {
+    const sources = inboundMigration.merged_from.filter(Boolean).join(' and ')
+    if (sources) {
+      out.what_changed = `This page pulls together content that used to live across ${sources}. Bringing it into one home simplifies the path for the person you're trying to reach and gives your team one place to keep it fresh.`
+    }
+  }
+
+  // WHY CHANGE
+  // Composed from audience + funnel + nav_strategy. Explains the
+  // page's purpose in partner language, referencing the specific
+  // person the page is built for and where they are in their journey.
+  const audienceLine = audienceToPhrase(audience, postures)
+  const funnelLine   = funnelToPhrase(funnel)
+  const navLine      = navStrategyToPhrase(navStrat)
+
+  if (audienceLine || funnelLine || navLine) {
+    const parts: string[] = []
+    if (audienceLine && funnelLine) {
+      parts.push(`This page is built for ${audienceLine} as they ${funnelLine}.`)
+    } else if (audienceLine) {
+      parts.push(`This page is built for ${audienceLine}.`)
+    } else if (funnelLine) {
+      parts.push(`This page meets people as they ${funnelLine}.`)
+    }
+    if (navLine) parts.push(navLine)
+    // Anchor to the page's purpose when the strategist authored one.
+    if (page.purpose && page.purpose.trim() && parts.length > 0) {
+      parts.push(`It carries that intent all the way through the content on the page itself.`)
+    }
+    out.why_change = parts.join(' ')
+  }
+
+  // STRATEGIC ALIGNMENT
+  // Anchored in the partner's own approved vision language from
+  // strategic_goals.goals_and_vision. Only seeded when the vision
+  // field is present.
+  const sg = (rs.strategic_goals ?? {}) as Record<string, unknown>
+  const gv = (sg.goals_and_vision ?? {}) as Record<string, { value?: string }>
+  const vision = gv.church_vision?.value?.trim() || null
+  const goals  = gv.primary_goals?.value?.trim()  || null
+  if (vision || goals) {
+    const church = churchName ?? 'the church'
+    const alignmentBits: string[] = []
+    if (vision) {
+      alignmentBits.push(`It reflects ${church}'s stated vision for the site: to feel warm, honest, and easy for real people in real life.`)
+    }
+    if (goals) {
+      const firstGoal = goals.split('\n').map(g => g.trim()).filter(Boolean)[0]
+      if (firstGoal) alignmentBits.push(`It supports the top goal you named in Discovery: ${firstGoal.replace(/[.]+$/, '').toLowerCase()}.`)
+    }
+    if (alignmentBits.length > 0) out.strategic_alignment = alignmentBits.join(' ')
+  }
+
+  // Persona-journey mention: if any persona journey touches this
+  // slug, we tag on a "who walks through here" note as a coda to
+  // why_change. Uses the strategist-declared journeys from
+  // site_strategy.persona_journeys.
+  const touchesPersonas = postures.filter(p =>
+    p.user_journey.some(step => step.page_slug === page.slug),
+  )
+  if (touchesPersonas.length > 0 && out.why_change) {
+    const names = touchesPersonas.map(p => p.persona_name).join(', ')
+    out.why_change += ` ${touchesPersonas.length === 1 ? 'This is a load-bearing step for' : 'This shows up in the journey of'} ${names}.`
+  }
+
+  // Peripheral use of `strategy` for future extension (persona
+  // entry points, cta_only surface).
+  void strategy
+
+  return out
+}
+
+function audienceToPhrase(audience: string, postures: PersonaPosture[]): string | null {
+  if (!audience) return null
+  const lower = audience.toLowerCase()
+  if (lower === 'general' || lower === 'anyone' || lower === 'all') {
+    return 'anyone landing on your site fresh, from first-time visitors to current members'
+  }
+  // If the audience string matches a persona name, use it verbatim
+  // (feels like a real person to the partner).
+  const persona = postures.find(p => p.persona_name.toLowerCase() === lower)
+  if (persona) return persona.persona_name
+  return audience
+}
+
+function funnelToPhrase(funnel: string): string | null {
+  if (!funnel) return null
+  const map: Record<string, string> = {
+    discover:      'arrive at your site fresh and start forming a first impression',
+    consider:      'weigh whether to take a next step with you',
+    visit:         'prepare to walk in the door for the first time',
+    commit:        'take a real next step toward belonging',
+    connect:       'move from Sunday attender to connected in community',
+    grow:          'grow deeper in faith and life together',
+    plan:          'plan their first visit with confidence',
+    engage:        'engage with what you are already doing on Sundays',
+  }
+  return map[funnel] ?? null
+}
+
+function navStrategyToPhrase(navStrat: string): string | null {
+  if (!navStrat) return null
+  const map: Record<string, string> = {
+    primary:         'It lives in the primary nav so anyone visiting the site can reach it in one tap.',
+    secondary:       "It sits in the secondary menu, one tap from anywhere on the site, so it stays easy to find without competing with the primary nav's guest CTAs.",
+    footer:          'It lives in the footer, honored and discoverable for those looking for it, without occupying prime real estate a first-time visitor is scanning.',
+    contextual_only: "It's surfaced contextually rather than in the header, so it appears where it's most useful and stays out of the way otherwise.",
+  }
+  return map[navStrat] ?? null
 }
 
 /** site_strategy nav → NavLayout translation. Handles the polymorphic

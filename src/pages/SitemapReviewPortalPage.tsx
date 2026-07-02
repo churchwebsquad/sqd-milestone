@@ -164,19 +164,35 @@ export default function SitemapReviewPortalPage() {
         )}
 
         {/* Persona postures. Ordered before pages so the partner sees
-            the WHO before the WHAT. */}
-        {review.persona_postures.length > 0 && (
-          <PortalSection
-            title="Who we're speaking to"
-            description="How the site is angled toward each person you're inviting into your community."
-          >
-            <div className="space-y-4">
-              {review.persona_postures.map(p => (
-                <PersonaPortalCard key={p.persona_id} posture={p} review={review} onChange={persist} locked={locked} />
-              ))}
-            </div>
-          </PortalSection>
-        )}
+            the WHO before the WHAT. On a locked review, personas with
+            no populated fields collapse entirely; on an unlocked
+            review every persona surfaces so the strategist has room
+            to fill them in. */}
+        {(() => {
+          const visiblePostures = locked
+            ? review.persona_postures.filter(p =>
+                (p.posture_summary && p.posture_summary.trim()) ||
+                p.user_journey.some(s => (s.step_label ?? '').trim()) ||
+                (p.drop_off_risk && (
+                  (p.drop_off_risk.mitigation ?? '').trim() ||
+                  (p.drop_off_risk.reason ?? '').trim()
+                )),
+              )
+            : review.persona_postures
+          if (visiblePostures.length === 0) return null
+          return (
+            <PortalSection
+              title="Who we're speaking to"
+              description="How the site is angled toward each person you're inviting into your community."
+            >
+              <div className="space-y-4">
+                {visiblePostures.map(p => (
+                  <PersonaPortalCard key={p.persona_id} posture={p} review={review} onChange={persist} locked={locked} />
+                ))}
+              </div>
+            </PortalSection>
+          )
+        })()}
 
         {/* Pages. Each page card consolidates purpose, what changed,
             why, and how it aligns with strategy. */}
@@ -282,20 +298,10 @@ function PagePortalCard({
           <span className="text-[10.5px] text-wm-text-subtle">{page.nav_position}</span>
         )}
       </div>
-      {(page.primary_audience || page.funnel_stage) && (
-        <div className="flex items-center gap-1.5 flex-wrap mb-2">
-          {page.primary_audience && (
-            <span className="text-[10.5px] px-2 py-0.5 rounded-full bg-wm-accent-tint border border-wm-accent/30 text-wm-accent-strong">
-              For: {page.primary_audience}
-            </span>
-          )}
-          {page.funnel_stage && (
-            <span className="text-[10.5px] px-2 py-0.5 rounded-full bg-wm-bg-elevated border border-wm-border text-wm-text-muted">
-              Funnel: {page.funnel_stage}
-            </span>
-          )}
-        </div>
-      )}
+      {/* Audience + funnel are not shown as chips to the partner.
+          The internal "for: general, funnel: discover" framing reads
+          as jargon to the client. Those signals feed the
+          seeded show-your-work paragraphs below instead. */}
       <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Purpose</p>
       <textarea
         defaultValue={page.purpose}
@@ -306,31 +312,28 @@ function PagePortalCard({
         className="w-full text-[13px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1.5 focus:outline-none focus:border-wm-accent disabled:opacity-50"
       />
 
-      {(page.what_changed || page.why_change || page.strategic_alignment || !locked) && (
+      {(page.what_changed || page.why_change || page.strategic_alignment) && (
         <div className="mt-3 space-y-3">
-          {(page.what_changed || !locked) && (
+          {page.what_changed && (
             <PagePortalNote
               label="What changed"
               value={page.what_changed}
-              placeholder="If this page is new, renamed, elevated, or merged from your current site, the strategist will explain the shift here."
               locked={locked}
               onSave={v => update({ what_changed: v })}
             />
           )}
-          {(page.why_change || !locked) && (
+          {page.why_change && (
             <PagePortalNote
-              label="Why we made this change"
+              label="Why we made this call"
               value={page.why_change}
-              placeholder="The reasoning behind the decision, in the context of the person this serves."
               locked={locked}
               onSave={v => update({ why_change: v })}
             />
           )}
-          {(page.strategic_alignment || !locked) && (
+          {page.strategic_alignment && (
             <PagePortalNote
-              label="How it aligns with strategy"
+              label="How it aligns with your strategy"
               value={page.strategic_alignment}
-              placeholder="How this page reflects your mission, values, and the goals set in Discovery."
               locked={locked}
               onSave={v => update({ strategic_alignment: v })}
             />
@@ -341,30 +344,30 @@ function PagePortalCard({
   )
 }
 
-/** One "What changed / Why / Alignment" subsection inside a page card.
- *  Reads as a small labeled paragraph when populated; becomes an
- *  editable textarea when the review isn't locked and the field is
- *  focused. Empty locked fields collapse entirely. */
+/** One "What changed / Why / Alignment" subsection inside a page
+ *  card. Only rendered when the strategist has authored the content
+ *  (either directly or via the show-your-work seeder). When the
+ *  review is unlocked, the paragraph becomes an editable textarea so
+ *  the partner can refine wording; when locked, reads as prose. */
 function PagePortalNote({
-  label, value, placeholder, locked, onSave,
+  label, value, locked, onSave,
 }: {
-  label:       string
-  value:       string | undefined
-  placeholder: string
-  locked:      boolean
-  onSave:      (v: string) => void
+  label:  string
+  value:  string
+  locked: boolean
+  onSave: (v: string) => void
 }) {
   return (
     <div>
       <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">{label}</p>
-      {locked && !value ? null : (
+      {locked ? (
+        <p className="text-[13px] text-wm-text leading-relaxed whitespace-pre-wrap">{value}</p>
+      ) : (
         <textarea
-          defaultValue={value ?? ''}
-          placeholder={placeholder}
-          disabled={locked}
+          defaultValue={value}
           rows={2}
-          onBlur={e => { if (e.target.value !== (value ?? '')) onSave(e.target.value) }}
-          className="w-full text-[13px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1.5 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+          onBlur={e => { if (e.target.value !== value) onSave(e.target.value) }}
+          className="w-full text-[13px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1.5 focus:outline-none focus:border-wm-accent"
         />
       )}
     </div>
@@ -392,48 +395,99 @@ function PersonaPortalCard({
     update({ user_journey: posture.user_journey.filter((_, i) => i !== idx) })
   }
   const addStep = () => update({ user_journey: [...posture.user_journey, { step_label: '' }] })
+
+  const hasPosture = !!posture.posture_summary && posture.posture_summary.trim().length > 0
+  const hasJourney = posture.user_journey.some(s => (s.step_label ?? '').trim().length > 0)
+  const hasLeanIn  = !!posture.drop_off_risk && (
+    (posture.drop_off_risk.mitigation ?? '').trim().length > 0 ||
+    (posture.drop_off_risk.reason ?? '').trim().length > 0
+  )
+
   return (
     <div className="rounded-lg border border-wm-border bg-white p-4">
       <p className="text-[15px] font-bold text-wm-text mb-2">{posture.persona_name}</p>
-      <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">How the site meets them</p>
-      <textarea
-        defaultValue={posture.posture_summary}
-        placeholder={`How the site meets ${posture.persona_name}: the tone, the first message, what's easy to find, what quietly earns their trust.`}
-        disabled={locked}
-        rows={2}
-        onBlur={e => { if (e.target.value !== posture.posture_summary) update({ posture_summary: e.target.value }) }}
-        className="w-full text-[13px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1.5 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-      />
-      <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mt-3 mb-1">Their journey through the site</p>
-      <ol className="space-y-1 list-decimal list-inside">
-        {posture.user_journey.map((step, i) => (
-          <li key={i} className="flex items-baseline gap-2">
-            <input
-              type="text"
-              defaultValue={step.step_label}
-              disabled={locked}
-              placeholder="Step (e.g. Lands on homepage, taps 'I'm new')"
-              onBlur={e => { if (e.target.value !== step.step_label) updateStep(i, { step_label: e.target.value }) }}
-              className="flex-1 text-[13px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+
+      {(hasPosture || !locked) && (
+        <>
+          <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">How the site meets them</p>
+          {locked ? (
+            hasPosture && (
+              <p className="text-[13px] text-wm-text leading-relaxed whitespace-pre-wrap">{posture.posture_summary}</p>
+            )
+          ) : (
+            <textarea
+              defaultValue={posture.posture_summary}
+              placeholder={`How the site meets ${posture.persona_name}: the tone, the first message, what's easy to find, what quietly earns their trust.`}
+              rows={2}
+              onBlur={e => { if (e.target.value !== posture.posture_summary) update({ posture_summary: e.target.value }) }}
+              className="w-full text-[13px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1.5 focus:outline-none focus:border-wm-accent"
             />
-            {!locked && (
-              <button
-                type="button"
-                onClick={() => removeStep(i)}
-                className="text-wm-text-subtle hover:text-wm-danger text-[15px] leading-none px-1"
-              >×</button>
-            )}
-          </li>
-        ))}
-      </ol>
-      {!locked && (
-        <button
-          type="button"
-          onClick={addStep}
-          className="mt-1 text-[11px] font-semibold text-wm-accent-strong hover:underline"
-        >
-          + Add step
-        </button>
+          )}
+        </>
+      )}
+
+      {(hasJourney || !locked) && (
+        <>
+          <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mt-3 mb-1">Their journey through the site</p>
+          <ol className="space-y-1 list-decimal list-inside">
+            {posture.user_journey.map((step, i) => (
+              (step.step_label ?? '').trim() || !locked ? (
+                <li key={i} className="flex items-baseline gap-2">
+                  {locked ? (
+                    <span className="text-[13px] text-wm-text">{step.step_label}</span>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        defaultValue={step.step_label}
+                        placeholder="Step (e.g. Lands on homepage, taps 'I'm new')"
+                        onBlur={e => { if (e.target.value !== step.step_label) updateStep(i, { step_label: e.target.value }) }}
+                        className="flex-1 text-[13px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeStep(i)}
+                        className="text-wm-text-subtle hover:text-wm-danger text-[15px] leading-none px-1"
+                      >×</button>
+                    </>
+                  )}
+                </li>
+              ) : null
+            ))}
+          </ol>
+          {!locked && (
+            <button
+              type="button"
+              onClick={addStep}
+              className="mt-1 text-[11px] font-semibold text-wm-accent-strong hover:underline"
+            >
+              + Add step
+            </button>
+          )}
+        </>
+      )}
+
+      {/* Solution-first drop-off framing. The underlying data field is
+          still called `drop_off_risk` (semantically what it is at the
+          data model layer), but the partner-facing label frames it as
+          proactive care: "how we're clearing the way" or "leaning in
+          here" rather than "a risk exists." */}
+      {hasLeanIn && posture.drop_off_risk && (
+        <div className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2">
+          <p className="text-[10.5px] uppercase tracking-widest font-bold text-amber-800 mb-1">
+            How we're leaning in for {posture.persona_name} at /{posture.drop_off_risk.at_slug}
+          </p>
+          {posture.drop_off_risk.mitigation && (
+            <p className="text-[13px] text-amber-900 leading-relaxed whitespace-pre-wrap">
+              {posture.drop_off_risk.mitigation}
+            </p>
+          )}
+          {posture.drop_off_risk.reason && (
+            <p className="text-[11.5px] text-amber-800/80 leading-snug mt-1 italic">
+              Context: {posture.drop_off_risk.reason}
+            </p>
+          )}
+        </div>
       )}
     </div>
   )

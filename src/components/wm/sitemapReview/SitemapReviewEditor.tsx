@@ -638,12 +638,14 @@ function PersonaPosturesEditor({
             {p.drop_off_risk && (
               <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5">
                 <p className="text-[10px] uppercase tracking-widest font-bold text-amber-800 mb-0.5">
-                  Drop-off risk at /{p.drop_off_risk.at_slug}
+                  How we're clearing the way at /{p.drop_off_risk.at_slug}
                 </p>
-                <p className="text-[11.5px] text-amber-900 leading-snug">{p.drop_off_risk.reason}</p>
                 {p.drop_off_risk.mitigation && (
-                  <p className="text-[11px] text-amber-800 leading-snug mt-0.5">
-                    <span className="font-semibold">Mitigation:</span> {p.drop_off_risk.mitigation}
+                  <p className="text-[11.5px] text-amber-900 leading-snug">{p.drop_off_risk.mitigation}</p>
+                )}
+                {p.drop_off_risk.reason && (
+                  <p className="text-[10.5px] text-amber-800/80 leading-snug mt-0.5 italic">
+                    Context: {p.drop_off_risk.reason}
                   </p>
                 )}
               </div>
