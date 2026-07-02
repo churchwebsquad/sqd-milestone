@@ -33,7 +33,7 @@ import {
   Send, X, Check, ImagePlus, Trash2, Inbox, PartyPopper, AlertTriangle,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { resolveStaffName } from '../lib/webReviews'
+import { resolveStaffName, deleteOwnReviewComment } from '../lib/webReviews'
 import { uploadAttachment } from '../lib/attachmentUpload'
 import { PagePreview } from '../components/wm/PagePreview'
 import { WMRichTextEditor } from '../components/wm/RichTextEditor'
@@ -733,6 +733,8 @@ export default function PortalReviewPage() {
             finishedAt={finishedAt}
             finishing={finishing}
             isInternalReview={isInternalReview}
+            partnerName={partnerName}
+            onRefresh={loadMyComments}
             onJumpToSection={(pageId, sectionId) => {
               setActivePageId(pageId)
               queueMicrotask(() => {
@@ -776,7 +778,8 @@ export default function PortalReviewPage() {
 
 function FeedbackTracker({
   comments, pages, sectionsByPage, templates, finishedAt, finishing,
-  isInternalReview, onJumpToSection, onFinish, onApprove,
+  isInternalReview, partnerName, onRefresh,
+  onJumpToSection, onFinish, onApprove,
 }: {
   comments: WebReviewComment[]
   pages: WebPage[]
@@ -788,10 +791,33 @@ function FeedbackTracker({
    *  tracker's labels + the bottom-of-rail CTA so squad members see
    *  collaboration-focused copy instead of partner-finalization copy. */
   isInternalReview: boolean
+  /** Name the reviewer entered on first visit. Used to identify
+   *  "my own comments" — only those get a delete affordance. Null
+   *  when the reviewer hasn't captured their name yet. */
+  partnerName: string | null
+  /** Called after a delete so the parent reloads myComments. */
+  onRefresh: () => Promise<void> | void
   onJumpToSection: (pageId: string, sectionId: string) => void
   onFinish: () => Promise<void>
   onApprove: (finalNote: string) => Promise<void>
 }) {
+  // Two-click delete state — tracks the currently-confirming comment
+  // id so only one delete-confirm shows at a time.
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const handleDelete = async (commentId: string) => {
+    if (!partnerName) return
+    setDeletingId(commentId)
+    try {
+      const ok = await deleteOwnReviewComment({ commentId, partnerName })
+      if (ok) {
+        setConfirmingDeleteId(null)
+        await onRefresh()
+      }
+    } finally {
+      setDeletingId(null)
+    }
+  }
   // No-feedback approve modal — only triggers when the partner hits
   // "Complete Review" with zero comments on the project.
   const [approveModalOpen, setApproveModalOpen] = useState(false)
@@ -882,8 +908,17 @@ function FeedbackTracker({
                     // don't differentiate between an inline edit and
                     // a structured suggestion in their head.
                     const kindLabel = c.kind === 'comment' ? 'Comment' : 'Edit'
+                    // "Mine" gate — partner can only delete comments
+                    // they authored, and only while still open. Case-
+                    // insensitive name match to survive stray casing
+                    // when the same partner logs back in.
+                    const isMine =
+                      !!partnerName
+                      && c.author_kind === 'partner'
+                      && (c.author_external_name ?? '').toLowerCase() === partnerName.toLowerCase()
+                      && c.status === 'open'
                     return (
-                      <li key={c.id}>
+                      <li key={c.id} className="relative group">
                         <button
                           type="button"
                           onClick={() => c.web_section_id && onJumpToSection(page.id, c.web_section_id)}
@@ -911,6 +946,42 @@ function FeedbackTracker({
                             {c.author_external_name ?? 'You'} · {fmtPortalDateTime(c.created_at)}
                           </p>
                         </button>
+                        {isMine && (
+                          confirmingDeleteId === c.id ? (
+                            <div
+                              className="absolute inset-y-1 right-1 flex items-center gap-1 pl-2 pr-1.5 rounded bg-white border border-red-200 shadow-sm"
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <span className="text-[10.5px] text-purple-gray">Delete?</span>
+                              <button
+                                type="button"
+                                onClick={() => void handleDelete(c.id)}
+                                disabled={deletingId === c.id}
+                                className="text-[10.5px] font-semibold text-red-600 hover:underline disabled:opacity-50"
+                              >
+                                {deletingId === c.id ? 'deleting…' : 'yes'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmingDeleteId(null)}
+                                disabled={deletingId === c.id}
+                                className="text-[10.5px] text-purple-gray hover:text-deep-plum"
+                              >
+                                cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setConfirmingDeleteId(c.id) }}
+                              className="absolute top-1 right-1 inline-flex items-center justify-center h-6 w-6 rounded text-purple-gray/60 hover:text-red-600 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                              title="Delete your comment"
+                              aria-label="Delete comment"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          )
+                        )}
                       </li>
                     )
                   })}

@@ -18,7 +18,7 @@
  * refresh after any mutation.
  */
 import { useState } from 'react'
-import { Check, ExternalLink, Loader2 } from 'lucide-react'
+import { Check, ExternalLink, Loader2, Trash2 } from 'lucide-react'
 import { Avatar } from './Avatar'
 import { KindBadge } from './KindBadge'
 import { FeedbackStatusPill } from './FeedbackStatusPill'
@@ -26,8 +26,10 @@ import { CategoryChip } from './CategoryChip'
 import { AssigneePicker, type AssigneeValue } from './AssigneePicker'
 import { DueDatePicker } from './DueDatePicker'
 import { CommentActions } from '../sectioneditor/CommentActions'
+import { useAuth } from '../../../contexts/AuthContext'
 import {
   setCommentCategory, setCommentAssignee, setCommentDueDate, resolveComment,
+  deleteOwnReviewComment,
 } from '../../../lib/webReviews'
 import type {
   WebReviewComment, WebReviewCommentCategory,
@@ -57,6 +59,17 @@ export function FeedbackCard({
 }: FeedbackCardProps) {
   const isCompleted = comment.status !== 'open'
   const [resolving, setResolving] = useState(false)
+  const { user } = useAuth()
+  // "My own comment I can delete" gate. Only shown to staff on their
+  // own OPEN comments — the RPC would refuse anything else server-
+  // side, but hiding the button in those cases keeps the UI honest.
+  const canDelete =
+    !isCompleted
+    && comment.author_kind === 'staff'
+    && !!user?.id
+    && comment.author_user_id === user.id
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   /** Mark this comment complete without any field change. For internal
    *  comments this is the usual close path ("noted, fixed elsewhere"
@@ -72,6 +85,17 @@ export function FeedbackCard({
       if (ok) await onChanged()
     } finally {
       setResolving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    try {
+      const ok = await deleteOwnReviewComment({ commentId: comment.id })
+      if (ok) await onChanged()
+      else setConfirmingDelete(false)
+    } finally {
+      setDeleting(false)
     }
   }
   const accentColor = isCompleted
@@ -206,6 +230,39 @@ export function FeedbackCard({
             >
               <ExternalLink size={11} /> Address in editor
             </button>
+          )}
+          {canDelete && (
+            confirmingDelete ? (
+              <span className="inline-flex items-center gap-1.5 ml-auto text-[11px]">
+                <span className="text-wm-text-muted">Delete?</span>
+                <button
+                  type="button"
+                  onClick={() => void handleDelete()}
+                  disabled={deleting}
+                  className="font-semibold text-wm-danger hover:underline disabled:opacity-50"
+                >
+                  {deleting ? 'deleting…' : 'yes, delete'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmingDelete(false)}
+                  disabled={deleting}
+                  className="text-wm-text-subtle hover:text-wm-text"
+                >
+                  cancel
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(true)}
+                className="inline-flex items-center justify-center h-7 w-7 ml-auto rounded-md text-wm-text-subtle hover:bg-wm-danger/10 hover:text-wm-danger transition-colors"
+                title="Delete this comment (only your own open comments can be deleted)"
+                aria-label="Delete comment"
+              >
+                <Trash2 size={12} />
+              </button>
+            )
           )}
         </div>
       )}

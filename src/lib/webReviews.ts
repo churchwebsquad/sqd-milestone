@@ -657,6 +657,34 @@ function setNestedPath(
 // Each is a thin Supabase update — failures log and return false so the
 // caller can decide whether to surface a toast.
 
+/** Delete a comment the caller authored. Wraps the
+ *  `delete_own_review_comment` SECURITY DEFINER RPC so both authenticated
+ *  staff (verified via auth.uid()) and anon partners (verified via a
+ *  partner name pulled from portal localStorage) share one code path.
+ *
+ *  Refuses to delete already-resolved comments — the RPC enforces this
+ *  server-side so audit history stays intact.
+ *
+ *  Returns true when the row was removed, false on failure. Errors are
+ *  logged; callers decide whether to surface a toast. */
+export async function deleteOwnReviewComment(opts: {
+  commentId:   string
+  /** Only passed from the partner portal — the name the partner
+   *  entered on first visit (stored in localStorage). Ignored when the
+   *  RPC runs under an authenticated staff session. */
+  partnerName?: string | null
+}): Promise<boolean> {
+  const { error } = await supabase.rpc('delete_own_review_comment', {
+    p_comment_id:   opts.commentId,
+    p_partner_name: opts.partnerName ?? null,
+  })
+  if (error) {
+    console.error('[reviews] deleteOwnReviewComment failed:', error.message)
+    return false
+  }
+  return true
+}
+
 /** Change a comment's design/content tag. Pass null to clear. */
 export async function setCommentCategory(
   commentId: string,
