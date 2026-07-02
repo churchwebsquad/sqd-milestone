@@ -733,7 +733,7 @@ export default function PortalReviewPage() {
             finishedAt={finishedAt}
             finishing={finishing}
             isInternalReview={isInternalReview}
-            partnerName={partnerName}
+            token={token ?? null}
             onRefresh={loadMyComments}
             onJumpToSection={(pageId, sectionId) => {
               setActivePageId(pageId)
@@ -778,7 +778,7 @@ export default function PortalReviewPage() {
 
 function FeedbackTracker({
   comments, pages, sectionsByPage, templates, finishedAt, finishing,
-  isInternalReview, partnerName, onRefresh,
+  isInternalReview, onRefresh, token,
   onJumpToSection, onFinish, onApprove,
 }: {
   comments: WebReviewComment[]
@@ -791,10 +791,8 @@ function FeedbackTracker({
    *  tracker's labels + the bottom-of-rail CTA so squad members see
    *  collaboration-focused copy instead of partner-finalization copy. */
   isInternalReview: boolean
-  /** Name the reviewer entered on first visit. Used to identify
-   *  "my own comments" — only those get a delete affordance. Null
-   *  when the reviewer hasn't captured their name yet. */
-  partnerName: string | null
+  /** Route token; the server uses this to authorize deletes. */
+  token: string | null
   /** Called after a delete so the parent reloads myComments. */
   onRefresh: () => Promise<void> | void
   onJumpToSection: (pageId: string, sectionId: string) => void
@@ -805,21 +803,20 @@ function FeedbackTracker({
   // id so only one delete-confirm shows at a time.
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [deleteErrorId, setDeleteErrorId] = useState<{ id: string; msg: string } | null>(null)
   const handleDelete = async (commentId: string) => {
-    if (!partnerName) return
     setDeletingId(commentId)
-    setDeleteErrorId(null)
     try {
-      const res = await deleteOwnReviewComment({ commentId, partnerName })
-      if (res.ok) {
-        setConfirmingDeleteId(null)
-        await onRefresh()
-      } else {
-        setDeleteErrorId({ id: commentId, msg: res.error })
-      }
+      // Always close the confirm bar and refresh, regardless of the
+      // server's response. Possession of the review token is the
+      // whole permission model; there's nothing meaningful to
+      // explain to the reviewer if the server declines. Silence is
+      // less frustrating than a cryptic error next to a small
+      // affordance the reviewer already committed to.
+      await deleteOwnReviewComment({ commentId, reviewToken: token ?? undefined })
     } finally {
       setDeletingId(null)
+      setConfirmingDeleteId(null)
+      await onRefresh()
     }
   }
   // No-feedback approve modal — only triggers when the partner hits
@@ -912,15 +909,13 @@ function FeedbackTracker({
                     // don't differentiate between an inline edit and
                     // a structured suggestion in their head.
                     const kindLabel = c.kind === 'comment' ? 'Comment' : 'Edit'
-                    // "Mine" gate — partner can only delete comments
-                    // they authored, and only while still open. Case-
-                    // insensitive name match to survive stray casing
-                    // when the same partner logs back in.
-                    const isMine =
-                      !!partnerName
-                      && c.author_kind === 'partner'
-                      && (c.author_external_name ?? '').toLowerCase() === partnerName.toLowerCase()
-                      && c.status === 'open'
+                    // Any open comment on this review is deletable by
+                    // anyone with the review token. Possession of the
+                    // link is the whole permission model, so we don't
+                    // gate the trash button by author. Resolved
+                    // comments still hide their delete affordance
+                    // since they represent staff action already taken.
+                    const canDelete = c.status === 'open'
                     return (
                       <li key={c.id} className="relative group">
                         <button
@@ -950,43 +945,36 @@ function FeedbackTracker({
                             {c.author_external_name ?? 'You'} · {fmtPortalDateTime(c.created_at)}
                           </p>
                         </button>
-                        {isMine && (
+                        {canDelete && (
                           confirmingDeleteId === c.id ? (
                             <div
-                              className="absolute inset-y-1 right-1 flex flex-col items-end gap-0.5 pl-2 pr-1.5 py-1 rounded bg-white border border-red-200 shadow-sm"
+                              className="absolute inset-y-1 right-1 flex items-center gap-1 pl-2 pr-1.5 rounded bg-white border border-red-200 shadow-sm"
                               onClick={e => e.stopPropagation()}
                             >
-                              <div className="flex items-center gap-1">
-                                <span className="text-[10.5px] text-purple-gray">Delete?</span>
-                                <button
-                                  type="button"
-                                  onClick={() => void handleDelete(c.id)}
-                                  disabled={deletingId === c.id}
-                                  className="text-[10.5px] font-semibold text-red-600 hover:underline disabled:opacity-50"
-                                >
-                                  {deletingId === c.id ? 'deleting…' : 'yes'}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => { setConfirmingDeleteId(null); setDeleteErrorId(null) }}
-                                  disabled={deletingId === c.id}
-                                  className="text-[10.5px] text-purple-gray hover:text-deep-plum"
-                                >
-                                  cancel
-                                </button>
-                              </div>
-                              {deleteErrorId?.id === c.id && (
-                                <span className="text-[10px] text-red-600 max-w-[220px] text-right leading-tight">
-                                  {deleteErrorId.msg}
-                                </span>
-                              )}
+                              <span className="text-[10.5px] text-purple-gray">Delete?</span>
+                              <button
+                                type="button"
+                                onClick={() => void handleDelete(c.id)}
+                                disabled={deletingId === c.id}
+                                className="text-[10.5px] font-semibold text-red-600 hover:underline disabled:opacity-50"
+                              >
+                                {deletingId === c.id ? 'deleting…' : 'yes'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmingDeleteId(null)}
+                                disabled={deletingId === c.id}
+                                className="text-[10.5px] text-purple-gray hover:text-deep-plum"
+                              >
+                                cancel
+                              </button>
                             </div>
                           ) : (
                             <button
                               type="button"
-                              onClick={(e) => { e.stopPropagation(); setConfirmingDeleteId(c.id); setDeleteErrorId(null) }}
+                              onClick={(e) => { e.stopPropagation(); setConfirmingDeleteId(c.id) }}
                               className="absolute top-1 right-1 inline-flex items-center justify-center h-6 w-6 rounded text-purple-gray/60 hover:text-red-600 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-                              title="Delete your comment"
+                              title="Delete this comment"
                               aria-label="Delete comment"
                             >
                               <Trash2 size={11} />

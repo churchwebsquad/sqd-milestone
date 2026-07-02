@@ -657,41 +657,36 @@ function setNestedPath(
 // Each is a thin Supabase update — failures log and return false so the
 // caller can decide whether to surface a toast.
 
-/** Delete a comment the caller authored. Wraps the
- *  `delete_own_review_comment` SECURITY DEFINER RPC so both authenticated
- *  staff (verified via auth.uid()) and anon partners (verified via a
- *  partner name pulled from portal localStorage) share one code path.
+/** Delete a review comment. Whoever has the review token can delete
+ *  any comment on that review; authenticated staff can delete any
+ *  comment they can reach. No author-name gate, no status gate.
  *
- *  Refuses to delete already-resolved comments; the RPC enforces this
- *  server-side so audit history stays intact.
- *
- *  Returns `{ ok: true }` on success or `{ ok: false, error }` on
- *  failure. Historic version returned bare `boolean` and callers
- *  couldn't surface the actual failure reason to the user, which
- *  caused a "delete stands still" bug in the wild when the name
- *  match rejected silently (case-sensitivity, since fixed
- *  server-side, but any future gate would repeat the pattern). */
+ *  Returns a bare boolean. Callers should NOT surface the reason for
+ *  a failed delete to a partner-facing UI; possession of the link is
+ *  the whole permission model, and any error is either a network
+ *  hiccup or a caller passing the wrong token. Both look the same
+ *  from the reviewer's perspective: "click, it either goes or
+ *  refreshes." */
 export async function deleteOwnReviewComment(opts: {
-  commentId:   string
-  /** Only passed from the partner portal; the name the partner
-   *  entered on first visit (stored in localStorage). Ignored when the
-   *  RPC runs under an authenticated staff session. */
+  commentId:    string
+  /** Review token from the partner-portal URL. When passed, the RPC
+   *  authorizes the anon caller against the review's `partner_token`.
+   *  Not needed for authenticated staff. */
+  reviewToken?: string | null
+  /** Deprecated. The historic name check was removed server-side; this
+   *  argument is accepted for source-compat and ignored. */
   partnerName?: string | null
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+}): Promise<boolean> {
   const { data, error } = await supabase.rpc('delete_own_review_comment', {
     p_comment_id:   opts.commentId,
     p_partner_name: opts.partnerName ?? null,
+    p_review_token: opts.reviewToken ?? null,
   })
   if (error) {
     console.error('[reviews] deleteOwnReviewComment failed:', error.message)
-    return { ok: false, error: error.message || 'Delete failed' }
+    return false
   }
-  // The RPC returns true on success and false when the comment
-  // wasn't found. Anything else surfaces as an exception on `error`.
-  if (data === false) {
-    return { ok: false, error: 'Comment could not be found or was already deleted.' }
-  }
-  return { ok: true }
+  return data !== false
 }
 
 /** Change a comment's design/content tag. Pass null to clear. */

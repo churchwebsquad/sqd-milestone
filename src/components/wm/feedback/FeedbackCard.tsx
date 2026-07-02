@@ -93,11 +93,13 @@ export function FeedbackCard({
     setDeleting(true)
     setDeleteError(null)
     try {
-      const res = await deleteOwnReviewComment({ commentId: comment.id })
-      if (res.ok) {
+      const ok = await deleteOwnReviewComment({ commentId: comment.id })
+      if (ok) {
         await onChanged()
       } else {
-        setDeleteError(res.error)
+        // Generic, non-diagnostic message. The RPC surfaces false for
+        // any refusal; details aren't useful here.
+        setDeleteError('Delete didn\'t go through. Try again in a moment.')
       }
     } finally {
       setDeleting(false)
