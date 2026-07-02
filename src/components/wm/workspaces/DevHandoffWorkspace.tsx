@@ -461,6 +461,16 @@ export function DevHandoffWorkspace({ project }: Props) {
         </header>
 
         <div className="space-y-5">
+          {/* Section order (per strategist, 2026-07-02):
+              1. Page notes
+              2. ACSS details (variables export + preview)
+              3. Church settings
+              4. Content model + content inventory (+ CTA inventory)
+              5. Photos
+              6. SEO
+              Software in use stays at the very top as a preamble;
+              URL Redirects tails at the bottom. */}
+
           {/* ── Software in use (from strategic_goals) ─────────── */}
           {softwareInUse && (
             <WMCard padding="loose">
@@ -482,7 +492,7 @@ export function DevHandoffWorkspace({ project }: Props) {
             </WMCard>
           )}
 
-          {/* ── Dev notes per page (moved to top per strategist) ── */}
+          {/* ── 1. Page notes ──────────────────────────────────── */}
           <WMCard padding="loose">
             <div className="flex items-start justify-between gap-4 mb-3">
               <div>
@@ -520,49 +530,7 @@ export function DevHandoffWorkspace({ project }: Props) {
             )}
           </WMCard>
 
-          {/* ── Content Inventory: Technical Details ───────────── */}
-          {/* Page 2 of the strategist's cowork content-collection form
-              (events / sermons / groups / blog / domain / hosting /
-              discipleship pathway). All the technical context the dev
-              team needs before they bind sections to CMS post types. */}
-          <ContentInventoryTechnicalCard session={contentSession} />
-
-          {/* ── Organized images folder ────────────────────────── */}
-          {/* Authored on the Design Handoff tab; mirrored here so the dev
-              team has the same link one click away without bouncing
-              tabs. Read-only view — editing happens on Design. */}
-          <WMCard padding="loose">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
-                  <FolderOpen size={13} />
-                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
-                    Organized images folder
-                  </h2>
-                </div>
-                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
-                  Prepared imagery for this build (Drive, Dropbox, Notion).
-                  Authored on the Design Handoff tab.
-                </p>
-              </div>
-              {spec.organized_images_folder_url ? (
-                <a
-                  href={spec.organized_images_folder_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-md bg-wm-accent text-white text-[12px] font-semibold px-3 py-1.5 hover:bg-wm-accent-hover transition-colors shrink-0"
-                >
-                  <ExternalLink size={12} /> Open folder
-                </a>
-              ) : (
-                <span className="text-[11px] text-wm-text-subtle italic shrink-0">
-                  Not yet set
-                </span>
-              )}
-            </div>
-          </WMCard>
-
-          {/* ── ACSS variables export ──────────────────────────── */}
+          {/* ── 2. ACSS details — variables export ─────────────── */}
           <WMCard padding="loose">
             <div className="flex items-start justify-between gap-4 mb-3">
               <div>
@@ -621,91 +589,23 @@ export function DevHandoffWorkspace({ project }: Props) {
             </details>
           </WMCard>
 
-          {/* ── ACSS variable preview ──────────────────────────── */}
+          {/* ── ACSS details — variable preview ────────────────── */}
           <AcssVariablePreviewCard spec={spec} />
 
-          {/* ── SEO / AEO / GEO ─────────────────────────────────── */}
-          <WMCard padding="loose">
-            <div className="flex items-start justify-between gap-4 mb-3">
-              <div>
-                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
-                  <Globe size={13} />
-                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
-                    SEO · AEO · GEO export
-                  </h2>
-                </div>
-                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
-                  Page-by-page SEO title + meta description, focus keywords,
-                  AEO answer intent + Q&A, and GEO service areas. Authored
-                  from the Pages tab's SEO panel. Download as Markdown so
-                  the dev team can paste straight into the WordPress page
-                  template / Yoast / Rank Math fields.
-                </p>
-              </div>
-              <WMButton
-                variant="primary"
-                size="md"
-                iconLeft={<Download size={13} />}
-                onClick={() => downloadSeoMarkdown(projectSlug, project.name, seoRows)}
-                disabled={seoRows.length === 0 || seoCtaLoading}
-              >
-                Download SEO doc
-              </WMButton>
-            </div>
-            {seoCtaLoading ? (
-              <p className="text-[12px] text-wm-text-subtle">Loading…</p>
-            ) : seoRows.length === 0 ? (
-              <p className="text-[12px] text-wm-text-subtle italic">No pages on this project yet.</p>
-            ) : (
-              <SeoSummaryTable rows={seoRows} />
-            )}
-          </WMCard>
-
-          {/* ── Church settings (site snippets) ───────────────────── */}
+          {/* ── 3. Church settings (site snippets) ─────────────── */}
           <ChurchSettingsCard
             snippets={globalSnippets}
             projectSlug={projectSlug}
             loading={seoCtaLoading}
           />
 
-          {/* ── CTA inventory ─────────────────────────────────────── */}
-          <WMCard padding="loose">
-            <div className="flex items-start justify-between gap-4 mb-3">
-              <div>
-                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
-                  <LinkIcon size={13} />
-                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
-                    CTA inventory
-                  </h2>
-                </div>
-                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
-                  Every CTA across the site grouped by page. Entries with
-                  no URL set are dropped (those are partner placeholders,
-                  not real routes). Useful for the dev team's button-
-                  routing audit at launch.
-                </p>
-              </div>
-              <WMButton
-                variant="primary"
-                size="md"
-                iconLeft={<Download size={13} />}
-                onClick={() => downloadCtaCsv(projectSlug, ctaRows.filter(r => r.cta.url && r.cta.url.trim()))}
-                disabled={ctaRows.length === 0 || seoCtaLoading}
-              >
-                Download CSV
-              </WMButton>
-            </div>
-            {seoCtaLoading ? (
-              <p className="text-[12px] text-wm-text-subtle">Loading…</p>
-            ) : ctaRows.filter(r => r.cta.url && r.cta.url.trim()).length === 0 ? (
-              <p className="text-[12px] text-wm-text-subtle italic">No CTAs with destinations bound yet.</p>
-            ) : (
-              <CtaInventoryTable
-                rows={ctaRows.filter(r => r.cta.url && r.cta.url.trim())}
-                snippetMap={snippetMap}
-              />
-            )}
-          </WMCard>
+          {/* ── 4. Content model + content inventory ───────────── */}
+          {/* Content Inventory first — the strategist's cowork
+              content-collection form answers (events / sermons /
+              groups / blog / domain / hosting / discipleship pathway).
+              Then the analyzer's Content Model plan, then CTA inventory.
+              Grouped together so the dev sees content shape holistically. */}
+          <ContentInventoryTechnicalCard session={contentSession} />
 
           {/* ── Content model plan (Phase 1 preview) ──────────────── */}
           <WMCard padding="loose">
@@ -788,6 +688,117 @@ export function DevHandoffWorkspace({ project }: Props) {
               />
             )}
             {cmPlan && <CmWpObjectsPanel plan={cmPlan} />}
+          </WMCard>
+
+          {/* ── CTA inventory (part of Content model + inventory) ─── */}
+          <WMCard padding="loose">
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+                  <LinkIcon size={13} />
+                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
+                    CTA inventory
+                  </h2>
+                </div>
+                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+                  Every CTA across the site grouped by page. Entries with
+                  no URL set are dropped (those are partner placeholders,
+                  not real routes). Useful for the dev team's button-
+                  routing audit at launch.
+                </p>
+              </div>
+              <WMButton
+                variant="primary"
+                size="md"
+                iconLeft={<Download size={13} />}
+                onClick={() => downloadCtaCsv(projectSlug, ctaRows.filter(r => r.cta.url && r.cta.url.trim()))}
+                disabled={ctaRows.length === 0 || seoCtaLoading}
+              >
+                Download CSV
+              </WMButton>
+            </div>
+            {seoCtaLoading ? (
+              <p className="text-[12px] text-wm-text-subtle">Loading…</p>
+            ) : ctaRows.filter(r => r.cta.url && r.cta.url.trim()).length === 0 ? (
+              <p className="text-[12px] text-wm-text-subtle italic">No CTAs with destinations bound yet.</p>
+            ) : (
+              <CtaInventoryTable
+                rows={ctaRows.filter(r => r.cta.url && r.cta.url.trim())}
+                snippetMap={snippetMap}
+              />
+            )}
+          </WMCard>
+
+          {/* ── 5. Photos — organized images folder ────────────── */}
+          {/* Authored on the Design Handoff tab; mirrored here so the dev
+              team has the same link one click away without bouncing
+              tabs. Read-only view — editing happens on Design. */}
+          <WMCard padding="loose">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+                  <FolderOpen size={13} />
+                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
+                    Organized images folder
+                  </h2>
+                </div>
+                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+                  Prepared imagery for this build (Drive, Dropbox, Notion).
+                  Authored on the Design Handoff tab.
+                </p>
+              </div>
+              {spec.organized_images_folder_url ? (
+                <a
+                  href={spec.organized_images_folder_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-wm-accent text-white text-[12px] font-semibold px-3 py-1.5 hover:bg-wm-accent-hover transition-colors shrink-0"
+                >
+                  <ExternalLink size={12} /> Open folder
+                </a>
+              ) : (
+                <span className="text-[11px] text-wm-text-subtle italic shrink-0">
+                  Not yet set
+                </span>
+              )}
+            </div>
+          </WMCard>
+
+          {/* ── 6. SEO / AEO / GEO ─────────────────────────────── */}
+          <WMCard padding="loose">
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+                  <Globe size={13} />
+                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
+                    SEO · AEO · GEO export
+                  </h2>
+                </div>
+                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+                  Page-by-page SEO title + meta description, focus keywords,
+                  AEO answer intent + Q&A, and GEO service areas. Authored
+                  from the Pages tab's SEO panel. Download as Markdown so
+                  the dev team can paste straight into the WordPress page
+                  template / Yoast / Rank Math fields.
+                </p>
+              </div>
+              <WMButton
+                variant="primary"
+                size="md"
+                iconLeft={<Download size={13} />}
+                onClick={() => downloadSeoMarkdown(projectSlug, project.name, seoRows)}
+                disabled={seoRows.length === 0 || seoCtaLoading}
+              >
+                Download SEO doc
+              </WMButton>
+            </div>
+            {seoCtaLoading ? (
+              <p className="text-[12px] text-wm-text-subtle">Loading…</p>
+            ) : seoRows.length === 0 ? (
+              <p className="text-[12px] text-wm-text-subtle italic">No pages on this project yet.</p>
+            ) : (
+              <SeoSummaryTable rows={seoRows} />
+            )}
           </WMCard>
 
           <UrlRedirectsCard
