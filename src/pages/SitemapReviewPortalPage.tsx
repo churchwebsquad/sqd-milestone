@@ -33,6 +33,7 @@ import {
   savePartnerSitemapReview,
   approveReview,
   type ContentMigration,
+  type FooterInfo,
   type JourneyStep,
   type NavItem,
   type PersonaPosture,
@@ -84,9 +85,9 @@ export default function SitemapReviewPortalPage() {
         <div className="text-center space-y-3">
           <h1 className="text-[24px] font-bold text-wm-text">Review not available</h1>
           <p className="text-wm-text-muted">
-            This link isn't valid — the review may have been rescinded, or your team
-            hasn't published it for review yet. Reach out to Church Media Squad and
-            we'll get you the current link.
+            This link isn't valid. Your review may have been rescinded, or your team
+            hasn't published it yet. Reach out to Church Media Squad and we'll get you
+            the current link.
           </p>
         </div>
       </PortalShell>
@@ -98,15 +99,15 @@ export default function SitemapReviewPortalPage() {
   return (
     <PortalShell>
       {/* Intro */}
-      <header className="mb-8">
+      <header className="mb-10">
         <p className="text-[11px] uppercase tracking-widest font-bold text-wm-accent-strong mb-1">
           {churchName ?? 'Your church'} · sitemap review
         </p>
         <h1 className="text-[28px] md:text-[32px] font-bold text-wm-text leading-tight">
-          {review.intro?.headline ?? 'Sitemap & Navigation Review'}
+          {review.intro?.headline ?? `${churchName ?? 'Your church'} website content strategy`}
         </h1>
-        <p className="text-[14px] text-wm-text-muted mt-3 leading-relaxed max-w-2xl">
-          {review.intro?.body ?? 'Here\'s the proposed structure for your new site. Every field is editable — refine what feels off and hit Approve when you\'re happy.'}
+        <p className="text-[15px] text-wm-text-muted mt-3 leading-relaxed max-w-2xl">
+          {review.intro?.body ?? 'Here\'s the proposed structure for your new website. Read through it, share it with your team, and tell us what to refine. This is a working draft we build together.'}
         </p>
         <div className="mt-3 flex items-center gap-2 flex-wrap">
           <StatusPill status={review.status} />
@@ -115,21 +116,47 @@ export default function SitemapReviewPortalPage() {
         </div>
       </header>
 
-      <div className="space-y-8">
-        {/* Pages */}
-        <PortalSection title="Pages" description="What each page on your new site is for.">
-          <ul className="space-y-3">
-            {review.pages.map(p => (
-              <PagePortalCard key={p.id} page={p} review={review} onChange={persist} locked={locked} />
-            ))}
-          </ul>
-        </PortalSection>
+      <div className="space-y-10">
+        {/* Executive summary. Big-picture "here's what this site is
+            designed to do for you" framing that opens the review. */}
+        {review.executive_summary && (
+          <PortalCallout title="Executive summary" tone="accent">
+            <MultilineText
+              value={review.executive_summary}
+              onSave={locked ? null : (v) => void persist({ ...review, executive_summary: v })}
+              placeholder="Executive summary in progress."
+              rows={6}
+              className="text-[15px] text-wm-text leading-relaxed"
+            />
+          </PortalCallout>
+        )}
 
-        {/* Persona postures */}
+        {/* Navigation strategy. The "heart and why" paragraph before
+            the partner scans the actual menu structure below. */}
+        {(review.navigation_strategy || !locked) && (
+          <PortalSection
+            title="Primary navigation strategy"
+            description="How the menu is built and why."
+          >
+            <MultilineText
+              value={review.navigation_strategy ?? ''}
+              onSave={locked ? null : (v) => void persist({ ...review, navigation_strategy: v })}
+              placeholder="The reasoning behind the menu structure will land here once the strategist finalizes it."
+              rows={5}
+              className="rounded-lg border border-wm-border bg-white px-4 py-3 text-[14px] text-wm-text leading-relaxed"
+            />
+            <div className="mt-4">
+              <NavPreview items={review.nav_layout.header} />
+            </div>
+          </PortalSection>
+        )}
+
+        {/* Persona postures. Ordered before pages so the partner sees
+            the WHO before the WHAT. */}
         {review.persona_postures.length > 0 && (
           <PortalSection
-            title="How we're speaking to each person"
-            description="Site posture and user journey per persona."
+            title="Who we're speaking to"
+            description="How the site is angled toward each person you're inviting into your community."
           >
             <div className="space-y-4">
               {review.persona_postures.map(p => (
@@ -139,16 +166,21 @@ export default function SitemapReviewPortalPage() {
           </PortalSection>
         )}
 
-        {/* Nav layout */}
-        <PortalSection title="Navigation" description="Where each page lives in the site's main nav.">
-          <NavPreview items={review.nav_layout.header} />
+        {/* Pages. Each page card consolidates purpose, what changed,
+            why, and how it aligns with strategy. */}
+        <PortalSection title="Pages" description="What each page on your new site is for.">
+          <ul className="space-y-4">
+            {review.pages.map(p => (
+              <PagePortalCard key={p.id} page={p} review={review} onChange={persist} locked={locked} />
+            ))}
+          </ul>
         </PortalSection>
 
-        {/* Content migrations */}
+        {/* Content migrations. */}
         {review.content_migrations.length > 0 && (
           <PortalSection
             title="Where your content went"
-            description="Pages that changed shape from your current site — what merged, and why."
+            description="Pages that changed shape from your current site. What merged, what got its own home, and why."
           >
             <div className="space-y-3">
               {review.content_migrations.map(m => (
@@ -158,11 +190,16 @@ export default function SitemapReviewPortalPage() {
           </PortalSection>
         )}
 
+        {/* Footer information */}
+        {review.footer_info && (
+          <FooterPortalSection footer={review.footer_info} />
+        )}
+
         {/* Partner notes */}
         <PortalSection title="Your notes" description="Anything else you want us to know.">
           <textarea
             defaultValue={review.partner_notes ?? ''}
-            placeholder="Anything else you'd like us to consider — priorities, missing pages, terminology preferences…"
+            placeholder="Anything else you'd like us to consider: priorities, missing pages, terminology preferences, and any concerns."
             disabled={locked}
             rows={4}
             onBlur={e => {
@@ -176,10 +213,10 @@ export default function SitemapReviewPortalPage() {
         {/* Approve */}
         {!locked && (
           <div className="rounded-lg border-2 border-wm-accent bg-wm-accent-tint p-5 text-center">
-            <h2 className="text-[18px] font-bold text-wm-text mb-1">Approve this sitemap?</h2>
+            <h2 className="text-[18px] font-bold text-wm-text mb-1">Ready to move forward?</h2>
             <p className="text-[13px] text-wm-text-muted mb-3">
-              Approving locks the sitemap as-is and unblocks the next stage of work.
-              You can still ask us to reopen it if you spot something later.
+              Approving locks in the structure and lets your Church Media Squad start the next stage.
+              If something surfaces later, we can always reopen the review together.
             </p>
             <button
               type="button"
@@ -187,16 +224,16 @@ export default function SitemapReviewPortalPage() {
               disabled={saving}
               className="inline-flex items-center gap-2 text-[13px] font-semibold bg-wm-accent-strong text-white rounded-full px-6 py-2 hover:bg-wm-accent disabled:opacity-50"
             >
-              Approve sitemap →
+              Approve this sitemap →
             </button>
           </div>
         )}
         {locked && (
           <div className="rounded-lg border-2 border-green-400 bg-green-50 p-5 text-center">
-            <h2 className="text-[18px] font-bold text-green-800 mb-1">Approved</h2>
+            <h2 className="text-[18px] font-bold text-green-800 mb-1">Approved. Thank you.</h2>
             <p className="text-[13px] text-green-700">
-              This sitemap is locked as the official direction. Any further changes need to
-              go through Church Media Squad.
+              This sitemap is locked as the official direction. Your Church Media Squad is picking it up
+              from here. Reach out anytime if something needs to be reopened.
             </p>
           </div>
         )}
@@ -250,13 +287,75 @@ function PagePortalCard({
       <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Purpose</p>
       <textarea
         defaultValue={page.purpose}
-        placeholder="What this page is for — tell us if this doesn't match how you'd describe it."
+        placeholder="What this page is for. Tell us if the framing doesn't match how you'd describe it."
         disabled={locked}
         rows={2}
         onBlur={e => { if (e.target.value !== page.purpose) update({ purpose: e.target.value }) }}
         className="w-full text-[13px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1.5 focus:outline-none focus:border-wm-accent disabled:opacity-50"
       />
+
+      {(page.what_changed || page.why_change || page.strategic_alignment || !locked) && (
+        <div className="mt-3 space-y-3">
+          {(page.what_changed || !locked) && (
+            <PagePortalNote
+              label="What changed"
+              value={page.what_changed}
+              placeholder="If this page is new, renamed, elevated, or merged from your current site, the strategist will explain the shift here."
+              locked={locked}
+              onSave={v => update({ what_changed: v })}
+            />
+          )}
+          {(page.why_change || !locked) && (
+            <PagePortalNote
+              label="Why we made this change"
+              value={page.why_change}
+              placeholder="The reasoning behind the decision, in the context of the person this serves."
+              locked={locked}
+              onSave={v => update({ why_change: v })}
+            />
+          )}
+          {(page.strategic_alignment || !locked) && (
+            <PagePortalNote
+              label="How it aligns with strategy"
+              value={page.strategic_alignment}
+              placeholder="How this page reflects your mission, values, and the goals set in Discovery."
+              locked={locked}
+              onSave={v => update({ strategic_alignment: v })}
+            />
+          )}
+        </div>
+      )}
     </li>
+  )
+}
+
+/** One "What changed / Why / Alignment" subsection inside a page card.
+ *  Reads as a small labeled paragraph when populated; becomes an
+ *  editable textarea when the review isn't locked and the field is
+ *  focused. Empty locked fields collapse entirely. */
+function PagePortalNote({
+  label, value, placeholder, locked, onSave,
+}: {
+  label:       string
+  value:       string | undefined
+  placeholder: string
+  locked:      boolean
+  onSave:      (v: string) => void
+}) {
+  return (
+    <div>
+      <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">{label}</p>
+      {locked && !value ? null : (
+        <textarea
+          defaultValue={value ?? ''}
+          placeholder={placeholder}
+          disabled={locked}
+          rows={2}
+          onBlur={e => { if (e.target.value !== (value ?? '')) onSave(e.target.value) }}
+          className="w-full text-[13px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1.5 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+        />
+      )}
+    </div>
   )
 }
 
@@ -287,7 +386,7 @@ function PersonaPortalCard({
       <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">How the site meets them</p>
       <textarea
         defaultValue={posture.posture_summary}
-        placeholder={`How the site is angled to ${posture.persona_name} — the tone, the first message, what's easy to find`}
+        placeholder={`How the site meets ${posture.persona_name}: the tone, the first message, what's easy to find, what quietly earns their trust.`}
         disabled={locked}
         rows={2}
         onBlur={e => { if (e.target.value !== posture.posture_summary) update({ posture_summary: e.target.value }) }}
@@ -419,6 +518,131 @@ function PortalSection({
       )}
       {children}
     </section>
+  )
+}
+
+/** Full-width accent callout used for the executive summary. Tinted
+ *  background + accent border so it reads as the strategic opener,
+ *  distinct from the per-page cards below. */
+function PortalCallout({
+  title, children, tone = 'accent',
+}: { title: string; children: React.ReactNode; tone?: 'accent' | 'neutral' }) {
+  const cls = tone === 'accent'
+    ? 'border-wm-accent/40 bg-wm-accent-tint/40'
+    : 'border-wm-border bg-white'
+  return (
+    <section className={`rounded-xl border-2 ${cls} p-5`}>
+      <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-accent-strong mb-2">{title}</p>
+      {children}
+    </section>
+  )
+}
+
+/** Textarea-when-editable / paragraph-when-locked. Persists on blur. */
+function MultilineText({
+  value, onSave, placeholder, rows = 4, className = '',
+}: {
+  value:       string
+  onSave:      ((v: string) => void) | null
+  placeholder: string
+  rows?:       number
+  className?:  string
+}) {
+  if (!onSave) {
+    return value ? (
+      <div className={`whitespace-pre-wrap ${className}`}>{value}</div>
+    ) : (
+      <p className={`italic text-wm-text-subtle ${className}`}>{placeholder}</p>
+    )
+  }
+  return (
+    <textarea
+      defaultValue={value}
+      placeholder={placeholder}
+      rows={rows}
+      onBlur={e => { if (e.target.value !== value) onSave(e.target.value) }}
+      className={`w-full bg-transparent border-0 focus:outline-none focus:ring-2 focus:ring-wm-accent focus:rounded resize-vertical ${className}`}
+    />
+  )
+}
+
+/** Footer section renders the site-wide contact + link block as a
+ *  clean read-only preview. Editing footer info happens on the staff
+ *  side; partners see the block to verify accuracy and flag anything
+ *  wrong in the partner_notes textarea at the bottom of the page. */
+function FooterPortalSection({ footer }: { footer: FooterInfo }) {
+  const hasAny =
+    footer.church_name ||
+    footer.address ||
+    footer.phone ||
+    footer.email ||
+    footer.office_hours ||
+    footer.newsletter_signup_url ||
+    (footer.social_links && footer.social_links.length > 0) ||
+    (footer.footer_page_links && footer.footer_page_links.length > 0)
+  if (!hasAny) return null
+
+  return (
+    <PortalSection
+      title="Footer information"
+      description="The contact block and page links that sit at the bottom of every page. Confirm these read correctly for your church today."
+    >
+      <div className="rounded-lg border border-wm-border bg-white p-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-8 text-[13.5px] text-wm-text">
+          {footer.church_name && <FooterRow label="Church name"  value={footer.church_name} />}
+          {footer.address     && <FooterRow label="Address"      value={footer.address} />}
+          {footer.phone       && <FooterRow label="Phone"        value={footer.phone} />}
+          {footer.email       && <FooterRow label="Email"        value={footer.email} />}
+          {footer.office_hours && <FooterRow label="Office hours" value={footer.office_hours} />}
+          {footer.newsletter_signup_url && (
+            <FooterRow
+              label="Newsletter"
+              value={
+                <a href={footer.newsletter_signup_url} target="_blank" rel="noopener noreferrer" className="text-wm-accent-strong underline break-all">
+                  {footer.newsletter_signup_url}
+                </a>
+              }
+            />
+          )}
+        </div>
+        {footer.social_links && footer.social_links.length > 0 && (
+          <div className="mt-4">
+            <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">Social</p>
+            <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
+              {footer.social_links.map((s, i) => (
+                <li key={`${s.platform}-${i}`}>
+                  <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-wm-accent-strong underline capitalize">
+                    {s.platform}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {footer.footer_page_links && footer.footer_page_links.length > 0 && (
+          <div className="mt-4">
+            <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">Footer page links</p>
+            <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
+              {footer.footer_page_links.map((l, i) => (
+                <li key={i}>
+                  <span className="text-wm-text">{l.label}</span>
+                  {l.url && <span className="text-wm-text-subtle ml-1">({l.url})</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </PortalSection>
+  )
+}
+
+function FooterRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-0.5">{label}</p>
+      <div className="text-[13.5px] text-wm-text">{value}</div>
+    </div>
   )
 }
 

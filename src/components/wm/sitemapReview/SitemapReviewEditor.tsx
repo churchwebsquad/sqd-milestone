@@ -61,16 +61,25 @@ export function SitemapReviewEditor({
       setLoading(false)
       return
     }
-    // No review yet — compose one from current project state.
-    // Pull roadmap_state so composeSitemapReview can read
-    // site_strategy (the cowork sitemap step output — has rich
-    // per-page purposes, primary_audience, funnel_stage, curated nav,
-    // persona journeys, and pages_considered_dropped for the "where
-    // content went" section). Without site_strategy every field starts
-    // blank; with it, the review pre-fills with the strategist's work.
+    // No review yet: compose one from current project state.
+    //
+    // Pulls a wider column set now that the review carries an
+    // executive summary + navigation strategy + footer info block:
+    //   - roadmap_state: site_strategy (page purpose/audience/funnel,
+    //     nav.primary/footer, persona_journeys,
+    //     pages_considered_dropped), strategic_goals (church_vision,
+    //     x-factor), stage_1.personas (fallback source of truth when
+    //     the personas column is empty on older projects).
+    //   - Global columns (address, phone, email, socials) that
+    //     compose maps into footer_info.
     const [{ data: proj }, { data: pgs }] = await Promise.all([
       supabase.from('strategy_web_projects')
-        .select('id, church_name, personas, nav_group_definitions, roadmap_state')
+        .select([
+          'id, church_name, personas, nav_group_definitions, roadmap_state',
+          'address, city_state, phone, email, primary_service_time, all_service_times',
+          'social_facebook_url, social_instagram_url, social_youtube_url',
+          'social_tiktok_url, social_twitter_url, social_linkedin_url',
+        ].join(', '))
         .eq('id', projectId).maybeSingle(),
       supabase.from('web_pages')
         .select('id, slug, name, phase, sort_order, nav_group_label, user_journey_step')
@@ -174,10 +183,13 @@ export function SitemapReviewEditor({
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
           <IntroEditor review={review} onChange={persist} disabled={isApproved} />
-          <PagesEditor review={review} onChange={persist} disabled={isApproved} />
+          <ExecutiveSummaryEditor review={review} onChange={persist} disabled={isApproved} />
+          <NavigationStrategyEditor review={review} onChange={persist} disabled={isApproved} />
           <PersonaPosturesEditor review={review} onChange={persist} disabled={isApproved} />
+          <PagesEditor review={review} onChange={persist} disabled={isApproved} />
           <NavLayoutEditor review={review} onChange={persist} disabled={isApproved} />
           <ContentMigrationsEditor review={review} onChange={persist} disabled={isApproved} />
+          <FooterInfoEditor review={review} onChange={persist} disabled={isApproved} />
         </div>
 
         {/* Footer */}
@@ -309,6 +321,185 @@ function IntroEditor({
   )
 }
 
+function ExecutiveSummaryEditor({
+  review, onChange, disabled,
+}: { review: SitemapReview; onChange: (next: SitemapReview) => Promise<void> | void; disabled: boolean }) {
+  return (
+    <Section
+      title="Executive summary"
+      subtitle="Big-picture strategic framing that opens the review"
+    >
+      <textarea
+        defaultValue={review.executive_summary ?? ''}
+        placeholder="Two or three warm paragraphs on what this site is designed to accomplish for the partner. Speaks to their heart, not just the mechanics."
+        disabled={disabled}
+        rows={8}
+        onBlur={e => {
+          if (e.target.value === (review.executive_summary ?? '')) return
+          void onChange({ ...review, executive_summary: e.target.value })
+        }}
+        className="w-full text-[12.5px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1.5 focus:outline-none focus:border-wm-accent disabled:opacity-50 leading-relaxed"
+      />
+    </Section>
+  )
+}
+
+function NavigationStrategyEditor({
+  review, onChange, disabled,
+}: { review: SitemapReview; onChange: (next: SitemapReview) => Promise<void> | void; disabled: boolean }) {
+  return (
+    <Section
+      title="Navigation strategy"
+      subtitle="The 'heart and why' paragraph for the menu structure"
+    >
+      <textarea
+        defaultValue={review.navigation_strategy ?? ''}
+        placeholder="Explain the reasoning behind the menu structure in prose. Who each layer serves, why items were grouped this way, what the partner will feel when their audience uses it."
+        disabled={disabled}
+        rows={6}
+        onBlur={e => {
+          if (e.target.value === (review.navigation_strategy ?? '')) return
+          void onChange({ ...review, navigation_strategy: e.target.value })
+        }}
+        className="w-full text-[12.5px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1.5 focus:outline-none focus:border-wm-accent disabled:opacity-50 leading-relaxed"
+      />
+    </Section>
+  )
+}
+
+function FooterInfoEditor({
+  review, onChange, disabled,
+}: { review: SitemapReview; onChange: (next: SitemapReview) => Promise<void> | void; disabled: boolean }) {
+  const footer = review.footer_info ?? {}
+  const update = (patch: Partial<NonNullable<SitemapReview['footer_info']>>) => {
+    void onChange({ ...review, footer_info: { ...footer, ...patch } })
+  }
+  return (
+    <Section
+      title="Footer information"
+      subtitle="Contact details, hours, socials, and footer page links"
+    >
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <FooterField label="Church name"    value={footer.church_name}    disabled={disabled} onSave={v => update({ church_name: v })} />
+        <FooterField label="Address"        value={footer.address}        disabled={disabled} onSave={v => update({ address: v })} />
+        <FooterField label="Phone"          value={footer.phone}          disabled={disabled} onSave={v => update({ phone: v })} />
+        <FooterField label="Email"          value={footer.email}          disabled={disabled} onSave={v => update({ email: v })} />
+        <FooterField label="Office hours"   value={footer.office_hours}   disabled={disabled} onSave={v => update({ office_hours: v })} />
+        <FooterField label="Newsletter URL" value={footer.newsletter_signup_url} disabled={disabled} onSave={v => update({ newsletter_signup_url: v })} />
+      </div>
+
+      <div className="mt-3">
+        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Social links</p>
+        {(footer.social_links ?? []).length === 0 && (
+          <p className="text-[11.5px] text-wm-text-subtle italic">No socials pulled from intake yet.</p>
+        )}
+        <ul className="space-y-1">
+          {(footer.social_links ?? []).map((s, i) => (
+            <li key={`${s.platform}-${i}`} className="flex items-center gap-2 text-[12px]">
+              <span className="w-20 text-wm-text-muted capitalize">{s.platform}</span>
+              <input
+                type="text"
+                defaultValue={s.url}
+                disabled={disabled}
+                onBlur={e => {
+                  if (e.target.value === s.url) return
+                  const next = [...(footer.social_links ?? [])]
+                  next[i] = { ...s, url: e.target.value }
+                  update({ social_links: next })
+                }}
+                className="flex-1 text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+              />
+              {!disabled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = (footer.social_links ?? []).filter((_, idx) => idx !== i)
+                    update({ social_links: next })
+                  }}
+                  className="text-wm-text-subtle hover:text-wm-danger text-[14px] leading-none px-1"
+                >×</button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="mt-3">
+        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Footer page links</p>
+        <p className="text-[10.5px] text-wm-text-subtle mb-1.5">Extra links the partner wants in the footer (Preschool, Careers, Memorial Garden, etc.).</p>
+        <ul className="space-y-1">
+          {(footer.footer_page_links ?? []).map((link, i) => (
+            <li key={i} className="flex items-center gap-2 text-[12px]">
+              <input
+                type="text"
+                defaultValue={link.label}
+                placeholder="Label"
+                disabled={disabled}
+                onBlur={e => {
+                  if (e.target.value === link.label) return
+                  const next = [...(footer.footer_page_links ?? [])]
+                  next[i] = { ...link, label: e.target.value }
+                  update({ footer_page_links: next })
+                }}
+                className="w-40 text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+              />
+              <input
+                type="text"
+                defaultValue={link.url}
+                placeholder="/path or https://…"
+                disabled={disabled}
+                onBlur={e => {
+                  if (e.target.value === link.url) return
+                  const next = [...(footer.footer_page_links ?? [])]
+                  next[i] = { ...link, url: e.target.value }
+                  update({ footer_page_links: next })
+                }}
+                className="flex-1 text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+              />
+              {!disabled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = (footer.footer_page_links ?? []).filter((_, idx) => idx !== i)
+                    update({ footer_page_links: next })
+                  }}
+                  className="text-wm-text-subtle hover:text-wm-danger text-[14px] leading-none px-1"
+                >×</button>
+              )}
+            </li>
+          ))}
+        </ul>
+        {!disabled && (
+          <button
+            type="button"
+            onClick={() => update({ footer_page_links: [...(footer.footer_page_links ?? []), { label: '', url: '' }] })}
+            className="mt-1 text-[11px] font-semibold text-wm-accent-strong hover:underline"
+          >
+            + Add footer link
+          </button>
+        )}
+      </div>
+    </Section>
+  )
+}
+
+function FooterField({
+  label, value, disabled, onSave,
+}: { label: string; value: string | null | undefined; disabled: boolean; onSave: (v: string) => void }) {
+  return (
+    <label className="block">
+      <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">{label}</span>
+      <input
+        type="text"
+        defaultValue={value ?? ''}
+        disabled={disabled}
+        onBlur={e => { if (e.target.value !== (value ?? '')) onSave(e.target.value) }}
+        className="mt-1 w-full text-[12.5px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+      />
+    </label>
+  )
+}
+
 function PagesEditor({
   review, onChange, disabled,
 }: { review: SitemapReview; onChange: (next: SitemapReview) => Promise<void> | void; disabled: boolean }) {
@@ -347,14 +538,50 @@ function PagesEditor({
                 )}
               </div>
             )}
-            <textarea
-              defaultValue={p.purpose}
-              placeholder="What this page is for — 1-2 sentences the partner will read"
-              disabled={disabled}
-              rows={2}
-              onBlur={e => { if (e.target.value !== p.purpose) updatePage(p.id, { purpose: e.target.value }) }}
-              className="w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-            />
+            <label className="block mt-1">
+              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Purpose</span>
+              <textarea
+                defaultValue={p.purpose}
+                placeholder="What this page is for. One or two warm sentences the partner will read."
+                disabled={disabled}
+                rows={2}
+                onBlur={e => { if (e.target.value !== p.purpose) updatePage(p.id, { purpose: e.target.value }) }}
+                className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+              />
+            </label>
+            <label className="block mt-2">
+              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">What changed</span>
+              <textarea
+                defaultValue={p.what_changed ?? ''}
+                placeholder="If this page replaces or reshapes something on the current site, describe the change (fresh page, renamed, merged from another, elevated from a dropdown, etc.)."
+                disabled={disabled}
+                rows={2}
+                onBlur={e => { if (e.target.value !== (p.what_changed ?? '')) updatePage(p.id, { what_changed: e.target.value }) }}
+                className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+              />
+            </label>
+            <label className="block mt-2">
+              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Why we made this change</span>
+              <textarea
+                defaultValue={p.why_change ?? ''}
+                placeholder="The reasoning behind the decision. Speak to the partner about the person this serves better and the friction it removes."
+                disabled={disabled}
+                rows={2}
+                onBlur={e => { if (e.target.value !== (p.why_change ?? '')) updatePage(p.id, { why_change: e.target.value }) }}
+                className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+              />
+            </label>
+            <label className="block mt-2">
+              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">How it aligns with strategy</span>
+              <textarea
+                defaultValue={p.strategic_alignment ?? ''}
+                placeholder="How this page reflects the church's mission, values, or the goals set in Discovery."
+                disabled={disabled}
+                rows={2}
+                onBlur={e => { if (e.target.value !== (p.strategic_alignment ?? '')) updatePage(p.id, { strategic_alignment: e.target.value }) }}
+                className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+              />
+            </label>
           </li>
         ))}
       </ul>
@@ -396,7 +623,7 @@ function PersonaPosturesEditor({
     )
   }
   return (
-    <Section title="Persona postures" subtitle="How the site is angled to each person + their user journey">
+    <Section title="Persona postures" subtitle="How the site is angled to each person and the journey we imagined for them">
       <div className="space-y-3">
         {review.persona_postures.map(p => (
           <div key={p.persona_id} className="border border-wm-border rounded p-3 bg-wm-bg">
@@ -423,7 +650,7 @@ function PersonaPosturesEditor({
             )}
             <textarea
               defaultValue={p.posture_summary}
-              placeholder={`How the site meets ${p.persona_name} — what they see first, how the message lands, tone`}
+              placeholder={`How the site meets ${p.persona_name}: what they see first, how the message lands, the tone that keeps them.`}
               disabled={disabled}
               rows={2}
               onBlur={e => { if (e.target.value !== p.posture_summary) updatePosture(p.persona_id, { posture_summary: e.target.value }) }}
@@ -534,7 +761,7 @@ function NavLayoutEditor({
           )}
         </div>
         <p className="text-[10.5px] text-wm-text-subtle italic">
-          Footer sections editor coming in a follow-up — for now, the partner sees the header nav preview.
+          Footer sections editor coming soon. For now, the partner sees the header nav preview here and reviews the footer contact block below.
         </p>
       </div>
     </Section>
@@ -561,7 +788,7 @@ function ContentMigrationsEditor({
   const removeMig = (id: string) => setMigrations(migrations.filter(m => m.id !== id))
 
   return (
-    <Section title="Where content went" subtitle="Consolidation rationale — e.g. Youth + Kids → Family, and why">
+    <Section title="Where content went" subtitle="Consolidation rationale. For example, Youth and Kids folding into a single Family page, and why that serves families better.">
       <p className="text-[11.5px] text-wm-text-muted mb-2">
         Document pages the partner had before but that now live under a
         different structure. Each migration explains what merged into
@@ -607,7 +834,7 @@ function ContentMigrationsEditor({
             </div>
             <textarea
               defaultValue={m.rationale}
-              placeholder="Why the merge — what the partner gains, what stays intact"
+              placeholder="Why the change serves the partner well: what they gain, what stays intact, why the new page is a better fit for the person visiting."
               disabled={disabled}
               rows={2}
               onBlur={e => { if (e.target.value !== m.rationale) updateMig(m.id, { rationale: e.target.value }) }}

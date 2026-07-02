@@ -71,29 +71,36 @@ export interface ReviewPage {
   web_page_id?: string
   slug: string
   name: string
-  /** Client-facing "what this page is for" note. Editable throughout —
+  /** Client-facing "what this page is for" note. Editable throughout;
    *  strategist drafts, partner refines, both writes flow into the
    *  edit_history. */
   purpose: string
-  /** Human label of where this page lives in the nav — e.g. "Header
-   *  → About → Team" or "Footer → Get Help". Purely descriptive; the
-   *  actual nav tree lives in nav_layout. */
+  /** Human label of where this page lives in the nav (e.g. "Header,
+   *  under About") Purely descriptive; the actual nav tree lives in
+   *  nav_layout. */
   nav_position?: string
   parent_slug?: string | null
   order: number
   /** Persona ids this page is primarily for. Cross-referenced against
    *  persona_postures[].persona_id. */
   persona_relevance?: string[]
-  /** Primary audience label lifted from the cowork sitemap
-   *  (site_strategy.pages[].primary_audience). Free text —
+  /** Primary audience label lifted from the cowork sitemap. Free text:
    *  "general", persona name, "Jordan & Ashley", etc. */
   primary_audience?: string | null
-  /** Funnel stage this page serves (site_strategy.pages[].primary_funnel).
-   *  Typically "discover" / "consider" / "visit" / "commit". */
+  /** Funnel stage this page serves. Typically "discover", "consider",
+   *  "visit", "commit". */
   funnel_stage?: string | null
-  /** Where in the nav this page lives (site_strategy.pages[].nav_strategy).
-   *  "primary" / "secondary" / "footer" / "contextual_only" / etc. */
+  /** Where in the nav this page lives ("primary", "secondary", "footer",
+   *  "contextual_only", etc.). */
   nav_strategy?: string | null
+  /** Consolidated "here's the strategy behind this page" block used
+   *  by the partner review card. Three optional fields the strategist
+   *  fills in per page; each is free text. The card only renders
+   *  filled fields, so pages the strategist hasn't annotated stay
+   *  clean instead of showing empty section labels. */
+  what_changed?:        string
+  why_change?:          string
+  strategic_alignment?: string
 }
 
 export interface NavItem {
@@ -138,6 +145,28 @@ export interface EditLogEntry {
   note?: string
 }
 
+/** Site-wide footer information the partner reviews for accuracy.
+ *  Populated at compose-time from `strategy_web_projects` global
+ *  columns; every field remains editable so the partner can correct
+ *  anything that changed since the intake questionnaire. */
+export interface FooterInfo {
+  church_name?:         string | null
+  address?:             string | null
+  phone?:               string | null
+  email?:               string | null
+  office_hours?:        string | null
+  newsletter_signup_url?: string | null
+  social_links?: Array<{
+    platform: 'facebook' | 'instagram' | 'youtube' | 'tiktok' | 'twitter' | 'linkedin' | 'other'
+    url:      string
+    label?:   string
+  }>
+  /** Additional footer page links (Weekday Preschool, Careers,
+   *  Contact, Memorial Garden, etc.). Strategist adds these as they
+   *  emerge from cowork; partner confirms or edits. */
+  footer_page_links?: Array<{ label: string; url: string }>
+}
+
 export interface SitemapReview {
   schema_version: 1
   token: string
@@ -148,12 +177,26 @@ export interface SitemapReview {
   approved_at:  string | null
   approved_by:  'staff' | 'partner' | null
 
-  /** Intro block shown at the top of the partner-facing review — sets
+  /** Intro block shown at the top of the partner-facing review; sets
    *  the tone. Editable; strategist authors, partner can rewrite. */
   intro?: {
     headline: string
     body:     string
   }
+
+  /** Big-picture strategic framing that opens the review. Explains
+   *  what the site is designed to accomplish for this partner in
+   *  plain, partnership-focused language. Two to four short
+   *  paragraphs typically. */
+  executive_summary?: string
+
+  /** The "heart and why" behind the navigation choices, written
+   *  as a warm paragraph that gives the partner context before
+   *  they scan the menu structure. */
+  navigation_strategy?: string
+
+  /** Site-wide footer contact + link info the partner reviews. */
+  footer_info?: FooterInfo
 
   pages:             ReviewPage[]
   persona_postures:  PersonaPosture[]
@@ -188,7 +231,24 @@ export async function loadSitemapReview(
 }
 
 /** Write the sitemap review back. Read-merge-write so other roadmap_state
- *  keys are preserved. `updated_at` is stamped automatically. */
+ *  keys are preserved. `updated_at` is stamped automatically.
+ *
+ *  Also syncs the shared editable fields back into
+ *  `roadmap_state.site_strategy` so the cowork step (and its Copy
+ *  markdown / Copy JSON download) reflects the strategist's + partner's
+ *  latest edits. Without this, editing a page's name / purpose /
+ *  audience / funnel in the review UI would silently diverge from the
+ *  cowork markdown someone might download from Content Engine.
+ *
+ *  Sync scope (only the shared fields; review-only fields like
+ *  what_changed / persona postures / footer_info stay on
+ *  sitemap_review):
+ *    - site_strategy.pages[N].name / purpose / primary_audience /
+ *      primary_funnel / nav_strategy  (matched by slug)
+ *    - site_strategy.pages_considered_dropped[N].reason (matched by
+ *      merged_from label ↔ slug when available)
+ *    - site_strategy.nav.primary / footer                (rebuilt from
+ *      nav_layout when the strategist has edited it) */
 export async function saveSitemapReview(
   sb: SupabaseClient,
   projectId: string,
@@ -202,13 +262,95 @@ export async function saveSitemapReview(
   if (readErr) return { ok: false, error: readErr.message }
   const rs = ((row as { roadmap_state?: Record<string, unknown> } | null)?.roadmap_state) ?? {}
   const stamped: SitemapReview = { ...next, updated_at: new Date().toISOString() }
-  const merged = { ...rs, sitemap_review: stamped }
+
+  // Sync shared fields back into site_strategy when it exists.
+  const nextSiteStrategy = syncToSiteStrategy(rs.site_strategy as unknown, stamped)
+
+  const merged = {
+    ...rs,
+    sitemap_review: stamped,
+    ...(nextSiteStrategy ? { site_strategy: nextSiteStrategy } : {}),
+  }
   const { error: writeErr } = await sb
     .from('strategy_web_projects')
     .update({ roadmap_state: merged } as never)
     .eq('id', projectId)
   if (writeErr) return { ok: false, error: writeErr.message }
   return { ok: true, review: stamped }
+}
+
+/** Merge the review's edits back into a site_strategy blob so cowork
+ *  and the site_strategy JSON download stay in sync. Only touches the
+ *  fields that overlap between the two shapes; leaves cowork-only
+ *  fields (persona_journeys, covers_cells, has_children, etc.)
+ *  untouched. Returns null when there's no site_strategy to sync into
+ *  (cowork step hasn't run) so the caller skips the merge. */
+function syncToSiteStrategy(
+  existingSiteStrategy: unknown,
+  review: SitemapReview,
+): Record<string, unknown> | null {
+  if (!existingSiteStrategy || typeof existingSiteStrategy !== 'object') return null
+  const strategy = existingSiteStrategy as {
+    pages?:                    Array<Record<string, unknown>>
+    nav?:                      { primary?: unknown; footer?: unknown; cta_only?: unknown } | Record<string, unknown>
+    pages_considered_dropped?: Array<Record<string, unknown>>
+    [k: string]:               unknown
+  }
+
+  // Sync pages by slug. Only the strategist-mutable fields are touched;
+  // everything else on the site_strategy page (covers_cells, nav_order,
+  // has_children, parent_slug from cowork's original run) is preserved.
+  const reviewBySlug = new Map(review.pages.map(p => [p.slug, p]))
+  const nextPages: Array<Record<string, unknown>> = (strategy.pages ?? []).map(sp => {
+    const slug = sp.slug as string | undefined
+    if (!slug) return sp
+    const rp = reviewBySlug.get(slug)
+    if (!rp) return sp
+    return {
+      ...sp,
+      name:             rp.name,
+      purpose:          rp.purpose,
+      primary_audience: rp.primary_audience ?? sp.primary_audience,
+      primary_funnel:   rp.funnel_stage ?? sp.primary_funnel,
+      nav_strategy:     rp.nav_strategy ?? sp.nav_strategy,
+    }
+  })
+
+  // Sync nav layout. Rebuild strategy.nav.primary from review header
+  // items when present; keep footer + cta_only from the strategy since
+  // the review doesn't fully model those yet (footer editor is still a
+  // follow-up per SitemapReviewEditor's inline note).
+  const existingNav = (strategy.nav && typeof strategy.nav === 'object') ? strategy.nav : {}
+  const rebuiltPrimary = review.nav_layout.header.length > 0
+    ? review.nav_layout.header.map(item => item.slug
+        ? { slug: item.slug, label: item.label, ...(item.children && item.children.length > 0
+            ? { children: item.children.map(c => c.slug ? { slug: c.slug, label: c.label } : { label: c.label }) }
+            : {}) }
+        : { label: item.label })
+    : (existingNav as { primary?: unknown }).primary
+
+  // Sync migrations. Match by merged_from[0] label since that's what
+  // buildDroppedFromMigrations emits into the review; strategy uses a
+  // slug-only shape so we only touch reason when it changed.
+  const nextDropped: Array<Record<string, unknown>> = (strategy.pages_considered_dropped ?? []).map(d => {
+    const slug = d.slug as string | undefined
+    if (!slug) return d
+    const match = review.content_migrations.find(m =>
+      m.merged_from.some(label => label && label.toLowerCase() === formatSlugAsTitle(slug).toLowerCase()),
+    )
+    if (!match) return d
+    return { ...d, reason: match.rationale || d.reason }
+  })
+
+  return {
+    ...strategy,
+    pages: nextPages,
+    nav: {
+      ...existingNav,
+      ...(rebuiltPrimary !== undefined ? { primary: rebuiltPrimary } : {}),
+    },
+    pages_considered_dropped: nextDropped,
+  }
 }
 
 // ── Compose from existing project state ──────────────────────────────
@@ -219,6 +361,21 @@ interface ComposeSourceProject {
   personas?: Array<{ id: string; name: string; archetype?: string; description?: string }> | null
   nav_group_definitions?: Array<{ label: string; sort_order?: number }> | null
   roadmap_state?: unknown
+  /** Every project column we consider surfacing on the review's footer
+   *  block. All optional; missing values render empty (not null).
+   *  Analytics-safe: no PII beyond what the partner already published. */
+  address?:               string | null
+  city_state?:            string | null
+  phone?:                 string | null
+  email?:                 string | null
+  primary_service_time?:  string | null
+  all_service_times?:     string | null
+  social_facebook_url?:   string | null
+  social_instagram_url?:  string | null
+  social_youtube_url?:    string | null
+  social_tiktok_url?:     string | null
+  social_twitter_url?:    string | null
+  social_linkedin_url?:   string | null
 }
 
 interface ComposeSourceWebPage {
@@ -352,18 +509,53 @@ export function composeSitemapReview(args: {
   const existingPosturesById = new Map<string, PersonaPosture>()
   for (const pp of existing?.persona_postures ?? []) existingPosturesById.set(pp.persona_id, pp)
 
-  // Persona journeys from site_strategy — keyed by persona NAME
+  // Persona journeys from site_strategy, keyed by persona NAME
   // (strategy stores lowercase name, personas[] has a name field).
   const journeyByPersonaName = new Map<string, NonNullable<SiteStrategyBlob['persona_journeys']>[number]>()
   for (const j of strategy?.persona_journeys ?? []) {
     if (typeof j.persona === 'string') journeyByPersonaName.set(j.persona.toLowerCase(), j)
   }
 
-  const composedPostures: PersonaPosture[] = (project.personas ?? []).map(persona => {
+  // Persona source resolution.
+  //
+  // The `personas` column on strategy_web_projects is the intended
+  // canonical location, but earlier cowork runs wrote personas to
+  // `roadmap_state.stage_1.personas` and never back-filled the
+  // column. The column is empty on many older projects even when
+  // stage_1 has 4+ personas ready to use.
+  //
+  // Fall back to stage_1 when the column is empty. The stage_1 shape
+  // is `{ name, bio_one_line, desire, barrier, likely_entry_points }`
+  // (no id field), so we synthesize a stable id from the name.
+  interface Stage1Persona {
+    name?: string
+    bio_one_line?: string
+    desire?: string
+    barrier?: string
+    description?: string
+  }
+  const stage1Personas = ((rs as { stage_1?: { personas?: Stage1Persona[] } })?.stage_1?.personas ?? [])
+    .filter((p): p is Stage1Persona => !!p && typeof p === 'object' && typeof p.name === 'string')
+  const columnPersonas = project.personas ?? []
+  const personaSource: Array<{ id: string; name: string; description: string }> =
+    columnPersonas.length > 0
+      ? columnPersonas.map(p => ({
+          id:          p.id,
+          name:        p.name,
+          description: p.description ?? '',
+        }))
+      : stage1Personas.map(p => ({
+          id:          synthesizePersonaId(p.name!),
+          name:        p.name!,
+          description: [p.bio_one_line, p.desire && `Wants: ${p.desire}`, p.barrier && `Worries: ${p.barrier}`]
+            .filter(Boolean).join(' • '),
+        }))
+
+  const composedPostures: PersonaPosture[] = personaSource.map(persona => {
     const prior = existingPosturesById.get(persona.id)
     const journey = journeyByPersonaName.get(persona.name.toLowerCase())
     const seededSteps: JourneyStep[] = journey?.journey
-      ? journey.journey.map(slug => ({ step_label: `→ /${slug}`, page_slug: slug }))
+      ? journey.journey.map(slug => ({ step_label: `Visits /${slug}`, page_slug: slug }))
       : []
     return {
       persona_id:      persona.id,
@@ -412,6 +604,42 @@ export function composeSitemapReview(args: {
             rationale:   d.reason ?? '',
           }))
 
+  // Big-picture strategic framing pulled from strategic_goals when
+  // available. Combines the church's own approved vision language
+  // with the strategist's x-factor read so the partner opens the
+  // review already grounded in the "why" of the whole site, not just
+  // the mechanics of the pages.
+  const composedExecSummary = existing?.executive_summary
+    ?? buildExecutiveSummary({ project, rs, church: project.church_name })
+
+  // Navigation "heart and why" paragraph. Seeded from the sitemap
+  // step's handoff_note (which already argues for the nav choices
+  // in prose) when available; otherwise a warm generic that the
+  // strategist rewrites.
+  const composedNavStrategy = existing?.navigation_strategy
+    ?? buildNavigationStrategy({ strategy, church: project.church_name })
+
+  // Footer info hydrated from the project's global columns. Every
+  // field remains editable so the partner can correct anything that
+  // changed since intake.
+  const composedFooter: FooterInfo = existing?.footer_info ?? {
+    church_name:          project.church_name ?? null,
+    address:              project.address ?? null,
+    phone:                project.phone ?? null,
+    email:                project.email ?? null,
+    office_hours:         null,
+    newsletter_signup_url: null,
+    social_links:         [
+      project.social_facebook_url  ? { platform: 'facebook' as const,  url: project.social_facebook_url }  : null,
+      project.social_instagram_url ? { platform: 'instagram' as const, url: project.social_instagram_url } : null,
+      project.social_youtube_url   ? { platform: 'youtube' as const,   url: project.social_youtube_url }   : null,
+      project.social_tiktok_url    ? { platform: 'tiktok' as const,    url: project.social_tiktok_url }    : null,
+      project.social_twitter_url   ? { platform: 'twitter' as const,   url: project.social_twitter_url }   : null,
+      project.social_linkedin_url  ? { platform: 'linkedin' as const,  url: project.social_linkedin_url }  : null,
+    ].filter((s): s is NonNullable<typeof s> => s !== null),
+    footer_page_links:    [],
+  }
+
   return {
     schema_version:     1,
     token:              existing?.token ?? cryptoRandomId(),
@@ -422,9 +650,12 @@ export function composeSitemapReview(args: {
     approved_at:        existing?.approved_at ?? null,
     approved_by:        existing?.approved_by ?? null,
     intro:              existing?.intro ?? {
-      headline: `${project.church_name ?? 'Your church'} — sitemap and navigation review`,
-      body:     'Here\'s the proposed structure for your new site — what each page is for, how they connect, and how each fits the people you\'re trying to reach. Everything on this page is editable; let us know what to adjust.',
+      headline: `${project.church_name ?? 'Your church'} website content strategy`,
+      body:     `Here's the proposed structure for your new website: what each page is for, how they fit together, and how the whole site is shaped around the people you're inviting into your church family. Everything on this page is editable. Read through it, share it with your team, and tell us what to refine. This is a working draft we build together.`,
     },
+    executive_summary:  composedExecSummary,
+    navigation_strategy: composedNavStrategy,
+    footer_info:        composedFooter,
     pages:              composedPages,
     persona_postures:   composedPostures,
     nav_layout:         composedNav,
@@ -432,6 +663,59 @@ export function composeSitemapReview(args: {
     partner_notes:      existing?.partner_notes,
     edit_history:       existing?.edit_history ?? [],
   }
+}
+
+/** Compose the executive-summary paragraph from strategic_goals when
+ *  available. Prefers the partner's own approved vision language;
+ *  falls back to a warm generic when strategic_goals hasn't run yet.
+ *  Never uses em-dashes in generated copy (partner-facing tone). */
+function buildExecutiveSummary(args: {
+  project: ComposeSourceProject
+  rs:      Record<string, unknown>
+  church:  string | null | undefined
+}): string {
+  const { rs, church } = args
+  const sg = (rs.strategic_goals ?? {}) as Record<string, unknown>
+  const gv = (sg.goals_and_vision ?? {}) as Record<string, { value?: string }>
+  const s1 = (rs.stage_1 ?? {}) as { x_factor?: string; mission?: string }
+  const churchVision = gv.church_vision?.value?.trim() || null
+  const xFactor = s1.x_factor?.trim() || null
+  const churchName = church ?? 'Your church'
+
+  if (churchVision && xFactor) {
+    return `${churchVision}\n\nThe website is built to carry that all the way through. ${churchName}'s heartbeat, "${xFactor}", shows up in the structure, the language, and the way each page invites people forward.`
+  }
+  if (churchVision) {
+    return `${churchVision}\n\nEvery page below is designed to carry that intent all the way through so someone finding you online experiences the same welcome and clarity your team offers in person.`
+  }
+  return `This website is designed to be a warm, honest, easy-to-navigate front door for ${churchName}. Every page below has been shaped around the people you're inviting into your community and the next steps you want to make easy for them.`
+}
+
+/** Compose the navigation "heart and why" paragraph from the cowork
+ *  sitemap step's handoff_note when available. The handoff_note
+ *  already argues for the nav choices in strategist voice; we extract
+ *  the top-line reasoning. */
+function buildNavigationStrategy(args: {
+  strategy: SiteStrategyBlob | null
+  church:   string | null | undefined
+}): string {
+  const { strategy, church } = args
+  const churchName = church ?? 'Your church'
+  // The handoff_note isn't part of the typed SiteStrategyBlob (it's
+  // deep in _meta) so we don't try to parse it here. Return a
+  // strategist-facing default the reviewer can rewrite with the
+  // specific navigation rationale.
+  void strategy
+  const primaryCount = strategy?.nav?.primary?.length ?? 0
+  return `The navigation is built to serve two people at once. A first-time visitor who lands on ${churchName}'s site needs to make one clear decision fast, and a returning member needs to reach what they came for without hunting for it. The top-level nav answers "should I visit?" first, then "how do I grow here?" second, and puts everything else one click away without cluttering the header.${primaryCount > 0 ? ` We landed on ${primaryCount} primary items after weighing what belongs where; the reasoning behind each is spelled out in the pages list below.` : ''}`
+}
+
+/** Synthesize a stable persona id from a name. Used when the source
+ *  data (roadmap_state.stage_1.personas) has no id field. The id is
+ *  stable across recomposes because it's a lowercase slug of the name;
+ *  same input always yields the same id. */
+function synthesizePersonaId(name: string): string {
+  return 'p_' + name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 }
 
 /** site_strategy nav → NavLayout translation. Handles the polymorphic
