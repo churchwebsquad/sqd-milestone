@@ -145,8 +145,20 @@ export default function SitemapReviewPortalPage() {
               rows={5}
               className="rounded-lg border border-wm-border bg-white px-4 py-3 text-[14px] text-wm-text leading-relaxed"
             />
-            <div className="mt-4">
-              <NavPreview items={review.nav_layout.header} />
+            <div className="mt-4 space-y-4">
+              <NavRegionPreview
+                label="Primary (always visible)"
+                items={review.nav_layout.header}
+                tone="primary"
+              />
+              {review.nav_layout.secondary && review.nav_layout.secondary.length > 0 && (
+                <NavRegionPreview
+                  label={review.nav_layout.secondary_label ?? 'Secondary menu'}
+                  hint="Off-canvas, utility, or drawer nav; opens alongside the primary nav rather than replacing it."
+                  items={review.nav_layout.secondary}
+                  tone="secondary"
+                />
+              )}
             </div>
           </PortalSection>
         )}
@@ -427,30 +439,47 @@ function PersonaPortalCard({
   )
 }
 
-function NavPreview({ items }: { items: NavItem[] }) {
+/** Renders one nav region (primary or secondary) with a label header
+ *  and a scannable item list. Tone changes the visual weight so
+ *  primary reads as the loud one and secondary reads as supportive. */
+function NavRegionPreview({
+  label, items, hint, tone,
+}: {
+  label: string
+  items: NavItem[]
+  hint?: string
+  tone:  'primary' | 'secondary'
+}) {
   if (items.length === 0) {
-    return <p className="text-[13px] text-wm-text-muted italic">No nav items proposed yet.</p>
+    return <p className="text-[13px] text-wm-text-muted italic">No {tone} nav items proposed yet.</p>
   }
+  const containerCls = tone === 'primary'
+    ? 'rounded-lg border border-wm-border bg-white p-4'
+    : 'rounded-lg border border-wm-border/70 bg-wm-bg-elevated/60 p-4'
   return (
-    <nav className="rounded-lg border border-wm-border bg-white p-4">
-      <ul className="flex flex-wrap gap-x-6 gap-y-2">
-        {items.map((it, i) => (
-          <li key={i} className="text-[14px] font-semibold text-wm-text">
-            {it.label}
-            {it.slug && <code className="ml-1 text-[10.5px] font-mono text-wm-text-subtle">/{it.slug}</code>}
-            {it.children && it.children.length > 0 && (
-              <ul className="ml-4 mt-1 space-y-0.5">
-                {it.children.map((c, j) => (
-                  <li key={j} className="text-[12.5px] font-normal text-wm-text-muted">
-                    · {c.label} {c.slug && <code className="text-[10px] font-mono">/{c.slug}</code>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </li>
-        ))}
-      </ul>
-    </nav>
+    <div>
+      <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-accent-strong mb-1">{label}</p>
+      {hint && <p className="text-[11.5px] text-wm-text-subtle mb-2">{hint}</p>}
+      <nav className={containerCls}>
+        <ul className="flex flex-wrap gap-x-6 gap-y-2">
+          {items.map((it, i) => (
+            <li key={i} className={`text-[14px] ${tone === 'primary' ? 'font-semibold text-wm-text' : 'font-medium text-wm-text-muted'}`}>
+              {it.label}
+              {it.slug && <code className="ml-1 text-[10.5px] font-mono text-wm-text-subtle">/{it.slug}</code>}
+              {it.children && it.children.length > 0 && (
+                <ul className="ml-4 mt-1 space-y-0.5">
+                  {it.children.map((c, j) => (
+                    <li key={j} className="text-[12.5px] font-normal text-wm-text-muted">
+                      · {c.label} {c.slug && <code className="text-[10px] font-mono">/{c.slug}</code>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
+      </nav>
+    </div>
   )
 }
 

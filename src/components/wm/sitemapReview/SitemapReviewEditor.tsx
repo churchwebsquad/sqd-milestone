@@ -710,61 +710,146 @@ function NavLayoutEditor({
 }: { review: SitemapReview; onChange: (next: SitemapReview) => Promise<void> | void; disabled: boolean }) {
   const nav = review.nav_layout
   const setNav = (next: NavLayout) => { void onChange({ ...review, nav_layout: next }) }
-  const updateHeaderItem = (idx: number, patch: Partial<NavItem>) => {
-    setNav({ ...nav, header: nav.header.map((it, i) => i === idx ? { ...it, ...patch } : it) })
-  }
-  const addHeaderItem = () => setNav({ ...nav, header: [...nav.header, { label: '' }] })
-  const removeHeaderItem = (idx: number) => setNav({ ...nav, header: nav.header.filter((_, i) => i !== idx) })
   return (
-    <Section title="Navigation layout" subtitle="Header items + footer sections">
-      <div className="space-y-3">
-        <div>
-          <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Header</p>
-          <ol className="space-y-1">
-            {nav.header.map((it, i) => (
-              <li key={i} className="flex items-baseline gap-2">
-                <input
-                  type="text"
-                  defaultValue={it.label}
-                  placeholder="Nav label"
-                  disabled={disabled}
-                  onBlur={e => { if (e.target.value !== it.label) updateHeaderItem(i, { label: e.target.value }) }}
-                  className="flex-1 text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-                />
-                <select
-                  defaultValue={it.slug ?? ''}
-                  disabled={disabled}
-                  onChange={e => updateHeaderItem(i, { slug: e.target.value || undefined })}
-                  className="text-[11px] text-wm-text bg-wm-bg border border-wm-border rounded px-1 py-0.5 disabled:opacity-50"
-                >
-                  <option value="">(no target)</option>
-                  {review.pages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
-                </select>
-                {!disabled && (
-                  <button
-                    type="button"
-                    onClick={() => removeHeaderItem(i)}
-                    className="text-wm-text-subtle hover:text-wm-danger text-[14px] leading-none px-1"
-                  >×</button>
-                )}
-              </li>
-            ))}
-          </ol>
-          {!disabled && (
-            <button
-              type="button"
-              onClick={addHeaderItem}
-              className="mt-1 text-[11px] font-semibold text-wm-accent-strong hover:underline"
-            >
-              + Add header item
-            </button>
-          )}
-        </div>
+    <Section title="Navigation layout" subtitle="Header items, secondary menu, and footer sections">
+      <div className="space-y-5">
+        <NavListEditor
+          label="Header (primary)"
+          hint="Always-visible top nav. Guest-facing decisions live here."
+          items={nav.header}
+          pages={review.pages}
+          disabled={disabled}
+          onChange={next => setNav({ ...nav, header: next })}
+        />
+        <NavListEditor
+          label={nav.secondary_label ?? 'Secondary menu'}
+          hint="Off-canvas, utility, or drawer nav. Important items that shouldn't compete with the primary nav's guest CTAs."
+          items={nav.secondary ?? []}
+          pages={review.pages}
+          disabled={disabled}
+          renameLabel={disabled ? undefined : (nextLabel) =>
+            setNav({ ...nav, secondary_label: nextLabel.trim() || undefined })
+          }
+          currentLabelName={nav.secondary_label ?? ''}
+          onChange={next => setNav({ ...nav, secondary: next })}
+        />
         <p className="text-[10.5px] text-wm-text-subtle italic">
-          Footer sections editor coming soon. For now, the partner sees the header nav preview here and reviews the footer contact block below.
+          Footer sections editor coming soon. Partners still see the footer contact block below and can flag anything to fix.
         </p>
       </div>
     </Section>
+  )
+}
+
+/** Reusable list editor for one nav region (primary or secondary).
+ *  Handles add / remove / label edit / slug binding. The parent owns
+ *  the whole array; this component doesn't mutate its own state. */
+function NavListEditor({
+  label, hint, items, pages, disabled, onChange, renameLabel, currentLabelName,
+}: {
+  label:             string
+  hint:              string
+  items:             NavItem[]
+  pages:             ReviewPage[]
+  disabled:          boolean
+  onChange:          (next: NavItem[]) => void
+  /** Only supplied for the secondary region so the strategist can
+   *  rename it ("Off-canvas menu", "Utility nav", etc.). Undefined
+   *  for the header region since the primary label is fixed. */
+  renameLabel?:      (next: string) => void
+  currentLabelName?: string
+}) {
+  const [renaming, setRenaming] = useState(false)
+  const updateItem = (idx: number, patch: Partial<NavItem>) => {
+    onChange(items.map((it, i) => i === idx ? { ...it, ...patch } : it))
+  }
+  const addItem = () => onChange([...items, { label: '' }])
+  const removeItem = (idx: number) => onChange(items.filter((_, i) => i !== idx))
+  return (
+    <div>
+      <div className="flex items-baseline gap-2 flex-wrap mb-0.5">
+        <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle">{label}</p>
+        {renameLabel && !renaming && (
+          <button
+            type="button"
+            onClick={() => setRenaming(true)}
+            className="text-[10.5px] text-wm-text-subtle hover:text-wm-accent-strong hover:underline"
+          >
+            rename
+          </button>
+        )}
+      </div>
+      {renaming && renameLabel && (
+        <div className="mb-1 flex items-baseline gap-2 flex-wrap">
+          <input
+            type="text"
+            defaultValue={currentLabelName ?? ''}
+            placeholder="Off-canvas menu, Utility nav, Drawer, More…"
+            autoFocus
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                renameLabel((e.target as HTMLInputElement).value)
+                setRenaming(false)
+              }
+              if (e.key === 'Escape') setRenaming(false)
+            }}
+            onBlur={e => { renameLabel(e.target.value); setRenaming(false) }}
+            className="text-[12px] text-wm-text bg-wm-bg border border-wm-accent rounded px-2 py-1 focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={() => setRenaming(false)}
+            className="text-[10.5px] text-wm-text-subtle hover:text-wm-text"
+          >
+            cancel
+          </button>
+        </div>
+      )}
+      <p className="text-[10.5px] text-wm-text-subtle mb-1.5">{hint}</p>
+      {items.length === 0 && (
+        <p className="text-[11.5px] text-wm-text-subtle italic mb-1">Nothing here yet.</p>
+      )}
+      <ol className="space-y-1">
+        {items.map((it, i) => (
+          <li key={i} className="flex items-baseline gap-2">
+            <input
+              type="text"
+              defaultValue={it.label}
+              placeholder="Nav label"
+              disabled={disabled}
+              onBlur={e => { if (e.target.value !== it.label) updateItem(i, { label: e.target.value }) }}
+              className="flex-1 text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+            />
+            <select
+              defaultValue={it.slug ?? ''}
+              disabled={disabled}
+              onChange={e => updateItem(i, { slug: e.target.value || undefined })}
+              className="text-[11px] text-wm-text bg-wm-bg border border-wm-border rounded px-1 py-0.5 disabled:opacity-50"
+            >
+              <option value="">(no target)</option>
+              {pages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
+            </select>
+            {!disabled && (
+              <button
+                type="button"
+                onClick={() => removeItem(i)}
+                className="text-wm-text-subtle hover:text-wm-danger text-[14px] leading-none px-1"
+              >×</button>
+            )}
+          </li>
+        ))}
+      </ol>
+      {!disabled && (
+        <button
+          type="button"
+          onClick={addItem}
+          className="mt-1 text-[11px] font-semibold text-wm-accent-strong hover:underline"
+        >
+          + Add item
+        </button>
+      )}
+    </div>
   )
 }
 

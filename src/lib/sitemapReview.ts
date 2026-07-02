@@ -117,6 +117,23 @@ export interface FooterSection {
 
 export interface NavLayout {
   header: NavItem[]
+  /** Secondary navigation region. Sits between primary (header) and
+   *  footer conceptually: items that are important but shouldn't
+   *  compete with the primary nav's guest-focused CTAs. Common
+   *  patterns:
+   *    - "Off-canvas" hamburger menu carrying About / Give / Events
+   *      / Care that opens alongside the primary nav (Lakeway).
+   *    - "Utility" nav strip above the header carrying Login /
+   *      Search / Give.
+   *    - "More" drawer for mobile that surfaces the deeper set.
+   *  The strategist renames the visible label via `secondary_label`;
+   *  render surfaces show the label instead of a generic word. */
+  secondary?: NavItem[]
+  /** Display label for the secondary region. Defaults to
+   *  "Secondary menu"; the strategist typically renames this to
+   *  match the site (e.g. "Off-canvas menu", "Utility nav",
+   *  "More", "Drawer"). */
+  secondary_label?: string
   footer_sections: FooterSection[]
 }
 
@@ -247,8 +264,8 @@ export async function loadSitemapReview(
  *      primary_funnel / nav_strategy  (matched by slug)
  *    - site_strategy.pages_considered_dropped[N].reason (matched by
  *      merged_from label ↔ slug when available)
- *    - site_strategy.nav.primary / footer                (rebuilt from
- *      nav_layout when the strategist has edited it) */
+ *    - site_strategy.nav.primary / secondary / secondary_label
+ *      (rebuilt from nav_layout when the strategist has edited it) */
 export async function saveSitemapReview(
   sb: SupabaseClient,
   projectId: string,
@@ -316,18 +333,26 @@ function syncToSiteStrategy(
     }
   })
 
-  // Sync nav layout. Rebuild strategy.nav.primary from review header
-  // items when present; keep footer + cta_only from the strategy since
-  // the review doesn't fully model those yet (footer editor is still a
-  // follow-up per SitemapReviewEditor's inline note).
+  // Sync nav layout. Rebuild strategy.nav.primary + .secondary from
+  // review header + secondary items when present; keep footer +
+  // cta_only from the strategy since the review doesn't fully model
+  // those yet (footer editor is still a follow-up).
   const existingNav = (strategy.nav && typeof strategy.nav === 'object') ? strategy.nav : {}
+  const rebuildNavList = (items: NavItem[]): Array<Record<string, unknown>> =>
+    items.map(item => item.slug
+      ? { slug: item.slug, label: item.label, ...(item.children && item.children.length > 0
+          ? { children: item.children.map(c => c.slug ? { slug: c.slug, label: c.label } : { label: c.label }) }
+          : {}) }
+      : { label: item.label })
   const rebuiltPrimary = review.nav_layout.header.length > 0
-    ? review.nav_layout.header.map(item => item.slug
-        ? { slug: item.slug, label: item.label, ...(item.children && item.children.length > 0
-            ? { children: item.children.map(c => c.slug ? { slug: c.slug, label: c.label } : { label: c.label }) }
-            : {}) }
-        : { label: item.label })
+    ? rebuildNavList(review.nav_layout.header)
     : (existingNav as { primary?: unknown }).primary
+  const reviewSecondary = review.nav_layout.secondary ?? []
+  const rebuiltSecondary = reviewSecondary.length > 0
+    ? rebuildNavList(reviewSecondary)
+    : (existingNav as { secondary?: unknown }).secondary
+  const rebuiltSecondaryLabel = review.nav_layout.secondary_label
+    ?? (existingNav as { secondary_label?: string }).secondary_label
 
   // Sync migrations. Match by merged_from[0] label since that's what
   // buildDroppedFromMigrations emits into the review; strategy uses a
@@ -347,7 +372,9 @@ function syncToSiteStrategy(
     pages: nextPages,
     nav: {
       ...existingNav,
-      ...(rebuiltPrimary !== undefined ? { primary: rebuiltPrimary } : {}),
+      ...(rebuiltPrimary   !== undefined ? { primary:   rebuiltPrimary }   : {}),
+      ...(rebuiltSecondary !== undefined ? { secondary: rebuiltSecondary } : {}),
+      ...(rebuiltSecondaryLabel !== undefined ? { secondary_label: rebuiltSecondaryLabel } : {}),
     },
     pages_considered_dropped: nextDropped,
   }
@@ -404,9 +431,19 @@ interface SiteStrategyBlob {
     parent_slug?:       string | null
   }>
   nav?: {
-    primary?:  Array<{ slug?: string; label?: string; children?: Array<{ slug?: string; label?: string }> } | string>
-    footer?:   Array<{ slug?: string; label?: string } | string>
-    cta_only?: Array<{ slug?: string; label?: string } | string>
+    primary?:   Array<{ slug?: string; label?: string; children?: Array<{ slug?: string; label?: string }> } | string>
+    /** Secondary region (off-canvas / utility / drawer / etc.).
+     *  Same polymorphic shape as primary: entries can be strings
+     *  (slugs) or objects with an optional child list. Cowork writes
+     *  here when the strategist declares a secondary nav; otherwise
+     *  it's absent and compose falls back to inferring from pages
+     *  whose nav_strategy is 'secondary'. */
+    secondary?: Array<{ slug?: string; label?: string; children?: Array<{ slug?: string; label?: string }> } | string>
+    /** Label the cowork step suggested for the secondary region
+     *  ("Off-canvas menu", "Utility nav", etc.). */
+    secondary_label?: string
+    footer?:    Array<{ slug?: string; label?: string } | string>
+    cta_only?:  Array<{ slug?: string; label?: string } | string>
   }
   persona_journeys?: Array<{
     persona?:       string
@@ -719,63 +756,88 @@ function synthesizePersonaId(name: string): string {
 }
 
 /** site_strategy nav → NavLayout translation. Handles the polymorphic
- *  primary/footer entries (strings-of-slugs OR objects). Returns null
- *  when strategy has no nav data so the caller can fall back to
- *  nav_group_definitions. */
+ *  primary/secondary/footer entries (strings-of-slugs OR objects).
+ *  Returns null when strategy has no nav data so the caller can fall
+ *  back to nav_group_definitions.
+ *
+ *  Secondary fallback: when the strategy blob DOESN'T carry an
+ *  explicit `nav.secondary` list but SOME pages have
+ *  `nav_strategy: 'secondary'`, we synthesize a secondary list from
+ *  those pages. This lets older projects that only got page-level
+ *  secondary tags still render a secondary region in the review. */
 function buildNavLayoutFromStrategy(
   strategy: SiteStrategyBlob | null,
   pages: ReviewPage[],
 ): NavLayout | null {
   const nav = strategy?.nav
-  if (!nav || (!nav.primary && !nav.footer)) return null
+  const secondaryPagesFallback = pages.filter(p => p.nav_strategy === 'secondary')
+  if (!nav || (!nav.primary && !nav.footer && !nav.secondary && secondaryPagesFallback.length === 0)) return null
 
   const nameBySlug = new Map<string, string>()
   for (const p of pages) nameBySlug.set(p.slug, p.name)
 
-  const primaryItems: NavItem[] = (nav.primary ?? []).map(item => {
+  // Shared helper: normalize a polymorphic entry (string slug or object)
+  // into a NavItem with a label resolved from the pages list. Used for
+  // primary + secondary + footer since they share the same shape.
+  const toNavItem = (item: unknown, withChildren: boolean): NavItem => {
     if (typeof item === 'string') {
       return { label: nameBySlug.get(item) ?? formatSlugAsTitle(item), slug: item }
     }
-    const slug = item.slug
-    const label = item.label ?? (slug ? (nameBySlug.get(slug) ?? formatSlugAsTitle(slug)) : '')
-    const children = (item.children ?? [])
-      .map(c => {
-        if (typeof c === 'string') return { label: nameBySlug.get(c) ?? formatSlugAsTitle(c), slug: c }
-        const cs = (c as { slug?: string; label?: string }).slug
-        return { label: (c as { label?: string }).label ?? (cs ? (nameBySlug.get(cs) ?? formatSlugAsTitle(cs)) : ''), slug: cs }
-      })
+    if (!item || typeof item !== 'object') return { label: '' }
+    const it = item as { slug?: string; label?: string; children?: unknown[] }
+    const slug = it.slug
+    const label = it.label ?? (slug ? (nameBySlug.get(slug) ?? formatSlugAsTitle(slug)) : '')
+    if (!withChildren) return { label, ...(slug ? { slug } : {}) }
+    const children = (it.children ?? [])
+      .map(c => toNavItem(c, false))
       .filter(c => c.label)
-    return { label, slug, ...(children.length > 0 ? { children } : {}) }
-  }).filter(it => it.label)
+    return { label, ...(slug ? { slug } : {}), ...(children.length > 0 ? { children } : {}) }
+  }
 
-  const footerItems: NavItem[] = (nav.footer ?? []).map(item => {
-    if (typeof item === 'string') {
-      return { label: nameBySlug.get(item) ?? formatSlugAsTitle(item), slug: item }
-    }
-    const slug = item.slug
-    return { label: item.label ?? (slug ? (nameBySlug.get(slug) ?? formatSlugAsTitle(slug)) : ''), slug }
-  }).filter(it => it.label)
+  const primaryItems: NavItem[] = (nav.primary ?? []).map(item => toNavItem(item, true)).filter(it => it.label)
+  const secondaryFromStrategy: NavItem[] = (nav.secondary ?? []).map(item => toNavItem(item, true)).filter(it => it.label)
+  const secondaryFromFallback: NavItem[] = secondaryPagesFallback
+    .sort((a, b) => a.order - b.order)
+    .map(p => ({ label: p.name, slug: p.slug }))
+  const secondaryItems = secondaryFromStrategy.length > 0
+    ? secondaryFromStrategy
+    : secondaryFromFallback
+
+  const footerItems: NavItem[] = (nav.footer ?? []).map(item => toNavItem(item, false)).filter(it => it.label)
 
   return {
-    header:          primaryItems,
-    footer_sections: footerItems.length > 0
+    header:           primaryItems,
+    ...(secondaryItems.length > 0 ? { secondary: secondaryItems } : {}),
+    ...(nav.secondary_label ? { secondary_label: nav.secondary_label } : {}),
+    footer_sections:  footerItems.length > 0
       ? [{ label: 'Footer', items: footerItems }]
       : [],
   }
 }
 
 /** Map slug → human-readable nav position string ("Header · primary",
- *  "Footer", "Sub-nav of /about"). Used to prefill ReviewPage.nav_position
- *  without duplicating the nav_layout tree. */
+ *  "Secondary menu", "Footer", "Sub-nav of /about"). Used to prefill
+ *  ReviewPage.nav_position without duplicating the nav_layout tree.
+ *  Secondary label falls back to the strategy's `secondary_label` when
+ *  set (e.g. "Off-canvas menu"), else the neutral "Secondary menu". */
 function buildNavPositionMap(nav: SiteStrategyBlob['nav'] | undefined): Map<string, string> {
   const map = new Map<string, string>()
   if (!nav) return map
+  const secondaryLabel = nav.secondary_label ?? 'Secondary menu'
   for (const item of nav.primary ?? []) {
     if (typeof item === 'string') { map.set(item, 'Header · primary'); continue }
     if (item.slug) map.set(item.slug, 'Header · primary')
     for (const c of item.children ?? []) {
       if (typeof c === 'string') map.set(c, `Header · under ${item.label ?? item.slug ?? '(parent)'}`)
       else if ((c as { slug?: string }).slug) map.set((c as { slug: string }).slug, `Header · under ${item.label ?? item.slug ?? '(parent)'}`)
+    }
+  }
+  for (const item of nav.secondary ?? []) {
+    if (typeof item === 'string') { map.set(item, secondaryLabel); continue }
+    if (item.slug) map.set(item.slug, secondaryLabel)
+    for (const c of item.children ?? []) {
+      if (typeof c === 'string') map.set(c, `${secondaryLabel} · under ${item.label ?? item.slug ?? '(parent)'}`)
+      else if ((c as { slug?: string }).slug) map.set((c as { slug: string }).slug, `${secondaryLabel} · under ${item.label ?? item.slug ?? '(parent)'}`)
     }
   }
   for (const item of nav.footer ?? []) {

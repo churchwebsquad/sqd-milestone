@@ -248,15 +248,30 @@ export function siteStrategyToMarkdown(raw: unknown): string {
     sections.push(`## Pages (${ss.pages.length})${NL2}${pageBlocks.join(NL2)}`)
   }
 
-  // nav structure (primary / footer / cta_only)
+  // nav structure (primary / secondary / footer / cta_only)
+  //
+  // Secondary nav (off-canvas / utility / drawer / "more" menu, etc.)
+  // sits between primary and footer conceptually and gets the same
+  // tree treatment as primary since strategists may nest child items
+  // inside a secondary parent (e.g. a Care section that expands).
   if (ss.nav && typeof ss.nav === 'object') {
     const navLines: string[] = []
+    const formatTree = (list: any[]): string[] => list.map((n: any) => {
+      if (typeof n === 'string') return `- ${n}`
+      const slug = n.slug ?? n.label ?? '(no slug)'
+      const children = Array.isArray(n.children) && n.children.length
+        ? ` → (${n.children.map((c: any) => typeof c === 'string' ? c : (c.slug ?? c.label ?? '')).filter(Boolean).join(', ')})`
+        : ''
+      return `- ${slug}${children}`
+    })
     if (Array.isArray(ss.nav.primary) && ss.nav.primary.length) {
-      const primary = ss.nav.primary.map((n: any) => {
-        const children = Array.isArray(n.children) && n.children.length ? ` → (${n.children.join(', ')})` : ''
-        return `- ${n.slug}${children}`
-      })
-      navLines.push(`**Primary nav**:` + NL + primary.join(NL))
+      navLines.push(`**Primary nav**:` + NL + formatTree(ss.nav.primary).join(NL))
+    }
+    if (Array.isArray(ss.nav.secondary) && ss.nav.secondary.length) {
+      const label = (typeof ss.nav.secondary_label === 'string' && ss.nav.secondary_label.trim())
+        ? ss.nav.secondary_label.trim()
+        : 'Secondary nav (off-canvas / utility)'
+      navLines.push(`**${label}**:` + NL + formatTree(ss.nav.secondary).join(NL))
     }
     if (Array.isArray(ss.nav.footer) && ss.nav.footer.length) {
       navLines.push(`**Footer**: ${ss.nav.footer.join(', ')}`)
