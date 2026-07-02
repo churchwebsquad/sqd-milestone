@@ -805,14 +805,18 @@ function FeedbackTracker({
   // id so only one delete-confirm shows at a time.
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteErrorId, setDeleteErrorId] = useState<{ id: string; msg: string } | null>(null)
   const handleDelete = async (commentId: string) => {
     if (!partnerName) return
     setDeletingId(commentId)
+    setDeleteErrorId(null)
     try {
-      const ok = await deleteOwnReviewComment({ commentId, partnerName })
-      if (ok) {
+      const res = await deleteOwnReviewComment({ commentId, partnerName })
+      if (res.ok) {
         setConfirmingDeleteId(null)
         await onRefresh()
+      } else {
+        setDeleteErrorId({ id: commentId, msg: res.error })
       }
     } finally {
       setDeletingId(null)
@@ -949,31 +953,38 @@ function FeedbackTracker({
                         {isMine && (
                           confirmingDeleteId === c.id ? (
                             <div
-                              className="absolute inset-y-1 right-1 flex items-center gap-1 pl-2 pr-1.5 rounded bg-white border border-red-200 shadow-sm"
+                              className="absolute inset-y-1 right-1 flex flex-col items-end gap-0.5 pl-2 pr-1.5 py-1 rounded bg-white border border-red-200 shadow-sm"
                               onClick={e => e.stopPropagation()}
                             >
-                              <span className="text-[10.5px] text-purple-gray">Delete?</span>
-                              <button
-                                type="button"
-                                onClick={() => void handleDelete(c.id)}
-                                disabled={deletingId === c.id}
-                                className="text-[10.5px] font-semibold text-red-600 hover:underline disabled:opacity-50"
-                              >
-                                {deletingId === c.id ? 'deleting…' : 'yes'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setConfirmingDeleteId(null)}
-                                disabled={deletingId === c.id}
-                                className="text-[10.5px] text-purple-gray hover:text-deep-plum"
-                              >
-                                cancel
-                              </button>
+                              <div className="flex items-center gap-1">
+                                <span className="text-[10.5px] text-purple-gray">Delete?</span>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDelete(c.id)}
+                                  disabled={deletingId === c.id}
+                                  className="text-[10.5px] font-semibold text-red-600 hover:underline disabled:opacity-50"
+                                >
+                                  {deletingId === c.id ? 'deleting…' : 'yes'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setConfirmingDeleteId(null); setDeleteErrorId(null) }}
+                                  disabled={deletingId === c.id}
+                                  className="text-[10.5px] text-purple-gray hover:text-deep-plum"
+                                >
+                                  cancel
+                                </button>
+                              </div>
+                              {deleteErrorId?.id === c.id && (
+                                <span className="text-[10px] text-red-600 max-w-[220px] text-right leading-tight">
+                                  {deleteErrorId.msg}
+                                </span>
+                              )}
                             </div>
                           ) : (
                             <button
                               type="button"
-                              onClick={(e) => { e.stopPropagation(); setConfirmingDeleteId(c.id) }}
+                              onClick={(e) => { e.stopPropagation(); setConfirmingDeleteId(c.id); setDeleteErrorId(null) }}
                               className="absolute top-1 right-1 inline-flex items-center justify-center h-6 w-6 rounded text-purple-gray/60 hover:text-red-600 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
                               title="Delete your comment"
                               aria-label="Delete comment"

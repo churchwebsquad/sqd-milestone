@@ -662,27 +662,36 @@ function setNestedPath(
  *  staff (verified via auth.uid()) and anon partners (verified via a
  *  partner name pulled from portal localStorage) share one code path.
  *
- *  Refuses to delete already-resolved comments — the RPC enforces this
+ *  Refuses to delete already-resolved comments; the RPC enforces this
  *  server-side so audit history stays intact.
  *
- *  Returns true when the row was removed, false on failure. Errors are
- *  logged; callers decide whether to surface a toast. */
+ *  Returns `{ ok: true }` on success or `{ ok: false, error }` on
+ *  failure. Historic version returned bare `boolean` and callers
+ *  couldn't surface the actual failure reason to the user, which
+ *  caused a "delete stands still" bug in the wild when the name
+ *  match rejected silently (case-sensitivity, since fixed
+ *  server-side, but any future gate would repeat the pattern). */
 export async function deleteOwnReviewComment(opts: {
   commentId:   string
-  /** Only passed from the partner portal — the name the partner
+  /** Only passed from the partner portal; the name the partner
    *  entered on first visit (stored in localStorage). Ignored when the
    *  RPC runs under an authenticated staff session. */
   partnerName?: string | null
-}): Promise<boolean> {
-  const { error } = await supabase.rpc('delete_own_review_comment', {
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data, error } = await supabase.rpc('delete_own_review_comment', {
     p_comment_id:   opts.commentId,
     p_partner_name: opts.partnerName ?? null,
   })
   if (error) {
     console.error('[reviews] deleteOwnReviewComment failed:', error.message)
-    return false
+    return { ok: false, error: error.message || 'Delete failed' }
   }
-  return true
+  // The RPC returns true on success and false when the comment
+  // wasn't found. Anything else surfaces as an exception on `error`.
+  if (data === false) {
+    return { ok: false, error: 'Comment could not be found or was already deleted.' }
+  }
+  return { ok: true }
 }
 
 /** Change a comment's design/content tag. Pass null to clear. */

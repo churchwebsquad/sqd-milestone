@@ -70,6 +70,7 @@ export function FeedbackCard({
     && comment.author_user_id === user.id
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   /** Mark this comment complete without any field change. For internal
    *  comments this is the usual close path ("noted, fixed elsewhere"
@@ -90,10 +91,14 @@ export function FeedbackCard({
 
   const handleDelete = async () => {
     setDeleting(true)
+    setDeleteError(null)
     try {
-      const ok = await deleteOwnReviewComment({ commentId: comment.id })
-      if (ok) await onChanged()
-      else setConfirmingDelete(false)
+      const res = await deleteOwnReviewComment({ commentId: comment.id })
+      if (res.ok) {
+        await onChanged()
+      } else {
+        setDeleteError(res.error)
+      }
     } finally {
       setDeleting(false)
     }
@@ -233,7 +238,7 @@ export function FeedbackCard({
           )}
           {canDelete && (
             confirmingDelete ? (
-              <span className="inline-flex items-center gap-1.5 ml-auto text-[11px]">
+              <span className="inline-flex items-center gap-1.5 ml-auto text-[11px] flex-wrap">
                 <span className="text-wm-text-muted">Delete?</span>
                 <button
                   type="button"
@@ -245,12 +250,15 @@ export function FeedbackCard({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setConfirmingDelete(false)}
+                  onClick={() => { setConfirmingDelete(false); setDeleteError(null) }}
                   disabled={deleting}
                   className="text-wm-text-subtle hover:text-wm-text"
                 >
                   cancel
                 </button>
+                {deleteError && (
+                  <span className="text-[10.5px] text-wm-danger">{deleteError}</span>
+                )}
               </span>
             ) : (
               <button
