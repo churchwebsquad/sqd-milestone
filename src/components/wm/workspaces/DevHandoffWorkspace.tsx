@@ -1874,14 +1874,21 @@ function DeclaredContentModelsBlock({ plan }: { plan: ContentModelPlan }) {
                   · {boundRows.length} source section{boundRows.length === 1 ? '' : 's'}
                   · {totalItems} total item{totalItems === 1 ? '' : 's'}
                 </span>
-                <span className="text-[11px] text-wm-text-subtle ml-auto">
-                  Buttons: <span className="text-wm-text-muted">{ctaText}</span>
-                </span>
               </summary>
               <div className="border-t border-wm-accent/30 px-4 py-3 space-y-3">
-                {/* Schema — the strategist's declared field list */}
+                {/* Schema — the strategist's declared field list. Button
+                    target sits at the top of this section as a first-
+                    class row, since it's part of the model's shape
+                    (what happens when the CTA is clicked) — same
+                    editorial weight as the fields themselves. */}
                 <div>
-                  <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Schema (strategist-declared)</p>
+                  <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">Schema (strategist-declared)</p>
+                  <div className="mb-2 flex items-baseline gap-2 min-w-0 rounded-md border border-wm-accent/30 bg-wm-accent-tint/40 px-3 py-2">
+                    <span className="text-[13.5px] font-semibold text-wm-text truncate">Button target</span>
+                    <span className="text-[12px] font-semibold text-wm-accent-strong bg-white border border-wm-accent/40 px-2.5 py-0.5 rounded-full shrink-0">
+                      {ctaText}
+                    </span>
+                  </div>
                   {m.schema.length === 0 ? (
                     <p className="text-[12px] text-wm-text-muted italic">No fields declared yet.</p>
                   ) : (
