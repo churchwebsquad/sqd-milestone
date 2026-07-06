@@ -416,14 +416,14 @@ Return ONLY this JSON — no explanation, no markdown fences:
             const scrapeRes = await fetch(FIRECRAWL_SCRAPE_URL, {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${firecrawlKey}` },
-              body: JSON.stringify({ url: websiteUrl, formats: ["markdown", "links"], onlyMainContent: false }),
+              body: JSON.stringify({ url: websiteUrl, formats: ["markdown", "rawHtml", "links"], onlyMainContent: false }),
             });
-            if (!scrapeRes.ok) return { markdown: "", links: [] };
+            if (!scrapeRes.ok) return { markdown: "", rawHtml: "", links: [] };
             const d = await scrapeRes.json();
             const page = d?.data ?? d;
-            return { markdown: (page?.markdown ?? "") as string, links: (page?.links ?? []) as string[] };
+            return { markdown: (page?.markdown ?? "") as string, rawHtml: (page?.rawHtml ?? "") as string, links: (page?.links ?? []) as string[] };
           } catch {
-            return { markdown: "", links: [] };
+            return { markdown: "", rawHtml: "", links: [] };
           }
         })()
       : Promise.resolve({ markdown: "", links: [] }),
@@ -476,10 +476,10 @@ Return ONLY this JSON — no explanation, no markdown fences:
       brandGuideFallbackText = await scrapeBrandGuideUrl(brandGuideUrl, firecrawlKey);
     }
 
-    // Fallback 2: extract colors/fonts from website HTML
-    if (crawlResult.markdown) {
-      console.log("[social-intel] Brand fallback 2: extracting from website HTML");
-      websiteBrandFallback = extractBrandFromHtml(crawlResult.markdown);
+    // Fallback 2: extract colors/fonts from raw HTML (markdown loses CSS/meta tags)
+    if (crawlResult.rawHtml) {
+      console.log("[social-intel] Brand fallback 2: extracting from website rawHtml");
+      websiteBrandFallback = extractBrandFromHtml(crawlResult.rawHtml);
     }
   }
 

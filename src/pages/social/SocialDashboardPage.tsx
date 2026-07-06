@@ -311,13 +311,13 @@ export default function SocialDashboardPage() {
     return base.sort((a, b) => {
       const aSrp = srpMap.get(a.member)
       const bSrp = srpMap.get(b.member)
-      const aThisWeek = aSrp ? isThisWeek(aSrp.createdAt, weekStart) : false
-      const bThisWeek = bSrp ? isThisWeek(bSrp.createdAt, weekStart) : false
+      const aThisWeek = aSrp ? isThisWeek(aSrp.updatedAt || aSrp.createdAt, weekStart) : false
+      const bThisWeek = bSrp ? isThisWeek(bSrp.updatedAt || bSrp.createdAt, weekStart) : false
       if (aThisWeek && !bThisWeek) return -1
       if (!aThisWeek && bThisWeek) return  1
-      // Both this week → first come first serve (oldest task created first)
+      // Both this week → most recently updated first
       if (aThisWeek && bThisWeek) {
-        return new Date(aSrp!.createdAt).getTime() - new Date(bSrp!.createdAt).getTime()
+        return new Date(bSrp!.updatedAt || bSrp!.createdAt).getTime() - new Date(aSrp!.updatedAt || aSrp!.createdAt).getTime()
       }
       // Neither this week → most recently active first
       const aTime = aSrp ? new Date(aSrp.updatedAt).getTime() : 0
@@ -389,8 +389,9 @@ export default function SocialDashboardPage() {
             {sorted.map(c => {
               const intel        = intelMap.get(c.member)
               const srp          = srpMap.get(c.member)
-              const srpDate      = srp ? new Date(srp.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null
-              const thisWeek     = srp ? isThisWeek(srp.createdAt, weekStart) : false
+              const srpDateMs    = srp ? new Date(srp.updatedAt || srp.createdAt).getTime() : NaN
+              const srpDate      = srp && !isNaN(srpDateMs) ? new Date(srpDateMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null
+              const thisWeek     = srp ? isThisWeek(srp.updatedAt || srp.createdAt, weekStart) : false
               const noName       = !c.church_name
 
               return (
