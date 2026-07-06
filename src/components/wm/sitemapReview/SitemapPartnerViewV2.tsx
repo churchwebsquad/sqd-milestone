@@ -1,16 +1,16 @@
 /**
- * Partner-facing sitemap review — v2 visualization.
+ * Partner-facing sitemap review · v2 visualization.
  *
  * Renders `SitemapReview` in the layout Ashley signed off on in the
  * Squad-palette design artifact. Each region is a clickable target
  * that opens the sibling drawer for a scoped edit request.
  *
- * Section-id convention (stable — partner_edit_requests keys off it):
- *   intro · nav-primary · nav-secondary · hubs · footer ·
- *   page-<slug> · what-changed · why · general
+ * Section-id convention (stable; partner_edit_requests keys off it):
+ *   intro, nav-primary, nav-secondary, hubs, footer,
+ *   page-<slug>, what-changed, why, general.
  *
  * Multi-campus (Doxology-style per-congregation persistent nav bars)
- * is deliberately not force-rendered here — until the review's data
+ * is deliberately not force-rendered here. Until the review's data
  * model carries a first-class `campuses` list, we render the site as
  * a single-tier structure. The secondary nav_layout region still
  * renders when the strategist declared one.
@@ -19,14 +19,13 @@
 import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type {
   ContentMigration,
-  FooterInfo,
   NavItem,
   PartnerEditRequest,
   ReviewPage,
   SitemapReview,
 } from '../../../lib/sitemapReview'
 
-// ── Styles (scoped to .dox — palette translated to Squad) ──────────
+// ── Styles (scoped to .dox · palette translated to Squad) ──────────
 
 const scopedCss = `
 .dox { --ink:#341756; --paper:#fff; --panel:#F9F5F1; --panel2:#EDE9FC; --line:#CFC9F8; --line2:#BEB6EE; --muted:#6B6180; --muted2:#8B84A0; --accent:#513DE5; --accent-soft:#EDE9FC; --ph:#CFC9F8; --good:#3f7d55; --dark:#341756;
@@ -177,7 +176,6 @@ export default function SitemapPartnerViewV2({
   onUpdatePartnerNotes, onApprove, onSubmitFeedback,
 }: SitemapPartnerViewV2Props) {
   const [drawer, setDrawer] = useState<{ id: string; label: string } | null>(null)
-  const [author, setAuthor] = useState(authorName ?? '')
   const [comment, setComment] = useState('')
   const [suggestion, setSuggestion] = useState('')
   const [notesDraft, setNotesDraft] = useState(review.partner_notes ?? '')
@@ -215,7 +213,7 @@ export default function SitemapPartnerViewV2({
       section_label:    drawer.label,
       comment:          comment.trim(),
       suggested_change: suggestion.trim() || undefined,
-      author_name:      author.trim() || undefined,
+      author_name:      authorName?.trim() || undefined,
     })
     setComment('')
     setSuggestion('')
@@ -298,7 +296,7 @@ export default function SitemapPartnerViewV2({
               <div className="mega-panel">
                 {primaryNav.filter(it => it.children && it.children.length > 0).slice(0, 2).map((parent, pi) => (
                   <div key={pi} style={{ marginBottom: pi === 0 ? 22 : 0 }}>
-                    <div className="mega-label">{parent.label} — what's inside</div>
+                    <div className="mega-label">{parent.label} · what's inside</div>
                     <div className="mega-grid">
                       {(parent.children ?? []).slice(0, 6).map((c, ci) => (
                         <div key={ci} className="mega-item">
@@ -338,7 +336,7 @@ export default function SitemapPartnerViewV2({
         {hubs.length > 0 && (
           <section className="sec">
             <div className="sec-head"><span className="sec-num">04</span><h2>Shared Hub Pages</h2></div>
-            <p className="sec-note">Warm welcome pages that lead into the deeper structure — the first place a curious guest lands.</p>
+            <p className="sec-note">Warm welcome pages that lead into the deeper structure. The first place a curious guest lands.</p>
             <div
               className={`cards3 ${clickable('hubs')}`}
               {...clickBind('hubs', 'Shared hub pages')}
@@ -359,41 +357,40 @@ export default function SitemapPartnerViewV2({
           </section>
         )}
 
-        {review.footer_info && hasAnyFooter(review.footer_info) && (
-          <section className="sec">
-            <div className="sec-head"><span className="sec-num">05</span><h2>Footer</h2></div>
-            <p className="sec-note">Every page ends here — your contact info, everyday links, and a place to stay in touch.</p>
-            <div className={`footer-preview ${clickable('footer')}`} {...clickBind('footer', 'Footer')}>
-              <div className="fbrand">◆ {review.footer_info.church_name ?? church}</div>
-              <div className="fmeta">
-                {review.footer_info.address && <div>{review.footer_info.address}</div>}
-                {review.footer_info.phone   && <div>{review.footer_info.phone}</div>}
-                {review.footer_info.email   && <div>{review.footer_info.email}</div>}
-                {(review.footer_info.social_links ?? []).length > 0 && (
-                  <div style={{ marginTop: 10 }}>
-                    {(review.footer_info.social_links ?? []).map((s, i) => (
-                      <span key={i} style={{ marginRight: 14 }}>
-                        {s.label ?? capitalize(s.platform)}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
+        <section className="sec">
+          <div className="sec-head"><span className="sec-num">05</span><h2>Footer</h2></div>
+          <p className="sec-note">Every page ends here, with your contact info, everyday links, and a place to stay in touch.</p>
+          <div className={`footer-preview ${clickable('footer')}`} {...clickBind('footer', 'Footer')}>
+            <div className="fbrand">◆ {review.footer_info?.church_name ?? church}</div>
+            <div className="fmeta">
+              {review.footer_info?.address && <div>{review.footer_info.address}</div>}
+              {review.footer_info?.phone   && <div>{review.footer_info.phone}</div>}
+              {review.footer_info?.email   && <div>{review.footer_info.email}</div>}
+              {(!review.footer_info?.address && !review.footer_info?.phone && !review.footer_info?.email) && (
+                <div style={{ opacity: 0.7, fontStyle: 'italic' }}>Address, phone, and email will appear here as they are confirmed with your team.</div>
+              )}
+              {(review.footer_info?.social_links ?? []).length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  {(review.footer_info?.social_links ?? []).map((s, i) => (
+                    <span key={i} style={{ marginRight: 14 }}>
+                      {s.label ?? capitalize(s.platform)}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
-          </section>
-        )}
+          </div>
+        </section>
 
         {review.pages.length > 0 && <section className="sec">
           <div className="sec-head"><span className="sec-num">06</span><h2>Full Page List</h2></div>
           <p className="sec-note">{readOnly ? 'Every page in the sitemap, grouped by parent.' : 'Click any page to leave a note about it: rename, move, combine, or ask a question.'}</p>
-          {grouped.some(g => g.pages.some(p => p.what_changed)) && (
-            <div className="legend">
-              <span><b className="tag2 t-keep">have today</b> already on your site</span>
-              <span><b className="tag2 t-uni">now shared</b> one page for the whole church</span>
-              <span><b className="tag2 t-cons">combined</b> merged from several pages</span>
-              <span><b className="tag2 t-new">new</b> new to the site</span>
-            </div>
-          )}
+          <div className="legend">
+            <span><b className="tag2 t-keep">have today</b> already on your site</span>
+            <span><b className="tag2 t-uni">now shared</b> was separate per congregation, now one page</span>
+            <span><b className="tag2 t-cons">combined</b> a few of today's pages merged into one</span>
+            <span><b className="tag2 t-new">new</b> new to the site</span>
+          </div>
           <div className="tiers">
             {grouped.map(group => (
               <div key={group.id} className="tier">
@@ -430,12 +427,12 @@ export default function SitemapPartnerViewV2({
           </div>
         </section>}
 
-        {review.content_migrations.length > 0 && (
-          <section className="sec">
-            <div className="sec-head"><span className="sec-num">07</span><h2>What's changing from your current site</h2></div>
-            <p className="sec-note">Almost nothing is being thrown away; it's being <b>reorganized</b>. Here's the honest picture:</p>
-            <div className={`changed ${clickable('what-changed')}`} {...clickBind('what-changed', "What's changing")}>
-              {review.content_migrations.slice(0, 6).map(m => (
+        <section className="sec">
+          <div className="sec-head"><span className="sec-num">07</span><h2>What's changing from your current site</h2></div>
+          <p className="sec-note">Almost nothing is being thrown away; it's being <b>reorganized</b>. Here's the honest picture:</p>
+          <div className={`changed ${clickable('what-changed')}`} {...clickBind('what-changed', "What's changing")}>
+            {review.content_migrations.length > 0 ? (
+              review.content_migrations.slice(0, 6).map(m => (
                 <div key={m.id} className="chcard">
                   <p>
                     <b>{m.title}.</b>{' '}
@@ -443,18 +440,23 @@ export default function SitemapPartnerViewV2({
                     {m.rationale}
                   </p>
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
+              ))
+            ) : (
+              <>
+                <div className="chcard"><span className="tag2 t-keep" style={{ display: 'inline-block', marginBottom: 7 }}>have today</span><p><b>Kept, just re-homed.</b> The pages you already have carry over into the new structure so nothing familiar goes missing.</p></div>
+                <div className="chcard"><span className="tag2 t-cons" style={{ display: 'inline-block', marginBottom: 7 }}>combined</span><p><b>Tidied up.</b> Where several pages were doing similar work, they merge into one clearer home so visitors find what they need faster.</p></div>
+              </>
+            )}
+          </div>
+        </section>
 
         <section className="sec">
           <div className="sec-head"><span className="sec-num">08</span><h2>Why we shaped it this way</h2></div>
           <div className={`why ${clickable('why')}`} {...clickBind('why', "Why we shaped it this way")}>
-            <div className="wcard"><div className="ic">◆</div><h4>Serves the people you're reaching</h4><p>Every page is shaped around a real person, not an org chart — first-time visitors, regular attenders, and everyone in between.</p></div>
+            <div className="wcard"><div className="ic">◆</div><h4>Serves the people you're reaching</h4><p>Every page is shaped around a real person, not an org chart: first-time visitors, regular attenders, and everyone in between.</p></div>
             <div className="wcard"><div className="ic">◇</div><h4>Newcomers find their way</h4><p>Someone landing fresh can understand what {church} is about and take a next step in under a minute.</p></div>
             <div className="wcard"><div className="ic">✦</div><h4>One church, one story</h4><p>Shared story blocks stay shared so visitors and members experience the same voice everywhere.</p></div>
-            <div className="wcard"><div className="ic">↗</div><h4>Built to grow</h4><p>As {church} grows, new pages slot into the same structure — no redesign needed.</p></div>
+            <div className="wcard"><div className="ic">↗</div><h4>Built to grow</h4><p>As {church} grows, new pages slot into the same structure, no redesign needed.</p></div>
           </div>
         </section>
 
@@ -470,7 +472,7 @@ export default function SitemapPartnerViewV2({
                 value={notesDraft}
                 onChange={e => setNotesDraft(e.target.value)}
                 onBlur={() => { if (onUpdatePartnerNotes && notesDraft !== (review.partner_notes ?? '')) void onUpdatePartnerNotes(notesDraft) }}
-                placeholder="Anything overall — names, missing pages, tone, priorities…"
+                placeholder="Anything overall: names, missing pages, tone, priorities…"
                 style={{ width: '100%', minHeight: 80, padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 14, fontFamily: 'inherit', resize: 'vertical' }}
               />
 
@@ -505,7 +507,7 @@ export default function SitemapPartnerViewV2({
                   {openReqs.length > 0 && `${openReqs.length} section note${openReqs.length === 1 ? '' : 's'} pending`}
                   {openReqs.length > 0 && hasNotes && ' · '}
                   {hasNotes && 'overall notes unsent'}
-                  {!shareMode && 'No pending notes — approve to lock as canonical.'}
+                  {!shareMode && 'No pending notes. Approve to lock as canonical.'}
                 </span>
               </div>
             </div>
@@ -524,9 +526,11 @@ export default function SitemapPartnerViewV2({
               <p>Your note is pinned to this section and shared with the Church Media Squad team.</p>
             </div>
             <div className="db">
-              <label htmlFor="pn-author">Your name (optional)</label>
-              <input id="pn-author" type="text" value={author} onChange={e => setAuthor(e.target.value)} placeholder="e.g. Pastor Chris" />
-
+              {authorName && (
+                <p style={{ margin: '0 0 12px', fontSize: 12, color: '#6B6180' }}>
+                  Signed in as <b style={{ color: '#341756' }}>{authorName}</b>
+                </p>
+              )}
               <label htmlFor="pn-comment">What's on your mind?</label>
               <textarea id="pn-comment" value={comment} onChange={e => setComment(e.target.value)} placeholder="Describe what feels off, or what you'd like to see changed…" />
 
@@ -603,6 +607,16 @@ function groupPagesForList(pages: ReviewPage[], primary: NavItem[]): Array<{ id:
 }
 
 function tagFor(p: ReviewPage, migrations: ContentMigration[]): { label: string; className: string } | null {
+  // Explicit strategist-authored tag always wins. Vocabulary is
+  // fixed in the schema so the pill colors and legend stay in sync.
+  if (p.sitemap_tag) {
+    switch (p.sitemap_tag) {
+      case 'kept':         return { label: 'have today', className: 't-keep' }
+      case 'unified':      return { label: 'now shared', className: 't-uni' }
+      case 'consolidated': return { label: 'combined',   className: 't-cons' }
+      case 'new':          return { label: 'new',        className: 't-new' }
+    }
+  }
   const isMergedTo = migrations.some(m =>
     m.merged_to_slug === p.slug ||
     (m.merged_to && m.merged_to.toLowerCase() === p.name.toLowerCase()),
@@ -624,10 +638,6 @@ function shortDescriptionFor(item: NavItem, pages: ReviewPage[]): string {
     return item.children.map(c => c.label).join(' · ')
   }
   return ''
-}
-
-function hasAnyFooter(f: FooterInfo): boolean {
-  return !!(f.church_name || f.address || f.phone || f.email || (f.social_links && f.social_links.length > 0))
 }
 
 function truncate(s: string | undefined, n: number): string {

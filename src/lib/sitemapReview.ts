@@ -101,6 +101,19 @@ export interface ReviewPage {
   what_changed?:        string
   why_change?:          string
   strategic_alignment?: string
+
+  /** Explicit change-status tag rendered as a colored pill on the
+   *  partner-facing Full Page List. When unset, the visualization
+   *  falls back to inferring from what_changed / content_migrations.
+   *
+   *  Vocabulary is fixed so the legend and colors stay consistent:
+   *    'kept'          Have today. Already lives on the current site.
+   *    'unified'       Now shared. Was separate per congregation, is
+   *                    one shared page now.
+   *    'consolidated'  Combined. Several current pages merged into
+   *                    this one.
+   *    'new'           New. Wasn't on the current site at all. */
+  sitemap_tag?: 'kept' | 'unified' | 'consolidated' | 'new'
 }
 
 export interface NavItem {

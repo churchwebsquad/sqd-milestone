@@ -29,19 +29,19 @@ export function ApprovedSitemapBanner({ projectId, churchName, showAllStatuses }
   const config = {
     draft: {
       classes: 'border-wm-border bg-wm-bg-elevated text-wm-text-muted',
-      label:   'Sitemap review — draft (not yet published)',
+      label:   'Sitemap review ·draft (not yet published)',
     },
     published: {
       classes: 'border-blue-300 bg-blue-50 text-blue-800',
-      label:   'Sitemap review — published, awaiting partner',
+      label:   'Sitemap review ·published, awaiting partner',
     },
     partner_reviewed: {
       classes: 'border-amber-300 bg-amber-50 text-amber-800',
-      label:   'Sitemap review — partner made edits, staff review pending',
+      label:   'Sitemap review ·partner made edits, staff review pending',
     },
     approved: {
       classes: 'border-green-400 bg-green-50 text-green-800',
-      label:   'Sitemap review — approved, canonical for downstream tools',
+      label:   'Sitemap review ·approved, canonical for downstream tools',
     },
   }[review.status]
 
@@ -60,7 +60,7 @@ export function ApprovedSitemapBanner({ projectId, churchName, showAllStatuses }
         className={`w-full text-left rounded-md border px-3 py-2 text-[12px] font-medium ${config.classes} hover:brightness-95 transition`}
       >
         <span className="inline-block w-2 h-2 rounded-full bg-current mr-2 opacity-60" />
-        {config.label} — click to view/edit
+        {config.label} · click to view/edit
       </button>
     </>
   )

@@ -8,20 +8,27 @@
  *
  * v2 flow:
  *   1. Look up review by token via get_sitemap_review_by_token RPC.
- *      Not-found / not-yet-published → polite unavailable screen.
- *   2. Render the Squad-palette v2 visualization
+ *      Not-found / not-yet-published route to a polite unavailable
+ *      screen.
+ *   2. Name gate. First visit prompts for the reviewer's name so every
+ *      section note is credited to a real person. Stored in
+ *      localStorage keyed by token so the partner isn't re-prompted on
+ *      subsequent visits. Mirrors the pattern used by PortalReviewPage
+ *      (the copy-review portal) so the two feel consistent.
+ *   3. Render the Squad-palette v2 visualization
  *      (SitemapPartnerViewV2). Each section is clickable and opens a
- *      drawer to leave a scoped edit request.
- *   3. "Approve as-is" locks the review as canonical.
+ *      drawer to leave a scoped edit request. All requests carry the
+ *      captured name automatically.
+ *   4. "Approve as-is" locks the review as canonical.
  *      "Share Sitemap Review Feedback" surfaces once any edit request
- *      or overall note is pending; sets status → partner_reviewed.
+ *      or overall note is pending; sets status to partner_reviewed.
  *
  * Distinct from PortalReviewPage (the copy-review portal): that one
  * captures suggested edits on already-committed pages; this one is a
  * structural review of the sitemap itself, upstream of page copy.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   loadSitemapReviewByToken,
@@ -32,6 +39,8 @@ import {
 } from '../lib/sitemapReview'
 import SitemapPartnerViewV2 from '../components/wm/sitemapReview/SitemapPartnerViewV2'
 
+const STORAGE_KEY = (token: string) => `sitemap_review_${token}_name`
+
 export default function SitemapReviewPortalPage() {
   const { token } = useParams<{ token: string }>()
   const [review, setReview] = useState<SitemapReview | null>(null)
@@ -40,6 +49,21 @@ export default function SitemapReviewPortalPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [flash, setFlash] = useState<string | null>(null)
+  const [partnerName, setPartnerName] = useState<string | null>(null)
+
+  // Restore partner name from localStorage on load so returning
+  // visitors skip the name gate. Keyed by token so the same browser
+  // hosting multiple partner links stays separated.
+  useEffect(() => {
+    if (!token) return
+    try {
+      const stored = window.localStorage.getItem(STORAGE_KEY(token))
+      if (stored) setPartnerName(stored)
+    } catch {
+      // localStorage unavailable (private browsing, iframe sandboxing).
+      // We'll re-prompt every visit in that case, which is acceptable.
+    }
+  }, [token])
 
   const load = useCallback(async () => {
     if (!token) { setStatus('not-found'); return }
@@ -72,9 +96,10 @@ export default function SitemapReviewPortalPage() {
     if (!review) return
     const entry: PartnerEditRequest = {
       ...req,
-      id:         cryptoRandomId(),
-      created_at: new Date().toISOString(),
-      status:     'open',
+      author_name: req.author_name ?? partnerName ?? undefined,
+      id:          cryptoRandomId(),
+      created_at:  new Date().toISOString(),
+      status:      'open',
     }
     const next: SitemapReview = {
       ...review,
@@ -82,7 +107,7 @@ export default function SitemapReviewPortalPage() {
     }
     const ok = await persist(next)
     if (ok) setFlash('Note saved.')
-  }, [review, persist])
+  }, [review, persist, partnerName])
 
   const removeEditRequest = useCallback(async (id: string) => {
     if (!review) return
@@ -115,6 +140,15 @@ export default function SitemapReviewPortalPage() {
     if (ok) setFlash('Feedback sent. Your Squad team will review and follow up.')
   }, [review, persist])
 
+  const submitName = useCallback((name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed || !token) return
+    try { window.localStorage.setItem(STORAGE_KEY(token), trimmed) } catch { /* ignore */ }
+    setPartnerName(trimmed)
+  }, [token])
+
+  const projectName = useMemo(() => churchName ?? 'your church', [churchName])
+
   if (status === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: '#F9F5F1', color: '#341756', fontFamily: "'Inter','Segoe UI',system-ui,sans-serif" }}>
@@ -139,6 +173,14 @@ export default function SitemapReviewPortalPage() {
 
   const locked = review.status === 'approved'
 
+  // Name gate. Partner does not see the review until they say who
+  // they are so every note carries their name. Skipped for locked
+  // reviews (read-only viewing) so we don't harass someone who's
+  // just checking the approved artifact.
+  if (!partnerName && !locked) {
+    return <NameGate projectName={projectName} onSubmit={submitName} />
+  }
+
   return (
     <>
       {locked && (
@@ -155,13 +197,14 @@ export default function SitemapReviewPortalPage() {
       )}
       {error && (
         <div style={{ background: '#FBE0E0', color: '#7A1A1A', textAlign: 'center', padding: '10px 20px', fontSize: 13 }}>
-          Save failed — {error}. Please try again.
+          Save failed. {error}. Please try again.
         </div>
       )}
       <SitemapPartnerViewV2
         review={review}
         churchName={churchName}
         saving={saving}
+        authorName={partnerName ?? undefined}
         onAddEditRequest={locked ? () => Promise.resolve() : addEditRequest}
         onRemoveEditRequest={locked ? undefined : removeEditRequest}
         onUpdatePartnerNotes={locked ? () => Promise.resolve() : updatePartnerNotes}
@@ -169,6 +212,76 @@ export default function SitemapReviewPortalPage() {
         onSubmitFeedback={handleSubmitFeedback}
       />
     </>
+  )
+}
+
+// Full-screen name capture shown on first visit. Follows the same
+// pattern as PortalReviewPage's NameGate so partners recognize the
+// prompt across reviews.
+function NameGate({ projectName, onSubmit }: { projectName: string; onSubmit: (name: string) => void }) {
+  const [name, setName] = useState('')
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#F9F5F1',
+        fontFamily: "'Inter','Segoe UI',system-ui,sans-serif",
+        padding: 24,
+      }}
+    >
+      <form
+        onSubmit={(e) => { e.preventDefault(); onSubmit(name) }}
+        style={{
+          maxWidth: 440, width: '100%',
+          background: '#fff', border: '1px solid #CFC9F8', borderRadius: 16,
+          padding: '28px 28px 24px', textAlign: 'center',
+          boxShadow: '0 20px 40px -20px rgba(52,23,86,.25)',
+        }}
+      >
+        <p style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.16em', textTransform: 'uppercase', color: '#513DE5', margin: 0 }}>{projectName}</p>
+        <h1 style={{ fontSize: 22, fontWeight: 650, color: '#341756', margin: '6px 0 8px' }}>Welcome to your sitemap review</h1>
+        <p style={{ fontSize: 13.5, color: '#6B6180', lineHeight: 1.55, margin: '0 0 20px' }}>
+          Let us know who's reviewing so your Church Media Squad can credit your feedback.
+        </p>
+        <label style={{ display: 'block', textAlign: 'left', marginBottom: 18 }}>
+          <span style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '.14em', textTransform: 'uppercase', color: '#6B6180', marginBottom: 6 }}>Your name</span>
+          <input
+            type="text"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            autoFocus
+            placeholder="Pastor Chris"
+            style={{
+              width: '100%',
+              padding: '11px 16px',
+              borderRadius: 999,
+              border: '1px solid #CFC9F8',
+              background: '#fff',
+              color: '#341756',
+              fontSize: 14,
+              fontFamily: 'inherit',
+              outline: 'none',
+            }}
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={!name.trim()}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            background: '#341756', color: '#fff', border: 'none',
+            padding: '10px 22px', borderRadius: 999,
+            fontSize: 13.5, fontWeight: 650, cursor: 'pointer',
+            opacity: name.trim() ? 1 : 0.5,
+          }}
+        >
+          Start reviewing →
+        </button>
+      </form>
+    </div>
   )
 }
 
