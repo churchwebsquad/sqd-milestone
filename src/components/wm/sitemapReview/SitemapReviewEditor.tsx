@@ -13,7 +13,7 @@
  * writes back through a token-gated save path (see sitemapReview.ts).
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { supabase } from '../../../lib/supabase'
 import {
   approveReview,
@@ -207,14 +207,56 @@ export function SitemapReviewEditor({
         {viewMode === 'edit' ? (
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
             <PartnerEditRequestsInbox review={review} onChange={persist} disabled={isApproved} />
-            <IntroEditor review={review} onChange={persist} disabled={isApproved} />
-            <ExecutiveSummaryEditor review={review} onChange={persist} disabled={isApproved} />
-            <NavigationStrategyEditor review={review} onChange={persist} disabled={isApproved} />
-            <PersonaPosturesEditor review={review} onChange={persist} disabled={isApproved} />
-            <PagesEditor review={review} onChange={persist} disabled={isApproved} />
-            <NavLayoutEditor review={review} onChange={persist} disabled={isApproved} />
-            <ContentMigrationsEditor review={review} onChange={persist} disabled={isApproved} />
-            <FooterInfoEditor review={review} onChange={persist} disabled={isApproved} />
+
+            {/* Sections are ordered to mirror the partner-facing wrapper 1:1.
+                Each header calls out the artifact section it feeds so the
+                strategist knows exactly where the field renders. */}
+
+            <SectionBand num="Hero" label="What the partner reads first">
+              <IntroEditor review={review} onChange={persist} disabled={isApproved} />
+            </SectionBand>
+
+            <SectionBand num="01" label="The heart behind your new site">
+              <ExecutiveSummaryEditor review={review} onChange={persist} disabled={isApproved} />
+            </SectionBand>
+
+            <SectionBand num="02" label="Primary Navigation">
+              <NavigationStrategyEditor review={review} onChange={persist} disabled={isApproved} />
+              <p className="text-[11.5px] text-wm-text-subtle mt-2">
+                The nav preview itself is sourced from the sitemap step's <code>nav_presentation</code>. Edit that step (cowork) to change the visible header, megamenu, and offcanvas.
+              </p>
+            </SectionBand>
+
+            <SectionBand num="03" label="Footer">
+              <FooterInfoEditor review={review} onChange={persist} disabled={isApproved} />
+            </SectionBand>
+
+            <SectionBand num="04" label="Full Page List">
+              <PagesEditor review={review} onChange={persist} disabled={isApproved} />
+              <NavLayoutEditor review={review} onChange={persist} disabled={isApproved} />
+            </SectionBand>
+
+            <SectionBand num="05" label="What's changing (fallback)">
+              <ContentMigrationsEditor review={review} onChange={persist} disabled={isApproved} />
+              <p className="text-[11.5px] text-wm-text-subtle mt-2">
+                Authored <code>presentation.whats_changing_cards</code> (below) overrides these when populated by a cowork session.
+              </p>
+            </SectionBand>
+
+            <SectionBand num="Personas" label="Not on the artifact, kept for reference">
+              <PersonaPosturesEditor review={review} onChange={persist} disabled={isApproved} />
+            </SectionBand>
+
+            {/* Cowork-authored presentation layer. For fields cowork
+                (or Claude Code) writes back into after the sitemap
+                step: congregations, featured highlight, tiers,
+                whats-changing summary cards, why cards, your-turn
+                prompts, hero em phrase. Rich per-field editors are
+                a later pass; for now the strategist edits the raw
+                JSON so cowork output can round-trip immediately. */}
+            <SectionBand num="Cowork" label="Presentation layer (authored by cowork sessions)">
+              <PresentationEditor review={review} onChange={persist} disabled={isApproved} />
+            </SectionBand>
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
@@ -995,6 +1037,118 @@ function buildPartnerReviewUrl(token: string): string {
   return `${window.location.origin}/portal/sitemap/${token}`
 }
 
-// (silence unused var lint — buildPortalUrl imported for parity with
+// (silence unused var lint, buildPortalUrl imported for parity with
 // other portal builders; the partner sitemap URL doesn't need it yet.)
 void buildPortalUrl
+
+// ─────────────────────────────────────────────────────────────────
+// SectionBand: visual grouper that stamps the wrapper's section
+// number next to each editor cluster so the strategist can trace
+// "this is what feeds section 02 of the partner view" without
+// switching to Preview.
+// ─────────────────────────────────────────────────────────────────
+
+function SectionBand({ num, label, children }: { num: string; label: string; children: ReactNode }) {
+  return (
+    <div className="rounded-xl border border-wm-border bg-wm-bg-elevated p-4">
+      <div className="flex items-baseline gap-3 mb-3">
+        <span className="inline-flex items-center rounded-full bg-wm-accent-tint text-wm-accent-strong text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 font-mono">
+          {num}
+        </span>
+        <span className="text-[13px] font-semibold text-wm-text">{label}</span>
+      </div>
+      <div className="space-y-4">{children}</div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// PresentationEditor: raw JSON textarea for the cowork-authored
+// SitemapReview.presentation layer. Rich per-field editors will
+// follow; for now this is the round-trip surface a cowork session
+// pastes its output into.
+// ─────────────────────────────────────────────────────────────────
+
+function PresentationEditor({
+  review, onChange, disabled,
+}: {
+  review:   SitemapReview
+  onChange: (next: SitemapReview) => Promise<void> | void
+  disabled: boolean
+}) {
+  const initial = useMemo(
+    () => JSON.stringify(review.presentation ?? {}, null, 2),
+    [review.presentation],
+  )
+  const [text,  setText]  = useState(initial)
+  const [error, setError] = useState<string | null>(null)
+
+  // Reset when the underlying data updates from elsewhere.
+  useEffect(() => { setText(initial); setError(null) }, [initial])
+
+  const save = () => {
+    setError(null)
+    try {
+      const parsed = text.trim() ? JSON.parse(text) : {}
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Must be a JSON object.')
+      }
+      void onChange({ ...review, presentation: parsed })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Invalid JSON.')
+    }
+  }
+
+  const clear = () => {
+    if (!confirm('Clear the entire presentation layer? The partner view falls back to system defaults.')) return
+    setText('{}')
+    void onChange({ ...review, presentation: undefined })
+  }
+
+  const dirty = text !== initial
+
+  return (
+    <div className="space-y-2">
+      <div className="text-[11.5px] text-wm-text-muted leading-snug">
+        Cowork sessions push their output here. Fields the schema accepts:
+        <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">hero_em_phrase</code>,
+        <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">congregations[]</code>,
+        <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">featured_highlight</code>,
+        <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">tiers[]</code>,
+        <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">whats_changing_cards[]</code>,
+        <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">why_cards[]</code>,
+        <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">your_turn_prompts[]</code>.
+        See <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">src/lib/sitemapReview.ts</code> for the full type.
+      </div>
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        disabled={disabled}
+        rows={16}
+        spellCheck={false}
+        className="w-full rounded-md border border-wm-border bg-white text-[12px] font-mono text-wm-text p-3 outline-none focus:border-wm-accent"
+        placeholder="{}"
+      />
+      {error && <div className="text-[11.5px] text-red-600">{error}</div>}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={disabled || !dirty}
+          onClick={save}
+          className="text-[12px] font-semibold px-4 py-1.5 rounded-full bg-wm-accent-strong text-white hover:bg-wm-accent disabled:opacity-50"
+        >
+          Save presentation
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={clear}
+          className="text-[11.5px] text-wm-text-muted hover:text-red-600"
+        >
+          Clear presentation
+        </button>
+        {dirty && <span className="text-[11px] text-wm-text-subtle">Unsaved changes</span>}
+      </div>
+    </div>
+  )
+}

@@ -91,6 +91,9 @@ const scopedCss = `
 .dox .plist li{display:grid; grid-template-columns:220px 1fr; gap:18px; padding:11px 18px; border-top:1px solid var(--panel); align-items:baseline; cursor:pointer; transition:background .12s ease;}
 .dox .plist li:hover{background:#FBF9FE;}
 .dox .plist li:first-child{border-top:none;}
+.dox .plist li.child{padding-left:44px; background:#FCFBFE;}
+.dox .plist li.child:hover{background:#F5F1FD;}
+.dox .plist li.child .pg{font-weight:520; color:#4a4239;}
 .dox .plist .pg{font-weight:600; font-size:14px; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; color:var(--ink);}
 .dox .plist .desc{font-size:12.5px; color:var(--muted); line-height:1.4;}
 .dox .why{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
@@ -123,6 +126,8 @@ const scopedCss = `
 .dox .status-chip{display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font-size:11px; font-weight:650; letter-spacing:.05em; text-transform:uppercase;}
 .dox .exec-body{background:#fff; border:1px solid var(--line); border-radius:14px; padding:24px 26px; color:var(--ink); font-size:15px; line-height:1.65; white-space:pre-wrap;}
 .dox .nav-strategy-body{background:var(--panel2); border-radius:12px; padding:18px 22px; color:var(--ink); font-size:14.5px; line-height:1.6; white-space:pre-wrap; margin-top:14px;}
+.dox .feat-highlight{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px 22px;}
+.dox .feat-highlight .btn{padding:8px 16px;}
 /* Drawer */
 .dox-drawer-scrim{position:fixed; inset:0; background:rgba(52,23,86,.35); z-index:80;}
 .dox-drawer{position:fixed; right:0; top:0; bottom:0; width:min(420px,100vw); background:#fff; z-index:81; box-shadow:-24px 0 60px -30px rgba(52,23,86,.5); display:flex; flex-direction:column;}
@@ -240,7 +245,13 @@ export default function SitemapPartnerViewV2({
   const church = churchName ?? review.footer_info?.church_name ?? 'Your church'
   const hero = review.intro
   const primaryNav = review.nav_layout.header ?? []
-  const grouped = groupPagesForList(review.pages, primaryNav)
+  const pres = review.presentation
+  const grouped = useMemo(
+    () => pres?.tiers && pres.tiers.length > 0
+      ? groupPagesByTiers(review.pages, pres.tiers)
+      : groupPagesForList(review.pages, primaryNav),
+    [review.pages, primaryNav, pres?.tiers],
+  )
 
   return (
     <div className="dox">
@@ -257,7 +268,7 @@ export default function SitemapPartnerViewV2({
             <div className="hero">
               <div className="eyebrow">Your New Website · Structure &amp; Navigation</div>
               <h1>{hero.headline}</h1>
-              <p>{hero.body}</p>
+              <p>{renderWithEmPhrase(hero.body, pres?.hero_em_phrase)}</p>
               <div className="rule" />
             </div>
           </header>
@@ -281,14 +292,63 @@ export default function SitemapPartnerViewV2({
           )}
           {review.nav_presentation ? (
             <div className={clickable('nav-primary')} {...clickBind('nav-primary', 'Primary navigation')} style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #CFC9F8' }}>
-              <NavPresentationPanel presentation={review.nav_presentation as NavPresentation} />
+              <NavPresentationPanel presentation={review.nav_presentation as NavPresentation} variant="partner" />
             </div>
           ) : (
             <div className={`browser ${clickable('nav-primary')}`} {...clickBind('nav-primary', 'Primary navigation')} style={{ padding: 22, fontStyle: 'italic', color: '#6B6180' }}>
               The nav preview will appear here once the sitemap step finishes.
             </div>
           )}
+
+          {pres?.featured_highlight && (
+            <div className="feat-highlight" style={{ marginTop: 16 }}>
+              <div className="mega-label" style={{ color: '#513DE5' }}>Featured · links out ↗</div>
+              <h4 style={{ fontSize: 20, fontWeight: 680, margin: '4px 0 6px', color: '#341756' }}>{pres.featured_highlight.label}</h4>
+              <p style={{ fontSize: 13.5, color: '#6B6180', margin: '0 0 12px', lineHeight: 1.5 }}>{pres.featured_highlight.description}</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {pres.featured_highlight.url && (
+                  <a href={pres.featured_highlight.url} target="_blank" rel="noreferrer" className="btn accent">
+                    {pres.featured_highlight.cta_label ?? 'Learn more'} →
+                  </a>
+                )}
+                {pres.featured_highlight.secondary_cta_label && (
+                  <span className="btn ghost">{pres.featured_highlight.secondary_cta_label}</span>
+                )}
+              </div>
+            </div>
+          )}
         </section>
+
+        {pres?.congregations && pres.congregations.length > 0 && (
+          <section className="sec">
+            <div className="sec-head"><span className="sec-num">02b</span><h2>Persistent Navigation</h2></div>
+            <p className="sec-note">Step into a congregation and this bar stays with you. Its name, service time, address, and full menu always in reach.</p>
+            <div className={clickable('nav-secondary')} {...clickBind('nav-secondary', 'Persistent navigation')} style={{ padding: '8px 0' }}>
+              {pres.congregations.map(cg => (
+                <div key={cg.id} className="cong-bar" style={{ background: '#341756', color: '#fff', borderRadius: 12, padding: '14px 16px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                  <div style={{ background: '#F9F5F1', color: '#341756', borderRadius: 999, padding: '8px 16px', display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.16em', textTransform: 'uppercase', color: '#513DE5', alignSelf: 'center' }}>{cg.label}</span>
+                    {cg.service_time && <span style={{ fontSize: 14, fontWeight: 750, letterSpacing: '-.02em' }}>{cg.service_time}</span>}
+                    {cg.address && <span style={{ fontSize: 12, color: '#6B6180' }}>{cg.address}</span>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginLeft: 'auto', fontSize: 13, fontWeight: 530, color: '#CFC9F8', alignItems: 'center' }}>
+                    {[...(cg.links_left ?? []), ...(cg.links_right ?? [])].map((it, i) => (
+                      <span key={i}>
+                        {it.label}
+                        {it.is_dropdown && <span style={{ color: '#8A82AC', fontSize: 10, marginLeft: 3 }}>▾</span>}
+                        {it.is_shared && <span style={{ color: '#8A82AC', fontSize: 10, marginLeft: 3 }}>↗ shared</span>}
+                      </span>
+                    ))}
+                    <span style={{ color: '#fff', fontWeight: 640, border: '1px solid #6B5CE7', padding: '5px 12px', borderRadius: 999 }}>
+                      Visit {cg.label}
+                    </span>
+                  </div>
+                  {cg.note && <div style={{ width: '100%', fontSize: 11, color: '#8B84A0', fontStyle: 'italic', marginTop: 2 }}>{cg.note}</div>}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="sec">
           <div className="sec-head"><span className="sec-num">03</span><h2>Footer</h2></div>
@@ -325,38 +385,45 @@ export default function SitemapPartnerViewV2({
             <span><b className="tag2 t-new">new</b> new to the site</span>
           </div>
           <div className="tiers">
-            {grouped.map(group => (
-              <div key={group.id} className="tier">
-                <div className="tier-head">
-                  <h3>{group.label}</h3>
-                  {group.meta && <span className="meta">{group.meta}</span>}
+            {grouped.map(group => {
+              const childSlugs  = 'childSlugs'  in group ? (group as PageGroup).childSlugs  : undefined
+              const overrides   = 'overrides'   in group ? (group as PageGroup).overrides   : undefined
+              return (
+                <div key={group.id} className="tier">
+                  <div className="tier-head">
+                    <h3>{group.label}</h3>
+                    {group.meta && <span className="meta">{group.meta}</span>}
+                  </div>
+                  <ul className="plist">
+                    {group.pages.map(p => {
+                      const sectionId = `page-${p.slug}`
+                      const hasNote   = openBySection.has(sectionId)
+                      const isChild   = childSlugs?.has(p.slug) ?? false
+                      const desc      = overrides?.get(p.slug) ?? p.purpose ?? p.what_changed ?? 'No description yet.'
+                      return (
+                        <li
+                          key={p.id}
+                          className={isChild ? 'child' : undefined}
+                          {...clickBind(sectionId, p.name)}
+                          style={hasNote && !readOnly ? { background: '#FFF8EC' } : (readOnly ? { cursor: 'default' } : undefined)}
+                        >
+                          <span className="pg">
+                            {p.name}
+                            {tagFor(p, review.content_migrations) && (
+                              <span className={`tag2 ${tagFor(p, review.content_migrations)!.className}`}>
+                                {tagFor(p, review.content_migrations)!.label}
+                              </span>
+                            )}
+                            {hasNote && <span className="tag2" style={{ background:'#FFB84D', color:'#341756' }}>note pending</span>}
+                          </span>
+                          <span className="desc">{desc}</span>
+                        </li>
+                      )
+                    })}
+                  </ul>
                 </div>
-                <ul className="plist">
-                  {group.pages.map(p => {
-                    const sectionId = `page-${p.slug}`
-                    const hasNote = openBySection.has(sectionId)
-                    return (
-                      <li
-                        key={p.id}
-                        {...clickBind(sectionId, p.name)}
-                        style={hasNote && !readOnly ? { background: '#FFF8EC' } : (readOnly ? { cursor: 'default' } : undefined)}
-                      >
-                        <span className="pg">
-                          {p.name}
-                          {tagFor(p, review.content_migrations) && (
-                            <span className={`tag2 ${tagFor(p, review.content_migrations)!.className}`}>
-                              {tagFor(p, review.content_migrations)!.label}
-                            </span>
-                          )}
-                          {hasNote && <span className="tag2" style={{ background:'#FFB84D', color:'#341756' }}>note pending</span>}
-                        </span>
-                        <span className="desc">{p.purpose || p.what_changed || 'No description yet.'}</span>
-                      </li>
-                    )
-                  })}
-                </ul>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </section>}
 
@@ -364,7 +431,14 @@ export default function SitemapPartnerViewV2({
           <div className="sec-head"><span className="sec-num">05</span><h2>What's changing from your current site</h2></div>
           <p className="sec-note">Almost nothing is being thrown away; it's being <b>reorganized</b>. Here's the honest picture:</p>
           <div className={`changed ${clickable('what-changed')}`} {...clickBind('what-changed', "What's changing")}>
-            {review.content_migrations.length > 0 ? (
+            {pres?.whats_changing_cards && pres.whats_changing_cards.length > 0 ? (
+              pres.whats_changing_cards.map(c => (
+                <div key={c.id} className="chcard">
+                  {c.tag && <span className={`tag2 ${tagClassFor(c.tag)}`} style={{ display: 'inline-block', marginBottom: 7 }}>{tagLabelFor(c.tag)}</span>}
+                  <p><b>{c.title}.</b> {c.body}</p>
+                </div>
+              ))
+            ) : review.content_migrations.length > 0 ? (
               review.content_migrations.slice(0, 6).map(m => (
                 <div key={m.id} className="chcard">
                   <p>
@@ -386,10 +460,22 @@ export default function SitemapPartnerViewV2({
         <section className="sec">
           <div className="sec-head"><span className="sec-num">06</span><h2>Why we shaped it this way</h2></div>
           <div className={`why ${clickable('why')}`} {...clickBind('why', "Why we shaped it this way")}>
-            <div className="wcard"><div className="ic">◆</div><h4>Serves the people you're reaching</h4><p>Every page is shaped around a real person, not an org chart: first-time visitors, regular attenders, and everyone in between.</p></div>
-            <div className="wcard"><div className="ic">◇</div><h4>Newcomers find their way</h4><p>Someone landing fresh can understand what {church} is about and take a next step in under a minute.</p></div>
-            <div className="wcard"><div className="ic">✦</div><h4>One church, one story</h4><p>Shared story blocks stay shared so visitors and members experience the same voice everywhere.</p></div>
-            <div className="wcard"><div className="ic">↗</div><h4>Built to grow</h4><p>As {church} grows, new pages slot into the same structure, no redesign needed.</p></div>
+            {pres?.why_cards && pres.why_cards.length > 0 ? (
+              pres.why_cards.map(c => (
+                <div key={c.id} className="wcard">
+                  <div className="ic">{c.icon ?? '◆'}</div>
+                  <h4>{c.title}</h4>
+                  <p>{c.body}</p>
+                </div>
+              ))
+            ) : (
+              <>
+                <div className="wcard"><div className="ic">◆</div><h4>Serves the people you're reaching</h4><p>Every page is shaped around a real person, not an org chart: first-time visitors, regular attenders, and everyone in between.</p></div>
+                <div className="wcard"><div className="ic">◇</div><h4>Newcomers find their way</h4><p>Someone landing fresh can understand what {church} is about and take a next step in under a minute.</p></div>
+                <div className="wcard"><div className="ic">✦</div><h4>One church, one story</h4><p>Shared story blocks stay shared so visitors and members experience the same voice everywhere.</p></div>
+                <div className="wcard"><div className="ic">↗</div><h4>Built to grow</h4><p>As {church} grows, new pages slot into the same structure, no redesign needed.</p></div>
+              </>
+            )}
           </div>
         </section>
 
@@ -410,9 +496,16 @@ export default function SitemapPartnerViewV2({
               />
 
               <ul style={{ marginTop: 22 }}>
-                <li><span className="n">1</span><span>Do the <b>page names</b> sound like {church}? We used your language, but you know your people best.</span></li>
-                <li><span className="n">2</span><span>Is anything <b>in the wrong place</b>, or <b>missing</b> that your people need?</span></li>
-                <li><span className="n">3</span><span>Anything you'd want to <b>add, combine, or rename</b> before we start writing?</span></li>
+                {(pres?.your_turn_prompts && pres.your_turn_prompts.length > 0
+                  ? pres.your_turn_prompts
+                  : [
+                      `Do the page names sound like ${church}? We used your language, but you know your people best.`,
+                      `Is anything in the wrong place, or missing that your people need?`,
+                      `Anything you'd want to add, combine, or rename before we start writing?`,
+                    ]
+                ).map((prompt, i) => (
+                  <li key={i}><span className="n">{i + 1}</span><span>{prompt}</span></li>
+                ))}
               </ul>
 
               <div className="actions">
@@ -498,6 +591,98 @@ export default function SitemapPartnerViewV2({
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
+
+/** Split a body string around a chosen emphasis phrase so it renders
+ *  in the serif-italic brand voice. Returns the original body when
+ *  the phrase isn't present so callers don't have to guard. */
+function renderWithEmPhrase(body: string, phrase: string | undefined) {
+  if (!phrase || !body.includes(phrase)) return body
+  const idx = body.indexOf(phrase)
+  return (
+    <>
+      {body.slice(0, idx)}
+      <em className="brand-em">{phrase}</em>
+      {body.slice(idx + phrase.length)}
+    </>
+  )
+}
+
+function tagClassFor(tag: 'kept' | 'unified' | 'consolidated' | 'new'): string {
+  switch (tag) {
+    case 'kept':         return 't-keep'
+    case 'unified':      return 't-uni'
+    case 'consolidated': return 't-cons'
+    case 'new':          return 't-new'
+  }
+}
+function tagLabelFor(tag: 'kept' | 'unified' | 'consolidated' | 'new'): string {
+  switch (tag) {
+    case 'kept':         return 'have today'
+    case 'unified':      return 'now shared'
+    case 'consolidated': return 'combined'
+    case 'new':          return 'new'
+  }
+}
+
+interface PageGroup { id: string; label: string; meta?: string; pages: ReviewPage[]; childSlugs?: Set<string>; overrides?: Map<string, string> }
+
+/** Group pages according to strategist-authored tiers. Each tier's
+ *  `page_slugs` (or `page_entries`) lists which review pages go in
+ *  which tier, in what order. Any pages the strategist didn't
+ *  assign land in a final "Other pages" tier so nothing is silently
+ *  dropped. */
+function groupPagesByTiers(
+  pages: ReviewPage[],
+  tiers: NonNullable<SitemapReview['presentation']>['tiers'] & object,
+): PageGroup[] {
+  const bySlug = new Map(pages.map(p => [p.slug, p]))
+  const assigned = new Set<string>()
+  const groups: PageGroup[] = []
+
+  for (const tier of tiers ?? []) {
+    const orderedPages: ReviewPage[] = []
+    const childSlugs = new Set<string>()
+    const overrides = new Map<string, string>()
+
+    if (tier.page_entries && tier.page_entries.length > 0) {
+      for (const entry of tier.page_entries) {
+        const p = bySlug.get(entry.slug)
+        if (!p) continue
+        assigned.add(entry.slug)
+        orderedPages.push(p)
+        if (entry.is_child) childSlugs.add(entry.slug)
+        if (entry.description_override) overrides.set(entry.slug, entry.description_override)
+      }
+    } else {
+      for (const slug of tier.page_slugs ?? []) {
+        const p = bySlug.get(slug)
+        if (!p) continue
+        assigned.add(slug)
+        orderedPages.push(p)
+      }
+    }
+
+    groups.push({
+      id:     `tier-${tier.id}`,
+      label:  tier.letter ? `${tier.letter}. ${tier.title}` : tier.title,
+      meta:   tier.meta,
+      pages:  orderedPages,
+      childSlugs,
+      overrides,
+    })
+  }
+
+  const unassigned = pages.filter(p => !assigned.has(p.slug))
+  if (unassigned.length > 0) {
+    groups.push({
+      id:    'tier-other',
+      label: 'Other pages',
+      meta:  `${unassigned.length} unassigned`,
+      pages: unassigned,
+    })
+  }
+  return groups
+}
 
 function groupPagesForList(pages: ReviewPage[], primary: NavItem[]): Array<{ id: string; label: string; meta?: string; pages: ReviewPage[] }> {
   // Group by top-level nav parent when derivable; else by parent_slug; else lump into "All pages".

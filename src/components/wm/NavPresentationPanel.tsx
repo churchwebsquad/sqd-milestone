@@ -1,5 +1,5 @@
 /**
- * NavPresentationPanel — shared nav-presentation visualization.
+ * NavPresentationPanel. Shared nav-presentation visualization.
  *
  * Originally lived inside src/components/wm/pipeline/previews/
  * SitemapPreview.tsx (legacy Copy Engine view). Extracted here so the
@@ -7,13 +7,13 @@
  * rendering and the strategist sees the same shell/megamenu/offcanvas
  * cards regardless of which pipeline produced the artifact.
  *
- * Pure presentation — no data loading, no Supabase calls. Takes a
+ * Pure presentation. No data loading, no Supabase calls. Takes a
  * NavPresentation object (or null), renders nothing when null.
  */
 
 import type { ReactNode } from 'react'
 
-// ── Types (mirror SitemapPreview's shape — kept local so this module
+// ── Types (mirror SitemapPreview's shape, kept local so this module
 // can ship without a circular import). ────────────────────────────────
 
 export interface NavPresentationVisibleTopLevel {
@@ -83,27 +83,46 @@ const SHELL_LABEL: Record<string, string> = {
 
 // ────────────────────────────────────────────────────────────────────
 
-export function NavPresentationPanel({ presentation }: { presentation: NavPresentation | null | undefined }) {
-  if (!presentation) return null
-  const shell = presentation.shell
-  return (
-    <Section label="Nav presentation">
-      <div className="rounded-md border-2 border-wm-accent/40 bg-wm-accent-tint/30 px-3 py-2.5 mb-4">
-        <div className="flex items-baseline gap-2 mb-1 flex-wrap">
-          <span className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">Shell</span>
-          <span className="text-[14px] font-semibold text-wm-text">{shell ? SHELL_LABEL[shell] ?? shell : '—'}</span>
-        </div>
-        {presentation.presentation_rationale && (
-          <p className="text-[12px] text-wm-text leading-relaxed">{presentation.presentation_rationale}</p>
-        )}
-      </div>
+/** Visual variant. `'staff'` (default) surfaces strategist framing:
+ *  the section wrapper, shell / rationale callout, internal labels
+ *  ("Visible header, what the visitor sees at rest"), and the URL
+ *  slug hints under each link. `'partner'` hides all of that so the
+ *  same component is safe to embed inside the partner-facing sitemap
+ *  review portal: just the visual mockup, no strategist voice. */
+export type NavPresentationPanelVariant = 'staff' | 'partner'
 
-      {/* Visible top-level — bar mockup */}
+export function NavPresentationPanel({
+  presentation,
+  variant = 'staff',
+}: {
+  presentation: NavPresentation | null | undefined
+  variant?:     NavPresentationPanelVariant
+}) {
+  if (!presentation) return null
+  const shell    = presentation.shell
+  const isPartner = variant === 'partner'
+  const body = (
+    <>
+      {!isPartner && (
+        <div className="rounded-md border-2 border-wm-accent/40 bg-wm-accent-tint/30 px-3 py-2.5 mb-4">
+          <div className="flex items-baseline gap-2 mb-1 flex-wrap">
+            <span className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">Shell</span>
+            <span className="text-[14px] font-semibold text-wm-text">{shell ? SHELL_LABEL[shell] ?? shell : '…'}</span>
+          </div>
+          {presentation.presentation_rationale && (
+            <p className="text-[12px] text-wm-text leading-relaxed">{presentation.presentation_rationale}</p>
+          )}
+        </div>
+      )}
+
+      {/* Visible top-level: bar mockup */}
       {presentation.visible_top_level && presentation.visible_top_level.length > 0 && (
         <div className="mb-4">
-          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">
-            Visible header — what the visitor sees at rest
-          </p>
+          {!isPartner && (
+            <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">
+              Visible header. What the visitor sees at rest.
+            </p>
+          )}
           <div className="rounded-md border border-wm-border bg-wm-bg/40 px-3 py-2 flex flex-wrap items-center gap-2">
             {presentation.visible_top_level.map((item, i) => (
               <VisibleTopLevelChip key={i} item={item} />
@@ -114,16 +133,18 @@ export function NavPresentationPanel({ presentation }: { presentation: NavPresen
 
       {/* Per-shell layout */}
       {shell === 'standard_dropdowns' && presentation.standard_dropdowns && (
-        <StandardDropdownsLayout groups={presentation.standard_dropdowns.groups ?? []} />
+        <StandardDropdownsLayout groups={presentation.standard_dropdowns.groups ?? []} variant={variant} />
       )}
       {shell === 'megamenu' && presentation.megamenu_panels && (
-        <MegamenuLayout panels={presentation.megamenu_panels} />
+        <MegamenuLayout panels={presentation.megamenu_panels} variant={variant} />
       )}
       {shell === 'offcanvas' && presentation.offcanvas_overlay && (
-        <OffcanvasLayout overlay={presentation.offcanvas_overlay} />
+        <OffcanvasLayout overlay={presentation.offcanvas_overlay} variant={variant} />
       )}
-    </Section>
+    </>
   )
+
+  return isPartner ? <div>{body}</div> : <Section label="Nav presentation">{body}</Section>
 }
 
 function VisibleTopLevelChip({ item }: { item: NavPresentationVisibleTopLevel }) {
@@ -144,29 +165,32 @@ function VisibleTopLevelChip({ item }: { item: NavPresentationVisibleTopLevel })
         ? 'bg-wm-accent text-white font-semibold'
         : 'bg-wm-bg-elevated border border-wm-border text-wm-text',
     ].join(' ')}>
-      {item.label ?? item.group_label ?? '—'}
+      {item.label ?? item.group_label ?? '…'}
       {isGroup && <span className="text-[10px] opacity-60">▾</span>}
     </span>
   )
 }
 
-function StandardDropdownsLayout({ groups }: { groups: NavPresentationDropdownGroup[] }) {
+function StandardDropdownsLayout({ groups, variant }: { groups: NavPresentationDropdownGroup[]; variant: NavPresentationPanelVariant }) {
+  const isPartner = variant === 'partner'
   return (
     <div>
-      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">
-        Dropdown panels
-      </p>
+      {!isPartner && (
+        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">
+          Dropdown panels
+        </p>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {groups.map((g, i) => (
           <div key={i} className="rounded-md border border-wm-border bg-wm-bg/40 p-3">
             <p className="text-[12px] font-semibold text-wm-text mb-1.5">
-              {g.group_label ?? '—'} ▾
+              {g.group_label ?? '…'} ▾
             </p>
             <ul className="space-y-1.5">
               {(g.children ?? []).map((c, j) => (
                 <li key={j} className="text-[12px]">
                   <span className="text-wm-text">{c.label}</span>
-                  {c.slug && <span className="ml-1.5 text-[10px] font-mono text-wm-text-subtle">/{c.slug}</span>}
+                  {!isPartner && c.slug && <span className="ml-1.5 text-[10px] font-mono text-wm-text-subtle">/{c.slug}</span>}
                   {c.one_line_description && (
                     <p className="text-[11px] text-wm-text-muted leading-snug mt-0.5">
                       {c.one_line_description}
@@ -182,24 +206,30 @@ function StandardDropdownsLayout({ groups }: { groups: NavPresentationDropdownGr
   )
 }
 
-function MegamenuLayout({ panels }: { panels: NavPresentationMegamenuPanel[] }) {
+function MegamenuLayout({ panels, variant }: { panels: NavPresentationMegamenuPanel[]; variant: NavPresentationPanelVariant }) {
+  const isPartner = variant === 'partner'
   return (
     <div className="space-y-4">
-      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
-        Megamenu panels — what opens on each top-level hover
-      </p>
+      {!isPartner && (
+        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
+          Megamenu panels. What opens on each top-level hover.
+        </p>
+      )}
       {panels.map((panel, i) => (
         <div key={i} className="rounded-md border border-wm-accent/30 bg-wm-bg/40">
           <div className="px-3 py-1.5 border-b border-wm-accent/20 bg-wm-accent-tint/30">
             <p className="text-[11px] text-wm-text">
-              Opens from: <span className="font-semibold">&ldquo;{panel.triggered_by ?? '—'}&rdquo;</span>
+              {isPartner
+                ? <><span className="font-semibold">{panel.triggered_by ?? '…'}</span></>
+                : <>Opens from: <span className="font-semibold">&ldquo;{panel.triggered_by ?? '…'}&rdquo;</span></>
+              }
             </p>
           </div>
           <div className="p-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
             {(panel.columns ?? []).map((col, j) => (
               <div key={j} className="rounded border border-wm-border bg-wm-bg-elevated p-2.5">
                 <p className="text-[11px] font-semibold text-wm-accent-strong mb-1">
-                  {col.heading ?? '—'}
+                  {col.heading ?? '…'}
                 </p>
                 {col.description && (
                   <p className="text-[10px] text-wm-text-muted italic leading-snug mb-2">{col.description}</p>
@@ -208,7 +238,7 @@ function MegamenuLayout({ panels }: { panels: NavPresentationMegamenuPanel[] }) 
                   {(col.links ?? []).map((link, k) => (
                     <li key={k} className="text-[11px]">
                       <span className="text-wm-text font-medium">{link.label}</span>
-                      {link.slug && (
+                      {!isPartner && link.slug && (
                         <span className="ml-1 text-[10px] font-mono text-wm-text-subtle">/{link.slug}</span>
                       )}
                       {link.one_line_description && (
@@ -222,7 +252,7 @@ function MegamenuLayout({ panels }: { panels: NavPresentationMegamenuPanel[] }) 
             {panel.featured_tile && (
               <div className="rounded border-2 border-wm-accent bg-wm-accent-tint/40 p-2.5 col-span-1 md:col-span-1 lg:col-span-1">
                 <p className="text-[9px] uppercase tracking-widest font-bold text-wm-accent-strong mb-1">
-                  Featured {panel.featured_tile.kind?.replace(/_/g, ' ') ?? 'tile'}
+                  {isPartner ? 'Featured' : `Featured ${panel.featured_tile.kind?.replace(/_/g, ' ') ?? 'tile'}`}
                 </p>
                 {panel.featured_tile.heading && (
                   <p className="text-[12px] font-semibold text-wm-text leading-tight mb-1">
@@ -246,12 +276,15 @@ function MegamenuLayout({ panels }: { panels: NavPresentationMegamenuPanel[] }) 
   )
 }
 
-function OffcanvasLayout({ overlay }: { overlay: NonNullable<NavPresentation['offcanvas_overlay']> }) {
+function OffcanvasLayout({ overlay, variant }: { overlay: NonNullable<NavPresentation['offcanvas_overlay']>; variant: NavPresentationPanelVariant }) {
+  const isPartner = variant === 'partner'
   return (
     <div>
-      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">
-        Off-canvas overlay — full nav lives behind the hamburger
-      </p>
+      {!isPartner && (
+        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">
+          Off-canvas overlay. Full nav lives behind the hamburger.
+        </p>
+      )}
       <div className="rounded-md border-2 border-wm-accent/30 bg-wm-bg/60 p-3 max-w-md">
         {overlay.hero_message && (
           <p className="text-[13px] text-wm-text font-semibold mb-3 italic">
@@ -267,7 +300,7 @@ function OffcanvasLayout({ overlay }: { overlay: NonNullable<NavPresentation['of
               {(section.links ?? []).map((link, j) => (
                 <li key={j} className="text-[12px] text-wm-text">
                   {link.label}
-                  {link.slug && <span className="ml-1 text-[10px] font-mono text-wm-text-subtle">/{link.slug}</span>}
+                  {!isPartner && link.slug && <span className="ml-1 text-[10px] font-mono text-wm-text-subtle">/{link.slug}</span>}
                 </li>
               ))}
             </ul>

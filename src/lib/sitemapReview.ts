@@ -217,6 +217,111 @@ export interface PartnerEditRequest {
   author_name?:  string
 }
 
+/** Authored "presentation" layer: fields the strategist (or a Claude
+ *  Code cowork session) writes into after the sitemap step has already
+ *  produced the mechanical output. These are the extras that turn the
+ *  system-generated sitemap into a partner-ready walkthrough:
+ *  per-congregation nav bars, featured highlights, tiered page
+ *  grouping, authored summary cards, and partner prompts.
+ *
+ *  Doxology's cowork session, for example, produces the 3-congregation
+ *  persistent nav, the Kingdom Come featured highlight, and the
+ *  4 "what's changing" summary cards; those get pushed back into
+ *  roadmap_state.sitemap_review.presentation and picked up here.
+ *
+ *  Every field is optional. When absent, the partner render falls
+ *  back to the auto-derived defaults so a partner who hasn't had a
+ *  cowork session still sees a usable review. */
+export interface SitemapReviewPresentation {
+  /** Optional italic-emphasis phrase in the hero subline. Rendered
+   *  in the serif-italic brand voice inside the surrounding sans
+   *  body. Doxology example: "three congregations". */
+  hero_em_phrase?: string
+
+  /** Per-congregation persistent nav bars, rendered below the
+   *  Primary Navigation section. Absent (or empty) for
+   *  single-campus partners. Doxology-specific override; the app
+   *  does not derive this from anywhere. */
+  congregations?: Array<{
+    id:            string
+    label:         string
+    service_time?: string
+    address?:      string
+    is_primary?:   boolean
+    /** Left-column and right-column links, mirroring the artifact's
+     *  two-column persistent nav layout. `is_shared: true` renders
+     *  the "shared" pill; `is_dropdown: true` renders the ▾ caret. */
+    links_left?:   Array<{ label: string; slug?: string; is_shared?: boolean; is_dropdown?: boolean; kids?: string }>
+    links_right?:  Array<{ label: string; slug?: string; is_shared?: boolean; is_dropdown?: boolean; kids?: string }>
+    /** Optional visit-page slug this congregation's "Visit" button
+     *  routes to. Falls back to `/visit` when unset. */
+    visit_slug?:   string
+    /** Optional note rendered under address (e.g., "Future campus:
+     *  1805 FM 156, Haslet"). */
+    note?:         string
+  }>
+
+  /** Optional featured highlight anchored in the primary nav
+   *  megamenu. Doxology: Kingdom Come, linking to its own site. */
+  featured_highlight?: {
+    label:        string
+    description:  string
+    url?:         string
+    cta_label?:   string
+    secondary_cta_label?: string
+  }
+
+  /** Tiered grouping of the page list. When absent, the render
+   *  falls back to grouping by parent_slug. When present, each page
+   *  slug in `page_slugs` slots into that tier in order; unassigned
+   *  pages appear in a final "Other pages" tier so nothing is
+   *  silently dropped. */
+  tiers?: Array<{
+    id:         string
+    letter?:    string
+    title:      string
+    meta?:      string
+    /** Slugs of pages that live in this tier. Order determines
+     *  the display order within the tier. Child pages can be
+     *  marked with an `is_child` flag on the tier entry (see the
+     *  `page_entries` alternate below) or via ReviewPage.parent_slug
+     *  when the tier just lists top-level slugs. */
+    page_slugs?: string[]
+    /** Alternate: fully-specified entries with per-page overrides
+     *  (child indent, custom description). Preferred over
+     *  page_slugs when authoring a rich Southwest-style tier. */
+    page_entries?: Array<{
+      slug:        string
+      is_child?:   boolean
+      description_override?: string
+    }>
+  }>
+
+  /** Authored "What's changing from your current site" summary
+   *  cards. When present, replaces the default (which is derived
+   *  from content_migrations). The artifact renders 4 of these,
+   *  each with a tag pill + short heading + body sentence. */
+  whats_changing_cards?: Array<{
+    id:    string
+    tag?:  'kept' | 'unified' | 'consolidated' | 'new'
+    title: string
+    body:  string
+  }>
+
+  /** Authored "Why we shaped it this way" cards. When present,
+   *  replaces the default 4 cards the renderer ships. */
+  why_cards?: Array<{
+    id:    string
+    icon?: string
+    title: string
+    body:  string
+  }>
+
+  /** Authored "Your turn" prompts. When present, replaces the
+   *  default 3 prompts the CTA section ships. */
+  your_turn_prompts?: string[]
+}
+
 /** Snapshot of the cowork sitemap step's nav_presentation. Copied
  *  into the review at compose time so the partner portal can render
  *  the same visible-header + megamenu preview the strategist saw in
@@ -262,6 +367,13 @@ export interface SitemapReview {
    *  NavPresentationPanel so the strategist and partner see the same
    *  visible-header + megamenu preview. */
   nav_presentation?: SitemapReviewNavPresentation
+
+  /** Authored presentation layer for the artifact-style wrapper
+   *  sections (congregations, featured highlight, page tiers,
+   *  summary cards, prompts). Populated by cowork sessions after
+   *  the sitemap step; every field is optional and the renderer
+   *  falls back to sensible defaults when absent. */
+  presentation?: SitemapReviewPresentation
 
   /** Intro block shown at the top of the partner-facing review; sets
    *  the tone. Editable; strategist authors, partner can rewrite. */
@@ -799,6 +911,7 @@ export function composeSitemapReview(args: {
     executive_summary:  composedExecSummary,
     navigation_strategy: composedNavStrategy,
     nav_presentation:   composedNavPresentation,
+    presentation:       existing?.presentation,
     footer_info:        composedFooter,
     pages:              composedPages,
     persona_postures:   composedPostures,
