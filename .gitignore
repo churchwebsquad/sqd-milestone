@@ -34,3 +34,5 @@ tmp-srp-reference/
 *.sln
 *.sw?
 .vercel
+.env*
+.claude/settings.local.json

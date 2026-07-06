@@ -48,6 +48,7 @@ function parseSection(description: string, header: string): string {
     if (new RegExp(`^${header}\\s*$`, 'i').test(trimmed)) { capturing = true; continue }
     if (capturing) {
       if (/^[A-Z][A-Z\s]{3,}$/.test(trimmed) && trimmed === trimmed.toUpperCase()) break
+      if (/^external\s+link\s+for\s+sermon\s+notes/i.test(trimmed)) break
       result.push(line)
     }
   }
