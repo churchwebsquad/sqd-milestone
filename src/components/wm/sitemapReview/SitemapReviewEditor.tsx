@@ -30,6 +30,8 @@ import {
   type SitemapReview,
 } from '../../../lib/sitemapReview'
 import { buildPortalUrl } from '../../../lib/portalUrl'
+import { PartnerEditRequestsInbox } from './PartnerEditRequestsInbox'
+import SitemapPartnerViewV2 from './SitemapPartnerViewV2'
 
 interface Props {
   projectId: string
@@ -51,6 +53,7 @@ export function SitemapReviewEditor({
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -157,6 +160,26 @@ export function SitemapReviewEditor({
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <div className="inline-flex rounded-full border border-wm-border overflow-hidden text-[11.5px] font-semibold">
+              <button
+                type="button"
+                onClick={() => setViewMode('edit')}
+                className={
+                  viewMode === 'edit'
+                    ? 'bg-wm-accent-strong text-white px-3 py-1.5'
+                    : 'bg-white text-wm-text-muted px-3 py-1.5 hover:text-wm-text'
+                }
+              >Edit</button>
+              <button
+                type="button"
+                onClick={() => setViewMode('preview')}
+                className={
+                  viewMode === 'preview'
+                    ? 'bg-wm-accent-strong text-white px-3 py-1.5'
+                    : 'bg-white text-wm-text-muted px-3 py-1.5 hover:text-wm-text'
+                }
+              >Preview as partner</button>
+            </div>
             {saving && <span className="text-[11px] text-wm-text-subtle">Saving…</span>}
             {shareUrl && (
               <a
@@ -181,16 +204,23 @@ export function SitemapReviewEditor({
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
-          <IntroEditor review={review} onChange={persist} disabled={isApproved} />
-          <ExecutiveSummaryEditor review={review} onChange={persist} disabled={isApproved} />
-          <NavigationStrategyEditor review={review} onChange={persist} disabled={isApproved} />
-          <PersonaPosturesEditor review={review} onChange={persist} disabled={isApproved} />
-          <PagesEditor review={review} onChange={persist} disabled={isApproved} />
-          <NavLayoutEditor review={review} onChange={persist} disabled={isApproved} />
-          <ContentMigrationsEditor review={review} onChange={persist} disabled={isApproved} />
-          <FooterInfoEditor review={review} onChange={persist} disabled={isApproved} />
-        </div>
+        {viewMode === 'edit' ? (
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+            <PartnerEditRequestsInbox review={review} onChange={persist} disabled={isApproved} />
+            <IntroEditor review={review} onChange={persist} disabled={isApproved} />
+            <ExecutiveSummaryEditor review={review} onChange={persist} disabled={isApproved} />
+            <NavigationStrategyEditor review={review} onChange={persist} disabled={isApproved} />
+            <PersonaPosturesEditor review={review} onChange={persist} disabled={isApproved} />
+            <PagesEditor review={review} onChange={persist} disabled={isApproved} />
+            <NavLayoutEditor review={review} onChange={persist} disabled={isApproved} />
+            <ContentMigrationsEditor review={review} onChange={persist} disabled={isApproved} />
+            <FooterInfoEditor review={review} onChange={persist} disabled={isApproved} />
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto">
+            <SitemapPartnerViewV2 review={review} churchName={churchName} readOnly />
+          </div>
+        )}
 
         {/* Footer */}
         <div className="border-t border-wm-border px-5 py-3 flex items-center gap-2 flex-wrap">

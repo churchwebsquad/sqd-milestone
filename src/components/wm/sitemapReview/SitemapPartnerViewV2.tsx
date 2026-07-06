@@ -16,7 +16,7 @@
  * renders when the strategist declared one.
  */
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type {
   ContentMigration,
   FooterInfo,
@@ -159,15 +159,20 @@ export interface SitemapPartnerViewV2Props {
   churchName?: string | null
   saving?:     boolean
   authorName?: string
-  onAddEditRequest:    (req: Omit<PartnerEditRequest, 'id' | 'created_at' | 'status'>) => Promise<void> | void
+  /** Read-only preview mode. Used by staff to see exactly what the
+   *  partner sees without any interactive controls. Disables section
+   *  click targets, hides the drawer, hides the "Your turn" CTA and
+   *  the approve/submit buttons, and swaps in a staff-facing banner. */
+  readOnly?:   boolean
+  onAddEditRequest?:    (req: Omit<PartnerEditRequest, 'id' | 'created_at' | 'status'>) => Promise<void> | void
   onRemoveEditRequest?: (id: string) => Promise<void> | void
-  onUpdatePartnerNotes: (notes: string) => Promise<void> | void
-  onApprove:   () => Promise<void> | void
-  onSubmitFeedback: () => Promise<void> | void
+  onUpdatePartnerNotes?: (notes: string) => Promise<void> | void
+  onApprove?:   () => Promise<void> | void
+  onSubmitFeedback?: () => Promise<void> | void
 }
 
 export default function SitemapPartnerViewV2({
-  review, churchName, saving, authorName,
+  review, churchName, saving, authorName, readOnly = false,
   onAddEditRequest, onRemoveEditRequest,
   onUpdatePartnerNotes, onApprove, onSubmitFeedback,
 }: SitemapPartnerViewV2Props) {
@@ -196,6 +201,7 @@ export default function SitemapPartnerViewV2({
   const shareMode = hasPendingEdits || hasNotes
 
   const openDrawer = (id: string, label: string) => {
+    if (readOnly) return
     setDrawer({ id, label })
     setComment('')
     setSuggestion('')
@@ -203,7 +209,7 @@ export default function SitemapPartnerViewV2({
   const closeDrawer = () => setDrawer(null)
 
   const submitDrawer = async () => {
-    if (!drawer || !comment.trim()) return
+    if (!drawer || !comment.trim() || !onAddEditRequest) return
     await onAddEditRequest({
       section_id:       drawer.id,
       section_label:    drawer.label,
@@ -215,6 +221,22 @@ export default function SitemapPartnerViewV2({
     setSuggestion('')
     // Keep drawer open in case they want to add another; empty inputs signal "ready for next".
   }
+
+  // Wrap the click handler so read-only mode makes sections
+  // non-interactive without duplicating the JSX branch.
+  const clickBind = (id: string, label: string) => readOnly
+    ? {}
+    : {
+        role: 'button' as const,
+        tabIndex: 0,
+        onClick: () => openDrawer(id, label),
+        onKeyDown: (e: ReactKeyboardEvent) => {
+          if (e.key === 'Enter' || e.key === ' ') openDrawer(id, label)
+        },
+      }
+  const clickable = (id: string) => readOnly
+    ? ''
+    : `clickable ${openBySection.has(id) ? 'has-note' : ''}`
 
   const church = churchName ?? review.footer_info?.church_name ?? 'Your church'
   const hero = review.intro
@@ -228,13 +250,13 @@ export default function SitemapPartnerViewV2({
       <style dangerouslySetInnerHTML={{ __html: scopedCss }} />
       <div className="wrap">
 
+        {readOnly && (
+          <div style={{ background: '#EDE9FC', color: '#341756', textAlign: 'center', padding: '10px 20px', fontSize: 12.5, fontWeight: 620, letterSpacing: '.04em', textTransform: 'uppercase', borderRadius: 999, margin: '0 auto 20px', maxWidth: 480 }}>
+            Preview · this is what your partner sees
+          </div>
+        )}
         {hero && (
-          <header
-            className={sectionClass('intro', openBySection)}
-            role="button" tabIndex={0}
-            onClick={() => openDrawer('intro', 'Introduction')}
-            onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && openDrawer('intro', 'Introduction')}
-          >
+          <header className={clickable('intro')} {...clickBind('intro', 'Introduction')}>
             <div className="hero">
               <div className="eyebrow">Your New Website · Structure &amp; Navigation</div>
               <h1>{hero.headline}</h1>
@@ -256,12 +278,7 @@ export default function SitemapPartnerViewV2({
           {review.navigation_strategy && (
             <p className="sec-note">{review.navigation_strategy}</p>
           )}
-          <div
-            className={`browser clickable ${openBySection.has('nav-primary') ? 'has-note' : ''}`}
-            role="button" tabIndex={0}
-            onClick={() => openDrawer('nav-primary', 'Primary navigation')}
-            onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && openDrawer('nav-primary', 'Primary navigation')}
-          >
+          <div className={`browser ${clickable('nav-primary')}`} {...clickBind('nav-primary', 'Primary navigation')}>
             <nav className="topnav">
               <div className="brand-mark"><span className="glyph">◆</span> {church}</div>
               <div className="items">
@@ -305,10 +322,8 @@ export default function SitemapPartnerViewV2({
             <div className="sec-head"><span className="sec-num">03</span><h2>{review.nav_layout.secondary_label ?? 'Secondary Navigation'}</h2></div>
             <p className="sec-note">Important supporting links that stay one tap away without competing with the primary nav.</p>
             <div
-              className={`browser clickable ${openBySection.has('nav-secondary') ? 'has-note' : ''}`}
-              role="button" tabIndex={0}
-              onClick={() => openDrawer('nav-secondary', review.nav_layout.secondary_label ?? 'Secondary navigation')}
-              onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && openDrawer('nav-secondary', review.nav_layout.secondary_label ?? 'Secondary navigation')}
+              className={`browser ${clickable('nav-secondary')}`}
+              {...clickBind('nav-secondary', review.nav_layout.secondary_label ?? 'Secondary navigation')}
               style={{ background: '#341756', borderColor: '#341756' }}
             >
               <div style={{ padding: '18px 22px', display: 'flex', gap: 18, flexWrap: 'wrap', color: '#EDE9FC', fontSize: 14, fontWeight: 530 }}>
@@ -325,10 +340,8 @@ export default function SitemapPartnerViewV2({
             <div className="sec-head"><span className="sec-num">04</span><h2>Shared Hub Pages</h2></div>
             <p className="sec-note">Warm welcome pages that lead into the deeper structure — the first place a curious guest lands.</p>
             <div
-              className={`cards3 clickable ${openBySection.has('hubs') ? 'has-note' : ''}`}
-              role="button" tabIndex={0}
-              onClick={() => openDrawer('hubs', 'Shared hub pages')}
-              onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && openDrawer('hubs', 'Shared hub pages')}
+              className={`cards3 ${clickable('hubs')}`}
+              {...clickBind('hubs', 'Shared hub pages')}
               style={{ padding: '8px 0' }}
             >
               {hubs.map(h => (
@@ -350,12 +363,7 @@ export default function SitemapPartnerViewV2({
           <section className="sec">
             <div className="sec-head"><span className="sec-num">05</span><h2>Footer</h2></div>
             <p className="sec-note">Every page ends here — your contact info, everyday links, and a place to stay in touch.</p>
-            <div
-              className={`footer-preview clickable ${openBySection.has('footer') ? 'has-note' : ''}`}
-              role="button" tabIndex={0}
-              onClick={() => openDrawer('footer', 'Footer')}
-              onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && openDrawer('footer', 'Footer')}
-            >
+            <div className={`footer-preview ${clickable('footer')}`} {...clickBind('footer', 'Footer')}>
               <div className="fbrand">◆ {review.footer_info.church_name ?? church}</div>
               <div className="fmeta">
                 {review.footer_info.address && <div>{review.footer_info.address}</div>}
@@ -375,9 +383,9 @@ export default function SitemapPartnerViewV2({
           </section>
         )}
 
-        <section className="sec">
+        {review.pages.length > 0 && <section className="sec">
           <div className="sec-head"><span className="sec-num">06</span><h2>Full Page List</h2></div>
-          <p className="sec-note">Click any page to leave a note about it: rename, move, combine, or ask a question.</p>
+          <p className="sec-note">{readOnly ? 'Every page in the sitemap, grouped by parent.' : 'Click any page to leave a note about it: rename, move, combine, or ask a question.'}</p>
           {grouped.some(g => g.pages.some(p => p.what_changed)) && (
             <div className="legend">
               <span><b className="tag2 t-keep">have today</b> already on your site</span>
@@ -400,10 +408,8 @@ export default function SitemapPartnerViewV2({
                     return (
                       <li
                         key={p.id}
-                        onClick={() => openDrawer(sectionId, p.name)}
-                        role="button" tabIndex={0}
-                        onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && openDrawer(sectionId, p.name)}
-                        style={hasNote ? { background: '#FFF8EC' } : undefined}
+                        {...clickBind(sectionId, p.name)}
+                        style={hasNote && !readOnly ? { background: '#FFF8EC' } : (readOnly ? { cursor: 'default' } : undefined)}
                       >
                         <span className="pg">
                           {p.name}
@@ -422,18 +428,13 @@ export default function SitemapPartnerViewV2({
               </div>
             ))}
           </div>
-        </section>
+        </section>}
 
         {review.content_migrations.length > 0 && (
           <section className="sec">
             <div className="sec-head"><span className="sec-num">07</span><h2>What's changing from your current site</h2></div>
             <p className="sec-note">Almost nothing is being thrown away; it's being <b>reorganized</b>. Here's the honest picture:</p>
-            <div
-              className={`changed clickable ${openBySection.has('what-changed') ? 'has-note' : ''}`}
-              role="button" tabIndex={0}
-              onClick={() => openDrawer('what-changed', "What's changing")}
-              onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && openDrawer('what-changed', "What's changing")}
-            >
+            <div className={`changed ${clickable('what-changed')}`} {...clickBind('what-changed', "What's changing")}>
               {review.content_migrations.slice(0, 6).map(m => (
                 <div key={m.id} className="chcard">
                   <p>
@@ -449,12 +450,7 @@ export default function SitemapPartnerViewV2({
 
         <section className="sec">
           <div className="sec-head"><span className="sec-num">08</span><h2>Why we shaped it this way</h2></div>
-          <div
-            className={`why clickable ${openBySection.has('why') ? 'has-note' : ''}`}
-            role="button" tabIndex={0}
-            onClick={() => openDrawer('why', "Why we shaped it this way")}
-            onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && openDrawer('why', "Why we shaped it this way")}
-          >
+          <div className={`why ${clickable('why')}`} {...clickBind('why', "Why we shaped it this way")}>
             <div className="wcard"><div className="ic">◆</div><h4>Serves the people you're reaching</h4><p>Every page is shaped around a real person, not an org chart — first-time visitors, regular attenders, and everyone in between.</p></div>
             <div className="wcard"><div className="ic">◇</div><h4>Newcomers find their way</h4><p>Someone landing fresh can understand what {church} is about and take a next step in under a minute.</p></div>
             <div className="wcard"><div className="ic">✦</div><h4>One church, one story</h4><p>Shared story blocks stay shared so visitors and members experience the same voice everywhere.</p></div>
@@ -462,57 +458,59 @@ export default function SitemapPartnerViewV2({
           </div>
         </section>
 
-        <section className="sec">
-          <div className="turn">
-            <h2>Your turn, <em className="brand-em">tell us what you think</em></h2>
-            <p>This is your site, and this is the moment to shape it. Click any section above to leave a note pinned to it, or drop overall thoughts here.</p>
+        {!readOnly && (
+          <section className="sec">
+            <div className="turn">
+              <h2>Your turn, <em className="brand-em">tell us what you think</em></h2>
+              <p>This is your site, and this is the moment to shape it. Click any section above to leave a note pinned to it, or drop overall thoughts here.</p>
 
-            <label htmlFor="partner-notes" className="mega-label" style={{ color: '#D8CFF3', display: 'block', marginTop: 14, marginBottom: 8 }}>Overall notes</label>
-            <textarea
-              id="partner-notes"
-              value={notesDraft}
-              onChange={e => setNotesDraft(e.target.value)}
-              onBlur={() => { if (notesDraft !== (review.partner_notes ?? '')) void onUpdatePartnerNotes(notesDraft) }}
-              placeholder="Anything overall — names, missing pages, tone, priorities…"
-              style={{ width: '100%', minHeight: 80, padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 14, fontFamily: 'inherit', resize: 'vertical' }}
-            />
+              <label htmlFor="partner-notes" className="mega-label" style={{ color: '#D8CFF3', display: 'block', marginTop: 14, marginBottom: 8 }}>Overall notes</label>
+              <textarea
+                id="partner-notes"
+                value={notesDraft}
+                onChange={e => setNotesDraft(e.target.value)}
+                onBlur={() => { if (onUpdatePartnerNotes && notesDraft !== (review.partner_notes ?? '')) void onUpdatePartnerNotes(notesDraft) }}
+                placeholder="Anything overall — names, missing pages, tone, priorities…"
+                style={{ width: '100%', minHeight: 80, padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 14, fontFamily: 'inherit', resize: 'vertical' }}
+              />
 
-            <ul style={{ marginTop: 22 }}>
-              <li><span className="n">1</span><span>Do the <b>page names</b> sound like {church}? We used your language, but you know your people best.</span></li>
-              <li><span className="n">2</span><span>Is anything <b>in the wrong place</b>, or <b>missing</b> that your people need?</span></li>
-              <li><span className="n">3</span><span>Anything you'd want to <b>add, combine, or rename</b> before we start writing?</span></li>
-            </ul>
+              <ul style={{ marginTop: 22 }}>
+                <li><span className="n">1</span><span>Do the <b>page names</b> sound like {church}? We used your language, but you know your people best.</span></li>
+                <li><span className="n">2</span><span>Is anything <b>in the wrong place</b>, or <b>missing</b> that your people need?</span></li>
+                <li><span className="n">3</span><span>Anything you'd want to <b>add, combine, or rename</b> before we start writing?</span></li>
+              </ul>
 
-            <div className="actions">
-              {shareMode ? (
-                <button
-                  type="button" className="btn pending"
-                  disabled={saving}
-                  onClick={() => void onSubmitFeedback()}
-                >Share Sitemap Review Feedback →</button>
-              ) : (
-                <button
-                  type="button" className="btn approve"
-                  disabled={saving}
-                  onClick={() => void onApprove()}
-                >Approve as-is →</button>
-              )}
-              {shareMode && (
-                <button
-                  type="button" className="btn ghost"
-                  disabled={saving}
-                  onClick={() => void onApprove()}
-                >Approve anyway</button>
-              )}
-              <span className="note-count">
-                {openReqs.length > 0 && `${openReqs.length} section note${openReqs.length === 1 ? '' : 's'} pending`}
-                {openReqs.length > 0 && hasNotes && ' · '}
-                {hasNotes && 'overall notes unsent'}
-                {!shareMode && 'No pending notes — approve to lock as canonical.'}
-              </span>
+              <div className="actions">
+                {shareMode && onSubmitFeedback ? (
+                  <button
+                    type="button" className="btn pending"
+                    disabled={saving}
+                    onClick={() => void onSubmitFeedback()}
+                  >Share Sitemap Review Feedback →</button>
+                ) : onApprove ? (
+                  <button
+                    type="button" className="btn approve"
+                    disabled={saving}
+                    onClick={() => void onApprove()}
+                  >Approve as-is →</button>
+                ) : null}
+                {shareMode && onApprove && (
+                  <button
+                    type="button" className="btn ghost"
+                    disabled={saving}
+                    onClick={() => void onApprove()}
+                  >Approve anyway</button>
+                )}
+                <span className="note-count">
+                  {openReqs.length > 0 && `${openReqs.length} section note${openReqs.length === 1 ? '' : 's'} pending`}
+                  {openReqs.length > 0 && hasNotes && ' · '}
+                  {hasNotes && 'overall notes unsent'}
+                  {!shareMode && 'No pending notes — approve to lock as canonical.'}
+                </span>
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        )}
       </div>
 
       {drawer && (
@@ -563,10 +561,6 @@ export default function SitemapPartnerViewV2({
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
-
-function sectionClass(id: string, openBySection: Map<string, PartnerEditRequest[]>): string {
-  return `clickable ${openBySection.has(id) ? 'has-note' : ''}`
-}
 
 function detectHubs(pages: ReviewPage[], primary: NavItem[]): ReviewPage[] {
   const hubSlugs = new Set(['visit', 'plan-a-visit', 'plan-your-visit', 'im-new', 'new-here', 'watch', 'sermons', 'give', 'connect'])
