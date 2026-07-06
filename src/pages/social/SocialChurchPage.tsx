@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Brain, Sparkles, CalendarDays, ArrowLeft, ExternalLink, Plus, Wand2, X, ChevronRight, User, Video, Link2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import SocialIntelProfileView from '../../components/intel/SocialIntelProfileView'
-import { createSession, srpPipeline, STEP_LABELS, type SrpSessionListRow } from '../../lib/srpSessions'
+import { createSession, srpPipeline, STEP_LABELS, suggestDeliverablesFromText, type SrpSessionListRow } from '../../lib/srpSessions'
 import { useAuth } from '../../contexts/AuthContext'
 import type React from 'react'
 
@@ -182,8 +182,20 @@ export default function SocialChurchPage() {
       .select('member, church_name, css_rep, church_website, reel_submitted_this_week, last_reel_submission, recent_series_srp, instagram, facebook, youtube, custom_gpt, photos_link, bible_translation, preferred_bible_translation, which_social_media_platforms_do_you_want_us_to_post_to_from_all, sms_notes, social_coach, branded_carousel_task, branded_carousel_dropbox_file, vista_social_email_from_discovery, notion_dashboard, sermon_recap_form')
       .eq('member', member)
       .maybeSingle()
-      .then(({ data }) => {
-        setChurch(data as Church | null)
+      .then(async ({ data }) => {
+        if (data) {
+          setChurch(data as Church | null)
+        } else {
+          // Fallback — check strategy_social_pro_profiles for Social Pro churches
+          const { data: proData } = await (supabase as any)
+            .from('strategy_social_pro_profiles')
+            .select('member, church_name, css_rep, website')
+            .eq('member', member)
+            .maybeSingle()
+          if (proData) {
+            setChurch({ member: proData.member, church_name: proData.church_name, css_rep: proData.css_rep } as Church)
+          }
+        }
         setChurchLoading(false)
       })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -891,6 +903,19 @@ export default function SocialChurchPage() {
             }
             const brandVoiceGuidelines = lines.join('\n').trim() || null
 
+            // Fetch full task details to auto-select deliverables from description
+            let suggestedDeliverables = suggestDeliverablesFromText(task.name)
+            try {
+              const tdRes = await fetch(`/api/clickup/task-detail?taskId=${encodeURIComponent(task.id)}`)
+              if (tdRes.ok) {
+                const td = await tdRes.json()
+                const combined = `${task.name} ${td.description ?? ''}`
+                suggestedDeliverables = suggestDeliverablesFromText(combined)
+              }
+            } catch {
+              // fall back to name-only suggestions already set above
+            }
+
             const sermonTitle = task.name.replace(/^\d+\s*-\s*/, '').trim()
             const { session_id } = await createSession({
               member: String(member),
@@ -899,6 +924,7 @@ export default function SocialChurchPage() {
               clickupTaskId: task.id,
               sermonTitle,
               brandVoiceGuidelines,
+              suggestedDeliverables: suggestedDeliverables.length ? suggestedDeliverables : null,
             })
             navigate(`/social/srp/${encodeURIComponent(session_id)}`)
           } catch (err) {

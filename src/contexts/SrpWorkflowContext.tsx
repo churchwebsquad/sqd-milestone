@@ -19,6 +19,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { supabase } from '../lib/supabase'
 import {
   srpPipeline,
   updateSession,
@@ -79,6 +80,14 @@ interface SrpWorkflowState {
   transcriptJobId: string | null
   setTranscriptJobId: (id: string | null) => void
 
+  // Overview
+  keyInsights: string[]
+  setKeyInsights: (v: string[]) => void
+
+  // Pre-render edits
+  outroLogoUrl: string | null
+  setOutroLogoUrl: (url: string | null) => void
+
   // Clips
   clipSuggestions: SrpClipSelection[]
   setClipSuggestions: (c: SrpClipSelection[]) => void
@@ -86,9 +95,7 @@ interface SrpWorkflowState {
   setClipSelections: (c: SrpClipSelection[]) => void
 
   // Approved deliverable text
-  reel1Caption: string | null
-  reel2Caption: string | null
-  setReelCaption: (idx: 1 | 2, value: string | null) => void
+  updateClipSocialCaption: (clipId: string, caption: string | null) => void
   facebookPost: string | null
   setFacebookPost: (v: string | null) => void
   sundayInvite: string | null
@@ -152,6 +159,29 @@ export interface SrpWorkflowProviderProps {
   children:   ReactNode
 }
 
+/** Format a saved intel profile's brand voice into a text block for generation prompts. */
+function formatIntelBrandVoice(p: any): string {
+  const bv = p?.brand_voice
+  const cp = p?.church_profile
+  if (!bv) return ''
+  const lines: string[] = []
+  if (bv.tone_summary) lines.push(`Tone: ${bv.tone_summary}`)
+  if (bv.casual_to_formal_spectrum) lines.push(`Voice spectrum: ${bv.casual_to_formal_spectrum}`)
+  if (Array.isArray(bv.attributes) && bv.attributes.length > 0) {
+    lines.push('\nVoice attributes:')
+    for (const attr of bv.attributes) {
+      lines.push(`- ${attr.name}: ${attr.definition ?? ''}`)
+      if (attr.write_with_this_in_mind) lines.push(`  Write with this in mind: ${attr.write_with_this_in_mind}`)
+      if (Array.isArray(attr.use) && attr.use.length)     lines.push(`  Use: ${attr.use.join(', ')}`)
+      if (Array.isArray(attr.avoid) && attr.avoid.length) lines.push(`  Avoid: ${attr.avoid.join(', ')}`)
+    }
+  }
+  if (cp?.service_times) lines.push(`\nService times: ${cp.service_times}`)
+  if (cp?.location)      lines.push(`Location: ${cp.location}`)
+  if (cp?.website)       lines.push(`Website: ${cp.website}`)
+  return lines.join('\n').trim()
+}
+
 export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProviderProps) {
   // Identity
   const [sessionDbId, setSessionDbId] = useState<string | null>(null)
@@ -177,12 +207,12 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
   const [transcriptJobId, setTranscriptJobId] = useState<string | null>(null)
 
   // Clips
+  const [keyInsights, setKeyInsights]     = useState<string[]>([])
+  const [outroLogoUrl, setOutroLogoUrl]   = useState<string | null>(null)
   const [clipSuggestions, setClipSuggestions] = useState<SrpClipSelection[]>([])
   const [clipSelections, setClipSelections] = useState<SrpClipSelection[]>([])
 
   // Approved deliverable text
-  const [reel1Caption, setReel1Caption] = useState<string | null>(null)
-  const [reel2Caption, setReel2Caption] = useState<string | null>(null)
   const [facebookPost, setFacebookPost] = useState<string | null>(null)
   const [sundayInvite, setSundayInvite] = useState<string | null>(null)
   const [photoRecapCaption, setPhotoRecapCaption] = useState<string | null>(null)
@@ -218,9 +248,8 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
   // ── Convenience setters ─────────────────────────────────────────────
   const setCurrentStep = useCallback((s: SrpWorkflowStep) => setCurrentStepRaw(s), [])
 
-  const setReelCaption = useCallback((idx: 1 | 2, value: string | null) => {
-    if (idx === 1) setReel1Caption(value)
-    else setReel2Caption(value)
+  const updateClipSocialCaption = useCallback((clipId: string, caption: string | null) => {
+    setClipSelections(prev => prev.map(c => c.clip_id === clipId ? { ...c, social_caption: caption } : c))
   }, [])
 
   // ── visibleSteps: conditional on selectedDeliverables ───────────────
@@ -228,13 +257,13 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     const steps: SrpWorkflowStep[] = ['account', 'deliverables']
     const hasReels = selectedDeliverables.some(isSrpReelDeliverable)
     if (selectedDeliverables.length > 0) {
-      steps.push('sermon')
-      if (hasReels) steps.push('clips', 'reelCaptions')
+      steps.push('sermon', 'overview')
+      if (hasReels) steps.push('clips', 'preRenderEdit', 'reelCaptions')
       if (selectedDeliverables.includes('carousel'))     steps.push('carousel')
       if (selectedDeliverables.includes('facebook'))     steps.push('facebook')
       if (selectedDeliverables.includes('sundayInvite')) steps.push('sundayInvite')
       if (selectedDeliverables.includes('photoRecap'))   steps.push('photoRecap')
-      if (hasReels)                                      steps.push('creativeDirection', 'clipProcessing')
+      if (hasReels)                                      steps.push('clipProcessing')
     }
     steps.push('approved')
     return steps
@@ -268,8 +297,6 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     setClipSuggestions(Array.isArray(row.clip_suggestions) ? row.clip_suggestions : [])
     setClipSelections(Array.isArray(row.clip_selections) ? row.clip_selections : [])
 
-    setReel1Caption(row.reel1_caption ?? null)
-    setReel2Caption(row.reel2_caption ?? null)
     setFacebookPost(row.facebook_post ?? null)
     setSundayInvite(row.sunday_invite ?? null)
     setPhotoRecapCaption(row.photo_recap_caption ?? null)
@@ -369,6 +396,41 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     void refresh()
   }, [refresh])
 
+  // Auto-load brand voice from church intel if not already set
+  useEffect(() => {
+    if (isResuming) return              // wait until session is fully loaded
+    if (brandVoice) return              // already has a voice — don't overwrite
+    const memberNum = account?.member
+    if (!memberNum) return
+    ;(async () => {
+      const { data } = await (supabase as any)
+        .from('strategy_church_intel')
+        .select('intel_profile')
+        .eq('member', memberNum)
+        .eq('status', 'live')
+        .maybeSingle()
+      if (!data?.intel_profile) return
+      const formatted = formatIntelBrandVoice(data.intel_profile)
+      if (formatted) setBrandVoice(formatted)
+    })()
+  }, [isResuming, brandVoice, account?.member])
+
+  // Auto-load outro logo URL from clip_templates
+  useEffect(() => {
+    if (isResuming) return
+    if (outroLogoUrl) return            // already loaded
+    const memberNum = account?.member
+    if (!memberNum) return
+    ;(async () => {
+      const { data } = await srpPipeline
+        .from('clip_templates')
+        .select('outro_logo_url')
+        .eq('member', memberNum)
+        .maybeSingle()
+      if (data?.outro_logo_url) setOutroLogoUrl(data.outro_logo_url as string)
+    })()
+  }, [isResuming, outroLogoUrl, account?.member])
+
   // ── Autosave ────────────────────────────────────────────────────────
   // Build only the dirty subset so a fresh-mount autosave doesn't clobber
   // values that haven't been touched yet by the coach.
@@ -404,8 +466,6 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
       transcript_job_id:      transcriptJobId,
       clip_suggestions:       clipSuggestions.length > 0 ? clipSuggestions : null,
       clip_selections:        clipSelections.length > 0 ? clipSelections : null,
-      reel1_caption:          reel1Caption,
-      reel2_caption:          reel2Caption,
       facebook_post:          facebookPost,
       sunday_invite:          sundayInvite,
       photo_recap_caption:    photoRecapCaption,
@@ -427,7 +487,7 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     currentStep, selectedDeliverables,
     videoUrl, videoSourceType, transcript, transcriptWords, hasTimecodes, transcriptJobId,
     clipSuggestions, clipSelections,
-    reel1Caption, reel2Caption, facebookPost, sundayInvite, photoRecapCaption,
+    facebookPost, sundayInvite, photoRecapCaption,
     carouselSlides, carouselCaption,
     srpTemplate, backgroundMusic, designerNotes,
     clipcutterJobId, clickupTaskId, srpTaskIdOverride,
@@ -462,9 +522,11 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     transcriptWords, setTranscriptWords,
     hasTimecodes, setHasTimecodes,
     transcriptJobId, setTranscriptJobId,
+    keyInsights, setKeyInsights,
+    outroLogoUrl, setOutroLogoUrl,
     clipSuggestions, setClipSuggestions,
     clipSelections, setClipSelections,
-    reel1Caption, reel2Caption, setReelCaption,
+    updateClipSocialCaption,
     facebookPost, setFacebookPost,
     sundayInvite, setSundayInvite,
     photoRecapCaption, setPhotoRecapCaption,

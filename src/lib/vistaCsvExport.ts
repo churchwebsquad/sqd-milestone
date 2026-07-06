@@ -6,14 +6,6 @@
  * (/api/srp/push-to-vista) isn't configured.
  *
  * Columns: Channel, Caption, Scheduled Date, Media URL
- *  - Channel       — platform per row (Instagram / Facebook / TikTok / YouTube)
- *  - Caption       — the deliverable's final text
- *  - Scheduled Date — left blank; coach fills before importing into Vista
- *  - Media URL     — for reels, the rendered MP4 URL from clipcutter_jobs.clip_results
- *
- * One row per deliverable per platform. Reel captions get their video_url
- * if rendered; otherwise the URL column is empty so Vista will still
- * accept the row as text-only draft.
  */
 
 import type { SrpPipelineSession, SrpClipSelection } from '../types/database'
@@ -28,28 +20,23 @@ interface CsvRow {
 interface VistaCsvInput {
   session: Pick<SrpPipelineSession,
     | 'facebook_post' | 'sunday_invite' | 'photo_recap_caption'
-    | 'carousel_caption' | 'reel1_caption' | 'reel2_caption' | 'church_name'
-    | 'session_id'
+    | 'carousel_caption' | 'church_name' | 'session_id'
   >
-  /** Rendered clip results from srp_pipeline.clipcutter_jobs.clip_results, in
-   *  the same order as the reel slot (index 0 → reel1, index 1 → reel2). */
+  /** All selected clips with social_caption populated. */
+  clipSelections?: SrpClipSelection[]
+  /** Rendered clip results from clipcutter_jobs, matched by clip_id. */
   renderedClips?: SrpClipSelection[]
 }
 
-export function buildVistaCsv({ session, renderedClips = [] }: VistaCsvInput): string {
+export function buildVistaCsv({ session, clipSelections = [], renderedClips = [] }: VistaCsvInput): string {
   const rows: CsvRow[] = []
 
-  const reelUrlByIdx: Record<number, string | undefined> = {
-    0: renderedClips[0]?.video_url ?? undefined,
-    1: renderedClips[1]?.video_url ?? undefined,
-  }
-
   if (session.facebook_post) {
-    rows.push({ channel: 'Facebook',  caption: session.facebook_post,  date: '', mediaUrl: '' })
+    rows.push({ channel: 'Facebook',  caption: session.facebook_post, date: '', mediaUrl: '' })
   }
   if (session.sunday_invite) {
-    rows.push({ channel: 'Facebook',  caption: session.sunday_invite,  date: '', mediaUrl: '' })
-    rows.push({ channel: 'Instagram', caption: session.sunday_invite,  date: '', mediaUrl: '' })
+    rows.push({ channel: 'Facebook',  caption: session.sunday_invite, date: '', mediaUrl: '' })
+    rows.push({ channel: 'Instagram', caption: session.sunday_invite, date: '', mediaUrl: '' })
   }
   if (session.photo_recap_caption) {
     rows.push({ channel: 'Instagram', caption: session.photo_recap_caption, date: '', mediaUrl: '' })
@@ -58,14 +45,15 @@ export function buildVistaCsv({ session, renderedClips = [] }: VistaCsvInput): s
   if (session.carousel_caption) {
     rows.push({ channel: 'Instagram', caption: session.carousel_caption, date: '', mediaUrl: '' })
   }
-  if (session.reel1_caption) {
-    rows.push({ channel: 'Instagram', caption: session.reel1_caption, date: '', mediaUrl: reelUrlByIdx[0] ?? '' })
-    rows.push({ channel: 'TikTok',    caption: session.reel1_caption, date: '', mediaUrl: reelUrlByIdx[0] ?? '' })
-  }
-  if (session.reel2_caption) {
-    rows.push({ channel: 'Instagram', caption: session.reel2_caption, date: '', mediaUrl: reelUrlByIdx[1] ?? '' })
-    rows.push({ channel: 'TikTok',    caption: session.reel2_caption, date: '', mediaUrl: reelUrlByIdx[1] ?? '' })
-  }
+
+  clipSelections.forEach((clip, i) => {
+    const caption = clip.social_caption
+    if (!caption) return
+    const rendered = renderedClips.find(r => r.clip_id === clip.clip_id) ?? renderedClips[i]
+    const mediaUrl = rendered?.video_url ?? ''
+    rows.push({ channel: 'Instagram', caption, date: '', mediaUrl })
+    rows.push({ channel: 'TikTok',    caption, date: '', mediaUrl })
+  })
 
   const escape = (v: string) => {
     if (/[",\n]/.test(v)) return `"${v.replace(/"/g, '""')}"`

@@ -23,6 +23,7 @@ import type {
   SrpClipSelection,
   SrpCarouselSlide,
 } from '../types/database'
+import { SRP_MAX_REELS } from '../types/database'
 
 /** Untyped client scoped to the `srp_pipeline` schema. Cast is unavoidable
  *  because the Database generic only ships public.* types. */
@@ -50,14 +51,47 @@ export function makeSessionId(member: number | string, churchName: string): stri
   return `${member}_${slug}_${ts}`
 }
 
+/** Parse a ClickUp task name/description to suggest deliverables. */
+export function suggestDeliverablesFromText(text: string): SrpDeliverable[] {
+  const lower = text.toLowerCase()
+  const result: SrpDeliverable[] = []
+
+  // Detect reel count from patterns like:
+  //   "3 reel", "reel x3", "x3 reel", "3x reel", "3 sermon video", "sermon video x3"
+  const reelMatch =
+    lower.match(/(\d+)\s*x?\s*reel/) ??
+    lower.match(/reel\s*x?\s*(\d+)/) ??
+    lower.match(/x\s*(\d+)\s*reel/) ??
+    lower.match(/(\d+)\s*x\s*reel/) ??
+    lower.match(/(\d+)\s*sermon\s*video/) ??
+    lower.match(/sermon\s*video\s*x?\s*(\d+)/)
+
+  const hasReelKeyword = lower.includes('reel') || lower.includes('sermon video') || lower.includes('sermon recap')
+
+  if (hasReelKeyword) {
+    const count = reelMatch ? Math.min(parseInt(reelMatch[1], 10), SRP_MAX_REELS) : 1
+    for (let i = 1; i <= count; i++) {
+      result.push(`reel${i}` as SrpDeliverable)
+    }
+  }
+
+  if (lower.includes('carousel'))                                result.push('carousel')
+  if (lower.includes('facebook'))                                result.push('facebook')
+  if (lower.includes('invite') || lower.includes('sunday'))      result.push('sundayInvite')
+  if (lower.includes('photo recap'))  result.push('photoRecap')
+
+  return [...new Set(result)] as SrpDeliverable[]
+}
+
 /** Create a fresh session row. Returns { id, session_id }. */
 export async function createSession(input: {
-  member:                number | string
-  churchName:            string
-  userEmail:             string | null
-  brandVoiceGuidelines?: string | null
-  clickupTaskId?:        string | null
-  sermonTitle?:          string | null
+  member:                 number | string
+  churchName:             string
+  userEmail:              string | null
+  brandVoiceGuidelines?:  string | null
+  clickupTaskId?:         string | null
+  sermonTitle?:           string | null
+  suggestedDeliverables?: SrpDeliverable[] | null
 }): Promise<{ id: string; session_id: string }> {
   const session_id = makeSessionId(input.member, input.churchName)
   const memberNum = typeof input.member === 'number' ? input.member : Number(input.member)
@@ -74,8 +108,11 @@ export async function createSession(input: {
       status:                'in_progress',
       // TODO: restore once v77_srp_sessions_brand_voice.sql migration is run
       // ...(input.brandVoiceGuidelines ? { brand_voice_guidelines: input.brandVoiceGuidelines } : {}),
-      ...(input.clickupTaskId  ? { clickup_task_id: input.clickupTaskId }  : {}),
-      ...(input.sermonTitle    ? { sermon_title:    input.sermonTitle }    : {}),
+      ...(input.clickupTaskId         ? { clickup_task_id:       input.clickupTaskId }         : {}),
+      ...(input.sermonTitle           ? { sermon_title:          input.sermonTitle }           : {}),
+      ...(input.suggestedDeliverables?.length
+          ? { selected_deliverables: input.suggestedDeliverables }
+          : {}),
     })
     .select('id, session_id')
     .single()
@@ -143,9 +180,9 @@ export type { SrpPipelineSession, SrpWorkflowStep, SrpDeliverable, SrpClipSelect
  *  for conditional ordering based on selected deliverables. */
 export const SRP_ALL_STEPS: SrpWorkflowStep[] = [
   'account', 'deliverables', 'sermon',
-  'clips', 'reelCaptions',
+  'overview', 'clips', 'preRenderEdit', 'reelCaptions',
   'carousel', 'facebook', 'sundayInvite', 'photoRecap',
-  'creativeDirection', 'clipProcessing',
+  'clipProcessing',
   'approved',
 ]
 
@@ -153,13 +190,14 @@ export const STEP_LABELS: Record<SrpWorkflowStep, string> = {
   account:           'Account',
   deliverables:      'Deliverables',
   sermon:            'Sermon input',
+  overview:          'Service overview',
   clips:             'Clip selection',
+  preRenderEdit:     'Music & edits',
   reelCaptions:      'Reel captions',
   carousel:          'Carousel',
   facebook:          'Facebook',
   sundayInvite:      'Sunday invite',
   photoRecap:        'Photo recap',
-  creativeDirection: 'Creative direction',
   clipProcessing:    'Clip processing',
   approved:          'Approved & ship',
 }
@@ -168,13 +206,14 @@ export const STEP_DESCRIPTIONS: Record<SrpWorkflowStep, string> = {
   account:           'Partner this run is for',
   deliverables:      'What this run will produce',
   sermon:            'Drop sermon URL or paste transcript',
+  overview:          'AI-generated summary, key insights, and scripture',
   clips:             'Pick the best moments for reels',
+  preRenderEdit:     'Title screens, outro logo, and caption text fixes',
   reelCaptions:      'Caption each reel',
   carousel:          '5-slide Instagram carousel',
   facebook:          'Long-form Facebook post',
   sundayInvite:      '3 invite variants for the week',
   photoRecap:        '3-5 carousel captions for the photo recap',
-  creativeDirection: 'Template, music, designer notes',
   clipProcessing:    'Render the reels',
   approved:          'Ship to ClickUp + Vista',
 }

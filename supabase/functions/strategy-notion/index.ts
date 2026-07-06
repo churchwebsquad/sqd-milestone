@@ -45,6 +45,7 @@ import { suggestActionItem } from './_lib/ops/suggest-action-item.ts'
 import { promoteActionItem } from './_lib/ops/promote-action-item.ts'
 import { getActionItemContent } from './_lib/ops/get-action-item.ts'
 import { listDatabasePagesWithContent } from './_lib/ops/list-database-pages-with-content.ts'
+import { listSmmAssignments } from './_lib/ops/list-smm-assignments.ts'
 import type {
   InitiativeWritable, InitiativeCreate, MilestoneWritable, MilestoneCreate,
   ProgressWritable, ProgressCreate, DocWritable, DocCreate, StrategyEntity,
@@ -287,6 +288,9 @@ serve(async (req: Request) => {
       // existing partner copy against the canonical templates without
       // a Notion-MCP round-trip per page. Triggered server-side when
       // the cowork pipeline detects strategy_web_projects.notion_database_id.
+      case 'list-smm-assignments':
+        return json({ assignments: await listSmmAssignments() })
+
       case 'list-database-pages-with-content': {
         const { databaseId } = args as { databaseId?: string }
         if (!databaseId) return json400('Missing "databaseId" for list-database-pages-with-content.')

@@ -140,10 +140,17 @@ export function AccountSelectionStep() {
           <h3 className="text-[13px] font-semibold text-[var(--color-deep-plum)]">
             Brand voice
           </h3>
+          {brandVoice && (
+            <span className="ml-auto text-[10px] font-semibold text-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)] px-2 py-0.5 rounded-full">
+              Loaded from Intel
+            </span>
+          )}
         </header>
         <div className="p-4 space-y-3">
           <p className="text-[11px] text-[var(--color-purple-gray)]">
-            Paste the church's voice guidelines here. This text is injected into every generate call's system prompt — short, specific phrases shape the output more reliably than long paragraphs.
+            {brandVoice
+              ? 'Pre-loaded from this church\'s Intel profile. Review and edit if needed — it\'s injected into every content generation call.'
+              : 'Paste the church\'s voice guidelines here. This text is injected into every generate call\'s system prompt — short, specific phrases shape the output more reliably than long paragraphs.'}
           </p>
           <textarea
             value={voiceDraft}

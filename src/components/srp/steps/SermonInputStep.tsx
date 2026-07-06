@@ -16,12 +16,13 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowLeft, ArrowRight, Loader2, FileText, Link as LinkIcon, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Loader2, FileText, Link as LinkIcon, AlertCircle, CheckCircle2, Search } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { useTranscriptJob } from '../../../lib/srpRealtime'
 import { SrpButton } from '../_shared/SrpButton'
 import { callSrpApi } from '../../../lib/srpApi'
 import { STEP_LABELS, STEP_DESCRIPTIONS } from '../../../lib/srpSessions'
+import { supabase } from '../../../lib/supabase'
 
 type Mode = 'url' | 'paste'
 
@@ -42,6 +43,7 @@ export function SermonInputStep() {
     transcriptWords, setTranscriptWords,
     hasTimecodes, setHasTimecodes,
     transcriptJobId, setTranscriptJobId,
+    clickupTaskId,
     visibleSteps,
     goToNextStep, goToPrevStep,
     refresh,
@@ -51,6 +53,36 @@ export function SermonInputStep() {
   const [pasteDraft, setPasteDraft] = useState<string>(transcript)
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
+  const [autoPulling, setAutoPulling] = useState(false)
+  const [autoPullSource, setAutoPullSource] = useState<string | null>(null)
+  const [autoPullError, setAutoPullError] = useState<string | null>(null)
+
+  // Auto-pull video URL from ClickUp task on first load if we have a task ID but no URL yet
+  useEffect(() => {
+    if (!clickupTaskId || videoUrl.trim()) return
+    let cancelled = false
+    setAutoPulling(true)
+    setAutoPullError(null)
+    fetch(`/api/clickup/task-video-url?taskId=${encodeURIComponent(clickupTaskId)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (cancelled) return
+        if (data.videoUrl) {
+          setVideoUrl(data.videoUrl)
+          setAutoPullSource(data.source)
+          setMode('url')
+        } else {
+          setAutoPullError('No video link found in the ClickUp task. Paste one below or switch to transcript.')
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAutoPullError('Could not check ClickUp task for a video link.')
+      })
+      .finally(() => { if (!cancelled) setAutoPulling(false) })
+    return () => { cancelled = true }
+  // Only run once on mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clickupTaskId])
 
   // Sync paste draft if context transcript changes (e.g. after refresh).
   useEffect(() => {
@@ -75,10 +107,12 @@ export function SermonInputStep() {
     if (!url) { setStartError('Paste a video URL first.'); return }
     setStarting(true); setStartError(null)
     try {
+      const { data: { session: authSession } } = await supabase.auth.getSession()
       const r = await callSrpApi<StartTranscriptionResponse>('start-transcription', {
         session_id: sessionId,
         source_url: url,
-      })
+        source_type: 'unknown',
+      }, { authToken: authSession?.access_token })
       setTranscriptJobId(r.job_id)
       // Clear any prior pasted transcript so the "you can also paste"
       // hint doesn't mislead while the job runs.
@@ -145,6 +179,26 @@ export function SermonInputStep() {
           <FileText size={12} /> Paste transcript
         </button>
       </div>
+
+      {/* Auto-pull status */}
+      {autoPulling && (
+        <div className="inline-flex items-center gap-2 text-[12px] text-[var(--color-purple-gray)] bg-[var(--color-lavender-tint)] rounded-full px-3 py-1.5">
+          <Loader2 size={12} className="animate-spin" />
+          Searching ClickUp task for video link…
+        </div>
+      )}
+      {autoPullSource && !autoPulling && (
+        <div className="inline-flex items-center gap-1.5 text-[12px] text-wm-success bg-wm-success-bg rounded-full px-3 py-1.5">
+          <Search size={12} />
+          Video link found in task {autoPullSource} — confirm or replace below
+        </div>
+      )}
+      {autoPullError && !autoPulling && (
+        <div className="inline-flex items-center gap-1.5 text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5">
+          <AlertCircle size={12} />
+          {autoPullError}
+        </div>
+      )}
 
       {mode === 'url' && (
         <section className="rounded-xl border border-[var(--color-lavender)] bg-white p-4 space-y-3">

@@ -103,7 +103,7 @@ export function DeliverableSelectionStep() {
         </div>
         {reelCount > 0 && (
           <p className="text-[11px] text-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)] rounded-md px-3 py-2">
-            Workflow adds <strong>Clip Selection</strong> → <strong>Reel Captions</strong> → <strong>Creative Direction</strong> → <strong>Clip Processing</strong> steps to the sidebar.
+            Workflow adds <strong>Clip Selection</strong> → <strong>Music &amp; edits</strong> → <strong>Reel Captions</strong> → <strong>Clip Processing</strong> steps to the sidebar.
           </p>
         )}
       </section>
