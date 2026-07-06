@@ -217,6 +217,36 @@ export interface PartnerEditRequest {
   author_name?:  string
 }
 
+/** Snapshot of the cowork sitemap step's nav_presentation. Copied
+ *  into the review at compose time so the partner portal can render
+ *  the same visible-header + megamenu preview the strategist saw in
+ *  the sitemap step, without reaching for site_strategy through a
+ *  second RPC call. Structurally identical to
+ *  NavPresentationPanel's expected shape; we keep the local
+ *  definition minimal (all fields optional) to stay tolerant of
+ *  older runs. */
+export interface SitemapReviewNavPresentation {
+  shell?:                  'standard_dropdowns' | 'megamenu' | 'offcanvas'
+  presentation_rationale?: string
+  visible_top_level?:      Array<{ kind?: 'page' | 'group' | 'button' | 'hamburger'; label?: string; slug?: string; group_label?: string }>
+  standard_dropdowns?:     { groups?: Array<{ group_label?: string; children?: Array<{ label?: string; slug?: string; one_line_description?: string }> }> }
+  megamenu_panels?:        Array<{
+    triggered_by?:  string
+    columns?:       Array<{ heading?: string; description?: string; links?: Array<{ label?: string; slug?: string; one_line_description?: string }> }>
+    featured_tile?: { kind?: 'image_cta' | 'sermon_card' | 'event_card' | 'persona_callout'; heading?: string; body?: string; link_label?: string; link_slug?: string }
+  }>
+  offcanvas_overlay?: {
+    hero_message?: string
+    sections?:     Array<{ section_label?: string; links?: Array<{ label?: string; slug?: string }> }>
+    surfaced_facts?: {
+      service_times?: string
+      address?:       string
+      socials?:       Array<{ platform?: string; url?: string }>
+      search?:        boolean
+    }
+  }
+}
+
 export interface SitemapReview {
   schema_version: 1
   token: string
@@ -226,6 +256,12 @@ export interface SitemapReview {
   published_at: string | null
   approved_at:  string | null
   approved_by:  'staff' | 'partner' | null
+
+  /** Cowork sitemap step's nav_presentation, copied at compose time.
+   *  The partner portal renders this via the existing
+   *  NavPresentationPanel so the strategist and partner see the same
+   *  visible-header + megamenu preview. */
+  nav_presentation?: SitemapReviewNavPresentation
 
   /** Intro block shown at the top of the partner-facing review; sets
    *  the tone. Editable; strategist authors, partner can rewrite. */
@@ -715,6 +751,17 @@ export function composeSitemapReview(args: {
   const composedNavStrategy = existing?.navigation_strategy
     ?? buildNavigationStrategy({ strategy, church: project.church_name })
 
+  // Nav-presentation snapshot. Copied from the cowork sitemap step
+  // output (site_strategy.nav_presentation) when present, or from the
+  // legacy stage_2.nav_presentation for older projects that ran the
+  // draft-sitemap prompt before the cowork switchover. The partner
+  // portal renders this via the shared NavPresentationPanel so the
+  // preview stays identical to the strategist's view.
+  const legacyStage2 = (rs as { stage_2?: { nav_presentation?: unknown } })?.stage_2
+  const composedNavPresentation = existing?.nav_presentation
+    ?? (strategy as { nav_presentation?: SitemapReviewNavPresentation } | null)?.nav_presentation
+    ?? (legacyStage2?.nav_presentation as SitemapReviewNavPresentation | undefined)
+
   // Footer info hydrated from the project's global columns. Every
   // field remains editable so the partner can correct anything that
   // changed since intake.
@@ -751,6 +798,7 @@ export function composeSitemapReview(args: {
     },
     executive_summary:  composedExecSummary,
     navigation_strategy: composedNavStrategy,
+    nav_presentation:   composedNavPresentation,
     footer_info:        composedFooter,
     pages:              composedPages,
     persona_postures:   composedPostures,

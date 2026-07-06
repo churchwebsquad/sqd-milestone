@@ -24,6 +24,7 @@ import type {
   ReviewPage,
   SitemapReview,
 } from '../../../lib/sitemapReview'
+import { NavPresentationPanel, type NavPresentation } from '../NavPresentationPanel'
 
 // ── Styles (scoped to .dox · palette translated to Squad) ──────────
 
@@ -239,8 +240,6 @@ export default function SitemapPartnerViewV2({
   const church = churchName ?? review.footer_info?.church_name ?? 'Your church'
   const hero = review.intro
   const primaryNav = review.nav_layout.header ?? []
-  const secondaryNav = review.nav_layout.secondary ?? []
-  const hubs = detectHubs(review.pages, primaryNav)
   const grouped = groupPagesForList(review.pages, primaryNav)
 
   return (
@@ -271,94 +270,28 @@ export default function SitemapPartnerViewV2({
           </section>
         )}
 
+        {/* Nav preview. Reuses the SAME NavPresentationPanel the
+            strategist sees in the sitemap step, so partner and staff
+            look at identical output. Wrapping div keeps the clickable
+            + note-pending affordance around the shared component. */}
         <section className="sec">
           <div className="sec-head"><span className="sec-num">02</span><h2>Primary Navigation</h2></div>
           {review.navigation_strategy && (
             <p className="sec-note">{review.navigation_strategy}</p>
           )}
-          <div className={`browser ${clickable('nav-primary')}`} {...clickBind('nav-primary', 'Primary navigation')}>
-            <nav className="topnav">
-              <div className="brand-mark"><span className="glyph">◆</span> {church}</div>
-              <div className="items">
-                {primaryNav.length > 0
-                  ? primaryNav.slice(0, 5).map((it, i) => (
-                      <span key={i} className={it.children && it.children.length > 0 ? 'mega' : ''}>
-                        {it.label}{it.children && it.children.length > 0 && <span className="caret">▾</span>}
-                      </span>
-                    ))
-                  : <span style={{ color: '#8B84A0', fontStyle: 'italic' }}>Primary menu will appear here</span>}
-              </div>
-              <span className="spacer" />
-              <span className="btn accent">Visit</span>
-              <span className="btn ghost">Give</span>
-            </nav>
-            {primaryNav.some(it => it.children && it.children.length > 0) && (
-              <div className="mega-panel">
-                {primaryNav.filter(it => it.children && it.children.length > 0).slice(0, 2).map((parent, pi) => (
-                  <div key={pi} style={{ marginBottom: pi === 0 ? 22 : 0 }}>
-                    <div className="mega-label">{parent.label} · what's inside</div>
-                    <div className="mega-grid">
-                      {(parent.children ?? []).slice(0, 6).map((c, ci) => (
-                        <div key={ci} className="mega-item">
-                          <span className="ph sq">■</span>
-                          <div>
-                            <h4>{c.label}</h4>
-                            <p>{shortDescriptionFor(c, review.pages)}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          {review.nav_presentation ? (
+            <div className={clickable('nav-primary')} {...clickBind('nav-primary', 'Primary navigation')} style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #CFC9F8' }}>
+              <NavPresentationPanel presentation={review.nav_presentation as NavPresentation} />
+            </div>
+          ) : (
+            <div className={`browser ${clickable('nav-primary')}`} {...clickBind('nav-primary', 'Primary navigation')} style={{ padding: 22, fontStyle: 'italic', color: '#6B6180' }}>
+              The nav preview will appear here once the sitemap step finishes.
+            </div>
+          )}
         </section>
 
-        {secondaryNav.length > 0 && (
-          <section className="sec">
-            <div className="sec-head"><span className="sec-num">03</span><h2>{review.nav_layout.secondary_label ?? 'Secondary Navigation'}</h2></div>
-            <p className="sec-note">Important supporting links that stay one tap away without competing with the primary nav.</p>
-            <div
-              className={`browser ${clickable('nav-secondary')}`}
-              {...clickBind('nav-secondary', review.nav_layout.secondary_label ?? 'Secondary navigation')}
-              style={{ background: '#341756', borderColor: '#341756' }}
-            >
-              <div style={{ padding: '18px 22px', display: 'flex', gap: 18, flexWrap: 'wrap', color: '#EDE9FC', fontSize: 14, fontWeight: 530 }}>
-                {secondaryNav.map((it, i) => (
-                  <span key={i}>{it.label}{it.children && it.children.length > 0 && <span style={{ color: '#8A82AC', fontSize: 10, marginLeft: 4 }}>▾</span>}</span>
-                ))}
-              </div>
-            </div>
-          </section>
-        )}
-
-        {hubs.length > 0 && (
-          <section className="sec">
-            <div className="sec-head"><span className="sec-num">04</span><h2>Shared Hub Pages</h2></div>
-            <p className="sec-note">Warm welcome pages that lead into the deeper structure. The first place a curious guest lands.</p>
-            <div
-              className={`cards3 ${clickable('hubs')}`}
-              {...clickBind('hubs', 'Shared hub pages')}
-              style={{ padding: '8px 0' }}
-            >
-              {hubs.map(h => (
-                <div key={h.slug} className="vcard">
-                  <div className="vimg">◇</div>
-                  <div className="vbody">
-                    <h4>{h.name}</h4>
-                    <div className="vt">/{h.slug}</div>
-                    <div className="va">{truncate(h.purpose, 90)}</div>
-                    <span className="btn accent" style={{ display: 'block', textAlign: 'center' }}>Visit {h.name} →</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
         <section className="sec">
-          <div className="sec-head"><span className="sec-num">05</span><h2>Footer</h2></div>
+          <div className="sec-head"><span className="sec-num">03</span><h2>Footer</h2></div>
           <p className="sec-note">Every page ends here, with your contact info, everyday links, and a place to stay in touch.</p>
           <div className={`footer-preview ${clickable('footer')}`} {...clickBind('footer', 'Footer')}>
             <div className="fbrand">◆ {review.footer_info?.church_name ?? church}</div>
@@ -383,7 +316,7 @@ export default function SitemapPartnerViewV2({
         </section>
 
         {review.pages.length > 0 && <section className="sec">
-          <div className="sec-head"><span className="sec-num">06</span><h2>Full Page List</h2></div>
+          <div className="sec-head"><span className="sec-num">04</span><h2>Full Page List</h2></div>
           <p className="sec-note">{readOnly ? 'Every page in the sitemap, grouped by parent.' : 'Click any page to leave a note about it: rename, move, combine, or ask a question.'}</p>
           <div className="legend">
             <span><b className="tag2 t-keep">have today</b> already on your site</span>
@@ -428,7 +361,7 @@ export default function SitemapPartnerViewV2({
         </section>}
 
         <section className="sec">
-          <div className="sec-head"><span className="sec-num">07</span><h2>What's changing from your current site</h2></div>
+          <div className="sec-head"><span className="sec-num">05</span><h2>What's changing from your current site</h2></div>
           <p className="sec-note">Almost nothing is being thrown away; it's being <b>reorganized</b>. Here's the honest picture:</p>
           <div className={`changed ${clickable('what-changed')}`} {...clickBind('what-changed', "What's changing")}>
             {review.content_migrations.length > 0 ? (
@@ -451,7 +384,7 @@ export default function SitemapPartnerViewV2({
         </section>
 
         <section className="sec">
-          <div className="sec-head"><span className="sec-num">08</span><h2>Why we shaped it this way</h2></div>
+          <div className="sec-head"><span className="sec-num">06</span><h2>Why we shaped it this way</h2></div>
           <div className={`why ${clickable('why')}`} {...clickBind('why', "Why we shaped it this way")}>
             <div className="wcard"><div className="ic">◆</div><h4>Serves the people you're reaching</h4><p>Every page is shaped around a real person, not an org chart: first-time visitors, regular attenders, and everyone in between.</p></div>
             <div className="wcard"><div className="ic">◇</div><h4>Newcomers find their way</h4><p>Someone landing fresh can understand what {church} is about and take a next step in under a minute.</p></div>
@@ -566,13 +499,6 @@ export default function SitemapPartnerViewV2({
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-function detectHubs(pages: ReviewPage[], primary: NavItem[]): ReviewPage[] {
-  const hubSlugs = new Set(['visit', 'plan-a-visit', 'plan-your-visit', 'im-new', 'new-here', 'watch', 'sermons', 'give', 'connect'])
-  const primaryTopSlugs = new Set(primary.filter(i => i.slug).map(i => i.slug!))
-  const hubs = pages.filter(p => hubSlugs.has(p.slug) || primaryTopSlugs.has(p.slug))
-  return hubs.slice(0, 3)
-}
-
 function groupPagesForList(pages: ReviewPage[], primary: NavItem[]): Array<{ id: string; label: string; meta?: string; pages: ReviewPage[] }> {
   // Group by top-level nav parent when derivable; else by parent_slug; else lump into "All pages".
   const byParent = new Map<string, ReviewPage[]>()
@@ -627,22 +553,6 @@ function tagFor(p: ReviewPage, migrations: ContentMigration[]): { label: string;
   if (wc.includes('new')) return { label: 'new', className: 't-new' }
   if (p.what_changed) return { label: 'have today', className: 't-keep' }
   return null
-}
-
-function shortDescriptionFor(item: NavItem, pages: ReviewPage[]): string {
-  if (item.slug) {
-    const p = pages.find(pp => pp.slug === item.slug)
-    if (p?.purpose) return truncate(p.purpose, 80)
-  }
-  if (item.children && item.children.length > 0) {
-    return item.children.map(c => c.label).join(' · ')
-  }
-  return ''
-}
-
-function truncate(s: string | undefined, n: number): string {
-  if (!s) return ''
-  return s.length > n ? s.slice(0, n - 1) + '…' : s
 }
 
 function capitalize(s: string): string {
