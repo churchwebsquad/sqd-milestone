@@ -18,7 +18,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ChevronDown, ChevronRight, Library, MessageCircle, Plus, Search, Settings, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Library, MessageCircle, Plus, Search, Settings, X, XCircle } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { SettingsWorkspace } from '../../components/wm/workspaces/SettingsWorkspace'
 import { StatCards } from '../../components/launch/StatCards'
@@ -32,9 +32,27 @@ export default function WebProjectsPage() {
   const navigate = useNavigate()
   const [createOpen, setCreateOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Free-text filter applied to the build-queue rows only. Kept scoped
+  // to the queue itself so header stats + sprint timeline still reflect
+  // the whole plan; searching is about narrowing what you're looking at,
+  // not redefining "active work".
+  const [queueSearch, setQueueSearch] = useState('')
 
   const plan = useLaunchPlan()
   const launchedCount = plan.rows.filter(r => r.current_phase === 'launched' && !r.archived).length
+
+  // Narrow the queue rows by church name (case-insensitive substring) or
+  // member number (substring match on the stringified number so `19` finds
+  // `1963`, `1908`, etc.). Empty query is a passthrough. Memoized on the
+  // rows list so QueueTable's drag-reorder stays stable while typing.
+  const filteredQueueRows = useMemo(() => {
+    const q = queueSearch.trim().toLowerCase()
+    if (!q) return plan.rows
+    return plan.rows.filter(r =>
+      (r.church_name ?? '').toLowerCase().includes(q) ||
+      String(r.member ?? '').includes(q),
+    )
+  }, [plan.rows, queueSearch])
 
   return (
     <div className="min-h-full py-6 px-4 md:px-6">
@@ -128,8 +146,37 @@ export default function WebProjectsPage() {
           />
         </div>
 
+        <div className="mb-2 flex items-center justify-between gap-2 flex-wrap">
+          <div className="relative w-full sm:max-w-sm">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-purple-gray/60 pointer-events-none" />
+            <input
+              type="text"
+              value={queueSearch}
+              onChange={e => setQueueSearch(e.target.value)}
+              placeholder="Search queue by church name or member #"
+              className="w-full pl-9 pr-9 py-2 text-sm rounded-full border border-lavender bg-white text-deep-plum placeholder:text-purple-gray/70 focus:outline-none focus:border-primary-purple focus:ring-1 focus:ring-primary-purple"
+              aria-label="Search build queue"
+            />
+            {queueSearch && (
+              <button
+                type="button"
+                onClick={() => setQueueSearch('')}
+                title="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-purple-gray/70 hover:text-deep-plum"
+                aria-label="Clear search"
+              >
+                <XCircle size={14} />
+              </button>
+            )}
+          </div>
+          {queueSearch && (
+            <p className="text-[11px] text-purple-gray shrink-0">
+              {filteredQueueRows.length} match{filteredQueueRows.length === 1 ? '' : 'es'} of {plan.rows.length}
+            </p>
+          )}
+        </div>
         <QueueTable
-          rows={plan.rows}
+          rows={filteredQueueRows}
           sites={plan.sites}
           schedule={plan.schedule}
           recovery={plan.recovery}
