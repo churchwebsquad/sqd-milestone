@@ -184,6 +184,26 @@ export interface FooterInfo {
   footer_page_links?: Array<{ label: string; url: string }>
 }
 
+/** One partner-requested edit pinned to a specific section of the
+ *  review. The partner opens a drawer on any section, leaves a note
+ *  (optionally with a suggested change), and it lands here. The
+ *  approve-vs-share-feedback button state on the partner portal is
+ *  driven by the count of `status: 'open'` entries.
+ *
+ *  Sections use stable string IDs (kebab-case): `nav-primary`,
+ *  `nav-secondary`, `hubs`, `footer`, `page-<slug>`, `what-changed`,
+ *  `why`. Staff resolves each entry after acting on it. */
+export interface PartnerEditRequest {
+  id: string
+  section_id:    string
+  section_label: string
+  comment:       string
+  suggested_change?: string
+  status:        'open' | 'resolved'
+  created_at:    string
+  author_name?:  string
+}
+
 export interface SitemapReview {
   schema_version: 1
   token: string
@@ -223,6 +243,12 @@ export interface SitemapReview {
   /** Partner-typed free-text feedback that isn't tied to a specific
    *  field. Lives alongside per-field edits. */
   partner_notes?: string
+
+  /** Section-scoped edit requests the partner has pinned. Each entry
+   *  has a stable `section_id`; the partner portal drives the
+   *  approve-vs-"Share Sitemap Review Feedback" button state from the
+   *  count of entries with `status: 'open'`. */
+  partner_edit_requests?: PartnerEditRequest[]
 
   edit_history: EditLogEntry[]
 }
