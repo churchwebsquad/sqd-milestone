@@ -129,6 +129,34 @@ export function DevHandoffWorkspace({ project }: Props) {
   // is keyed on web_project_id; if multiple, take the most recent.
   const [contentSession, setContentSession] = useState<Record<string, unknown> | null>(null)
 
+  // Account-level photo library URLs from strategy_account_progress.
+  // Two separate fields: the intake-questionnaire photos and the
+  // legacy library kept as a fallback when the partner didn't attach
+  // anything during Discovery. Both surface as buttons in the Photos
+  // section below so the designer can grab whichever is populated.
+  const [accountPhotos, setAccountPhotos] = useState<{
+    discovery: string | null
+    backup:    string | null
+  } | null>(null)
+  useEffect(() => {
+    if (project.member == null) { setAccountPhotos(null); return }
+    let cancelled = false
+    void (async () => {
+      const { data } = await supabase
+        .from('strategy_account_progress')
+        .select('photos_from_all_in_discovery_form, legacy_photo_library')
+        .eq('member', project.member)
+        .maybeSingle()
+      if (cancelled) return
+      const row = data as { photos_from_all_in_discovery_form?: string | null; legacy_photo_library?: string | null } | null
+      setAccountPhotos({
+        discovery: (row?.photos_from_all_in_discovery_form ?? '').trim() || null,
+        backup:    (row?.legacy_photo_library                ?? '').trim() || null,
+      })
+    })()
+    return () => { cancelled = true }
+  }, [project.member])
+
   // Content-model formation plan — Phase 1 preview. Persists to
   // strategy_web_projects.roadmap_state.content_model_plan. Answers
   // to open questions persist SEPARATELY under
@@ -729,38 +757,43 @@ export function DevHandoffWorkspace({ project }: Props) {
             )}
           </WMCard>
 
-          {/* ── 5. Photos — organized images folder ────────────── */}
-          {/* Authored on the Design Handoff tab; mirrored here so the dev
-              team has the same link one click away without bouncing
-              tabs. Read-only view — editing happens on Design. */}
+          {/* ── 5. Photos — organized images + account photo libraries ── */}
+          {/* Three possible sources the designer wants one-click access
+              to: the strategist's organized folder (authored on Design
+              Handoff), the partner's photos from Discovery, and the
+              legacy backup library. Each button only renders when its
+              URL is populated so the row stays focused on what actually
+              exists for this partner. */}
           <WMCard padding="loose">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
-                  <FolderOpen size={13} />
-                  <h2 className="text-[13px] font-bold uppercase tracking-widest">
-                    Organized images folder
-                  </h2>
-                </div>
-                <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
-                  Prepared imagery for this build (Drive, Dropbox, Notion).
-                  Authored on the Design Handoff tab.
-                </p>
+            <div className="mb-3">
+              <div className="flex items-center gap-2 mb-1 text-wm-accent-strong">
+                <FolderOpen size={13} />
+                <h2 className="text-[13px] font-bold uppercase tracking-widest">
+                  Photos
+                </h2>
               </div>
-              {spec.organized_images_folder_url ? (
-                <a
-                  href={spec.organized_images_folder_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-md bg-wm-accent text-white text-[12px] font-semibold px-3 py-1.5 hover:bg-wm-accent-hover transition-colors shrink-0"
-                >
-                  <ExternalLink size={12} /> Open folder
-                </a>
-              ) : (
-                <span className="text-[11px] text-wm-text-subtle italic shrink-0">
-                  Not yet set
-                </span>
-              )}
+              <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
+                Prepared imagery for this build. The organized folder is
+                authored on Design Handoff; the two library links come
+                straight from the partner's account.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <PhotoLinkButton
+                label="Organized images folder"
+                url={spec.organized_images_folder_url ?? null}
+                tone="primary"
+              />
+              <PhotoLinkButton
+                label="Photos from Discovery"
+                url={accountPhotos?.discovery ?? null}
+                tone="secondary"
+              />
+              <PhotoLinkButton
+                label="Photo library backup"
+                url={accountPhotos?.backup ?? null}
+                tone="secondary"
+              />
             </div>
           </WMCard>
 
@@ -1062,6 +1095,40 @@ function RedirectTargetCell({
       )}
       <span className="text-[10px] text-wm-text-subtle opacity-0 group-hover:opacity-100 transition-opacity">✎</span>
     </button>
+  )
+}
+
+/** One photo-source button on the Photos card. When `url` is
+ *  populated, renders a labeled pill that opens the link in a new tab;
+ *  when null, renders a disabled placeholder with a "Not set" hint so
+ *  the designer can see at a glance which sources this partner has
+ *  and which are still empty. */
+function PhotoLinkButton({
+  label, url, tone,
+}: {
+  label: string
+  url:   string | null
+  tone:  'primary' | 'secondary'
+}) {
+  if (url) {
+    const cls = tone === 'primary'
+      ? 'bg-wm-accent text-white hover:bg-wm-accent-hover'
+      : 'bg-wm-bg-elevated border border-wm-border text-wm-text hover:border-wm-accent hover:text-wm-accent-strong'
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        className={`inline-flex items-center gap-1.5 rounded-md text-[12px] font-semibold px-3 py-1.5 transition-colors ${cls}`}
+      >
+        <ExternalLink size={12} /> {label}
+      </a>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-md text-[12px] font-medium px-3 py-1.5 border border-dashed border-wm-border text-wm-text-subtle italic">
+      {label} · not set
+    </span>
   )
 }
 
