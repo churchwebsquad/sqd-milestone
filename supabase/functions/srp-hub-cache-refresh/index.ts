@@ -8,9 +8,14 @@
 // Can also be triggered manually from the Social Hub "Refresh" button.
 //
 // Secrets required (set in Supabase dashboard → Edge Functions → Secrets):
-//   CLICKUP_API_TOKEN
-//   NOTION_TOKEN          (optional — SMM assignments; skipped if missing)
-//   NOTION_SMM_DB_ID      (optional — Notion database ID for SMM assignments)
+//   STRATEGY_SQUAD_API_KEY   Squad API gateway key. Authenticates against
+//                            api.thesqd.com; the gateway then talks to
+//                            ClickUp. Do NOT swap in a raw ClickUp personal
+//                            token here — a raw token wouldn't reach the
+//                            gateway, and the gateway key can't hit
+//                            api.clickup.com directly.
+//   NOTION_TOKEN             (optional — SMM assignments; skipped if missing)
+//   NOTION_SMM_DB_ID         (optional — Notion database ID for SMM assignments)
 // Built-in:
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
@@ -30,36 +35,142 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-const CLICKUP_TEAM_ID = "1235435";
+const SQUAD_API_BASE = "https://api.thesqd.com";
 
-// ── ClickUp: fetch all sms-sermon-recap tasks ─────────────────────────────────
+// ── Squad API → ClickUp: fetch all sms-sermon-recap tasks ────────────────────
+//
+// STRATEGY_SQUAD_API_KEY is a Squad API GATEWAY key, not a raw ClickUp token.
+// It authenticates against https://api.thesqd.com and the gateway calls
+// ClickUp on our behalf. Sending it directly to api.clickup.com always 401s
+// because ClickUp has no idea what key that is. Route through the gateway's
+// /v1/tasks/list endpoint instead; it returns tasks with account/member
+// numbers already attached, so we can drop the leading-number regex the
+// old code used to sniff a member out of the task title.
 
-async function fetchSrpTasks(token: string) {
-  const url = `https://api.clickup.com/api/v2/team/${CLICKUP_TEAM_ID}/task?tags[]=sms-sermon-recap&page=0&order_by=updated&page_size=100&include_closed=true`;
-  const res = await fetch(url, { headers: { Authorization: token } });
-  if (!res.ok) throw new Error(`ClickUp API error: ${res.status}`);
-  const data = await res.json();
+interface SquadTaskRow {
+  id?:            string;
+  name?:          string;
+  account?:       number | string;
+  church_name?:   string;
+  status?:        string;
+  date_created?:  string | number;
+  date_updated?:  string | number;
+  url?:           string;
+  assignees?:     Array<{ username?: string; email?: string }>;
+}
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const allTasks: any[] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const task of (data.tasks ?? []) as any[]) {
-    const match = String(task.name ?? "").match(/^(\d+)\s*-/);
-    if (!match) continue;
-    const member = parseInt(match[1], 10);
-    allTasks.push({
-      member,
-      id:           task.id,
-      name:         task.name,
-      status:       task.status?.status ?? "",
-      date_created: task.date_created ?? "",
-      assignees:    (task.assignees ?? []).map((a: any) => a.username ?? a.email ?? ""),
-      url:          task.url ?? "",
-      updatedAt:    new Date(Number(task.date_updated ?? 0)).toISOString(),
-    });
+async function fetchSrpTasks(squadApiKey: string) {
+  // Paginate through the full result set. Keep paging until a short
+  // page returns; PER_PAGE (below) is intentionally small to stay
+  // under the gateway's upstream query timeout.
+  const allTasks: Array<{
+    member:       number;
+    id:           string;
+    name:         string;
+    status:       string;
+    date_created: string;
+    assignees:    string[];
+    url:          string;
+    updatedAt:    string;
+  }> = [];
+
+  // per_page is deliberately small: at 250 the gateway's upstream DB
+  // query hit a statement timeout (502). 50 works most of the time,
+  // and pages that time out are retried once before we fall back to
+  // partial results.
+  const PER_PAGE       = 50;
+  const FETCH_TIMEOUT  = 25_000; // per-request abort (ms)
+  const TOTAL_BUDGET   = 60_000; // total time budget for the fetch loop (ms)
+  const started        = Date.now();
+
+  let page = 1;
+  while (true) {
+    // Soft total-time budget. Bail with whatever we have if we're
+    // about to blow past 60s — the edge function itself gets killed
+    // at 150s idle, so we need to leave room for the Notion fetch
+    // and the Supabase upserts.
+    if (Date.now() - started > TOTAL_BUDGET) {
+      console.warn(`[srp-hub-cache-refresh] page ${page} skipped: total-time budget exceeded; returning partial results`);
+      break;
+    }
+
+    const url = new URL(`${SQUAD_API_BASE}/v1/tasks/list`);
+    url.searchParams.set("tag",            "sms-sermon-recap");
+    url.searchParams.set("include_closed", "true");
+    url.searchParams.set("per_page",       String(PER_PAGE));
+    url.searchParams.set("page",           String(page));
+
+    // Per-page retry with abort. Each individual fetch is bounded so
+    // a hung upstream can't burn the whole edge function budget.
+    // Retry once on 5xx/timeout, bail with partial results after that.
+    let res: Response | null = null;
+    let lastErr: string | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 500));
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT);
+      try {
+        const r = await fetch(url.toString(), {
+          headers: { Authorization: `Bearer ${squadApiKey}` },
+          signal:  ac.signal,
+        });
+        if (r.ok) { res = r; break }
+        const body = await r.text().catch(() => "");
+        lastErr = `${r.status}: ${body.slice(0, 200)}`;
+        if (r.status < 500 && r.status !== 429) break; // non-retriable
+      } catch (e) {
+        lastErr = e instanceof Error ? e.message : String(e);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    if (!res) {
+      if (page === 1) throw new Error(`Squad API error ${lastErr}`);
+      console.warn(`[srp-hub-cache-refresh] page ${page} failed after retries (${lastErr}); returning partial results`);
+      break;
+    }
+
+    const payload = await res.json();
+    // The gateway wraps rows under `tasks` today; be defensive in case a
+    // future version returns a bare array or a different envelope key.
+    const rows: SquadTaskRow[] =
+      (Array.isArray(payload?.tasks)   && payload.tasks)   ||
+      (Array.isArray(payload?.data)    && payload.data)    ||
+      (Array.isArray(payload?.results) && payload.results) ||
+      (Array.isArray(payload)          && payload)         ||
+      [];
+    if (rows.length === 0) break;
+
+    for (const t of rows) {
+      const memberRaw = t.account;
+      const member = typeof memberRaw === "number" ? memberRaw : Number(memberRaw);
+      if (!Number.isFinite(member) || member <= 0) continue;
+
+      const updatedAtMs = Number(t.date_updated ?? 0);
+      const createdAtMs = Number(t.date_created ?? 0);
+
+      allTasks.push({
+        member,
+        id:           t.id ?? "",
+        name:         t.name ?? "",
+        status:       t.status ?? "",
+        date_created: createdAtMs ? new Date(createdAtMs).toISOString() : "",
+        assignees:    (t.assignees ?? []).map(a => a.username ?? a.email ?? ""),
+        url:          t.url ?? "",
+        updatedAt:    updatedAtMs ? new Date(updatedAtMs).toISOString() : "",
+      });
+    }
+
+    // Break once we've clearly consumed the last page — a page shorter
+    // than PER_PAGE is the tail.
+    if (rows.length < PER_PAGE) break;
+    page += 1;
+    // Safety valve — shouldn't happen given the current data set, but
+    // prevents a runaway loop if the API misbehaves.
+    if (page > 20) break;
   }
 
-  // Most recent task per member
+  // Most recent task per member (same shape the frontend already reads).
   const byMember = new Map<number, typeof allTasks[0]>();
   for (const t of allTasks) {
     const existing = byMember.get(t.member);
@@ -71,7 +182,7 @@ async function fetchSrpTasks(token: string) {
     taskId:    t.id,
     taskName:  t.name,
     status:    t.status,
-    createdAt: new Date(Number(t.date_created || 0)).toISOString(),
+    createdAt: t.date_created,
     updatedAt: t.updatedAt,
   }));
 
@@ -82,7 +193,12 @@ async function fetchSrpTasks(token: string) {
 // Source: All-In Members database (collection://1f2e83f7-31f6-80f0-b787-000b47cfcde6)
 // Properties: "Member #" (number), "SMS Team Member" (select)
 
-const ALL_IN_MEMBERS_DB = "1f2e83f7-31f6-80f0-b787-000b47cfcde6";
+// All-In Members database in the Church Media Squad workspace.
+// The branch's original constant (1f2e83f7-31f6-80f0-b787-000b47cfcde6)
+// was a different UUID entirely and never returned rows — this is
+// the id parsed from the actual database URL and it matches the
+// "All-In Members" view Ashley pointed us at.
+const ALL_IN_MEMBERS_DB = "1f2e83f7-31f6-80e7-a10f-e7b9ea728a44";
 
 async function fetchSmmAssignments(notionToken: string) {
   let allResults: any[] = [];
@@ -129,14 +245,19 @@ Deno.serve(async (req: Request) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  const clickupToken = Deno.env.get("CLICKUP_API_TOKEN");
-  if (!clickupToken) return json({ error: "CLICKUP_API_TOKEN not set" }, 500);
+  // Squad API gateway key. This is NOT a ClickUp token — it authenticates
+  // against api.thesqd.com, which then calls ClickUp on our behalf. See
+  // fetchSrpTasks above for the endpoint contract.
+  const squadApiKey = Deno.env.get("STRATEGY_SQUAD_API_KEY");
+  if (!squadApiKey) {
+    return json({ error: "STRATEGY_SQUAD_API_KEY not set" }, 500);
+  }
 
   const results: Record<string, string> = {};
 
   // ── SRP tasks ────────────────────────────────────────────────────────────────
   try {
-    const srpData = await fetchSrpTasks(clickupToken);
+    const srpData = await fetchSrpTasks(squadApiKey);
     await supabase.from("strategy_srp_hub_cache").upsert({
       cache_key:    "srp_tasks",
       data:         srpData,
