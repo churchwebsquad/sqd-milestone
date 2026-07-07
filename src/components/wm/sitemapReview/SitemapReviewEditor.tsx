@@ -1122,6 +1122,13 @@ function NavPresentationEditor({
         onChange={next => void onChange({ ...review, nav_presentation: next })}
       />
 
+      <HeaderCtasEditor
+        review={review}
+        np={np}
+        disabled={disabled}
+        onChange={next => void onChange({ ...review, nav_presentation: next })}
+      />
+
       {shell === 'offcanvas' && (
         <OffcanvasFeaturedLinksEditor
           review={review}
@@ -1245,6 +1252,105 @@ function TopnavItemsEditor({
           className="mt-1.5 text-[11px] font-semibold text-wm-accent-strong hover:underline"
         >
           + Add item
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// HeaderCtasEditor. The pill buttons on the far right of the
+// primary nav row (Give / Plan a Visit). Rendered on standard_
+// dropdowns and megamenu at the topnav right edge; on offcanvas
+// at the bottom of the slide-out panel. Each row = label + slug
+// (in-site page) XOR url (external) + style pill_primary/secondary.
+// Independent from the topnav items above and from the offcanvas
+// featured links below.
+// ─────────────────────────────────────────────────────────────────
+
+function HeaderCtasEditor({
+  review, np, disabled, onChange,
+}: {
+  review:  SitemapReview
+  np:      SitemapReviewNavPresentation | undefined
+  disabled: boolean
+  onChange: (next: SitemapReviewNavPresentation) => void
+}) {
+  type Cta = NonNullable<SitemapReviewNavPresentation['header_ctas']>[number]
+  const ctas: Cta[] = (np?.header_ctas ?? []).map(c => ({ ...c }))
+  const setCtas = (next: Cta[]) => onChange({ ...(np ?? {}), header_ctas: next })
+  const add = () => setCtas([...ctas, { label: '', slug: '', style: ctas.length === 0 ? 'pill_primary' : 'pill_secondary' }])
+  const remove = (i: number) => setCtas(ctas.filter((_, j) => j !== i))
+  const patch = (i: number, p: Partial<Cta>) => setCtas(ctas.map((c, j) => j === i ? { ...c, ...p } : c))
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2 mb-1.5">
+        <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Header CTAs</div>
+        <span className="text-[10.5px] text-wm-text-subtle">{ctas.length}/3 · pill buttons on the nav</span>
+      </div>
+      <p className="text-[10.5px] text-wm-text-subtle mb-1.5">
+        Render as pill buttons on the far-right of the topnav (standard dropdowns + mega menu) or at the bottom of the offcanvas panel. Each row is either an in-site page OR an external URL.
+      </p>
+      <div className="space-y-1.5">
+        {ctas.map((cta, i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <input
+              type="text"
+              defaultValue={cta.label ?? ''}
+              placeholder="Label (e.g. Give)"
+              disabled={disabled}
+              onBlur={e => patch(i, { label: e.target.value })}
+              className="flex-1 min-w-0 text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+            />
+            <select
+              value={cta.slug ?? ''}
+              disabled={disabled || !!(cta.url ?? '').trim()}
+              onChange={e => patch(i, { slug: e.target.value || undefined, url: e.target.value ? undefined : cta.url })}
+              className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50 max-w-[140px]"
+              title={(cta.url ?? '').trim() ? 'Clear the URL to pick a page' : 'Pick a page'}
+            >
+              <option value="">(pick a page)</option>
+              {review.pages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
+            </select>
+            <input
+              type="url"
+              defaultValue={cta.url ?? ''}
+              placeholder="or external URL"
+              disabled={disabled || !!(cta.slug ?? '').trim()}
+              onBlur={e => {
+                const v = e.target.value.trim()
+                patch(i, { url: v || undefined, slug: v ? undefined : cta.slug })
+              }}
+              className="w-[140px] text-[11px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+              title={(cta.slug ?? '').trim() ? 'Clear the page picker to enter a URL' : 'External URL'}
+            />
+            <select
+              value={cta.style ?? 'pill_secondary'}
+              disabled={disabled}
+              onChange={e => patch(i, { style: e.target.value as Cta['style'] })}
+              className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50"
+              title="Visual style — primary is deep-plum filled, secondary is outlined"
+            >
+              <option value="pill_primary">Primary</option>
+              <option value="pill_secondary">Secondary</option>
+            </select>
+            {!disabled && (
+              <button
+                type="button"
+                onClick={() => remove(i)}
+                className="text-wm-text-subtle hover:text-wm-danger text-[14px] leading-none px-1"
+              >×</button>
+            )}
+          </div>
+        ))}
+      </div>
+      {!disabled && ctas.length < 3 && (
+        <button
+          type="button"
+          onClick={add}
+          className="mt-1.5 text-[11px] font-semibold text-wm-accent-strong hover:underline"
+        >
+          + Add header CTA
         </button>
       )}
     </div>

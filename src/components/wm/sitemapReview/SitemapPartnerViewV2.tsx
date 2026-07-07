@@ -799,7 +799,13 @@ function PrimaryNavPreview({
   // appears in the visible header.
   const vtl = (np.visible_top_level ?? []).filter(i => !isHomeNavItem(i))
   const allItems  = vtl.filter(i => i.kind !== 'button' && i.kind !== 'hamburger')
-  const buttons   = vtl.filter(i => i.kind === 'button')
+  // Buttons: prefer the strategist-authored header_ctas (with style
+  // info) over the visible_top_level fallback. Same shape either way
+  // so the render below iterates a single list.
+  const authoredCtas = (np.header_ctas ?? []).filter(c => !isHomeNavItem({ label: c.label, slug: c.slug }))
+  const buttons: Array<{ label?: string; style?: 'pill_primary' | 'pill_secondary' }> = authoredCtas.length > 0
+    ? authoredCtas.map(c => ({ label: c.label ?? c.slug ?? '', style: c.style }))
+    : vtl.filter(i => i.kind === 'button').map(i => ({ label: i.label, style: undefined }))
   const hasBurger = vtl.some(i => i.kind === 'hamburger')
   // Offcanvas rule: the visible topnav carries at most 3-4 items and
   // always shows a hamburger. Everything else lives inside the
@@ -831,14 +837,23 @@ function PrimaryNavPreview({
          */}
         {!isOffcanvas && buttons.length > 0 && (
           <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-            {buttons.map((it, i) => (
-              <span
-                key={i}
-                className={i === buttons.length - 1 ? 'btn accent' : 'btn ghost'}
-              >
-                {it.label}
-              </span>
-            ))}
+            {buttons.map((it, i) => {
+              // If the strategist authored a style, honor it.
+              // Otherwise fall back to the index rule: last = accent,
+              // earlier = ghost outlines — matches "primary + secondary"
+              // reading order.
+              const isPrimary = it.style
+                ? it.style === 'pill_primary'
+                : i === buttons.length - 1
+              return (
+                <span
+                  key={i}
+                  className={isPrimary ? 'btn accent' : 'btn ghost'}
+                >
+                  {it.label}
+                </span>
+              )
+            })}
           </span>
         )}
         {showBurger && <span style={{ fontSize: 20, color: '#341756', marginLeft: 8 }}>☰</span>}
@@ -1115,13 +1130,13 @@ function hydrateNavPresentation(
   const shellChoice = np?.shell ?? shell(np ?? {}) ?? 'megamenu'
 
   // visible_top_level — filter home from authored; derive from header
-  // when empty. Also ALWAYS append button items derived from
-  // nav_layout.cta_only when the strategist hasn't authored button
-  // items themselves. This is what surfaces "Give" / "Plan a Visit"
-  // as pill buttons in the topnav row — cta_only comes from
-  // site_strategy.nav.cta_only which the sitemap step emits, and
-  // without this pass the visible_top_level list never gets any
-  // button-kind entries.
+  // when empty. Buttons: strongest precedence is np.header_ctas (the
+  // first-class CTA field the strategist authors); next is any
+  // kind='button' entries in the authored visible_top_level; last
+  // fallback is nav_layout.cta_only from the sitemap step. Result
+  // is a merged visible_top_level with button items appended so
+  // the topnav's CTA row and the offcanvas panel bottom both get
+  // populated.
   const authoredVtl = (np?.visible_top_level ?? []).filter(i => !isHomeNavItem(i))
   const authoredHasButton = authoredVtl.some(i => i.kind === 'button')
   const derivedVtl: NonNullable<SitemapReviewNavPresentation['visible_top_level']> = nonHomeHeader.map(h => ({
@@ -1130,15 +1145,27 @@ function hydrateNavPresentation(
     group_label: h.label ?? h.slug ?? '',
     ...(h.slug ? { slug: h.slug } : {}),
   }))
-  const derivedCtaButtons: NonNullable<SitemapReviewNavPresentation['visible_top_level']> = nonHomeCtaOnly.map(c => ({
-    kind: 'button',
-    label: c.label ?? c.slug ?? '',
-    ...(c.slug ? { slug: c.slug } : {}),
-  }))
+  const derivedCtaButtons: NonNullable<SitemapReviewNavPresentation['visible_top_level']> = (() => {
+    // Preferred: strategist-authored header_ctas (first-class field).
+    const authoredCtas = (np?.header_ctas ?? []).filter(c => !isHomeNavItem({ label: c.label, slug: c.slug }))
+    if (authoredCtas.length > 0) {
+      return authoredCtas.map(c => ({
+        kind: 'button' as const,
+        label: c.label ?? c.slug ?? '',
+        ...(c.slug ? { slug: c.slug } : {}),
+      }))
+    }
+    // Fallback: nav_layout.cta_only from the cowork sitemap step.
+    return nonHomeCtaOnly.map(c => ({
+      kind: 'button' as const,
+      label: c.label ?? c.slug ?? '',
+      ...(c.slug ? { slug: c.slug } : {}),
+    }))
+  })()
   const baseVtl = authoredVtl.length > 0 ? authoredVtl : derivedVtl
   // If the authored list already has button items, respect them
-  // fully. Only append derived CTA buttons when the authored list
-  // has none.
+  // fully. Otherwise append the derived CTA buttons (from
+  // header_ctas or cta_only) so the CTA row lights up.
   const visible_top_level = authoredHasButton
     ? baseVtl
     : [...baseVtl, ...derivedCtaButtons]
@@ -1216,7 +1243,16 @@ function hydrateNavPresentation(
 function OffcanvasPreview({ np, church }: { np: SitemapReviewNavPresentation; church: string }) {
   const overlay = np.offcanvas_overlay
   const vtl = (np.visible_top_level ?? []).filter(i => !isHomeNavItem(i))
-  const buttonItems = vtl.filter(i => i.kind === 'button').slice(0, 2)
+  // Bottom-of-panel CTA buttons. Same source-of-truth stack as the
+  // topnav's button row on other shells: header_ctas first, then
+  // visible_top_level's kind='button' items. Cap at 2.
+  const buttonItems: Array<{ label?: string; style?: 'pill_primary' | 'pill_secondary' }> = (() => {
+    const authoredCtas = (np.header_ctas ?? []).filter(c => !isHomeNavItem({ label: c.label, slug: c.slug }))
+    if (authoredCtas.length > 0) {
+      return authoredCtas.slice(0, 2).map(c => ({ label: c.label ?? c.slug ?? '', style: c.style }))
+    }
+    return vtl.filter(i => i.kind === 'button').slice(0, 2).map(i => ({ label: i.label, style: undefined }))
+  })()
   // Primary large links. Precedence:
   //   1. offcanvas_overlay.featured_links — strategist-authored,
   //      independent of visible_top_level (which drives the
@@ -1310,27 +1346,35 @@ function OffcanvasPreview({ np, church }: { np: SitemapReviewNavPresentation; ch
         </div>
       )}
 
-      {/* CTA buttons at the bottom (up to two) */}
+      {/* CTA buttons at the bottom (up to two). Honors header_ctas
+       *  style hint (pill_primary vs pill_secondary) when authored;
+       *  otherwise falls back to "last one is primary" so a two-CTA
+       *  row reads as secondary + primary. */}
       {buttonItems.length > 0 && (
         <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-          {buttonItems.map((btn, i) => (
-            <span
-              key={i}
-              style={{
-                flex: 1,
-                textAlign: 'center',
-                padding: '13px 24px',
-                borderRadius: 999,
-                fontSize: 13,
-                fontWeight: 700,
-                background: i === buttonItems.length - 1 ? '#341756' : 'transparent',
-                color:      i === buttonItems.length - 1 ? '#F9F5F1' : '#341756',
-                border:     i === buttonItems.length - 1 ? '1px solid #341756' : '1.5px solid #341756',
-              }}
-            >
-              {btn.label}
-            </span>
-          ))}
+          {buttonItems.map((btn, i) => {
+            const isPrimary = btn.style
+              ? btn.style === 'pill_primary'
+              : i === buttonItems.length - 1
+            return (
+              <span
+                key={i}
+                style={{
+                  flex: 1,
+                  textAlign: 'center',
+                  padding: '13px 24px',
+                  borderRadius: 999,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  background: isPrimary ? '#341756' : 'transparent',
+                  color:      isPrimary ? '#F9F5F1' : '#341756',
+                  border:     isPrimary ? '1px solid #341756' : '1.5px solid #341756',
+                }}
+              >
+                {btn.label}
+              </span>
+            )
+          })}
         </div>
       )}
     </div>

@@ -416,6 +416,27 @@ export interface SitemapReviewPresentation {
 export interface SitemapReviewNavPresentation {
   shell?:                  'standard_dropdowns' | 'megamenu' | 'offcanvas'
   presentation_rationale?: string
+  /** First-class header CTA field — the pill buttons on the far
+   *  right of the primary nav row (Give, Plan a Visit, etc). Each
+   *  entry supports either an in-site page (slug) or an external
+   *  URL, plus a display style. Independent from visible_top_level
+   *  so the strategist can promote different sets:
+   *
+   *    - visible_top_level → the text-link items in the topnav row.
+   *    - header_ctas       → the pill buttons at the far right.
+   *    - offcanvas_overlay.featured_links → the big vertical stack
+   *                          inside the offcanvas panel.
+   *
+   *  Render precedence (partner view): if header_ctas is authored,
+   *  hydrateNavPresentation uses it verbatim for the button row.
+   *  Otherwise it falls back to `visible_top_level` items with
+   *  kind='button', and then to `nav_layout.cta_only`. */
+  header_ctas?: Array<{
+    label?:        string
+    slug?:         string          // in-site page slug (matches review.pages[].slug)
+    url?:          string          // OR external URL
+    style?:        'pill_primary' | 'pill_secondary'
+  }>
   visible_top_level?:      Array<{ kind?: 'page' | 'group' | 'button' | 'hamburger'; label?: string; slug?: string; group_label?: string }>
   standard_dropdowns?:     { groups?: Array<{ group_label?: string; children?: Array<{ label?: string; slug?: string; one_line_description?: string }> }> }
   megamenu_panels?:        Array<{
