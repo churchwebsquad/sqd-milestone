@@ -556,6 +556,11 @@ export default function PortalReviewPage() {
                 ? `${data.project.church_name ?? data.project.name} — Internal Squad Review`
                 : `${data.project.church_name ?? data.project.name} Wireframes: Copy Review`}
             </h1>
+            {typeof data.review.round_number === 'number' && data.review.round_number > 0 && (
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-purple-gray/80 mt-0.5">
+                Round {data.review.round_number}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <div className="text-right">
