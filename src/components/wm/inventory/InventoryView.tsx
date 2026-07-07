@@ -2555,16 +2555,39 @@ function ProgramDossier({
   const scope = useGroupEditState()
   const canEdit = reviewMode && !!programEditBase && !!saveMark
 
-  // Local drafts for name + description, registered with the scope so
-  // they save in the same batch as the nested rows.
+  const nestedItems = Array.isArray(program.items) ? (program.items as Item[]) : []
+  const rawPassages = Array.isArray(program.passages)
+    ? (program.passages as Array<string | Passage>).map(p =>
+        typeof p === 'string' ? { url: '', text: p } : { url: p.url, text: p.text })
+    : []
+  // Apply prior passage overrides so the edit textarea starts from
+  // the strategist's latest edits, not the original crawl text.
+  const passagesWithOverrides = rawPassages.map((p, i) => {
+    const m = programEditBase ? marks?.get(`${programEditBase}/passage-${i}`) : undefined
+    return (m?.status === 'approved' && m.client_note != null) ? { ...p, text: m.client_note } : p
+  })
+  const nestedPassages = passagesWithOverrides
+
+  // Local drafts for name + description + each passage, all registered
+  // with the scope so they save in one Save-all batch.
   const [nameDraft, setNameDraft] = useState(name)
   const [descDraft, setDescDraft] = useState(desc)
-  const nameDraftRef = useRef(nameDraft)
-  const descDraftRef = useRef(descDraft)
-  useEffect(() => { nameDraftRef.current = nameDraft }, [nameDraft])
-  useEffect(() => { descDraftRef.current = descDraft }, [descDraft])
+  const [passageDrafts, setPassageDrafts] = useState<string[]>(nestedPassages.map(p => p.text ?? ''))
+  const nameDraftRef      = useRef(nameDraft)
+  const descDraftRef      = useRef(descDraft)
+  const passageDraftsRef  = useRef(passageDrafts)
+  useEffect(() => { nameDraftRef.current      = nameDraft      }, [nameDraft])
+  useEffect(() => { descDraftRef.current      = descDraft      }, [descDraft])
+  useEffect(() => { passageDraftsRef.current  = passageDrafts  }, [passageDrafts])
   useEffect(() => {
-    if (!scope.editing) { setNameDraft(name); setDescDraft(desc) }
+    if (!scope.editing) {
+      setNameDraft(name)
+      setDescDraft(desc)
+      setPassageDrafts(nestedPassages.map(p => p.text ?? ''))
+    }
+  // Only re-sync on scope changes; nestedPassages identity flips
+  // every render but the underlying strings only matter on exit.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope.editing, name, desc])
 
   useEffect(() => {
@@ -2575,18 +2598,30 @@ function ProgramDossier({
         const dTrim = descDraftRef.current.trim()
         await saveMark(`${programEditBase}/name`,        'topic_item', 'approved', nTrim === origName.trim() ? null : nTrim)
         await saveMark(`${programEditBase}/description`, 'topic_item', 'approved', dTrim === origDesc.trim() ? null : dTrim)
+        // Save each passage that has changed from the crawl-original.
+        for (let i = 0; i < passageDraftsRef.current.length; i++) {
+          const draft = passageDraftsRef.current[i].trim()
+          const orig  = (rawPassages[i]?.text ?? '').trim()
+          if (draft !== orig) {
+            await saveMark(`${programEditBase}/passage-${i}`, 'topic_item', 'approved', draft || null)
+          }
+        }
       },
-      reset: () => { setNameDraft(name); setDescDraft(desc) },
+      reset: () => {
+        setNameDraft(name); setDescDraft(desc)
+        setPassageDrafts(nestedPassages.map(p => p.text ?? ''))
+      },
     })
+  // rawPassages/nestedPassages identities churn per render; the ref
+  // captures current drafts, and the commit reads originals directly
+  // from rawPassages, so we deliberately don't depend on either.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope.contextValue, programEditBase, saveMark, origName, origDesc, name, desc])
 
-  const headerEdited = (nameMark?.client_note != null) || (descMark?.client_note != null)
-
-  const nestedItems = Array.isArray(program.items) ? (program.items as Item[]) : []
-  const nestedPassages = Array.isArray(program.passages)
-    ? (program.passages as Array<string | Passage>).map(p =>
-        typeof p === 'string' ? { url: '', text: p } : { url: p.url, text: p.text })
-    : []
+  const passagesEdited = nestedPassages.some((_, i) =>
+    programEditBase ? marks?.get(`${programEditBase}/passage-${i}`)?.client_note != null : false,
+  )
+  const headerEdited = (nameMark?.client_note != null) || (descMark?.client_note != null) || passagesEdited
 
   // Partition nested items
   const meetingTimes  = nestedItems.filter(i => i.kind === 'meeting_time')
@@ -2671,9 +2706,22 @@ function ProgramDossier({
             desc && <p className={reviewMode ? 'text-sm text-deep-plum leading-snug' : 'text-[12px] text-wm-text leading-snug'}>{desc}</p>
           )}
           {nestedPassages.map((p, i) => (
-            <p key={i} className={reviewMode ? 'text-sm text-deep-plum/85 leading-snug mt-2 italic' : 'text-[12px] text-wm-text/85 leading-snug mt-2 italic'}>
-              "{p.text}"
-            </p>
+            scope.editing ? (
+              <textarea
+                key={i}
+                value={passageDrafts[i] ?? ''}
+                rows={Math.max(2, Math.min(6, (passageDrafts[i] ?? '').split('\n').length + 1))}
+                onChange={e => setPassageDrafts(prev => prev.map((v, idx) => idx === i ? e.target.value : v))}
+                placeholder="Passage text"
+                className={reviewMode
+                  ? 'w-full text-sm text-deep-plum bg-white border border-primary-purple rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-purple/30 resize-y italic leading-snug mt-2'
+                  : 'w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border-focus rounded px-2 py-1.5 focus:outline-none resize-y italic leading-snug mt-2'}
+              />
+            ) : (
+              <p key={i} className={reviewMode ? 'text-sm text-deep-plum/85 leading-snug mt-2 italic' : 'text-[12px] text-wm-text/85 leading-snug mt-2 italic'}>
+                "{p.text}"
+              </p>
+            )
           ))}
           {program.philosophy && (
             <p className={reviewMode ? 'text-xs text-purple-gray italic mt-2' : 'text-[11px] text-wm-text-muted italic mt-2'}>{String(program.philosophy)}</p>

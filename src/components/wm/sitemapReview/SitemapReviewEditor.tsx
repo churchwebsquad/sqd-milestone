@@ -3,7 +3,7 @@
  *
  * Composes the review from the project's current state (personas,
  * web_pages, nav groups) via composeSitemapReview, then lets the
- * strategist edit every field — pages + purposes, persona postures +
+ * strategist edit every field, pages + purposes, persona postures +
  * journeys, nav layout, content-consolidation rationale. Publishes
  * to a shareable partner URL when ready; approves it as canonical
  * once the partner has weighed in.
@@ -22,9 +22,6 @@ import {
   publishReview,
   saveSitemapReview,
   type ContentMigration,
-  type JourneyStep,
-  type NavItem,
-  type NavLayout,
   type PersonaPosture,
   type ReviewPage,
   type SitemapReview,
@@ -58,24 +55,16 @@ export function SitemapReviewEditor({
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
-    const existing = await loadSitemapReview(supabase, projectId)
-    if (existing) {
-      setReview(existing)
-      setLoading(false)
-      return
-    }
-    // No review yet: compose one from current project state.
-    //
-    // Pulls a wider column set now that the review carries an
-    // executive summary + navigation strategy + footer info block:
-    //   - roadmap_state: site_strategy (page purpose/audience/funnel,
-    //     nav.primary/footer, persona_journeys,
-    //     pages_considered_dropped), strategic_goals (church_vision,
-    //     x-factor), stage_1.personas (fallback source of truth when
-    //     the personas column is empty on older projects).
-    //   - Global columns (address, phone, email, socials) that
-    //     compose maps into footer_info.
-    const [{ data: proj }, { data: pgs }] = await Promise.all([
+    // Always recompose against the latest project state so older
+    // reviews get missing defaults (executive_summary, navigation_
+    // strategy, footer_info, sitemap_tag per page, seeded why_cards)
+    // filled in without wiping anything the strategist authored.
+    // composeSitemapReview preserves every existing field it finds;
+    // the caller passes existing through so authored purposes,
+    // intro copy, footer overrides, presentation blocks, and
+    // partner_edit_requests round-trip.
+    const [existing, { data: proj }, { data: pgs }] = await Promise.all([
+      loadSitemapReview(supabase, projectId),
       supabase.from('strategy_web_projects')
         .select([
           'id, church_name, personas, nav_group_definitions, roadmap_state',
@@ -93,7 +82,7 @@ export function SitemapReviewEditor({
     const composed = composeSitemapReview({
       project:  (proj ?? { id: projectId }) as never,
       pages:    (pgs ?? []) as never,
-      existing: null,
+      existing,
     })
     setReview(composed)
     setLoading(false)
@@ -137,9 +126,15 @@ export function SitemapReviewEditor({
   const container = embed
     ? 'flex flex-col h-full bg-wm-bg'
     : 'fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4'
+  // Preview mode widens the modal because the partner render packs
+  // 2 or 3 megamenu columns + a featured tile side by side and needs
+  // ~1100px to breathe. Edit mode keeps the narrower form-friendly
+  // width so per-page textareas don't stretch line-length.
   const inner = embed
     ? 'flex flex-col h-full'
-    : 'bg-wm-bg rounded-lg shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col'
+    : viewMode === 'preview'
+      ? 'bg-wm-bg rounded-lg shadow-2xl w-full max-w-6xl h-[95vh] flex flex-col'
+      : 'bg-wm-bg rounded-lg shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col'
 
   return (
     <div className={container}>
@@ -212,8 +207,17 @@ export function SitemapReviewEditor({
                 Each header calls out the artifact section it feeds so the
                 strategist knows exactly where the field renders. */}
 
+            {/* Every editor here maps 1:1 to a partner-visible section
+                so the strategist edits exactly what the partner sees.
+                Anything strategist-only (persona postures) is tucked
+                into an Advanced group at the bottom so it does not
+                clutter the primary flow. */}
+
             <SectionBand num="Hero" label="What the partner reads first">
               <IntroEditor review={review} onChange={persist} disabled={isApproved} />
+              <div className="mt-3">
+                <HeroEmPhraseEditor review={review} onChange={persist} disabled={isApproved} />
+              </div>
             </SectionBand>
 
             <SectionBand num="01" label="The heart behind your new site">
@@ -222,9 +226,19 @@ export function SitemapReviewEditor({
 
             <SectionBand num="02" label="Primary Navigation">
               <NavigationStrategyEditor review={review} onChange={persist} disabled={isApproved} />
-              <p className="text-[11.5px] text-wm-text-subtle mt-2">
-                The nav preview itself is sourced from the sitemap step's <code>nav_presentation</code>. Edit that step (cowork) to change the visible header, megamenu, and offcanvas.
-              </p>
+              <NavPresentationEditor review={review} onChange={persist} disabled={isApproved} />
+              <div className="mt-4">
+                <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Featured highlight tile</p>
+                <FeaturedHighlightEditor review={review} onChange={persist} disabled={isApproved} />
+              </div>
+            </SectionBand>
+
+            <SectionBand num="02b" label="Congregations (Shared Hub Pages + Persistent Nav)">
+              <SharedHubsIntroEditor review={review} onChange={persist} disabled={isApproved} />
+              <div className="mt-4">
+                <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Congregations</p>
+                <CongregationsEditor review={review} onChange={persist} disabled={isApproved} />
+              </div>
             </SectionBand>
 
             <SectionBand num="03" label="Footer">
@@ -232,28 +246,41 @@ export function SitemapReviewEditor({
             </SectionBand>
 
             <SectionBand num="04" label="Full Page List">
-              <PagesEditor review={review} onChange={persist} disabled={isApproved} />
-              <NavLayoutEditor review={review} onChange={persist} disabled={isApproved} />
+              <div>
+                <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Tier headings</p>
+                <TiersEditor review={review} onChange={persist} disabled={isApproved} />
+              </div>
+              <div className="mt-4">
+                <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Pages</p>
+                <PagesEditor review={review} onChange={persist} disabled={isApproved} />
+              </div>
+              <div className="mt-4">
+                <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Per-page descriptions</p>
+                <TierPageDescriptionsEditor review={review} onChange={persist} disabled={isApproved} />
+              </div>
             </SectionBand>
 
-            <SectionBand num="05" label="What's changing (fallback)">
-              <ContentMigrationsEditor review={review} onChange={persist} disabled={isApproved} />
-              <p className="text-[11.5px] text-wm-text-subtle mt-2">
-                Authored <code>presentation.whats_changing_cards</code> (below) overrides these when populated by a cowork session.
+            <SectionBand num="05" label="What's changing from your current site">
+              <WhatsChangingCardsEditor review={review} onChange={persist} disabled={isApproved} />
+              <details className="mt-4 rounded border border-wm-border bg-wm-bg px-3 py-2">
+                <summary className="text-[11.5px] font-semibold text-wm-text-muted cursor-pointer">Content migrations (strategist-only, feeds the cards above when unauthored)</summary>
+                <div className="mt-3">
+                  <ContentMigrationsEditor review={review} onChange={persist} disabled={isApproved} />
+                </div>
+              </details>
+            </SectionBand>
+
+            <SectionBand num="06" label="Why we shaped it this way">
+              <WhyCardsEditor review={review} onChange={persist} disabled={isApproved} />
+            </SectionBand>
+
+            <SectionBand num="07" label="Who this site is built for (personas + journeys)">
+              <p className="text-[11.5px] text-wm-text-muted mb-2">
+                Each persona plus the step-by-step journey the partner sees on the review. Only personas with a posture summary or at least one journey step render on the partner view.
               </p>
-            </SectionBand>
-
-            <SectionBand num="Personas" label="Not on the artifact, kept for reference">
               <PersonaPosturesEditor review={review} onChange={persist} disabled={isApproved} />
             </SectionBand>
 
-            {/* Cowork-authored presentation layer. For fields cowork
-                (or Claude Code) writes back into after the sitemap
-                step: congregations, featured highlight, tiers,
-                whats-changing summary cards, why cards, your-turn
-                prompts, hero em phrase. Rich per-field editors are
-                a later pass; for now the strategist edits the raw
-                JSON so cowork output can round-trip immediately. */}
             <SectionBand num="Cowork" label="Presentation layer (authored by cowork sessions)">
               <PresentationEditor review={review} onChange={persist} disabled={isApproved} />
             </SectionBand>
@@ -596,20 +623,32 @@ function PagesEditor({
                 <span className="text-[10.5px] text-wm-text-subtle ml-auto">{p.nav_position}</span>
               )}
             </div>
-            {(p.primary_audience || p.funnel_stage) && (
-              <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
-                {p.primary_audience && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-wm-accent-tint border border-wm-accent/30 text-wm-accent-strong">
-                    Audience: {p.primary_audience}
-                  </span>
-                )}
-                {p.funnel_stage && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-wm-bg-elevated border border-wm-border text-wm-text-muted">
-                    Funnel: {p.funnel_stage}
-                  </span>
-                )}
-              </div>
-            )}
+            <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+              {p.primary_audience && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-wm-accent-tint border border-wm-accent/30 text-wm-accent-strong">
+                  Audience: {p.primary_audience}
+                </span>
+              )}
+              {p.funnel_stage && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-wm-bg-elevated border border-wm-border text-wm-text-muted">
+                  Funnel: {p.funnel_stage}
+                </span>
+              )}
+              <label className="ml-auto flex items-center gap-1.5 text-[10px] text-wm-text-muted">
+                <span className="uppercase tracking-wider font-semibold">Tag</span>
+                <select
+                  value={p.sitemap_tag ?? 'kept'}
+                  disabled={disabled}
+                  onChange={e => updatePage(p.id, { sitemap_tag: e.target.value as ReviewPage['sitemap_tag'] })}
+                  className="text-[11px] rounded-full border border-wm-border bg-white px-2 py-0.5 font-semibold text-wm-text focus:outline-none focus:border-wm-accent disabled:opacity-50"
+                >
+                  <option value="kept">have today</option>
+                  <option value="unified">now shared</option>
+                  <option value="consolidated">combined</option>
+                  <option value="new">new</option>
+                </select>
+              </label>
+            </div>
             <label className="block mt-1">
               <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Purpose</span>
               <textarea
@@ -618,39 +657,6 @@ function PagesEditor({
                 disabled={disabled}
                 rows={2}
                 onBlur={e => { if (e.target.value !== p.purpose) updatePage(p.id, { purpose: e.target.value }) }}
-                className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-              />
-            </label>
-            <label className="block mt-2">
-              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">What changed</span>
-              <textarea
-                defaultValue={p.what_changed ?? ''}
-                placeholder="If this page replaces or reshapes something on the current site, describe the change (fresh page, renamed, merged from another, elevated from a dropdown, etc.)."
-                disabled={disabled}
-                rows={2}
-                onBlur={e => { if (e.target.value !== (p.what_changed ?? '')) updatePage(p.id, { what_changed: e.target.value }) }}
-                className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-              />
-            </label>
-            <label className="block mt-2">
-              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Why we made this change</span>
-              <textarea
-                defaultValue={p.why_change ?? ''}
-                placeholder="The reasoning behind the decision. Speak to the partner about the person this serves better and the friction it removes."
-                disabled={disabled}
-                rows={2}
-                onBlur={e => { if (e.target.value !== (p.why_change ?? '')) updatePage(p.id, { why_change: e.target.value }) }}
-                className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-              />
-            </label>
-            <label className="block mt-2">
-              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">How it aligns with strategy</span>
-              <textarea
-                defaultValue={p.strategic_alignment ?? ''}
-                placeholder="How this page reflects the church's mission, values, or the goals set in Discovery."
-                disabled={disabled}
-                rows={2}
-                onBlur={e => { if (e.target.value !== (p.strategic_alignment ?? '')) updatePage(p.id, { strategic_alignment: e.target.value }) }}
                 className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
               />
             </label>
@@ -670,42 +676,32 @@ function PersonaPosturesEditor({
       persona_postures: review.persona_postures.map(p => p.persona_id === id ? { ...p, ...patch } : p),
     })
   }
-  const addJourney = (id: string) => {
+  const toggleKeyPage = (id: string, slug: string) => {
     const p = review.persona_postures.find(pp => pp.persona_id === id)
     if (!p) return
-    updatePosture(id, { user_journey: [...p.user_journey, { step_label: '' }] })
-  }
-  const removeJourney = (id: string, idx: number) => {
-    const p = review.persona_postures.find(pp => pp.persona_id === id)
-    if (!p) return
-    updatePosture(id, { user_journey: p.user_journey.filter((_, i) => i !== idx) })
-  }
-  const updateJourney = (id: string, idx: number, patch: Partial<JourneyStep>) => {
-    const p = review.persona_postures.find(pp => pp.persona_id === id)
-    if (!p) return
-    updatePosture(id, { user_journey: p.user_journey.map((s, i) => i === idx ? { ...s, ...patch } : s) })
+    const current = p.key_page_slugs ?? []
+    const has = current.includes(slug)
+    const next = has ? current.filter(s => s !== slug) : [...current, slug].slice(0, 3)
+    updatePosture(id, { key_page_slugs: next })
   }
   if (review.persona_postures.length === 0) {
     return (
       <Section title="Persona postures" subtitle="One posture per project persona">
         <p className="text-[12px] text-wm-text-muted italic">
-          No personas on this project yet. Add personas in the Roadmap workspace first.
+          No personas on this project yet. Add personas to the strategy brief first — do not invent them here.
         </p>
       </Section>
     )
   }
   return (
-    <Section title="Persona postures" subtitle="How the site is angled to each person and the journey we imagined for them">
+    <Section title="Persona postures" subtitle="How the site is angled to each person and the top 3 pages that must serve them">
       <div className="space-y-3">
-        {review.persona_postures.map(p => (
+        {review.persona_postures.map(p => {
+          const currentKeys = p.key_page_slugs ?? []
+          return (
           <div key={p.persona_id} className="border border-wm-border rounded p-3 bg-wm-bg">
             <div className="flex items-baseline gap-2 flex-wrap mb-1">
               <p className="text-[13px] font-bold text-wm-text">{p.persona_name}</p>
-              {p.entry_points && p.entry_points.length > 0 && (
-                <span className="text-[10.5px] text-wm-text-subtle">
-                  Enters at: {p.entry_points.map(s => `/${s}`).join(', ')}
-                </span>
-              )}
             </div>
             {p.drop_off_risk && (
               <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5">
@@ -724,208 +720,61 @@ function PersonaPosturesEditor({
             )}
             <textarea
               defaultValue={p.posture_summary}
-              placeholder={`How the site meets ${p.persona_name}: what they see first, how the message lands, the tone that keeps them.`}
+              placeholder={`How the site meets ${p.persona_name}: contextualize their brief-stated desire and barrier into a paragraph about the site's job for them.`}
               disabled={disabled}
               rows={2}
               onBlur={e => { if (e.target.value !== p.posture_summary) updatePosture(p.persona_id, { posture_summary: e.target.value }) }}
               className="w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
             />
             <div className="mt-2">
-              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">User journey</p>
-              <ol className="space-y-1 list-decimal list-inside">
-                {p.user_journey.map((step, i) => (
-                  <li key={i} className="flex items-baseline gap-2">
-                    <input
-                      type="text"
-                      defaultValue={step.step_label}
-                      placeholder="Step (e.g. Lands on homepage, taps 'I'm new')"
-                      disabled={disabled}
-                      onBlur={e => { if (e.target.value !== step.step_label) updateJourney(p.persona_id, i, { step_label: e.target.value }) }}
-                      className="flex-1 text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-                    />
-                    <select
-                      defaultValue={step.page_slug ?? ''}
-                      disabled={disabled}
-                      onChange={e => updateJourney(p.persona_id, i, { page_slug: e.target.value || undefined })}
-                      className="text-[11px] text-wm-text bg-wm-bg border border-wm-border rounded px-1 py-0.5 disabled:opacity-50"
+              <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Goal</p>
+              <input
+                type="text"
+                defaultValue={p.goal ?? ''}
+                placeholder={`What ${p.persona_name} is trying to reach on the site (specific, not "plan a visit" for everyone).`}
+                disabled={disabled}
+                onBlur={e => { const v = e.target.value.trim(); if (v !== (p.goal ?? '')) updatePosture(p.persona_id, { goal: v || undefined }) }}
+                className="w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+              />
+            </div>
+            <div className="mt-2">
+              <div className="flex items-baseline justify-between mb-1">
+                <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Key pages</p>
+                <p className="text-[10px] text-wm-text-subtle">{currentKeys.length}/3 selected</p>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {review.pages.map(pg => {
+                  const active   = currentKeys.includes(pg.slug)
+                  const disable  = disabled || (!active && currentKeys.length >= 3)
+                  return (
+                    <button
+                      key={pg.slug}
+                      type="button"
+                      disabled={disable}
+                      onClick={() => toggleKeyPage(p.persona_id, pg.slug)}
+                      className={`text-[11px] px-2 py-0.5 rounded-full border transition ${
+                        active
+                          ? 'bg-wm-accent text-white border-wm-accent'
+                          : 'bg-wm-bg-elevated text-wm-text border-wm-border hover:border-wm-accent'
+                      } disabled:opacity-40 disabled:cursor-not-allowed`}
+                      title={pg.purpose}
                     >
-                      <option value="">(no page)</option>
-                      {review.pages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
-                    </select>
-                    {!disabled && (
-                      <button
-                        type="button"
-                        onClick={() => removeJourney(p.persona_id, i)}
-                        className="text-wm-text-subtle hover:text-wm-danger text-[14px] leading-none px-1"
-                      >×</button>
-                    )}
-                  </li>
-                ))}
-              </ol>
-              {!disabled && (
-                <button
-                  type="button"
-                  onClick={() => addJourney(p.persona_id)}
-                  className="mt-1 text-[11px] font-semibold text-wm-accent-strong hover:underline"
-                >
-                  + Add step
-                </button>
-              )}
+                      {pg.name}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           </div>
-        ))}
+        )})}
       </div>
     </Section>
   )
 }
 
-function NavLayoutEditor({
-  review, onChange, disabled,
-}: { review: SitemapReview; onChange: (next: SitemapReview) => Promise<void> | void; disabled: boolean }) {
-  const nav = review.nav_layout
-  const setNav = (next: NavLayout) => { void onChange({ ...review, nav_layout: next }) }
-  return (
-    <Section title="Navigation layout" subtitle="Header items, secondary menu, and footer sections">
-      <div className="space-y-5">
-        <NavListEditor
-          label="Header (primary)"
-          hint="Always-visible top nav. Guest-facing decisions live here."
-          items={nav.header}
-          pages={review.pages}
-          disabled={disabled}
-          onChange={next => setNav({ ...nav, header: next })}
-        />
-        <NavListEditor
-          label={nav.secondary_label ?? 'Secondary menu'}
-          hint="Off-canvas, utility, or drawer nav. Important items that shouldn't compete with the primary nav's guest CTAs."
-          items={nav.secondary ?? []}
-          pages={review.pages}
-          disabled={disabled}
-          renameLabel={disabled ? undefined : (nextLabel) =>
-            setNav({ ...nav, secondary_label: nextLabel.trim() || undefined })
-          }
-          currentLabelName={nav.secondary_label ?? ''}
-          onChange={next => setNav({ ...nav, secondary: next })}
-        />
-        <p className="text-[10.5px] text-wm-text-subtle italic">
-          Footer sections editor coming soon. Partners still see the footer contact block below and can flag anything to fix.
-        </p>
-      </div>
-    </Section>
-  )
-}
-
-/** Reusable list editor for one nav region (primary or secondary).
- *  Handles add / remove / label edit / slug binding. The parent owns
- *  the whole array; this component doesn't mutate its own state. */
-function NavListEditor({
-  label, hint, items, pages, disabled, onChange, renameLabel, currentLabelName,
-}: {
-  label:             string
-  hint:              string
-  items:             NavItem[]
-  pages:             ReviewPage[]
-  disabled:          boolean
-  onChange:          (next: NavItem[]) => void
-  /** Only supplied for the secondary region so the strategist can
-   *  rename it ("Off-canvas menu", "Utility nav", etc.). Undefined
-   *  for the header region since the primary label is fixed. */
-  renameLabel?:      (next: string) => void
-  currentLabelName?: string
-}) {
-  const [renaming, setRenaming] = useState(false)
-  const updateItem = (idx: number, patch: Partial<NavItem>) => {
-    onChange(items.map((it, i) => i === idx ? { ...it, ...patch } : it))
-  }
-  const addItem = () => onChange([...items, { label: '' }])
-  const removeItem = (idx: number) => onChange(items.filter((_, i) => i !== idx))
-  return (
-    <div>
-      <div className="flex items-baseline gap-2 flex-wrap mb-0.5">
-        <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle">{label}</p>
-        {renameLabel && !renaming && (
-          <button
-            type="button"
-            onClick={() => setRenaming(true)}
-            className="text-[10.5px] text-wm-text-subtle hover:text-wm-accent-strong hover:underline"
-          >
-            rename
-          </button>
-        )}
-      </div>
-      {renaming && renameLabel && (
-        <div className="mb-1 flex items-baseline gap-2 flex-wrap">
-          <input
-            type="text"
-            defaultValue={currentLabelName ?? ''}
-            placeholder="Off-canvas menu, Utility nav, Drawer, More…"
-            autoFocus
-            onKeyDown={e => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                renameLabel((e.target as HTMLInputElement).value)
-                setRenaming(false)
-              }
-              if (e.key === 'Escape') setRenaming(false)
-            }}
-            onBlur={e => { renameLabel(e.target.value); setRenaming(false) }}
-            className="text-[12px] text-wm-text bg-wm-bg border border-wm-accent rounded px-2 py-1 focus:outline-none"
-          />
-          <button
-            type="button"
-            onClick={() => setRenaming(false)}
-            className="text-[10.5px] text-wm-text-subtle hover:text-wm-text"
-          >
-            cancel
-          </button>
-        </div>
-      )}
-      <p className="text-[10.5px] text-wm-text-subtle mb-1.5">{hint}</p>
-      {items.length === 0 && (
-        <p className="text-[11.5px] text-wm-text-subtle italic mb-1">Nothing here yet.</p>
-      )}
-      <ol className="space-y-1">
-        {items.map((it, i) => (
-          <li key={i} className="flex items-baseline gap-2">
-            <input
-              type="text"
-              defaultValue={it.label}
-              placeholder="Nav label"
-              disabled={disabled}
-              onBlur={e => { if (e.target.value !== it.label) updateItem(i, { label: e.target.value }) }}
-              className="flex-1 text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-            />
-            <select
-              defaultValue={it.slug ?? ''}
-              disabled={disabled}
-              onChange={e => updateItem(i, { slug: e.target.value || undefined })}
-              className="text-[11px] text-wm-text bg-wm-bg border border-wm-border rounded px-1 py-0.5 disabled:opacity-50"
-            >
-              <option value="">(no target)</option>
-              {pages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
-            </select>
-            {!disabled && (
-              <button
-                type="button"
-                onClick={() => removeItem(i)}
-                className="text-wm-text-subtle hover:text-wm-danger text-[14px] leading-none px-1"
-              >×</button>
-            )}
-          </li>
-        ))}
-      </ol>
-      {!disabled && (
-        <button
-          type="button"
-          onClick={addItem}
-          className="mt-1 text-[11px] font-semibold text-wm-accent-strong hover:underline"
-        >
-          + Add item
-        </button>
-      )}
-    </div>
-  )
-}
+// NavLayoutEditor and NavListEditor removed. Nav shell + content
+// authoring now lives in NavPresentationEditor above, and footer
+// links have their own FooterPageLinksEditor.
 
 function ContentMigrationsEditor({
   review, onChange, disabled,
@@ -1149,6 +998,827 @@ function PresentationEditor({
         </button>
         {dirty && <span className="text-[11px] text-wm-text-subtle">Unsaved changes</span>}
       </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// NavPresentationEditor. Shell selector (dropdowns / megamenu /
+// off-canvas) plus a JSON textarea for the body (visible_top_level,
+// megamenu_panels, standard_dropdowns, offcanvas_overlay). Rich per
+// field editors for nested columns and featured tiles are a later
+// pass; this gives the strategist a working editing surface today
+// for the nav shell + preview content.
+// ─────────────────────────────────────────────────────────────────
+
+function NavPresentationEditor({
+  review, onChange, disabled,
+}: {
+  review:   SitemapReview
+  onChange: (next: SitemapReview) => Promise<void> | void
+  disabled: boolean
+}) {
+  const np = review.nav_presentation
+  const shell = (np?.shell
+    ?? (np?.megamenu_panels && np.megamenu_panels.length > 0 ? 'megamenu'
+        : np?.standard_dropdowns ? 'standard_dropdowns'
+        : np?.offcanvas_overlay ? 'offcanvas' : 'megamenu')) as 'standard_dropdowns' | 'megamenu' | 'offcanvas'
+
+  const initial = useMemo(() => JSON.stringify(np ?? {}, null, 2), [np])
+  const [text,  setText]  = useState(initial)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => { setText(initial); setError(null) }, [initial])
+
+  const setShell = (nextShell: typeof shell) => {
+    const nextNp = { ...(np ?? {}), shell: nextShell }
+    void onChange({ ...review, nav_presentation: nextNp })
+  }
+
+  const saveJson = () => {
+    setError(null)
+    try {
+      const parsed = text.trim() ? JSON.parse(text) : {}
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Must be a JSON object.')
+      void onChange({ ...review, nav_presentation: parsed })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Invalid JSON.')
+    }
+  }
+  const dirty = text !== initial
+
+  const shellOptions: Array<{ key: typeof shell; label: string; hint: string }> = [
+    { key: 'megamenu',           label: 'Mega menu',           hint: 'Rich dropdowns with columns + featured tiles. Best for churches with several ministries under one top-level item.' },
+    { key: 'standard_dropdowns', label: 'Standard dropdowns',  hint: 'Simple link lists per top-level item. Best for small sites with clear parent-child structure.' },
+    { key: 'offcanvas',          label: 'Off-canvas overlay',  hint: 'Full nav lives behind the hamburger with a short header. Best when mobile-first or when the top nav needs to stay minimal.' },
+  ]
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">Nav shell</div>
+        <div className="flex flex-wrap gap-1.5">
+          {shellOptions.map(opt => (
+            <button
+              key={opt.key}
+              type="button"
+              disabled={disabled}
+              onClick={() => setShell(opt.key)}
+              className={
+                'text-[12px] font-medium px-3 py-1.5 rounded-full border ' +
+                (shell === opt.key
+                  ? 'bg-wm-accent-strong text-white border-wm-accent-strong'
+                  : 'bg-white text-wm-text-muted border-wm-border hover:border-wm-accent')
+              }
+              title={opt.hint}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] text-wm-text-muted mt-1.5">
+          {shellOptions.find(o => o.key === shell)?.hint}
+        </p>
+      </div>
+
+      <div>
+        <div className="flex items-baseline justify-between gap-2 mb-1">
+          <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Nav content (visible header, panels, columns)</div>
+          <span className="text-[10.5px] text-wm-text-subtle">JSON matching <code className="bg-wm-bg px-1 rounded">SitemapReviewNavPresentation</code></span>
+        </div>
+        <textarea
+          value={text}
+          onChange={e => setText(e.target.value)}
+          disabled={disabled}
+          rows={16}
+          spellCheck={false}
+          className="w-full rounded-md border border-wm-border bg-white text-[12px] font-mono text-wm-text p-3 outline-none focus:border-wm-accent"
+        />
+        {error && <div className="text-[11.5px] text-red-600 mt-1">{error}</div>}
+        <div className="flex items-center gap-2 mt-1.5">
+          <button
+            type="button"
+            disabled={disabled || !dirty}
+            onClick={saveJson}
+            className="text-[12px] font-semibold px-4 py-1.5 rounded-full bg-wm-accent-strong text-white hover:bg-wm-accent disabled:opacity-50"
+          >Save nav content</button>
+          {dirty && <span className="text-[11px] text-wm-text-subtle">Unsaved changes</span>}
+          <span className="ml-auto text-[10.5px] text-wm-text-subtle">
+            Rich per-field editors (add / remove megamenu columns, featured tiles) coming next; JSON round-trip works today.
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// FooterPageLinksEditor removed. FooterInfoEditor already renders
+// the authoring surface for footer_info.footer_page_links; keeping a
+// second wrapper here caused the double-render bug on the edit tab.
+
+// ─────────────────────────────────────────────────────────────────
+// WhyCardsEditor. Structured editor for presentation.why_cards so
+// the strategist can override the auto-seeded strategy cards per
+// partner. Each card carries an icon + title + body.
+// ─────────────────────────────────────────────────────────────────
+
+function WhyCardsEditor({
+  review, onChange, disabled,
+}: {
+  review:   SitemapReview
+  onChange: (next: SitemapReview) => Promise<void> | void
+  disabled: boolean
+}) {
+  const cards = review.presentation?.why_cards ?? []
+  const update = (next: NonNullable<SitemapReview['presentation']>['why_cards']) => {
+    void onChange({
+      ...review,
+      presentation: { ...(review.presentation ?? {}), why_cards: next },
+    })
+  }
+  const addCard = () => update([...(cards ?? []), { id: cryptoRandomIdLocal(), icon: '◆', title: '', body: '' }])
+  const removeCard = (id: string) => update((cards ?? []).filter(c => c.id !== id))
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[11.5px] text-wm-text-muted">
+        The partner render prefers these authored cards over the auto-seeded strategy defaults. Add or remove to match how you want the partner to hear the reasoning behind the sitemap.
+      </p>
+      {(cards ?? []).map(c => (
+        <div key={c.id} className="rounded border border-wm-border bg-white px-3 py-2.5">
+          <div className="flex items-center gap-2 mb-1">
+            <input
+              type="text"
+              defaultValue={c.icon ?? '◆'}
+              disabled={disabled}
+              onBlur={e => update((cards ?? []).map(cc => cc.id === c.id ? { ...cc, icon: e.target.value } : cc))}
+              className="text-[16px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded-md px-2 py-0.5 w-12 text-center focus:outline-none focus:border-wm-accent disabled:opacity-50"
+              title="Icon character (◆ ◇ ✦ ↗ or any glyph)"
+            />
+            <input
+              type="text"
+              defaultValue={c.title}
+              placeholder="Card title (e.g. Built on what makes you distinct)"
+              disabled={disabled}
+              onBlur={e => update((cards ?? []).map(cc => cc.id === c.id ? { ...cc, title: e.target.value } : cc))}
+              className="flex-1 text-[13px] font-semibold text-wm-text bg-transparent border-b border-transparent focus:border-wm-accent focus:outline-none disabled:opacity-50"
+            />
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => removeCard(c.id)}
+              className="text-[10.5px] text-wm-text-subtle hover:text-red-600 disabled:opacity-50"
+            >Remove</button>
+          </div>
+          <textarea
+            defaultValue={c.body}
+            placeholder="One or two warm sentences the partner reads."
+            disabled={disabled}
+            rows={2}
+            onBlur={e => update((cards ?? []).map(cc => cc.id === c.id ? { ...cc, body: e.target.value } : cc))}
+            className="w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+          />
+        </div>
+      ))}
+      {(cards ?? []).length === 0 && (
+        <p className="text-[11.5px] text-wm-text-subtle italic">No authored Why cards yet; the partner view shows the strategy-seeded default.</p>
+      )}
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={addCard}
+        className="text-[11.5px] font-semibold text-wm-accent-strong hover:underline disabled:opacity-50"
+      >+ Add why card</button>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// TierPageDescriptionsEditor. Lets the strategist override the
+// one-line description shown under each page in the Full Page List.
+// Reads from presentation.tiers[].page_entries[].description_override
+// and writes back to the same. Grouped by tier so the strategist
+// sees which tier each page belongs to.
+// ─────────────────────────────────────────────────────────────────
+
+function TierPageDescriptionsEditor({
+  review, onChange, disabled,
+}: {
+  review:   SitemapReview
+  onChange: (next: SitemapReview) => Promise<void> | void
+  disabled: boolean
+}) {
+  const tiers = review.presentation?.tiers ?? []
+  if (tiers.length === 0) {
+    return (
+      <p className="text-[11.5px] text-wm-text-subtle italic">
+        No tiers defined yet. Add them via the Presentation JSON below, then per-page overrides show up here.
+      </p>
+    )
+  }
+  const updateEntry = (tierId: string, slug: string, override: string) => {
+    const nextTiers = tiers.map(t => t.id !== tierId ? t : {
+      ...t,
+      page_entries: (t.page_entries ?? []).map(e => e.slug !== slug ? e : { ...e, description_override: override || undefined }),
+    })
+    void onChange({ ...review, presentation: { ...(review.presentation ?? {}), tiers: nextTiers } })
+  }
+  return (
+    <div className="space-y-3">
+      <p className="text-[11.5px] text-wm-text-muted">
+        Override the one-line description shown under each page. Blank falls back to the page's own <code className="bg-wm-bg px-1 rounded">purpose</code>.
+      </p>
+      {tiers.map(t => (
+        <div key={t.id} className="rounded border border-wm-border bg-white px-3 py-2.5">
+          <p className="text-[12px] font-semibold text-wm-text mb-1.5">
+            {t.letter ? `${t.letter}. ` : ''}{t.title}
+            {t.meta && <span className="text-[10.5px] text-wm-text-subtle font-normal ml-2">{t.meta}</span>}
+          </p>
+          {(t.page_entries ?? []).length === 0 && (
+            <p className="text-[11px] text-wm-text-subtle italic">No pages in this tier yet.</p>
+          )}
+          <div className="space-y-1.5">
+            {(t.page_entries ?? []).map(entry => {
+              const page = review.pages.find(p => p.slug === entry.slug)
+              return (
+                <div key={entry.slug} className="flex items-start gap-2">
+                  <div className="w-40 shrink-0 pt-1">
+                    <span className={'text-[12px] ' + (entry.is_child ? 'ml-4 text-wm-text-muted' : 'font-semibold text-wm-text')}>
+                      {page?.name ?? entry.slug}
+                    </span>
+                  </div>
+                  <textarea
+                    defaultValue={entry.description_override ?? ''}
+                    placeholder={page?.purpose ?? 'One-line description shown under this page.'}
+                    disabled={disabled}
+                    rows={1}
+                    onBlur={e => { if (e.target.value !== (entry.description_override ?? '')) updateEntry(t.id, entry.slug, e.target.value) }}
+                    className="flex-1 text-[11.5px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+                  />
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function cryptoRandomIdLocal(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
+  return `sr_${Math.random().toString(36).slice(2, 10)}`
+}
+
+// ─────────────────────────────────────────────────────────────────
+// CongregationsEditor. Rich per-cong editor for the Shared Hub Pages
+// section + the Get Connected mega row layout. Fields:
+//   label, service_time, address, note, is_primary flag.
+// Nested link edit + featured highlight edit still route through the
+// Presentation JSON block for now (deeper edit UIs to follow).
+// ─────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────
+// SharedHubsIntroEditor. Edits the headline + body text shown above
+// the Shared Hub Pages cards on the partner preview. Both fields
+// optional; falls back to defaults when unset.
+// ─────────────────────────────────────────────────────────────────
+
+function SharedHubsIntroEditor({
+  review, onChange, disabled,
+}: {
+  review:   SitemapReview
+  onChange: (next: SitemapReview) => Promise<void> | void
+  disabled: boolean
+}) {
+  const pres = review.presentation ?? {}
+  const setField = (k: 'shared_hubs_headline' | 'shared_hubs_body', v: string) => {
+    void onChange({
+      ...review,
+      presentation: { ...pres, [k]: v.trim() ? v : undefined },
+    })
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Section intro</p>
+      <label className="block">
+        <span className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle">Headline</span>
+        <input
+          type="text"
+          defaultValue={pres.shared_hubs_headline ?? ''}
+          disabled={disabled}
+          placeholder="Shared Hub Pages"
+          onBlur={e => { if (e.target.value !== (pres.shared_hubs_headline ?? '')) setField('shared_hubs_headline', e.target.value) }}
+          className="mt-1 w-full text-[13px] font-semibold text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+        />
+      </label>
+      <label className="block">
+        <span className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle">Body</span>
+        <textarea
+          defaultValue={pres.shared_hubs_body ?? ''}
+          disabled={disabled}
+          rows={3}
+          placeholder="Visit is a warm welcome page for the whole church, with a card that leads to a dedicated page for each congregation. Watch works the same way."
+          onBlur={e => { if (e.target.value !== (pres.shared_hubs_body ?? '')) setField('shared_hubs_body', e.target.value) }}
+          className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50 resize-y"
+        />
+        <p className="text-[10.5px] text-wm-text-subtle mt-1">Leave blank to use the built-in default. Rendered as plain text under the section heading.</p>
+      </label>
+    </div>
+  )
+}
+
+function CongregationsEditor({
+  review, onChange, disabled,
+}: {
+  review:   SitemapReview
+  onChange: (next: SitemapReview) => Promise<void> | void
+  disabled: boolean
+}) {
+  const congs = review.presentation?.congregations ?? []
+  const update = (next: NonNullable<SitemapReview['presentation']>['congregations']) => {
+    void onChange({
+      ...review,
+      presentation: { ...(review.presentation ?? {}), congregations: next },
+    })
+  }
+  const patchCong = (id: string, patch: Partial<NonNullable<typeof congs>[number]>) => {
+    update((congs ?? []).map(c => c.id === id ? { ...c, ...patch } : c))
+  }
+  const addCong = () => update([...(congs ?? []), { id: cryptoRandomIdLocal(), label: '', service_time: '', address: '' }])
+  const removeCong = (id: string) => {
+    if (!confirm('Remove this congregation? Its row disappears from Shared Hub Pages, Persistent Nav, and the Get Connected mega.')) return
+    update((congs ?? []).filter(c => c.id !== id))
+  }
+  const setPrimary = (id: string) => update((congs ?? []).map(c => ({ ...c, is_primary: c.id === id })))
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[11.5px] text-wm-text-muted">
+        Each row drives one card in <b>Shared Hub Pages</b>, one bar in <b>Persistent Navigation</b>, and one row inside the Get Connected mega. Links are still authored via the Presentation JSON below.
+      </p>
+      {(congs ?? []).length === 0 && (
+        <p className="text-[11.5px] text-wm-text-subtle italic">No congregations yet. Single-campus partners skip this section entirely.</p>
+      )}
+      {(congs ?? []).map(c => (
+        <div key={c.id} className="rounded border border-wm-border bg-white px-3 py-2.5 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              type="text"
+              defaultValue={c.label}
+              disabled={disabled}
+              placeholder="Congregation name (e.g. Southwest)"
+              onBlur={e => { if (e.target.value !== c.label) patchCong(c.id, { label: e.target.value }) }}
+              className="flex-1 min-w-[160px] text-[13px] font-semibold text-wm-text bg-transparent border-b border-transparent focus:border-wm-accent focus:outline-none disabled:opacity-50"
+            />
+            <label className="text-[11px] text-wm-text-muted inline-flex items-center gap-1.5">
+              <input
+                type="radio"
+                name="cong-primary"
+                checked={!!c.is_primary}
+                disabled={disabled}
+                onChange={() => setPrimary(c.id)}
+              />
+              Primary
+            </label>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => removeCong(c.id)}
+              className="text-[10.5px] text-wm-text-subtle hover:text-red-600 disabled:opacity-50"
+            >Remove</button>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Service time</span>
+              <input
+                type="text"
+                defaultValue={c.service_time ?? ''}
+                disabled={disabled}
+                placeholder="Sundays 9 and 10:30am"
+                onBlur={e => { if (e.target.value !== (c.service_time ?? '')) patchCong(c.id, { service_time: e.target.value || undefined }) }}
+                className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Address</span>
+              <input
+                type="text"
+                defaultValue={c.address ?? ''}
+                disabled={disabled}
+                placeholder="4805 Arborlawn Dr, Fort Worth"
+                onBlur={e => { if (e.target.value !== (c.address ?? '')) patchCong(c.id, { address: e.target.value || undefined }) }}
+                className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+              />
+            </label>
+          </div>
+          <label className="block">
+            <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Note (optional)</span>
+            <input
+              type="text"
+              defaultValue={c.note ?? ''}
+              disabled={disabled}
+              placeholder="Future campus: 1805 FM 156, Haslet"
+              onBlur={e => { if (e.target.value !== (c.note ?? '')) patchCong(c.id, { note: e.target.value || undefined }) }}
+              className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <CongregationLinksColumn
+              title="Left column"
+              hint="First column of the persistent nav bar (e.g. Family Life, Community Life)."
+              links={c.links_left ?? []}
+              disabled={disabled}
+              onChange={next => patchCong(c.id, { links_left: next.length > 0 ? next : undefined })}
+            />
+            <CongregationLinksColumn
+              title="Right column"
+              hint="Second column (e.g. Next Steps, Resources, Events shared)."
+              links={c.links_right ?? []}
+              disabled={disabled}
+              onChange={next => patchCong(c.id, { links_right: next.length > 0 ? next : undefined })}
+            />
+          </div>
+        </div>
+      ))}
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={addCong}
+        className="text-[11.5px] font-semibold text-wm-accent-strong hover:underline disabled:opacity-50"
+      >+ Add congregation</button>
+    </div>
+  )
+}
+
+// One column of congregation links. Each link has label + optional
+// is_dropdown flag + optional kids (comma-separated child labels for
+// the expanded ddpanel) + optional is_shared flag (renders `↗ shared`
+// in the persistent nav bar).
+type CongLink = NonNullable<NonNullable<SitemapReview['presentation']>['congregations']>[number]['links_left'] extends (infer T)[] | undefined ? T : never
+function CongregationLinksColumn({
+  title, hint, links, disabled, onChange,
+}: {
+  title:    string
+  hint:     string
+  links:    CongLink[]
+  disabled: boolean
+  onChange: (next: CongLink[]) => void
+}) {
+  const patch = (idx: number, p: Partial<CongLink>) => {
+    onChange(links.map((l, i) => i === idx ? { ...l, ...p } : l))
+  }
+  const add    = () => onChange([...links, { label: '' }])
+  const remove = (idx: number) => onChange(links.filter((_, i) => i !== idx))
+  return (
+    <div>
+      <p className="text-[10.5px] uppercase tracking-widest font-bold text-wm-text-subtle">{title}</p>
+      <p className="text-[10.5px] text-wm-text-subtle mb-1.5">{hint}</p>
+      <div className="space-y-1.5">
+        {links.map((l, i) => (
+          <div key={i} className="rounded bg-wm-bg-elevated border border-wm-border px-2 py-1.5">
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                defaultValue={l.label}
+                disabled={disabled}
+                placeholder="Link label"
+                onBlur={e => { if (e.target.value !== l.label) patch(i, { label: e.target.value }) }}
+                className="flex-1 min-w-0 text-[12px] font-semibold text-wm-text bg-transparent focus:outline-none disabled:opacity-50"
+              />
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => remove(i)}
+                className="text-[10.5px] text-wm-text-subtle hover:text-red-600 disabled:opacity-50"
+              >×</button>
+            </div>
+            <div className="flex items-center gap-3 text-[10.5px] text-wm-text-muted mt-1 flex-wrap">
+              <label className="inline-flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={!!l.is_dropdown}
+                  disabled={disabled}
+                  onChange={e => patch(i, { is_dropdown: e.target.checked || undefined })}
+                />
+                dropdown
+              </label>
+              <label className="inline-flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={!!l.is_shared}
+                  disabled={disabled}
+                  onChange={e => patch(i, { is_shared: e.target.checked || undefined })}
+                />
+                shared (↗)
+              </label>
+            </div>
+            {l.is_dropdown && (
+              <input
+                type="text"
+                defaultValue={l.kids ?? ''}
+                disabled={disabled}
+                placeholder="Kids · Youth (comma-separated child labels)"
+                onBlur={e => { if (e.target.value !== (l.kids ?? '')) patch(i, { kids: e.target.value || undefined }) }}
+                className="mt-1 w-full text-[11.5px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+              />
+            )}
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={add}
+        className="mt-1 text-[10.5px] font-semibold text-wm-accent-strong hover:underline disabled:opacity-50"
+      >+ Add link</button>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// FeaturedHighlightEditor. Edits presentation.featured_highlight,
+// which drives the Kingdom Come card in the About Doxology mega.
+// ─────────────────────────────────────────────────────────────────
+
+function FeaturedHighlightEditor({
+  review, onChange, disabled,
+}: {
+  review:   SitemapReview
+  onChange: (next: SitemapReview) => Promise<void> | void
+  disabled: boolean
+}) {
+  const fh = review.presentation?.featured_highlight
+  const patch = (next: NonNullable<SitemapReview['presentation']>['featured_highlight'] | undefined) => {
+    void onChange({
+      ...review,
+      presentation: { ...(review.presentation ?? {}), featured_highlight: next },
+    })
+  }
+  const setField = (k: string, v: string) => {
+    const current = fh ?? { label: '', description: '' }
+    patch({ ...current, [k]: v || undefined } as typeof fh)
+  }
+  const clear = () => {
+    if (!confirm('Clear the featured highlight? The tile disappears from the About mega.')) return
+    patch(undefined)
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[11.5px] text-wm-text-muted">
+        Rendered as a boxed card inside the About mega panel. Leave blank to hide the tile entirely.
+      </p>
+      <label className="block">
+        <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Label</span>
+        <input
+          type="text"
+          defaultValue={fh?.label ?? ''}
+          disabled={disabled}
+          placeholder="Kingdom Come"
+          onBlur={e => { if (e.target.value !== (fh?.label ?? '')) setField('label', e.target.value) }}
+          className="mt-1 w-full text-[13px] font-semibold text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+        />
+      </label>
+      <label className="block">
+        <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Description</span>
+        <textarea
+          defaultValue={fh?.description ?? ''}
+          disabled={disabled}
+          rows={3}
+          placeholder="A featured highlight that links to its own site, and the spot can feature your next initiative down the road."
+          onBlur={e => { if (e.target.value !== (fh?.description ?? '')) setField('description', e.target.value) }}
+          className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50 resize-y"
+        />
+      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Link URL (optional)</span>
+          <input
+            type="text"
+            defaultValue={fh?.url ?? ''}
+            disabled={disabled}
+            placeholder="https://…"
+            onBlur={e => { if (e.target.value !== (fh?.url ?? '')) setField('url', e.target.value) }}
+            className="mt-1 w-full text-[12px] font-mono text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+          />
+        </label>
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Primary CTA label</span>
+          <input
+            type="text"
+            defaultValue={fh?.cta_label ?? ''}
+            disabled={disabled}
+            placeholder="Learn more"
+            onBlur={e => { if (e.target.value !== (fh?.cta_label ?? '')) setField('cta_label', e.target.value) }}
+            className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+          />
+        </label>
+      </div>
+      <label className="block">
+        <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Secondary CTA label (optional)</span>
+        <input
+          type="text"
+          defaultValue={fh?.secondary_cta_label ?? ''}
+          disabled={disabled}
+          placeholder="Give"
+          onBlur={e => { if (e.target.value !== (fh?.secondary_cta_label ?? '')) setField('secondary_cta_label', e.target.value) }}
+          className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+        />
+      </label>
+      {fh && (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={clear}
+          className="text-[11px] text-wm-text-muted hover:text-red-600 disabled:opacity-50"
+        >Clear featured highlight</button>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// TiersEditor. Edit each tier's letter/title/meta so strategist can
+// rename the section headings that appear in the Full Page List
+// without touching the Presentation JSON. Page assignments still
+// live in the JSON block; a rich per-page tier assignment editor is
+// a follow-up.
+// ─────────────────────────────────────────────────────────────────
+
+function TiersEditor({
+  review, onChange, disabled,
+}: {
+  review:   SitemapReview
+  onChange: (next: SitemapReview) => Promise<void> | void
+  disabled: boolean
+}) {
+  const tiers = review.presentation?.tiers ?? []
+  const patchTier = (id: string, patch: Partial<NonNullable<typeof tiers>[number]>) => {
+    const next = (tiers ?? []).map(t => t.id === id ? { ...t, ...patch } : t)
+    void onChange({ ...review, presentation: { ...(review.presentation ?? {}), tiers: next } })
+  }
+  if (tiers.length === 0) {
+    return <p className="text-[11.5px] text-wm-text-subtle italic">No tiers yet. Author them via the Presentation JSON below; the letter/title/meta editors show up once tiers exist.</p>
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-[11.5px] text-wm-text-muted">Edit the tier headings shown in the Full Page List (A. About Doxology, B. For everyone, etc.).</p>
+      {tiers.map(t => (
+        <div key={t.id} className="rounded border border-wm-border bg-white px-3 py-2.5 grid grid-cols-[48px_1fr_1fr] gap-2">
+          <label className="block">
+            <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Letter</span>
+            <input
+              type="text"
+              defaultValue={t.letter ?? ''}
+              disabled={disabled}
+              maxLength={2}
+              onBlur={e => { if (e.target.value !== (t.letter ?? '')) patchTier(t.id, { letter: e.target.value || undefined }) }}
+              className="mt-1 w-full text-[13px] font-semibold text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 text-center focus:outline-none focus:border-wm-accent disabled:opacity-50"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Title</span>
+            <input
+              type="text"
+              defaultValue={t.title}
+              disabled={disabled}
+              onBlur={e => { if (e.target.value !== t.title) patchTier(t.id, { title: e.target.value }) }}
+              className="mt-1 w-full text-[13px] font-semibold text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Meta (sub-label)</span>
+            <input
+              type="text"
+              defaultValue={t.meta ?? ''}
+              disabled={disabled}
+              placeholder="The whole church"
+              onBlur={e => { if (e.target.value !== (t.meta ?? '')) patchTier(t.id, { meta: e.target.value || undefined }) }}
+              className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+            />
+          </label>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// HeroEmPhraseEditor. Trivial single-input for
+// presentation.hero_em_phrase (the italic emphasis phrase in the
+// hero body).
+// ─────────────────────────────────────────────────────────────────
+
+function HeroEmPhraseEditor({
+  review, onChange, disabled,
+}: {
+  review:   SitemapReview
+  onChange: (next: SitemapReview) => Promise<void> | void
+  disabled: boolean
+}) {
+  const value = review.presentation?.hero_em_phrase ?? ''
+  return (
+    <label className="block">
+      <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Emphasis phrase</span>
+      <input
+        type="text"
+        defaultValue={value}
+        disabled={disabled}
+        placeholder="three congregations"
+        onBlur={e => {
+          if (e.target.value !== value) {
+            void onChange({
+              ...review,
+              presentation: { ...(review.presentation ?? {}), hero_em_phrase: e.target.value || undefined },
+            })
+          }
+        }}
+        className="mt-1 w-full text-[13px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+      />
+      <p className="text-[10.5px] text-wm-text-subtle mt-1">Rendered in serif italic inside the hero subline. Must be a substring of the hero body copy.</p>
+    </label>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// WhatsChangingCardsEditor. Structured editor for
+// presentation.whats_changing_cards. Each card carries a tag
+// (kept/unified/consolidated/new), a title, and a body.
+// ─────────────────────────────────────────────────────────────────
+
+function WhatsChangingCardsEditor({
+  review, onChange, disabled,
+}: {
+  review:   SitemapReview
+  onChange: (next: SitemapReview) => Promise<void> | void
+  disabled: boolean
+}) {
+  const cards = review.presentation?.whats_changing_cards ?? []
+  const update = (next: NonNullable<SitemapReview['presentation']>['whats_changing_cards']) => {
+    void onChange({
+      ...review,
+      presentation: { ...(review.presentation ?? {}), whats_changing_cards: next },
+    })
+  }
+  const patch = (id: string, p: Partial<NonNullable<typeof cards>[number]>) => {
+    update((cards ?? []).map(c => c.id === id ? { ...c, ...p } : c))
+  }
+  const add = () => update([...(cards ?? []), { id: cryptoRandomIdLocal(), tag: 'kept', title: '', body: '' }])
+  const remove = (id: string) => update((cards ?? []).filter(c => c.id !== id))
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[11.5px] text-wm-text-muted">
+        Cards shown in the What&apos;s changing from your current site section. Each card gets a color-coded pill. When empty, the partner view shows two warm defaults.
+      </p>
+      {(cards ?? []).map(c => (
+        <div key={c.id} className="rounded border border-wm-border bg-white px-3 py-2.5 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              defaultValue={c.tag ?? 'kept'}
+              disabled={disabled}
+              onChange={e => patch(c.id, { tag: e.target.value as NonNullable<typeof cards>[number]['tag'] })}
+              className="text-[11px] rounded-full border border-wm-border bg-white px-2 py-0.5 font-semibold text-wm-text focus:outline-none focus:border-wm-accent disabled:opacity-50"
+            >
+              <option value="kept">have today</option>
+              <option value="unified">now shared</option>
+              <option value="consolidated">combined</option>
+              <option value="new">new</option>
+            </select>
+            <input
+              type="text"
+              defaultValue={c.title}
+              disabled={disabled}
+              placeholder="Card title (e.g. Kept, just re-homed)"
+              onBlur={e => { if (e.target.value !== c.title) patch(c.id, { title: e.target.value }) }}
+              className="flex-1 min-w-[160px] text-[13px] font-semibold text-wm-text bg-transparent border-b border-transparent focus:border-wm-accent focus:outline-none disabled:opacity-50"
+            />
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => remove(c.id)}
+              className="text-[10.5px] text-wm-text-subtle hover:text-red-600 disabled:opacity-50"
+            >Remove</button>
+          </div>
+          <textarea
+            defaultValue={c.body}
+            disabled={disabled}
+            rows={2}
+            placeholder="One partner-facing sentence describing what changed."
+            onBlur={e => { if (e.target.value !== c.body) patch(c.id, { body: e.target.value }) }}
+            className="w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50 resize-y"
+          />
+        </div>
+      ))}
+      {(cards ?? []).length === 0 && (
+        <p className="text-[11.5px] text-wm-text-subtle italic">No cards yet; the partner view shows generic defaults.</p>
+      )}
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={add}
+        className="text-[11.5px] font-semibold text-wm-accent-strong hover:underline disabled:opacity-50"
+      >+ Add card</button>
     </div>
   )
 }

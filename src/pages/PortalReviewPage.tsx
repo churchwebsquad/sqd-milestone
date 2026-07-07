@@ -41,7 +41,7 @@ import { augmentTemplate } from '../lib/webBrixiesSchemaAugment'
 import { loadEditorSnippets } from '../lib/webSnippets'
 import type { SnippetMap } from '../lib/webBrixiesRender'
 import type {
-  WebReview, WebPage, WebSection, WebContentTemplate, WebFieldDef,
+  WebReview, WebPage, WebSection, WebContentTemplate, WebFieldDef, WebGroupDef,
   WebReviewComment, StrategyWebProject,
 } from '../types/database'
 
@@ -764,6 +764,7 @@ export default function PortalReviewPage() {
             onCancel={() => setDraft(null)}
             onSubmit={submit}
             template={draft.section.content_template_id ? data.templates[draft.section.content_template_id] ?? null : null}
+            cardTemplates={data.cardTemplates}
             existingForSection={myComments.filter(c => c.web_section_id === draft.section.id)}
             snippetMap={data.snippetMap}
             sectionLabel={partnerSectionLabel}
@@ -1240,7 +1241,7 @@ function NameCaptureModal({
 }
 
 function CommentDrawer({
-  draft, setDraft, submitting, onCancel, onSubmit, template,
+  draft, setDraft, submitting, onCancel, onSubmit, template, cardTemplates,
   existingForSection, snippetMap: _snippetMap, sectionLabel: overrideLabel,
 }: {
   draft: DraftComment
@@ -1249,6 +1250,13 @@ function CommentDrawer({
   onCancel: () => void
   onSubmit: () => Promise<void>
   template: WebContentTemplate | null
+  /** Palette-referenced card templates keyed by template id. When a
+   *  group has `item_template_ref: 'from_palette'` its actual
+   *  editable fields live on the referenced card template, not on the
+   *  group's inline `item_schema`. Without this, feature-section-2
+   *  and any other palette-based card grid rendered zero editable
+   *  card fields in the drawer. */
+  cardTemplates?: Record<string, WebContentTemplate>
   existingForSection: WebReviewComment[]
   snippetMap: SnippetMap
   /** Partner-facing section label override, e.g. "Section 3". Falls
@@ -1262,17 +1270,15 @@ function CommentDrawer({
   // request a change to. Recurses through groups (cards, item lists)
   // so each repeating item × child slot surfaces as its own row.
   // Path-style keys (`cards.0.heading`) let resolveComment write back
-  // into the nested field_values shape on Apply.
+  // into the nested field_values shape on Apply. Palette-referenced
+  // groups now resolve through cardTemplates so feature-section-2
+  // card headings, body copy, and CTAs actually surface.
   const editableFields = useMemo(() => {
     if (!template) return [] as EditableLeaf[]
     const values = (draft.section.field_values ?? {}) as Record<string, unknown>
-    // Drop fields with no current value before showing them to the
-    // partner. An empty "Current: (empty)" row is noise — the
-    // partner can't critique what isn't there. If they want to add
-    // content that isn't bound, that's a separate conversation.
-    return flattenTemplateFields(template.fields ?? [], values)
+    return flattenTemplateFields(template.fields ?? [], values, cardTemplates)
       .filter(leaf => !isLeafEmpty(leaf))
-  }, [template, draft.section.field_values])
+  }, [template, draft.section.field_values, cardTemplates])
 
   const setBody = (body: string) => setDraft({ ...draft, body })
   const toggleSuggestion = (leaf: EditableLeaf) => {
@@ -1574,43 +1580,90 @@ function isLeafEmpty(leaf: EditableLeaf): boolean {
 function flattenTemplateFields(
   fields: WebFieldDef[],
   values: Record<string, unknown>,
+  cardTemplates?: Record<string, WebContentTemplate>,
 ): EditableLeaf[] {
   const out: EditableLeaf[] = []
+  walkTemplateFields(fields, values ?? {}, cardTemplates, '', undefined, out)
+  return out
+}
+
+/** Recursive walker used by flattenTemplateFields. Handles:
+ *   - top-level slots (heading, description, etc.)
+ *   - groups with inline item_schema (e.g. buttons)
+ *   - palette-referenced groups (item_template_ref: 'from_palette'),
+ *     which point at a Card-family template such as `card-193` whose
+ *     fields wrap the actual slots in a single-instance-hint container.
+ *     That wrapper is unwrapped here so partners see one editor per
+ *     card instead of an inaccessible one-item-per-item card container.
+ *   - arbitrary nesting inside cards (e.g. a card's `buttons` group). */
+function walkTemplateFields(
+  fields: WebFieldDef[],
+  values: Record<string, unknown>,
+  cardTemplates: Record<string, WebContentTemplate> | undefined,
+  keyPath: string,
+  itemLabel: string | undefined,
+  out: EditableLeaf[],
+): void {
   for (const f of fields) {
     if (f.kind === 'slot') {
-      if (f.type === 'text' || f.type === 'richtext' || f.type === 'cta') {
-        out.push({
-          fieldKey:  f.key,
-          label:     f.layer_name ?? f.key,
-          fieldType: f.type,
-          current:   values[f.key],
-        })
-      }
+      if (f.type !== 'text' && f.type !== 'richtext' && f.type !== 'cta') continue
+      const fk = keyPath ? `${keyPath}.${f.key}` : f.key
+      out.push({
+        fieldKey:  fk,
+        label:     f.layer_name ?? f.key,
+        itemLabel,
+        fieldType: f.type,
+        current:   values[f.key],
+      })
       continue
     }
-    if (f.kind === 'group') {
-      const raw = values[f.key]
-      const items: Array<Record<string, unknown>> = Array.isArray(raw)
-        ? (raw as Array<Record<string, unknown>>)
-        : []
-      const groupLabel = f.layer_name ?? f.key
-      items.forEach((item, idx) => {
-        const itemLabel = `${groupLabel} · #${idx + 1}`
-        for (const child of f.item_schema ?? []) {
-          if (child.kind !== 'slot') continue
-          if (child.type !== 'text' && child.type !== 'richtext' && child.type !== 'cta') continue
-          out.push({
-            fieldKey:  `${f.key}.${idx}.${child.key}`,
-            label:     child.layer_name ?? child.key,
-            itemLabel,
-            fieldType: child.type,
-            current:   item?.[child.key],
-          })
-        }
-      })
+    if (f.kind !== 'group') continue
+
+    const raw = values[f.key]
+    const items: Array<Record<string, unknown>> = Array.isArray(raw)
+      ? (raw as Array<Record<string, unknown>>)
+      : []
+    const groupLabel = f.layer_name ?? f.key
+    const resolvedRef = f.item_template_ref && f.referenced_template_id
+      ? cardTemplates?.[f.referenced_template_id]
+      : undefined
+    let itemFields: WebFieldDef[] = resolvedRef
+      ? (resolvedRef.fields ?? [])
+      : (f.item_schema ?? [])
+
+    // Palette-referenced card templates typically wrap their content
+    // in a single-instance group whose key matches the parent group
+    // (e.g. card-193's outer "card" wrapper around the real slots).
+    // Unwrap it so labels stay clean ("Card · #1" not "Card · #1 ·
+    // Card #1") and the persisted values path aligns with the schema.
+    let valueUnwrapKey: string | null = null
+    if (
+      resolvedRef &&
+      itemFields.length === 1 &&
+      itemFields[0].kind === 'group' &&
+      (itemFields[0] as WebGroupDef).single_instance_hint
+    ) {
+      valueUnwrapKey = itemFields[0].key
+      itemFields = (itemFields[0] as WebGroupDef).item_schema ?? []
     }
+
+    items.forEach((item, idx) => {
+      const nestedItemLabel = itemLabel
+        ? `${itemLabel} · ${groupLabel} #${idx + 1}`
+        : `${groupLabel} · #${idx + 1}`
+      const baseKeyPath = keyPath ? `${keyPath}.${f.key}.${idx}` : `${f.key}.${idx}`
+      let itemValues: Record<string, unknown> = (item ?? {}) as Record<string, unknown>
+      let itemKeyPath = baseKeyPath
+      if (valueUnwrapKey) {
+        const wrapped = itemValues[valueUnwrapKey]
+        if (Array.isArray(wrapped) && wrapped.length > 0 && wrapped[0] && typeof wrapped[0] === 'object') {
+          itemValues = wrapped[0] as Record<string, unknown>
+          itemKeyPath = `${baseKeyPath}.${valueUnwrapKey}.0`
+        }
+      }
+      walkTemplateFields(itemFields, itemValues, cardTemplates, itemKeyPath, nestedItemLabel, out)
+    })
   }
-  return out
 }
 
 /** Read-only preview of a field's current value. Rich text renders as

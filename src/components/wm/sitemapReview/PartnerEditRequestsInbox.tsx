@@ -6,7 +6,7 @@
  *
  * Mounted at the top of SitemapReviewEditor so partner feedback is
  * the first thing staff sees on opening the review. Empty state is
- * hidden entirely — no visual noise when there's nothing to review.
+ * hidden entirely, no visual noise when there's nothing to review.
  */
 
 import { useMemo, useState } from 'react'

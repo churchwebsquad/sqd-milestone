@@ -1,3 +1,19 @@
+// crawl-categorize v17 — url_pattern extensions for common partner slugs.
+//
+//   • Added to `beliefs`: salvation, the-gospel, gospel, vision-and-values,
+//     vision-values, vision, our-vision. Partners routinely publish
+//     salvation/gospel pages under /salvation and doctrine-heavy vision
+//     pages under /vision-and-values; without these the LLM's default
+//     was to dump them into `other`.
+//   • Added to `missions`: causes, impact, our-impact, community-impact,
+//     neighboring, love-where-you-live. Transformation Church's /causes,
+//     Doxology's love-where-you-live phrasing, and impact-focused
+//     partners were all landing in `other`.
+//   • Added to `plan_visit`: what-to-expect, expect, first-visit-info.
+//     "What to Expect" is a very common first-visit landing page name
+//     that used to fall through the classifier entirely.
+//
+// (Original v16 comment block, retained for diff continuity):
 // crawl-categorize v16 — priority-URL filter + grouped `other` bucket
 //
 //   • Added priority_url_patterns to clean ministry/path/identity topics.
@@ -112,8 +128,8 @@ const TAXONOMY = [
     priority_url_patterns:[/^\/(about|who-we-are|our-story|story|history|mission-and-vision|distinctives)\/?$/i,/^\/about\//i],
     description:'Identity narrative.' },
   { key:'beliefs',         label:'Beliefs & Values',     group:'identity',  inventory_kind:'voice_rich',
-    url_patterns:[/^\/(beliefs|what-we-believe(?:-\d+)?|values|doctrine|statement-of-faith|our-beliefs|core-values)(?:\/|$)/i],
-    priority_url_patterns:[/^\/(beliefs|what-we-believe(?:-\d+)?|values|doctrine|statement-of-faith|our-beliefs|core-values)(?:\/|$)/i],
+    url_patterns:[/^\/(beliefs|what-we-believe(?:-\d+)?|values|doctrine|statement-of-faith|our-beliefs|core-values|salvation|the-gospel|gospel|vision-and-values|vision-values|vision|our-vision)(?:\/|$)/i],
+    priority_url_patterns:[/^\/(beliefs|what-we-believe(?:-\d+)?|values|doctrine|statement-of-faith|our-beliefs|core-values|salvation|the-gospel|gospel|vision-and-values|vision-values|vision|our-vision)(?:\/|$)/i],
     description:'Statement of faith + values.' },
   { key:'testimonies',     label:'Testimonies & Stories', group:'identity', inventory_kind:'voice_rich',
     url_patterns:[/^\/(stories|testimonies|testimony|baptism-stories|life-change|impact-stories|my-story)(?:\/|$)/i,/^\/stories\//i,/^\/testimon/i],
@@ -147,8 +163,8 @@ const TAXONOMY = [
     priority_url_patterns:[/^\/(worship|music|worship-arts|worship-team|choir|band|hymnal|production|tech-team|audio-team|av-team|sound-team)(?:\/|$)/i],
     description:'Worship arts.' },
   { key:'missions',        label:'Missions & Outreach',  group:'ministry',  inventory_kind:'voice_rich',
-    url_patterns:[/^\/(missions|outreach|global|local-outreach|partners|mission-partners)(?:\/|$)/i],
-    priority_url_patterns:[/^\/(missions|outreach|global|local-outreach|partners|mission-partners)(?:\/|$)/i],
+    url_patterns:[/^\/(missions|outreach|global|local-outreach|partners|mission-partners|causes|impact|our-impact|community-impact|neighboring|love-where-you-live)(?:\/|$)/i],
+    priority_url_patterns:[/^\/(missions|outreach|global|local-outreach|partners|mission-partners|causes|impact|our-impact|community-impact|neighboring|love-where-you-live)(?:\/|$)/i],
     description:'Local + global outreach. Programs MUST include scope:"local" or scope:"global".' },
   { key:'care',            label:'Care',                 group:'ministry',  inventory_kind:'voice_rich',
     url_patterns:[/^\/(care|gospel-?care|prayer|prayer-team|grief|funerals|hospital|recovery|support-groups|freedom|restoration|crisis-care)(?:\/|$)/i],
@@ -167,8 +183,8 @@ const TAXONOMY = [
     priority_url_patterns:[/^\/(new|new-here|first-time|im-new|welcome|first-visit|visitor)(?:\/|$)/i],
     description:'First-time visitor.' },
   { key:'plan_visit',      label:'Plan a Visit',         group:'path',      inventory_kind:'voice_rich',
-    url_patterns:[/^\/(plan-a-visit|plan-your-visit|visit|plan-your-first-visit)(?:\/|$)/i],
-    priority_url_patterns:[/^\/(plan-a-visit|plan-your-visit|visit|plan-your-first-visit)(?:\/|$)/i],
+    url_patterns:[/^\/(plan-a-visit|plan-your-visit|visit|plan-your-first-visit|what-to-expect|expect|first-visit-info)(?:\/|$)/i],
+    priority_url_patterns:[/^\/(plan-a-visit|plan-your-visit|visit|plan-your-first-visit|what-to-expect|expect|first-visit-info)(?:\/|$)/i],
     description:'Pre-visit pathway.' },
   { key:'connect_groups',  label:'Connect / Groups',     group:'path',      inventory_kind:'voice_rich',
     url_patterns:[/^\/(connect|groups|life-groups|small-groups|community|get-connected|dna|dna-groups|missional-communities|mc-groups|gospel-communities|home-groups|house-churches|community-groups)(?:\/|$)/i],

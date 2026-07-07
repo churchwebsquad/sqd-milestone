@@ -23,8 +23,8 @@ import type {
   PartnerEditRequest,
   ReviewPage,
   SitemapReview,
+  SitemapReviewNavPresentation,
 } from '../../../lib/sitemapReview'
-import { NavPresentationPanel, type NavPresentation } from '../NavPresentationPanel'
 
 // ── Styles (scoped to .dox · palette translated to Squad) ──────────
 
@@ -66,8 +66,8 @@ const scopedCss = `
 .dox .mega-item{display:flex; gap:12px; align-items:flex-start;}
 .dox .ph{background:var(--ph); border-radius:7px; flex:none; display:grid; place-items:center; color:#7A6DBE;}
 .dox .ph.sq{width:38px; height:38px; font-size:14px;}
-.dox .mega-item h4{font-size:14px; font-weight:640; margin:0 0 2px; color:var(--ink);}
-.dox .mega-item p{font-size:12px; color:var(--muted); margin:0; line-height:1.4;}
+.dox .mega-item h4{font-size:13.5px; font-weight:640; margin:0 0 1px; color:var(--ink); line-height:1.25;}
+.dox .mega-item p{font-size:11.5px; color:var(--muted); margin:0; line-height:1.4; font-weight:400;}
 .dox .cards3{display:grid; grid-template-columns:repeat(3,1fr); gap:16px;}
 .dox .vcard{border:1px solid var(--line); border-radius:14px; overflow:hidden; background:#fff;}
 .dox .vcard .vimg{background:var(--ph); height:82px; display:grid; place-items:center; color:#7A6DBE;}
@@ -150,7 +150,7 @@ const scopedCss = `
 .dox-drawer .existing .item .sugg{margin-top:6px; padding-top:6px; border-top:1px dashed #CFC9F8; font-size:12.5px; color:#513DE5;}
 .dox-drawer .existing .item .rm{float:right; background:none; border:none; color:#6B6180; font-size:11px; cursor:pointer; padding:0;}
 .dox-drawer .existing .item .rm:hover{color:#B8590E;}
-@media (max-width:860px){
+@media (max-width:640px){
   .dox .cards3,.dox .why,.dox .changed{grid-template-columns:1fr;}
   .dox .plist li{grid-template-columns:1fr;}
   .dox .topnav .items{display:none;}
@@ -281,42 +281,23 @@ export default function SitemapPartnerViewV2({
           </section>
         )}
 
-        {/* Nav preview. Reuses the SAME NavPresentationPanel the
-            strategist sees in the sitemap step, so partner and staff
-            look at identical output. Wrapping div keeps the clickable
-            + note-pending affordance around the shared component. */}
+        {/* Primary Navigation preview. Content sourced from
+            nav_presentation (visible_top_level + megamenu_panels or
+            standard_dropdowns or offcanvas_overlay). Visuals rendered
+            in the Doxology-artifact style: browser topnav with pill
+            chips, mega-panels with columns + descriptions + featured
+            tile as image_cta card. */}
         <section className="sec">
           <div className="sec-head"><span className="sec-num">02</span><h2>Primary Navigation</h2></div>
           {review.navigation_strategy && (
             <p className="sec-note">{review.navigation_strategy}</p>
           )}
-          {review.nav_presentation ? (
-            <div className={clickable('nav-primary')} {...clickBind('nav-primary', 'Primary navigation')} style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #CFC9F8' }}>
-              <NavPresentationPanel presentation={review.nav_presentation as NavPresentation} variant="partner" />
-            </div>
-          ) : (
-            <div className={`browser ${clickable('nav-primary')}`} {...clickBind('nav-primary', 'Primary navigation')} style={{ padding: 22, fontStyle: 'italic', color: '#6B6180' }}>
-              The nav preview will appear here once the sitemap step finishes.
-            </div>
-          )}
-
-          {pres?.featured_highlight && (
-            <div className="feat-highlight" style={{ marginTop: 16 }}>
-              <div className="mega-label" style={{ color: '#513DE5' }}>Featured · links out ↗</div>
-              <h4 style={{ fontSize: 20, fontWeight: 680, margin: '4px 0 6px', color: '#341756' }}>{pres.featured_highlight.label}</h4>
-              <p style={{ fontSize: 13.5, color: '#6B6180', margin: '0 0 12px', lineHeight: 1.5 }}>{pres.featured_highlight.description}</p>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {pres.featured_highlight.url && (
-                  <a href={pres.featured_highlight.url} target="_blank" rel="noreferrer" className="btn accent">
-                    {pres.featured_highlight.cta_label ?? 'Learn more'} →
-                  </a>
-                )}
-                {pres.featured_highlight.secondary_cta_label && (
-                  <span className="btn ghost">{pres.featured_highlight.secondary_cta_label}</span>
-                )}
-              </div>
-            </div>
-          )}
+          <div className={`browser ${clickable('nav-primary')}`} {...clickBind('nav-primary', 'Primary navigation')}>
+            {review.nav_presentation
+              ? <PrimaryNavPreview np={review.nav_presentation} church={church} featured={pres?.featured_highlight} congregations={pres?.congregations} />
+              : <PrimaryNavFallback header={review.nav_layout.header ?? []} church={church} />
+            }
+          </div>
         </section>
 
         {pres?.congregations && pres.congregations.length > 0 && (
@@ -324,59 +305,181 @@ export default function SitemapPartnerViewV2({
             <div className="sec-head"><span className="sec-num">02b</span><h2>Persistent Navigation</h2></div>
             <p className="sec-note">Step into a congregation and this bar stays with you. Its name, service time, address, and full menu always in reach.</p>
             <div className={clickable('nav-secondary')} {...clickBind('nav-secondary', 'Persistent navigation')} style={{ padding: '8px 0' }}>
+              {pres.congregations.map(cg => {
+                const allLinks = [...(cg.links_left ?? []), ...(cg.links_right ?? [])]
+                const dropdowns = allLinks.filter(l => l.is_dropdown && (l.kids ?? '').trim())
+                return (
+                  <div key={cg.id} style={{ marginBottom: 12 }}>
+                    <div className="cong-bar" style={{ background: '#341756', color: '#fff', borderRadius: 12, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+                      <div style={{ background: '#F9F5F1', color: '#341756', borderRadius: 999, padding: '10px 18px', display: 'flex', alignItems: 'baseline', gap: 12 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.16em', textTransform: 'uppercase', color: '#513DE5', alignSelf: 'center' }}>{cg.label}</span>
+                        {cg.service_time && <span style={{ fontSize: 14, fontWeight: 750, letterSpacing: '-.02em' }}>{cg.service_time}</span>}
+                        {cg.address && <span style={{ fontSize: 12, color: '#6B6180' }}>{cg.address}</span>}
+                      </div>
+                      <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', marginLeft: 'auto', fontSize: 13, fontWeight: 530, color: '#CFC9F8', alignItems: 'center' }}>
+                        {allLinks.map((it, i) => (
+                          <span key={i}>
+                            {it.label}
+                            {it.is_dropdown && <span style={{ color: '#8A82AC', fontSize: 10, marginLeft: 4 }}>▾</span>}
+                            {it.is_shared && <span style={{ color: '#8A82AC', fontSize: 10, marginLeft: 4 }}>↗ shared</span>}
+                          </span>
+                        ))}
+                        <span style={{ color: '#fff', fontWeight: 640, border: '1px solid #6B5CE7', padding: '6px 14px', borderRadius: 999, marginLeft: 8 }}>
+                          Visit {cg.label}
+                        </span>
+                      </div>
+                      {cg.note && <div style={{ width: '100%', fontSize: 11, color: '#8B84A0', fontStyle: 'italic', marginTop: 4 }}>{cg.note}</div>}
+                    </div>
+                    {dropdowns.length > 0 && (
+                      <div style={{
+                        background: '#291247',
+                        borderRadius: 10,
+                        padding: '18px 22px',
+                        margin: '10px 8px 0',
+                        display: 'grid',
+                        gridTemplateColumns: `repeat(auto-fit, minmax(180px, 1fr))`,
+                        gap: '20px 40px',
+                        fontSize: 13,
+                      }}>
+                        {dropdowns.map((it, i) => (
+                          <div key={i} style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 8,
+                            paddingLeft: i === 0 ? 0 : 14,
+                            borderLeft: i === 0 ? 'none' : '1px solid rgba(255,255,255,0.12)',
+                          }}>
+                            <span style={{
+                              color: '#B8B0D2',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              letterSpacing: '.14em',
+                              textTransform: 'uppercase',
+                              marginBottom: 2,
+                            }}>{it.label} ▾</span>
+                            {(it.kids ?? '').split(',').map(k => k.trim()).filter(Boolean).map((child, j) => (
+                              <span key={j} style={{
+                                color: '#fff',
+                                fontWeight: 550,
+                                fontSize: 13.5,
+                                lineHeight: 1.35,
+                              }}>{child}</span>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* Shared Hub Pages. One card per congregation with service
+            time + address + Visit button. Populated from
+            presentation.congregations; sites without multi-campus
+            structure skip this section entirely. */}
+        {pres?.congregations && pres.congregations.length > 0 && (
+          <section className="sec">
+            <div className="sec-head"><span className="sec-num">03</span><h2>{pres.shared_hubs_headline ?? 'Shared Hub Pages'}</h2></div>
+            {pres.shared_hubs_body
+              ? <p className="sec-note" style={{ whiteSpace: 'pre-wrap' }}>{pres.shared_hubs_body}</p>
+              : <p className="sec-note"><b>Visit</b> is a warm welcome page for the whole church, with a card that leads to a dedicated page for each congregation. <b>Watch</b> works the same way.</p>}
+            <div className={`cards3 ${clickable('hubs')}`} {...clickBind('hubs', 'Shared hub pages')} style={{ padding: '8px 0' }}>
               {pres.congregations.map(cg => (
-                <div key={cg.id} className="cong-bar" style={{ background: '#341756', color: '#fff', borderRadius: 12, padding: '14px 16px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-                  <div style={{ background: '#F9F5F1', color: '#341756', borderRadius: 999, padding: '8px 16px', display: 'flex', alignItems: 'baseline', gap: 10 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.16em', textTransform: 'uppercase', color: '#513DE5', alignSelf: 'center' }}>{cg.label}</span>
-                    {cg.service_time && <span style={{ fontSize: 14, fontWeight: 750, letterSpacing: '-.02em' }}>{cg.service_time}</span>}
-                    {cg.address && <span style={{ fontSize: 12, color: '#6B6180' }}>{cg.address}</span>}
+                <div key={cg.id} className="vcard">
+                  <div className="vimg">◇</div>
+                  <div className="vbody">
+                    <h4>{cg.label}</h4>
+                    {cg.service_time && <div className="vt">{cg.service_time}</div>}
+                    {cg.address && <div className="va">{cg.address}</div>}
+                    <span className="btn accent" style={{ display: 'block', textAlign: 'center' }}>Visit {cg.label} →</span>
                   </div>
-                  <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginLeft: 'auto', fontSize: 13, fontWeight: 530, color: '#CFC9F8', alignItems: 'center' }}>
-                    {[...(cg.links_left ?? []), ...(cg.links_right ?? [])].map((it, i) => (
-                      <span key={i}>
-                        {it.label}
-                        {it.is_dropdown && <span style={{ color: '#8A82AC', fontSize: 10, marginLeft: 3 }}>▾</span>}
-                        {it.is_shared && <span style={{ color: '#8A82AC', fontSize: 10, marginLeft: 3 }}>↗ shared</span>}
-                      </span>
-                    ))}
-                    <span style={{ color: '#fff', fontWeight: 640, border: '1px solid #6B5CE7', padding: '5px 12px', borderRadius: 999 }}>
-                      Visit {cg.label}
-                    </span>
-                  </div>
-                  {cg.note && <div style={{ width: '100%', fontSize: 11, color: '#8B84A0', fontStyle: 'italic', marginTop: 2 }}>{cg.note}</div>}
                 </div>
               ))}
             </div>
           </section>
         )}
 
+        {/* Footer preview. Four-column grid: brand + contact / by-
+            congregation service times / footer_page_links (explore)
+            / newsletter cta. Matches the artifact layout. */}
         <section className="sec">
-          <div className="sec-head"><span className="sec-num">03</span><h2>Footer</h2></div>
-          <p className="sec-note">Every page ends here, with your contact info, everyday links, and a place to stay in touch.</p>
-          <div className={`footer-preview ${clickable('footer')}`} {...clickBind('footer', 'Footer')}>
-            <div className="fbrand">◆ {review.footer_info?.church_name ?? church}</div>
-            <div className="fmeta">
-              {review.footer_info?.address && <div>{review.footer_info.address}</div>}
-              {review.footer_info?.phone   && <div>{review.footer_info.phone}</div>}
-              {review.footer_info?.email   && <div>{review.footer_info.email}</div>}
-              {(!review.footer_info?.address && !review.footer_info?.phone && !review.footer_info?.email) && (
-                <div style={{ opacity: 0.7, fontStyle: 'italic' }}>Address, phone, and email will appear here as they are confirmed with your team.</div>
-              )}
-              {(review.footer_info?.social_links ?? []).length > 0 && (
-                <div style={{ marginTop: 10 }}>
-                  {(review.footer_info?.social_links ?? []).map((s, i) => (
-                    <span key={i} style={{ marginRight: 14 }}>
-                      {s.label ?? capitalize(s.platform)}
-                    </span>
+          <div className="sec-head"><span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '04' : '03'}</span><h2>Footer</h2></div>
+          <p className="sec-note">Every page ends here: contact info, everyday links, and a place to stay in touch.</p>
+          <div className={`footer-preview ${clickable('footer')}`} {...clickBind('footer', 'Footer')} style={{ padding: '28px 26px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: [
+              '1.3fr',
+              (pres?.congregations && pres.congregations.length > 0) ? '1.1fr' : null,
+              '1fr',
+              review.footer_info?.newsletter_signup_url ? '1fr' : null,
+            ].filter(Boolean).join(' '), gap: 28 }}>
+              <div>
+                <div className="fbrand" style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                  <span style={{ width: 26, height: 26, background: '#fff', borderRadius: 6, display: 'grid', placeItems: 'center', color: '#341756', fontSize: 13 }}>◆</span>
+                  {review.footer_info?.church_name ?? church}
+                </div>
+                <p style={{ fontSize: 12.5, color: '#D8CFF3', margin: '0 0 12px', lineHeight: 1.5 }}>
+                  {review.executive_summary ? '' : `Contact ${church} and stay in touch.`}
+                </p>
+                <div style={{ fontSize: 12, color: '#D8CFF3', lineHeight: 1.8 }}>
+                  {review.footer_info?.email   && <div>{review.footer_info.email}</div>}
+                  {review.footer_info?.phone   && <div>{review.footer_info.phone}</div>}
+                  {review.footer_info?.address && <div>{review.footer_info.address}</div>}
+                  {(!review.footer_info?.address && !review.footer_info?.phone && !review.footer_info?.email) && (
+                    <div style={{ opacity: 0.7, fontStyle: 'italic' }}>Contact info populates once your team confirms it.</div>
+                  )}
+                </div>
+                {(review.footer_info?.social_links ?? []).length > 0 && (
+                  <p style={{ fontSize: 11.5, color: '#B8B0D2', margin: '12px 0 0', letterSpacing: '.03em' }}>
+                    {(review.footer_info?.social_links ?? []).map(s => s.label ?? capitalize(s.platform)).join(' · ')}
+                  </p>
+                )}
+              </div>
+
+              {pres?.congregations && pres.congregations.length > 0 && (
+                <div>
+                  <div className="mega-label" style={{ color: '#B8B0D2', marginBottom: 12 }}>Congregations</div>
+                  {pres.congregations.map(cg => (
+                    <p key={cg.id} style={{ fontSize: 12, color: '#EDE9FC', margin: '0 0 10px', lineHeight: 1.5 }}>
+                      <b style={{ color: '#fff' }}>{cg.label}</b><br />
+                      {cg.service_time}
+                      {cg.address && <> · {cg.address}</>}
+                      {' · '}<span style={{ color: '#FFC98A' }}>Visit →</span>
+                    </p>
                   ))}
                 </div>
               )}
+
+              <div>
+                <div className="mega-label" style={{ color: '#B8B0D2', marginBottom: 12 }}>Explore</div>
+                <div style={{ fontSize: 12.5, color: '#EDE9FC', lineHeight: 2 }}>
+                  {(review.footer_info?.footer_page_links ?? []).length > 0 ? (
+                    (review.footer_info?.footer_page_links ?? []).map((l, i) => (<div key={i}>{l.label}</div>))
+                  ) : (
+                    <div style={{ opacity: 0.7, fontStyle: 'italic' }}>Add footer links in the Footer section of the Edit tab.</div>
+                  )}
+                </div>
+              </div>
+
+              {review.footer_info?.newsletter_signup_url && (
+                <div>
+                  <div className="mega-label" style={{ color: '#B8B0D2', marginBottom: 12 }}>Stay in the loop</div>
+                  <p style={{ fontSize: 12, color: '#D8CFF3', margin: '0 0 10px', lineHeight: 1.5 }}>Weekend recaps and upcoming events.</p>
+                  <a href={review.footer_info.newsletter_signup_url} target="_blank" rel="noreferrer" className="btn" style={{ background: '#FFC98A', borderColor: '#FFC98A', color: '#341756' }}>Sign up →</a>
+                </div>
+              )}
+            </div>
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', marginTop: 22, paddingTop: 14, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, fontSize: 11, color: '#B8B0D2' }}>
+              <span>© {new Date().getFullYear()} {review.footer_info?.church_name ?? church}</span>
+              <span>Privacy · Terms</span>
             </div>
           </div>
         </section>
 
         {review.pages.length > 0 && <section className="sec">
-          <div className="sec-head"><span className="sec-num">04</span><h2>Full Page List</h2></div>
+          <div className="sec-head"><span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '05' : '04'}</span><h2>Full Page List</h2></div>
           <p className="sec-note">{readOnly ? 'Every page in the sitemap, grouped by parent.' : 'Click any page to leave a note about it: rename, move, combine, or ask a question.'}</p>
           <div className="legend">
             <span><b className="tag2 t-keep">have today</b> already on your site</span>
@@ -428,8 +531,8 @@ export default function SitemapPartnerViewV2({
         </section>}
 
         <section className="sec">
-          <div className="sec-head"><span className="sec-num">05</span><h2>What's changing from your current site</h2></div>
-          <p className="sec-note">Almost nothing is being thrown away; it's being <b>reorganized</b>. Here's the honest picture:</p>
+          <div className="sec-head"><span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '06' : '05'}</span><h2>What's changing from your current site</h2></div>
+          <p className="sec-note">Here is how the content you have today shows up in the new structure:</p>
           <div className={`changed ${clickable('what-changed')}`} {...clickBind('what-changed', "What's changing")}>
             {pres?.whats_changing_cards && pres.whats_changing_cards.length > 0 ? (
               pres.whats_changing_cards.map(c => (
@@ -438,19 +541,14 @@ export default function SitemapPartnerViewV2({
                   <p><b>{c.title}.</b> {c.body}</p>
                 </div>
               ))
-            ) : review.content_migrations.length > 0 ? (
-              review.content_migrations.slice(0, 6).map(m => (
-                <div key={m.id} className="chcard">
-                  <p>
-                    <b>{m.title}.</b>{' '}
-                    {m.merged_from.length > 0 && <>Combining {m.merged_from.join(', ')} into {m.merged_to}. </>}
-                    {m.rationale}
-                  </p>
-                </div>
-              ))
             ) : (
+              // No authored cards -> show partner-friendly generic
+              // defaults instead of raw content_migrations rationale
+              // (which is strategist-facing sitemap step output and
+              // often technical or context-heavy in ways partners
+              // shouldn't be reading).
               <>
-                <div className="chcard"><span className="tag2 t-keep" style={{ display: 'inline-block', marginBottom: 7 }}>have today</span><p><b>Kept, just re-homed.</b> The pages you already have carry over into the new structure so nothing familiar goes missing.</p></div>
+                <div className="chcard"><span className="tag2 t-keep" style={{ display: 'inline-block', marginBottom: 7 }}>have today</span><p><b>Kept, just re-homed.</b> Pages you already have carry over into the new structure with clearer names and better neighbors.</p></div>
                 <div className="chcard"><span className="tag2 t-cons" style={{ display: 'inline-block', marginBottom: 7 }}>combined</span><p><b>Tidied up.</b> Where several pages were doing similar work, they merge into one clearer home so visitors find what they need faster.</p></div>
               </>
             )}
@@ -458,7 +556,7 @@ export default function SitemapPartnerViewV2({
         </section>
 
         <section className="sec">
-          <div className="sec-head"><span className="sec-num">06</span><h2>Why we shaped it this way</h2></div>
+          <div className="sec-head"><span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '07' : '06'}</span><h2>Why we shaped it this way</h2></div>
           <div className={`why ${clickable('why')}`} {...clickBind('why', "Why we shaped it this way")}>
             {pres?.why_cards && pres.why_cards.length > 0 ? (
               pres.why_cards.map(c => (
@@ -478,6 +576,72 @@ export default function SitemapPartnerViewV2({
             )}
           </div>
         </section>
+
+        {review.persona_postures.length > 0 && (() => {
+          const visiblePostures = review.persona_postures.filter(p =>
+            (p.posture_summary ?? '').trim().length > 0 ||
+            (p.goal ?? '').trim().length > 0 ||
+            (p.key_page_slugs ?? []).length > 0 ||
+            (p.drop_off_risk && ((p.drop_off_risk.mitigation ?? '').trim().length > 0)),
+          )
+          if (visiblePostures.length === 0) return null
+          const pageBySlug = new Map(review.pages.map(p => [p.slug, p]))
+          const congBase = pres?.congregations && pres.congregations.length > 0 ? 7 : 6
+          return (
+            <section className="sec">
+              <div className="sec-head"><span className="sec-num">{String(congBase + 1).padStart(2, '0')}</span><h2>Who this site is built for</h2></div>
+              <p className="sec-note">The people we designed the site around, and the pages that matter most for each one.</p>
+              <div className={`personas ${clickable('personas')}`} {...clickBind('personas', 'Who this site is built for')} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
+                {visiblePostures.map(p => (
+                  <div key={p.persona_id} style={{ background: '#fff', border: '1px solid #CFC9F8', borderRadius: 14, padding: '18px 20px' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: '#513DE5', marginBottom: 4 }}>Meet</div>
+                    <h3 style={{ fontSize: 20, fontWeight: 680, color: '#341756', margin: '0 0 10px', letterSpacing: '-0.02em' }}>{p.persona_name}</h3>
+                    {p.posture_summary && (
+                      <p style={{ fontSize: 13, color: '#6B6180', margin: '0 0 14px', lineHeight: 1.55 }}>{p.posture_summary}</p>
+                    )}
+                    {(p.goal ?? '').trim().length > 0 && (
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', margin: '0 0 14px', padding: '10px 12px', background: '#EDE9FC', borderRadius: 10, fontSize: 12.5, color: '#341756', lineHeight: 1.45 }}>
+                        <span style={{ flex: 'none', fontSize: 10, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: '#513DE5' }}>Goal</span>
+                        <span style={{ fontWeight: 600 }}>{p.goal}</span>
+                      </div>
+                    )}
+                    {(() => {
+                      const slugs = (p.key_page_slugs ?? []).slice(0, 3)
+                      const pages = slugs.map(s => pageBySlug.get(s)).filter((pg): pg is (typeof review.pages)[number] => !!pg)
+                      if (pages.length === 0) return null
+                      return (
+                        <div>
+                          <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: '#8B84A0', marginBottom: 8 }}>Key pages</div>
+                          <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {pages.map((page) => (
+                              <li key={page.slug} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                                <span style={{ flex: 'none', width: 6, height: 6, borderRadius: '50%', background: '#513DE5', marginTop: 7 }} />
+                                <div style={{ fontSize: 13, color: '#341756', lineHeight: 1.4 }}>
+                                  <div style={{ fontWeight: 620 }}>{page.name}</div>
+                                  {(page.purpose ?? '').trim().length > 0 && (
+                                    <div style={{ fontSize: 11.5, color: '#6B6180', marginTop: 2 }}>{page.purpose}</div>
+                                  )}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )
+                    })()}
+                    {p.drop_off_risk && (p.drop_off_risk.mitigation ?? '').trim().length > 0 && (
+                      <div style={{ marginTop: 14, padding: '10px 12px', background: '#F9F5F1', borderRadius: 10, borderLeft: '3px solid #513DE5' }}>
+                        <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: '#513DE5', marginBottom: 4 }}>
+                          How we&apos;re leaning in for {p.persona_name}
+                        </div>
+                        <div style={{ fontSize: 12.5, color: '#341756', lineHeight: 1.5 }}>{p.drop_off_risk.mitigation}</div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )
+        })()}
 
         {!readOnly && (
           <section className="sec">
@@ -587,6 +751,312 @@ export default function SitemapPartnerViewV2({
         </>
       )}
     </div>
+  )
+}
+
+// ── Nav preview components ────────────────────────────────────────
+
+/** Artifact-style primary nav preview. Reads nav_presentation (from
+ *  cowork sitemap step OR strategist-authored via presentation layer)
+ *  and renders it in the browser-mock layout the design artifact
+ *  established: topnav with pill chips + mega-panels with columns +
+ *  featured tiles. Explicitly does NOT reuse NavPresentationPanel
+ *  because that component's layout is different by design. */
+function PrimaryNavPreview({
+  np, church, featured, congregations,
+}: {
+  np:       SitemapReviewNavPresentation
+  church:   string
+  featured?: NonNullable<SitemapReview['presentation']>['featured_highlight']
+  /** When present, mega panels whose columns look like the
+   *  congregations list get rendered as per-congregation rows
+   *  (chip + horizontal links + service card) instead of the
+   *  standard columns-of-links layout. Matches the artifact's
+   *  Get Connected mega for multi-campus partners. */
+  congregations?: NonNullable<SitemapReview['presentation']>['congregations']
+}) {
+  const vtl = np.visible_top_level ?? []
+  const items    = vtl.filter(i => i.kind !== 'button' && i.kind !== 'hamburger')
+  const buttons  = vtl.filter(i => i.kind === 'button')
+  const hasBurger = vtl.some(i => i.kind === 'hamburger')
+
+  return (
+    <>
+      <nav className="topnav">
+        <div className="brand-mark"><span className="glyph">◆</span> {church}</div>
+        <div className="items">
+          {items.map((it, i) => (
+            <span key={i} className={it.kind === 'group' ? 'mega' : ''}>
+              {it.label ?? it.group_label}
+              {it.kind === 'group' && <span className="caret">▾</span>}
+            </span>
+          ))}
+        </div>
+        <span className="spacer" />
+        {buttons.map((it, i) => (
+          <span key={i} className={i === 0 ? 'btn accent' : 'btn ghost'}>{it.label}</span>
+        ))}
+        {hasBurger && <span style={{ fontSize: 20, color: '#341756', marginLeft: 8 }}>☰</span>}
+      </nav>
+
+      {(np.megamenu_panels ?? []).map((panel, pi) => {
+        const cols = panel.columns ?? []
+        const isFirstWithFeatured = pi === 0 && !!panel.featured_tile
+        const externalFeatured = isFirstWithFeatured ? undefined : (pi === 0 ? featured : undefined)
+        const featuredTile = panel.featured_tile
+          ?? (externalFeatured ? { kind: 'image_cta' as const, heading: externalFeatured.label, body: externalFeatured.description, link_label: externalFeatured.cta_label ?? 'Learn more' } : undefined)
+        const externalUrl       = featured?.url
+        const externalCtaLabel  = featured?.cta_label
+        const secondaryCta      = featured?.secondary_cta_label
+
+        // Detect "congregation rows" shape: panel columns whose
+        // headings match presentation.congregations labels. Switches
+        // to the per-cong row layout the artifact uses for Doxology's
+        // Get Connected mega (chip + horizontal links + service card).
+        const congByLabel = new Map((congregations ?? []).map(c => [c.label.toLowerCase(), c]))
+        const congRows = cols.length > 0 && cols.every(c => c.heading && congByLabel.has(c.heading.toLowerCase()))
+
+        return (
+          <div key={pi} className="mega-panel" style={pi > 0 ? { borderTop: '1px solid #CFC9F8' } : undefined}>
+            <div className="mega-label">{panel.triggered_by ?? '…'}</div>
+
+            {congRows ? (
+              /* Per-congregation rows: chip + link list + svc card. */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {cols.map((col, ci) => {
+                  const cong = congByLabel.get((col.heading ?? '').toLowerCase())
+                  const isPrimary = !!cong?.is_primary
+                  const links = col.links ?? []
+                  return (
+                    <div key={ci} style={{ display: 'grid', gridTemplateColumns: '150px 1fr 240px', gap: 24, alignItems: 'start', padding: '18px 0', borderTop: ci === 0 ? undefined : '1px solid #CFC9F8' }}>
+                      <div style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 9,
+                        fontWeight: 640, fontSize: 14, padding: '11px 14px',
+                        borderRadius: 999,
+                        background: isPrimary ? '#341756' : '#fff',
+                        color:      isPrimary ? '#fff'    : '#341756',
+                        border: `1px solid ${isPrimary ? '#341756' : '#CFC9F8'}`,
+                        justifySelf: 'start',
+                      }}>◆ {cong?.label ?? col.heading}</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px 28px', paddingTop: 6 }}>
+                        {links.map((l, li) => {
+                          // Split comma-separated one_line_description
+                          // ("Kids, Youth") into stacked sub-page rows.
+                          // Sub-pages are the actual site pages, so they
+                          // get full page-hierarchy typography; the parent
+                          // label above them is treated as a small-caps
+                          // dropdown header, not competing with the pages.
+                          const kids = (l.one_line_description ?? '')
+                            .split(',')
+                            .map(s => s.trim())
+                            .filter(Boolean)
+                          const hasKids = kids.length > 0
+                          return (
+                            <div key={li}>
+                              {hasKids ? (
+                                <>
+                                  <div style={{
+                                    fontSize: 10.5,
+                                    fontWeight: 700,
+                                    letterSpacing: '.14em',
+                                    textTransform: 'uppercase',
+                                    color: '#8B84A0',
+                                    marginBottom: 6,
+                                  }}>{l.label}</div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                    {kids.map((k, ki) => (
+                                      <span key={ki} style={{
+                                        fontSize: 14,
+                                        fontWeight: 620,
+                                        color: '#341756',
+                                        lineHeight: 1.3,
+                                      }}>{k}</span>
+                                    ))}
+                                  </div>
+                                </>
+                              ) : (
+                                <div style={{
+                                  fontSize: 14,
+                                  fontWeight: 620,
+                                  color: '#341756',
+                                  lineHeight: 1.3,
+                                }}>{l.label}</div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <div style={{ background: '#F9F5F1', border: '1px solid #E2DDD4', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 10, justifySelf: 'stretch' }}>
+                        {cong?.service_time && <div style={{ fontSize: 17, fontWeight: 700, color: '#341756', lineHeight: 1.2 }}>{cong.service_time}</div>}
+                        {cong?.address && <div style={{ fontSize: 12.5, color: '#6F6558', lineHeight: 1.4 }}>{cong.address}</div>}
+                        {cong?.note && <div style={{ fontSize: 11, color: '#8B84A0', fontStyle: 'italic' }}>{cong.note}</div>}
+                        <span style={{ marginTop: 4, textAlign: 'center', background: '#341756', color: '#fff', padding: '8px 12px', borderRadius: 7, fontSize: 12, fontWeight: 620 }}>Visit {cong?.label ?? col.heading}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              /* Standard columns + optional featured tile. */
+              <div style={{ display: 'flex', gap: 30, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                {cols.map((col, ci) => {
+                  const links = col.links ?? []
+                  const twoCol = cols.length === 1 && links.length >= 4
+                  return (
+                    <div key={ci} style={{ flex: '1 1 240px', minWidth: 180 }}>
+                      {col.heading && <h4 style={{ fontSize: 14, fontWeight: 680, margin: '0 0 6px', color: '#513DE5', letterSpacing: '-0.01em' }}>{col.heading}</h4>}
+                      {col.description && <p style={{ fontSize: 12.5, color: '#6B6180', margin: '0 0 12px', lineHeight: 1.45 }}>{col.description}</p>}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px 24px' }}>
+                        {links.map((link, li) => (
+                          <div key={li} className="mega-item" style={twoCol ? { flex: '1 1 45%', minWidth: 140 } : { flex: '1 1 100%' }}>
+                            <span className="ph sq">■</span>
+                            <div>
+                              <h4>{link.label}</h4>
+                              {link.one_line_description && <p>{link.one_line_description}</p>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+                {featuredTile && (
+                  <div style={{ flex: '0 1 260px', minWidth: 220 }}>
+                    <FeaturedTile
+                      tile={featuredTile}
+                      externalUrl={panel.featured_tile ? externalUrl : externalFeatured?.url}
+                      externalCtaLabel={panel.featured_tile ? externalCtaLabel : externalFeatured?.cta_label}
+                      secondaryCta={panel.featured_tile ? secondaryCta : externalFeatured?.secondary_cta_label}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {shell(np) === 'standard_dropdowns' && (np.standard_dropdowns?.groups ?? []).length > 0 && (
+        <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 10, background: '#fff' }}>
+          {np.standard_dropdowns!.groups!.map((g, gi) => (
+            <div key={gi} style={{ background: '#341756', color: '#fff', borderRadius: 12, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+              <div style={{ background: '#F9F5F1', color: '#341756', borderRadius: 999, padding: '8px 16px', fontSize: 13, fontWeight: 700 }}>
+                {g.group_label ?? '…'}
+              </div>
+              <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', marginLeft: 'auto', fontSize: 13, fontWeight: 530, color: '#CFC9F8', alignItems: 'center' }}>
+                {(g.children ?? []).map((c, ci) => (
+                  <span key={ci}>{c.label}</span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {shell(np) === 'offcanvas' && np.offcanvas_overlay && (
+        <div className="mega-panel" style={{ background: 'linear-gradient(180deg,#F9F5F1,#EDE9FC)' }}>
+          {np.offcanvas_overlay.hero_message && (
+            <p style={{ fontSize: 14, fontWeight: 640, fontStyle: 'italic', color: '#341756', margin: '0 0 14px' }}>
+              &ldquo;{np.offcanvas_overlay.hero_message}&rdquo;
+            </p>
+          )}
+          <div className="about-grid" style={{ gridTemplateColumns: `repeat(${Math.min((np.offcanvas_overlay.sections ?? []).length, 3)}, 1fr)` }}>
+            {(np.offcanvas_overlay.sections ?? []).map((s, si) => (
+              <div key={si} className="lcol" style={{ gridTemplateColumns: '1fr' }}>
+                <h4 style={{ fontSize: 12, fontWeight: 680, margin: '0 0 8px', color: '#513DE5', textTransform: 'uppercase', letterSpacing: '.08em' }}>{s.section_label}</h4>
+                {(s.links ?? []).map((l, li) => (
+                  <div key={li} className="mega-item"><span className="ph sq" style={{ width: 24, height: 24 }}>■</span><div><h4>{l.label}</h4></div></div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+function FeaturedTile({
+  tile, externalUrl, externalCtaLabel, secondaryCta,
+}: {
+  tile:             NonNullable<NonNullable<SitemapReviewNavPresentation['megamenu_panels']>[number]['featured_tile']>
+  externalUrl?:     string
+  externalCtaLabel?: string
+  secondaryCta?:    string
+}) {
+  const linksOut = !!externalUrl
+  return (
+    <div style={{
+      background: '#F9F5F1',
+      border: '1px solid #E2DDD4',
+      borderRadius: 12,
+      padding: 14,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+    }}>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6180' }}>
+        Featured{linksOut && <span style={{ marginLeft: 6 }}>· links out ↗</span>}
+      </div>
+      <div style={{ background: '#D9D4CA', borderRadius: 8, height: 88, display: 'grid', placeItems: 'center', color: '#8A8073', fontSize: 22 }}>◇</div>
+      {tile.heading && <h4 style={{ fontSize: 16, fontWeight: 680, margin: 0, color: '#341756', letterSpacing: '-0.02em', lineHeight: 1.2 }}>{tile.heading}</h4>}
+      {tile.body && <p style={{ fontSize: 12, color: '#6F6558', margin: 0, lineHeight: 1.45 }}>{tile.body}</p>}
+      <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+        {externalUrl ? (
+          <a href={externalUrl} target="_blank" rel="noreferrer" style={{ flex: 1, textAlign: 'center', padding: '8px 12px', background: '#341756', border: '1.5px solid #341756', borderRadius: 7, color: '#fff', fontSize: 12, fontWeight: 620, textDecoration: 'none' }}>
+            {externalCtaLabel ?? tile.link_label ?? 'Learn more'} →
+          </a>
+        ) : (
+          tile.link_label && <span style={{ flex: 1, textAlign: 'center', padding: '8px 12px', background: '#341756', border: '1.5px solid #341756', borderRadius: 7, color: '#fff', fontSize: 12, fontWeight: 620 }}>{tile.link_label} →</span>
+        )}
+        {secondaryCta && <span style={{ flex: 1, textAlign: 'center', padding: '8px 12px', background: 'transparent', border: '1.5px solid #341756', borderRadius: 7, color: '#341756', fontSize: 12, fontWeight: 620 }}>{secondaryCta}</span>}
+      </div>
+    </div>
+  )
+}
+
+function shell(np: SitemapReviewNavPresentation): SitemapReviewNavPresentation['shell'] {
+  return np.shell ?? (np.megamenu_panels && np.megamenu_panels.length > 0 ? 'megamenu' : np.standard_dropdowns ? 'standard_dropdowns' : np.offcanvas_overlay ? 'offcanvas' : undefined)
+}
+
+/** Fallback preview when nav_presentation is absent. Renders a
+ *  minimal browser topnav from nav_layout.header so partners still
+ *  see something recognizable when the strategist has not authored
+ *  a full nav_presentation. */
+function PrimaryNavFallback({ header, church }: { header: NavItem[]; church: string }) {
+  return (
+    <>
+      <nav className="topnav">
+        <div className="brand-mark"><span className="glyph">◆</span> {church}</div>
+        <div className="items">
+          {header.slice(0, 6).map((it, i) => (
+            <span key={i} className={it.children && it.children.length > 0 ? 'mega' : ''}>
+              {it.label}
+              {it.children && it.children.length > 0 && <span className="caret">▾</span>}
+            </span>
+          ))}
+        </div>
+        <span className="spacer" />
+        <span className="btn accent">Visit</span>
+      </nav>
+      {header.some(it => it.children && it.children.length > 0) && (
+        <div className="mega-panel">
+          {header.filter(it => it.children && it.children.length > 0).slice(0, 2).map((parent, pi) => (
+            <div key={pi} style={{ marginBottom: pi === 0 ? 20 : 0 }}>
+              <div className="mega-label">{parent.label}</div>
+              <div className="mega-grid">
+                {(parent.children ?? []).slice(0, 6).map((c, ci) => (
+                  <div key={ci} className="mega-item">
+                    <span className="ph sq">■</span>
+                    <div><h4>{c.label}</h4></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   )
 }
 

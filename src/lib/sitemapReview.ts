@@ -1,15 +1,15 @@
 /**
- * Sitemap Review — the partner-facing snapshot of a project's page
+ * Sitemap Review, the partner-facing snapshot of a project's page
  * structure, persona postures, navigation layout, and content-
  * consolidation rationale.
  *
- * Distinct from `roadmap_state.stage_2` (the strategist's proposal —
+ * Distinct from `roadmap_state.stage_2` (the strategist's proposal ,
  * includes strategist-only info like scoring, considered alternatives,
  * cowork provenance). The review is the client-safe view: a curated
  * summary the partner reads and can edit, then approves as the
  * official path forward that downstream tools consume.
  *
- * Storage: `strategy_web_projects.roadmap_state.sitemap_review` — a
+ * Storage: `strategy_web_projects.roadmap_state.sitemap_review`, a
  * single JSONB blob. No new table (matches the CLAUDE.md rule that
  * roadmap_state absorbs strategist-authored data). Partner writes go
  * through a SECURITY DEFINER RPC that checks the token before merging
@@ -25,9 +25,9 @@ export type SitemapReviewStatus =
   | 'draft'             // staff is authoring, not yet shared with partner
   | 'published'         // shared with partner, awaiting their input
   | 'partner_reviewed'  // partner made edits, waiting for staff confirmation
-  | 'approved'          // locked as canonical — downstream tools read from here
+  | 'approved'          // locked as canonical, downstream tools read from here
 
-/** Ordered step in a persona's journey — either an anchor to one of
+/** Ordered step in a persona's journey, either an anchor to one of
  *  the site's pages (via `page_slug`) or a free-text milestone
  *  (e.g. "Watches a service online" without a specific page). */
 export interface JourneyStep {
@@ -37,29 +37,77 @@ export interface JourneyStep {
 }
 
 /** How the site is postured toward one persona. Composed by the
- *  strategist from the project's `personas[]` — one posture per
- *  persona the site is meant to serve. */
+ *  strategist from the project's `personas[]`, one posture per
+ *  persona the site is meant to serve.
+ *
+ *  Sourcing rule: personas are NOT invented at the sitemap review
+ *  step. Extract them from the strategy brief (project.personas or
+ *  roadmap_state.stage_1.personas) and contextualize their existing
+ *  needs, desires, and barriers to the website. If the strategy
+ *  brief has zero personas, the posture list stays empty until the
+ *  brief captures them — never seed placeholder personas here.
+ *
+ *  Composition rules — apply when authoring or generating for ANY
+ *  partner:
+ *
+ *  1. Goal is persona-specific and concrete. "Attend a DivorceCare
+ *     cohort", "join a community group this semester", "coordinate a
+ *     neighboring day." Not "plan a visit" for every persona and not
+ *     "give more" for anyone. The goal is the site's job for this
+ *     specific person, framed in their language and against their
+ *     stated desire/barrier from the strategy brief.
+ *
+ *  2. Key pages are the top 3 pages (max) that must serve this
+ *     persona to reach their goal. Selected from the review's
+ *     current page list, not invented. Not a laundry list of pages
+ *     we hope they see — the pages whose content strategy is
+ *     load-bearing for this persona's outcome.
+ *
+ *  3. Posture summary is contextualized to the website. Read the
+ *     strategy brief's bio_one_line, desire, and barrier for this
+ *     persona and translate them into "how the site meets this
+ *     person" — the tone, the first-page priority, the friction we
+ *     are removing. Do not rewrite the persona's identity.
+ *
+ *  4. One persona, one primary congregation. For multi-campus sites,
+ *     assign each persona to a single congregation via
+ *     primary_congregation_id. Do not fabricate cross-congregation
+ *     scenarios. */
 export interface PersonaPosture {
   persona_id: string
   persona_name: string
-  /** One-paragraph "here's how the site is angled to this person" —
-   *  what they see first, how the message lands, what tone. */
+  /** One-paragraph "here's how the site is angled to this person",
+   *  contextualized from the strategy brief's bio + desire + barrier.
+   *  What the site does for them, in their language. */
   posture_summary: string
-  user_journey: JourneyStep[]
-  /** Slugs of the pages most critical to this persona's success on
-   *  the site. Used to highlight "these are your pages" per persona. */
+  /** The specific outcome this persona is trying to reach on the site.
+   *  Concrete and persona-specific ("register for baptism and join a
+   *  group", "attend a DivorceCare cohort", "decide whether to visit
+   *  Sunday"). Framed against the strategy brief's stated desire and
+   *  barrier for this persona. */
+  goal?: string
+  /** Top 3 pages (max) whose content is load-bearing for this
+   *  persona's outcome. Chosen from the review's current page list,
+   *  not invented. Used to signal "these are your pages" per persona
+   *  and to drive downstream content-strategy priority. */
   key_page_slugs: string[]
-  /** Pages this persona is likely to LAND on first. Pulled from the
-   *  cowork sitemap step's `persona_journeys[].entry_points`. Empty
-   *  when unknown. */
-  entry_points?: string[]
-  /** Where the strategist predicts this persona might bail. Pulled
-   *  from `persona_journeys[].drop_off_risk`. Optional. */
+  /** Congregation this persona is anchored to on multi-campus sites.
+   *  Empty on single-campus reviews. */
+  primary_congregation_id?: string
+  /** Where the strategist predicts this persona might bail. */
   drop_off_risk?: {
     at_slug:    string
     reason:     string
     mitigation: string
   }
+  /** @deprecated Replaced by `key_page_slugs`. Retained for
+   *  backward-compat during the migration off sequenced journeys.
+   *  Do not render on partner view; do not author on new postures. */
+  user_journey?: JourneyStep[]
+  /** @deprecated See `user_journey`. */
+  journeys_by_congregation?: Record<string, JourneyStep[]>
+  /** @deprecated Merged into `key_page_slugs`; kept for older data. */
+  entry_points?: string[]
 }
 
 /** One page in the review's pages list. Independent from the real
@@ -118,7 +166,7 @@ export interface ReviewPage {
 
 export interface NavItem {
   label: string
-  slug?: string   // internal — points at ReviewPage.slug
+  slug?: string   // internal, points at ReviewPage.slug
   url?: string    // external
   children?: NavItem[]
 }
@@ -150,7 +198,7 @@ export interface NavLayout {
   footer_sections: FooterSection[]
 }
 
-/** "Where content went" — captures the strategist's consolidation
+/** "Where content went", captures the strategist's consolidation
  *  decisions so the partner sees "Youth + Kids → Family, because a
  *  single Family entry point aligns with how young families actually
  *  arrive" instead of silently losing the pages they had. */
@@ -320,6 +368,12 @@ export interface SitemapReviewPresentation {
   /** Authored "Your turn" prompts. When present, replaces the
    *  default 3 prompts the CTA section ships. */
   your_turn_prompts?: string[]
+
+  /** Section-level intro copy for the Shared Hub Pages block. Both
+   *  fields optional; falls back to defaults when unset. Only
+   *  renders on multi-campus partners (where congregations exist). */
+  shared_hubs_headline?: string
+  shared_hubs_body?:     string
 }
 
 /** Snapshot of the cowork sitemap step's nav_presentation. Copied
@@ -416,7 +470,7 @@ export interface SitemapReview {
 
 // ── Read / write ─────────────────────────────────────────────────────
 
-/** Read the sitemap review for a project (staff context — uses the
+/** Read the sitemap review for a project (staff context, uses the
  *  authenticated user's session). Returns null when the review hasn't
  *  been initialized yet. */
 export async function loadSitemapReview(
@@ -602,7 +656,7 @@ interface ComposeSourceWebPage {
   user_journey_step?: number | null
 }
 
-/** Shape of `roadmap_state.site_strategy` — the cowork "plan-site-strategy"
+/** Shape of `roadmap_state.site_strategy`, the cowork "plan-site-strategy"
  *  step output. Loosely typed because we defensively index; only the
  *  fields we consume are documented here. */
 interface SiteStrategyBlob {
@@ -649,7 +703,7 @@ interface SiteStrategyBlob {
 /** Compose a first-draft sitemap review from the current project state.
  *
  *  Prefers `roadmap_state.site_strategy` (the cowork plan-site-strategy
- *  step output) as the source of truth — that has rich per-page context
+ *  step output) as the source of truth, that has rich per-page context
  *  (purpose, primary audience, funnel stage, nav strategy), curated nav
  *  layout, persona journeys, and pages_considered_dropped rationale.
  *  Falls back to raw `web_pages` + `nav_group_definitions` when
@@ -677,14 +731,46 @@ export function composeSitemapReview(args: {
   const webPageBySlug = new Map<string, ComposeSourceWebPage>()
   for (const p of pages) webPageBySlug.set(p.slug, p)
 
-  // Nav-position labeling — derives a human-readable "where in the nav"
+  // Nav-position labeling, derives a human-readable "where in the nav"
   // from site_strategy.nav (primary / footer / cta_only) so the review
   // renders "Header · primary" instead of leaving nav_position blank.
   const navPositionBySlug = buildNavPositionMap(strategy?.nav)
 
-  // Prefer site_strategy.pages when present; fall back to raw web_pages.
+  // Source-of-truth precedence for pages:
+  //   1. When an existing review already has an authored pages list,
+  //      use IT as the primary source. Recompose only backfills
+  //      missing fields (nav_position, primary_audience) from the
+  //      strategy when the same slug happens to appear there. This
+  //      prevents recompose from adding duplicate pages under the
+  //      strategy's slug conventions (which for Doxology are
+  //      prefixed like sw-kids, al-serve, visit-southwest) when the
+  //      strategist has already authored a canonical pages list.
+  //   2. Otherwise fall back to strategy.pages (fresh compose).
+  //   3. Otherwise fall back to raw web_pages.
   const strategyPages = Array.isArray(strategy?.pages) ? strategy!.pages! : []
-  const composedPages: ReviewPage[] = (strategyPages.length > 0
+  const strategyBySlug = new Map(strategyPages.filter(p => typeof p.slug === 'string' && p.slug !== '_meta').map(p => [p.slug!, p]))
+  const useExistingAsSource = (existing?.pages ?? []).length > 0
+
+  const composedPages: ReviewPage[] = (useExistingAsSource
+    ? (existing!.pages)
+        .slice()
+        .sort((a, b) => a.order - b.order)
+        .map((prior, i) => {
+          const sp = strategyBySlug.get(prior.slug)
+          return {
+            ...prior,
+            order: i,
+            // Fill absent fields from strategy when the slug exists there,
+            // but never overwrite what the strategist has already authored.
+            purpose:          prior.purpose && prior.purpose.trim() ? prior.purpose : (sp?.purpose ?? prior.purpose ?? ''),
+            nav_position:     prior.nav_position ?? navPositionBySlug.get(prior.slug) ?? (sp?.nav_strategy ? capitalize(sp.nav_strategy) : undefined),
+            primary_audience: prior.primary_audience ?? sp?.primary_audience ?? null,
+            funnel_stage:     prior.funnel_stage ?? sp?.primary_funnel ?? null,
+            nav_strategy:     prior.nav_strategy ?? sp?.nav_strategy ?? null,
+            parent_slug:      prior.parent_slug ?? sp?.parent_slug ?? null,
+          }
+        })
+    : strategyPages.length > 0
     ? strategyPages
         .filter(p => typeof p.slug === 'string' && p.slug && p.slug !== '_meta')
         .sort((a, b) => (a.nav_order ?? 0) - (b.nav_order ?? 0))
@@ -706,6 +792,13 @@ export function composeSitemapReview(args: {
             primary_audience:  prior?.primary_audience ?? sp.primary_audience ?? null,
             funnel_stage:      prior?.funnel_stage ?? sp.primary_funnel ?? null,
             nav_strategy:      prior?.nav_strategy ?? sp.nav_strategy ?? null,
+            // Preserve strategist-authored per-page fields across
+            // recompose so tags, migration explanations, and strategy
+            // alignment survive a load->save round-trip.
+            sitemap_tag:         prior?.sitemap_tag,
+            what_changed:        prior?.what_changed,
+            why_change:          prior?.why_change,
+            strategic_alignment: prior?.strategic_alignment,
           }
         })
     : pages
@@ -726,9 +819,29 @@ export function composeSitemapReview(args: {
             primary_audience:  prior?.primary_audience ?? null,
             funnel_stage:      prior?.funnel_stage ?? null,
             nav_strategy:      prior?.nav_strategy ?? null,
+            sitemap_tag:         prior?.sitemap_tag,
+            what_changed:        prior?.what_changed,
+            why_change:          prior?.why_change,
+            strategic_alignment: prior?.strategic_alignment,
           }
         })
   )
+
+  // Append any strategist-authored pages that exist in the prior
+  // review but aren't produced by site_strategy or web_pages (e.g.
+  // Beliefs, Staff, Family Life, and other tier-scaffolding pages
+  // the strategist has added via cowork or SQL). Without this,
+  // recomposing an existing review would silently drop those pages,
+  // breaking any presentation.tiers that reference them.
+  const composedSlugs = new Set(composedPages.map(p => p.slug))
+  const nextOrderStart = composedPages.length
+  const preservedExtras: ReviewPage[] = []
+  for (const prior of existing?.pages ?? []) {
+    if (!composedSlugs.has(prior.slug)) {
+      preservedExtras.push({ ...prior, order: nextOrderStart + preservedExtras.length })
+    }
+  }
+  composedPages.push(...preservedExtras)
 
   const existingPosturesById = new Map<string, PersonaPosture>()
   for (const pp of existing?.persona_postures ?? []) existingPosturesById.set(pp.persona_id, pp)
@@ -778,18 +891,19 @@ export function composeSitemapReview(args: {
   const composedPostures: PersonaPosture[] = personaSource.map(persona => {
     const prior = existingPosturesById.get(persona.id)
     const journey = journeyByPersonaName.get(persona.name.toLowerCase())
-    const seededSteps: JourneyStep[] = journey?.journey
-      ? journey.journey.map(slug => ({ step_label: `Visits /${slug}`, page_slug: slug }))
-      : []
+    // Seed key_page_slugs from the strategy brief's likely_entry_points
+    // (top 3 max). No fabricated pages — if the brief lacks entry points,
+    // the strategist picks pages in the editor.
+    const seededKeyPages = (journey?.entry_points ?? []).slice(0, 3)
     return {
       persona_id:      persona.id,
       persona_name:    persona.name,
       posture_summary: prior?.posture_summary ?? persona.description ?? '',
-      user_journey:    prior?.user_journey && prior.user_journey.length > 0 ? prior.user_journey : seededSteps,
+      goal:            prior?.goal,
       key_page_slugs:  prior?.key_page_slugs && prior.key_page_slugs.length > 0
-        ? prior.key_page_slugs
-        : (journey?.entry_points ?? []),
-      entry_points:    prior?.entry_points ?? journey?.entry_points ?? undefined,
+        ? prior.key_page_slugs.slice(0, 3)
+        : seededKeyPages,
+      primary_congregation_id: prior?.primary_congregation_id,
       drop_off_risk:   prior?.drop_off_risk ?? (
         journey?.drop_off_risk?.at_slug && journey?.drop_off_risk?.reason
           ? {
@@ -799,6 +913,11 @@ export function composeSitemapReview(args: {
             }
           : undefined
       ),
+      // Legacy fields preserved from prior data for older reviews that
+      // still reference them, but no longer authored or rendered.
+      user_journey:             prior?.user_journey,
+      journeys_by_congregation: prior?.journeys_by_congregation,
+      entry_points:             prior?.entry_points,
     }
   })
 
@@ -846,6 +965,9 @@ export function composeSitemapReview(args: {
     if (!p.what_changed        && seed.what_changed)        p.what_changed        = seed.what_changed
     if (!p.why_change          && seed.why_change)          p.why_change          = seed.why_change
     if (!p.strategic_alignment && seed.strategic_alignment) p.strategic_alignment = seed.strategic_alignment
+    // Auto-derive sitemap_tag from migration lookup + copy signals.
+    // Only seeds when strategist hasn't set one explicitly.
+    if (!p.sitemap_tag) p.sitemap_tag = deriveSitemapTag(p, composedMigrations)
   }
 
   // Big-picture strategic framing pulled from strategic_goals when
@@ -873,6 +995,28 @@ export function composeSitemapReview(args: {
   const composedNavPresentation = existing?.nav_presentation
     ?? (strategy as { nav_presentation?: SitemapReviewNavPresentation } | null)?.nav_presentation
     ?? (legacyStage2?.nav_presentation as SitemapReviewNavPresentation | undefined)
+
+  // Presentation layer. Preserves any cowork-authored content and
+  // seeds Why cards from real strategy signals (church_vision,
+  // x_factor, persona count, migration count, page count) when the
+  // strategist has not authored them yet. This gets partners past
+  // the "same 4 generic cards for everyone" complaint: every review
+  // opens with cards keyed to that partner's own approved vision
+  // and the actual decisions made in the sitemap.
+  const composedPresentation: SitemapReviewPresentation | undefined = (() => {
+    const priorPres = existing?.presentation
+    const authoredWhy = priorPres?.why_cards
+    if (authoredWhy && authoredWhy.length > 0) return priorPres
+    const seededWhy = buildWhyCardsFromStrategy({
+      rs,
+      church:          project.church_name,
+      pages:           composedPages,
+      migrationCount:  composedMigrations.length,
+      personaCount:    composedPostures.length,
+    })
+    if (!priorPres && !seededWhy) return undefined
+    return { ...(priorPres ?? {}), why_cards: seededWhy ?? undefined }
+  })()
 
   // Footer info hydrated from the project's global columns. Every
   // field remains editable so the partner can correct anything that
@@ -911,7 +1055,7 @@ export function composeSitemapReview(args: {
     executive_summary:  composedExecSummary,
     navigation_strategy: composedNavStrategy,
     nav_presentation:   composedNavPresentation,
-    presentation:       existing?.presentation,
+    presentation:       composedPresentation,
     footer_info:        composedFooter,
     pages:              composedPages,
     persona_postures:   composedPostures,
@@ -971,6 +1115,118 @@ function buildNavigationStrategy(args: {
  *  data (roadmap_state.stage_1.personas) has no id field. The id is
  *  stable across recomposes because it's a lowercase slug of the name;
  *  same input always yields the same id. */
+/** Auto-derive a page's sitemap_tag from migration lookups and copy
+ *  signals. Runs at compose time so every partner's page list carries
+ *  tags whether or not the strategist has authored them. Order of
+ *  precedence:
+ *   1. Migration where this page is `merged_to_slug` or its name
+ *      matches `merged_to` (case-insensitive)  ->  'consolidated'.
+ *   2. `what_changed` copy mentions "share" / "unified" / "one page"
+ *      /  "shared"                              ->  'unified'.
+ *   3. `what_changed` copy mentions "brand new" / "new to the site"
+ *      / "did not exist"                        ->  'new'.
+ *   4. Default (page existed before, unchanged) ->  'kept'. */
+/** Seed the "Why we shaped it this way" cards from real project
+ *  strategy so every partner opens the review with reasoning keyed
+ *  to their own approved vision, not generic boilerplate. Reads
+ *  strategic_goals.church_vision, stage_1.x_factor, plus counts
+ *  the compose already has (personas, migrations, pages). Returns
+ *  null when there is not enough signal to say anything meaningful,
+ *  in which case the renderer falls back to the static 4 cards. */
+function buildWhyCardsFromStrategy(args: {
+  rs:              Record<string, unknown>
+  church:          string | null | undefined
+  pages:           ReviewPage[]
+  migrationCount:  number
+  personaCount:    number
+}): NonNullable<SitemapReviewPresentation['why_cards']> | null {
+  const { rs, church, pages, migrationCount, personaCount } = args
+  const sg = (rs.strategic_goals ?? {}) as Record<string, unknown>
+  const gv = (sg.goals_and_vision ?? {}) as Record<string, { value?: string }>
+  const churchVision = gv.church_vision?.value?.trim()  ?? null
+  const topGoal      = gv.primary_goals?.value?.trim().split('\n')[0]?.trim() ?? null
+  const s1           = (rs.stage_1 ?? {}) as { x_factor?: string; mission?: string }
+  const xFactor      = s1.x_factor?.trim() ?? null
+  const churchName   = church ?? 'this church'
+
+  // If we have no strategy signals at all, let the renderer show
+  // its static defaults instead of pretending we have signal.
+  if (!churchVision && !xFactor && !topGoal && personaCount === 0 && migrationCount === 0) {
+    return null
+  }
+
+  const cards: NonNullable<SitemapReviewPresentation['why_cards']> = []
+
+  if (xFactor) {
+    cards.push({
+      id:    'x-factor',
+      icon:  '◆',
+      title: 'Built on what makes you distinct',
+      body:  `The whole site keeps ${churchName}'s heartbeat in view: ${xFactor}. Every page is shaped to carry that intent all the way through.`,
+    })
+  }
+
+  if (personaCount > 0) {
+    cards.push({
+      id:    'people',
+      icon:  '◇',
+      title: personaCount === 1 ? 'Written for the person you named' : `Written for the ${personaCount} people you named`,
+      body:  `Every page is built around a real person from Discovery, not an org chart. First-time visitors and long-time members each have a clear next step from wherever they land.`,
+    })
+  }
+
+  if (migrationCount > 0) {
+    cards.push({
+      id:    'consolidation',
+      icon:  '✦',
+      title: 'Tidied without losing anything',
+      body:  `${migrationCount} pages from your current site fold into clearer homes. Nothing familiar goes missing; the structure just gets easier to move through.`,
+    })
+  }
+
+  if (churchVision) {
+    cards.push({
+      id:    'vision',
+      icon:  '↗',
+      title: 'Aligned with the vision you approved',
+      body:  `The whole site is shaped to reflect your own words for what ${churchName} is becoming, not a template borrowed from another church.`,
+    })
+  } else if (topGoal) {
+    cards.push({
+      id:    'goal',
+      icon:  '↗',
+      title: 'Aligned with the goal you named',
+      body:  `The structure keeps your top goal from Discovery front and center: ${topGoal.replace(/[.]+$/, '')}.`,
+    })
+  } else if (pages.length > 0) {
+    cards.push({
+      id:    'grow',
+      icon:  '↗',
+      title: 'Built to grow with you',
+      body:  `As ${churchName} adds ministries and pages, new content slots into the same structure, no redesign needed.`,
+    })
+  }
+
+  // Return exactly what we could seed; the renderer shows whatever
+  // is here. Empty array (no signals) falls to the static default.
+  return cards.length > 0 ? cards : null
+}
+
+function deriveSitemapTag(
+  page:       ReviewPage,
+  migrations: ContentMigration[],
+): ReviewPage['sitemap_tag'] {
+  const isMergeTarget = migrations.some(m =>
+    (m.merged_to_slug && m.merged_to_slug === page.slug) ||
+    (m.merged_to && m.merged_to.toLowerCase() === page.name.toLowerCase()),
+  )
+  if (isMergeTarget) return 'consolidated'
+  const wc = (page.what_changed ?? '').toLowerCase()
+  if (wc.includes('share') || wc.includes('unified') || wc.includes('one page') || wc.includes('shared set')) return 'unified'
+  if (wc.includes('brand new') || wc.includes('new to the site') || wc.includes('did not exist')) return 'new'
+  return 'kept'
+}
+
 function synthesizePersonaId(name: string): string {
   return 'p_' + name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 }
@@ -1067,16 +1323,15 @@ function seedShowYourWorkForPage(args: {
     if (alignmentBits.length > 0) out.strategic_alignment = alignmentBits.join(' ')
   }
 
-  // Persona-journey mention: if any persona journey touches this
-  // slug, we tag on a "who walks through here" note as a coda to
-  // why_change. Uses the strategist-declared journeys from
-  // site_strategy.persona_journeys.
+  // Persona key-pages mention: if any persona names this slug as a
+  // top-3 key page, tag on a "load-bearing for X" note as a coda to
+  // why_change so partners see which personas depend on this page.
   const touchesPersonas = postures.filter(p =>
-    p.user_journey.some(step => step.page_slug === page.slug),
+    (p.key_page_slugs ?? []).includes(page.slug),
   )
   if (touchesPersonas.length > 0 && out.why_change) {
     const names = touchesPersonas.map(p => p.persona_name).join(', ')
-    out.why_change += ` ${touchesPersonas.length === 1 ? 'This is a load-bearing step for' : 'This shows up in the journey of'} ${names}.`
+    out.why_change += ` ${touchesPersonas.length === 1 ? 'This is a load-bearing page for' : 'This is a load-bearing page for'} ${names}.`
   }
 
   // Peripheral use of `strategy` for future extension (persona
@@ -1158,14 +1413,15 @@ function buildNavLayoutFromStrategy(
     const slug = it.slug
     const label = it.label ?? (slug ? (nameBySlug.get(slug) ?? formatSlugAsTitle(slug)) : '')
     if (!withChildren) return { label, ...(slug ? { slug } : {}) }
-    const children = (it.children ?? [])
+    const children = (Array.isArray(it.children) ? it.children : [])
       .map(c => toNavItem(c, false))
       .filter(c => c.label)
     return { label, ...(slug ? { slug } : {}), ...(children.length > 0 ? { children } : {}) }
   }
 
-  const primaryItems: NavItem[] = (nav.primary ?? []).map(item => toNavItem(item, true)).filter(it => it.label)
-  const secondaryFromStrategy: NavItem[] = (nav.secondary ?? []).map(item => toNavItem(item, true)).filter(it => it.label)
+  const asArr = <T,>(v: unknown): T[] => Array.isArray(v) ? (v as T[]) : []
+  const primaryItems: NavItem[] = asArr(nav.primary).map(item => toNavItem(item, true)).filter(it => it.label)
+  const secondaryFromStrategy: NavItem[] = asArr(nav.secondary).map(item => toNavItem(item, true)).filter(it => it.label)
   const secondaryFromFallback: NavItem[] = secondaryPagesFallback
     .sort((a, b) => a.order - b.order)
     .map(p => ({ label: p.name, slug: p.slug }))
@@ -1173,7 +1429,7 @@ function buildNavLayoutFromStrategy(
     ? secondaryFromStrategy
     : secondaryFromFallback
 
-  const footerItems: NavItem[] = (nav.footer ?? []).map(item => toNavItem(item, false)).filter(it => it.label)
+  const footerItems: NavItem[] = asArr(nav.footer).map(item => toNavItem(item, false)).filter(it => it.label)
 
   return {
     header:           primaryItems,
@@ -1193,28 +1449,33 @@ function buildNavLayoutFromStrategy(
 function buildNavPositionMap(nav: SiteStrategyBlob['nav'] | undefined): Map<string, string> {
   const map = new Map<string, string>()
   if (!nav) return map
+  // site_strategy.nav can arrive with non-array values for a given
+  // region (Doxology's older sitemap step wrote nav.footer as an
+  // object with `items` inside). Guard every iteration so a shape
+  // mismatch doesn't crash the entire compose.
+  const asArr = <T,>(v: unknown): T[] => Array.isArray(v) ? (v as T[]) : []
   const secondaryLabel = nav.secondary_label ?? 'Secondary menu'
-  for (const item of nav.primary ?? []) {
+  for (const item of asArr<{ slug?: string; label?: string; children?: unknown[] } | string>(nav.primary)) {
     if (typeof item === 'string') { map.set(item, 'Header · primary'); continue }
     if (item.slug) map.set(item.slug, 'Header · primary')
-    for (const c of item.children ?? []) {
+    for (const c of asArr<{ slug?: string; label?: string } | string>(item.children)) {
       if (typeof c === 'string') map.set(c, `Header · under ${item.label ?? item.slug ?? '(parent)'}`)
       else if ((c as { slug?: string }).slug) map.set((c as { slug: string }).slug, `Header · under ${item.label ?? item.slug ?? '(parent)'}`)
     }
   }
-  for (const item of nav.secondary ?? []) {
+  for (const item of asArr<{ slug?: string; label?: string; children?: unknown[] } | string>(nav.secondary)) {
     if (typeof item === 'string') { map.set(item, secondaryLabel); continue }
     if (item.slug) map.set(item.slug, secondaryLabel)
-    for (const c of item.children ?? []) {
+    for (const c of asArr<{ slug?: string; label?: string } | string>(item.children)) {
       if (typeof c === 'string') map.set(c, `${secondaryLabel} · under ${item.label ?? item.slug ?? '(parent)'}`)
       else if ((c as { slug?: string }).slug) map.set((c as { slug: string }).slug, `${secondaryLabel} · under ${item.label ?? item.slug ?? '(parent)'}`)
     }
   }
-  for (const item of nav.footer ?? []) {
+  for (const item of asArr<{ slug?: string } | string>(nav.footer)) {
     if (typeof item === 'string') { map.set(item, 'Footer'); continue }
     if (item.slug) map.set(item.slug, 'Footer')
   }
-  for (const item of nav.cta_only ?? []) {
+  for (const item of asArr<{ slug?: string } | string>(nav.cta_only)) {
     if (typeof item === 'string') { map.set(item, 'CTA button only'); continue }
     if (item.slug) map.set(item.slug, 'CTA button only')
   }
@@ -1231,7 +1492,7 @@ function capitalize(s: string): string {
 
 // ── Status transitions ───────────────────────────────────────────────
 
-/** Move the review to `published` — mints the token if missing and
+/** Move the review to `published`, mints the token if missing and
  *  stamps published_at. Idempotent. */
 export function publishReview(review: SitemapReview): SitemapReview {
   return {
@@ -1242,7 +1503,7 @@ export function publishReview(review: SitemapReview): SitemapReview {
   }
 }
 
-/** Move the review to `approved` — stamps approved_at + approved_by.
+/** Move the review to `approved`, stamps approved_at + approved_by.
  *  Once approved, downstream tools read from this review (see
  *  getApprovedSitemapReview). */
 export function approveReview(review: SitemapReview, by: 'staff' | 'partner'): SitemapReview {
@@ -1256,7 +1517,7 @@ export function approveReview(review: SitemapReview, by: 'staff' | 'partner'): S
 
 /** Downstream consumers should ONLY read a review that's been
  *  approved. Draft / published / partner_reviewed states are still in
- *  flux — tools reading from them would render provisional data as
+ *  flux, tools reading from them would render provisional data as
  *  canonical. Returns null when nothing is approved yet, at which
  *  point downstream tools fall back to their pre-existing sources
  *  (web_pages, roadmap_state.stage_2, project.personas, etc.). */
@@ -1326,7 +1587,7 @@ function cryptoRandomId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID()
   }
-  // Fallback for the rare runtime without randomUUID — timestamp +
+  // Fallback for the rare runtime without randomUUID, timestamp +
   // random suffix. Not cryptographically strong, but the review token
   // is scoped to a single project and rotatable.
   return `sr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
