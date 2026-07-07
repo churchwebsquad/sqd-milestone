@@ -547,6 +547,29 @@ export default function SitemapPartnerViewV2({
           </div>
         </section>}
 
+        {/* Optional inspiration image — strategist-uploaded reference
+         *  visual (moodboard tile, competitor screenshot, brand-guide
+         *  swatch). Absent by default; when unset the whole section
+         *  is omitted so the review stays clean. */}
+        {pres?.inspiration_image?.url && (
+          <section className="sec">
+            <div className="sec-head">
+              <span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '05b' : '04b'}</span>
+              <h2>For inspiration</h2>
+            </div>
+            <div className={clickable('inspiration-image')} {...clickBind('inspiration-image', 'Inspiration image')} style={{ padding: '4px 0' }}>
+              <img
+                src={pres.inspiration_image.url}
+                alt={pres.inspiration_image.alt ?? 'Inspiration for the new site'}
+                style={{ width: '100%', maxWidth: 960, height: 'auto', borderRadius: 12, border: '1px solid #CFC9F8', display: 'block' }}
+              />
+              {(pres.inspiration_image.caption ?? '').trim().length > 0 && (
+                <p className="sec-note" style={{ marginTop: 10 }}>{pres.inspiration_image.caption}</p>
+              )}
+            </div>
+          </section>
+        )}
+
         <section className="sec">
           <div className="sec-head"><span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '06' : '05'}</span><h2>What's changing from your current site</h2></div>
           <p className="sec-note">Here is how the content you have today shows up in the new structure:</p>

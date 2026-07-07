@@ -28,6 +28,7 @@ import {
   type SitemapReviewNavPresentation,
 } from '../../../lib/sitemapReview'
 import { buildPortalUrl } from '../../../lib/portalUrl'
+import { uploadAttachment } from '../../../lib/attachmentUpload'
 import { PartnerEditRequestsInbox } from './PartnerEditRequestsInbox'
 import SitemapPartnerViewV2 from './SitemapPartnerViewV2'
 
@@ -279,6 +280,15 @@ export function SitemapReviewEditor({
                 <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Per-page descriptions</p>
                 <TierPageDescriptionsEditor review={review} onChange={persist} disabled={isApproved} />
               </div>
+            </SectionBand>
+
+            <SectionBand num="04b" label="Inspiration image (optional)">
+              <InspirationImageEditor
+                review={review}
+                projectId={projectId}
+                onChange={persist}
+                disabled={isApproved}
+              />
             </SectionBand>
 
             <SectionBand num="05" label="What's changing from your current site">
@@ -1607,6 +1617,139 @@ function cryptoRandomIdLocal(): string {
 // Nested link edit + featured highlight edit still route through the
 // Presentation JSON block for now (deeper edit UIs to follow).
 // ─────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────
+// InspirationImageEditor. Optional file upload + caption for the
+// inspiration-image block on the partner review. Renders below the
+// Full Page List when the URL is set; the entire section is
+// omitted when the URL is empty. Uploads land in the brand-assets
+// bucket via attachmentUpload with a project-scoped path prefix.
+// ─────────────────────────────────────────────────────────────────
+
+function InspirationImageEditor({
+  review, projectId, onChange, disabled,
+}: {
+  review:    SitemapReview
+  projectId: string
+  onChange:  (next: SitemapReview) => Promise<void> | void
+  disabled:  boolean
+}) {
+  const [uploading, setUploading]     = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const pres  = review.presentation ?? {}
+  const image = pres.inspiration_image
+
+  const setImage = (
+    next: NonNullable<SitemapReview['presentation']>['inspiration_image'] | undefined,
+  ) => {
+    void onChange({
+      ...review,
+      presentation: { ...(review.presentation ?? {}), inspiration_image: next },
+    })
+  }
+
+  const handleFile = async (file: File) => {
+    setUploading(true)
+    setUploadError(null)
+    try {
+      const result = await uploadAttachment(file, null, undefined, {
+        bucket:      'brand-assets',
+        pathPrefix:  `sitemap-review/${projectId}`,
+        allowedMime: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
+        maxBytes:    10 * 1024 * 1024,
+      })
+      setImage({
+        url:     result.url,
+        alt:     image?.alt,
+        caption: image?.caption,
+      })
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-wm-text-muted">
+        Optional. Upload a reference visual to render below the Full Page List (moodboard tile, competitor screenshot, brand-guide swatch, a photo of the physical space). When empty, the section is hidden entirely on the partner view.
+      </p>
+
+      {image?.url ? (
+        <div className="flex gap-3 items-start rounded border border-wm-border bg-white p-3">
+          <img
+            src={image.url}
+            alt={image.alt ?? 'Inspiration'}
+            className="w-32 h-20 object-cover rounded border border-wm-border"
+          />
+          <div className="flex-1 min-w-0 space-y-1.5">
+            <input
+              type="text"
+              defaultValue={image.alt ?? ''}
+              placeholder="Alt text (screen readers, SEO)"
+              disabled={disabled}
+              onBlur={e => setImage({ ...image, alt: e.target.value.trim() || undefined })}
+              className="w-full text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+            />
+            <input
+              type="text"
+              defaultValue={image.caption ?? ''}
+              placeholder="Caption (shown under the image, optional)"
+              disabled={disabled}
+              onBlur={e => setImage({ ...image, caption: e.target.value.trim() || undefined })}
+              className="w-full text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+            />
+            <div className="flex items-center gap-3 pt-1">
+              <label className="text-[11px] font-semibold text-wm-accent-strong cursor-pointer hover:underline">
+                Replace image
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  className="hidden"
+                  disabled={disabled || uploading}
+                  onChange={e => {
+                    const f = e.target.files?.[0]
+                    if (f) void handleFile(f)
+                    e.target.value = ''
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => setImage(undefined)}
+                disabled={disabled}
+                className="text-[11px] font-semibold text-wm-text-subtle hover:text-wm-danger disabled:opacity-40"
+              >
+                Remove
+              </button>
+              {uploading && <span className="text-[11px] text-wm-text-subtle">Uploading…</span>}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <label className="inline-flex items-center gap-2 rounded-full border border-dashed border-wm-border bg-white px-3 py-1.5 text-[12px] font-semibold text-wm-text-muted hover:border-wm-accent hover:text-wm-accent-strong cursor-pointer">
+          {uploading ? 'Uploading…' : '+ Upload inspiration image'}
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            className="hidden"
+            disabled={disabled || uploading}
+            onChange={e => {
+              const f = e.target.files?.[0]
+              if (f) void handleFile(f)
+              e.target.value = ''
+            }}
+          />
+        </label>
+      )}
+
+      {uploadError && (
+        <p className="text-[11.5px] text-red-600">{uploadError}</p>
+      )}
+    </div>
+  )
+}
 
 // ─────────────────────────────────────────────────────────────────
 // SharedHubsIntroEditor. Edits the headline + body text shown above

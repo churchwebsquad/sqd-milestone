@@ -403,6 +403,23 @@ export interface SitemapReviewPresentation {
    *  renders on multi-campus partners (where congregations exist). */
   shared_hubs_headline?: string
   shared_hubs_body?:     string
+
+  /** Optional inspiration image — a reference visual the strategist
+   *  wants the partner to see below the sitemap visualization
+   *  (moodboard tile, competitor screenshot, brand-guide swatch,
+   *  a photograph of the physical space). Absent by default; when
+   *  URL is empty the partner view does not render the section at
+   *  all so the review stays clean.
+   *
+   *  The upload is stored in the `brand-assets` bucket via
+   *  attachmentUpload.uploadAttachment with pathPrefix keyed to the
+   *  project id so cleanup is straightforward. Only the URL is
+   *  persisted here; the review UI streams it as a plain <img>. */
+  inspiration_image?: {
+    url:      string
+    alt?:     string
+    caption?: string
+  }
 }
 
 /** Snapshot of the cowork sitemap step's nav_presentation. Copied
