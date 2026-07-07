@@ -11,10 +11,8 @@
 # new tools inside their lane without extra permission. They only hit Ashley's
 # review when a change reaches OUTSIDE their domain (e.g. a route in App.tsx).
 #
-# PLACEHOLDERS: swap @SPENCER_GH for the real GitHub username once Spencer
-# accepts the repo invite. Until then the catch-all `*` line routes anything
-# Spencer touches to @churchwebsquad — safe by default.
-#   @SPENCER_GH     = Branding Director (spencer@churchmediasquad.com) — placeholder
+# Resolved usernames:
+#   @cms-spencer    = Branding Director (spencer@churchmediasquad.com) — resolved 2026-07-07
 #   @amberpankey    = Social Media Director (amber@churchmediasquad.com) — resolved 2026-06-12
 #   @churchwebsquad = Ashley (VP, owns foundations + catch-all)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -37,19 +35,19 @@
 # Reserved home for net-new social tools (create when the first one lands)
 /src/pages/social/                                 @amberpankey
 
-# ── Branding Squad — @SPENCER_GH (spencer@churchmediasquad.com) ──
-/src/components/brand/                             @SPENCER_GH
-/src/pages/BrandGuideEditorPage.tsx                @SPENCER_GH
-/src/pages/BrandingIndexPage.tsx                   @SPENCER_GH
-/src/pages/BrandHandoffPage.tsx                    @SPENCER_GH
-/src/pages/BrandGuidePortalPage.tsx                @SPENCER_GH
-/src/lib/brandGuide.ts                             @SPENCER_GH
-/src/lib/brandHandoff.ts                           @SPENCER_GH
+# ── Branding Squad — @cms-spencer (spencer@churchmediasquad.com) ──
+/src/components/brand/                             @cms-spencer
+/src/pages/BrandGuideEditorPage.tsx                @cms-spencer
+/src/pages/BrandingIndexPage.tsx                   @cms-spencer
+/src/pages/BrandHandoffPage.tsx                    @cms-spencer
+/src/pages/BrandGuidePortalPage.tsx                @cms-spencer
+/src/lib/brandGuide.ts                             @cms-spencer
+/src/lib/brandHandoff.ts                           @cms-spencer
 # Brand sections of the Churches Dashboard
-/src/components/churches/BrandSquadSection.tsx     @SPENCER_GH
-/src/components/churches/BrandVoiceSection.tsx     @SPENCER_GH
+/src/components/churches/BrandSquadSection.tsx     @cms-spencer
+/src/components/churches/BrandVoiceSection.tsx     @cms-spencer
 # Reserved home for net-new brand tools (create when the first one lands)
-/src/pages/brand/                                  @SPENCER_GH
+/src/pages/brand/                                  @cms-spencer
 
 # ── PROTECTED FOUNDATIONS — Ashley reviews everything here ──
 # Database, infra, auth, routing, and shared scaffolding. These override the
