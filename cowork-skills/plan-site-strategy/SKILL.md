@@ -363,11 +363,113 @@ preserved. **Save the WHY where the review picks it up:**
   entry_points, journey, drop_off_risk (at_slug, reason, mitigation).
   These seed the persona postures on the review; mitigation drives
   the "How we're clearing the way for X" internal note.
-- **nav_presentation** — the visible_top_level + megamenu_panels /
-  standard_dropdowns / offcanvas_overlay block. This is what
-  renders the partner-facing nav preview. If you emit a shell but
-  no content, the review hydrates from your `pages[]` + `nav[]`
-  instead, so at minimum: name the shell.
+- **nav_presentation** — the block that drives the partner-facing
+  nav preview. Emit this shape EXACTLY (the review composer reads
+  these field names; alternative names like `header_ctas` vs
+  `visible_top_level.kind='button'`, or `footer_links` inside
+  offcanvas_overlay, get dropped on the floor):
+
+  ```jsonc
+  {
+    "shell": "megamenu" | "standard_dropdowns" | "offcanvas",
+    "presentation_rationale": "One sentence on why this shell serves this partner.",
+
+    // First-class field for the pill buttons on the far right of
+    // the topnav (megamenu + standard_dropdowns) or at the bottom
+    // of the offcanvas panel. Do NOT put CTAs anywhere else.
+    "header_ctas": [
+      { "label": "Give",           "slug": "give",           "style": "pill_primary"   },
+      { "label": "Plan a Visit",   "slug": "plan-your-visit","style": "pill_secondary" }
+      // OR external URL:
+      // { "label": "Livestream", "url": "https://...", "style": "pill_secondary" }
+    ],
+
+    // The text-link items visible on the topnav row (NOT the CTAs).
+    // kind='page' for a leaf; kind='group' for a dropdown parent
+    // (renders with a caret); kind='hamburger' for the burger icon.
+    // NEVER include home here — the logo IS the home link.
+    "visible_top_level": [
+      { "kind": "group", "label": "About",    "group_label": "About" },
+      { "kind": "page",  "label": "Sermons",  "slug":  "sermons" },
+      { "kind": "hamburger" }
+    ],
+
+    // Only when shell='megamenu'. One panel per group in
+    // visible_top_level. Each column pairs a heading with links.
+    "megamenu_panels": [
+      {
+        "triggered_by": "About",
+        "columns": [
+          {
+            "heading": "About",
+            "links": [
+              { "label": "Our Beliefs", "slug": "our-beliefs" },
+              { "label": "Our Team",    "slug": "our-team" }
+            ]
+          }
+        ],
+        "featured_tile": {
+          "kind": "image_cta",
+          "heading": "New here?",
+          "body": "Start with a Sunday visit.",
+          "link_label": "Plan a Visit",
+          "link_slug": "plan-your-visit"
+        }
+      }
+    ],
+
+    // Only when shell='standard_dropdowns'. One group per parent.
+    "standard_dropdowns": {
+      "groups": [
+        {
+          "group_label": "About",
+          "children": [
+            { "label": "Our Beliefs", "slug": "our-beliefs" },
+            { "label": "Our Team",    "slug": "our-team" }
+          ]
+        }
+      ]
+    },
+
+    // Only when shell='offcanvas'.
+    "offcanvas_overlay": {
+      "hero_message": "Optional italic quote at the top of the panel.",
+
+      // The LARGE primary-column links inside the offcanvas panel —
+      // independent from visible_top_level. Each entry is either
+      // an in-site page (page_slug) OR an external URL. Include
+      // ~4-6 items max; this is the featured column.
+      "featured_links": [
+        { "label": "Teaching",         "page_slug": "teaching" },
+        { "label": "Life at Woodcreek", "page_slug": "life-at-woodcreek" },
+        { "label": "Sabbatical Fund",  "external_url": "https://..." }
+      ],
+
+      // Organizational sections BELOW the featured column. One block
+      // per parent, each showing its children as a two-column grid.
+      // Do NOT use `footer_links` here; that name isn't read.
+      "sections": [
+        {
+          "section_label": "Teaching",
+          "links": [
+            { "label": "Messages", "slug": "messages" },
+            { "label": "Podcast",  "slug": "podcast" }
+          ]
+        }
+      ]
+    }
+  }
+  ```
+
+  Rules:
+  - Never invent field names. If a concept doesn't fit the schema
+    (e.g. footer_links, top_level_ctas), find the right field
+    above or drop it — extra fields get discarded silently.
+  - `home` never appears in visible_top_level, featured_links, or
+    section links. The logo is the home link.
+  - When you emit only `shell` and nothing else, the review
+    hydrates the rest from `pages[]` + `nav[]`. That's a valid
+    fallback but you lose control over the presentation.
 - **report.coverage_gaps_addressed[]** — free-text bullets on how
   the sitemap addresses the strategic goals. Feeds the review's
   executive summary framing.
