@@ -1105,18 +1105,31 @@ function hydrateNavPresentation(
   }
 
   let offcanvas_overlay = np?.offcanvas_overlay
-  if (shellChoice === 'offcanvas' && !offcanvas_overlay) {
+  if (shellChoice === 'offcanvas') {
     // Derive organizational structure — NOT a flat dump. Each header
     // parent that has children becomes its own section (label = the
-    // parent's label; links = its children). Top-level items without
-    // children are surfaced as primary large links via
-    // visible_top_level and do not repeat in a section.
+    // parent's label; links = its children).
     const parentsWithChildren = nonHomeHeader.filter(h => (h.children ?? []).length > 0)
-    offcanvas_overlay = {
-      sections: parentsWithChildren.map(p => ({
-        section_label: p.label ?? p.slug ?? '',
-        links: (p.children ?? []).filter(c => !isHomeNavItem(c)).map(c => ({ label: c.label ?? c.slug ?? '' })),
-      })),
+    // Featured links (the big top-of-panel column). Derived from the
+    // parent items in the header — these are the "hub" pages a
+    // visitor is most likely to click into. If the strategist has
+    // authored featured_links explicitly, respect them; otherwise
+    // seed from the parents so we don't fall through to the topnav
+    // vtl list (which is meant to be shorter and independent).
+    const seededFeatured = parentsWithChildren.map(p => ({
+      label:     p.label ?? p.slug ?? '',
+      page_slug: p.slug,
+    }))
+    if (!offcanvas_overlay) {
+      offcanvas_overlay = {
+        featured_links: seededFeatured,
+        sections: parentsWithChildren.map(p => ({
+          section_label: p.label ?? p.slug ?? '',
+          links: (p.children ?? []).filter(c => !isHomeNavItem(c)).map(c => ({ label: c.label ?? c.slug ?? '' })),
+        })),
+      }
+    } else if (!offcanvas_overlay.featured_links || offcanvas_overlay.featured_links.length === 0) {
+      offcanvas_overlay = { ...offcanvas_overlay, featured_links: seededFeatured }
     }
   }
 
@@ -1140,13 +1153,23 @@ function OffcanvasPreview({ np, church }: { np: SitemapReviewNavPresentation; ch
   const overlay = np.offcanvas_overlay
   const vtl = (np.visible_top_level ?? []).filter(i => !isHomeNavItem(i))
   const buttonItems = vtl.filter(i => i.kind === 'button').slice(0, 2)
-  // Primary large links = the top-level items themselves (Ministries,
-  // Next Steps, About, plus any leaf items). Home is filtered — the
-  // logo is the homepage link.
-  const primaryLinks: string[] = vtl
-    .filter(i => i.kind !== 'button' && i.kind !== 'hamburger')
-    .map(i => i.label ?? i.group_label)
-    .filter((l): l is string => !!l && l.trim().length > 0 && l.trim().toLowerCase() !== 'home')
+  // Primary large links. Precedence:
+  //   1. offcanvas_overlay.featured_links — strategist-authored,
+  //      independent of visible_top_level (which drives the
+  //      compact topnav). Supports either in-site page slugs or
+  //      external URLs.
+  //   2. Fallback to visible_top_level's non-button/non-hamburger
+  //      items when the strategist hasn't authored featured_links.
+  //      Home is filtered — the logo is the homepage link.
+  const authoredFeatured = (overlay?.featured_links ?? [])
+    .map(l => (l.label ?? '').trim())
+    .filter(l => l.length > 0 && l.toLowerCase() !== 'home')
+  const primaryLinks: string[] = authoredFeatured.length > 0
+    ? authoredFeatured
+    : vtl
+        .filter(i => i.kind !== 'button' && i.kind !== 'hamburger')
+        .map(i => i.label ?? i.group_label)
+        .filter((l): l is string => !!l && l.trim().length > 0 && l.trim().toLowerCase() !== 'home')
   // Sections carry the organizational structure — each is a
   // parent-with-children block (Ministries → Kidcreek / Youth / …).
   // Not a flat dump; the strategist can author these explicitly and

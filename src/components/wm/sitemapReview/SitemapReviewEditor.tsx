@@ -25,6 +25,7 @@ import {
   type PersonaPosture,
   type ReviewPage,
   type SitemapReview,
+  type SitemapReviewNavPresentation,
 } from '../../../lib/sitemapReview'
 import { buildPortalUrl } from '../../../lib/portalUrl'
 import { PartnerEditRequestsInbox } from './PartnerEditRequestsInbox'
@@ -1100,6 +1101,22 @@ function NavPresentationEditor({
         </p>
       </div>
 
+      <TopnavItemsEditor
+        review={review}
+        np={np}
+        disabled={disabled}
+        onChange={next => void onChange({ ...review, nav_presentation: next })}
+      />
+
+      {shell === 'offcanvas' && (
+        <OffcanvasFeaturedLinksEditor
+          review={review}
+          np={np}
+          disabled={disabled}
+          onChange={next => void onChange({ ...review, nav_presentation: next })}
+        />
+      )}
+
       <div>
         <div className="flex items-baseline justify-between gap-2 mb-1">
           <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Nav content (visible header, panels, columns)</div>
@@ -1134,6 +1151,180 @@ function NavPresentationEditor({
 // FooterPageLinksEditor removed. FooterInfoEditor already renders
 // the authoring surface for footer_info.footer_page_links; keeping a
 // second wrapper here caused the double-render bug on the edit tab.
+
+// ─────────────────────────────────────────────────────────────────
+// TopnavItemsEditor. Compact list editor for nav_presentation
+// .visible_top_level — drives the horizontal items next to the
+// hamburger / logo in the topnav preview across every shell.
+// Independent from the offcanvas featured links below so the
+// strategist can promote a compact set here and a fuller set in
+// the offcanvas panel. Each row: label + kind + (optional) slug.
+// External URLs on topnav items aren't supported (topnav items in
+// this schema key off internal slugs); use featured_links for that.
+// ─────────────────────────────────────────────────────────────────
+
+function TopnavItemsEditor({
+  review, np, disabled, onChange,
+}: {
+  review:  SitemapReview
+  np:      SitemapReviewNavPresentation | undefined
+  disabled: boolean
+  onChange: (next: SitemapReviewNavPresentation) => void
+}) {
+  type Item = NonNullable<SitemapReviewNavPresentation['visible_top_level']>[number]
+  const items: Item[] = (np?.visible_top_level ?? []).map(i => ({ ...i }))
+  const setItems = (next: Item[]) => onChange({ ...(np ?? {}), visible_top_level: next })
+  const add = () => setItems([...items, { kind: 'page', label: '', slug: '' }])
+  const remove = (i: number) => setItems(items.filter((_, j) => j !== i))
+  const patch = (i: number, p: Partial<Item>) => setItems(items.map((it, j) => j === i ? { ...it, ...p } : it))
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2 mb-1.5">
+        <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Topnav items (next to the hamburger)</div>
+        <span className="text-[10.5px] text-wm-text-subtle">{items.length}/6 · keep it tight</span>
+      </div>
+      <div className="space-y-1.5">
+        {items.map((it, i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <select
+              value={it.kind ?? 'page'}
+              disabled={disabled}
+              onChange={e => patch(i, { kind: e.target.value as Item['kind'] })}
+              className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50"
+            >
+              <option value="page">Link</option>
+              <option value="group">Group ▾</option>
+              <option value="button">Button</option>
+              <option value="hamburger">Hamburger</option>
+            </select>
+            <input
+              type="text"
+              defaultValue={it.label ?? it.group_label ?? ''}
+              placeholder="Label (e.g. About)"
+              disabled={disabled}
+              onBlur={e => patch(i, it.kind === 'group' ? { group_label: e.target.value } : { label: e.target.value })}
+              className="flex-1 text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+            />
+            <select
+              value={it.slug ?? ''}
+              disabled={disabled || it.kind === 'hamburger'}
+              onChange={e => patch(i, { slug: e.target.value || undefined })}
+              className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50"
+            >
+              <option value="">(no page)</option>
+              {review.pages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
+            </select>
+            {!disabled && (
+              <button
+                type="button"
+                onClick={() => remove(i)}
+                className="text-wm-text-subtle hover:text-wm-danger text-[14px] leading-none px-1"
+              >×</button>
+            )}
+          </div>
+        ))}
+      </div>
+      {!disabled && items.length < 6 && (
+        <button
+          type="button"
+          onClick={add}
+          className="mt-1.5 text-[11px] font-semibold text-wm-accent-strong hover:underline"
+        >
+          + Add item
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// OffcanvasFeaturedLinksEditor. The large "featured" links column
+// inside the offcanvas panel (Teaching / Life at Woodcreek / …).
+// Independent from the topnav items above so the strategist can
+// promote a different set here. Each row supports EITHER an in-site
+// page (slug picker) OR an external URL — mutually exclusive.
+// Only renders when the nav shell is set to offcanvas.
+// ─────────────────────────────────────────────────────────────────
+
+function OffcanvasFeaturedLinksEditor({
+  review, np, disabled, onChange,
+}: {
+  review:  SitemapReview
+  np:      SitemapReviewNavPresentation | undefined
+  disabled: boolean
+  onChange: (next: SitemapReviewNavPresentation) => void
+}) {
+  type FL = NonNullable<NonNullable<SitemapReviewNavPresentation['offcanvas_overlay']>['featured_links']>[number]
+  const overlay = np?.offcanvas_overlay ?? {}
+  const links: FL[] = (overlay.featured_links ?? []).map(l => ({ ...l }))
+  const setLinks = (next: FL[]) => onChange({ ...(np ?? {}), offcanvas_overlay: { ...overlay, featured_links: next } })
+  const add = () => setLinks([...links, { label: '', page_slug: '' }])
+  const remove = (i: number) => setLinks(links.filter((_, j) => j !== i))
+  const patch = (i: number, p: Partial<FL>) => setLinks(links.map((l, j) => j === i ? { ...l, ...p } : l))
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2 mb-1.5">
+        <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Offcanvas featured links</div>
+        <span className="text-[10.5px] text-wm-text-subtle">{links.length}/6 · large primary column in the slide-out</span>
+      </div>
+      <p className="text-[10.5px] text-wm-text-subtle mb-1.5">
+        Independent from the topnav items above. Each row is either an in-site page OR an external URL — set one, leave the other blank.
+      </p>
+      <div className="space-y-1.5">
+        {links.map((link, i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <input
+              type="text"
+              defaultValue={link.label ?? ''}
+              placeholder="Label (e.g. Teaching)"
+              disabled={disabled}
+              onBlur={e => patch(i, { label: e.target.value })}
+              className="flex-1 min-w-0 text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+            />
+            <select
+              value={link.page_slug ?? ''}
+              disabled={disabled || !!(link.external_url ?? '').trim()}
+              onChange={e => patch(i, { page_slug: e.target.value || undefined, external_url: e.target.value ? undefined : link.external_url })}
+              className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50 max-w-[140px]"
+              title={(link.external_url ?? '').trim() ? 'Clear the external URL to pick a page' : 'Pick a page'}
+            >
+              <option value="">(pick a page)</option>
+              {review.pages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
+            </select>
+            <input
+              type="url"
+              defaultValue={link.external_url ?? ''}
+              placeholder="or external URL"
+              disabled={disabled || !!(link.page_slug ?? '').trim()}
+              onBlur={e => {
+                const v = e.target.value.trim()
+                patch(i, { external_url: v || undefined, page_slug: v ? undefined : link.page_slug })
+              }}
+              className="w-[160px] text-[11px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+              title={(link.page_slug ?? '').trim() ? 'Clear the page picker to enter a URL' : 'External URL'}
+            />
+            {!disabled && (
+              <button
+                type="button"
+                onClick={() => remove(i)}
+                className="text-wm-text-subtle hover:text-wm-danger text-[14px] leading-none px-1"
+              >×</button>
+            )}
+          </div>
+        ))}
+      </div>
+      {!disabled && links.length < 6 && (
+        <button
+          type="button"
+          onClick={add}
+          className="mt-1.5 text-[11px] font-semibold text-wm-accent-strong hover:underline"
+        >
+          + Add featured link
+        </button>
+      )}
+    </div>
+  )
+}
 
 // ─────────────────────────────────────────────────────────────────
 // WhyCardsEditor. Structured editor for presentation.why_cards so

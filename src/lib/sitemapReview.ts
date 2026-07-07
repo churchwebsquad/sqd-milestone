@@ -396,6 +396,13 @@ export interface SitemapReviewNavPresentation {
   }>
   offcanvas_overlay?: {
     hero_message?: string
+    /** Featured links rendered as the large primary column at the
+     *  top of the offcanvas panel. Independent from visible_top_level
+     *  (which drives the topnav next to the hamburger) so the
+     *  strategist can promote a different set of pages inside the
+     *  offcanvas than what shows in the compact topnav. Each link
+     *  is either an in-site page (page_slug) or an external URL. */
+    featured_links?: Array<{ label?: string; page_slug?: string; external_url?: string }>
     sections?:     Array<{ section_label?: string; links?: Array<{ label?: string; slug?: string }> }>
     surfaced_facts?: {
       service_times?: string
