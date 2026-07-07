@@ -16,6 +16,7 @@ import { supabase } from './supabase'
 
 export type PartnerReviewLinkSource =
   | 'content_collection'
+  | 'sitemap_review'
   | 'web_partner_review'
 
 export interface PartnerReviewLink {
@@ -26,6 +27,11 @@ export interface PartnerReviewLink {
   label:  string
   url:    string
   source: PartnerReviewLinkSource
+  /** Partner-facing sub-headline. Used on the Partner Hub to give
+   *  each outstanding-review card a one-line "what this is" beneath
+   *  its title. Optional; consumers that don't need it (asset picker)
+   *  ignore it. */
+  description?: string
 }
 
 /** Fetch every open partner review link for this member. Returns
@@ -74,12 +80,37 @@ export async function fetchPartnerReviewLinks(
       .maybeSingle()
     if (ccRes.data?.id) {
       links.push({
-        id:     `content_collection:${ccRes.data.id}`,
-        label:  'Website Content Collection',
-        url:    `${origin}/portal/${portalToken}/hub/content-collection/${ccRes.data.id}`,
-        source: 'content_collection',
+        id:          `content_collection:${ccRes.data.id}`,
+        label:       'Website Content Collection',
+        description: 'Review what we found on your current site, tell us what to update or leave alone, and answer a few questions about how you\'d like the new site to work.',
+        url:         `${origin}/portal/${portalToken}/hub/content-collection/${ccRes.data.id}`,
+        source:      'content_collection',
       })
     }
+  }
+
+  // ── Sitemap & Navigation review ────────────────────────────────
+  // Token + status live under roadmap_state.sitemap_review. Only
+  // surfaced once the strategist has published the review; drafts
+  // stay hidden from the partner. Uses its own token in the URL
+  // (roadmap_state.sitemap_review.token), which the sitemap portal
+  // page resolves via the get_sitemap_review_by_token RPC.
+  const smRes = await supabase
+    .from('strategy_web_projects')
+    .select('roadmap_state')
+    .eq('id', projectId)
+    .maybeSingle()
+  const smRaw = smRes.data?.roadmap_state as { sitemap_review?: { token?: string; status?: string } } | null
+  const sm    = smRaw?.sitemap_review
+  const smVisible = sm?.status === 'published' || sm?.status === 'partner_reviewed'
+  if (sm?.token && smVisible) {
+    links.push({
+      id:          `sitemap_review:${sm.token}`,
+      label:       'Sitemap & Navigation Review',
+      description: 'The pages we\'re planning for your new site, how the navigation groups them, and who each one is for. Tell us what to rename, move, or add.',
+      url:         `${origin}/portal/sitemap/${sm.token}`,
+      source:      'sitemap_review',
+    })
   }
 
   // ── Web partner review ─────────────────────────────────────────
@@ -97,10 +128,11 @@ export async function fetchPartnerReviewLinks(
     .maybeSingle()
   if (wrRes.data?.partner_token) {
     links.push({
-      id:     `web_partner_review:${wrRes.data.partner_token}`,
-      label:  'Website Review',
-      url:    `${origin}/portal/review/${wrRes.data.partner_token}`,
-      source: 'web_partner_review',
+      id:          `web_partner_review:${wrRes.data.partner_token}`,
+      label:       'Website Content Review',
+      description: 'Walk through the drafted pages, suggest specific edits, and leave notes for the team.',
+      url:         `${origin}/portal/review/${wrRes.data.partner_token}`,
+      source:      'web_partner_review',
     })
   }
 

@@ -587,8 +587,7 @@ export default function SitemapPartnerViewV2({
           const visiblePostures = review.persona_postures.filter(p =>
             (p.posture_summary ?? '').trim().length > 0 ||
             (p.goal ?? '').trim().length > 0 ||
-            (p.key_page_slugs ?? []).length > 0 ||
-            (p.drop_off_risk && ((p.drop_off_risk.mitigation ?? '').trim().length > 0)),
+            (p.key_page_slugs ?? []).length > 0,
           )
           if (visiblePostures.length === 0) return null
           const pageBySlug = new Map(review.pages.map(p => [p.slug, p]))
@@ -634,14 +633,16 @@ export default function SitemapPartnerViewV2({
                         </div>
                       )
                     })()}
-                    {p.drop_off_risk && (p.drop_off_risk.mitigation ?? '').trim().length > 0 && (
-                      <div style={{ marginTop: 14, padding: '10px 12px', background: '#F9F5F1', borderRadius: 10, borderLeft: '3px solid #513DE5' }}>
-                        <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: '#513DE5', marginBottom: 4 }}>
-                          How we&apos;re leaning in for {p.persona_name}
-                        </div>
-                        <div style={{ fontSize: 12.5, color: '#341756', lineHeight: 1.5 }}>{p.drop_off_risk.mitigation}</div>
-                      </div>
-                    )}
+                    {/* "How we're leaning in for X" was previously
+                     *  rendered here from drop_off_risk.mitigation, but
+                     *  nothing downstream (content collection, copy
+                     *  generation, page draft) reads that field, so the
+                     *  promise had no fulfillment. Removed from partner-
+                     *  facing view to avoid saying things the system
+                     *  can't back up. Still authored + shown on the
+                     *  staff editor so strategists keep the note for
+                     *  their own work; if we later route mitigation
+                     *  into the content pipeline, restore this block. */}
                   </div>
                 ))}
               </div>
@@ -786,9 +787,17 @@ function PrimaryNavPreview({
   // same guarantee: the logo is the homepage link, so home never
   // appears in the visible header.
   const vtl = (np.visible_top_level ?? []).filter(i => !isHomeNavItem(i))
-  const items    = vtl.filter(i => i.kind !== 'button' && i.kind !== 'hamburger')
-  const buttons  = vtl.filter(i => i.kind === 'button')
+  const allItems  = vtl.filter(i => i.kind !== 'button' && i.kind !== 'hamburger')
+  const buttons   = vtl.filter(i => i.kind === 'button')
   const hasBurger = vtl.some(i => i.kind === 'hamburger')
+  // Offcanvas rule: the visible topnav carries at most 3-4 items and
+  // always shows a hamburger. Everything else lives inside the
+  // offcanvas panel, which we render below with organizational
+  // structure. Non-offcanvas shells render the full item list as
+  // before.
+  const isOffcanvas = shell(np) === 'offcanvas'
+  const items = isOffcanvas ? allItems.slice(0, 4) : allItems
+  const showBurger = hasBurger || isOffcanvas
 
   return (
     <>
@@ -806,7 +815,7 @@ function PrimaryNavPreview({
         {buttons.map((it, i) => (
           <span key={i} className={i === 0 ? 'btn accent' : 'btn ghost'}>{it.label}</span>
         ))}
-        {hasBurger && <span style={{ fontSize: 20, color: '#341756', marginLeft: 8 }}>☰</span>}
+        {showBurger && <span style={{ fontSize: 20, color: '#341756', marginLeft: 8 }}>☰</span>}
       </nav>
 
       {(np.megamenu_panels ?? []).map((panel, pi) => {
@@ -1097,14 +1106,17 @@ function hydrateNavPresentation(
 
   let offcanvas_overlay = np?.offcanvas_overlay
   if (shellChoice === 'offcanvas' && !offcanvas_overlay) {
+    // Derive organizational structure — NOT a flat dump. Each header
+    // parent that has children becomes its own section (label = the
+    // parent's label; links = its children). Top-level items without
+    // children are surfaced as primary large links via
+    // visible_top_level and do not repeat in a section.
+    const parentsWithChildren = nonHomeHeader.filter(h => (h.children ?? []).length > 0)
     offcanvas_overlay = {
-      sections: [{
-        section_label: 'All pages',
-        links: nonHomeHeader.flatMap(h => [
-          { label: h.label ?? h.slug ?? '' },
-          ...(h.children ?? []).filter(c => !isHomeNavItem(c)).map(c => ({ label: c.label ?? c.slug ?? '' })),
-        ]),
-      }],
+      sections: parentsWithChildren.map(p => ({
+        section_label: p.label ?? p.slug ?? '',
+        links: (p.children ?? []).filter(c => !isHomeNavItem(c)).map(c => ({ label: c.label ?? c.slug ?? '' })),
+      })),
     }
   }
 
@@ -1128,26 +1140,25 @@ function OffcanvasPreview({ np, church }: { np: SitemapReviewNavPresentation; ch
   const overlay = np.offcanvas_overlay
   const vtl = (np.visible_top_level ?? []).filter(i => !isHomeNavItem(i))
   const buttonItems = vtl.filter(i => i.kind === 'button').slice(0, 2)
-  // Primary large links come from visible_top_level's non-button
-  // items. Falls back to the first offcanvas section's links when
-  // vtl is empty. Home is filtered — the logo is the homepage link.
-  const primaryFromVtl = vtl
+  // Primary large links = the top-level items themselves (Ministries,
+  // Next Steps, About, plus any leaf items). Home is filtered — the
+  // logo is the homepage link.
+  const primaryLinks: string[] = vtl
     .filter(i => i.kind !== 'button' && i.kind !== 'hamburger')
     .map(i => i.label ?? i.group_label)
     .filter((l): l is string => !!l && l.trim().length > 0 && l.trim().toLowerCase() !== 'home')
-  const sections = overlay?.sections ?? []
-  const primaryLinks: string[] = primaryFromVtl.length > 0
-    ? primaryFromVtl
-    : (sections[0]?.links ?? [])
-        .map(l => l.label)
-        .filter((l): l is string => !!l && l.trim().toLowerCase() !== 'home')
-  // "Other pages" comes from the remaining sections (or from all
-  // sections when we took vtl for primary).
-  const otherSections = primaryFromVtl.length > 0 ? sections : sections.slice(1)
-  const otherLinks: string[] = otherSections
-    .flatMap(s => (s.links ?? []).map(l => l.label ?? ''))
-    .filter(l => l.trim().length > 0 && l.trim().toLowerCase() !== 'home')
-  const otherLabel = otherSections[0]?.section_label ?? 'Other pages'
+  // Sections carry the organizational structure — each is a
+  // parent-with-children block (Ministries → Kidcreek / Youth / …).
+  // Not a flat dump; the strategist can author these explicitly and
+  // hydration derives them from nav_layout.header when unauthored.
+  const sections = (overlay?.sections ?? [])
+    .map(s => ({
+      label: s.section_label ?? '',
+      links: (s.links ?? [])
+        .map(l => l.label ?? '')
+        .filter(l => l.trim().length > 0 && l.trim().toLowerCase() !== 'home'),
+    }))
+    .filter(s => s.links.length > 0)
   return (
     <div style={{
       background: '#F9F5F1', padding: 30, display: 'flex', flexDirection: 'column',
@@ -1188,21 +1199,27 @@ function OffcanvasPreview({ np, church }: { np: SitemapReviewNavPresentation; ch
         </div>
       )}
 
-      {primaryLinks.length > 0 && otherLinks.length > 0 && (
+      {primaryLinks.length > 0 && sections.length > 0 && (
         <div style={{ height: 1, background: '#CFC9F8', width: '100%' }} />
       )}
 
-      {/* Other pages — 2-column grid */}
-      {otherLinks.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: '#513DE5' }}>
-            {otherLabel}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 40px' }}>
-            {otherLinks.map((label, i) => (
-              <div key={i} style={{ fontSize: 15, fontWeight: 620, color: '#341756' }}>{label}</div>
-            ))}
-          </div>
+      {/* Organizational sections — one block per parent, each with
+       *  its label and a 2-column grid of children. Gives the panel
+       *  strategic structure instead of a flat "Other pages" dump. */}
+      {sections.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+          {sections.map((section, si) => (
+            <div key={si} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: '#513DE5' }}>
+                {section.label}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 40px' }}>
+                {section.links.map((label, li) => (
+                  <div key={li} style={{ fontSize: 15, fontWeight: 620, color: '#341756' }}>{label}</div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

@@ -13,8 +13,9 @@
  */
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { Calendar, FileText, ArrowRight, Loader2, AlertCircle, MessageCircle } from 'lucide-react'
+import { Calendar, FileText, Map as MapIcon, PencilLine, ArrowRight, Loader2, AlertCircle, MessageCircle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { fetchPartnerReviewLinks, type PartnerReviewLink } from '../lib/partnerReviewLinks'
 
 interface PartnerInfo {
   member:        number
@@ -55,6 +56,7 @@ export default function PartnerHubPage() {
   const [partner, setPartner]   = useState<PartnerInfo | null>(null)
   const [webProjectId, setWebProjectId] = useState<string | null>(null)
   const [sessions, setSessions] = useState<OpenSession[]>([])
+  const [reviewLinks, setReviewLinks] = useState<PartnerReviewLink[]>([])
   const [am, setAm] = useState<AMContact | null>(null)
 
   useEffect(() => {
@@ -96,6 +98,17 @@ export default function PartnerHubPage() {
           if (cancelled) return
           setSessions((s ?? []) as OpenSession[])
         }
+
+        // 3b. All other outstanding partner review links (sitemap
+        // review, website content review). fetchPartnerReviewLinks
+        // shares its logic with the milestone asset picker so both
+        // surfaces see the same set of reviews. Content-collection
+        // is included in the returned list but we render it via the
+        // dedicated ContentCollectionCard below (which knows about
+        // due dates), so we filter it out of the review-links list.
+        const links = await fetchPartnerReviewLinks(p.member)
+        if (cancelled) return
+        setReviewLinks(links.filter(l => l.source !== 'content_collection'))
 
         // 4. AM contact (css_rep is a name; we look up their channel)
         if (p.css_rep) {
@@ -148,6 +161,7 @@ export default function PartnerHubPage() {
   }
 
   const inventorySession = sessions[0] ?? null
+  const hasAnyOutstanding = !!inventorySession || reviewLinks.length > 0
 
   return (
     <div className="min-h-screen bg-cream flex flex-col">
@@ -168,11 +182,11 @@ export default function PartnerHubPage() {
         <div className="max-w-3xl mx-auto space-y-8">
 
           {/* Outstanding asks */}
-          <section>
+          <section className="space-y-3">
             <h2 className="text-xs font-bold uppercase tracking-[0.14em] text-primary-purple mb-3">
               Outstanding from you
             </h2>
-            {sessions.length === 0 && (
+            {!hasAnyOutstanding && (
               <div className="bg-white border border-lavender rounded-2xl p-6 text-center">
                 <p className="text-deep-plum font-medium mb-1">You're all caught up.</p>
                 <p className="text-purple-gray text-sm">Nothing waiting on you right now.</p>
@@ -185,6 +199,10 @@ export default function PartnerHubPage() {
                 token={token!}
               />
             )}
+
+            {reviewLinks.map(link => (
+              <PartnerReviewCard key={link.id} link={link} />
+            ))}
           </section>
 
           {/* Have questions */}
@@ -237,6 +255,36 @@ export default function PartnerHubPage() {
 }
 
 // ── Outstanding-ask card ─────────────────────────────────────────────
+
+/** Generic review-link card. Sitemap review and website content
+ *  review both surface through here — same visual card as the
+ *  content-collection card (which has its own due-date treatment).
+ *  Links follow their existing routes: sitemap review lives at
+ *  /portal/sitemap/<token>, content review at /portal/review/<token>. */
+function PartnerReviewCard({ link }: { link: PartnerReviewLink }) {
+  const Icon = link.source === 'sitemap_review' ? MapIcon : PencilLine
+  return (
+    <a
+      href={link.url}
+      className="block bg-white border border-lavender rounded-2xl p-5 md:p-6 hover:border-primary-purple transition-colors group"
+    >
+      <div className="flex items-start gap-4">
+        <div className="rounded-full bg-primary-purple/10 p-2.5 shrink-0 group-hover:bg-primary-purple/15 transition-colors">
+          <Icon className="text-primary-purple" size={20} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-deep-plum font-semibold">{link.label}</p>
+          {link.description && (
+            <p className="text-purple-gray text-sm mt-1">{link.description}</p>
+          )}
+          <p className="text-primary-purple text-sm font-semibold mt-3 inline-flex items-center gap-1">
+            Open review <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+          </p>
+        </div>
+      </div>
+    </a>
+  )
+}
 
 function ContentCollectionCard({ session, token }: { session: OpenSession; token: string }) {
   const due = formatDue(session.due_at)
