@@ -948,13 +948,17 @@ function PrimaryNavPreview({
       })}
 
       {shell(np) === 'standard_dropdowns' && (np.standard_dropdowns?.groups ?? []).length > 0 && (
-        <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 10, background: '#fff' }}>
+        /* Standard dropdowns render — mirrors the persistent-nav
+         *  layout (chip on left + horizontal children on right) but
+         *  in light Squad colors, not the dark plum congregation
+         *  treatment. Each group is one row. */
+        <div style={{ padding: '14px 22px 22px', display: 'flex', flexDirection: 'column', gap: 10, background: '#fff' }}>
           {np.standard_dropdowns!.groups!.map((g, gi) => (
-            <div key={gi} style={{ background: '#341756', color: '#fff', borderRadius: 12, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
-              <div style={{ background: '#F9F5F1', color: '#341756', borderRadius: 999, padding: '8px 16px', fontSize: 13, fontWeight: 700 }}>
+            <div key={gi} style={{ background: '#F9F5F1', color: '#341756', borderRadius: 12, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap', border: '1px solid #E2DDD4' }}>
+              <div style={{ background: '#fff', color: '#341756', borderRadius: 999, padding: '9px 16px', fontSize: 12, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', border: '1px solid #CFC9F8' }}>
                 {g.group_label ?? '…'}
               </div>
-              <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', marginLeft: 'auto', fontSize: 13, fontWeight: 530, color: '#CFC9F8', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', marginLeft: 'auto', fontSize: 13.5, fontWeight: 620, color: '#341756', alignItems: 'center' }}>
                 {(g.children ?? []).map((c, ci) => (
                   <span key={ci}>{c.label}</span>
                 ))}
@@ -964,24 +968,16 @@ function PrimaryNavPreview({
         </div>
       )}
 
-      {shell(np) === 'offcanvas' && np.offcanvas_overlay && (
-        <div className="mega-panel" style={{ background: 'linear-gradient(180deg,#F9F5F1,#EDE9FC)' }}>
-          {np.offcanvas_overlay.hero_message && (
-            <p style={{ fontSize: 14, fontWeight: 640, fontStyle: 'italic', color: '#341756', margin: '0 0 14px' }}>
-              &ldquo;{np.offcanvas_overlay.hero_message}&rdquo;
-            </p>
-          )}
-          <div className="about-grid" style={{ gridTemplateColumns: `repeat(${Math.min((np.offcanvas_overlay.sections ?? []).length, 3)}, 1fr)` }}>
-            {(np.offcanvas_overlay.sections ?? []).map((s, si) => (
-              <div key={si} className="lcol" style={{ gridTemplateColumns: '1fr' }}>
-                <h4 style={{ fontSize: 12, fontWeight: 680, margin: '0 0 8px', color: '#513DE5', textTransform: 'uppercase', letterSpacing: '.08em' }}>{s.section_label}</h4>
-                {(s.links ?? []).map((l, li) => (
-                  <div key={li} className="mega-item"><span className="ph sq" style={{ width: 24, height: 24 }}>■</span><div><h4>{l.label}</h4></div></div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
+      {shell(np) === 'offcanvas' && (
+        /* Offcanvas render — full-panel slide-out mock modeled on
+         *  the Logoipsum artifact structure Ashley shared. Cream
+         *  background, brand mark + close (X) in the header, primary
+         *  links as a large serif-adjacent column, horizontal rule,
+         *  "Other pages" 2-column secondary grid, and up to two CTA
+         *  buttons at the bottom pulled from visible_top_level's
+         *  button items. Uses Squad palette (Cream / Deep Plum /
+         *  Primary Purple), not the artifact's neutral colors. */
+        <OffcanvasPreview np={np} church={church} />
       )}
     </>
   )
@@ -1028,6 +1024,119 @@ function FeaturedTile({
 
 function shell(np: SitemapReviewNavPresentation): SitemapReviewNavPresentation['shell'] {
   return np.shell ?? (np.megamenu_panels && np.megamenu_panels.length > 0 ? 'megamenu' : np.standard_dropdowns ? 'standard_dropdowns' : np.offcanvas_overlay ? 'offcanvas' : undefined)
+}
+
+/** Offcanvas slide-out preview. Modeled on the Logoipsum reference
+ *  Ashley provided: cream background, brand mark + close X header,
+ *  primary links as a large left-aligned column, horizontal rule,
+ *  "Other pages" 2-column secondary grid, and a pair of CTA buttons
+ *  at the bottom. Uses Squad palette (Cream / Deep Plum / Primary
+ *  Purple), not the artifact's neutral colors. */
+function OffcanvasPreview({ np, church }: { np: SitemapReviewNavPresentation; church: string }) {
+  const overlay = np.offcanvas_overlay
+  const vtl = np.visible_top_level ?? []
+  const buttonItems = vtl.filter(i => i.kind === 'button').slice(0, 2)
+  // Primary large links come from visible_top_level's non-button
+  // items. Falls back to the first offcanvas section's links when
+  // vtl is empty.
+  const primaryFromVtl = vtl
+    .filter(i => i.kind !== 'button' && i.kind !== 'hamburger')
+    .map(i => i.label ?? i.group_label)
+    .filter((l): l is string => !!l && l.trim().length > 0)
+  const sections = overlay?.sections ?? []
+  const primaryLinks: string[] = primaryFromVtl.length > 0
+    ? primaryFromVtl
+    : (sections[0]?.links ?? []).map(l => l.label).filter((l): l is string => !!l)
+  // "Other pages" comes from the remaining sections (or from all
+  // sections when we took vtl for primary).
+  const otherSections = primaryFromVtl.length > 0 ? sections : sections.slice(1)
+  const otherLinks: string[] = otherSections
+    .flatMap(s => (s.links ?? []).map(l => l.label ?? ''))
+    .filter(l => l.trim().length > 0)
+  const otherLabel = otherSections[0]?.section_label ?? 'Other pages'
+  return (
+    <div style={{
+      background: '#F9F5F1', padding: 30, display: 'flex', flexDirection: 'column',
+      gap: 44, borderRadius: 12, border: '1px solid #E2DDD4',
+    }}>
+      {/* Header: brand mark + close */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 15, fontWeight: 700, color: '#341756' }}>
+          <span style={{ display: 'inline-grid', placeItems: 'center', width: 32, height: 32, background: '#341756', color: '#F9F5F1', borderRadius: 8, fontSize: 14 }}>◆</span>
+          {church}
+        </div>
+        <span aria-hidden style={{ fontSize: 26, color: '#341756', lineHeight: 1 }}>×</span>
+      </div>
+
+      {overlay?.hero_message && (
+        <p style={{ fontSize: 14, fontStyle: 'italic', color: '#6B6180', margin: 0, lineHeight: 1.55 }}>
+          &ldquo;{overlay.hero_message}&rdquo;
+        </p>
+      )}
+
+      {/* Primary large links */}
+      {primaryLinks.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {primaryLinks.map((label, i) => (
+            <div
+              key={i}
+              style={{
+                fontSize: 30,
+                fontWeight: 620,
+                lineHeight: 1.15,
+                letterSpacing: '-0.02em',
+                color: i === 0 || i === primaryLinks.length - 1 ? '#513DE5' : '#341756',
+              }}
+            >
+              {label}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {primaryLinks.length > 0 && otherLinks.length > 0 && (
+        <div style={{ height: 1, background: '#CFC9F8', width: '100%' }} />
+      )}
+
+      {/* Other pages — 2-column grid */}
+      {otherLinks.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: '#513DE5' }}>
+            {otherLabel}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 40px' }}>
+            {otherLinks.map((label, i) => (
+              <div key={i} style={{ fontSize: 15, fontWeight: 620, color: '#341756' }}>{label}</div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* CTA buttons at the bottom (up to two) */}
+      {buttonItems.length > 0 && (
+        <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+          {buttonItems.map((btn, i) => (
+            <span
+              key={i}
+              style={{
+                flex: 1,
+                textAlign: 'center',
+                padding: '13px 24px',
+                borderRadius: 999,
+                fontSize: 13,
+                fontWeight: 700,
+                background: i === buttonItems.length - 1 ? '#341756' : 'transparent',
+                color:      i === buttonItems.length - 1 ? '#F9F5F1' : '#341756',
+                border:     i === buttonItems.length - 1 ? '1px solid #341756' : '1.5px solid #341756',
+              }}
+            >
+              {btn.label}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 /** Fallback preview when nav_presentation is absent. Renders a
