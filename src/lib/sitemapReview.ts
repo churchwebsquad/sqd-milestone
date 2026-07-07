@@ -1123,13 +1123,29 @@ export function composeSitemapReview(args: {
   // cowork sitemap re-run that emitted new visible_top_level items /
   // megamenu panels flows into the partner view. Existing wins on
   // stable loads.
+  //
+  // COWORK-SCHEMA NORMALIZATION: cowork's sitemap step sometimes
+  // emits nav_presentation in a completely different shape than the
+  // one PrimaryNavPreview reads (top-level `header.items[]` /
+  // `header.buttons[]` / `megamenus.<label>` instead of
+  // `visible_top_level` / `header_ctas` / `megamenu_panels[]`).
+  // Doxology's authored strategy uses the cowork shape verbatim.
+  // Without normalization, the render code silently discards
+  // everything cowork emitted and falls back to nav_layout.header —
+  // partner review has been showing the derived-from-nav.primary
+  // structure instead of the strategist-approved nav for days.
+  // normalizeCoworkNavPresentation translates the cowork shape into
+  // the internal shape at compose time so downstream reads work.
   const legacyStage2 = (rs as { stage_2?: { nav_presentation?: unknown } })?.stage_2
-  const strategyNavPresentation =
-    (strategy as { nav_presentation?: SitemapReviewNavPresentation } | null)?.nav_presentation
-    ?? (legacyStage2?.nav_presentation as SitemapReviewNavPresentation | undefined)
+  const rawStrategyNp =
+    (strategy as { nav_presentation?: unknown } | null)?.nav_presentation
+    ?? (legacyStage2?.nav_presentation as unknown | undefined)
+    ?? null
+  const strategyNavPresentation = normalizeCoworkNavPresentation(rawStrategyNp, existing?.presentation?.congregations)
+  const existingNormalized = normalizeCoworkNavPresentation(existing?.nav_presentation, existing?.presentation?.congregations)
   const composedNavPresentation = shouldResyncFromStrategy && strategyNavPresentation
     ? strategyNavPresentation
-    : existing?.nav_presentation ?? strategyNavPresentation
+    : existingNormalized ?? strategyNavPresentation
 
   // Presentation layer. Preserves any cowork-authored content and
   // seeds Why cards from real strategy signals (church_vision,
@@ -1215,6 +1231,189 @@ function readStrategyGeneratedAt(strategy: SiteStrategyBlob | null): string | nu
   const meta = (strategy as { _meta?: { generated_at?: unknown } })._meta
   const at = meta?.generated_at
   return typeof at === 'string' ? at : null
+}
+
+/** Normalize the cowork-emitted nav_presentation shape into the
+ *  internal shape PrimaryNavPreview reads. Detects the cowork shape
+ *  by presence of top-level `header` OR `megamenus` keys and rewrites
+ *  the whole blob. Idempotent — passing an already-internal shape
+ *  through returns it unchanged.
+ *
+ *  Cowork shape (what plan-site-strategy actually emits for
+ *  Doxology and other multi-campus/megamenu projects):
+ *
+ *    {
+ *      header: {
+ *        logo: 'home',
+ *        items: [{ type: 'megamenu'|'link', label }],
+ *        buttons: ['Visit', 'Watch']
+ *      },
+ *      megamenus: {
+ *        'About Doxology': {
+ *          columns: [['about','beliefs','staff','stories','careers']],
+ *          feature: { label: 'Kingdom Come', external: true }
+ *        },
+ *        'Get Connected': {
+ *          default: 'southwest',
+ *          congregations: ['southwest','alliance','espanol']
+ *        }
+ *      }
+ *    }
+ *
+ *  Internal shape (SitemapReviewNavPresentation):
+ *
+ *    {
+ *      shell: 'megamenu',
+ *      visible_top_level: [{ kind, label, group_label }],
+ *      header_ctas: [{ label, style }],
+ *      megamenu_panels: [{ triggered_by, columns: [...], featured_tile }]
+ *    }
+ *
+ *  Per-congregation megamenus (Doxology's "Get Connected") produce
+ *  megamenu_panels whose column headings match congregation labels.
+ *  PrimaryNavPreview's `congRows` detection then renders each column
+ *  as a per-congregation card with service time + address. This
+ *  requires the review's `presentation.congregations` to be
+ *  populated — passed in as `congregations`.
+ */
+function normalizeCoworkNavPresentation(
+  raw: unknown,
+  congregations?: NonNullable<SitemapReview['presentation']>['congregations'],
+): SitemapReviewNavPresentation | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const np = raw as Record<string, unknown>
+  const hasCoworkHeader    = np.header && typeof np.header === 'object' && Array.isArray((np.header as Record<string, unknown>).items)
+  const hasCoworkMegamenus = np.megamenus && typeof np.megamenus === 'object'
+  const hasInternalKeys    = Array.isArray(np.visible_top_level) || Array.isArray(np.megamenu_panels)
+  // Not cowork shape → pass through (may still be internal shape or
+  // a shell-only stub that hydrate will fill in downstream).
+  if (!hasCoworkHeader && !hasCoworkMegamenus) return raw as SitemapReviewNavPresentation
+  // If both shapes coexist (e.g. from a bad merge), prefer internal
+  // keys that were already normalized.
+  if (hasInternalKeys) return raw as SitemapReviewNavPresentation
+
+  const header    = (np.header    ?? {}) as Record<string, unknown>
+  const megamenus = (np.megamenus ?? {}) as Record<string, unknown>
+  const headerItems   = Array.isArray(header.items)   ? header.items   as Array<Record<string, unknown>> : []
+  const headerButtons = Array.isArray(header.buttons) ? header.buttons as Array<unknown>                 : []
+
+  // Visible top-level: map cowork item types to internal kinds.
+  //   type='megamenu' → kind='group' (has caret + panel)
+  //   type='link'     → kind='page'  (leaf link)
+  //   anything else falls back to 'page' so the label still shows.
+  const visible_top_level: NonNullable<SitemapReviewNavPresentation['visible_top_level']> = headerItems.map(it => {
+    const label = typeof it.label === 'string' ? it.label : ''
+    const type  = typeof it.type  === 'string' ? it.type  : 'link'
+    const slug  = typeof it.slug  === 'string' ? it.slug  : undefined
+    if (type === 'megamenu' || type === 'group') {
+      return { kind: 'group', label, group_label: label, ...(slug ? { slug } : {}) }
+    }
+    return { kind: 'page', label, ...(slug ? { slug } : {}) }
+  }).filter(it => (it.label ?? '').trim().length > 0)
+
+  // Header CTAs: cowork emits a plain string array (`["Visit","Watch"]`).
+  // Convention: first entry is primary (deep-plum fill), the rest
+  // are secondary (outlined). Give the strategist a style-explicit
+  // block so the renderer can honor it without inference.
+  const header_ctas: NonNullable<SitemapReviewNavPresentation['header_ctas']> = headerButtons
+    .map((b, i) => {
+      if (typeof b === 'string') return { label: b, style: i === 0 ? 'pill_primary' as const : 'pill_secondary' as const }
+      if (b && typeof b === 'object') {
+        const obj = b as { label?: unknown; slug?: unknown; url?: unknown; style?: unknown }
+        return {
+          label: typeof obj.label === 'string' ? obj.label : '',
+          slug:  typeof obj.slug  === 'string' ? obj.slug  : undefined,
+          url:   typeof obj.url   === 'string' ? obj.url   : undefined,
+          style: (obj.style === 'pill_primary' || obj.style === 'pill_secondary')
+            ? obj.style
+            : (i === 0 ? 'pill_primary' as const : 'pill_secondary' as const),
+        }
+      }
+      return { label: '', style: 'pill_secondary' as const }
+    })
+    .filter(b => (b.label ?? '').trim().length > 0)
+
+  // Megamenu panels. Cowork's `megamenus` is keyed by the parent
+  // label; each entry either has `columns[][slugs]` or a
+  // `congregations[]` list. Translate both:
+  //
+  //   { columns: [['about','beliefs',...]], feature: {label, external} }
+  //   → { triggered_by, columns: [{ heading, links: [{label, slug}] }], featured_tile }
+  //
+  //   { congregations: ['southwest','alliance','espanol'] }
+  //   → columns whose heading matches each congregation's label
+  //     (PrimaryNavPreview.congRows detection then picks it up).
+  const congLabelById = new Map<string, string>(
+    (congregations ?? []).map(c => [c.id, c.label]),
+  )
+  const megamenu_panels: NonNullable<SitemapReviewNavPresentation['megamenu_panels']> = []
+  for (const [label, panelRaw] of Object.entries(megamenus)) {
+    if (!panelRaw || typeof panelRaw !== 'object') continue
+    const panel = panelRaw as Record<string, unknown>
+
+    if (Array.isArray(panel.congregations)) {
+      // Per-congregation megamenu: emit one column per congregation
+      // slug. Heading = congregation label from review.presentation.
+      // Links stay empty here; the render pulls the per-cong details
+      // from presentation.congregations directly.
+      const cols = (panel.congregations as unknown[])
+        .filter((cid): cid is string => typeof cid === 'string')
+        .map(cid => ({ heading: congLabelById.get(cid) ?? cid, links: [] }))
+      if (cols.length > 0) megamenu_panels.push({ triggered_by: label, columns: cols })
+      continue
+    }
+
+    const columns: NonNullable<NonNullable<SitemapReviewNavPresentation['megamenu_panels']>[number]['columns']> = []
+    if (Array.isArray(panel.columns)) {
+      for (const col of panel.columns as unknown[]) {
+        if (!Array.isArray(col)) continue
+        const links = (col as unknown[])
+          .map(entry => {
+            if (typeof entry === 'string') return { label: formatSlugAsTitle(entry), slug: entry }
+            if (entry && typeof entry === 'object') {
+              const e = entry as { label?: unknown; slug?: unknown; one_line_description?: unknown }
+              return {
+                label:                 typeof e.label === 'string' ? e.label : (typeof e.slug === 'string' ? formatSlugAsTitle(e.slug) : ''),
+                slug:                  typeof e.slug  === 'string' ? e.slug  : undefined,
+                one_line_description:  typeof e.one_line_description === 'string' ? e.one_line_description : undefined,
+              }
+            }
+            return null
+          })
+          .filter((l): l is { label: string; slug?: string; one_line_description?: string } => !!l && (l.label ?? '').trim().length > 0)
+        if (links.length > 0) columns.push({ heading: label, links })
+      }
+    }
+    const featured = (panel.feature ?? panel.featured_tile ?? null) as Record<string, unknown> | null
+    const featuredHeading = (() => {
+      if (typeof featured?.label   === 'string' && featured.label.trim())   return featured.label
+      if (typeof featured?.heading === 'string' && featured.heading.trim()) return featured.heading
+      return undefined
+    })()
+    const featuredTile = featured && typeof featured === 'object'
+      ? {
+          kind:       'image_cta' as const,
+          heading:    featuredHeading,
+          body:       typeof featured.body === 'string' ? featured.body : undefined,
+          link_label: typeof featured.link_label === 'string'
+            ? featured.link_label
+            : (featured.external ? 'Learn more' : undefined),
+          link_slug:  typeof featured.link_slug === 'string' ? featured.link_slug : undefined,
+        }
+      : undefined
+    megamenu_panels.push({
+      triggered_by: label,
+      ...(columns.length > 0 ? { columns } : {}),
+      ...(featuredTile        ? { featured_tile: featuredTile } : {}),
+    })
+  }
+
+  return {
+    shell: 'megamenu',
+    visible_top_level,
+    header_ctas,
+    ...(megamenu_panels.length > 0 ? { megamenu_panels } : {}),
+  }
 }
 
 /** Compose the executive-summary paragraph from strategic_goals when
