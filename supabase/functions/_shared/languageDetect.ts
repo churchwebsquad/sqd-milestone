@@ -124,23 +124,44 @@ export function detectLanguage(text: string): LanguageDetectionResult {
     }
   }
   // Character-class signal: count language-exclusive glyphs (ñ, ¿, ¡
-  // for Spanish). Weighted boost on the score, AND a hard override:
-  // ≥ ABSOLUTE_GLYPH_THRESHOLD occurrences of a language-exclusive
-  // glyph in the corpus means we're confident enough that NO amount
-  // of English-template chrome (Squarespace boilerplate, English
-  // markdown link labels, URLs containing English words) should flip
-  // the call. Iglesia Betania has 11 ñ's in body copy across 12 pages
-  // — bilingual site with English template but Spanish content.
-  const ABSOLUTE_GLYPH_THRESHOLD = 5
-  let forcedLanguage: string | null = null
+  // for Spanish). Two roles:
+  //   1. Weighted boost on scores[lang] so glyphs inform the tally.
+  //   2. A hard override for the case where English template chrome
+  //      (nav / footer boilerplate / Squarespace scaffolding) drowns
+  //      out genuinely-Spanish body content in the stopword tally.
+  //
+  // The override is NOT an absolute count. Axis Church has 177 ñ / ¿
+  // / ¡ glyphs across 48 pages, but 39 of them are on a single
+  // /espanol page and the remaining 138 are 3-per-page template
+  // chrome (a `¿Español?` language switcher). Density across the
+  // corpus is only ~3 per 1000 tokens, and English stopwords
+  // decisively win the tally. Forcing Spanish on that basis
+  // misclassifies the whole site.
+  //
+  // Override rule: force only when the corpus is glyph-dense AND
+  // English stopwords do not decisively outscore Spanish stopwords
+  // on their own (i.e. we're not overriding a clear English tally).
+  const GLYPH_DENSITY_THRESHOLD_PER_1K = 5   // ~5 ñ per 1000 tokens
+  const EN_DOMINANCE_MULT              = 3   // en >> es without glyphs
+  const baseScores: Record<string, number> = { ...scores }
+  const glyphCounts: Record<string, number> = {}
   if (text) {
     for (const [lang, re] of Object.entries(CHARACTER_SIGNALS)) {
       const matches = text.match(re)
       const n = matches ? matches.length : 0
-      if (n > 0) {
-        scores[lang] = (scores[lang] ?? 0) + n * CHARACTER_SIGNAL_WEIGHT
-        if (n >= ABSOLUTE_GLYPH_THRESHOLD) forcedLanguage = lang
-      }
+      glyphCounts[lang] = n
+      if (n > 0) scores[lang] = (scores[lang] ?? 0) + n * CHARACTER_SIGNAL_WEIGHT
+    }
+  }
+  let forcedLanguage: string | null = null
+  for (const [lang, n] of Object.entries(glyphCounts)) {
+    if (n === 0 || tokens.length === 0) continue
+    const density = (n / tokens.length) * 1000
+    const enBase  = baseScores.en ?? 0
+    const langBase = baseScores[lang] ?? 0
+    const englishDecisive = lang !== 'en' && enBase > 0 && enBase > langBase * EN_DOMINANCE_MULT
+    if (density >= GLYPH_DENSITY_THRESHOLD_PER_1K && !englishDecisive) {
+      forcedLanguage = lang
     }
   }
   if (forcedLanguage) {
