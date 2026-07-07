@@ -435,19 +435,15 @@ preserved. **Save the WHY where the review picks it up:**
     "offcanvas_overlay": {
       "hero_message": "Optional italic quote at the top of the panel.",
 
-      // The LARGE primary-column links inside the offcanvas panel —
-      // independent from visible_top_level. Each entry is either
-      // an in-site page (page_slug) OR an external URL. Include
-      // ~4-6 items max; this is the featured column.
-      "featured_links": [
-        { "label": "Teaching",         "page_slug": "teaching" },
-        { "label": "Life at Woodcreek", "page_slug": "life-at-woodcreek" },
-        { "label": "Sabbatical Fund",  "external_url": "https://..." }
-      ],
-
-      // Organizational sections BELOW the featured column. One block
-      // per parent, each showing its children as a two-column grid.
-      // Do NOT use `footer_links` here; that name isn't read.
+      // Organizational sections BELOW the featured column. One
+      // block per parent, each showing its children as a two-column
+      // grid. Do NOT use `footer_links` here; that name isn't read.
+      //
+      // The large primary column at the TOP of the offcanvas panel
+      // (the Teaching / Life at Woodcreek / Next Steps stack) is
+      // NOT authored here — it mirrors `visible_top_level` at
+      // render time. One source of truth for both the topnav
+      // items and the offcanvas featured column.
       "sections": [
         {
           "section_label": "Teaching",

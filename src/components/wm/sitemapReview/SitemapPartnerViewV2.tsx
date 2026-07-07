@@ -1219,31 +1219,19 @@ function hydrateNavPresentation(
   }
 
   let offcanvas_overlay = np?.offcanvas_overlay
-  if (shellChoice === 'offcanvas') {
+  if (shellChoice === 'offcanvas' && !offcanvas_overlay) {
     // Derive organizational structure — NOT a flat dump. Each header
     // parent that has children becomes its own section (label = the
-    // parent's label; links = its children).
+    // parent's label; links = its children). Featured links are
+    // NOT derived here anymore — the offcanvas panel's large
+    // primary column mirrors visible_top_level directly at render
+    // time, so there's one source of truth for both surfaces.
     const parentsWithChildren = nonHomeHeader.filter(h => (h.children ?? []).length > 0)
-    // Featured links (the big top-of-panel column). Derived from the
-    // parent items in the header — these are the "hub" pages a
-    // visitor is most likely to click into. If the strategist has
-    // authored featured_links explicitly, respect them; otherwise
-    // seed from the parents so we don't fall through to the topnav
-    // vtl list (which is meant to be shorter and independent).
-    const seededFeatured = parentsWithChildren.map(p => ({
-      label:     p.label ?? p.slug ?? '',
-      page_slug: p.slug,
-    }))
-    if (!offcanvas_overlay) {
-      offcanvas_overlay = {
-        featured_links: seededFeatured,
-        sections: parentsWithChildren.map(p => ({
-          section_label: p.label ?? p.slug ?? '',
-          links: (p.children ?? []).filter(c => !isHomeNavItem(c)).map(c => ({ label: c.label ?? c.slug ?? '' })),
-        })),
-      }
-    } else if (!offcanvas_overlay.featured_links || offcanvas_overlay.featured_links.length === 0) {
-      offcanvas_overlay = { ...offcanvas_overlay, featured_links: seededFeatured }
+    offcanvas_overlay = {
+      sections: parentsWithChildren.map(p => ({
+        section_label: p.label ?? p.slug ?? '',
+        links: (p.children ?? []).filter(c => !isHomeNavItem(c)).map(c => ({ label: c.label ?? c.slug ?? '' })),
+      })),
     }
   }
 
@@ -1276,23 +1264,20 @@ function OffcanvasPreview({ np, church }: { np: SitemapReviewNavPresentation; ch
     }
     return vtl.filter(i => i.kind === 'button').slice(0, 2).map(i => ({ label: i.label, style: undefined }))
   })()
-  // Primary large links. Precedence:
-  //   1. offcanvas_overlay.featured_links — strategist-authored,
-  //      independent of visible_top_level (which drives the
-  //      compact topnav). Supports either in-site page slugs or
-  //      external URLs.
-  //   2. Fallback to visible_top_level's non-button/non-hamburger
-  //      items when the strategist hasn't authored featured_links.
-  //      Home is filtered — the logo is the homepage link.
-  const authoredFeatured = (overlay?.featured_links ?? [])
-    .map(l => (l.label ?? '').trim())
-    .filter(l => l.length > 0 && l.toLowerCase() !== 'home')
-  const primaryLinks: string[] = authoredFeatured.length > 0
-    ? authoredFeatured
-    : vtl
-        .filter(i => i.kind !== 'button' && i.kind !== 'hamburger')
-        .map(i => i.label ?? i.group_label)
-        .filter((l): l is string => !!l && l.trim().length > 0 && l.trim().toLowerCase() !== 'home')
+  // Primary large links mirror the topnav items — the same
+  // visible_top_level entries that render as chips in the topnav
+  // (or that would if the shell weren't offcanvas) become the
+  // extra-large stack inside the offcanvas panel. The strategist
+  // controls both surfaces from a single source (the Topnav Items
+  // editor); no separate list to keep in sync.
+  //
+  // offcanvas_overlay.featured_links is retained on the type as a
+  // legacy field but no longer read here. Older reviews that
+  // populated it fall through to visible_top_level cleanly.
+  const primaryLinks: string[] = vtl
+    .filter(i => i.kind !== 'button' && i.kind !== 'hamburger')
+    .map(i => i.label ?? i.group_label)
+    .filter((l): l is string => !!l && l.trim().length > 0 && l.trim().toLowerCase() !== 'home')
   // Sections carry the organizational structure — each is a
   // parent-with-children block (Ministries → Kidcreek / Youth / …).
   // Not a flat dump; the strategist can author these explicitly and
