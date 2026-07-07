@@ -144,7 +144,7 @@ export const STRATEGIC_GOAL_FIELDS: ReadonlyArray<StrategicGoalFieldDef> = [
     source: 'discovery',
     source_column: 'top_3_website_goals',
     description: 'The 1-3 outcomes the partner most wants the site to drive (e.g. "Help first-time visitors find information easily").',
-    pipeline_consumers: ['synthesize-strategy', 'plan-site-strategy', 'plan-cross-page-allocation'],
+    pipeline_consumers: ['synthesize-strategy', 'plan-site-strategy', 'plan-cross-page-allocation', 'plan-page-seo'],
     importance: 'high',
   },
   {
@@ -154,7 +154,7 @@ export const STRATEGIC_GOAL_FIELDS: ReadonlyArray<StrategicGoalFieldDef> = [
     source: 'am_handoff',
     source_column: 'primaryGoals',
     description: 'The AM\'s read of the partner\'s primary site goals and target audiences — usually more concrete than the questionnaire answer.',
-    pipeline_consumers: ['plan-site-strategy'],
+    pipeline_consumers: ['plan-site-strategy', 'plan-page-seo'],
     importance: 'high',
   },
   {
@@ -174,7 +174,7 @@ export const STRATEGIC_GOAL_FIELDS: ReadonlyArray<StrategicGoalFieldDef> = [
     source: 'discovery',
     source_column: 'ideal_website_experience',
     description: 'How the partner describes the experience they want a visitor to have on the finished site.',
-    pipeline_consumers: ['synthesize-strategy', 'plan-site-strategy', 'plan-cross-page-allocation'],
+    pipeline_consumers: ['synthesize-strategy', 'plan-site-strategy', 'plan-cross-page-allocation', 'plan-page-seo'],
     importance: 'medium',
   },
 
@@ -228,7 +228,7 @@ export const STRATEGIC_GOAL_FIELDS: ReadonlyArray<StrategicGoalFieldDef> = [
     source: 'discovery',
     source_column: 'best_outreach_methods',
     description: 'The outreach programs (events, ministries) that already work for connecting with the community.',
-    pipeline_consumers: ['plan-cross-page-allocation', 'outline-page'],
+    pipeline_consumers: ['plan-cross-page-allocation', 'outline-page', 'plan-page-seo'],
     importance: 'medium',
   },
   {
@@ -238,7 +238,7 @@ export const STRATEGIC_GOAL_FIELDS: ReadonlyArray<StrategicGoalFieldDef> = [
     source: 'content_collection',
     source_column: 'ministries_to_grow',
     description: 'The 1-2 ministries the partner is actively trying to grow — gets navigation prominence + homepage emphasis + clear progression CTAs.',
-    pipeline_consumers: ['plan-site-strategy', 'plan-cross-page-allocation', 'outline-page'],
+    pipeline_consumers: ['plan-site-strategy', 'plan-cross-page-allocation', 'outline-page', 'plan-page-seo'],
     importance: 'medium',
   },
   {

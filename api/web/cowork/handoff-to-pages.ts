@@ -1333,7 +1333,7 @@ export default async function handler(req: any, res: any) {
       .limit(1)
       .maybeSingle(),
     sb.from('web_pages')
-      .select('id, slug, sort_order, phase, content_status, cowork_handoff_at')
+      .select('id, slug, sort_order, phase, content_status, cowork_handoff_at, seo')
       .eq('web_project_id', projectId)
       .eq('archived', false),
     sb.from('web_content_templates')
@@ -1366,6 +1366,11 @@ export default async function handler(req: any, res: any) {
   // handoff reads it as-is and writes through to the new columns.
   const pageMeta    = (roadmap.cowork_page_meta ?? {}) as Record<string, any>
   const globalFooter = (roadmap.global_footer    ?? null) as Record<string, unknown> | null
+  // plan-page-seo output — one SEO plan per slug, written BEFORE
+  // copy is drafted so headings and body target chosen keywords.
+  // Copied into web_pages.seo below when the page has no partner-
+  // authored SEO override yet.
+  const seoPlans    = ((roadmap.page_seo_plans ?? {}).pages ?? {}) as Record<string, Record<string, unknown>>
 
   const allSlugs = new Set<string>([
     ...Object.keys(outlines),
@@ -1380,7 +1385,7 @@ export default async function handler(req: any, res: any) {
 
   // Partner-lock check (still preserved — protects shipped pages).
   const existingPages = (existingPagesRes.data ?? []) as Array<{
-    id: string; slug: string; sort_order: number; phase: string; content_status: string; cowork_handoff_at: string | null
+    id: string; slug: string; sort_order: number; phase: string; content_status: string; cowork_handoff_at: string | null; seo: Record<string, unknown> | null
   }>
   const partnerLockedSlugs = existingPages
     .filter(p => (p.content_status === 'partner_review' || p.content_status === 'partner_approved') && allSlugs.has(p.slug))
@@ -1447,6 +1452,14 @@ export default async function handler(req: any, res: any) {
     const partnerGapsFlagged   = Array.isArray(slugPageMeta?.gaps_flagged)
       ? (slugPageMeta?.gaps_flagged as Array<Record<string, unknown>>)
       : null
+    // plan-page-seo plan for this slug — seeded into web_pages.seo
+    // ONLY when the row's seo is empty. Never clobber a strategist-
+    // authored SEO block. `seo.status` starts at 'written' to reflect
+    // that the plan has been generated but not yet loaded into
+    // RankMath; the Pages workspace pill flips it to
+    // 'added_to_rankmath' once the strategist confirms.
+    const seoPlan = (seoPlans[slug] ?? null) as Record<string, unknown> | null
+    const seededSeo = seoPlan ? { ...seoPlan, status: 'written' } : null
 
     // Upsert web_pages row
     let pageId: string
@@ -1462,6 +1475,12 @@ export default async function handler(req: any, res: any) {
         triggerLabel: `Cowork → Pages handoff — ${slug}`,
       })
 
+      // Seed web_pages.seo from the SEO plan only when the existing
+      // row is empty. Never clobber a partner-authored or strategist-
+      // edited seo block; the plan is a starting point, not a source
+      // of truth once someone has touched it.
+      const existingSeoEmpty = !existing.seo || Object.keys(existing.seo).length === 0
+      const seoUpdate = seededSeo && existingSeoEmpty ? { seo: seededSeo } : {}
       const { error: updErr } = await sb.from('web_pages')
         .update({
           cowork_handoff_meta: {
@@ -1477,6 +1496,7 @@ export default async function handler(req: any, res: any) {
           updated_at:           handoffStartedAt,
           seo_metadata:         seoMetadata,
           partner_gaps_flagged: partnerGapsFlagged,
+          ...seoUpdate,
         })
         .eq('id', existing.id)
       if (updErr) return res.status(500).json({ error: `web_pages update failed for ${slug}: ${updErr.message}` })
@@ -1501,6 +1521,12 @@ export default async function handler(req: any, res: any) {
           sort_order:           nextSortOrder++,
           archived:             false,
           content_status:       'draft',
+          // Seed seo from the plan on brand-new pages. The seededSeo
+          // block includes { status: 'written' } so the Pages
+          // workspace pill shows the SEO row as "Written" out of the
+          // gate; strategist flips it to 'added_to_rankmath' once
+          // the plan has been dropped into RankMath.
+          seo:                  seededSeo ?? {},
           seo_metadata:         seoMetadata,
           partner_gaps_flagged: partnerGapsFlagged,
         })

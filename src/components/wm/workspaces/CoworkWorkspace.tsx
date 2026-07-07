@@ -178,6 +178,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         acf_plan:             roadmap.acf_plan             ?? null,
         site_strategy:        roadmap.site_strategy        ?? null,
         page_allocation_plan: roadmap.page_allocation_plan ?? null,
+        page_seo_plans:       roadmap.page_seo_plans       ?? null,
         critique_rollup:      roadmap.critique_rollup      ?? null,
         cowork_handoff_audit: roadmap.cowork_handoff_audit ?? null,
         page_outlines_count:  Object.keys(pageOutlines).length,

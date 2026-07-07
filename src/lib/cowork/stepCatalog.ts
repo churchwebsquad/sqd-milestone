@@ -31,6 +31,12 @@ export interface CoworkPipelineState {
   acf_plan:              { _meta?: { generated_at?: string; model?: string } } | null
   site_strategy:         { _meta?: { generated_at?: string; model?: string } } | null
   page_allocation_plan:  { _meta?: { generated_at?: string; model?: string } } | null
+  /** Per-page SEO plans (title + meta description + keyword targets +
+   *  AEO Q&A) generated BEFORE page copy is written. Downstream
+   *  outline + draft steps read this to keep headings, body copy,
+   *  and CTAs aligned to the chosen keyword targets. Persisted to
+   *  roadmap_state.page_seo_plans as `{ <slug>: { ...seo }, _meta }`. */
+  page_seo_plans:        { _meta?: { generated_at?: string; model?: string } } | null
   critique_rollup:       { _meta?: { generated_at?: string; model?: string } } | null
   /** Telemetry from /api/web/cowork/handoff-to-pages — written when
    *  the cowork pipeline pushes its three artifacts into web_pages +
@@ -440,10 +446,51 @@ Inspect staged chunks without pulling the payload:
     lastModel: s => s.page_allocation_plan?._meta?.model ?? null,
   },
 
+  // ── SEO plan generation — BEFORE copy is written ───────────────────
+  // Runs after allocation (so we know which content is on which page)
+  // and BEFORE outline + draft (so headings, body, and CTAs can be
+  // written against a chosen keyword target instead of after-the-fact
+  // retrofitting). Output persists to roadmap_state.page_seo_plans and
+  // is copied into web_pages.seo at handoff-to-pages, so the same
+  // record drives WordPress / RankMath / Yoast injection downstream.
+  {
+    key:         'plan-page-seo',
+    step_number: 8,
+    title:       'Plan SEO for each page',
+    subtitle:    'plan-page-seo',
+    description:
+      'Writes the per-page SEO plan before copy is drafted: primary keyword target, secondary keywords, meta title + meta description drafts, AEO Q&A candidates, and local GEO signals. The outline + copy steps then write against these targets so headings and body actually align with the search intent we chose, not the other way around.',
+    kind:        'web_ui',
+    endpoint:    '/api/web/agents/run-plan-page-seo',
+    output_key:  'page_seo_plans',
+    computeStatus: s => {
+      if (!s.page_allocation_plan?._meta?.generated_at) return 'blocked_waiting'
+      const out = s.page_seo_plans?._meta?.generated_at
+      if (!out)                                          return 'ready'
+      // Freshens when the sitemap changes (page list) OR allocation
+      // shifts (what content each page carries) OR strategic goals
+      // move (audience / voice).
+      const upstream = latestOf(
+        s.site_strategy?._meta?.generated_at ?? null,
+        s.page_allocation_plan._meta.generated_at ?? null,
+        s.strategic_goals_at,
+      )
+      if (fresherThan(out, upstream))                    return 'done'
+      return 'stale'
+    },
+    staleReason: s => staleReasonFor(s, s.page_seo_plans?._meta?.generated_at ?? null, [
+      { label: 'site_strategy',        getAt: ss => ss.site_strategy?._meta?.generated_at ?? null },
+      { label: 'page_allocation_plan', getAt: ss => ss.page_allocation_plan?._meta?.generated_at ?? null },
+      { label: 'strategic_goals',      getAt: ss => ss.strategic_goals_at },
+    ]),
+    lastRunAt: s => s.page_seo_plans?._meta?.generated_at ?? null,
+    lastModel: s => s.page_seo_plans?._meta?.model ?? null,
+  },
+
   // ── Cowork session: per-page work ─────────────────────────────────
   {
     key:         'outline-page',
-    step_number: 8,
+    step_number: 9,
     title:       'Outline each page',
     subtitle:    'outline-page',
     description:
@@ -459,23 +506,24 @@ I'm attaching two files to this conversation:
 1. The outline-page **SKILL.md** (contract + slot rules + verification checklist).
 2. The **project bundle** \`cowork-pipeline.<partner>.project-bundle.json\` — every read you need for the whole sitemap, pre-packaged. Atoms/facts/crawl pools indexed by id AND topic so source refs resolve in-context. Allocations keyed by page_slug. Handoff notes from prior steps. Canonical templates slot vocab. Strategic goals filtered to approved-only.
 
-**Read the bundle first.** Skim \`prior_handoff_notes.site_strategy\` and \`prior_handoff_notes.page_allocation_plan\` so you start with the allocation strategist's decisions and cross-step gotchas already loaded.
+**Read the bundle first.** Skim \`prior_handoff_notes.site_strategy\`, \`prior_handoff_notes.page_allocation_plan\`, and \`prior_handoff_notes.page_seo_plans\` so you start with the allocation strategist's decisions and the SEO keyword targets already loaded.
 
 ## Workflow — ONE MCP write per page
 
 For each page in \`sitemap_pages\` (walk by \`nav_order\`):
 
 1. Look up the allocation in-context: \`allocations_by_page[<slug>]\` plus \`build_directives_by_page[<slug>]\`.
-2. Resolve each \`section_intents[].sources[].ref\` against the bundle pools:
+2. Look up the SEO plan for this page: \`page_seo_plans.pages[<slug>]\` — this is the keyword target the outline MUST route sections against. Fields you'll use: \`primary_keyword\`, \`secondary_keywords\`, \`h1_directive\`, \`aeo_qa\` (the featured-snippet Q&A candidates the outline should reserve a section for), \`search_intent\` (drives whether the page opens with an answer or a story), and \`local_geo\` (informs whether a section carries neighborhood / city context). Never skip this — it's what turns the outline into an SEO-aware plan instead of a generic one.
+3. Resolve each \`section_intents[].sources[].ref\` against the bundle pools:
    - \`kind='pillar'\` → \`atoms_pool.by_id[ref]\` (fall back to \`atoms_pool.by_topic[ref]\` for topic-keyed drift)
    - \`kind='fact'\` → \`facts_pool.by_id[ref]\` (fall back to \`facts_pool.by_topic[ref]\` — fixes the \`'service_times'\` / \`'kids'\` topic-ref drift)
    - \`kind='crawl_topic'\` → \`crawl_topics_pool.by_key[ref]\` (passages capped 10 × 600 chars; if \`passages_truncated\` and the page genuinely needs more, that's the ONE valid case to run a direct SELECT)
-3. Apply strategic_goals_approved gates:
+4. Apply strategic_goals_approved gates:
    - \`content_and_allocation.copy_approach.derived.intended_verbatim_band\` — stamp on each section.
    - \`voice_and_tone.one_key_message\` + \`recurring_message_theme\` — at least one section's voice anchors against these.
    - \`content_and_allocation.ministries_to_grow\` — surface early on homepage / ministry pages.
-4. Walk me through the outline before persisting; pause for my pushback.
-5. **Persist via the column-free chunked-write pattern** (see SKILL §Persist for the full rationale + recovery hints). Each per-page write is:
+5. Walk me through the outline before persisting; pause for my pushback.
+6. **Persist via the column-free chunked-write pattern** (see SKILL §Persist for the full rationale + recovery hints). Each per-page write is:
 
 \`\`\`sql
 -- Step 1: clear scratch
@@ -538,7 +586,7 @@ The outline's \`_meta\` MUST carry \`handoff_note\` (≤1-screen markdown — se
   },
   {
     key:         'draft-page',
-    step_number: 9,
+    step_number: 10,
     title:       'Write each page',
     subtitle:    'draft-page',
     description:
@@ -554,7 +602,18 @@ I'm attaching:
 1. The draft-page **SKILL.md**.
 2. The **project bundle** \`cowork-pipeline.<partner>.project-bundle.json\` — same file outline-page consumed. You read atoms_pool / facts_pool / crawl_topics_pool / stage_1 / strategic_goals_approved / canonical_templates / sitemap_pages from it in-context.
 
-**Read \`prior_handoff_notes.page_outlines\` first** — the outline strategist's cross-step gotchas (voice anchor exemplars, persona postures, banned phrases, key_message section, mechanical-scan close calls).
+**Read \`prior_handoff_notes.page_outlines\` first** — the outline strategist's cross-step gotchas (voice anchor exemplars, persona postures, banned phrases, key_message section, mechanical-scan close calls). Also skim \`prior_handoff_notes.page_seo_plans\` so you know each page's chosen primary_keyword + secondary keywords + AEO Q&A candidates before you start writing headings.
+
+## SEO ingestion — each page's plan is load-bearing on copy
+
+Before drafting any slot for a page, look up its SEO plan in the bundle: \`page_seo_plans.pages[<slug>]\`. The plan carries \`primary_keyword\`, \`secondary_keywords\`, \`meta_title\`, \`meta_description\`, \`h1_directive\`, \`aeo_qa\` (question / short_answer pairs), \`local_geo\`, and \`search_intent\`. Draft this way:
+
+- The page's H1 MUST fulfill \`h1_directive\`. That directive tells you the intent behind the H1; draft the actual copy in the church's voice.
+- Weave the \`primary_keyword\` naturally into the H1 and the first body paragraph. Never keyword-stuff — one clean, human-readable mention beats five awkward ones.
+- Weave 2-3 \`secondary_keywords\` across the page. Prefer subheadings + card headings; body paragraphs when nothing else fits.
+- For each \`aeo_qa\` question the outline reserved a section for, draft the section body so its lead sentence directly answers the question — that's what earns the featured snippet.
+- If \`local_geo\` is set + the page has a local surface (Visit / Contact / Locations), include the city / neighborhood explicitly in at least one section heading or body line.
+- If a copy line would keyword-stuff or fight the church's voice, prefer the voice — surface the tension in the batch review so the strategist can decide.
 
 ## Workflow — 5-page BATCHES (draft → show full copy → revise → combined persist)
 
@@ -674,7 +733,7 @@ Do NOT persist any page before the strategist signs off on its batch. Do NOT ask
   },
   {
     key:         'critique-page',
-    step_number: 10,
+    step_number: 11,
     title:       'Review each page',
     subtitle:    'critique-page',
     description:
@@ -775,7 +834,7 @@ SELECT roadmap_state_set('{{project_id}}'::uuid, ARRAY['page_critiques','<slug>'
   // ── Project-level rollup (web UI Run button) ──────────────────────
   {
     key:         'synthesize-critique',
-    step_number: 11,
+    step_number: 12,
     title:       'Final project review',
     subtitle:    'synthesize-critique',
     description:
