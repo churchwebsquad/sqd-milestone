@@ -269,9 +269,9 @@ async function assembleEndpointInputs(
       .eq('id', projectId)
       .maybeSingle(),
     sb.from('church_facts')
-      .select('topic, fact, is_primary_service')
+      .select('topic, data, status')
       .eq('web_project_id', projectId)
-      .eq('archived', false)
+      .neq('status', 'archived')
       .limit(200),
   ])
   if (projRes.error)  throw new Error(`project load failed: ${projRes.error.message}`)
