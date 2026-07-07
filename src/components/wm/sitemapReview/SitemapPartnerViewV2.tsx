@@ -904,12 +904,32 @@ function PrimaryNavPreview({
             <div className="mega-label">{panel.triggered_by ?? '…'}</div>
 
             {congRows ? (
-              /* Per-congregation rows: chip + link list + svc card. */
+              /* Per-congregation rows: chip + link list + svc card.
+               *  Link data lives in presentation.congregations[i].
+               *  links_left + links_right (that's where cowork's
+               *  per-cong sub-nav is authored). The megamenu panel's
+               *  columns just identify WHICH congregations render;
+               *  col.links stays empty in the normalized data.
+               *  Map `kids` (comma-separated sub-labels from the
+               *  cowork shape) into `one_line_description` so the
+               *  existing "split on commas → stacked sub-pages"
+               *  render logic below still works unchanged.
+               */
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {cols.map((col, ci) => {
                   const cong = congByLabel.get((col.heading ?? '').toLowerCase())
                   const isPrimary = !!cong?.is_primary
-                  const links = col.links ?? []
+                  const congLinks = [
+                    ...((cong?.links_left  ?? []) as Array<{ label?: string; kids?: string; is_dropdown?: boolean; is_shared?: boolean }>),
+                    ...((cong?.links_right ?? []) as Array<{ label?: string; kids?: string; is_dropdown?: boolean; is_shared?: boolean }>),
+                  ].map(l => ({
+                    label:                l.label ?? '',
+                    one_line_description: l.kids,
+                  })).filter(l => l.label.trim().length > 0)
+                  // Fallback to the panel column's own links if the
+                  // congregation entry doesn't carry per-cong links
+                  // (happens on non-Doxology multi-campus data).
+                  const links = congLinks.length > 0 ? congLinks : (col.links ?? [])
                   return (
                     <div key={ci} style={{ display: 'grid', gridTemplateColumns: '150px 1fr 240px', gap: 24, alignItems: 'start', padding: '18px 0', borderTop: ci === 0 ? undefined : '1px solid #CFC9F8' }}>
                       <div style={{
