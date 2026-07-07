@@ -86,7 +86,27 @@ export function SitemapReviewEditor({
       pages:    (pgs ?? []) as never,
       existing,
     })
-    setReview(composed)
+    // AUTO-PERSIST on watermark drift. When cowork's sitemap step
+    // reran and this compose call actually re-hydrated auto-fields
+    // from strategy (watermark advanced), immediately write the
+    // fresh review back to the DB. Otherwise partners hitting
+    // /portal/sitemap/<token> keep seeing the stale saved snapshot
+    // until a strategist explicitly saves something else in the
+    // editor. This is the fix for "cowork sitemap re-ran but the
+    // partner review still shows the old pages/nav."
+    //
+    // Safety: only auto-persists when the compose moved the
+    // watermark forward. Stable loads (existing = fresh) don't
+    // trigger a write.
+    const watermarkAdvanced =
+      composed.last_synced_from_strategy_at != null &&
+      composed.last_synced_from_strategy_at !== existing?.last_synced_from_strategy_at
+    if (watermarkAdvanced) {
+      const persistRes = await saveSitemapReview(supabase, projectId, composed)
+      setReview(persistRes.ok ? persistRes.review : composed)
+    } else {
+      setReview(composed)
+    }
     setLoading(false)
   }, [projectId])
 
