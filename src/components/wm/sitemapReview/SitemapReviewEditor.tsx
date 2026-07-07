@@ -670,6 +670,20 @@ function PagesEditor({
                 </select>
               </label>
             </div>
+            <label
+              className="flex items-center gap-1.5 text-[11px] text-wm-text-muted mb-1"
+              title="Check when this row is only a dropdown label in the nav (e.g. 'Teaching' opens Messages / Blog / Podcast) and not a real destination page. Hidden from Full Page List; skipped by web_pages creation; no copy is written for it."
+            >
+              <input
+                type="checkbox"
+                checked={p.is_nav_parent_only === true}
+                disabled={disabled}
+                onChange={e => updatePage(p.id, { is_nav_parent_only: e.target.checked || undefined })}
+              />
+              <span>
+                Nav dropdown label only <span className="text-wm-text-subtle">— not a real page</span>
+              </span>
+            </label>
             <label className="block mt-1">
               <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Purpose</span>
               <textarea

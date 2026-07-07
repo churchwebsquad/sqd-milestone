@@ -1372,11 +1372,25 @@ export default async function handler(req: any, res: any) {
   // authored SEO override yet.
   const seoPlans    = ((roadmap.page_seo_plans ?? {}).pages ?? {}) as Record<string, Record<string, unknown>>
 
+  // Nav-parent-only slugs — dropdown labels like "Teaching" that are
+  // marked on the sitemap review as not real destinations. Skip them
+  // entirely from handoff so no web_pages row is created and no
+  // downstream copy pipeline works on them.
+  const reviewPagesRaw = ((roadmap.sitemap_review ?? {}) as Record<string, unknown>).pages
+  const navParentOnlySlugs = new Set<string>(
+    (Array.isArray(reviewPagesRaw) ? reviewPagesRaw : [])
+      .filter((p: unknown): p is { slug: string; is_nav_parent_only?: boolean } =>
+        !!p && typeof p === 'object' && typeof (p as { slug?: unknown }).slug === 'string' && (p as { is_nav_parent_only?: unknown }).is_nav_parent_only === true)
+      .map(p => p.slug),
+  )
+
   const allSlugs = new Set<string>([
     ...Object.keys(outlines),
     ...Object.keys(drafts),
     ...Object.keys(critiques),
   ])
+  // Prune nav-parent-only slugs so they never land as web_pages rows.
+  for (const slug of navParentOnlySlugs) allSlugs.delete(slug)
 
   if (allSlugs.size === 0) {
     return res.status(400).json({ error: 'no_cowork_artifacts',

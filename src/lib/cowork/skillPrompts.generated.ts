@@ -13092,7 +13092,7 @@ Not the full plan — just the gotchas for outline + draft:
     name:         'plan-site-strategy',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  'b6a411095963b386',
+    contentHash:  '96d5813d7057bffc',
     references:   [
       'cowork-skills/page-outlines-by-ministry-model.md',
     ],
@@ -13387,6 +13387,33 @@ Required output:
 6. \`pages_to_carry_forward\` (input) entries either appear in \`pages\`
    output OR appear in \`pages_considered_dropped\` with reason. No
    silent drops.
+
+## Nav parents vs pages — DO NOT conflate them
+
+Some \`pages[]\` entries are nav dropdown labels, not real
+destinations. Example: "Teaching" opens a dropdown of Messages /
+Blog / Podcast / Live — clicking the word "Teaching" doesn't go
+anywhere. Neither does "Life at Woodcreek" or "Next Steps" on
+Woodcreek's site.
+
+For every page you emit with \`has_children: true\`, ask: does the
+partner want a real \`/<slug>\` page here with its own H1 + copy?
+Or is the slug just a nav grouping? Two rules:
+
+1. **Emit BOTH types in \`pages[]\`** — \`has_children: true\` is
+   the reliable signal downstream steps use to distinguish them.
+   The review will default any \`has_children: true\` row to
+   \`is_nav_parent_only: true\`; strategist can override in the
+   review UI when a parent IS also a real destination page.
+2. **Only assign real \`purpose\` copy to real destinations.** For
+   nav-only parents, keep \`purpose\` to a one-line "hub for X"
+   description rather than a partner-facing pitch. Downstream:
+   outline-page skips these, draft-page doesn't write copy for
+   them, handoff-to-pages doesn't create a web_pages row.
+
+Getting this wrong wastes downstream cycles writing copy for
+labels that never render. Getting it right keeps the Full Page
+List and the Pages workspace showing only real destinations.
 
 ## What the partner sitemap review reads — save the why here
 

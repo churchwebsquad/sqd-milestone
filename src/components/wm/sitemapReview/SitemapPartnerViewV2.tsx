@@ -246,11 +246,16 @@ export default function SitemapPartnerViewV2({
   const hero = review.intro
   const primaryNav = review.nav_layout.header ?? []
   const pres = review.presentation
+  // Nav-parent-only rows (Teaching, Life at Woodcreek — dropdown
+  // labels, not real destinations) are hidden from the Full Page
+  // List. They still show up as parents in the nav preview because
+  // that reads from nav_layout, not review.pages.
+  const realPages = useMemo(() => review.pages.filter(p => !p.is_nav_parent_only), [review.pages])
   const grouped = useMemo(
     () => pres?.tiers && pres.tiers.length > 0
-      ? groupPagesByTiers(review.pages, pres.tiers)
-      : groupPagesForList(review.pages, primaryNav),
-    [review.pages, primaryNav, pres?.tiers],
+      ? groupPagesByTiers(realPages, pres.tiers)
+      : groupPagesForList(realPages, primaryNav),
+    [realPages, primaryNav, pres?.tiers],
   )
 
   return (

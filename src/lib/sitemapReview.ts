@@ -162,6 +162,26 @@ export interface ReviewPage {
    *                    this one.
    *    'new'           New. Wasn't on the current site at all. */
   sitemap_tag?: 'kept' | 'unified' | 'consolidated' | 'new'
+
+  /** True when this row is a nav dropdown label, NOT a real page.
+   *  Examples: "Teaching" or "Life at Woodcreek" on a site where
+   *  clicking those in the nav only opens a dropdown of child pages
+   *  (Messages, Blog, Podcast) rather than routing to /teaching.
+   *
+   *  When true:
+   *    - Hidden from the partner Full Page List (still shows in
+   *      Primary Navigation / Offcanvas / mega panels as a parent).
+   *    - Skipped by the Pages workspace list + spreadsheet overview.
+   *    - Not created as a web_pages row on handoff-to-pages.
+   *    - Not written as copy by outline-page / draft-page.
+   *
+   *  Default false — strategist ticks the checkbox on the review
+   *  page card when the row is a nav grouping only. Heuristic hint
+   *  from site_strategy: `has_children === true` + this label appears
+   *  as a dropdown parent in nav_layout.header but is not clicked
+   *  through to as a leaf. Compose seeds the flag when both signals
+   *  hold; strategist can override either way. */
+  is_nav_parent_only?: boolean
 }
 
 export interface NavItem {
@@ -787,6 +807,17 @@ export function composeSitemapReview(args: {
   const shouldResyncFromStrategy = strategyIsFresher && strategyPages.length > 0
   const useExistingAsSource      = !shouldResyncFromStrategy && (existing?.pages ?? []).length > 0
 
+  // Seed heuristic: strategy pages with `has_children: true` are
+  // nav dropdown parents (Teaching → Messages/Blog/Podcast, Life
+  // at Woodcreek → Kids/Youth/…). Default them to is_nav_parent_only
+  // so they don't get treated as real pages downstream. Strategist
+  // can uncheck any that ARE real destinations.
+  const inferNavParentOnly = (sp: (typeof strategyPages)[number] | undefined): boolean | undefined => {
+    if (!sp || typeof sp !== 'object') return undefined
+    const hasChildren = (sp as { has_children?: unknown }).has_children === true
+    return hasChildren || undefined
+  }
+
   const composedPages: ReviewPage[] = (useExistingAsSource
     ? (existing!.pages)
         .slice()
@@ -804,6 +835,8 @@ export function composeSitemapReview(args: {
             funnel_stage:     prior.funnel_stage ?? sp?.primary_funnel ?? null,
             nav_strategy:     prior.nav_strategy ?? sp?.nav_strategy ?? null,
             parent_slug:      prior.parent_slug ?? sp?.parent_slug ?? null,
+            // Preserve strategist's checkbox state; seed from strategy on first sync.
+            is_nav_parent_only: prior.is_nav_parent_only ?? inferNavParentOnly(sp),
           }
         })
     : strategyPages.length > 0
@@ -828,6 +861,7 @@ export function composeSitemapReview(args: {
             primary_audience:  prior?.primary_audience ?? sp.primary_audience ?? null,
             funnel_stage:      prior?.funnel_stage ?? sp.primary_funnel ?? null,
             nav_strategy:      prior?.nav_strategy ?? sp.nav_strategy ?? null,
+            is_nav_parent_only: prior?.is_nav_parent_only ?? inferNavParentOnly(sp),
             // Preserve strategist-authored per-page fields across
             // recompose so tags, migration explanations, and strategy
             // alignment survive a load->save round-trip.
