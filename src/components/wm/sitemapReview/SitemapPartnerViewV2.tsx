@@ -293,10 +293,21 @@ export default function SitemapPartnerViewV2({
             <p className="sec-note">{review.navigation_strategy}</p>
           )}
           <div className={`browser ${clickable('nav-primary')}`} {...clickBind('nav-primary', 'Primary navigation')}>
-            {review.nav_presentation
-              ? <PrimaryNavPreview np={review.nav_presentation} church={church} featured={pres?.featured_highlight} congregations={pres?.congregations} />
-              : <PrimaryNavFallback header={review.nav_layout.header ?? []} church={church} />
-            }
+            {(() => {
+              // nav_presentation is a legitimate render source only
+              // when it has actual visible_top_level items. Older
+              // sitemap-step runs (pre-nav_presentation feature) leave
+              // a stub `{shell: 'megamenu'}` behind — that's not
+              // enough to render, so fall through to the header-based
+              // fallback which uses nav_layout.header. Woodcreek is
+              // the canonical example: shell-only stub + full
+              // 6-item nav_layout.header.
+              const np = review.nav_presentation
+              const hasPresentationContent = !!np && (np.visible_top_level?.length ?? 0) > 0
+              return hasPresentationContent
+                ? <PrimaryNavPreview np={np!} church={church} featured={pres?.featured_highlight} congregations={pres?.congregations} />
+                : <PrimaryNavFallback header={review.nav_layout.header ?? []} church={church} />
+            })()}
           </div>
         </section>
 
