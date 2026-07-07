@@ -306,6 +306,52 @@ Required output:
    output OR appear in `pages_considered_dropped` with reason. No
    silent drops.
 
+## What the partner sitemap review reads — save the why here
+
+The partner-facing sitemap review is composed downstream from what
+you persist to `roadmap_state.site_strategy` (this step's output).
+The review's `composeSitemapReview` is watermark-aware: any time
+`site_strategy._meta.generated_at` is newer than the review's last
+sync, the review re-hydrates auto-fields from your artifact.
+Authored fields the strategist has edited in the review UI are
+preserved. **Save the WHY where the review picks it up:**
+
+- **pages[].purpose** — a 10-200 char partner-facing sentence.
+  Renders on the review's per-page card as "what this page is for."
+  Two sentences beat one; the partner is scanning, not skimming.
+- **pages[].primary_audience** — matches a persona name from
+  stage_1.personas when possible. Renders as the "For whom" tag on
+  the page card + drives who gets which persona posture.
+- **pages[].primary_funnel** — one of discover / consider / visit /
+  belong / commit. Renders as a chip on the page card.
+- **pages[].nav_strategy** — primary / secondary / footer / cta_only
+  / contextual_only. Drives page grouping on the review and the
+  human-readable "Header, under X" label.
+- **pages_considered_dropped[]** — for each page you removed from
+  the crawl, an entry with `slug`, `from_label`, `reason` (why),
+  and `merged_to` (where the content went). These become the "What
+  changed" migration cards on the review — the partner sees exactly
+  why you dropped or consolidated a page.
+- **persona_journeys[]** — one entry per stage_1 persona with
+  entry_points, journey, drop_off_risk (at_slug, reason, mitigation).
+  These seed the persona postures on the review; mitigation drives
+  the "How we're clearing the way for X" internal note.
+- **nav_presentation** — the visible_top_level + megamenu_panels /
+  standard_dropdowns / offcanvas_overlay block. This is what
+  renders the partner-facing nav preview. If you emit a shell but
+  no content, the review hydrates from your `pages[]` + `nav[]`
+  instead, so at minimum: name the shell.
+- **report.coverage_gaps_addressed[]** — free-text bullets on how
+  the sitemap addresses the strategic goals. Feeds the review's
+  executive summary framing.
+- **_meta.handoff_note** — see below. Also seeds the partner-facing
+  "navigation strategy" paragraph.
+
+When the strategist re-runs this step, all of the above re-flows
+into the review automatically (via the watermark) — so DON'T ask
+them to manually sync. Just re-emit clean output and the review
+will pick up the change on next load.
+
 ## Handoff Note — required final substep
 
 Before declaring this step done, emit a HANDOFF NOTE — a ≤1-screen

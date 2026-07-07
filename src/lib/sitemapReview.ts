@@ -416,6 +416,24 @@ export interface SitemapReview {
   approved_at:  string | null
   approved_by:  'staff' | 'partner' | null
 
+  /** ISO timestamp of the last time this review re-hydrated auto-fields
+   *  (pages list, nav_layout, persona names/descriptions, migrations)
+   *  from `roadmap_state.site_strategy`. Compared against
+   *  `site_strategy._meta.generated_at` to decide whether a re-run of
+   *  the cowork sitemap step needs to flow into the review.
+   *
+   *  When strategy is fresher: compose treats strategy as authoritative
+   *  for auto-fields while keeping strategist-authored fields
+   *  (posture_summary, goal, key_page_slugs, per-page purpose, per-page
+   *  what_changed/why_change/strategic_alignment, presentation.*,
+   *  congregations, footer_info, intro, executive_summary,
+   *  navigation_strategy) intact.
+   *
+   *  Absent on reviews composed before this watermark was introduced;
+   *  compose treats that as "sync required" so the first refresh after
+   *  the upgrade fills it in. */
+  last_synced_from_strategy_at?: string
+
   /** Cowork sitemap step's nav_presentation, copied at compose time.
    *  The partner portal renders this via the existing
    *  NavPresentationPanel so the strategist and partner see the same
@@ -736,20 +754,31 @@ export function composeSitemapReview(args: {
   // renders "Header · primary" instead of leaving nav_position blank.
   const navPositionBySlug = buildNavPositionMap(strategy?.nav)
 
-  // Source-of-truth precedence for pages:
-  //   1. When an existing review already has an authored pages list,
-  //      use IT as the primary source. Recompose only backfills
-  //      missing fields (nav_position, primary_audience) from the
-  //      strategy when the same slug happens to appear there. This
-  //      prevents recompose from adding duplicate pages under the
-  //      strategy's slug conventions (which for Doxology are
-  //      prefixed like sw-kids, al-serve, visit-southwest) when the
-  //      strategist has already authored a canonical pages list.
-  //   2. Otherwise fall back to strategy.pages (fresh compose).
-  //   3. Otherwise fall back to raw web_pages.
+  // Source-of-truth precedence for pages, watermark-aware:
+  //   1. When the underlying site_strategy has been re-run since the
+  //      last time this review synced (strategy._meta.generated_at
+  //      > review.last_synced_from_strategy_at), STRATEGY WINS for the
+  //      page list. This is what makes a cowork sitemap re-run flow
+  //      into the partner review automatically. Per-page authored
+  //      fields (purpose overrides, sitemap_tag, what_changed,
+  //      why_change, strategic_alignment, name overrides) survive
+  //      via slug-keyed carry-forward from the existing review.
+  //   2. When the review has authored pages and strategy has NOT
+  //      moved forward, use the existing pages list as the source.
+  //      This prevents accidental churn on every load.
+  //   3. Otherwise fall back to strategy.pages (fresh compose).
+  //   4. Otherwise fall back to raw web_pages.
   const strategyPages = Array.isArray(strategy?.pages) ? strategy!.pages! : []
   const strategyBySlug = new Map(strategyPages.filter(p => typeof p.slug === 'string' && p.slug !== '_meta').map(p => [p.slug!, p]))
-  const useExistingAsSource = (existing?.pages ?? []).length > 0
+  const strategyGeneratedAt = readStrategyGeneratedAt(strategy)
+  const reviewSyncedAt      = existing?.last_synced_from_strategy_at ?? null
+  const strategyIsFresher   = !!strategyGeneratedAt && strategyGeneratedAt > (reviewSyncedAt ?? '')
+  // The refresh path fires when strategy is fresher than the review's
+  // last sync AND strategy actually has pages to work with. Otherwise
+  // stick to the existing-wins path so mid-session recomposes stay
+  // stable.
+  const shouldResyncFromStrategy = strategyIsFresher && strategyPages.length > 0
+  const useExistingAsSource      = !shouldResyncFromStrategy && (existing?.pages ?? []).length > 0
 
   const composedPages: ReviewPage[] = (useExistingAsSource
     ? (existing!.pages)
@@ -921,31 +950,39 @@ export function composeSitemapReview(args: {
     }
   })
 
-  // Nav layout: prefer site_strategy.nav when present; fall back to
-  // existing review or nav_group_definitions.
-  const composedNav: NavLayout = existing?.nav_layout ?? buildNavLayoutFromStrategy(strategy, composedPages)
-    ?? {
-      header: (project.nav_group_definitions ?? [])
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-        .map(g => ({ label: g.label })),
-      footer_sections: [],
-    }
+  // Nav layout: same watermark rule as pages. When strategy is fresher
+  // rebuild from strategy so nav changes flow into the review. When
+  // strategy isn't fresher, keep the existing nav (protects strategist-
+  // authored overrides across recompose).
+  const rebuiltNavFromStrategy = buildNavLayoutFromStrategy(strategy, composedPages)
+  const composedNav: NavLayout = shouldResyncFromStrategy && rebuiltNavFromStrategy
+    ? rebuiltNavFromStrategy
+    : existing?.nav_layout ?? rebuiltNavFromStrategy ?? {
+        header: (project.nav_group_definitions ?? [])
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+          .map(g => ({ label: g.label })),
+        footer_sections: [],
+      }
 
-  // Content migrations: seed from pages_considered_dropped when the
-  // strategist hasn't authored any yet. Each dropped-page entry becomes
-  // a "This existed on your old site; here's why it doesn't now" card.
-  const composedMigrations: ContentMigration[] =
-    existing?.content_migrations && existing.content_migrations.length > 0
-      ? existing.content_migrations
-      : (strategy?.pages_considered_dropped ?? [])
-          .filter(d => typeof d.slug === 'string' && (d.reason ?? '').trim())
-          .map(d => ({
-            id:          cryptoRandomId(),
-            title:       d.from_label ?? formatSlugAsTitle(d.slug as string),
-            merged_from: [d.from_label ?? formatSlugAsTitle(d.slug as string)],
-            merged_to:   d.merged_to ?? '(consolidated across the new site)',
-            rationale:   d.reason ?? '',
-          }))
+  // Content migrations: seed from pages_considered_dropped. On a
+  // watermark refresh, re-seed from the freshest pages_considered_dropped
+  // so a cowork re-run that changed which pages are dropping actually
+  // updates the "what changed / why" cards on the review. Otherwise
+  // keep existing (strategist-authored migrations survive).
+  const seededMigrations = (strategy?.pages_considered_dropped ?? [])
+    .filter(d => typeof d.slug === 'string' && (d.reason ?? '').trim())
+    .map(d => ({
+      id:          cryptoRandomId(),
+      title:       d.from_label ?? formatSlugAsTitle(d.slug as string),
+      merged_from: [d.from_label ?? formatSlugAsTitle(d.slug as string)],
+      merged_to:   d.merged_to ?? '(consolidated across the new site)',
+      rationale:   d.reason ?? '',
+    }))
+  const composedMigrations: ContentMigration[] = shouldResyncFromStrategy && seededMigrations.length > 0
+    ? seededMigrations
+    : (existing?.content_migrations && existing.content_migrations.length > 0
+        ? existing.content_migrations
+        : seededMigrations)
 
   // "Show your work" seeding for each page's what_changed /
   // why_change / strategic_alignment. Reads the structural signals we
@@ -985,16 +1022,17 @@ export function composeSitemapReview(args: {
   const composedNavStrategy = existing?.navigation_strategy
     ?? buildNavigationStrategy({ strategy, church: project.church_name })
 
-  // Nav-presentation snapshot. Copied from the cowork sitemap step
-  // output (site_strategy.nav_presentation) when present, or from the
-  // legacy stage_2.nav_presentation for older projects that ran the
-  // draft-sitemap prompt before the cowork switchover. The partner
-  // portal renders this via the shared NavPresentationPanel so the
-  // preview stays identical to the strategist's view.
+  // Nav-presentation snapshot — refreshes on watermark drift so a
+  // cowork sitemap re-run that emitted new visible_top_level items /
+  // megamenu panels flows into the partner view. Existing wins on
+  // stable loads.
   const legacyStage2 = (rs as { stage_2?: { nav_presentation?: unknown } })?.stage_2
-  const composedNavPresentation = existing?.nav_presentation
-    ?? (strategy as { nav_presentation?: SitemapReviewNavPresentation } | null)?.nav_presentation
+  const strategyNavPresentation =
+    (strategy as { nav_presentation?: SitemapReviewNavPresentation } | null)?.nav_presentation
     ?? (legacyStage2?.nav_presentation as SitemapReviewNavPresentation | undefined)
+  const composedNavPresentation = shouldResyncFromStrategy && strategyNavPresentation
+    ? strategyNavPresentation
+    : existing?.nav_presentation ?? strategyNavPresentation
 
   // Presentation layer. Preserves any cowork-authored content and
   // seeds Why cards from real strategy signals (church_vision,
@@ -1063,7 +1101,23 @@ export function composeSitemapReview(args: {
     content_migrations: composedMigrations,
     partner_notes:      existing?.partner_notes,
     edit_history:       existing?.edit_history ?? [],
+    // Watermark stamp — moves forward whenever this compose call
+    // used strategy as the authoritative source for auto-fields.
+    // Stays where it was on stable recomposes so subsequent loads
+    // stay in existing-wins mode until the sitemap step runs again.
+    last_synced_from_strategy_at: shouldResyncFromStrategy
+      ? (strategyGeneratedAt ?? existing?.last_synced_from_strategy_at)
+      : existing?.last_synced_from_strategy_at,
   }
+}
+
+/** Extract site_strategy._meta.generated_at defensively — strategy is
+ *  a loose blob, this key may be absent on legacy shapes. */
+function readStrategyGeneratedAt(strategy: SiteStrategyBlob | null): string | null {
+  if (!strategy || typeof strategy !== 'object') return null
+  const meta = (strategy as { _meta?: { generated_at?: unknown } })._meta
+  const at = meta?.generated_at
+  return typeof at === 'string' ? at : null
 }
 
 /** Compose the executive-summary paragraph from strategic_goals when

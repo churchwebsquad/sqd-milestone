@@ -176,6 +176,26 @@ export function SitemapReviewEditor({
               >Preview as partner</button>
             </div>
             {saving && <span className="text-[11px] text-wm-text-subtle">Saving…</span>}
+            <button
+              type="button"
+              disabled={saving || isApproved}
+              onClick={() => {
+                // Refresh from cowork sitemap step. Nulling the
+                // watermark on the loaded review makes composeSitemapReview
+                // treat the underlying site_strategy as authoritative on
+                // the next call — pages, nav_layout, migrations, and
+                // nav_presentation refresh from strategy while authored
+                // fields (posture_summary, goal, key_page_slugs, per-page
+                // purpose overrides, presentation.*, congregations,
+                // footer_info, intro, executive_summary, navigation_strategy)
+                // survive. Persisted immediately so the fresh review lands.
+                void persist({ ...review, last_synced_from_strategy_at: undefined }).then(() => load())
+              }}
+              className="text-[11.5px] font-semibold text-wm-text-muted hover:text-wm-accent-strong disabled:opacity-40"
+              title="Pull the latest sitemap from cowork step 6 into this review. Authored fields (posture summaries, per-page notes, presentation cards) are preserved."
+            >
+              ↻ Refresh from sitemap step
+            </button>
             {shareUrl && (
               <a
                 href={shareUrl}
