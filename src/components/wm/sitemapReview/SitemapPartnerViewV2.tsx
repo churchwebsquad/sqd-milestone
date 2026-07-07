@@ -294,19 +294,14 @@ export default function SitemapPartnerViewV2({
           )}
           <div className={`browser ${clickable('nav-primary')}`} {...clickBind('nav-primary', 'Primary navigation')}>
             {(() => {
-              // nav_presentation is a legitimate render source only
-              // when it has actual visible_top_level items. Older
-              // sitemap-step runs (pre-nav_presentation feature) leave
-              // a stub `{shell: 'megamenu'}` behind — that's not
-              // enough to render, so fall through to the header-based
-              // fallback which uses nav_layout.header. Woodcreek is
-              // the canonical example: shell-only stub + full
-              // 6-item nav_layout.header.
-              const np = review.nav_presentation
-              const hasPresentationContent = !!np && (np.visible_top_level?.length ?? 0) > 0
-              return hasPresentationContent
-                ? <PrimaryNavPreview np={np!} church={church} featured={pres?.featured_highlight} congregations={pres?.congregations} />
-                : <PrimaryNavFallback header={review.nav_layout.header ?? []} church={church} />
+              // hydrateNavPresentation combines the strategist's
+              // shell choice + any authored content with nav_layout.
+              // header as a derivation source, so picking a shell in
+              // the editor immediately drives the render. Filters
+              // home from every list — the logo is the homepage link.
+              const hydrated = hydrateNavPresentation(review.nav_presentation, review.nav_layout.header ?? [])
+              if (!hydrated) return null
+              return <PrimaryNavPreview np={hydrated} church={church} featured={pres?.featured_highlight} congregations={pres?.congregations} />
             })()}
           </div>
         </section>
@@ -786,7 +781,11 @@ function PrimaryNavPreview({
    *  Get Connected mega for multi-campus partners. */
   congregations?: NonNullable<SitemapReview['presentation']>['congregations']
 }) {
-  const vtl = np.visible_top_level ?? []
+  // Filter home defensively — hydrateNavPresentation removes it, but
+  // if this component is called with raw data elsewhere we want the
+  // same guarantee: the logo is the homepage link, so home never
+  // appears in the visible header.
+  const vtl = (np.visible_top_level ?? []).filter(i => !isHomeNavItem(i))
   const items    = vtl.filter(i => i.kind !== 'button' && i.kind !== 'hamburger')
   const buttons  = vtl.filter(i => i.kind === 'button')
   const hasBurger = vtl.some(i => i.kind === 'hamburger')
@@ -1026,6 +1025,99 @@ function shell(np: SitemapReviewNavPresentation): SitemapReviewNavPresentation['
   return np.shell ?? (np.megamenu_panels && np.megamenu_panels.length > 0 ? 'megamenu' : np.standard_dropdowns ? 'standard_dropdowns' : np.offcanvas_overlay ? 'offcanvas' : undefined)
 }
 
+/** True for nav items that represent the homepage. The logo is
+ *  always the homepage link, so home should never appear in the
+ *  visible nav — filter it out at every render site. */
+function isHomeNavItem(item: { label?: string; slug?: string; group_label?: string } | NavItem): boolean {
+  const label = ('label' in item ? item.label : undefined) ?? ('group_label' in item ? item.group_label : undefined) ?? ''
+  const slug  = 'slug' in item ? (item.slug ?? '') : ''
+  return label.trim().toLowerCase() === 'home' || slug.trim().toLowerCase() === 'home'
+}
+
+/** Hydrate nav_presentation with content derived from nav_layout.header
+ *  when the strategist has picked a shell but not authored the
+ *  visible_top_level / panels / overlay. This is what makes the
+ *  editor's shell selector actually control the partner render —
+ *  Woodcreek picks "megamenu" and the render uses that shell with
+ *  Woodcreek's 6-item header, even though visible_top_level is empty.
+ *
+ *  Filters home from every derived list (the logo is the homepage
+ *  link, so home is never in the nav). Returns null when there is no
+ *  usable data at all, so the section can be omitted. */
+function hydrateNavPresentation(
+  np: SitemapReviewNavPresentation | undefined,
+  header: NavItem[],
+): SitemapReviewNavPresentation | null {
+  const nonHomeHeader = (header ?? []).filter(h => !isHomeNavItem(h))
+  const hasAuthoredContent =
+    !!np && (
+      (np.visible_top_level?.length ?? 0) > 0 ||
+      (np.megamenu_panels?.length ?? 0) > 0 ||
+      ((np.standard_dropdowns?.groups?.length ?? 0) > 0) ||
+      !!np.offcanvas_overlay
+    )
+  if (!hasAuthoredContent && nonHomeHeader.length === 0) return null
+
+  const shellChoice = np?.shell ?? shell(np ?? {}) ?? 'megamenu'
+
+  // visible_top_level — filter home from authored; derive from header
+  // when empty.
+  const authoredVtl = (np?.visible_top_level ?? []).filter(i => !isHomeNavItem(i))
+  const derivedVtl: NonNullable<SitemapReviewNavPresentation['visible_top_level']> = nonHomeHeader.map(h => ({
+    kind: h.children && h.children.length > 0 ? 'group' : 'link',
+    label: h.label ?? h.slug ?? '',
+    group_label: h.label ?? h.slug ?? '',
+  }))
+  const visible_top_level = authoredVtl.length > 0 ? authoredVtl : derivedVtl
+
+  // Per-shell content — derive from header when the strategist has
+  // not authored an explicit shape.
+  let megamenu_panels = np?.megamenu_panels
+  if (shellChoice === 'megamenu' && (!megamenu_panels || megamenu_panels.length === 0)) {
+    const parents = nonHomeHeader.filter(h => (h.children ?? []).length > 0)
+    megamenu_panels = parents.map(p => ({
+      triggered_by: p.label,
+      columns: [{
+        heading: p.label,
+        links: (p.children ?? []).filter(c => !isHomeNavItem(c)).map(c => ({ label: c.label ?? c.slug ?? '' })),
+      }],
+    }))
+  }
+
+  let standard_dropdowns = np?.standard_dropdowns
+  if (shellChoice === 'standard_dropdowns' && (!standard_dropdowns || (standard_dropdowns.groups ?? []).length === 0)) {
+    const parents = nonHomeHeader.filter(h => (h.children ?? []).length > 0)
+    standard_dropdowns = {
+      groups: parents.map(p => ({
+        group_label: p.label,
+        children: (p.children ?? []).filter(c => !isHomeNavItem(c)).map(c => ({ label: c.label ?? c.slug ?? '' })),
+      })),
+    }
+  }
+
+  let offcanvas_overlay = np?.offcanvas_overlay
+  if (shellChoice === 'offcanvas' && !offcanvas_overlay) {
+    offcanvas_overlay = {
+      sections: [{
+        section_label: 'All pages',
+        links: nonHomeHeader.flatMap(h => [
+          { label: h.label ?? h.slug ?? '' },
+          ...(h.children ?? []).filter(c => !isHomeNavItem(c)).map(c => ({ label: c.label ?? c.slug ?? '' })),
+        ]),
+      }],
+    }
+  }
+
+  return {
+    ...(np ?? {}),
+    shell: shellChoice,
+    visible_top_level,
+    megamenu_panels,
+    standard_dropdowns,
+    offcanvas_overlay,
+  }
+}
+
 /** Offcanvas slide-out preview. Modeled on the Logoipsum reference
  *  Ashley provided: cream background, brand mark + close X header,
  *  primary links as a large left-aligned column, horizontal rule,
@@ -1034,25 +1126,27 @@ function shell(np: SitemapReviewNavPresentation): SitemapReviewNavPresentation['
  *  Purple), not the artifact's neutral colors. */
 function OffcanvasPreview({ np, church }: { np: SitemapReviewNavPresentation; church: string }) {
   const overlay = np.offcanvas_overlay
-  const vtl = np.visible_top_level ?? []
+  const vtl = (np.visible_top_level ?? []).filter(i => !isHomeNavItem(i))
   const buttonItems = vtl.filter(i => i.kind === 'button').slice(0, 2)
   // Primary large links come from visible_top_level's non-button
   // items. Falls back to the first offcanvas section's links when
-  // vtl is empty.
+  // vtl is empty. Home is filtered — the logo is the homepage link.
   const primaryFromVtl = vtl
     .filter(i => i.kind !== 'button' && i.kind !== 'hamburger')
     .map(i => i.label ?? i.group_label)
-    .filter((l): l is string => !!l && l.trim().length > 0)
+    .filter((l): l is string => !!l && l.trim().length > 0 && l.trim().toLowerCase() !== 'home')
   const sections = overlay?.sections ?? []
   const primaryLinks: string[] = primaryFromVtl.length > 0
     ? primaryFromVtl
-    : (sections[0]?.links ?? []).map(l => l.label).filter((l): l is string => !!l)
+    : (sections[0]?.links ?? [])
+        .map(l => l.label)
+        .filter((l): l is string => !!l && l.trim().toLowerCase() !== 'home')
   // "Other pages" comes from the remaining sections (or from all
   // sections when we took vtl for primary).
   const otherSections = primaryFromVtl.length > 0 ? sections : sections.slice(1)
   const otherLinks: string[] = otherSections
     .flatMap(s => (s.links ?? []).map(l => l.label ?? ''))
-    .filter(l => l.trim().length > 0)
+    .filter(l => l.trim().length > 0 && l.trim().toLowerCase() !== 'home')
   const otherLabel = otherSections[0]?.section_label ?? 'Other pages'
   return (
     <div style={{
@@ -1139,46 +1233,10 @@ function OffcanvasPreview({ np, church }: { np: SitemapReviewNavPresentation; ch
   )
 }
 
-/** Fallback preview when nav_presentation is absent. Renders a
- *  minimal browser topnav from nav_layout.header so partners still
- *  see something recognizable when the strategist has not authored
- *  a full nav_presentation. */
-function PrimaryNavFallback({ header, church }: { header: NavItem[]; church: string }) {
-  return (
-    <>
-      <nav className="topnav">
-        <div className="brand-mark"><span className="glyph">◆</span> {church}</div>
-        <div className="items">
-          {header.slice(0, 6).map((it, i) => (
-            <span key={i} className={it.children && it.children.length > 0 ? 'mega' : ''}>
-              {it.label}
-              {it.children && it.children.length > 0 && <span className="caret">▾</span>}
-            </span>
-          ))}
-        </div>
-        <span className="spacer" />
-        <span className="btn accent">Visit</span>
-      </nav>
-      {header.some(it => it.children && it.children.length > 0) && (
-        <div className="mega-panel">
-          {header.filter(it => it.children && it.children.length > 0).slice(0, 2).map((parent, pi) => (
-            <div key={pi} style={{ marginBottom: pi === 0 ? 20 : 0 }}>
-              <div className="mega-label">{parent.label}</div>
-              <div className="mega-grid">
-                {(parent.children ?? []).slice(0, 6).map((c, ci) => (
-                  <div key={ci} className="mega-item">
-                    <span className="ph sq">■</span>
-                    <div><h4>{c.label}</h4></div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </>
-  )
-}
+// PrimaryNavFallback removed. hydrateNavPresentation now derives a
+// full nav_presentation from nav_layout.header when the strategist
+// picked a shell but did not author explicit content, so the single
+// PrimaryNavPreview path covers every case.
 
 // ── Helpers ────────────────────────────────────────────────────────
 
