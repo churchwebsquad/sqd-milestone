@@ -304,7 +304,13 @@ export default function SitemapPartnerViewV2({
               // header as a derivation source, so picking a shell in
               // the editor immediately drives the render. Filters
               // home from every list — the logo is the homepage link.
-              const hydrated = hydrateNavPresentation(review.nav_presentation, review.nav_layout.header ?? [])
+              // cta_only feeds the derived button items so Give /
+              // Plan a Visit surface in the topnav's CTA row.
+              const hydrated = hydrateNavPresentation(
+                review.nav_presentation,
+                review.nav_layout.header ?? [],
+                review.nav_layout.cta_only ?? [],
+              )
               if (!hydrated) return null
               return <PrimaryNavPreview np={hydrated} church={church} featured={pres?.featured_highlight} congregations={pres?.congregations} />
             })()}
@@ -1093,8 +1099,10 @@ function isHomeNavItem(item: { label?: string; slug?: string; group_label?: stri
 function hydrateNavPresentation(
   np: SitemapReviewNavPresentation | undefined,
   header: NavItem[],
+  ctaOnly?: NavItem[],
 ): SitemapReviewNavPresentation | null {
   const nonHomeHeader = (header ?? []).filter(h => !isHomeNavItem(h))
+  const nonHomeCtaOnly = (ctaOnly ?? []).filter(h => !isHomeNavItem(h))
   const hasAuthoredContent =
     !!np && (
       (np.visible_top_level?.length ?? 0) > 0 ||
@@ -1102,19 +1110,38 @@ function hydrateNavPresentation(
       ((np.standard_dropdowns?.groups?.length ?? 0) > 0) ||
       !!np.offcanvas_overlay
     )
-  if (!hasAuthoredContent && nonHomeHeader.length === 0) return null
+  if (!hasAuthoredContent && nonHomeHeader.length === 0 && nonHomeCtaOnly.length === 0) return null
 
   const shellChoice = np?.shell ?? shell(np ?? {}) ?? 'megamenu'
 
   // visible_top_level — filter home from authored; derive from header
-  // when empty.
+  // when empty. Also ALWAYS append button items derived from
+  // nav_layout.cta_only when the strategist hasn't authored button
+  // items themselves. This is what surfaces "Give" / "Plan a Visit"
+  // as pill buttons in the topnav row — cta_only comes from
+  // site_strategy.nav.cta_only which the sitemap step emits, and
+  // without this pass the visible_top_level list never gets any
+  // button-kind entries.
   const authoredVtl = (np?.visible_top_level ?? []).filter(i => !isHomeNavItem(i))
+  const authoredHasButton = authoredVtl.some(i => i.kind === 'button')
   const derivedVtl: NonNullable<SitemapReviewNavPresentation['visible_top_level']> = nonHomeHeader.map(h => ({
-    kind: h.children && h.children.length > 0 ? 'group' : 'link',
+    kind: h.children && h.children.length > 0 ? 'group' : 'page',
     label: h.label ?? h.slug ?? '',
     group_label: h.label ?? h.slug ?? '',
+    ...(h.slug ? { slug: h.slug } : {}),
   }))
-  const visible_top_level = authoredVtl.length > 0 ? authoredVtl : derivedVtl
+  const derivedCtaButtons: NonNullable<SitemapReviewNavPresentation['visible_top_level']> = nonHomeCtaOnly.map(c => ({
+    kind: 'button',
+    label: c.label ?? c.slug ?? '',
+    ...(c.slug ? { slug: c.slug } : {}),
+  }))
+  const baseVtl = authoredVtl.length > 0 ? authoredVtl : derivedVtl
+  // If the authored list already has button items, respect them
+  // fully. Only append derived CTA buttons when the authored list
+  // has none.
+  const visible_top_level = authoredHasButton
+    ? baseVtl
+    : [...baseVtl, ...derivedCtaButtons]
 
   // Per-shell content — derive from header when the strategist has
   // not authored an explicit shape.

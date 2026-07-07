@@ -198,6 +198,15 @@ export interface FooterSection {
 
 export interface NavLayout {
   header: NavItem[]
+  /** CTA-only items — slugs the strategist wants rendered as buttons
+   *  on the primary nav row (Give, Plan a Visit) rather than as
+   *  regular text links inside the header dropdown structure. Sourced
+   *  from site_strategy.nav.cta_only at compose time. Downstream nav
+   *  previews render these as `kind: 'button'` entries in
+   *  visible_top_level; the topnav then displays them as pill buttons
+   *  at the far-right of the primary row (or, in the offcanvas shell,
+   *  at the bottom of the slide-out panel). */
+  cta_only?: NavItem[]
   /** Secondary navigation region. Sits between primary (header) and
    *  footer conceptually: items that are important but shouldn't
    *  compete with the primary nav's guest-focused CTAs. Common
@@ -996,7 +1005,7 @@ export function composeSitemapReview(args: {
   // strategy isn't fresher, keep the existing nav (protects strategist-
   // authored overrides across recompose).
   const rebuiltNavFromStrategy = buildNavLayoutFromStrategy(strategy, composedPages)
-  const composedNav: NavLayout = shouldResyncFromStrategy && rebuiltNavFromStrategy
+  const composedNavPre: NavLayout = shouldResyncFromStrategy && rebuiltNavFromStrategy
     ? rebuiltNavFromStrategy
     : existing?.nav_layout ?? rebuiltNavFromStrategy ?? {
         header: (project.nav_group_definitions ?? [])
@@ -1004,6 +1013,15 @@ export function composeSitemapReview(args: {
           .map(g => ({ label: g.label })),
         footer_sections: [],
       }
+  // Backfill cta_only from strategy on stable loads when the review
+  // predates the field. Never overwrites an already-populated
+  // cta_only (strategist edits win). Small enough that it's worth
+  // doing outside the full watermark refresh so partner previews
+  // pick up CTAs on next load without forcing a manual refresh.
+  const composedNav: NavLayout = (composedNavPre.cta_only?.length ?? 0) === 0
+    && (rebuiltNavFromStrategy?.cta_only?.length ?? 0) > 0
+      ? { ...composedNavPre, cta_only: rebuiltNavFromStrategy!.cta_only }
+      : composedNavPre
 
   // Content migrations: seed from pages_considered_dropped. On a
   // watermark refresh, re-seed from the freshest pages_considered_dropped
@@ -1525,11 +1543,13 @@ function buildNavLayoutFromStrategy(
     : secondaryFromFallback
 
   const footerItems: NavItem[] = asArr(nav.footer).map(item => toNavItem(item, false)).filter(it => it.label)
+  const ctaOnlyItems: NavItem[] = asArr(nav.cta_only).map(item => toNavItem(item, false)).filter(it => it.label)
 
   return {
     header:           primaryItems,
     ...(secondaryItems.length > 0 ? { secondary: secondaryItems } : {}),
     ...(nav.secondary_label ? { secondary_label: nav.secondary_label } : {}),
+    ...(ctaOnlyItems.length > 0 ? { cta_only: ctaOnlyItems } : {}),
     footer_sections:  footerItems.length > 0
       ? [{ label: 'Footer', items: footerItems }]
       : [],
