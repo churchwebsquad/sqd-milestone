@@ -1647,8 +1647,16 @@ function InspirationImageEditor({
           </div>
         </div>
       ) : (
-        <label className="inline-flex items-center gap-2 rounded-full border border-dashed border-wm-border bg-white px-3 py-1.5 text-[12px] font-semibold text-wm-text-muted hover:border-wm-accent hover:text-wm-accent-strong cursor-pointer">
-          {uploading ? 'Uploading…' : '+ Upload inspiration image'}
+        <label
+          className="flex flex-col items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-wm-border bg-white px-6 py-8 text-center hover:border-wm-accent hover:bg-wm-accent-tint/20 cursor-pointer transition-colors"
+        >
+          <span className="text-[22px] leading-none text-wm-text-subtle">↑</span>
+          <span className="text-[13px] font-semibold text-wm-text">
+            {uploading ? 'Uploading…' : 'Upload an inspiration image'}
+          </span>
+          <span className="text-[11px] text-wm-text-muted">
+            Optional. JPG, PNG, WebP, or GIF. Up to 10 MB. Renders below the Full Page List on the partner review.
+          </span>
           <input
             type="file"
             accept="image/jpeg,image/png,image/webp,image/gif"
