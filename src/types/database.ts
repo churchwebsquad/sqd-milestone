@@ -1672,6 +1672,21 @@ export interface WebPage {
    *  designer gets the same punch-list view the dev gets. */
   designer_notes: string | null
 
+  // ── Per-page workflow status ladders — surfaced on the Pages
+  //    workspace spreadsheet. Each ladder is a typed text column
+  //    with a CHECK constraint enforcing the enum; adding a value
+  //    later is a single ALTER on the check constraint. content_status
+  //    above drives the content authoring ladder; SEO status lives on
+  //    seo.status inside the existing seo jsonb.
+  /** Dev build workflow: not_started → in_progress → review → approved. */
+  dev_status:         'not_started' | 'in_progress' | 'review' | 'approved'
+  /** Image asset lifecycle: not_started → needed → ready_to_add → added. */
+  images_status:      'not_started' | 'needed' | 'ready_to_add' | 'added'
+  /** Designer pre-launch QA gate: not_started | complete | needs_edits. */
+  designer_qa_status: 'not_started' | 'complete' | 'needs_edits'
+  /** Dev pre-launch final check gate: not_started | needs_edits | complete. */
+  dev_final_status:   'not_started' | 'needs_edits' | 'complete'
+
   // ── Navigation grouping (v111) ──
   /** Optional group name for the Pages workspace nav grouping
    *  ("About", "Ministries", etc). NULL = ungrouped. Seeded from

@@ -89,7 +89,7 @@ import { loadProjectReviewState, type ProjectReviewState } from '../../../lib/we
 import type { SnippetMap } from '../../../lib/webBrixiesRender'
 import { ApprovedSitemapBanner } from '../sitemapReview/ApprovedSitemapBanner'
 import type {
-  StrategyWebProject, WebPage, WebSection, WebContentTemplate,
+  StrategyWebProject, WebPage, WebPageContentStatus, WebSection, WebContentTemplate,
   WebTemplateKind, FieldProvenanceMap,
 } from '../../../types/database'
 
@@ -348,8 +348,10 @@ export function PagesWorkspace({ project, onChange }: Props) {
               onArchived={() => { clearActivePageSelection(); void loadPages() }}
             />
           ) : (
-            <EmptyEditor
-              pageCount={pages.length}
+            <PagesOverview
+              pages={pages}
+              onSelect={selectPage}
+              onPagesChanged={loadPages}
               onImport={() => setImportOpen(true)}
               onAddPage={() => setAddPageInPhase('1')}
             />
@@ -988,6 +990,216 @@ function EmptyEditor({
             Add a page
           </WMButton>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// PagesOverview. Spreadsheet-style parent list rendered in the main
+// pane when no page is active. One row per page with editable inline
+// status pills for every workflow ladder. Clicking a page name calls
+// onSelect(id), which sets the ?page= URL param — same code path the
+// left-side tree list uses, so the individual page editor opens
+// exactly as it always did.
+// ─────────────────────────────────────────────────────────────────
+
+type StatusTone = 'muted' | 'progress' | 'review' | 'partner' | 'approved' | 'warn' | 'accent'
+interface StatusOption<V extends string> { value: V; label: string; tone: StatusTone }
+
+const TONE_STYLES: Record<StatusTone, string> = {
+  muted:    'bg-wm-bg-elevated text-wm-text-subtle border-wm-border',
+  progress: 'bg-blue-50 text-blue-800 border-blue-200',
+  review:   'bg-amber-50 text-amber-800 border-amber-200',
+  partner:  'bg-purple-50 text-purple-800 border-purple-200',
+  approved: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  warn:     'bg-red-50 text-red-800 border-red-200',
+  accent:   'bg-wm-accent-tint text-wm-accent-strong border-wm-accent/40',
+}
+
+const CONTENT_OPTIONS: StatusOption<WebPageContentStatus>[] = [
+  { value: 'draft',            label: 'Drafting',        tone: 'progress' },
+  { value: 'internal_review',  label: 'Internal review', tone: 'review' },
+  { value: 'partner_review',   label: 'Partner review',  tone: 'partner' },
+  { value: 'partner_approved', label: 'Approved',        tone: 'approved' },
+  { value: 'archived',         label: 'Archived',        tone: 'muted' },
+]
+const SEO_OPTIONS: StatusOption<'not_started' | 'written' | 'added_to_rankmath'>[] = [
+  { value: 'not_started',       label: 'Not started',       tone: 'muted' },
+  { value: 'written',           label: 'Written',           tone: 'accent' },
+  { value: 'added_to_rankmath', label: 'Added to RankMath', tone: 'approved' },
+]
+const DEV_OPTIONS: StatusOption<WebPage['dev_status']>[] = [
+  { value: 'not_started', label: 'Not started', tone: 'muted' },
+  { value: 'in_progress', label: 'In progress', tone: 'progress' },
+  { value: 'review',      label: 'Review',      tone: 'review' },
+  { value: 'approved',    label: 'Approved',    tone: 'approved' },
+]
+const IMAGES_OPTIONS: StatusOption<WebPage['images_status']>[] = [
+  { value: 'not_started',  label: 'Not started',  tone: 'muted' },
+  { value: 'needed',       label: 'Needed',       tone: 'warn' },
+  { value: 'ready_to_add', label: 'Ready to add', tone: 'accent' },
+  { value: 'added',        label: 'Added',        tone: 'approved' },
+]
+const DESIGNER_QA_OPTIONS: StatusOption<WebPage['designer_qa_status']>[] = [
+  { value: 'not_started', label: 'Not started', tone: 'muted' },
+  { value: 'complete',    label: 'Complete',    tone: 'approved' },
+  { value: 'needs_edits', label: 'Needs edits', tone: 'warn' },
+]
+const DEV_FINAL_OPTIONS: StatusOption<WebPage['dev_final_status']>[] = [
+  { value: 'not_started', label: 'Not started', tone: 'muted' },
+  { value: 'needs_edits', label: 'Needs edits', tone: 'warn' },
+  { value: 'complete',    label: 'Complete',    tone: 'approved' },
+]
+
+/** Editable status pill. Native <select> overlaid on a styled pill
+ *  so the tone (color + border) reflects the currently-selected
+ *  value while the OS-native chooser stays accessible. */
+function StatusPill<V extends string>({
+  value, options, onChange,
+}: {
+  value:    V
+  options:  StatusOption<V>[]
+  onChange: (next: V) => void | Promise<void>
+}) {
+  const current = options.find(o => o.value === value) ?? options[0]
+  const tone = current?.tone ?? 'muted'
+  const label = current?.label ?? String(value)
+  return (
+    <span className={`relative inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${TONE_STYLES[tone]}`}>
+      {label}
+      <ChevronDown size={11} className="opacity-60" />
+      <select
+        value={value}
+        onChange={e => void onChange(e.target.value as V)}
+        aria-label="Status"
+        className="absolute inset-0 opacity-0 cursor-pointer"
+      >
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </span>
+  )
+}
+
+function PagesOverview({
+  pages, onSelect, onPagesChanged, onImport, onAddPage,
+}: {
+  pages:          WebPage[]
+  onSelect:       (id: string) => void
+  onPagesChanged: () => Promise<void>
+  onImport:       () => void
+  onAddPage:      () => void
+}) {
+  if (pages.length === 0) {
+    return <EmptyEditor pageCount={0} onImport={onImport} onAddPage={onAddPage} />
+  }
+
+  const updateField = async (id: string, field: keyof WebPage, value: unknown) => {
+    const { error } = await supabase.from('web_pages').update({ [field]: value }).eq('id', id)
+    if (error) { console.error('[PagesOverview] update failed', field, error); return }
+    await onPagesChanged()
+  }
+  const updateSeoStatus = async (id: string, value: string) => {
+    const page = pages.find(p => p.id === id)
+    const nextSeo = { ...((page?.seo as Record<string, unknown>) ?? {}), status: value }
+    const { error } = await supabase.from('web_pages').update({ seo: nextSeo }).eq('id', id)
+    if (error) { console.error('[PagesOverview] seo update failed', error); return }
+    await onPagesChanged()
+  }
+
+  return (
+    <div className="p-6">
+      <div className="mb-4 flex items-baseline justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-[16px] font-semibold text-wm-text">Pages overview</h2>
+          <p className="text-[12px] text-wm-text-muted mt-0.5">
+            {pages.length} page{pages.length === 1 ? '' : 's'}. Click a page name to open its layout; click any status pill to change it.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <WMButton variant="secondary" size="sm" iconLeft={<Upload size={11} />} onClick={onImport}>
+            Import
+          </WMButton>
+          <WMButton variant="primary" size="sm" iconLeft={<Plus size={11} />} onClick={onAddPage}>
+            Add page
+          </WMButton>
+        </div>
+      </div>
+      <div className="overflow-x-auto border border-wm-border rounded-lg bg-white">
+        <table className="w-full text-[12px] border-collapse">
+          <thead className="bg-wm-bg-elevated/60">
+            <tr className="text-left">
+              {['Page', 'Slug', 'Content', 'SEO', 'Dev', 'Images', 'Designer QA', 'Dev final'].map(h => (
+                <th key={h} className="px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-wm-text-subtle whitespace-nowrap border-b border-wm-border">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {pages.map(page => {
+              const seoStatus = (((page.seo as Record<string, unknown>) ?? {}).status as string | undefined) ?? 'not_started'
+              return (
+                <tr key={page.id} className="border-b border-wm-border/60 hover:bg-wm-bg-elevated/30 transition-colors">
+                  <td className="px-3 py-2 align-middle">
+                    <button
+                      type="button"
+                      onClick={() => onSelect(page.id)}
+                      className="text-left text-[13px] font-semibold text-wm-text hover:text-wm-accent-strong hover:underline"
+                    >
+                      {page.name}
+                    </button>
+                  </td>
+                  <td className="px-3 py-2 align-middle">
+                    <code className="text-[11px] font-mono text-wm-text-subtle">/{page.slug}</code>
+                  </td>
+                  <td className="px-3 py-2 align-middle">
+                    <StatusPill
+                      value={(page.content_status ?? 'draft') as WebPageContentStatus}
+                      options={CONTENT_OPTIONS}
+                      onChange={v => updateField(page.id, 'content_status', v)}
+                    />
+                  </td>
+                  <td className="px-3 py-2 align-middle">
+                    <StatusPill
+                      value={seoStatus as (typeof SEO_OPTIONS)[number]['value']}
+                      options={SEO_OPTIONS}
+                      onChange={v => updateSeoStatus(page.id, v)}
+                    />
+                  </td>
+                  <td className="px-3 py-2 align-middle">
+                    <StatusPill
+                      value={page.dev_status ?? 'not_started'}
+                      options={DEV_OPTIONS}
+                      onChange={v => updateField(page.id, 'dev_status', v)}
+                    />
+                  </td>
+                  <td className="px-3 py-2 align-middle">
+                    <StatusPill
+                      value={page.images_status ?? 'not_started'}
+                      options={IMAGES_OPTIONS}
+                      onChange={v => updateField(page.id, 'images_status', v)}
+                    />
+                  </td>
+                  <td className="px-3 py-2 align-middle">
+                    <StatusPill
+                      value={page.designer_qa_status ?? 'not_started'}
+                      options={DESIGNER_QA_OPTIONS}
+                      onChange={v => updateField(page.id, 'designer_qa_status', v)}
+                    />
+                  </td>
+                  <td className="px-3 py-2 align-middle">
+                    <StatusPill
+                      value={page.dev_final_status ?? 'not_started'}
+                      options={DEV_FINAL_OPTIONS}
+                      onChange={v => updateField(page.id, 'dev_final_status', v)}
+                    />
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   )
