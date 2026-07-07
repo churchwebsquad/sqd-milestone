@@ -817,9 +817,24 @@ function PrimaryNavPreview({
           ))}
         </div>
         <span className="spacer" />
-        {buttons.map((it, i) => (
-          <span key={i} className={i === 0 ? 'btn accent' : 'btn ghost'}>{it.label}</span>
-        ))}
+        {/* Header CTAs — the button-kind items from visible_top_level.
+         *  On standard_dropdowns and megamenu they sit side-by-side at
+         *  the far right of the primary nav row (before the burger).
+         *  On offcanvas we hide them here so they only render inside
+         *  the offcanvas panel at the bottom (see OffcanvasPreview).
+         */}
+        {!isOffcanvas && buttons.length > 0 && (
+          <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+            {buttons.map((it, i) => (
+              <span
+                key={i}
+                className={i === buttons.length - 1 ? 'btn accent' : 'btn ghost'}
+              >
+                {it.label}
+              </span>
+            ))}
+          </span>
+        )}
         {showBurger && <span style={{ fontSize: 20, color: '#341756', marginLeft: 8 }}>☰</span>}
       </nav>
 
@@ -961,19 +976,36 @@ function PrimaryNavPreview({
       })}
 
       {shell(np) === 'standard_dropdowns' && (np.standard_dropdowns?.groups ?? []).length > 0 && (
-        /* Standard dropdowns render — mirrors the persistent-nav
-         *  layout (chip on left + horizontal children on right) but
-         *  in light Squad colors, not the dark plum congregation
-         *  treatment. Each group is one row. */
-        <div style={{ padding: '14px 22px 22px', display: 'flex', flexDirection: 'column', gap: 10, background: '#fff' }}>
+        /* Standard dropdowns render — each group is its own column,
+         *  columns arranged side-by-side across the panel. Reads like
+         *  a mega-menu light: uppercase group header, then a vertical
+         *  stack of children beneath. Light Squad palette (not the
+         *  dark plum congregation-nav treatment). */
+        <div
+          style={{
+            padding: '18px 22px 22px',
+            background: '#fff',
+            display: 'grid',
+            gridTemplateColumns: `repeat(auto-fit, minmax(180px, 1fr))`,
+            gap: 32,
+          }}
+        >
           {np.standard_dropdowns!.groups!.map((g, gi) => (
-            <div key={gi} style={{ background: '#F9F5F1', color: '#341756', borderRadius: 12, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap', border: '1px solid #E2DDD4' }}>
-              <div style={{ background: '#fff', color: '#341756', borderRadius: 999, padding: '9px 16px', fontSize: 12, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', border: '1px solid #CFC9F8' }}>
+            <div key={gi} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: '.14em',
+                textTransform: 'uppercase',
+                color: '#513DE5',
+              }}>
                 {g.group_label ?? '…'}
               </div>
-              <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', marginLeft: 'auto', fontSize: 13.5, fontWeight: 620, color: '#341756', alignItems: 'center' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {(g.children ?? []).map((c, ci) => (
-                  <span key={ci}>{c.label}</span>
+                  <span key={ci} style={{ fontSize: 14, fontWeight: 620, color: '#341756', lineHeight: 1.3 }}>
+                    {c.label}
+                  </span>
                 ))}
               </div>
             </div>
