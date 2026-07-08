@@ -1681,7 +1681,49 @@ const CMS_TYPES: CmsType[] = [
     topicKeys: ['locations_multi'], bucketKeys: ['campuses'],
     uploadKind: 'campuses_csv',
     uploadHelp: "Upload a CSV or Word doc of your campuses (name, address, service times, campus pastor) — we'll use it to build the locations page." },
+  // "Other" — sentinel row for partner-added CMS types. When checked,
+  // the follow-up sub-form lets the partner add N custom labels; each
+  // label persists as `other:<label>` alongside predefined values in
+  // the same cms_managed_types array. No migration needed.
+  { value: 'other',          label: 'Other',
+    topicKeys: [], bucketKeys: [],
+    uploadKind: null },
 ]
+
+// Sentinel prefix on cms_managed_types for partner-added "Other" entries.
+const OTHER_PREFIX = 'other:'
+
+/** Parse the cms_managed_types array into its three components:
+ *   - predefined:  values that match a CMS_TYPES entry other than 'other'
+ *   - otherLabels: labels of partner-added custom entries (with prefix stripped)
+ *   - hasOtherToggle: true when the 'other' checkbox should read as checked */
+function splitCmsManagedTypes(types: string[]): {
+  predefined: string[]
+  otherLabels: string[]
+  hasOtherToggle: boolean
+} {
+  const predefined: string[] = []
+  const otherLabels: string[] = []
+  let hasOtherLiteral = false
+  for (const v of types) {
+    if (v === 'other') { hasOtherLiteral = true; continue }
+    if (v.startsWith(OTHER_PREFIX)) {
+      otherLabels.push(v.slice(OTHER_PREFIX.length))
+      continue
+    }
+    predefined.push(v)
+  }
+  return { predefined, otherLabels, hasOtherToggle: hasOtherLiteral || otherLabels.length > 0 }
+}
+
+/** Merge predefined + otherLabels back into the flat cms_managed_types
+ *  array. When any labels are present, the 'other' literal is included
+ *  (harmless redundancy, keeps the checkbox visibly on if labels are
+ *  edited before saving). */
+function joinCmsManagedTypes(predefined: string[], otherLabels: string[]): string[] {
+  if (otherLabels.length === 0) return predefined
+  return [...predefined, 'other', ...otherLabels.map(l => `${OTHER_PREFIX}${l}`)]
+}
 
 /** True if the crawl found content for this CMS type — used both for
  *  the auto-precheck logic and to suppress the CSV upload affordance. */
@@ -1732,54 +1774,167 @@ function CmsManagedTypesSection({
       <p className="text-deep-plum text-sm font-semibold mt-3 mb-3">
         Select any content types below that you’d like your team to manage on an ongoing basis.
       </p>
-      <PartnerCheckboxGroup
-        value={session.cms_managed_types ?? []}
-        onChange={(next) => void saveField('cms_managed_types', next)}
-        options={CMS_TYPES.map(t => {
-          const hasContent = cmsTypeHasContent(t, topicsByKey)
-          // CSV upload reveals when the box is checked AND no crawl
-          // content / partner additions exist for this type. The
-          // 'blog' option has its own sub-form instead of a CSV.
-          const showUpload = t.uploadKind && !hasContent
-          return {
-            value: t.value,
-            label: t.label,
-            meta:  hasContent
-              ? (
-                <span className="text-[10px] uppercase tracking-wider font-bold text-primary-purple">
-                  Found on site
-                </span>
-              )
-              : null,
-            followUp: t.value === 'blog'
-              ? (
-                <BlogHandlingSubform
-                  session={session}
-                  recap={recap}
-                  topicsByKey={topicsByKey}
-                  saveField={saveField}
-                />
-              )
-              : showUpload && t.uploadKind
-              ? (
-                <div className="p-3 bg-cream/40 border border-lavender/60 rounded-lg">
-                  <FileUploadField
-                    sessionId={session.id}
-                    kind={t.uploadKind}
-                    attachments={attachments.filter(a => a.kind === t.uploadKind) as unknown as AttachmentMetadata[]}
-                    onUploaded={(a) => onAttachmentChange(prev => [a as unknown as AttachmentRow, ...prev])}
-                    onDeleted={(id) => onAttachmentChange(prev => prev.filter(x => x.id !== id))}
-                    label={t.uploadHelp ? `Upload your ${t.label.toLowerCase()} file` : undefined}
-                    help={t.uploadHelp}
-                    compact
-                  />
-                </div>
-              )
-              : undefined,
+      {(() => {
+        // Split the flat array into predefined + custom-other slices,
+        // then compute what PartnerCheckboxGroup sees (predefined
+        // values + a synthetic 'other' when custom labels exist).
+        const raw = session.cms_managed_types ?? []
+        const { predefined, otherLabels, hasOtherToggle } = splitCmsManagedTypes(raw)
+        const displayValue = hasOtherToggle ? [...predefined, 'other'] : predefined
+
+        const handleTopLevelChange = (next: string[]) => {
+          const wantsOther = next.includes('other')
+          const nextPredefined = next.filter(v => v !== 'other')
+          if (wantsOther) {
+            // Toggle "Other" on: keep existing labels; seed one empty
+            // input if partner is enabling Other for the first time.
+            const labels = otherLabels.length > 0 ? otherLabels : ['']
+            void saveField('cms_managed_types', joinCmsManagedTypes(nextPredefined, labels))
+          } else {
+            // Toggle "Other" off: drop all other:* entries.
+            void saveField('cms_managed_types', nextPredefined)
           }
-        })}
-      />
+        }
+
+        const handleOtherLabelsChange = (nextLabels: string[]) => {
+          void saveField('cms_managed_types', joinCmsManagedTypes(predefined, nextLabels))
+        }
+
+        return (
+          <PartnerCheckboxGroup
+            value={displayValue}
+            onChange={handleTopLevelChange}
+            options={CMS_TYPES.map(t => {
+              const hasContent = cmsTypeHasContent(t, topicsByKey)
+              // CSV upload reveals when the box is checked AND no crawl
+              // content / partner additions exist for this type. The
+              // 'blog' option has its own sub-form instead of a CSV.
+              const showUpload = t.uploadKind && !hasContent
+              return {
+                value: t.value,
+                label: t.label,
+                meta:  hasContent
+                  ? (
+                    <span className="text-[10px] uppercase tracking-wider font-bold text-primary-purple">
+                      Found on site
+                    </span>
+                  )
+                  : null,
+                followUp: t.value === 'blog'
+                  ? (
+                    <BlogHandlingSubform
+                      session={session}
+                      recap={recap}
+                      topicsByKey={topicsByKey}
+                      saveField={saveField}
+                    />
+                  )
+                  : t.value === 'other'
+                  ? (
+                    <OtherLabelsSubform
+                      labels={otherLabels}
+                      onChange={handleOtherLabelsChange}
+                    />
+                  )
+                  : showUpload && t.uploadKind
+                  ? (
+                    <div className="p-3 bg-cream/40 border border-lavender/60 rounded-lg">
+                      <FileUploadField
+                        sessionId={session.id}
+                        kind={t.uploadKind}
+                        attachments={attachments.filter(a => a.kind === t.uploadKind) as unknown as AttachmentMetadata[]}
+                        onUploaded={(a) => onAttachmentChange(prev => [a as unknown as AttachmentRow, ...prev])}
+                        onDeleted={(id) => onAttachmentChange(prev => prev.filter(x => x.id !== id))}
+                        label={t.uploadHelp ? `Upload your ${t.label.toLowerCase()} file` : undefined}
+                        help={t.uploadHelp}
+                        compact
+                      />
+                    </div>
+                  )
+                  : undefined,
+              }
+            })}
+          />
+        )
+      })()}
     </section>
+  )
+}
+
+// ── "Other" partner-added CMS types sub-form ─────────────────────────
+//
+// Rendered under the "Other" checkbox in Keep-Your-Website-Easy-to-Update.
+// Lets the partner add N custom content types they want their team to
+// manage on an ongoing basis (e.g. "Parenting Resource Hub"). Each entry
+// gets its own input row. Labels persist as `other:<label>` in the flat
+// cms_managed_types array — see splitCmsManagedTypes / joinCmsManagedTypes.
+
+function OtherLabelsSubform({
+  labels, onChange,
+}: {
+  labels:   string[]
+  onChange: (next: string[]) => void
+}) {
+  // Local editing state, committed to the parent on blur so we don't
+  // hammer the DB on every keystroke. Reseeds from `labels` when the
+  // parent shape changes (e.g., partner adds/removes a row).
+  const [draft, setDraft] = useState<string[]>(labels.length > 0 ? labels : [''])
+  useEffect(() => {
+    setDraft(labels.length > 0 ? labels : [''])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [labels.join('|')])
+
+  // Commit trims empty rows OUT of what we save (we don't want a
+  // trailing empty entry to persist), but the last row stays visible
+  // for further edits.
+  const commit = (next: string[]) => {
+    const trimmed = next.map(l => l.trim()).filter(l => l.length > 0)
+    onChange(trimmed)
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[12px] text-purple-gray leading-snug">
+        Add any custom content types you'd like your team to manage. Each one gets its own row.
+      </p>
+      <ul className="space-y-2">
+        {draft.map((label, i) => (
+          <li key={i} className="flex items-center gap-2">
+            <input
+              type="text"
+              value={label}
+              placeholder="ie. Parenting Resource Hub"
+              onChange={e => {
+                const next = draft.slice()
+                next[i] = e.target.value
+                setDraft(next)
+              }}
+              onBlur={() => commit(draft)}
+              className="flex-1 text-[13px] text-deep-plum bg-white border border-lavender rounded-lg px-3 py-2 focus:outline-none focus:border-primary-purple placeholder:text-purple-gray/70"
+            />
+            {draft.length > 1 && (
+              <button
+                type="button"
+                onClick={() => {
+                  const next = draft.filter((_, idx) => idx !== i)
+                  setDraft(next.length > 0 ? next : [''])
+                  commit(next)
+                }}
+                className="shrink-0 text-purple-gray hover:text-red-600 text-[16px] leading-none px-2 py-1"
+                aria-label={`Remove ${label || 'this entry'}`}
+              >×</button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        onClick={() => setDraft([...draft, ''])}
+        className="text-[12px] font-semibold text-primary-purple hover:underline"
+      >
+        + Add another
+      </button>
+    </div>
   )
 }
 
