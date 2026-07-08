@@ -299,6 +299,47 @@ export default function SitemapPartnerViewV2({
             <p className="sec-note">{review.navigation_strategy}</p>
           )}
           <div className={`browser ${clickable('nav-primary')}`} {...clickBind('nav-primary', 'Primary navigation')}>
+            {pres?.announcement_banner?.text && (() => {
+              // Announcement strip rendered inside the browser mock,
+              // above the primary nav. Absent on most reviews; when
+              // authored it sits at the top of every page as a
+              // seasonal callout (summer camp registration, Christmas
+              // services, giving campaign, etc). Tone → color scheme.
+              const banner = pres.announcement_banner!
+              const tone = banner.tone ?? 'info'
+              const palette = tone === 'warning'
+                ? { bg: '#3a2b0a', text: '#F5B84D', accent: '#F5B84D' }
+                : tone === 'neutral'
+                ? { bg: '#2b273a', text: '#CFC9F8', accent: '#CFC9F8' }
+                : { bg: '#241547', text: '#CFC9F8', accent: '#FFC98A' }
+              return (
+                <div
+                  onClick={(e) => { e.stopPropagation(); if (!readOnly) openDrawer('announcement-banner', 'Announcement banner') }}
+                  style={{
+                    background:  palette.bg,
+                    color:       palette.text,
+                    fontSize:    12.5,
+                    fontWeight:  550,
+                    padding:     '9px 18px',
+                    display:     'flex',
+                    alignItems:  'center',
+                    justifyContent: 'center',
+                    gap:         10,
+                    borderTopLeftRadius:  12,
+                    borderTopRightRadius: 12,
+                    cursor:      readOnly ? 'default' : 'pointer',
+                  }}
+                >
+                  <span aria-hidden="true" style={{ color: palette.accent }}>⚠</span>
+                  <span>{banner.text}</span>
+                  {banner.cta_url && (
+                    <span style={{ color: palette.accent, fontWeight: 650 }}>
+                      {banner.cta_label ? `${banner.cta_label} →` : '→'}
+                    </span>
+                  )}
+                </div>
+              )
+            })()}
             {(() => {
               // hydrateNavPresentation combines the strategist's
               // shell choice + any authored content with nav_layout.
@@ -427,12 +468,22 @@ export default function SitemapPartnerViewV2({
           <div className="sec-head"><span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '04' : '03'}</span><h2>Footer</h2></div>
           <p className="sec-note">Every page ends here: contact info, everyday links, and a place to stay in touch.</p>
           <div className={`footer-preview ${clickable('footer')}`} {...clickBind('footer', 'Footer')} style={{ padding: '28px 26px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: [
-              '1.3fr',
-              (pres?.congregations && pres.congregations.length > 0) ? '1.1fr' : null,
-              '1fr',
-              review.footer_info?.newsletter_signup_url ? '1fr' : null,
-            ].filter(Boolean).join(' '), gap: 28 }}>
+            {(() => {
+              // Grid layout responds to the number of link columns:
+              // brand column (always), congregations (optional),
+              // one column per footer_link_group (if any), else the
+              // single "Explore" fallback, newsletter cta (optional).
+              const groupCount = (review.footer_info?.footer_link_groups ?? [])
+                .filter(g => (g.links ?? []).length > 0).length
+              const linksColumnCount = groupCount > 0 ? groupCount : 1
+              const columns = [
+                '1.3fr',
+                (pres?.congregations && pres.congregations.length > 0) ? '1.1fr' : null,
+                ...Array.from({ length: linksColumnCount }, () => '1fr'),
+                review.footer_info?.newsletter_signup_url ? '1fr' : null,
+              ].filter(Boolean).join(' ')
+              return (
+                <div style={{ display: 'grid', gridTemplateColumns: columns, gap: 28 }}>
               <div>
                 <div className="fbrand" style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                   <span style={{ width: 26, height: 26, background: '#fff', borderRadius: 6, display: 'grid', placeItems: 'center', color: '#341756', fontSize: 13 }}>◆</span>
@@ -470,16 +521,37 @@ export default function SitemapPartnerViewV2({
                 </div>
               )}
 
-              <div>
-                <div className="mega-label" style={{ color: '#B8B0D2', marginBottom: 12 }}>Explore</div>
-                <div style={{ fontSize: 12.5, color: '#EDE9FC', lineHeight: 2 }}>
-                  {(review.footer_info?.footer_page_links ?? []).length > 0 ? (
-                    (review.footer_info?.footer_page_links ?? []).map((l, i) => (<div key={i}>{l.label}</div>))
-                  ) : (
-                    <div style={{ opacity: 0.7, fontStyle: 'italic' }}>Add footer links in the Footer section of the Edit tab.</div>
-                  )}
-                </div>
-              </div>
+              {(() => {
+                // Footer link columns. Preferred authoring shape is
+                // `footer_link_groups` (headed columns). Falls back
+                // to the legacy `footer_page_links` flat list under a
+                // single "Explore" heading. Empty groups (no links)
+                // are skipped so partners never see a stub column.
+                const groups = (review.footer_info?.footer_link_groups ?? [])
+                  .filter(g => (g.links ?? []).length > 0)
+                if (groups.length > 0) {
+                  return groups.map(g => (
+                    <div key={g.id}>
+                      <div className="mega-label" style={{ color: '#B8B0D2', marginBottom: 12 }}>{g.heading}</div>
+                      <div style={{ fontSize: 12.5, color: '#EDE9FC', lineHeight: 2 }}>
+                        {g.links.map((l, i) => (<div key={i}>{l.label}</div>))}
+                      </div>
+                    </div>
+                  ))
+                }
+                return (
+                  <div>
+                    <div className="mega-label" style={{ color: '#B8B0D2', marginBottom: 12 }}>Explore</div>
+                    <div style={{ fontSize: 12.5, color: '#EDE9FC', lineHeight: 2 }}>
+                      {(review.footer_info?.footer_page_links ?? []).length > 0 ? (
+                        (review.footer_info?.footer_page_links ?? []).map((l, i) => (<div key={i}>{l.label}</div>))
+                      ) : (
+                        <div style={{ opacity: 0.7, fontStyle: 'italic' }}>Add footer links in the Footer section of the Edit tab.</div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
 
               {review.footer_info?.newsletter_signup_url && (
                 <div>
@@ -489,6 +561,8 @@ export default function SitemapPartnerViewV2({
                 </div>
               )}
             </div>
+              )
+            })()}
             <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', marginTop: 22, paddingTop: 14, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, fontSize: 11, color: '#B8B0D2' }}>
               <span>© {new Date().getFullYear()} {review.footer_info?.church_name ?? church}</span>
               <span>Privacy · Terms</span>

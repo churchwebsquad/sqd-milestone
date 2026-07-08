@@ -292,6 +292,10 @@ export function SitemapReviewEditor({
               <NavigationStrategyEditor review={review} onChange={persist} disabled={isApproved} />
               <NavPresentationEditor review={review} onChange={persist} disabled={isApproved} />
               <div className="mt-4">
+                <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Announcement banner (above nav)</p>
+                <AnnouncementBannerEditor review={review} onChange={persist} disabled={isApproved} />
+              </div>
+              <div className="mt-4">
                 <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Featured highlight tile</p>
                 <FeaturedHighlightEditor review={review} onChange={persist} disabled={isApproved} />
               </div>
@@ -651,7 +655,213 @@ function FooterInfoEditor({
           </button>
         )}
       </div>
+
+      <div className="mt-5 pt-3 border-t border-wm-border">
+        <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Footer link groups</p>
+        <p className="text-[10.5px] text-wm-text-subtle mb-2">Multi-column footer layout with headings (Visiting / Take a next step / Get to know us / etc). When any group has links, this replaces the single Explore column above.</p>
+        <ul className="space-y-3">
+          {(footer.footer_link_groups ?? []).map((group, gIdx) => {
+            const updateGroup = (patch: Partial<typeof group>) => {
+              const next = [...(footer.footer_link_groups ?? [])]
+              next[gIdx] = { ...group, ...patch }
+              update({ footer_link_groups: next })
+            }
+            return (
+              <li key={group.id} className="rounded-md border border-wm-border bg-wm-bg-elevated px-3 py-2.5">
+                <div className="flex items-center gap-2 mb-2">
+                  <input
+                    type="text"
+                    defaultValue={group.heading}
+                    placeholder="Column heading (e.g. Visiting)"
+                    disabled={disabled}
+                    onBlur={e => {
+                      if (e.target.value === group.heading) return
+                      updateGroup({ heading: e.target.value })
+                    }}
+                    className="flex-1 text-[12.5px] font-semibold text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+                  />
+                  {!disabled && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = (footer.footer_link_groups ?? []).filter((_, i) => i !== gIdx)
+                        update({ footer_link_groups: next })
+                      }}
+                      className="text-wm-text-subtle hover:text-wm-danger text-[11px] font-semibold px-1"
+                    >remove column</button>
+                  )}
+                </div>
+                <ul className="space-y-1">
+                  {(group.links ?? []).map((link, lIdx) => (
+                    <li key={lIdx} className="flex items-center gap-2 text-[12px]">
+                      <input
+                        type="text"
+                        defaultValue={link.label}
+                        placeholder="Label"
+                        disabled={disabled}
+                        onBlur={e => {
+                          if (e.target.value === link.label) return
+                          const nextLinks = [...(group.links ?? [])]
+                          nextLinks[lIdx] = { ...link, label: e.target.value }
+                          updateGroup({ links: nextLinks })
+                        }}
+                        className="w-40 text-[12px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+                      />
+                      <input
+                        type="text"
+                        defaultValue={link.url ?? ''}
+                        placeholder="/path or https://…"
+                        disabled={disabled}
+                        onBlur={e => {
+                          if (e.target.value === (link.url ?? '')) return
+                          const nextLinks = [...(group.links ?? [])]
+                          nextLinks[lIdx] = { ...link, url: e.target.value || null }
+                          updateGroup({ links: nextLinks })
+                        }}
+                        className="flex-1 text-[12px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+                      />
+                      {!disabled && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextLinks = (group.links ?? []).filter((_, i) => i !== lIdx)
+                            updateGroup({ links: nextLinks })
+                          }}
+                          className="text-wm-text-subtle hover:text-wm-danger text-[14px] leading-none px-1"
+                        >×</button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {!disabled && (
+                  <button
+                    type="button"
+                    onClick={() => updateGroup({ links: [...(group.links ?? []), { label: '', url: '' }] })}
+                    className="mt-1 text-[11px] font-semibold text-wm-accent-strong hover:underline"
+                  >
+                    + Add link to this column
+                  </button>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+        {!disabled && (
+          <button
+            type="button"
+            onClick={() => update({
+              footer_link_groups: [
+                ...(footer.footer_link_groups ?? []),
+                { id: `grp-${(footer.footer_link_groups ?? []).length + 1}-${Math.random().toString(36).slice(2, 8)}`, heading: '', links: [] },
+              ],
+            })}
+            className="mt-2 text-[11px] font-semibold text-wm-accent-strong hover:underline"
+          >
+            + Add footer column
+          </button>
+        )}
+      </div>
     </Section>
+  )
+}
+
+function AnnouncementBannerEditor({
+  review, onChange, disabled,
+}: { review: SitemapReview; onChange: (r: SitemapReview) => Promise<void>; disabled: boolean }) {
+  const pres = review.presentation ?? {}
+  const banner = pres.announcement_banner
+  const hasBanner = !!banner && banner.text.trim().length > 0
+  const updateBanner = (patch: Partial<NonNullable<typeof banner>> | null) => {
+    if (patch === null) {
+      const nextPres = { ...pres }
+      delete nextPres.announcement_banner
+      void onChange({ ...review, presentation: nextPres })
+      return
+    }
+    void onChange({
+      ...review,
+      presentation: {
+        ...pres,
+        announcement_banner: {
+          text: '',
+          ...banner,
+          ...patch,
+        },
+      },
+    })
+  }
+  return (
+    <div className="rounded-md border border-wm-border bg-wm-bg-elevated px-3 py-2.5">
+      <p className="text-[10.5px] text-wm-text-subtle mb-2">A thin strip above the primary nav. Use for seasonal callouts (camp registration, Christmas services, giving campaigns). Leave blank to hide.</p>
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_140px_140px_auto] gap-2 items-start">
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Banner text</span>
+          <input
+            type="text"
+            defaultValue={banner?.text ?? ''}
+            placeholder="WinShape Camps, summer day camp for kids, register now"
+            disabled={disabled}
+            onBlur={e => {
+              const v = e.target.value.trim()
+              if (v === (banner?.text ?? '')) return
+              if (!v) { updateBanner(null); return }
+              updateBanner({ text: v })
+            }}
+            className="mt-1 w-full text-[12.5px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+          />
+        </label>
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">CTA label (optional)</span>
+          <input
+            type="text"
+            defaultValue={banner?.cta_label ?? ''}
+            placeholder="Register"
+            disabled={disabled || !hasBanner}
+            onBlur={e => {
+              const v = e.target.value.trim()
+              if (v === (banner?.cta_label ?? '')) return
+              updateBanner({ cta_label: v || null })
+            }}
+            className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+          />
+        </label>
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">CTA link</span>
+          <input
+            type="text"
+            defaultValue={banner?.cta_url ?? ''}
+            placeholder="/camp or https://…"
+            disabled={disabled || !hasBanner}
+            onBlur={e => {
+              const v = e.target.value.trim()
+              if (v === (banner?.cta_url ?? '')) return
+              updateBanner({ cta_url: v || null })
+            }}
+            className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+          />
+        </label>
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Tone</span>
+          <select
+            value={banner?.tone ?? 'info'}
+            disabled={disabled || !hasBanner}
+            onChange={e => updateBanner({ tone: e.target.value as 'warning' | 'info' | 'neutral' })}
+            className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+          >
+            <option value="info">Info (purple)</option>
+            <option value="warning">Warning (amber)</option>
+            <option value="neutral">Neutral (gray)</option>
+          </select>
+        </label>
+      </div>
+      {hasBanner && !disabled && (
+        <button
+          type="button"
+          onClick={() => updateBanner(null)}
+          className="mt-2 text-[11px] font-semibold text-wm-text-subtle hover:text-wm-danger"
+        >Remove banner</button>
+      )}
+    </div>
   )
 }
 

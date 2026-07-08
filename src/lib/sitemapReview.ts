@@ -462,8 +462,55 @@ export interface FooterInfo {
   }>
   /** Additional footer page links (Weekday Preschool, Careers,
    *  Contact, Memorial Garden, etc.). Strategist adds these as they
-   *  emerge from cowork; partner confirms or edits. */
+   *  emerge from cowork; partner confirms or edits.
+   *
+   *  Legacy flat-list shape. Preferred going forward is
+   *  `footer_link_groups` which supports multiple headed columns.
+   *  When both are present, `footer_link_groups` wins in the
+   *  partner-facing render; `footer_page_links` shows only as the
+   *  fallback single "Explore" column when groups are empty. */
   footer_page_links?: Array<{ label: string; url: string }>
+
+  /** Grouped footer link columns with headings. Powers the multi-
+   *  column footer layout ("Visiting", "Take a next step", "Get to
+   *  know us", etc). When set (non-empty), replaces the legacy
+   *  single "Explore" column. Order in the array is render order,
+   *  left to right. Each group renders as its own column.
+   *
+   *  Typical churches have 2-4 groups; the renderer distributes
+   *  them into a responsive grid. Empty groups (no links) are
+   *  skipped at render time. */
+  footer_link_groups?: Array<FooterLinkGroup>
+}
+
+/** One grouped column of footer links. */
+export interface FooterLinkGroup {
+  id: string
+  /** Column heading, shown above the links (e.g., "Visiting"). */
+  heading: string
+  /** Links inside this column. Each link has a partner-facing label
+   *  and an optional URL. URL is optional so a strategist can outline
+   *  the intended column shape before every destination is finalized. */
+  links: Array<{ label: string; url?: string | null }>
+}
+
+/** Announcement strip above the primary nav. Renders as a thin
+ *  horizontal band with a message + optional CTA arrow. Used for
+ *  seasonal callouts (summer camp registration, Christmas services,
+ *  giving campaigns). Absent on most reviews. */
+export interface AnnouncementBanner {
+  /** The banner copy. Plain text; no markdown. */
+  text: string
+  /** Optional destination for the arrow/CTA at the right end of the
+   *  banner. Absent = no arrow, banner is informational only. */
+  cta_url?: string | null
+  /** Optional label for the CTA at the right end. When absent but
+   *  cta_url is present, a bare arrow (→) shows. */
+  cta_label?: string | null
+  /** Visual tone. `warning` = amber (upcoming deadline / registration);
+   *  `info` = purple (general announcement); `neutral` = subtle gray.
+   *  Defaults to `info` when absent. */
+  tone?: 'warning' | 'info' | 'neutral'
 }
 
 /** One partner-requested edit pinned to a specific section of the
@@ -506,6 +553,12 @@ export interface SitemapReviewPresentation {
    *  in the serif-italic brand voice inside the surrounding sans
    *  body. Doxology example: "three congregations". */
   hero_em_phrase?: string
+
+  /** Optional announcement strip rendered above the primary nav
+   *  preview. Seasonal callout: summer camp registration, Christmas
+   *  service times, giving campaign, etc. Absent on most reviews.
+   *  See AnnouncementBanner for shape + tone options. */
+  announcement_banner?: AnnouncementBanner
 
   /** Per-congregation persistent nav bars, rendered below the
    *  Primary Navigation section. Absent (or empty) for
