@@ -576,12 +576,6 @@ export default function SitemapPartnerViewV2({
         {review.pages.length > 0 && <section className="sec">
           <div className="sec-head"><span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '05' : '04'}</span><h2>Full Page List</h2></div>
           <p className="sec-note">{readOnly ? 'Every page in the sitemap, grouped by parent.' : 'Click any page to leave a note about it: rename, move, combine, or ask a question.'}</p>
-          <div className="legend">
-            <span><b className="tag2 t-hub">hub</b> connects several pages under one home</span>
-            <span><b className="tag2 t-ministry">ministry</b> a specific ministry of the church</span>
-            <span><b className="tag2 t-churchwide">church-wide</b> info about the whole church</span>
-            <span><b className="tag2 t-foundation">foundation</b> core action page (give, watch, plan a visit)</span>
-          </div>
           <div className="tiers">
             {grouped.map(group => {
               const childSlugs  = 'childSlugs'  in group ? (group as PageGroup).childSlugs  : undefined
