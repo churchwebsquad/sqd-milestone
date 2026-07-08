@@ -13092,7 +13092,7 @@ Not the full plan — just the gotchas for outline + draft:
     name:         'plan-site-strategy',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  '4944bf2384606139',
+    contentHash:  'ca0031532903327f',
     references:   [
       'cowork-skills/page-outlines-by-ministry-model.md',
     ],
@@ -13224,7 +13224,26 @@ the doc speaks; those still apply for fields the doc leaves blank.
 
   nav: {
     primary:   Array<{ slug: string; children?: string[] }>      // primary nav
-    footer:    string[]                                          // footer-only links
+    secondary?: Array<{ slug: string; children?: string[] }>     // off-canvas / utility drawer
+    secondary_label?: string                                     // e.g. "Off-canvas menu"
+    /** Footer region. Emit the GROUPED shape below. The partner
+     *  review's composer extracts it into the multi-column footer
+     *  layout (Take a next step / Explore / Fine print columns).
+     *  A flat \`string[]\` shape is still accepted for backward compat
+     *  but produces a single "Explore" column — prefer grouped. */
+    footer:    {
+      primary_links?: string[]  // slugs — column heading "Take a next step"
+      explore?:       string[]  // slugs — column heading "Explore"
+      legal?:         string[]  // slugs — column heading "Fine print"
+      social?:        string[]  // platform names ('facebook', 'instagram', 'youtube', 'tiktok', 'twitter', 'linkedin')
+                                //   — resolved by the review from
+                                //   strategy_web_projects.social_*_url; don't put URLs here
+      parked?:        Array<{ label: string; reason: string }>
+                                // deferred / not-yet-ready items. NOT rendered on
+                                //   the review — surfaces to strategist only.
+      contact_block?: boolean   // signal: include the brand+contact column (default true)
+      service_times?: boolean   // signal: service-times column belongs in the footer
+    }
     cta_only:  string[]                                          // sticky-CTA links (e.g. Give)
   }
 
@@ -13387,6 +13406,16 @@ Required output:
 6. \`pages_to_carry_forward\` (input) entries either appear in \`pages\`
    output OR appear in \`pages_considered_dropped\` with reason. No
    silent drops.
+7. **Tier slug integrity.** For every
+   \`presentation.tiers[i].page_entries[j].slug\`, confirm
+   \`pages.some(p => p.slug === entry.slug)\`. Zero misses. See the
+   "Tiers vs pages — the slug-vocabulary rule" section below for
+   why this matters and the specific patterns that cause drift.
+8. **Footer shape.** \`nav.footer\` is the grouped-object shape
+   (primary_links / explore / legal / social / parked /
+   contact_block / service_times). A flat \`string[]\` still works
+   but produces a single-column footer — prefer grouped so the
+   partner review can render the multi-column layout.
 
 ## Nav parents vs pages — DO NOT conflate them
 
@@ -13414,6 +13443,53 @@ Or is the slug just a nav grouping? Two rules:
 Getting this wrong wastes downstream cycles writing copy for
 labels that never render. Getting it right keeps the Full Page
 List and the Pages workspace showing only real destinations.
+
+## Tiers vs pages — the slug-vocabulary rule (READ THIS)
+
+When you emit \`presentation.tiers[]\` (see the tiers doc below), every
+slug you list under \`tier.page_entries[].slug\` MUST be a slug you ALSO
+emit in the top-level \`pages[].slug\` array — VERBATIM. No aliases,
+no shortening, no semantic renames.
+
+The partner review groups the Full Page List into tiers by direct
+\`pages[].slug\` lookup. Drift here means the page falls into an
+"Other pages" bucket at the bottom instead of grouping under its
+congregation / ministry area. Partners see a decategorized list,
+lose orientation, and open frustrated notes.
+
+Common drift patterns to AVOID — every example below produced a
+real partner-facing bug that had to be manually fixed in the DB:
+
+  ❌ pages[].slug = "sw-community-groups"
+     tiers[].page_entries[].slug = "community-groups"     // MISS (page is prefixed; entry is not)
+
+  ❌ pages[].slug = "al-kids-youth"
+     tiers[].page_entries[].slug = "alliance-kids-youth"  // MISS (different prefix: alliance- vs al-)
+
+  ❌ pages[].slug = "sw-youth"
+     tiers[].page_entries[].slug = "students"             // MISS (semantic rename)
+
+  ❌ pages[].slug = "es-acerca"
+     tiers[].page_entries[].slug = "acerca-de-nosotros"   // MISS (extra tokens)
+
+  ❌ pages[].slug = "sw-young-adults-college"
+     tiers[].page_entries[].slug = "young-adults"         // MISS (extra token on page)
+
+The rule is boring on purpose: reference pages by their **exact
+\`pages[].slug\` string** — copy-paste, don't paraphrase. If a tier
+groups Southwest campus pages and the pages you emit are
+\`sw-family-life\`, \`sw-kids\`, \`sw-youth\`, the tier's \`page_entries\`
+MUST list those exact strings.
+
+Nav-parent-only pages (from the section above, \`has_children: true\`)
+render as tier internal structure only; DON'T include them in
+\`page_entries\` — they'll be filtered out at render time and just add
+noise.
+
+Self-check before returning: walk every \`tier.page_entries[i].slug\`
+and confirm \`pages.some(p => p.slug === entry.slug)\`. If a tier
+entry references a slug that isn't in pages, either fix the entry
+to match, drop it, or add a matching page. No exceptions.
 
 ## What the partner sitemap review reads — save the why here
 
@@ -13548,6 +13624,105 @@ preserved. **Save the WHY where the review picks it up:**
   - When you emit only \`shell\` and nothing else, the review
     hydrates the rest from \`pages[]\` + \`nav[]\`. That's a valid
     fallback but you lose control over the presentation.
+- **presentation.announcement_banner** — Optional thin strip
+  rendered above the primary nav preview. Emit ONLY when the church
+  has an active seasonal callout (camp registration, Christmas
+  services, giving campaign, launch series). Absent on most reviews.
+
+  \`\`\`jsonc
+  {
+    "text": "Christmas Eve services: December 24, 4pm and 6pm",
+    "cta_url": "/christmas-eve",       // optional, renders arrow
+    "cta_label": "Details",            // optional, renders label + arrow
+    "tone": "info" | "warning" | "neutral"    // default 'info' (purple)
+  }
+  \`\`\`
+
+  Tone maps to color: \`info\` purple, \`warning\` amber, \`neutral\` gray.
+
+- **presentation.tiers[]** — Groups the Full Page List section into
+  named tiers on the partner review. One tier per grouping — usually
+  one per congregation for multi-congregation sites, or by ministry
+  area for single-congregation sites. When absent, the review falls
+  back to grouping pages by top-level nav parent — that's a fine
+  default for smaller sites, but tiers give you control over the
+  labels + ordering.
+
+  \`\`\`jsonc
+  {
+    "id":     "southwest",             // stable identifier
+    "letter": "C",                      // A/B/C/… display letter for the header
+    "title":  "Southwest",              // partner-facing tier name
+    "meta":   "Sundays 9 and 10:30am",  // right-aligned metadata on the tier header
+    "page_entries": [
+      { "slug": "visit-southwest" },
+      { "slug": "sw-kids" },
+      { "slug": "sw-youth", "is_child": true },   // renders indented under previous entry
+      { "slug": "sw-community-groups" },
+      { "slug": "sw-adults", "is_child": true }
+    ]
+  }
+  \`\`\`
+
+  Every \`page_entries[].slug\` MUST match a \`pages[].slug\` VERBATIM.
+  See the "Tiers vs pages" section above for the full rule + common
+  drift patterns to avoid. This is the single most common source of
+  partner-facing sitemap bugs.
+
+- **presentation.congregations[]** — For multi-congregation sites,
+  authored per-congregation cards rendered below the primary nav
+  preview. One entry per campus/congregation. Only emit for multi-
+  campus projects (input \`campuses[].length > 1\`).
+
+  \`\`\`jsonc
+  {
+    "id":            "southwest",
+    "label":         "Southwest",
+    "service_time":  "Sundays 9 & 10:30am",
+    "address":       "4805 Arborlawn, Fort Worth",
+    "is_primary":    true,
+    "visit_slug":    "visit-southwest",    // where "Visit" CTA routes
+    "links_left":    [                    // 2-column per-cong nav preview
+      { "label": "Family Life",   "slug": "sw-family-life",    "is_dropdown": true, "kids": "Kids / Youth" },
+      { "label": "Community Life", "slug": "sw-community-life", "is_dropdown": true, "kids": "Community Groups / Young Adults / Adults" }
+    ],
+    "links_right":   [
+      { "label": "Take Your Next Step", "slug": "sw-next-steps" },
+      { "label": "Care & Support",       "slug": "sw-care" },
+      { "label": "Serve",                "slug": "sw-serve" },
+      { "label": "Mobilization",         "slug": "sw-mobilization" }
+    ],
+    "note":          "Future campus: 1805 FM 156, Haslet"  // optional
+  }
+  \`\`\`
+
+  When \`presentation.congregations[]\` is populated, the review adds a
+  "Persistent Navigation" section between Primary Nav and Full Page
+  List, showing each congregation's row.
+
+- **presentation.footer_link_groups[]** — Alternative to emitting
+  the grouped \`nav.footer\` shape. Directly authored headed columns:
+
+  \`\`\`jsonc
+  [
+    { "id": "grp-1", "heading": "Take a next step", "links": [
+        { "label": "Plan a Visit", "url": "/plan-a-visit" },
+        { "label": "Give",         "url": "/give" }
+    ]},
+    { "id": "grp-2", "heading": "Explore", "links": [
+        { "label": "About",   "url": "/about" },
+        { "label": "Sermons", "url": "/watch" }
+    ]}
+  ]
+  \`\`\`
+
+  Prefer \`nav.footer\` (grouped shape) as the authoring surface —
+  the review's composer extracts nav.footer into
+  presentation.footer_link_groups on first load. Only author
+  \`presentation.footer_link_groups\` directly when the desired
+  columns don't fit the primary_links / explore / legal taxonomy of
+  nav.footer.
+
 - **report.coverage_gaps_addressed[]** — free-text bullets on how
   the sitemap addresses the strategic goals. Feeds the review's
   executive summary framing.
