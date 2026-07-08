@@ -86,7 +86,7 @@ export function SitemapReviewEditor({
       pages:        (pgs ?? []) as never,
       existing,
     })
-    // AUTO-PERSIST on any drift. Two triggers:
+    // AUTO-PERSIST on any drift. Three triggers:
     //   1. Watermark advanced — cowork's sitemap step reran and this
     //      compose call rehydrated auto-fields (pages, nav, migrations,
     //      etc.) from strategy. Persist so partners on
@@ -96,7 +96,11 @@ export function SitemapReviewEditor({
     //      for the first time. Without this, the seed sits in local
     //      state and the partner still sees a blank footer until the
     //      strategist saves something else. Applies once per review.
-    // Both writes are idempotent; if nothing actually changed, the
+    //   3. Stale persona key_page_slugs got pruned — compose filters
+    //      slugs against the current pages set; if the DB was holding
+    //      references to renamed/dropped pages, persist the pruned
+    //      state so the DB self-heals on next partner load.
+    // All writes are idempotent; if nothing actually changed, the
     // save is a no-op. Stable loads (no drift) don't trigger a write.
     const watermarkAdvanced =
       composed.last_synced_from_strategy_at != null &&
@@ -104,7 +108,14 @@ export function SitemapReviewEditor({
     const footerGroupsSeeded =
       ((composed.footer_info?.footer_link_groups?.length ?? 0) > 0) &&
       ((existing?.footer_info?.footer_link_groups?.length ?? 0) === 0)
-    if (watermarkAdvanced || footerGroupsSeeded) {
+    const posturesKeyPagesPruned = existing != null && composed.persona_postures.some(next => {
+      const prior = existing.persona_postures.find(p => p.persona_id === next.persona_id)
+      const priorKeys = prior?.key_page_slugs ?? []
+      const nextKeys  = next.key_page_slugs ?? []
+      return priorKeys.length !== nextKeys.length
+        || priorKeys.some((s, i) => s !== nextKeys[i])
+    })
+    if (watermarkAdvanced || footerGroupsSeeded || posturesKeyPagesPruned) {
       const persistRes = await saveSitemapReview(supabase, projectId, composed)
       setReview(persistRes.ok ? persistRes.review : composed)
     } else {
@@ -1043,6 +1054,10 @@ function PersonaPosturesEditor({
       <div className="space-y-3">
         {review.persona_postures.map(p => {
           const currentKeys = p.key_page_slugs ?? []
+          // Only count key page slugs that still exist as real pages
+          // — stale references from older strategy states get filtered
+          // out so the count matches what the partner actually sees.
+          const validKeys = currentKeys.filter(s => review.pages.some(pg => pg.slug === s))
           return (
           <div key={p.persona_id} className="border border-wm-border rounded p-3 bg-wm-bg">
             <div className="flex items-baseline gap-2 flex-wrap mb-1">
@@ -1085,12 +1100,12 @@ function PersonaPosturesEditor({
             <div className="mt-2">
               <div className="flex items-baseline justify-between mb-1">
                 <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Key pages</p>
-                <p className="text-[10px] text-wm-text-subtle">{currentKeys.length}/3 selected</p>
+                <p className="text-[10px] text-wm-text-subtle">{validKeys.length}/3 selected</p>
               </div>
               <div className="flex flex-wrap gap-1">
                 {review.pages.map(pg => {
                   const active   = currentKeys.includes(pg.slug)
-                  const disable  = disabled || (!active && currentKeys.length >= 3)
+                  const disable  = disabled || (!active && validKeys.length >= 3)
                   return (
                     <button
                       key={pg.slug}
@@ -1109,6 +1124,40 @@ function PersonaPosturesEditor({
                   )
                 })}
               </div>
+              {/* Inline description editor for each selected key page.
+                * The partner card renders page.purpose as the line under
+                * each key-page bullet ("What Doxology believes, in English
+                * and Spanish."). Edit it here without leaving the persona
+                * section — writes update review.pages[i].purpose, the same
+                * field the Pages editor edits. */}
+              {validKeys.length > 0 && (
+                <ul className="mt-3 space-y-2">
+                  {validKeys.map(slug => {
+                    const pg = review.pages.find(x => x.slug === slug)
+                    if (!pg) return null
+                    return (
+                      <li key={slug} className="rounded border border-wm-border bg-wm-bg-elevated px-2.5 py-2">
+                        <div className="text-[11px] font-semibold text-wm-text mb-1">{pg.name}</div>
+                        <textarea
+                          defaultValue={pg.purpose ?? ''}
+                          disabled={disabled}
+                          rows={2}
+                          placeholder={`One sentence: what ${pg.name} does for ${p.persona_name}. Renders on the partner card under this key page.`}
+                          onBlur={e => {
+                            const v = e.target.value
+                            if (v === (pg.purpose ?? '')) return
+                            void onChange({
+                              ...review,
+                              pages: review.pages.map(row => row.slug === slug ? { ...row, purpose: v } : row),
+                            })
+                          }}
+                          className="w-full text-[11.5px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+                        />
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
             </div>
           </div>
         )})}

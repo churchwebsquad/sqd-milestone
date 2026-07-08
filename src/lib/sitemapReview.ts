@@ -1208,6 +1208,13 @@ export function composeSitemapReview(args: {
             .filter(Boolean).join(' • '),
         }))
 
+  // Set of currently-valid page slugs. Persona postures reference
+  // pages by slug; when strategy renames or drops a page, those refs
+  // go stale. Prune stale entries at compose time so the display
+  // never shows a false "3/3 selected" count against invalid slugs.
+  // Strategist re-picks in the editor to top back up to 3.
+  const validPageSlugs = new Set(composedPages.map(p => p.slug))
+
   const composedPostures: PersonaPosture[] = personaSource.map(persona => {
     const prior = existingPosturesById.get(persona.id)
     const journey = journeyByPersonaName.get(persona.name.toLowerCase())
@@ -1215,14 +1222,15 @@ export function composeSitemapReview(args: {
     // (top 3 max). No fabricated pages — if the brief lacks entry points,
     // the strategist picks pages in the editor.
     const seededKeyPages = (journey?.entry_points ?? []).slice(0, 3)
+    // Prune stale refs against the current pages set.
+    const priorKeys = (prior?.key_page_slugs ?? []).filter(s => validPageSlugs.has(s))
+    const seededKeys = seededKeyPages.filter(s => validPageSlugs.has(s))
     return {
       persona_id:      persona.id,
       persona_name:    persona.name,
       posture_summary: prior?.posture_summary ?? persona.description ?? '',
       goal:            prior?.goal,
-      key_page_slugs:  prior?.key_page_slugs && prior.key_page_slugs.length > 0
-        ? prior.key_page_slugs.slice(0, 3)
-        : seededKeyPages,
+      key_page_slugs:  priorKeys.length > 0 ? priorKeys.slice(0, 3) : seededKeys,
       primary_congregation_id: prior?.primary_congregation_id,
       drop_off_risk:   prior?.drop_off_risk ?? (
         journey?.drop_off_risk?.at_slug && journey?.drop_off_risk?.reason
