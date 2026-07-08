@@ -129,6 +129,59 @@ export function SitemapReviewEditor({
     if (onChange) await onChange()
   }, [projectId, onChange])
 
+  // Publish path with a forced strategy → review resync. The partner-
+  // facing URL reads from the persisted review, so anything stale
+  // there gets served verbatim. Rather than trust the compose-time
+  // watermark / drift-detection to catch drift (both can miss subtle
+  // cases where writers didn't bump _meta.generated_at AND the slug
+  // sets happen to overlap by coincidence), this path re-fetches
+  // project + web_pages, recomposes with a nulled watermark so
+  // strategy is treated as authoritative, applies publishReview,
+  // and saves atomically. Guarantees the partner sees the current
+  // strategy state at the moment of publish, no matter what.
+  const publishWithResync = useCallback(async () => {
+    if (!review) return
+    setSaving(true)
+    setError(null)
+    try {
+      const [{ data: proj }, { data: pgs }] = await Promise.all([
+        supabase.from('strategy_web_projects')
+          .select([
+            'id, church_name, personas, nav_group_definitions, roadmap_state',
+            'address, city_state, phone, email, primary_service_time, all_service_times',
+            'social_facebook_url, social_instagram_url, social_youtube_url',
+            'social_tiktok_url, social_twitter_url, social_linkedin_url',
+          ].join(', '))
+          .eq('id', projectId).maybeSingle(),
+        supabase.from('web_pages')
+          .select('id, slug, name, phase, sort_order, nav_group_label, user_journey_step')
+          .eq('web_project_id', projectId)
+          .eq('archived', false)
+          .order('sort_order', { ascending: true }),
+      ])
+      const fresh = composeSitemapReview({
+        project:  (proj ?? { id: projectId }) as never,
+        pages:    (pgs ?? []) as never,
+        // Null the watermark so compose forces resync from strategy.
+        // Slug-keyed carry-forward still preserves authored per-page
+        // fields (purpose overrides, sitemap_tag, what_changed, etc.)
+        existing: { ...review, last_synced_from_strategy_at: undefined },
+      })
+      const published = publishReview(fresh)
+      const res = await saveSitemapReview(supabase, projectId, published)
+      if (!res.ok) {
+        setError(res.error)
+        return
+      }
+      setReview(res.review)
+      if (onChange) await onChange()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }, [projectId, review, onChange])
+
   const shareUrl = useMemo(() => {
     if (!review?.token || review.status === 'draft') return null
     return buildPartnerReviewUrl(review.token)
@@ -354,7 +407,7 @@ export function SitemapReviewEditor({
           {status === 'draft' && (
             <button
               type="button"
-              onClick={() => void persist(publishReview(review))}
+              onClick={() => void publishWithResync()}
               disabled={saving}
               className="inline-flex items-center gap-1 text-[12px] font-semibold bg-wm-accent-strong text-white rounded-full px-4 py-1.5 hover:bg-wm-accent disabled:opacity-50"
             >

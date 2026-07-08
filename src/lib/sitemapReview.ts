@@ -1026,11 +1026,35 @@ export function composeSitemapReview(args: {
   const strategyGeneratedAt = readStrategyGeneratedAt(strategy)
   const reviewSyncedAt      = existing?.last_synced_from_strategy_at ?? null
   const strategyIsFresher   = !!strategyGeneratedAt && strategyGeneratedAt > (reviewSyncedAt ?? '')
-  // The refresh path fires when strategy is fresher than the review's
-  // last sync AND strategy actually has pages to work with. Otherwise
-  // stick to the existing-wins path so mid-session recomposes stay
-  // stable.
-  const shouldResyncFromStrategy = strategyIsFresher && strategyPages.length > 0
+
+  // Defensive drift detection. The watermark relies on writers (the
+  // revise-site-strategy cowork skill, mainly) to bump
+  // site_strategy._meta.generated_at every time they edit the
+  // strategy. In practice writers sometimes miss the bump, leaving
+  // the review stuck on a stale snapshot even though strategy has
+  // moved on. When the strategy's slug set differs from what the
+  // review last snapshotted, force a resync regardless of what the
+  // timestamp claims. Slug-keyed carry-forward still preserves any
+  // per-page authored fields on the review side.
+  const strategySlugSet = new Set(
+    strategyPages
+      .filter(p => typeof p.slug === 'string' && p.slug !== '_meta')
+      .map(p => p.slug as string),
+  )
+  const reviewSlugSet = new Set((existing?.pages ?? []).map(p => p.slug))
+  const structuralDrift =
+    strategySlugSet.size > 0
+    && reviewSlugSet.size > 0
+    && (
+      strategySlugSet.size !== reviewSlugSet.size
+      || [...strategySlugSet].some(s => !reviewSlugSet.has(s))
+      || [...reviewSlugSet].some(s => !strategySlugSet.has(s))
+    )
+
+  // Refresh path fires when strategy is fresher by watermark OR when
+  // the two sides drifted structurally (writer failed to bump the
+  // watermark). Either way strategy is authoritative for auto-fields.
+  const shouldResyncFromStrategy = (strategyIsFresher || structuralDrift) && strategyPages.length > 0
   const useExistingAsSource      = !shouldResyncFromStrategy && (existing?.pages ?? []).length > 0
 
   // Seed heuristic: strategy pages with `has_children: true` are
