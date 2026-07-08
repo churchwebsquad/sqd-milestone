@@ -567,14 +567,17 @@ Spencer is already a collaborator on the GitHub repo (`churchwebsquad/sqd-milest
 
 Confirm he can name the three places code lives: his laptop (local), GitHub (remote), and strategy.thesqd.com (deployed). If any of those are hazy, re-explain.
 
-**3. Pick a Git authentication method** so he can clone + push later. Three options; pick the simplest.
+**3. Get GitHub authentication working (via VSCode).**
 
-- **GitHub CLI — easiest, recommended.** One command installs everything.
-  - On Mac: install [Homebrew](https://brew.sh) first if he doesn't have it (`/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`), then `brew install gh`.
-  - On Windows: `winget install GitHub.cli`.
-  - Then run `gh auth login` — pick "GitHub.com", "HTTPS", "Login with a web browser", follow the URL it prints, paste the one-time code it displays into the browser. Done. Git will now authenticate for clone + push without a password prompt.
-- **SSH key** — if he already has one or wants to learn. Follow https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent, then add the public key at https://github.com/settings/keys.
-- **Personal Access Token** — last resort. https://github.com/settings/tokens → "Generate new token (classic)" → check the `repo` scope → save the token string somewhere safe. Git will prompt for it as the "password" on the first clone + push.
+Git needs a stored credential to prove Spencer is Spencer when he runs `git clone` or `git push`. The simplest way to get one in 2026 — no SSH keys, no personal access tokens, no CLI fiddling — is to sign in through VSCode after it's installed. VSCode handles the OAuth flow with GitHub, saves the credential to the operating system's keychain (macOS Keychain on Mac, Credential Manager on Windows), and Git picks it up automatically from that point on.
+
+Spencer will do this in **step 4** below (right after installing VSCode). The one-line explanation to give him:
+
+> "When you first open VSCode, look for a 'Sign in to GitHub' prompt in the bottom-left status bar, or open the Command Palette (Cmd+Shift+P on Mac, Ctrl+Shift+P on Windows), type 'GitHub: Sign in', and follow the browser prompt. That's your Git auth. You won't ever have to type a password again."
+
+Do NOT walk him through SSH keys or personal access tokens unless VSCode's sign-in fails for some reason. Those exist as fallbacks documented at https://docs.github.com/en/authentication if we ever need them.
+
+If Spencer prefers a terminal-only workflow later, he can install the GitHub CLI (`brew install gh` on Mac, `winget install GitHub.cli` on Windows) and run `gh auth login`. Both `gh` and VSCode write to the same OS keychain, so they don't conflict. But VSCode sign-in alone is enough for everything in this build.
 
 **4. Install VSCode as his code editor.**
 
@@ -596,7 +599,7 @@ Spencer is using **Claude Code Desktop** (the Anthropic desktop app) to talk to 
 - **Fallback: Terminal app** (Mac: Cmd+Space, type "Terminal") or Git Bash (Windows: installed alongside Git).
 - If you (Claude) run commands via your own tools, they execute in the same repo context. Spencer doesn't have to type most commands himself — you'll run them and he'll see the output.
 
-Don't advance to Prerequisites until steps 1-5 are done. If accepting the invite fails, `gh auth login` errors, or VSCode won't install, screenshot and ping Ashley.
+Don't advance to Prerequisites until steps 1-5 are done. If accepting the invite fails, VSCode's GitHub sign-in errors, or VSCode won't install, screenshot and ping Ashley.
 
 ### Prerequisites
 
@@ -604,23 +607,18 @@ Check with Spencer whether he has these. If not, help him install:
 
 - **Git** — check by opening VSCode's terminal and running `git --version`. If missing: install from https://git-scm.com/download (Windows) or run `brew install git` (Mac; installs [Homebrew](https://brew.sh) first if needed).
 - **Node.js 20+** — check with `node --version`. If missing: install the LTS version from https://nodejs.org (Windows or Mac) or run `brew install node` (Mac).
-- **GitHub CLI** — done in Step 0 above if he picked Option A. Otherwise skip.
-- **VSCode** — done in Step 0.4 above.
+- **VSCode + GitHub sign-in** — done in Step 0 above.
 
 ### Setup steps
 
-1. **Clone the repo:**
-
-   ```
-   git clone git@github.com:churchwebsquad/sqd-milestone.git
-   cd sqd-milestone
-   ```
-
-   If the SSH `git@` URL errors with an auth failure, use HTTPS instead:
+1. **Clone the repo (HTTPS — VSCode's stored credential handles auth):**
 
    ```
    git clone https://github.com/churchwebsquad/sqd-milestone.git
+   cd sqd-milestone
    ```
+
+   If Git prompts for a username and password, the VSCode sign-in from Step 0 didn't take. Ping Ashley — do NOT type a password (GitHub deprecated password auth years ago; whatever Spencer types will fail). The fix is usually to re-run "GitHub: Sign in" from VSCode's Command Palette.
 
 2. **Install Node dependencies:**
 
@@ -1182,7 +1180,7 @@ Ashley reviews the proposal. Then you build.
 **Spencer's tools:**
 - **Claude Code Desktop** (Anthropic desktop app) — AI collaboration surface
 - **VSCode** (https://code.visualstudio.com) — code editor, terminal, file view
-- **GitHub CLI (`gh`)** — auth + branch push (Step 0 in section 4)
+- **GitHub CLI (`gh`)** — optional, only if he wants a terminal-only workflow later. VSCode sign-in covers all Git auth needs.
 - **Browser** — Chrome or Safari for the local preview at http://localhost:5173
 
 **Key file paths:**
