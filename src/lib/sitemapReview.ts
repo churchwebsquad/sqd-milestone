@@ -1002,6 +1002,105 @@ interface ComposeSourceWebPage {
   user_journey_step?: number | null
 }
 
+/** The grouped shape cowork's plan-site-strategy step writes for
+ *  the footer region as of 2026-07. See the `footer?` field on
+ *  SiteStrategyBlob.nav for full docs on when this vs the flat array
+ *  arrives. */
+interface CoworkGroupedFooter {
+  primary_links?: Array<string | { slug?: string; label?: string }>
+  explore?:       Array<string | { slug?: string; label?: string }>
+  legal?:         Array<string | { slug?: string; label?: string }>
+  social?:        string[]
+  parked?:        Array<{ label?: string; reason?: string }>
+  contact_block?: boolean
+  service_times?: boolean
+}
+
+/** Type guard: is this footer value the new grouped-object shape
+ *  (not an array)? Cowork emits the grouped shape for new projects;
+ *  older projects (or the Doxology legacy write) may still emit an
+ *  array. Both routes converge in extractCoworkFooterGroups(). */
+function isGroupedFooter(v: unknown): v is CoworkGroupedFooter {
+  return !!v
+    && typeof v === 'object'
+    && !Array.isArray(v)
+}
+
+/** Extract footer link groups from cowork's `nav.footer` in whichever
+ *  shape it arrived. Returns:
+ *   - `groups`: array of {heading, links} suitable for feeding into
+ *     `footer_info.footer_link_groups`. Empty when cowork wrote no
+ *     footer data or every group had zero resolvable links.
+ *   - `flat`: same links squashed into one array, matching the shape
+ *     `buildNavLayoutFromStrategy` already expects, so
+ *     `nav_layout.footer_sections` and `buildNavPositionMap` keep
+ *     working for grouped inputs too.
+ *
+ *  Default group headings ("Take a next step", "Explore", "Fine
+ *  print") are partner-facing. The strategist can rename them in the
+ *  sitemap review editor after the initial seed. */
+function extractCoworkFooterGroups(
+  footer: Array<{ slug?: string; label?: string } | string> | CoworkGroupedFooter | null | undefined,
+  nameBySlug: Map<string, string>,
+): {
+  groups: FooterLinkGroup[]
+  flat: Array<{ slug?: string; label?: string } | string>
+} {
+  const flat: Array<{ slug?: string; label?: string } | string> = []
+  const groups: FooterLinkGroup[] = []
+  if (!footer) return { groups, flat }
+
+  // Helper: resolve a slug-or-object into a {label, url?} with the
+  // label falling back to the pages-map name or a title-cased slug.
+  // Blank labels are dropped so a stale slug doesn't render as "".
+  const resolveEntry = (item: string | { slug?: string; label?: string } | undefined): { label: string; url?: string | null } | null => {
+    if (!item) return null
+    if (typeof item === 'string') {
+      const label = nameBySlug.get(item) ?? formatSlugAsTitle(item)
+      if (!label) return null
+      return { label, url: `/${item.replace(/^\/+/, '')}` }
+    }
+    if (typeof item !== 'object') return null
+    const slug = item.slug
+    const label = item.label ?? (slug ? (nameBySlug.get(slug) ?? formatSlugAsTitle(slug)) : '')
+    if (!label) return null
+    return { label, url: slug ? `/${slug.replace(/^\/+/, '')}` : null }
+  }
+
+  // Flat-array shape: single "Explore" group, matches the pre-2026-07
+  // cowork output and the manual-fallback path.
+  if (Array.isArray(footer)) {
+    const links = footer.map(resolveEntry).filter((l): l is { label: string; url?: string | null } => !!l)
+    if (links.length > 0) {
+      groups.push({ id: 'grp-explore', heading: 'Explore', links })
+    }
+    for (const raw of footer) flat.push(raw)
+    return { groups, flat }
+  }
+
+  // Grouped-object shape: iterate known column keys in the order
+  // we want them rendered (highest-intent first).
+  if (isGroupedFooter(footer)) {
+    const columnOrder: Array<{ key: keyof CoworkGroupedFooter & string; heading: string; groupId: string }> = [
+      { key: 'primary_links', heading: 'Take a next step', groupId: 'grp-primary' },
+      { key: 'explore',       heading: 'Explore',           groupId: 'grp-explore' },
+      { key: 'legal',         heading: 'Fine print',        groupId: 'grp-legal'   },
+    ]
+    for (const col of columnOrder) {
+      const rawList = footer[col.key]
+      if (!Array.isArray(rawList)) continue
+      const links = rawList.map(resolveEntry).filter((l): l is { label: string; url?: string | null } => !!l)
+      if (links.length === 0) continue
+      groups.push({ id: col.groupId, heading: col.heading, links })
+      for (const raw of rawList) flat.push(raw as string | { slug?: string; label?: string })
+    }
+    // `social`, `parked`, `contact_block`, `service_times` intentionally
+    // ignored here — they don't map to link groups.
+  }
+
+  return { groups, flat }
+}
+
 /** Shape of `roadmap_state.site_strategy`, the cowork "plan-site-strategy"
  *  step output. Loosely typed because we defensively index; only the
  *  fields we consume are documented here. */
@@ -1029,7 +1128,24 @@ interface SiteStrategyBlob {
     /** Label the cowork step suggested for the secondary region
      *  ("Off-canvas menu", "Utility nav", etc.). */
     secondary_label?: string
-    footer?:    Array<{ slug?: string; label?: string } | string>
+    /** Footer region. Cowork emits one of two shapes:
+     *   1. FLAT (legacy, older cowork runs): an array of slug-strings
+     *      or {slug,label} objects, all rendered under a single
+     *      "Explore" column.
+     *   2. GROUPED (current cowork output as of 2026-07): an object
+     *      with keys `primary_links`, `explore`, `legal`, `social`,
+     *      `parked`, `contact_block`, `service_times`. Each of the
+     *      link-list keys (`primary_links`, `explore`, `legal`) is
+     *      a slug array; the flags (`contact_block`, `service_times`)
+     *      are booleans that don't feed the reverse-lookup section.
+     *      `parked` holds not-yet-ready items and is excluded from
+     *      render. `social` is a list of platform names, resolved
+     *      elsewhere against strategy_web_projects.social_* URLs.
+     *
+     *  Compose translates both shapes into `footer_info.footer_link_groups`
+     *  (grouped columns for the partner render) and flattens all link
+     *  slugs into `nav_layout.footer_sections` for nav-position tagging. */
+    footer?:    Array<{ slug?: string; label?: string } | string> | CoworkGroupedFooter
     cta_only?:  Array<{ slug?: string; label?: string } | string>
   }
   persona_journeys?: Array<{
@@ -1453,6 +1569,28 @@ export function composeSitemapReview(args: {
       project.social_linkedin_url  ? { platform: 'linkedin' as const,  url: project.social_linkedin_url }  : null,
     ].filter((s): s is NonNullable<typeof s> => s !== null),
     footer_page_links:    [],
+  }
+
+  // Seed footer_link_groups from cowork's grouped `nav.footer` output.
+  // Cowork writes {primary_links, explore, legal, social, parked,
+  // contact_block, service_times}; we translate the link-carrying keys
+  // into headed columns.
+  //
+  // First-time-seed only: once the review has any authored groups,
+  // never overwrite them (strategist may have renamed headings or
+  // reordered). To reseed from a new cowork run, the strategist
+  // clears all groups in the editor and reopens — an empty state
+  // triggers a fresh seed on the next compose.
+  //
+  // extractCoworkFooterGroups also returns a `flat` array so the
+  // downstream buildNavLayoutFromStrategy + buildNavPositionMap
+  // work for grouped inputs the same as for legacy flat inputs.
+  const nameBySlugForFooter = new Map<string, string>()
+  for (const p of composedPages) nameBySlugForFooter.set(p.slug, p.name)
+  const coworkFooterExtract = extractCoworkFooterGroups(strategy?.nav?.footer, nameBySlugForFooter)
+  const existingHasGroups = ((existing?.footer_info?.footer_link_groups ?? []).length > 0)
+  if (!existingHasGroups && coworkFooterExtract.groups.length > 0) {
+    composedFooter.footer_link_groups = coworkFooterExtract.groups
   }
 
   // Current-site pages snapshot. When the caller passed a fresh
@@ -2080,7 +2218,13 @@ function buildNavLayoutFromStrategy(
 ): NavLayout | null {
   const nav = strategy?.nav
   const secondaryPagesFallback = pages.filter(p => p.nav_strategy === 'secondary')
-  if (!nav || (!nav.primary && !nav.footer && !nav.secondary && secondaryPagesFallback.length === 0)) return null
+  // nav.footer can be either the legacy flat array OR the current
+  // grouped-object shape; either one counts as "has footer data" for
+  // deciding whether to build a nav_layout at all.
+  const hasFooterData = nav?.footer != null && (
+    Array.isArray(nav.footer) ? nav.footer.length > 0 : isGroupedFooter(nav.footer)
+  )
+  if (!nav || (!nav.primary && !hasFooterData && !nav.secondary && secondaryPagesFallback.length === 0)) return null
 
   const nameBySlug = new Map<string, string>()
   for (const p of pages) nameBySlug.set(p.slug, p.name)
@@ -2113,7 +2257,21 @@ function buildNavLayoutFromStrategy(
     ? secondaryFromStrategy
     : secondaryFromFallback
 
-  const footerItems: NavItem[] = asArr(nav.footer).map(item => toNavItem(item, false)).filter(it => it.label)
+  // Footer: extract via the shared helper so grouped-object and
+  // legacy-flat shapes both flow through. `flat` is the union of every
+  // link across all grouped columns (primary_links + explore + legal
+  // for the grouped shape; the array itself for legacy). Deduped on
+  // slug via a Set so a slug appearing in two groups only gets tagged
+  // once in nav_layout.
+  const footerExtract = extractCoworkFooterGroups(nav.footer, nameBySlug)
+  const footerSeen = new Set<string>()
+  const footerItems: NavItem[] = footerExtract.flat.map(item => toNavItem(item, false)).filter(it => {
+    if (!it.label) return false
+    const key = it.slug ?? it.label
+    if (footerSeen.has(key)) return false
+    footerSeen.add(key)
+    return true
+  })
   const ctaOnlyItems: NavItem[] = asArr(nav.cta_only).map(item => toNavItem(item, false)).filter(it => it.label)
 
   return {
@@ -2157,7 +2315,11 @@ function buildNavPositionMap(nav: SiteStrategyBlob['nav'] | undefined): Map<stri
       else if ((c as { slug?: string }).slug) map.set((c as { slug: string }).slug, `${secondaryLabel} · under ${item.label ?? item.slug ?? '(parent)'}`)
     }
   }
-  for (const item of asArr<{ slug?: string } | string>(nav.footer)) {
+  // Footer: consume via the shared extractor so grouped + flat both
+  // tag their slugs as 'Footer'. Empty name-map is fine here (we only
+  // need slugs, not labels).
+  const footerExtract = extractCoworkFooterGroups(nav.footer, new Map())
+  for (const item of footerExtract.flat) {
     if (typeof item === 'string') { map.set(item, 'Footer'); continue }
     if (item.slug) map.set(item.slug, 'Footer')
   }

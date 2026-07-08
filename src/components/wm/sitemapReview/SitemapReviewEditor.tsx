@@ -107,7 +107,7 @@ export function SitemapReviewEditor({
       existing,
       crawlResults,
     })
-    // AUTO-PERSIST on any drift. Two triggers:
+    // AUTO-PERSIST on any drift. Three triggers:
     //   1. Watermark advanced — cowork's sitemap step reran and this
     //      compose call rehydrated auto-fields (pages, nav, migrations,
     //      etc.) from strategy. Persist so partners on
@@ -115,6 +115,11 @@ export function SitemapReviewEditor({
     //   2. Crawl snapshot advanced — a fresh crawl_job produced new
     //      current_site_pages. Persist so the "Where your current
     //      pages live now" section stays current for partners.
+    //   3. Footer link groups just seeded from empty — cowork emitted
+    //      grouped nav.footer that we translated into headed columns
+    //      for the first time. Without this, the seed sits in local
+    //      state and the partner still sees a blank footer until the
+    //      strategist saves something else. Applies once per review.
     // Both writes are idempotent; if nothing actually changed, the
     // save is a no-op. Stable loads (no drift) don't trigger a write.
     const watermarkAdvanced =
@@ -123,7 +128,10 @@ export function SitemapReviewEditor({
     const crawlSnapshotAdvanced =
       composed.current_site_crawl_snapshot_at != null &&
       composed.current_site_crawl_snapshot_at !== existing?.current_site_crawl_snapshot_at
-    if (watermarkAdvanced || crawlSnapshotAdvanced) {
+    const footerGroupsSeeded =
+      ((composed.footer_info?.footer_link_groups?.length ?? 0) > 0) &&
+      ((existing?.footer_info?.footer_link_groups?.length ?? 0) === 0)
+    if (watermarkAdvanced || crawlSnapshotAdvanced || footerGroupsSeeded) {
       const persistRes = await saveSitemapReview(supabase, projectId, composed)
       setReview(persistRes.ok ? persistRes.review : composed)
     } else {
