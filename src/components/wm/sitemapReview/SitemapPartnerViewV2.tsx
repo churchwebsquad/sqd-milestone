@@ -16,7 +16,7 @@
  * renders when the strategist declared one.
  */
 
-import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import type {
   ContentMigration,
   NavItem,
@@ -25,6 +25,7 @@ import type {
   SitemapReview,
   SitemapReviewNavPresentation,
 } from '../../../lib/sitemapReview'
+import { matchCurrentPageToDestination } from '../../../lib/sitemapReview'
 
 // ── Styles (scoped to .dox · palette translated to Squad) ──────────
 
@@ -547,6 +548,105 @@ export default function SitemapPartnerViewV2({
           </div>
         </section>}
 
+        {/* Reverse lookup — for each page on the partner's CURRENT site
+         *  (from the latest crawl_job snapshot), show where its content
+         *  landed in the new sitemap. Answers "where is my baptism page?"
+         *  by matching current URLs against content_migrations.merged_from
+         *  labels. Only renders when we have a crawl snapshot. */}
+        {review.current_site_pages && review.current_site_pages.length > 0 && (
+          <section className="sec">
+            <div className="sec-head">
+              <span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '05b' : '04b'}</span>
+              <h2>Where your current pages live now</h2>
+            </div>
+            <p className="sec-note">
+              Wondering where a page from your current site ended up? Your primary pages are listed below (blog posts, event detail pages, and archives are excluded to keep this scannable), each mapped to its new home. {readOnly ? '' : 'Click any row to leave a note if the mapping looks wrong or a page is missing.'}
+            </p>
+            <div className="tiers">
+              <div className="tier">
+                <div className="tier-head">
+                  <h3>Your current pages</h3>
+                  <span className="meta">{review.current_site_pages.length} primary pages on your current site</span>
+                </div>
+                <ul className="plist">
+                  {[...review.current_site_pages]
+                    .sort((a, b) => (a.title ?? a.path_key).localeCompare(b.title ?? b.path_key))
+                    .map(cp => {
+                      const match = matchCurrentPageToDestination(cp, review.content_migrations, realPages)
+                      const sectionId = `current-page-${cp.path_key}`
+                      const hasNote   = openBySection.has(sectionId)
+                      const labelForNote = cp.title ?? cp.url
+                      // Left column: partner-friendly page label + external
+                      // link back to their current URL. Title falls back to
+                      // the path_key when scraped title is missing.
+                      const leftLabel = cp.title && cp.title.trim().length > 0
+                        ? cp.title.trim()
+                        : cp.path_key
+                      // Right column: the destination text, driven by the
+                      // three matched_via cases in CurrentPageMatch.
+                      let rightContent: ReactNode
+                      if (match.matched_via === 'migration' && match.destinationPage) {
+                        const mergedFrom = match.migration?.merged_from ?? []
+                        const otherMerged = mergedFrom.filter(l =>
+                          l.toLowerCase().replace(/\s+/g, '-') !== cp.path_key
+                          && l.toLowerCase() !== (cp.title ?? '').toLowerCase(),
+                        )
+                        rightContent = (
+                          <>
+                            <span style={{ color: 'var(--muted)' }}>Now on </span>
+                            <b style={{ color: 'var(--ink)' }}>{match.destinationPage.name}</b>
+                            {otherMerged.length > 0 && (
+                              <span style={{ color: 'var(--muted)' }}>, merged with {otherMerged.join(', ')}</span>
+                            )}
+                          </>
+                        )
+                      } else if (match.matched_via === 'slug' && match.destinationPage) {
+                        rightContent = (
+                          <>
+                            <span style={{ color: 'var(--muted)' }}>Now on </span>
+                            <b style={{ color: 'var(--ink)' }}>{match.destinationPage.name}</b>
+                          </>
+                        )
+                      } else {
+                        rightContent = (
+                          <span style={{ color: 'var(--muted)', fontStyle: 'italic' }}>
+                            Not mapped yet. {readOnly ? '' : 'Click to let us know where this should go.'}
+                          </span>
+                        )
+                      }
+                      return (
+                        <li
+                          key={cp.path_key + '::' + cp.url}
+                          {...clickBind(sectionId, labelForNote)}
+                          style={hasNote && !readOnly ? { background: '#FFF8EC' } : (readOnly ? { cursor: 'default' } : undefined)}
+                        >
+                          <span className="pg">
+                            {leftLabel}
+                            {hasNote && <span className="tag2" style={{ background:'#FFB84D', color:'#341756' }}>note pending</span>}
+                          </span>
+                          <span className="desc">
+                            {rightContent}
+                            {' '}
+                            <a
+                              href={cp.url}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                              onClick={(e) => e.stopPropagation()}
+                              style={{ color: 'var(--muted2)', textDecoration: 'none', marginLeft: 8, fontSize: 11 }}
+                              aria-label={`Open ${cp.url} in a new tab`}
+                            >
+                              ({new URL(cp.url).pathname || '/'})
+                            </a>
+                          </span>
+                        </li>
+                      )
+                    })}
+                </ul>
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* Optional inspiration image — strategist-uploaded reference
          *  visual (moodboard tile, competitor screenshot, brand-guide
          *  swatch). Absent by default; when unset the whole section
@@ -554,7 +654,7 @@ export default function SitemapPartnerViewV2({
         {pres?.inspiration_image?.url && (
           <section className="sec">
             <div className="sec-head">
-              <span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '05b' : '04b'}</span>
+              <span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '05c' : '04c'}</span>
               <h2>For inspiration</h2>
             </div>
             <div className={clickable('inspiration-image')} {...clickBind('inspiration-image', 'Inspiration image')} style={{ padding: '4px 0' }}>

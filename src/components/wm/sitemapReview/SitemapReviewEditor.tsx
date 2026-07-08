@@ -65,7 +65,7 @@ export function SitemapReviewEditor({
     // the caller passes existing through so authored purposes,
     // intro copy, footer overrides, presentation blocks, and
     // partner_edit_requests round-trip.
-    const [existing, { data: proj }, { data: pgs }] = await Promise.all([
+    const [existing, { data: proj }, { data: pgs }, crawlRow] = await Promise.all([
       loadSitemapReview(supabase, projectId),
       supabase.from('strategy_web_projects')
         .select([
@@ -80,28 +80,50 @@ export function SitemapReviewEditor({
         .eq('web_project_id', projectId)
         .eq('archived', false)
         .order('sort_order', { ascending: true }),
+      // Latest completed crawl_job for this project. When present, its
+      // crawl_results snapshot into the review's current_site_pages so
+      // the partner-facing "Where your current pages live now" section
+      // can render. When absent (project never crawled, or only failed
+      // runs), the existing snapshot on the review carries forward.
+      // @ts-expect-error — 'web-hub' schema not in generated types
+      supabase.schema('web-hub')
+        .from('crawl_jobs')
+        .select('crawl_results, status, completed_at')
+        .eq('project_id', projectId)
+        .eq('status', 'complete')
+        .order('completed_at', { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle(),
     ])
+    const crawlData = crawlRow?.data as
+      | { crawl_results?: Array<{ url?: string | null; title?: string | null }> | null; completed_at?: string | null }
+      | null
+    const crawlResults = crawlData
+      ? { pages: crawlData.crawl_results ?? [], completed_at: crawlData.completed_at ?? null }
+      : null
     const composed = composeSitemapReview({
-      project:  (proj ?? { id: projectId }) as never,
-      pages:    (pgs ?? []) as never,
+      project:      (proj ?? { id: projectId }) as never,
+      pages:        (pgs ?? []) as never,
       existing,
+      crawlResults,
     })
-    // AUTO-PERSIST on watermark drift. When cowork's sitemap step
-    // reran and this compose call actually re-hydrated auto-fields
-    // from strategy (watermark advanced), immediately write the
-    // fresh review back to the DB. Otherwise partners hitting
-    // /portal/sitemap/<token> keep seeing the stale saved snapshot
-    // until a strategist explicitly saves something else in the
-    // editor. This is the fix for "cowork sitemap re-ran but the
-    // partner review still shows the old pages/nav."
-    //
-    // Safety: only auto-persists when the compose moved the
-    // watermark forward. Stable loads (existing = fresh) don't
-    // trigger a write.
+    // AUTO-PERSIST on any drift. Two triggers:
+    //   1. Watermark advanced — cowork's sitemap step reran and this
+    //      compose call rehydrated auto-fields (pages, nav, migrations,
+    //      etc.) from strategy. Persist so partners on
+    //      /portal/sitemap/<token> get the fresh view.
+    //   2. Crawl snapshot advanced — a fresh crawl_job produced new
+    //      current_site_pages. Persist so the "Where your current
+    //      pages live now" section stays current for partners.
+    // Both writes are idempotent; if nothing actually changed, the
+    // save is a no-op. Stable loads (no drift) don't trigger a write.
     const watermarkAdvanced =
       composed.last_synced_from_strategy_at != null &&
       composed.last_synced_from_strategy_at !== existing?.last_synced_from_strategy_at
-    if (watermarkAdvanced) {
+    const crawlSnapshotAdvanced =
+      composed.current_site_crawl_snapshot_at != null &&
+      composed.current_site_crawl_snapshot_at !== existing?.current_site_crawl_snapshot_at
+    if (watermarkAdvanced || crawlSnapshotAdvanced) {
       const persistRes = await saveSitemapReview(supabase, projectId, composed)
       setReview(persistRes.ok ? persistRes.review : composed)
     } else {
