@@ -150,18 +150,28 @@ export interface ReviewPage {
   why_change?:          string
   strategic_alignment?: string
 
-  /** Explicit change-status tag rendered as a colored pill on the
-   *  partner-facing Full Page List. When unset, the visualization
-   *  falls back to inferring from what_changed / content_migrations.
+  /** Role tag describing what this page IS in the new site — rendered
+   *  as a colored pill on the partner-facing Full Page List. Focus is
+   *  the page's role, not its migration status. Content-origin notes
+   *  live separately in `what_changed`.
    *
-   *  Vocabulary is fixed so the legend and colors stay consistent:
-   *    'kept'          Have today. Already lives on the current site.
-   *    'unified'       Now shared. Was separate per congregation, is
-   *                    one shared page now.
-   *    'consolidated'  Combined. Several current pages merged into
-   *                    this one.
-   *    'new'           New. Wasn't on the current site at all. */
-  sitemap_tag?: 'kept' | 'unified' | 'consolidated' | 'new'
+   *  Vocabulary:
+   *    'hub'         Hub page. Aggregates related content or entry
+   *                  points (Start Here, Get Connected). Often
+   *                  formed by merging several current-site pages.
+   *    'ministry'    A specific ministry landing (Kids, Youth, Care,
+   *                  Community Groups).
+   *    'churchwide'  Info about the whole church (About, Beliefs,
+   *                  Staff, Contact).
+   *    'foundation'  Foundational action page (Give, Watch,
+   *                  Plan a Visit) — the primary CTAs.
+   *
+   *  Legacy values ('kept' / 'unified' / 'consolidated' / 'new') are
+   *  accepted in the type so older saved reviews typecheck. Renderer
+   *  ignores them; editor doesn't offer them. Strategist re-tags via
+   *  the editor when they open an old review. */
+  sitemap_tag?: 'hub' | 'ministry' | 'churchwide' | 'foundation'
+             | 'kept' | 'unified' | 'consolidated' | 'new'
 
   /** True when this row is a nav dropdown label, NOT a real page.
    *  Examples: "Teaching" or "Life at Woodcreek" on a site where
@@ -241,22 +251,6 @@ export interface ContentMigration {
   merged_to_slug?: string
 }
 
-/** A page from the partner's current site, pulled from the latest
- *  crawl_job snapshot at compose time. Powers the "Where your current
- *  pages live now" reverse-lookup section, which answers the partner
- *  question "where is my baptism page?" by mapping each existing URL
- *  to its new-site destination via content_migrations. */
-export interface CurrentSitePage {
-  /** Full URL from the crawl. */
-  url: string
-  /** Page <title> as scraped, when present. */
-  title: string | null
-  /** Normalized lookup key derived from the URL's last path segment
-   *  (or a fallback slug of the title). Used to match against
-   *  content_migrations.merged_from labels and against ReviewPage.slug. */
-  path_key: string
-}
-
 /** One entry in the edit log. Every save that changes a field
  *  appends here so both sides can see the trail. */
 export interface EditLogEntry {
@@ -266,182 +260,6 @@ export interface EditLogEntry {
   old_value: unknown
   new_value: unknown
   note?: string
-}
-
-/** Normalize a URL + title into a stable lookup key (last path
- *  segment, lowercased, dashes for separators). Empty-path URLs
- *  (site root) fall back to a title-derived slug or 'home'. */
-export function pathKeyForCurrentPage(url: string, title: string | null): string {
-  try {
-    const u = new URL(url)
-    const segments = u.pathname.split('/').filter(Boolean)
-    const last = segments[segments.length - 1] ?? ''
-    if (last) return last.toLowerCase().replace(/[_\s]+/g, '-')
-    // Root URL (no path segments) → 'home'
-    if (segments.length === 0) return 'home'
-  } catch {
-    // fall through to title-derived fallback
-  }
-  const t = (title ?? '').toLowerCase().trim().replace(/[_\s]+/g, '-')
-  return t.slice(0, 60) || 'untitled'
-}
-
-// URL segments that mean "this is an archive/index page, not a
-// standalone content page" — the parent segment is a bucket, not a
-// meaningful nav destination. `/blog/2023-lorem-post` skipped;
-// `/blog` itself is fine.
-const ARCHIVE_PARENT_SEGMENTS = new Set([
-  'blog', 'blogs', 'posts', 'post', 'news',
-  'tag', 'tags', 'category', 'categories', 'topic', 'topics',
-  'author', 'authors',
-  'archive', 'archives',
-  'sermon-series', 'series', 'sermons', 'sermon',   // detail pages under /sermons/
-  'events', 'event',                                 // detail pages under /events/
-  'page',                                            // pagination (/page/2)
-])
-
-// URL segments that mean "not a partner-facing page at all" — skip
-// entirely regardless of depth. WordPress + Squarespace + Wix leak
-// these; partners shouldn't see them in the review.
-const UTILITY_SEGMENTS = new Set([
-  'wp-admin', 'wp-content', 'wp-includes', 'wp-json',
-  'feed', 'rss', 'atom',
-  'search', 'sitemap.xml', 'sitemap_index.xml', 'robots.txt',
-  'cart', 'checkout', 'my-account', 'account', 'login', 'signin',
-  'privacy', 'terms', 'cookie-policy', // footer-only, not primary nav
-  'thank-you', 'thanks',
-])
-
-// File extensions that indicate an asset, not a page.
-const ASSET_EXTENSIONS = /\.(pdf|docx?|xlsx?|pptx?|jpe?g|png|gif|webp|svg|ico|mp4|mp3|wav|zip|xml|json|txt|css|js)$/i
-
-/** Decide whether a crawled URL is a "primary" page worth surfacing
- *  to a partner in the reverse-lookup section. Filters out blog
- *  posts, tag/category archives, paginated pages, asset URLs, and
- *  WordPress admin/utility routes. Strategist-authored
- *  content_migrations override this: any page whose path_key matches
- *  a `merged_from` label is force-included even if the heuristic
- *  would drop it (strategist explicitly cared about it).
- *
- *  Called at compose time so the review's `current_site_pages`
- *  snapshot only contains the trimmed-down set. Partners see 15-40
- *  meaningful pages instead of 200+ that include every blog post. */
-export function isPrimaryCurrentSitePage(
-  url: string,
-  pathKey: string,
-  strategistFlagged: Set<string>,
-): boolean {
-  // Strategist explicitly named this page in a migration → always keep.
-  if (strategistFlagged.has(pathKey)) return true
-
-  let u: URL
-  try {
-    u = new URL(url)
-  } catch {
-    return false
-  }
-
-  // Skip query-string variants (usually pagination or filter states).
-  if (u.search && u.search.length > 0) return false
-  // Skip anchor-only URLs.
-  if (u.hash && u.hash.length > 0) return false
-
-  const segments = u.pathname.split('/').filter(Boolean).map(s => s.toLowerCase())
-  // Root URL — always include (home).
-  if (segments.length === 0) return true
-
-  // Asset URL (last segment has a known asset extension) → skip.
-  const lastSegment = segments[segments.length - 1]
-  if (ASSET_EXTENSIONS.test(lastSegment)) return false
-
-  // Any utility segment anywhere in the path → skip.
-  for (const seg of segments) if (UTILITY_SEGMENTS.has(seg)) return false
-
-  // Depth 1 — /baptism, /give, /about, /kids → always include.
-  if (segments.length === 1) return true
-
-  // Depth 2+ — include only if the parent segment isn't an archive
-  // bucket. /about/staff yes, /blog/some-post no, /events/next-year no.
-  const parent = segments[segments.length - 2]
-  if (ARCHIVE_PARENT_SEGMENTS.has(parent)) return false
-
-  // Also skip if the parent segment looks like a year (e.g. /2024/lorem).
-  if (/^\d{4}$/.test(parent)) return false
-  // Or a page/N pagination pattern deeper in the tree.
-  if (parent === 'page' && /^\d+$/.test(lastSegment)) return false
-
-  // Depth 3+ pages are almost always detail pages, not primary nav.
-  // Kept as an escape hatch: if the strategist flagged the specific
-  // path_key it survived the strategist-override check at the top.
-  if (segments.length >= 3) return false
-
-  return true
-}
-
-/** Result of matching a current-site page against the new sitemap.
- *  Populated by matchCurrentPageToDestination(); the partner view uses
- *  this to render "your baptism page now lives on Start Here" rows. */
-export interface CurrentPageMatch {
-  /** The new-sitemap page the current page's content landed on, when
-   *  a match was found. Absent when the current page isn't referenced
-   *  by any content migration or does not share a slug with any new
-   *  page (the "not mapped yet" state in the UI). */
-  destinationPage?: ReviewPage
-  /** The specific migration that produced this match, when the match
-   *  came from strategist-authored merged_from labels. Useful for
-   *  showing the "merged with X" phrasing on the row. */
-  migration?: ContentMigration
-  /** How the match was found. 'migration' = matched via
-   *  content_migrations.merged_from label; 'slug' = matched by direct
-   *  slug equality against a new page; 'none' = no match. */
-  matched_via: 'migration' | 'slug' | 'none'
-}
-
-/** For one current-site page, find its new-site destination. Match
- *  strategy (in priority order):
- *   1. Any content_migration whose merged_from label matches this
- *      page's path_key (dashed or spaced), or is a case-insensitive
- *      substring match against the page's title. If found, resolve
- *      the destination page via merged_to_slug.
- *   2. Direct slug equality: current page's path_key matches a
- *      ReviewPage.slug. This catches pages that carried over verbatim
- *      without ever needing a migration entry.
- *   3. No match — returns matched_via='none'. Renders as "not mapped
- *      yet, leave a note" in the partner UI. */
-export function matchCurrentPageToDestination(
-  page:       CurrentSitePage,
-  migrations: ContentMigration[],
-  reviewPages: ReviewPage[],
-): CurrentPageMatch {
-  const key = page.path_key.toLowerCase()
-  const title = (page.title ?? '').toLowerCase().trim()
-
-  // 1. Migration match — walk merged_from labels for each migration.
-  //    Compare label as-is, label with spaces->dashes, and (when title
-  //    is non-empty) both directions of substring containment.
-  const migMatch = migrations.find(m => {
-    if (!m.merged_from || m.merged_from.length === 0) return false
-    return m.merged_from.some(rawLabel => {
-      const label = rawLabel.toLowerCase().trim()
-      if (!label) return false
-      if (label === key) return true
-      if (label.replace(/\s+/g, '-') === key) return true
-      if (title.length >= 4 && (label.includes(title) || title.includes(label))) return true
-      return false
-    })
-  })
-  if (migMatch) {
-    const destSlug = migMatch.merged_to_slug
-    const dest = destSlug ? reviewPages.find(p => p.slug === destSlug) : undefined
-    return { destinationPage: dest, migration: migMatch, matched_via: 'migration' }
-  }
-
-  // 2. Direct slug equality — some pages carry over 1:1 without a
-  //    migration entry (e.g., current /about maps to new /about).
-  const directMatch = reviewPages.find(p => p.slug === key)
-  if (directMatch) return { destinationPage: directMatch, matched_via: 'slug' }
-
-  return { matched_via: 'none' }
 }
 
 /** Site-wide footer information the partner reviews for accuracy.
@@ -791,15 +609,6 @@ export interface SitemapReview {
   persona_postures:  PersonaPosture[]
   nav_layout:        NavLayout
   content_migrations: ContentMigration[]
-
-  /** Snapshot of the partner's current-site pages from the latest
-   *  crawl_job. Fed at compose time when crawl_results are available;
-   *  preserved across recomposes when no fresh crawl_results are passed.
-   *  Absent when the project has never been crawled. */
-  current_site_pages?: CurrentSitePage[]
-
-  /** ISO timestamp of when current_site_pages was last refreshed. */
-  current_site_crawl_snapshot_at?: string
 
   /** Partner-typed free-text feedback that isn't tied to a specific
    *  field. Lives alongside per-field edits. */
@@ -1178,17 +987,6 @@ export function composeSitemapReview(args: {
   project:  ComposeSourceProject
   pages:    ComposeSourceWebPage[]
   existing: SitemapReview | null
-  /** Optional fresh crawl snapshot from the latest web-hub.crawl_jobs
-   *  row. When provided, snapshots into current_site_pages so the
-   *  partner review can render the reverse-lookup section. When
-   *  omitted, existing current_site_pages carry forward untouched.
-   *  `completed_at` (the crawl_job's own completion timestamp) is
-   *  used as the snapshot marker, so identical crawls loaded twice
-   *  don't cause spurious writes. */
-  crawlResults?: {
-    pages: Array<{ url?: string | null; title?: string | null }>
-    completed_at: string | null
-  } | null
 }): SitemapReview {
   const { project, pages, existing } = args
   const now = new Date().toISOString()
@@ -1593,69 +1391,6 @@ export function composeSitemapReview(args: {
     composedFooter.footer_link_groups = coworkFooterExtract.groups
   }
 
-  // Current-site pages snapshot. When the caller passed a fresh
-  // crawl with at least one URL and a completed_at that's newer than
-  // (or missing on) the existing snapshot, refresh. Otherwise carry
-  // forward whatever the existing review had. Content field is
-  // deliberately stripped, only url + title + normalized key survive.
-  //
-  // Filtering: raw crawls typically return 100-500 URLs including
-  // every blog post, tag archive, event detail, etc. That noise
-  // would swamp the partner-facing reverse-lookup section, so we
-  // narrow to "primary pages" (root, depth-1, depth-2 with a
-  // non-archive parent). Strategist-authored merged_from labels
-  // override the heuristic — anything the strategist explicitly
-  // named in a content migration is force-included so nothing they
-  // cared about gets dropped.
-  //
-  // Using the crawl_job's completed_at (not now()) as the marker
-  // means identical crawls loaded twice don't churn — the timestamp
-  // stays put and the auto-persist skip path is preserved.
-  const rawCrawl        = args.crawlResults ?? null
-  const rawCrawlPages   = Array.isArray(rawCrawl?.pages) ? rawCrawl!.pages : []
-  const rawCompletedAt  = rawCrawl?.completed_at ?? null
-  const existingSnapshotAt = existing?.current_site_crawl_snapshot_at ?? null
-
-  // Build strategist-override set: every merged_from label in
-  // content_migrations, normalized to the same path_key shape used
-  // by the primary-page test. That way "Baptism Info" survives even
-  // if its URL is /about/families/baptism-info (depth 3).
-  const strategistFlagged = new Set<string>()
-  for (const mig of composedMigrations) {
-    for (const label of mig.merged_from ?? []) {
-      const norm = label.toLowerCase().trim().replace(/[_\s]+/g, '-')
-      if (norm) strategistFlagged.add(norm)
-    }
-  }
-
-  const freshSitePages: CurrentSitePage[] = rawCrawlPages
-    .filter((r): r is { url: string; title?: string | null } => typeof r?.url === 'string' && r.url.length > 0)
-    .map(r => ({
-      url:      r.url,
-      title:    r.title ?? null,
-      path_key: pathKeyForCurrentPage(r.url, r.title ?? null),
-    }))
-    .filter(p => isPrimaryCurrentSitePage(p.url, p.path_key, strategistFlagged))
-    // Dedupe by path_key — some CMSes serve the same page at
-    // multiple URLs (trailing slash, uppercase variants). Last one wins.
-    .reduce<CurrentSitePage[]>((acc, p) => {
-      const existingIdx = acc.findIndex(x => x.path_key === p.path_key)
-      if (existingIdx >= 0) acc[existingIdx] = p
-      else acc.push(p)
-      return acc
-    }, [])
-
-  const useFresh =
-    freshSitePages.length > 0
-    && rawCompletedAt != null
-    && (existingSnapshotAt == null || rawCompletedAt > existingSnapshotAt)
-  const composedCurrentSitePages: CurrentSitePage[] | undefined = useFresh
-    ? freshSitePages
-    : existing?.current_site_pages
-  const composedCurrentSitePagesSnapshotAt: string | undefined = useFresh
-    ? rawCompletedAt ?? undefined
-    : existing?.current_site_crawl_snapshot_at
-
   return {
     schema_version:     1,
     token:              existing?.token ?? cryptoRandomId(),
@@ -1680,12 +1415,6 @@ export function composeSitemapReview(args: {
     content_migrations: composedMigrations,
     partner_notes:      existing?.partner_notes,
     edit_history:       existing?.edit_history ?? [],
-    // Current-site pages snapshot from the latest crawl_job. Refreshes
-    // when a caller passes fresh crawlResults; otherwise carries the
-    // existing snapshot forward. Powers the "Where your current pages
-    // live now" reverse-lookup section in the partner view.
-    current_site_pages:              composedCurrentSitePages,
-    current_site_crawl_snapshot_at:  composedCurrentSitePagesSnapshotAt,
     // Watermark stamp — moves forward whenever this compose call
     // used strategy as the authoritative source for auto-fields.
     // Stays where it was on stable recomposes so subsequent loads
@@ -2035,18 +1764,16 @@ function buildWhyCardsFromStrategy(args: {
 }
 
 function deriveSitemapTag(
-  page:       ReviewPage,
-  migrations: ContentMigration[],
+  _page:       ReviewPage,
+  _migrations: ContentMigration[],
 ): ReviewPage['sitemap_tag'] {
-  const isMergeTarget = migrations.some(m =>
-    (m.merged_to_slug && m.merged_to_slug === page.slug) ||
-    (m.merged_to && m.merged_to.toLowerCase() === page.name.toLowerCase()),
-  )
-  if (isMergeTarget) return 'consolidated'
-  const wc = (page.what_changed ?? '').toLowerCase()
-  if (wc.includes('share') || wc.includes('unified') || wc.includes('one page') || wc.includes('shared set')) return 'unified'
-  if (wc.includes('brand new') || wc.includes('new to the site') || wc.includes('did not exist')) return 'new'
-  return 'kept'
+  // Auto-derivation retired. The tag taxonomy switched from migration
+  // status (kept/unified/consolidated/new) to page role (hub/ministry/
+  // churchwide/foundation). Roles can't be inferred from migration
+  // signals alone — a merged page could be a hub, or a ministry, or
+  // church-wide info. Strategist assigns the role explicitly in the
+  // editor. Returning undefined leaves the pill off until then.
+  return undefined
 }
 
 function synthesizePersonaId(name: string): string {

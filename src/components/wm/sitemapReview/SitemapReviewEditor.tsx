@@ -65,7 +65,7 @@ export function SitemapReviewEditor({
     // the caller passes existing through so authored purposes,
     // intro copy, footer overrides, presentation blocks, and
     // partner_edit_requests round-trip.
-    const [existing, { data: proj }, { data: pgs }, crawlRow] = await Promise.all([
+    const [existing, { data: proj }, { data: pgs }] = await Promise.all([
       loadSitemapReview(supabase, projectId),
       supabase.from('strategy_web_projects')
         .select([
@@ -80,42 +80,18 @@ export function SitemapReviewEditor({
         .eq('web_project_id', projectId)
         .eq('archived', false)
         .order('sort_order', { ascending: true }),
-      // Latest completed crawl_job for this project. When present, its
-      // crawl_results snapshot into the review's current_site_pages so
-      // the partner-facing "Where your current pages live now" section
-      // can render. When absent (project never crawled, or only failed
-      // runs), the existing snapshot on the review carries forward.
-      // @ts-expect-error — 'web-hub' schema not in generated types
-      supabase.schema('web-hub')
-        .from('crawl_jobs')
-        .select('crawl_results, status, completed_at')
-        .eq('project_id', projectId)
-        .eq('status', 'complete')
-        .order('completed_at', { ascending: false, nullsFirst: false })
-        .limit(1)
-        .maybeSingle(),
     ])
-    const crawlData = crawlRow?.data as
-      | { crawl_results?: Array<{ url?: string | null; title?: string | null }> | null; completed_at?: string | null }
-      | null
-    const crawlResults = crawlData
-      ? { pages: crawlData.crawl_results ?? [], completed_at: crawlData.completed_at ?? null }
-      : null
     const composed = composeSitemapReview({
       project:      (proj ?? { id: projectId }) as never,
       pages:        (pgs ?? []) as never,
       existing,
-      crawlResults,
     })
-    // AUTO-PERSIST on any drift. Three triggers:
+    // AUTO-PERSIST on any drift. Two triggers:
     //   1. Watermark advanced — cowork's sitemap step reran and this
     //      compose call rehydrated auto-fields (pages, nav, migrations,
     //      etc.) from strategy. Persist so partners on
     //      /portal/sitemap/<token> get the fresh view.
-    //   2. Crawl snapshot advanced — a fresh crawl_job produced new
-    //      current_site_pages. Persist so the "Where your current
-    //      pages live now" section stays current for partners.
-    //   3. Footer link groups just seeded from empty — cowork emitted
+    //   2. Footer link groups just seeded from empty — cowork emitted
     //      grouped nav.footer that we translated into headed columns
     //      for the first time. Without this, the seed sits in local
     //      state and the partner still sees a blank footer until the
@@ -125,13 +101,10 @@ export function SitemapReviewEditor({
     const watermarkAdvanced =
       composed.last_synced_from_strategy_at != null &&
       composed.last_synced_from_strategy_at !== existing?.last_synced_from_strategy_at
-    const crawlSnapshotAdvanced =
-      composed.current_site_crawl_snapshot_at != null &&
-      composed.current_site_crawl_snapshot_at !== existing?.current_site_crawl_snapshot_at
     const footerGroupsSeeded =
       ((composed.footer_info?.footer_link_groups?.length ?? 0) > 0) &&
       ((existing?.footer_info?.footer_link_groups?.length ?? 0) === 0)
-    if (watermarkAdvanced || crawlSnapshotAdvanced || footerGroupsSeeded) {
+    if (watermarkAdvanced || footerGroupsSeeded) {
       const persistRes = await saveSitemapReview(supabase, projectId, composed)
       setReview(persistRes.ok ? persistRes.review : composed)
     } else {
@@ -926,17 +899,31 @@ function PagesEditor({
                 </span>
               )}
               <label className="ml-auto flex items-center gap-1.5 text-[10px] text-wm-text-muted">
-                <span className="uppercase tracking-wider font-semibold">Tag</span>
+                <span className="uppercase tracking-wider font-semibold">Role</span>
                 <select
-                  value={p.sitemap_tag ?? 'kept'}
+                  value={
+                    // Legacy migration-status values (kept/unified/
+                    // consolidated/new) no longer render as pills.
+                    // Show "unset" in the dropdown so the strategist
+                    // picks a role for old reviews on next open.
+                    p.sitemap_tag === 'hub' || p.sitemap_tag === 'ministry'
+                      || p.sitemap_tag === 'churchwide' || p.sitemap_tag === 'foundation'
+                      ? p.sitemap_tag
+                      : ''
+                  }
                   disabled={disabled}
-                  onChange={e => updatePage(p.id, { sitemap_tag: e.target.value as ReviewPage['sitemap_tag'] })}
+                  onChange={e => updatePage(p.id, {
+                    sitemap_tag: e.target.value === ''
+                      ? undefined
+                      : (e.target.value as ReviewPage['sitemap_tag']),
+                  })}
                   className="text-[11px] rounded-full border border-wm-border bg-white px-2 py-0.5 font-semibold text-wm-text focus:outline-none focus:border-wm-accent disabled:opacity-50"
                 >
-                  <option value="kept">have today</option>
-                  <option value="unified">now shared</option>
-                  <option value="consolidated">combined</option>
-                  <option value="new">new</option>
+                  <option value="">unset</option>
+                  <option value="hub">hub</option>
+                  <option value="ministry">ministry</option>
+                  <option value="churchwide">church-wide</option>
+                  <option value="foundation">foundation</option>
                 </select>
               </label>
             </div>

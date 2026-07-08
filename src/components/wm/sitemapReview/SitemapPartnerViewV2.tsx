@@ -16,7 +16,7 @@
  * renders when the strategist declared one.
  */
 
-import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type {
   ContentMigration,
   NavItem,
@@ -25,7 +25,6 @@ import type {
   SitemapReview,
   SitemapReviewNavPresentation,
 } from '../../../lib/sitemapReview'
-import { matchCurrentPageToDestination } from '../../../lib/sitemapReview'
 
 // ── Styles (scoped to .dox · palette translated to Squad) ──────────
 
@@ -83,6 +82,10 @@ const scopedCss = `
 .dox .t-uni{background:#EDE9FC; color:#513DE5;}
 .dox .t-cons{background:#F8ECFD; color:#8B3DE5;}
 .dox .t-new{background:#FFE9D6; color:#B8590E;}
+.dox .t-hub{background:#EDE9FC; color:#513DE5;}
+.dox .t-ministry{background:#E4F1E9; color:#3f7d55;}
+.dox .t-churchwide{background:#EFE7F6; color:#341756;}
+.dox .t-foundation{background:#FFE9D6; color:#B8590E;}
 .dox .tiers{display:grid; gap:18px;}
 .dox .tier{border:1px solid var(--line); border-radius:14px; background:#fff; overflow:hidden;}
 .dox .tier-head{display:flex; align-items:center; gap:12px; padding:14px 18px; background:var(--panel2); border-bottom:1px solid var(--line);}
@@ -574,10 +577,10 @@ export default function SitemapPartnerViewV2({
           <div className="sec-head"><span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '05' : '04'}</span><h2>Full Page List</h2></div>
           <p className="sec-note">{readOnly ? 'Every page in the sitemap, grouped by parent.' : 'Click any page to leave a note about it: rename, move, combine, or ask a question.'}</p>
           <div className="legend">
-            <span><b className="tag2 t-keep">have today</b> already on your site</span>
-            <span><b className="tag2 t-uni">now shared</b> was separate per congregation, now one page</span>
-            <span><b className="tag2 t-cons">combined</b> a few of today's pages merged into one</span>
-            <span><b className="tag2 t-new">new</b> new to the site</span>
+            <span><b className="tag2 t-hub">hub</b> connects several pages under one home</span>
+            <span><b className="tag2 t-ministry">ministry</b> a specific ministry of the church</span>
+            <span><b className="tag2 t-churchwide">church-wide</b> info about the whole church</span>
+            <span><b className="tag2 t-foundation">foundation</b> core action page (give, watch, plan a visit)</span>
           </div>
           <div className="tiers">
             {grouped.map(group => {
@@ -622,105 +625,6 @@ export default function SitemapPartnerViewV2({
           </div>
         </section>}
 
-        {/* Reverse lookup — for each page on the partner's CURRENT site
-         *  (from the latest crawl_job snapshot), show where its content
-         *  landed in the new sitemap. Answers "where is my baptism page?"
-         *  by matching current URLs against content_migrations.merged_from
-         *  labels. Only renders when we have a crawl snapshot. */}
-        {review.current_site_pages && review.current_site_pages.length > 0 && (
-          <section className="sec">
-            <div className="sec-head">
-              <span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '05b' : '04b'}</span>
-              <h2>Where your current pages live now</h2>
-            </div>
-            <p className="sec-note">
-              Wondering where a page from your current site ended up? Your primary pages are listed below (blog posts, event detail pages, and archives are excluded to keep this scannable), each mapped to its new home. {readOnly ? '' : 'Click any row to leave a note if the mapping looks wrong or a page is missing.'}
-            </p>
-            <div className="tiers">
-              <div className="tier">
-                <div className="tier-head">
-                  <h3>Your current pages</h3>
-                  <span className="meta">{review.current_site_pages.length} primary pages on your current site</span>
-                </div>
-                <ul className="plist">
-                  {[...review.current_site_pages]
-                    .sort((a, b) => (a.title ?? a.path_key).localeCompare(b.title ?? b.path_key))
-                    .map(cp => {
-                      const match = matchCurrentPageToDestination(cp, review.content_migrations, realPages)
-                      const sectionId = `current-page-${cp.path_key}`
-                      const hasNote   = openBySection.has(sectionId)
-                      const labelForNote = cp.title ?? cp.url
-                      // Left column: partner-friendly page label + external
-                      // link back to their current URL. Title falls back to
-                      // the path_key when scraped title is missing.
-                      const leftLabel = cp.title && cp.title.trim().length > 0
-                        ? cp.title.trim()
-                        : cp.path_key
-                      // Right column: the destination text, driven by the
-                      // three matched_via cases in CurrentPageMatch.
-                      let rightContent: ReactNode
-                      if (match.matched_via === 'migration' && match.destinationPage) {
-                        const mergedFrom = match.migration?.merged_from ?? []
-                        const otherMerged = mergedFrom.filter(l =>
-                          l.toLowerCase().replace(/\s+/g, '-') !== cp.path_key
-                          && l.toLowerCase() !== (cp.title ?? '').toLowerCase(),
-                        )
-                        rightContent = (
-                          <>
-                            <span style={{ color: 'var(--muted)' }}>Now on </span>
-                            <b style={{ color: 'var(--ink)' }}>{match.destinationPage.name}</b>
-                            {otherMerged.length > 0 && (
-                              <span style={{ color: 'var(--muted)' }}>, merged with {otherMerged.join(', ')}</span>
-                            )}
-                          </>
-                        )
-                      } else if (match.matched_via === 'slug' && match.destinationPage) {
-                        rightContent = (
-                          <>
-                            <span style={{ color: 'var(--muted)' }}>Now on </span>
-                            <b style={{ color: 'var(--ink)' }}>{match.destinationPage.name}</b>
-                          </>
-                        )
-                      } else {
-                        rightContent = (
-                          <span style={{ color: 'var(--muted)', fontStyle: 'italic' }}>
-                            Not mapped yet. {readOnly ? '' : 'Click to let us know where this should go.'}
-                          </span>
-                        )
-                      }
-                      return (
-                        <li
-                          key={cp.path_key + '::' + cp.url}
-                          {...clickBind(sectionId, labelForNote)}
-                          style={hasNote && !readOnly ? { background: '#FFF8EC' } : (readOnly ? { cursor: 'default' } : undefined)}
-                        >
-                          <span className="pg">
-                            {leftLabel}
-                            {hasNote && <span className="tag2" style={{ background:'#FFB84D', color:'#341756' }}>note pending</span>}
-                          </span>
-                          <span className="desc">
-                            {rightContent}
-                            {' '}
-                            <a
-                              href={cp.url}
-                              target="_blank"
-                              rel="noreferrer noopener"
-                              onClick={(e) => e.stopPropagation()}
-                              style={{ color: 'var(--muted2)', textDecoration: 'none', marginLeft: 8, fontSize: 11 }}
-                              aria-label={`Open ${cp.url} in a new tab`}
-                            >
-                              ({new URL(cp.url).pathname || '/'})
-                            </a>
-                          </span>
-                        </li>
-                      )
-                    })}
-                </ul>
-              </div>
-            </div>
-          </section>
-        )}
-
         {/* Optional inspiration image — strategist-uploaded reference
          *  visual (moodboard tile, competitor screenshot, brand-guide
          *  swatch). Absent by default; when unset the whole section
@@ -728,7 +632,7 @@ export default function SitemapPartnerViewV2({
         {pres?.inspiration_image?.url && (
           <section className="sec">
             <div className="sec-head">
-              <span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '05c' : '04c'}</span>
+              <span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '05b' : '04b'}</span>
               <h2>For inspiration</h2>
             </div>
             <div className={clickable('inspiration-image')} {...clickBind('inspiration-image', 'Inspiration image')} style={{ padding: '4px 0' }}>
@@ -1637,27 +1541,92 @@ function groupPagesByTiers(
   const assigned = new Set<string>()
   const groups: PageGroup[] = []
 
+  // Prefix-tolerant matching. Tier page_entries sometimes carry
+  // unprefixed slugs (`family-life`, `community-groups`) while the
+  // actual pages are congregation-prefixed (`sw-family-life`,
+  // `al-community-groups`). Cowork emits this pattern for multi-
+  // congregation churches (Doxology). Without a fallback, every
+  // entry misses and pages drop into "Other." The fix: also index
+  // pages by the suffix after their leading 1-4 char prefix.
+  const prefixOf = (slug: string): string | null => {
+    const idx = slug.indexOf('-')
+    if (idx < 1 || idx > 4) return null
+    return slug.slice(0, idx)
+  }
+  const suffixOf = (slug: string): string | null => {
+    const idx = slug.indexOf('-')
+    if (idx < 1 || idx > 4) return null
+    return slug.slice(idx + 1)
+  }
+  const suffixMap = new Map<string, ReviewPage[]>()
+  for (const p of pages) {
+    const sfx = suffixOf(p.slug)
+    if (!sfx) continue
+    const bucket = suffixMap.get(sfx)
+    if (bucket) bucket.push(p)
+    else suffixMap.set(sfx, [p])
+  }
+
   for (const tier of tiers ?? []) {
     const orderedPages: ReviewPage[] = []
     const childSlugs = new Set<string>()
     const overrides = new Map<string, string>()
+    // Prefix voting inside this tier. Once we've matched a couple
+    // of pages to this tier, we know its dominant congregation prefix
+    // (e.g. `sw` for Southwest) and use that to disambiguate later
+    // suffix-only entries where multiple candidates exist.
+    const prefixVotes = new Map<string, number>()
+    const bumpVote = (slug: string) => {
+      const pref = prefixOf(slug)
+      if (pref) prefixVotes.set(pref, (prefixVotes.get(pref) ?? 0) + 1)
+    }
+    const dominantPrefix = (): string | null => {
+      let best: string | null = null, bestCount = 0
+      for (const [pref, count] of prefixVotes) {
+        if (count > bestCount) { bestCount = count; best = pref }
+      }
+      return best
+    }
 
-    if (tier.page_entries && tier.page_entries.length > 0) {
-      for (const entry of tier.page_entries) {
-        const p = bySlug.get(entry.slug)
-        if (!p) continue
+    const entries: Array<{ slug: string; is_child?: boolean; description_override?: string }> =
+      tier.page_entries && tier.page_entries.length > 0
+        ? tier.page_entries
+        : (tier.page_slugs ?? []).map(s => ({ slug: s }))
+
+    // Pass 1: direct-slug matches. These are unambiguous and cast
+    // votes for the tier's dominant prefix.
+    const deferred: typeof entries = []
+    for (const entry of entries) {
+      const p = bySlug.get(entry.slug)
+      if (p && !assigned.has(entry.slug)) {
         assigned.add(entry.slug)
         orderedPages.push(p)
         if (entry.is_child) childSlugs.add(entry.slug)
         if (entry.description_override) overrides.set(entry.slug, entry.description_override)
+        bumpVote(p.slug)
+      } else if (!p) {
+        deferred.push(entry)
       }
-    } else {
-      for (const slug of tier.page_slugs ?? []) {
-        const p = bySlug.get(slug)
-        if (!p) continue
-        assigned.add(slug)
-        orderedPages.push(p)
-      }
+    }
+
+    // Pass 2: suffix fallback for deferred entries. When multiple
+    // pages share the suffix (e.g. `community-groups` matches both
+    // `sw-community-groups` and `al-community-groups`), pick the one
+    // whose prefix matches the tier's dominant prefix. If no votes
+    // yet (tier's entries are all unprefixed and first match), just
+    // take the first available candidate — subsequent entries will
+    // vote and stabilize.
+    for (const entry of deferred) {
+      const candidates = (suffixMap.get(entry.slug) ?? []).filter(p => !assigned.has(p.slug))
+      if (candidates.length === 0) continue
+      const hint = dominantPrefix()
+      let picked = hint ? candidates.find(p => prefixOf(p.slug) === hint) : undefined
+      if (!picked) picked = candidates[0]
+      assigned.add(picked.slug)
+      orderedPages.push(picked)
+      if (entry.is_child) childSlugs.add(picked.slug)
+      if (entry.description_override) overrides.set(picked.slug, entry.description_override)
+      bumpVote(picked.slug)
     }
 
     groups.push({
@@ -1715,27 +1684,20 @@ function groupPagesForList(pages: ReviewPage[], primary: NavItem[]): Array<{ id:
   return groups
 }
 
-function tagFor(p: ReviewPage, migrations: ContentMigration[]): { label: string; className: string } | null {
-  // Explicit strategist-authored tag always wins. Vocabulary is
-  // fixed in the schema so the pill colors and legend stay in sync.
-  if (p.sitemap_tag) {
-    switch (p.sitemap_tag) {
-      case 'kept':         return { label: 'have today', className: 't-keep' }
-      case 'unified':      return { label: 'now shared', className: 't-uni' }
-      case 'consolidated': return { label: 'combined',   className: 't-cons' }
-      case 'new':          return { label: 'new',        className: 't-new' }
-    }
+function tagFor(p: ReviewPage, _migrations: ContentMigration[]): { label: string; className: string } | null {
+  // Role tag: describes what the new page IS in the new site.
+  // Migration status (kept/unified/consolidated/new) is legacy and
+  // no longer rendered — see sitemap_tag docs in sitemapReview.ts.
+  // When a strategist hasn't set a role, no pill renders. Content
+  // origin lives in the page's `what_changed` note instead.
+  switch (p.sitemap_tag) {
+    case 'hub':        return { label: 'hub',         className: 't-hub' }
+    case 'ministry':   return { label: 'ministry',    className: 't-ministry' }
+    case 'churchwide': return { label: 'church-wide', className: 't-churchwide' }
+    case 'foundation': return { label: 'foundation',  className: 't-foundation' }
+    // Legacy values silently render nothing; strategist re-tags in editor.
+    default: return null
   }
-  const isMergedTo = migrations.some(m =>
-    m.merged_to_slug === p.slug ||
-    (m.merged_to && m.merged_to.toLowerCase() === p.name.toLowerCase()),
-  )
-  if (isMergedTo) return { label: 'combined', className: 't-cons' }
-  const wc = (p.what_changed ?? '').toLowerCase()
-  if (wc.includes('share') || wc.includes('unified') || wc.includes('one page')) return { label: 'now shared', className: 't-uni' }
-  if (wc.includes('new')) return { label: 'new', className: 't-new' }
-  if (p.what_changed) return { label: 'have today', className: 't-keep' }
-  return null
 }
 
 function capitalize(s: string): string {
