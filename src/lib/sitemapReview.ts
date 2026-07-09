@@ -2152,9 +2152,38 @@ export async function loadSitemapReviewByToken(
 ): Promise<{ review: SitemapReview; church_name: string | null; project_id: string } | null> {
   const { data, error } = await sb.rpc('get_sitemap_review_by_token', { p_token: token })
   if (error || !data) return null
-  const row = data as { review: SitemapReview | null; church_name: string | null; project_id: string }
+  const row = data as {
+    review:      SitemapReview | null
+    church_name: string | null
+    project_id:  string
+    project:     ComposeSourceProject | null
+    pages:       ComposeSourceWebPage[] | null
+  }
   if (!row.review) return null
-  return { review: row.review, church_name: row.church_name, project_id: row.project_id }
+
+  // Live compose from strategy so partners always see the current
+  // strategy pages / nav / migrations even when the persisted review
+  // snapshot is stale (writer failed to bump the watermark, no
+  // strategist opened the editor since strategy edits, etc). The
+  // compose is in-memory only — no DB write happens on partner
+  // reads. When the strategist next opens the editor, their compose
+  // will auto-persist the same fresh state.
+  //
+  // composeSitemapReview handles drift detection + slug-keyed
+  // carry-forward, so strategist-authored per-page fields (purpose
+  // overrides, sitemap_tag, what_changed, why_change,
+  // strategic_alignment) survive the resync when strategy has moved
+  // on. Presentation / postures / footer_info / partner_edit_requests
+  // are review-only and pass through unchanged.
+  const composed = row.project
+    ? composeSitemapReview({
+        project:  row.project,
+        pages:    row.pages ?? [],
+        existing: row.review,
+      })
+    : row.review
+
+  return { review: composed, church_name: row.church_name, project_id: row.project_id }
 }
 
 /** Partner-side save. Sends the full next review through a
