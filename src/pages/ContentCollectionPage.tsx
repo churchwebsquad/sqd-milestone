@@ -702,9 +702,6 @@ function Step1Review({
   onSupplemental:  () => void
 }) {
   const copyAllowance = copyAllowanceFromRecap(recap)
-  // "Start from scratch" suppresses the crawl entirely — the partner
-  // doesn't want any reference to existing content.
-  const hideInventory = copyAllowance.key === 'do_not_use'
   return (
     <div className="space-y-6">
       {/* Spanish-language notice — partner-facing. Fires when the site's
@@ -793,7 +790,33 @@ function Step1Review({
         </div>
       </div>
 
-      {copyAllowance.partnerMessage && (
+      {/* Copywriting Approach block. For the fresh-scratch discovery
+          choice (`do_not_use`), this is the prominent CTA area with an
+          inline "click here to skip" link that routes to the
+          supplemental (fresh copy) form. For every other approach,
+          it's a subtle informational strip. In both cases the
+          inventory below is shown so partners who want to review the
+          existing content can — the skip link is a shortcut, not a
+          gate. */}
+      {copyAllowance.partnerMessage && copyAllowance.key === 'do_not_use' && (
+        <div className="bg-white border-2 border-primary-purple rounded-2xl p-5 md:p-6">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple mb-2">
+            Copywriting Approach from Discovery Questionnaire
+          </p>
+          <p className="text-base text-deep-plum leading-relaxed">
+            You shared that you&rsquo;d like to start your site with completely fresh copy. If you&rsquo;d like to start fresh,{' '}
+            <button
+              type="button"
+              onClick={onSupplemental}
+              className="text-primary-purple font-semibold underline hover:text-deep-plum"
+            >
+              click here to skip what&rsquo;s on your current site and supply fresh copy
+            </button>
+            . Otherwise, feel free to use the sections below to review what&rsquo;s currently on your site we should use.
+          </p>
+        </div>
+      )}
+      {copyAllowance.partnerMessage && copyAllowance.key !== 'do_not_use' && (
         <div className="bg-lavender-tint/40 border border-lavender rounded-xl p-4 md:p-5">
           <p className="text-[10px] uppercase tracking-widest font-bold text-primary-purple mb-1">
             Copywriting Approach from Discovery Questionnaire
@@ -805,31 +828,21 @@ function Step1Review({
         </div>
       )}
 
-      {!hideInventory && (
-        <InventoryView
-          topicRows={topicRows}
-          campuses={campuses}
-          campusLabelSingular={campusLabelSingular}
-          campusLabelPlural={campusLabelPlural}
-          defaultLanguage={defaultLanguage}
-          snippetsByToken={snippetsByToken}
-          reviewMode={true}
-          marks={marks}
-          saveMark={saveMark}
-          sessionId={session.id}
-          attachments={attachments}
-          onAttachmentChange={onAttachmentChange}
-          externalPrefills={externalPrefills}
-        />
-      )}
-      {hideInventory && (
-        <div className="bg-white border border-lavender rounded-2xl p-5 md:p-6 text-center">
-          <p className="text-deep-plum font-semibold mb-1">Skipping the content review.</p>
-          <p className="text-purple-gray text-sm">
-            You chose to start your new site with completely fresh copy, so we&rsquo;re not asking you to review what&rsquo;s on your current site. Use the next step to tell us about your church and what you&rsquo;d like included.
-          </p>
-        </div>
-      )}
+      <InventoryView
+        topicRows={topicRows}
+        campuses={campuses}
+        campusLabelSingular={campusLabelSingular}
+        campusLabelPlural={campusLabelPlural}
+        defaultLanguage={defaultLanguage}
+        snippetsByToken={snippetsByToken}
+        reviewMode={true}
+        marks={marks}
+        saveMark={saveMark}
+        sessionId={session.id}
+        attachments={attachments}
+        onAttachmentChange={onAttachmentChange}
+        externalPrefills={externalPrefills}
+      />
 
       <div className="bg-white border border-lavender rounded-2xl p-4 md:p-5 flex items-center justify-between gap-4 flex-wrap">
         <p className="text-deep-plum text-sm">
