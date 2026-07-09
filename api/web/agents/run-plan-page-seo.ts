@@ -229,16 +229,77 @@ export default async function handler(req: any, res: any) {
     return res.status(500).json({ error: e instanceof Error ? e.message : 'roadmap_state write failed' })
   }
 
+  // Propagate the freshly-planned SEO into web_pages.seo for any page
+  // rows that already exist for this project. Historically the plan
+  // only landed on web_pages via handoff-to-pages, which meant the
+  // strategist saw an empty SEO tab immediately after step 8. This
+  // seeds it right away.
+  //
+  // Same rule handoff-to-pages uses: never clobber a non-empty seo
+  // block. The plan is a starting point, not a source of truth once a
+  // strategist or partner has touched it. `status: 'written'` reflects
+  // that the plan exists but hasn't been loaded into RankMath yet.
+  const seedResult = await seedWebPageSeoFromPlan(sb, projectId, bySlug)
+
   return res.status(200).json({
     ok:              true,
     project_id:      projectId,
     page_seo_plans:  artifactBody,
     skill_meta:      artifactBody._meta,
+    web_pages_seeded: seedResult,
     prompt_resolution: {
       global_source:        resolved.globalSource,
       has_project_addendum: resolved.hasProjectAddendum,
     },
   })
+}
+
+/** Copy each slug's SEO plan into its web_pages row's `seo` column when
+ *  the existing row's seo is empty. Returns per-slug status so callers
+ *  (and telemetry) can see which pages got seeded vs skipped. */
+async function seedWebPageSeoFromPlan(
+  sb:        any,
+  projectId: string,
+  plans:     Record<string, unknown>,
+): Promise<{ updated: string[]; skipped_nonempty: string[]; skipped_no_page: string[]; errors: Array<{ slug: string; error: string }> }> {
+  const summary = { updated: [] as string[], skipped_nonempty: [] as string[], skipped_no_page: [] as string[], errors: [] as Array<{ slug: string; error: string }> }
+  const plannedSlugs = Object.keys(plans)
+  if (plannedSlugs.length === 0) return summary
+
+  const { data: pageRows, error: pagesErr } = await sb
+    .from('web_pages')
+    .select('id, slug, seo')
+    .eq('web_project_id', projectId)
+    .in('slug', plannedSlugs)
+  if (pagesErr) {
+    console.warn('[run-plan-page-seo] web_pages load for seo seed failed:', pagesErr.message)
+    return summary
+  }
+  const bySlug = new Map<string, { id: string; slug: string; seo: Record<string, unknown> | null }>(
+    (pageRows ?? []).map((r: { id: string; slug: string; seo: Record<string, unknown> | null }) => [r.slug, r]),
+  )
+
+  for (const slug of plannedSlugs) {
+    const plan = plans[slug] as Record<string, unknown> | null
+    if (!plan) continue
+    const page = bySlug.get(slug)
+    if (!page) { summary.skipped_no_page.push(slug); continue }
+    const existingSeo = page.seo ?? null
+    const existingEmpty = !existingSeo || Object.keys(existingSeo).length === 0
+    if (!existingEmpty) { summary.skipped_nonempty.push(slug); continue }
+    const nextSeo = { ...plan, status: 'written' }
+    const { error: updErr } = await sb
+      .from('web_pages')
+      .update({ seo: nextSeo, updated_at: new Date().toISOString() })
+      .eq('id', page.id)
+    if (updErr) {
+      summary.errors.push({ slug, error: updErr.message })
+      console.warn(`[run-plan-page-seo] web_pages seo seed failed for ${slug}:`, updErr.message)
+    } else {
+      summary.updated.push(slug)
+    }
+  }
+  return summary
 }
 
 function mapGatewayError(res: any, e: unknown) {
