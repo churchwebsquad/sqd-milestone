@@ -169,7 +169,7 @@ export default async function handler(req: any, res: any) {
       const { data: session } = await sb
         .schema('srp_pipeline')
         .from('sessions')
-        .insert({ member: job.member, source: 'auto', video_url: videoUrl, status: 'transcribing' })
+        .insert({ member: job.member, clickup_task_id: taskId, source: 'auto', video_url: videoUrl, status: 'transcribing' })
         .select('session_id')
         .single()
       sessionId = session?.session_id ?? null
@@ -271,10 +271,11 @@ export default async function handler(req: any, res: any) {
       .schema('srp_pipeline')
       .from('sessions')
       .insert({
-        member:      memberNumber,
-        source:      'auto',
-        video_url:   videoUrl,
-        status:      'transcribing',
+        member:           memberNumber,
+        clickup_task_id:  taskId,
+        source:           'auto',
+        video_url:        videoUrl,
+        status:           'transcribing',
       })
       .select('session_id')
       .single()
