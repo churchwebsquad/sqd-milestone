@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Cog, Download, FileText, AlertCircle, Globe, Link as LinkIcon, ExternalLink, AlertTriangle, FolderOpen, Server, StickyNote } from 'lucide-react'
+import { Check, Cog, Download, FileText, AlertCircle, Globe, Link as LinkIcon, ExternalLink, AlertTriangle, FolderOpen, Loader2, Server, StickyNote } from 'lucide-react'
 import { WMButton } from '../Button'
 import { WMCard } from '../Card'
 import { supabase } from '../../../lib/supabase'
@@ -37,7 +37,7 @@ import {
 } from '../../../lib/cta'
 import { GLOBAL_FIELDS } from '../../../lib/webSnippets'
 import { composeSectionName } from '../../../lib/webSectionRoles'
-import { ANALYZER_REVISION, computeFormationPlan, saveFormationPlan, setSchemaOverride, type ContentModelPlan } from '../../../lib/acfFormationPlan'
+import { saveFormationPlan, setSchemaOverride, type ContentModelPlan } from '../../../lib/acfFormationPlan'
 import {
   buildRedirectDiff, redirectsToCsv, urlToPath,
   type CrawlUrlRow, type SitemapPage, type RedirectCandidate,
@@ -157,89 +157,50 @@ export function DevHandoffWorkspace({ project }: Props) {
     return () => { cancelled = true }
   }, [project.member])
 
-  // Content-model formation plan — Phase 1 preview. Persists to
-  // strategy_web_projects.roadmap_state.content_model_plan. Answers
-  // to open questions persist SEPARATELY under
-  // .content_model_plan_answers so a recompute doesn't wipe them.
-  const [cmStatus, setCmStatus] = useState<'idle' | 'computing' | 'success' | 'error'>('idle')
+  // Content-model formation plan. Auto-recomputes + persists on every
+  // mount so the DevHandoff panel is always a live read of the
+  // strategist's current content model (sections, templates, declared
+  // content models, discovery answers) with no manual refresh needed.
+  // Persists to strategy_web_projects.roadmap_state.content_model_plan
+  // so setSchemaOverride can read + mutate it. Open-question answers
+  // persist SEPARATELY under .content_model_plan_answers so this
+  // recompute never wipes them.
+  const [cmStatus, setCmStatus] = useState<'refreshing' | 'live' | 'error'>('refreshing')
   const [cmError,  setCmError]  = useState<string | null>(null)
   const [cmPlan,   setCmPlan]   = useState<ContentModelPlan | null>(null)
   const [cmAnswers, setCmAnswers] = useState<Record<string, string>>({})
-  const [cmStale, setCmStale]   = useState(false)
-  // Analyzer-code drift detection — distinct from input-drift staleness.
-  // True when the saved plan's `generated_by` doesn't match the current
-  // ANALYZER_REVISION (i.e. the analyzer logic has changed since the
-  // plan was computed). Tells the user "click Compute now to apply
-  // recent analyzer fixes" without surfacing a vague stale state.
-  const [cmCodeDrift, setCmCodeDrift] = useState(false)
-  // Track whether we've kicked off the auto-compute yet, to avoid
-  // re-firing on every roadmap_state change once the initial one is
-  // in flight. Scoped to project.id so a project switch triggers a
-  // fresh auto-compute.
-  const [autoComputedFor, setAutoComputedFor] = useState<string | null>(null)
-  // Seed from any previously saved plan so reloading the page shows
-  // the last counts without re-running the analyzer. When no persisted
-  // plan exists, auto-compute one in memory (skipping the expensive
-  // LLM enrichment) so the strategist-declared content models are
-  // visible immediately without waiting on a "Compute now" click.
-  // The in-memory result is not saved to the DB — clicking Compute
-  // now still writes the full plan (with LLM enrichment on if enabled)
-  // and persists it.
+
   useEffect(() => {
     const rs = project.roadmap_state as Record<string, unknown> | null
+    // Seed from the persisted plan immediately so the panel doesn't
+    // flash blank while the fresh compute runs in the background.
     const existing = rs?.content_model_plan as ContentModelPlan | undefined
-    if (existing?.schema_version === 1) {
-      setCmPlan(existing)
-      setCmStatus('success')
-      // Code-drift check: stamp on the plan vs current analyzer revision.
-      const savedRev = existing._meta?.generated_by ?? 'analyzer-v1'
-      setCmCodeDrift(savedRev !== ANALYZER_REVISION)
-    } else if (autoComputedFor !== project.id) {
-      // No persisted plan for this project — kick off a background
-      // compute (skipLlm) once per project session so the panel isn't
-      // blank on first open. Non-blocking; the full "Compute now"
-      // affordance stays available for the persisted, LLM-enriched run.
-      setAutoComputedFor(project.id)
-      let cancelled = false
-      void (async () => {
-        try {
-          const plan = await computeFormationPlan(project.id, supabase, { skipLlm: true })
-          if (cancelled) return
-          setCmPlan(plan)
-          setCmStatus('success')
-        } catch (e) {
-          if (cancelled) return
-          // Silent — this is a background nicety, not the primary path.
-          console.warn('[DevHandoff] auto-compute failed:', e)
-        }
-      })()
-      return () => { cancelled = true }
-    }
-    const persistedAnswers = rs?.content_model_plan_answers as Record<string, string> | undefined
-    if (persistedAnswers && typeof persistedAnswers === 'object') {
-      setCmAnswers(persistedAnswers)
-    }
-  }, [project.roadmap_state, project.id, autoComputedFor])
+    if (existing?.schema_version === 1) setCmPlan(existing)
 
-  // Stale detection: if any web_section in this project was updated
-  // after the plan was generated, McNeel should recompute. We don't
-  // auto-trigger because the analyzer is mildly expensive and the
-  // staff team prefers explicit refreshes.
-  useEffect(() => {
-    if (!cmPlan) { setCmStale(false); return }
+    const persistedAnswers = rs?.content_model_plan_answers as Record<string, string> | undefined
+    if (persistedAnswers && typeof persistedAnswers === 'object') setCmAnswers(persistedAnswers)
+
+    // Always recompute + persist so the panel is a live read. skipLlm
+    // keeps the cost tight (deterministic rules only); the LLM
+    // enrichment path was tied to the retired manual-compute workflow.
+    let cancelled = false
+    setCmStatus('refreshing')
+    setCmError(null)
     void (async () => {
-      const { data: maxRow } = await supabase
-        .from('web_sections')
-        .select('updated_at, web_page_id, web_pages!inner(web_project_id)')
-        .eq('web_pages.web_project_id', project.id)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      const latest = (maxRow as { updated_at?: string } | null)?.updated_at
-      if (!latest) { setCmStale(false); return }
-      setCmStale(new Date(latest) > new Date(cmPlan._meta.generated_at))
+      try {
+        const plan = await saveFormationPlan(project.id, supabase, { skipLlm: true })
+        if (cancelled) return
+        setCmPlan(plan)
+        setCmStatus('live')
+      } catch (e) {
+        if (cancelled) return
+        setCmError(e instanceof Error ? e.message : String(e))
+        setCmStatus('error')
+        console.warn('[DevHandoff] content-model recompute failed:', e)
+      }
     })()
-  }, [cmPlan, project.id])
+    return () => { cancelled = true }
+  }, [project.roadmap_state, project.id])
 
   /** Persist one open-question answer. Writes to
    *  roadmap_state.content_model_plan_answers as a flat
@@ -635,7 +596,7 @@ export function DevHandoffWorkspace({ project }: Props) {
               Grouped together so the dev sees content shape holistically. */}
           <ContentInventoryTechnicalCard session={contentSession} />
 
-          {/* ── Content model plan (Phase 1 preview) ──────────────── */}
+          {/* ── Content model plan (live) ─────────────────────────── */}
           <WMCard padding="loose">
             <div className="flex items-start justify-between gap-4 mb-3">
               <div>
@@ -646,37 +607,31 @@ export function DevHandoffWorkspace({ project }: Props) {
                   </h2>
                 </div>
                 <p className="text-[12px] text-wm-text-muted mt-1 max-w-xl">
-                  Reads every approved page's sections + template field
-                  schema and recommends a WordPress content model (CPTs,
-                  Options page, ACF field groups, Bricks Nestable vs ACF
-                  Flexible Content). Pure analyzer for now; full UI lands
-                  in Phase 2.
+                  Live read of the strategist's content model, reads every
+                  approved page's sections + template field schema and
+                  recommends a WordPress content model (CPTs, Options page,
+                  ACF field groups, Bricks Nestable vs ACF Flexible Content).
+                  Auto-refreshes when you open this tab.
                 </p>
               </div>
-              <WMButton
-                variant="primary"
-                size="md"
-                iconLeft={<Cog size={13} />}
-                disabled={cmStatus === 'computing'}
-                onClick={async () => {
-                  setCmStatus('computing')
-                  setCmError(null)
-                  try {
-                    const plan = await saveFormationPlan(project.id)
-                    setCmPlan(plan)
-                    setCmStatus('success')
-                    setCmCodeDrift(false)  // fresh compute matches current revision
-                  } catch (err) {
-                    setCmError(err instanceof Error ? err.message : String(err))
-                    setCmStatus('error')
-                  }
-                }}
+              <span
+                className={
+                  'shrink-0 inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full ' +
+                  (cmStatus === 'refreshing'
+                    ? 'bg-wm-accent-tint text-wm-accent-strong'
+                    : cmStatus === 'error'
+                      ? 'bg-red-50 text-red-700 border border-red-200'
+                      : 'bg-wm-success-bg text-wm-success')
+                }
+                title={cmPlan ? `Last synced ${new Date(cmPlan._meta.generated_at).toLocaleString()}` : undefined}
               >
-                {cmStatus === 'computing' ? 'Computing…' : 'Compute now'}
-              </WMButton>
+                {cmStatus === 'refreshing' && <><Loader2 size={11} className="animate-spin" /> Refreshing…</>}
+                {cmStatus === 'live'       && <><Check      size={11} /> Live</>}
+                {cmStatus === 'error'      && <><AlertTriangle size={11} /> Refresh failed</>}
+              </span>
             </div>
             {cmStatus === 'error' && cmError && (
-              <p className="text-[12px] text-red-600">Error: {cmError}</p>
+              <p className="text-[12px] text-red-600">Error refreshing: {cmError}</p>
             )}
             {cmPlan && (
               <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
@@ -687,23 +642,6 @@ export function DevHandoffWorkspace({ project }: Props) {
                 />
                 <CmStat label="ACF field groups"    value={cmPlan._meta.counts.acf_field_groups} />
                 <CmStat label="Low confidence"      value={cmPlan._meta.counts.low_confidence} />
-              </div>
-            )}
-            {cmPlan && (
-              <p className="text-[11px] text-wm-text-subtle mt-3">
-                Last computed {new Date(cmPlan._meta.generated_at).toLocaleString()} ·
-                input fingerprint <code>{cmPlan._meta.input_fingerprint}</code> ·
-                stored at <code>roadmap_state.content_model_plan</code>.
-              </p>
-            )}
-            {cmStale && cmStatus !== 'computing' && (
-              <div className="mt-2 rounded-md border border-wm-warn/40 bg-wm-warn-bg/60 text-wm-warn text-[11px] px-2.5 py-1.5 inline-flex items-center gap-1.5">
-                <AlertTriangle size={11} /> Plan is stale — sections have been edited since this was last computed. Click <strong>Compute now</strong> to refresh.
-              </div>
-            )}
-            {cmCodeDrift && cmStatus !== 'computing' && (
-              <div className="mt-2 rounded-md border border-wm-accent/40 bg-wm-accent-tint/40 text-wm-accent-strong text-[11px] px-2.5 py-1.5 inline-flex items-center gap-1.5">
-                <AlertTriangle size={11} /> Analyzer logic has been updated since this plan was computed (saved <code>{cmPlan?._meta.generated_by ?? 'unknown'}</code> · current <code>{ANALYZER_REVISION}</code>). Click <strong>Compute now</strong> to apply the new logic.
               </div>
             )}
             {cmPlan && <CmDownloadRow plan={cmPlan} answers={cmAnswers} projectSlug={projectSlug} />}
