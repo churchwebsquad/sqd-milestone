@@ -55,6 +55,7 @@ interface SquadTaskRow {
   status?:        string;
   date_created?:  string | number;
   date_updated?:  string | number;
+  due_date?:      string | number | null;
   url?:           string;
   assignees?:     Array<{ username?: string; email?: string }>;
 }
@@ -140,6 +141,9 @@ async function fetchSrpTasks(squadApiKey: string) {
       (Array.isArray(payload)          && payload)         ||
       [];
     if (rows.length === 0) break;
+
+    // Debug: log first row shape so we can see what fields Squad API returns
+    if (page === 1 && rows.length > 0) console.log("[debug] first raw row:", JSON.stringify(rows[0]).slice(0, 800));
 
     for (const t of rows) {
       const memberRaw = t.account;
@@ -250,11 +254,13 @@ async function fetchSrpTasksThisWeek(squadApiKey: string): Promise<{
       const memberRaw = t.account;
       const member = typeof memberRaw === "number" ? memberRaw : Number(memberRaw);
       if (!Number.isFinite(member) || member <= 0) continue;
+      const dueDateMs = Number(t.due_date ?? 0);
       allTasks.push({
         member,
         taskId:   t.id ?? "",
         taskName: t.name ?? "",
         status:   t.status ?? "",
+        dueDate:  dueDateMs ? new Date(dueDateMs).toISOString() : "",
       });
     }
 

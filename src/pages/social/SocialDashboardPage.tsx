@@ -24,6 +24,7 @@ interface SrpMeta {
   status: string
   createdAt: string
   updatedAt: string
+  dueDate?: string
 }
 
 interface AutoJob {
@@ -55,6 +56,15 @@ function isThisWeek(dateStr: string, weekStart: Date): boolean {
   const t = new Date(dateStr).getTime()
   const end = weekStart.getTime() + 7 * 24 * 60 * 60 * 1000
   return t >= weekStart.getTime() && t < end
+}
+
+// Parse sermon date from task name e.g. "4077 - July 5 Sermon Recap Posts"
+function parseDateFromTaskName(name: string): Date | null {
+  const match = name.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})\b/i)
+  if (!match) return null
+  const year = new Date().getFullYear()
+  const d = new Date(`${match[1]} ${match[2]}, ${year}`)
+  return isNaN(d.getTime()) ? null : d
 }
 
 // ── Add Profile Modal ─────────────────────────────────────────────────────────
@@ -288,12 +298,13 @@ export default function SocialDashboardPage() {
       setSrpMap(sm)
       const allTasksList = srpData.allTasks ?? []
       setAllTasks(allTasksList)
-      // Filter this week client-side — the Squad API's updated_after param
-      // returns all tasks regardless, so we filter by updatedAt locally.
+      // Filter by due date (primary) or task name date (fallback).
+      // Squad API doesn't return updatedAt timestamps reliably.
       const ws = getWeekStart(new Date())
-      setThisWeekTasks(allTasksList.filter(t => {
-        const d = t.updatedAt || t.createdAt || ''
-        return d ? isThisWeek(d, ws) : false
+      setThisWeekTasks((srpWeekData.tasks ?? []).filter(t => {
+        if (t.dueDate) return isThisWeek(t.dueDate, ws)
+        const d = parseDateFromTaskName(t.taskName ?? '')
+        return d ? isThisWeek(d.toISOString(), ws) : false
       }))
 
       // Surface ClickUp-only churches not yet in either DB table — deduplicated

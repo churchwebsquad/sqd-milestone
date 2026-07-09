@@ -148,7 +148,7 @@ export default async function handler(req: any, res: any) {
 
     // Find an auto-job for this task that is waiting for video
     const { data: job } = await (sb as any)
-      .from('strategy_srp_auto_jobs')
+      .schema('strategy').from('srp_auto_jobs')
       .select('id, member, session_id')
       .eq('clickup_task_id', taskId)
       .eq('video_status', 'waiting_for_upload')
@@ -157,7 +157,7 @@ export default async function handler(req: any, res: any) {
     if (!job) return res.status(200).json({ ok: true, ignored: 'no waiting auto-job for this task' })
 
     // Update the auto-job with the video URL
-    await (sb as any).from('strategy_srp_auto_jobs').update({
+    await (sb as any).schema('strategy').from('srp_auto_jobs').update({
       video_url:         videoUrl,
       video_status:      'found',
       transcript_status: 'in_progress',
@@ -174,7 +174,7 @@ export default async function handler(req: any, res: any) {
         .single()
       sessionId = session?.session_id ?? null
       if (sessionId) {
-        await (sb as any).from('strategy_srp_auto_jobs').update({ session_id: sessionId }).eq('id', job.id)
+        await (sb as any).schema('strategy').from('srp_auto_jobs').update({ session_id: sessionId }).eq('id', job.id)
       }
     }
 
@@ -189,7 +189,7 @@ export default async function handler(req: any, res: any) {
         })
       } catch (e) {
         console.warn('[clickup-srp] comment transcription fire error:', e instanceof Error ? e.message : e)
-        await (sb as any).from('strategy_srp_auto_jobs').update({
+        await (sb as any).schema('strategy').from('srp_auto_jobs').update({
           transcript_status: 'error',
           video_error: `Transcription failed to start: ${e instanceof Error ? e.message : 'unknown'}`,
         }).eq('id', job.id)
@@ -246,7 +246,7 @@ export default async function handler(req: any, res: any) {
 
   // ── Upsert auto-job row ──────────────────────────────────────────────
   const { data: autoJob, error: upsertErr } = await sb
-    .from('strategy_srp_auto_jobs')
+    .schema('strategy').from('srp_auto_jobs')
     .upsert({
       member:           memberNumber,
       clickup_task_id:  taskId,
@@ -282,7 +282,7 @@ export default async function handler(req: any, res: any) {
     if (sessionErr || !session) {
       console.error('[clickup-srp] session create error:', sessionErr?.message)
       // Update auto-job with error but still return 200 so ClickUp doesn't retry
-      await sb.from('strategy_srp_auto_jobs').update({
+      await sb.schema('strategy').from('srp_auto_jobs').update({
         transcript_status: 'error',
         video_error: `Failed to create SRP session: ${sessionErr?.message}`,
       }).eq('id', autoJob.id)
@@ -290,7 +290,7 @@ export default async function handler(req: any, res: any) {
     }
 
     // Store session_id on the auto-job
-    await sb.from('strategy_srp_auto_jobs').update({
+    await sb.schema('strategy').from('srp_auto_jobs').update({
       session_id:        session.session_id,
       transcript_status: 'in_progress',
     }).eq('id', autoJob.id)
@@ -313,7 +313,7 @@ export default async function handler(req: any, res: any) {
       })
     } catch (e) {
       console.warn('[clickup-srp] transcription fire error:', e instanceof Error ? e.message : e)
-      await sb.from('strategy_srp_auto_jobs').update({
+      await sb.schema('strategy').from('srp_auto_jobs').update({
         transcript_status: 'error',
         video_error: `Transcription failed to start: ${e instanceof Error ? e.message : 'unknown'}`,
       }).eq('id', autoJob.id)
