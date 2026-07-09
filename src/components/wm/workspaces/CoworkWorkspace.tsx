@@ -38,7 +38,7 @@ import { getCoworkSteps, type CoworkPipelineState, type StepCatalogEntry, type S
 import { expandCoworkTokens } from '../../../lib/cowork/coworkPromptContext'
 import { CoworkArtifactDrawer } from './CoworkArtifactDrawer'
 import { SitemapReviewEditor } from '../sitemapReview/SitemapReviewEditor'
-import { ApprovedSitemapBanner } from '../sitemapReview/ApprovedSitemapBanner'
+import { useSitemapReview } from '../../../lib/useSitemapReview'
 import type { StrategyWebProject } from '../../../types/database'
 
 interface Props {
@@ -98,10 +98,14 @@ export function CoworkWorkspace({ project, onChange }: Props) {
   // Shown above the progress card so the strategist sees constraints
   // BEFORE they fire any pipeline step.
   const [timelineNotes, setTimelineNotes]     = useState<string | null>(null)
-  // Partner-facing sitemap review overlay — opened from the "Sitemap
-  // ready" banner once step 6 is done. Composes a client-safe review
+  // Partner-facing sitemap review overlay — opened from Step 6's
+  // "Create sitemap review" / "View sitemap review" button once the
+  // plan-site-strategy step is done. Composes a client-safe review
   // from personas + pages + nav, publishes to /portal/sitemap/:token.
   const [sitemapReviewOpen, setSitemapReviewOpen] = useState(false)
+  // Whether a sitemap review row exists for this project — governs the
+  // Step 6 button label (Create vs View).
+  const { review: existingSitemapReview } = useSitemapReview(project.id)
 
   // ─── Data loaders ───────────────────────────────────────────────
 
@@ -675,18 +679,11 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         />
       )}
 
-      <ApprovedSitemapBanner
-        projectId={project.id}
-        churchName={project.church_name ?? undefined}
-        showAllStatuses
-      />
-
       <FoundationPipelineBanner
         state={state}
         pipelineRunning={pipelineRunning}
         pipelineProgress={pipelineProgress}
         onRun={() => void runFoundationPipeline(false)}
-        onForceRun={() => void runFoundationPipeline(true)}
       />
 
       <div className="flex flex-col gap-4">
@@ -703,6 +700,9 @@ export function CoworkWorkspace({ project, onChange }: Props) {
             onForceRerun={() => void runStep(step, true)}
             onApproveAsIs={() => void approveAsIs(step)}
             onOpenPartnerReview={step.key === 'plan-site-strategy' ? () => setSitemapReviewOpen(true) : undefined}
+            partnerReviewLabel={step.key === 'plan-site-strategy' ? (existingSitemapReview ? 'View sitemap review' : 'Create sitemap review') : undefined}
+            sitemapReviewStatus={step.key === 'plan-site-strategy' ? (existingSitemapReview?.status ?? null) : null}
+            projectSlugForFeedback={step.key === 'plan-site-strategy' && existingSitemapReview?.status === 'partner_reviewed' ? project.id : null}
             onViewDetails={() => setDrawerStep(step)}
           />
         ))}
@@ -741,13 +741,12 @@ export function CoworkWorkspace({ project, onChange }: Props) {
 // ────────────────────────────────────────────────────────────────────
 
 function FoundationPipelineBanner({
-  state, pipelineRunning, pipelineProgress, onRun, onForceRun,
+  state, pipelineRunning, pipelineProgress, onRun,
 }: {
   state:             CoworkPipelineState | null
   pipelineRunning:   boolean
   pipelineProgress:  { stepNumber: number; title: string } | null
   onRun:             () => void
-  onForceRun:        () => void
 }) {
   if (!state) return null
 
@@ -768,39 +767,12 @@ function FoundationPipelineBanner({
   ]
   const doneCount = checks.filter(c => c.done).length
 
-  // Sitemap done state. The "Partner sitemap review" action lives on
-  // the Plan the sitemap step card itself (see StepCard), so this
-  // banner only announces readiness and offers the destructive
-  // re-run-all path. Keeping the button on the step card avoids a
-  // second entry point that reads as an unrelated top-of-page tool.
-  if (sitemapReady && doneCount === 6) {
-    return (
-      <div className="mb-4 rounded-xl border border-wm-success bg-wm-success-bg px-4 py-3 flex items-start justify-between gap-3 flex-wrap">
-        <div className="min-w-0">
-          <p className="text-[13px] font-semibold text-wm-success">Sitemap ready for review.</p>
-          <p className="text-[11px] text-wm-success/80 mt-0.5">
-            Sub-steps 1 through 6 complete. Scroll to <strong>Plan the sitemap and navigation</strong> below to open the partner review from that step.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              // Force-re-run is destructive: overwrites the existing
-              // sitemap + every upstream artifact. Confirm before firing.
-              if (confirm('Force-re-run the entire foundation pipeline? This overwrites every artifact from atoms through the sitemap.')) {
-                onForceRun()
-              }
-            }}
-            className="text-[11px] font-semibold px-2.5 py-1 rounded-md border border-wm-success/40 text-wm-success hover:bg-wm-success/10"
-            title="Force-re-run the entire foundation pipeline. Use when the content collection changed and the sitemap needs to reflect new inputs."
-          >
-            Re-run all
-          </button>
-        </div>
-      </div>
-    )
-  }
+  // Sitemap done state falls through to the normal render below —
+  // the pipeline card doubles as the ready-state indicator (the
+  // header text swaps to "Sitemap ready" once doneCount === 6), and
+  // the partner-review entry point lives on the Plan the sitemap
+  // step card itself. Keeping only one banner avoids the extra
+  // top-of-page announcement that used to duplicate step 6's CTA.
 
   return (
     <div className="mb-4 rounded-xl border border-wm-border bg-wm-bg-elevated px-4 py-3">
@@ -1025,7 +997,7 @@ function Header({ projectId, readiness, readinessLoading, overallStats, timeline
 // StepCard
 // ────────────────────────────────────────────────────────────────────
 
-function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, onRun, onForceRerun, onApproveAsIs, onViewDetails, onOpenPartnerReview }: {
+function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, onRun, onForceRerun, onApproveAsIs, onViewDetails, onOpenPartnerReview, partnerReviewLabel, sitemapReviewStatus, projectSlugForFeedback }: {
   step:           StepCatalogEntry
   state:          CoworkPipelineState | null
   running:        boolean
@@ -1037,10 +1009,24 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
   onApproveAsIs:  () => void
   onViewDetails:  () => void
   /** Sitemap step only. When present + step is done, the card
-   *  renders the "Partner sitemap review" action inline so the
+   *  renders the "Create/View sitemap review" action inline so the
    *  strategist opens the composer from the same step that produced
    *  the sitemap. */
   onOpenPartnerReview?: () => void
+  /** Label for the partner-review button. "Create sitemap review"
+   *  when no review row exists yet, "View sitemap review" once one
+   *  has been drafted/published/approved. Only relevant when
+   *  onOpenPartnerReview is set. */
+  partnerReviewLabel?:  string
+  /** Sitemap review lifecycle status. When set (plan-site-strategy
+   *  step only) the card renders a lifecycle pill alongside the
+   *  base status badge so the strategist sees Draft / Awaiting partner
+   *  / Edits needed / Approved without opening the composer. */
+  sitemapReviewStatus?: 'draft' | 'published' | 'partner_reviewed' | 'approved' | null
+  /** When present, the card renders a "View partner feedback" button
+   *  that links to the dedicated staff feedback page. Set only when
+   *  the review is in `partner_reviewed` (staff-owed) status. */
+  projectSlugForFeedback?: string | null
 }) {
   const status   = state ? step.computeStatus(state) : 'blocked_waiting'
   const lastAt   = state && step.lastRunAt ? step.lastRunAt(state) : null
@@ -1099,7 +1085,8 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
           </h2>
           <p className="text-[11px] font-mono text-wm-text-subtle mt-1">{step.subtitle}</p>
         </div>
-        <div className="shrink-0">
+        <div className="shrink-0 flex items-center gap-1.5 flex-wrap justify-end">
+          {sitemapReviewStatus && <SitemapReviewStatusPill status={sitemapReviewStatus} />}
           <StatusBadge status={status} />
         </div>
       </div>
@@ -1203,6 +1190,18 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
                 View details
               </span>
             </button>
+            {projectSlugForFeedback && (
+              <a
+                href={`/web/${projectSlugForFeedback}/sitemap-feedback`}
+                className="text-[13px] font-semibold px-4 py-2 rounded-lg border border-wm-accent-strong text-wm-accent-strong hover:bg-wm-accent-tint transition-colors"
+                title="See the partner's edit requests + overall notes alongside the original draft, plus a ready-to-paste cowork prompt for applying the changes."
+              >
+                <span className="flex items-center gap-1.5">
+                  <Eye size={13} />
+                  View partner feedback
+                </span>
+              </a>
+            )}
             {onOpenPartnerReview && (
               <button
                 type="button"
@@ -1212,7 +1211,7 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
               >
                 <span className="flex items-center gap-1.5">
                   <ArrowRight size={13} />
-                  Partner sitemap review
+                  {partnerReviewLabel ?? 'Sitemap review'}
                 </span>
               </button>
             )}
@@ -1667,6 +1666,24 @@ function StatusBadge({ status }: { status: StepStatus }) {
   if (status === 'blocked_waiting')  return <WMStatusPill tone="neutral" size="md">Waiting</WMStatusPill>
   if (status === 'cowork_session')   return <WMStatusPill tone="ai"      size="md">Cowork session</WMStatusPill>
   if (status === 'aggregate_info')   return <WMStatusPill tone="success" size="md" icon={<Check size={12} />}>Auto-extracted</WMStatusPill>
+  return null
+}
+
+/** Sitemap review lifecycle pill. Rendered next to the step's base
+ *  StatusBadge on the plan-site-strategy card so the strategist sees
+ *  where the partner-facing review sits without opening the composer.
+ *
+ *  Mapping:
+ *   - draft            → "Draft"            (staff authoring, unshared)
+ *   - published        → "Awaiting partner" (shared, no partner input yet)
+ *   - partner_reviewed → "Edits needed"     (partner submitted, staff owes)
+ *   - approved         → "Approved"         (locked as canonical)
+ */
+function SitemapReviewStatusPill({ status }: { status: 'draft' | 'published' | 'partner_reviewed' | 'approved' }) {
+  if (status === 'draft')            return <WMStatusPill tone="neutral" size="md">Draft review</WMStatusPill>
+  if (status === 'published')        return <WMStatusPill tone="info"    size="md">Awaiting partner</WMStatusPill>
+  if (status === 'partner_reviewed') return <WMStatusPill tone="warning" size="md">Edits needed</WMStatusPill>
+  if (status === 'approved')         return <WMStatusPill tone="success" size="md" icon={<Check size={12} />}>Review approved</WMStatusPill>
   return null
 }
 
