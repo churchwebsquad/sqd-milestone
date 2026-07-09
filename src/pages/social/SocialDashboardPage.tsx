@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Search, Brain, Sparkles, ArrowUpDown, Plus, X, Loader2, Save } from 'lucide-react'
+import { Search, Brain, Sparkles, ArrowUpDown, Plus, X, Loader2, Save, Mic, Clock, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import type { StrategySocialProProfile } from '../../types/database'
@@ -24,6 +24,13 @@ interface SrpMeta {
   status: string
   createdAt: string
   updatedAt: string
+}
+
+interface AutoJob {
+  member: number
+  video_status: 'pending' | 'found' | 'waiting_for_upload' | 'error'
+  transcript_status: 'pending' | 'in_progress' | 'ready' | 'error' | 'skipped'
+  video_error: string | null
 }
 
 type SortMode = 'srp' | 'member' | 'alpha'
@@ -199,6 +206,9 @@ export default function SocialDashboardPage() {
   const [intelMap, setIntelMap]   = useState<Map<number, IntelMeta>>(new Map())
   const [srpMap, setSrpMap]       = useState<Map<number, SrpMeta>>(new Map())
   const [smmMap, setSmmMap]       = useState<Map<number, string>>(new Map())
+  const [autoJobMap, setAutoJobMap] = useState<Map<number, AutoJob>>(new Map())
+  const [allTasks, setAllTasks]         = useState<SrpMeta[]>([])
+  const [thisWeekTasks, setThisWeekTasks] = useState<SrpMeta[]>([])
   const [loading, setLoading]     = useState(true)
   const [search, setSearch]       = useState('')
   const [sort, setSort]           = useState<SortMode>('srp')
@@ -236,21 +246,27 @@ export default function SocialDashboardPage() {
       setIntelMap(im)
 
       // Enrichment — read from pre-fetched cache table first, fall back to live APIs
-      const [cacheRes, smmLiveRes] = await Promise.allSettled([
+      const [cacheRes, smmLiveRes, autoJobRes] = await Promise.allSettled([
         (supabase as any)
           .from('strategy_srp_hub_cache')
           .select('cache_key, data, refreshed_at')
-          .in('cache_key', ['srp_tasks', 'smm_assignments']),
+          .in('cache_key', ['srp_tasks', 'smm_assignments', 'srp_tasks_this_week']),
         fetch('/api/notion/smm-assignments').then(r => r.ok ? r.json() : null),
+        (supabase as any)
+          .from('strategy_srp_auto_jobs')
+          .select('member, video_status, transcript_status, video_error')
+          .gte('week_start', getWeekStart(new Date()).toISOString().split('T')[0]),
       ])
 
       let srpData: { tasks: SrpMeta[]; allTasks: SrpMeta[] } = { tasks: [], allTasks: [] }
+      let srpWeekData: { tasks: SrpMeta[]; total: number } = { tasks: [], total: 0 }
       let smmData: { assignments: { member: number; smm: string }[] } = { assignments: [] }
 
       if (cacheRes.status === 'fulfilled' && cacheRes.value.data) {
         for (const row of cacheRes.value.data as { cache_key: string; data: any }[]) {
-          if (row.cache_key === 'srp_tasks')       srpData = row.data
-          if (row.cache_key === 'smm_assignments') smmData = row.data
+          if (row.cache_key === 'srp_tasks')            srpData = row.data
+          if (row.cache_key === 'smm_assignments')     smmData = row.data
+          if (row.cache_key === 'srp_tasks_this_week') srpWeekData = row.data
         }
       }
 
@@ -270,6 +286,8 @@ export default function SocialDashboardPage() {
       const sm = new Map<number, SrpMeta>()
       for (const row of srpData.tasks) sm.set(row.member, row)
       setSrpMap(sm)
+      setAllTasks(srpData.allTasks ?? [])
+      setThisWeekTasks(srpWeekData.tasks ?? [])
 
       // Surface ClickUp-only churches not yet in either DB table — deduplicated
       const allMemberSet = new Set(allChurches.map(c => c.member))
@@ -290,6 +308,12 @@ export default function SocialDashboardPage() {
       const smm = new Map<number, string>()
       for (const row of smmData.assignments) smm.set(row.member, row.smm)
       setSmmMap(smm)
+
+      const aj = new Map<number, AutoJob>()
+      if (autoJobRes.status === 'fulfilled' && autoJobRes.value.data) {
+        for (const row of autoJobRes.value.data as AutoJob[]) aj.set(row.member, row)
+      }
+      setAutoJobMap(aj)
     }
     void load()
   }, [])
@@ -336,14 +360,120 @@ export default function SocialDashboardPage() {
     setAddingMember(null)
   }, [])
 
+  const [overdueOpen, setOverdueOpen] = useState(false)
+
+  const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000
+  const overdueChurches = useMemo(() => {
+    const now = Date.now()
+    return churches.filter(c => {
+      if (c.socialPro) return false // only All-In churches
+      const srp = srpMap.get(c.member)
+      if (!srp) return true // never submitted
+      const lastMs = new Date(srp.updatedAt || srp.createdAt).getTime()
+      return isNaN(lastMs) || (now - lastMs) >= TWO_WEEKS_MS
+    })
+  }, [churches, srpMap])
+
+  const STATUS_LABELS: Record<string, string> = {
+    'open':                  'Open',
+    'dependent':             'Dependent',
+    'more info need':        'More Info Need',
+    'received':              'Received',
+    'waiting feedback':      'Waiting Feedback',
+    'needs an update':       'Needs an Update',
+    'on hold':               'On Hold',
+    'deliverables needed':   'Deliverables Needed',
+    'final files delivered': 'Final Files Delivered',
+    'closed':                'Closed',
+  }
+
+  // Normalize status to lowercase for matching
+  const normalizeStatus = (s: string) => s.toLowerCase().trim()
+
+  const statusCounts = Object.fromEntries(
+    Object.keys(STATUS_LABELS).map(s => [s, 0])
+  ) as Record<string, number>
+  for (const t of thisWeekTasks) {
+    const key = normalizeStatus(t.status ?? '')
+    if (key in statusCounts) statusCounts[key]++
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
 
-      <div className="mb-8">
+      <div className="mb-6">
         <p className="text-xs font-semibold text-[#513DE5] uppercase tracking-widest mb-1">Social</p>
         <h1 className="text-3xl font-bold text-[#341756]">Social Hub</h1>
         <p className="text-sm text-gray-500 mt-1">All partner churches — click one to open their Social Hub.</p>
       </div>
+
+      {/* Stats bar */}
+      <div className="bg-white border border-[#CFC9F8] rounded-2xl p-5 mb-6">
+        <div className="flex items-baseline gap-2 mb-4">
+          <span className="text-2xl font-bold text-[#341756]">{thisWeekTasks.length}</span>
+          <span className="text-sm text-gray-500">SRPs this week</span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {Object.entries(STATUS_LABELS).map(([key, label]) => (
+            <div key={key} className="bg-[#F9F5F1] rounded-xl px-3 py-2.5">
+              <p className="text-xl font-bold text-[#341756]">{statusCounts[key] ?? 0}</p>
+              <p className="text-[11px] text-gray-500 mt-0.5 leading-tight">{label}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Overdue alert */}
+      {overdueChurches.length > 0 && (
+        <div className="mb-6">
+          <button
+            type="button"
+            onClick={() => setOverdueOpen(o => !o)}
+            className="w-full flex items-center justify-between bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 hover:bg-amber-100 transition-colors text-left"
+          >
+            <div className="flex items-center gap-3">
+              <AlertCircle size={18} className="text-amber-500 shrink-0" />
+              <div>
+                <p className="text-sm font-bold text-amber-800">
+                  {overdueChurches.length} All-In {overdueChurches.length === 1 ? 'church has' : 'churches have'} not submitted an SRP in 2+ weeks
+                </p>
+                <p className="text-xs text-amber-600 mt-0.5">Click to {overdueOpen ? 'hide' : 'view'} the list</p>
+              </div>
+            </div>
+            <span className="text-amber-500 text-lg">{overdueOpen ? '▲' : '▼'}</span>
+          </button>
+
+          {overdueOpen && (
+            <div className="mt-2 bg-white border border-amber-200 rounded-2xl overflow-hidden">
+              <div className="divide-y divide-gray-100">
+                {overdueChurches.map(c => {
+                  const srp = srpMap.get(c.member)
+                  const lastDate = srp
+                    ? new Date(srp.updatedAt || srp.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                    : null
+                  return (
+                    <Link
+                      key={c.member}
+                      to={`/social/${c.member}`}
+                      className="flex items-center justify-between px-5 py-3 hover:bg-amber-50 transition-colors"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-[#341756]">{c.church_name ?? `Member #${c.member}`}</p>
+                        <p className="text-xs text-gray-400">
+                          #{c.member}{c.css_rep ? ` · AM: ${c.css_rep}` : ''}
+                        </p>
+                      </div>
+                      <p className="text-xs text-amber-600 font-medium shrink-0 ml-4">
+                        {lastDate ? `Last SRP: ${lastDate}` : 'No SRP on record'}
+                      </p>
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Search + sort */}
       <div className="flex items-center gap-3 mb-6 flex-wrap">
@@ -454,6 +584,35 @@ export default function SocialDashboardPage() {
                           <Sparkles size={10} /> No SRP yet
                         </span>
                       )}
+                      {(() => {
+                        const job = autoJobMap.get(c.member)
+                        if (!job) return null
+                        if (job.transcript_status === 'ready') return (
+                          <span className="inline-flex items-center gap-1 text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                            <CheckCircle2 size={10} /> Transcript ready
+                          </span>
+                        )
+                        if (job.transcript_status === 'in_progress' || job.video_status === 'found') return (
+                          <span className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">
+                            <Loader2 size={10} className="animate-spin" /> Transcribing…
+                          </span>
+                        )
+                        if (job.video_status === 'waiting_for_upload') return (
+                          <span className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full font-medium">
+                            <Clock size={10} /> Waiting for video
+                          </span>
+                        )
+                        if (job.video_status === 'error' || job.transcript_status === 'error') return (
+                          <span className="inline-flex items-center gap-1 text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full font-medium" title={job.video_error ?? undefined}>
+                            <AlertCircle size={10} /> Video error
+                          </span>
+                        )
+                        return (
+                          <span className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full">
+                            <Mic size={10} /> SRP queued
+                          </span>
+                        )
+                      })()}
                     </div>
                   </Link>
 

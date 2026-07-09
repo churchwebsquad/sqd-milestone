@@ -189,6 +189,83 @@ async function fetchSrpTasks(squadApiKey: string) {
   return { tasks, allTasks };
 }
 
+// ── Squad API — this week's SRP tasks (Fri–Thu work week) ────────────────────
+// Uses updated_after to get only tasks touched this week, so the stats bar
+// on the Social Hub shows an accurate weekly count.
+
+function getWeekStartTimestamp(): number {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  // getDay(): 0=Sun 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri 6=Sat
+  const daysSinceFri = now.getDay() === 5 ? 0 : now.getDay() === 6 ? 1 : now.getDay() + 2;
+  now.setDate(now.getDate() - daysSinceFri);
+  return now.getTime();
+}
+
+async function fetchSrpTasksThisWeek(squadApiKey: string): Promise<{
+  tasks: Array<{ member: number; taskId: string; taskName: string; status: string }>;
+  total: number;
+}> {
+  const weekStartMs = getWeekStartTimestamp();
+  const allTasks: Array<{ member: number; taskId: string; taskName: string; status: string }> = [];
+
+  const PER_PAGE      = 50;
+  const FETCH_TIMEOUT = 25_000;
+  let page = 1;
+
+  while (true) {
+    const url = new URL(`${SQUAD_API_BASE}/v1/tasks/list`);
+    url.searchParams.set("tag",            "sms-sermon-recap");
+    url.searchParams.set("include_closed", "true");
+    url.searchParams.set("per_page",       String(PER_PAGE));
+    url.searchParams.set("page",           String(page));
+    url.searchParams.set("updated_after",  String(weekStartMs));
+
+    let res: Response | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 500));
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT);
+      try {
+        const r = await fetch(url.toString(), {
+          headers: { Authorization: `Bearer ${squadApiKey}` },
+          signal:  ac.signal,
+        });
+        if (r.ok) { res = r; break; }
+        if (r.status < 500 && r.status !== 429) break;
+      } catch { /* retry */ } finally { clearTimeout(timer); }
+    }
+    if (!res) break;
+
+    const payload = await res.json();
+    const rows: SquadTaskRow[] =
+      (Array.isArray(payload?.tasks)   && payload.tasks)   ||
+      (Array.isArray(payload?.data)    && payload.data)    ||
+      (Array.isArray(payload?.results) && payload.results) ||
+      (Array.isArray(payload)          && payload)         ||
+      [];
+    if (rows.length === 0) break;
+
+    for (const t of rows) {
+      const memberRaw = t.account;
+      const member = typeof memberRaw === "number" ? memberRaw : Number(memberRaw);
+      if (!Number.isFinite(member) || member <= 0) continue;
+      allTasks.push({
+        member,
+        taskId:   t.id ?? "",
+        taskName: t.name ?? "",
+        status:   t.status ?? "",
+      });
+    }
+
+    if (rows.length < PER_PAGE) break;
+    page += 1;
+    if (page > 20) break;
+  }
+
+  return { tasks: allTasks, total: allTasks.length };
+}
+
 // ── Notion: fetch SMM assignments ─────────────────────────────────────────────
 // Source: All-In Members database (collection://1f2e83f7-31f6-80f0-b787-000b47cfcde6)
 // Properties: "Member #" (number), "SMS Team Member" (select)
@@ -255,15 +332,25 @@ Deno.serve(async (req: Request) => {
 
   const results: Record<string, string> = {};
 
-  // ── SRP tasks ────────────────────────────────────────────────────────────────
+  // ── SRP tasks (all) + this week's tasks ─────────────────────────────────────
   try {
-    const srpData = await fetchSrpTasks(squadApiKey);
-    await supabase.from("strategy_srp_hub_cache").upsert({
-      cache_key:    "srp_tasks",
-      data:         srpData,
-      refreshed_at: new Date().toISOString(),
-    }, { onConflict: "cache_key" });
-    results.srp_tasks = `ok — ${srpData.tasks.length} churches`;
+    const [srpData, srpWeekData] = await Promise.all([
+      fetchSrpTasks(squadApiKey),
+      fetchSrpTasksThisWeek(squadApiKey),
+    ]);
+    await Promise.all([
+      supabase.from("strategy_srp_hub_cache").upsert({
+        cache_key:    "srp_tasks",
+        data:         srpData,
+        refreshed_at: new Date().toISOString(),
+      }, { onConflict: "cache_key" }),
+      supabase.from("strategy_srp_hub_cache").upsert({
+        cache_key:    "srp_tasks_this_week",
+        data:         srpWeekData,
+        refreshed_at: new Date().toISOString(),
+      }, { onConflict: "cache_key" }),
+    ]);
+    results.srp_tasks = `ok — ${srpData.tasks.length} churches, ${srpWeekData.total} this week`;
   } catch (e) {
     results.srp_tasks = `error: ${e instanceof Error ? e.message : String(e)}`;
   }
