@@ -49,6 +49,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { setRoadmapStateAtomic } from '../agents/_lib/roadmapStateMerge.js'
 import { snapshotPageVersion } from '../agents/_lib/pageSnapshot.js'
+import { mapPlanToWebPageSeo } from '../../../src/lib/webPageSeoFromPlan.js'
 
 export const maxDuration = 60
 
@@ -1473,7 +1474,11 @@ export default async function handler(req: any, res: any) {
     // RankMath; the Pages workspace pill flips it to
     // 'added_to_rankmath' once the strategist confirms.
     const seoPlan = (seoPlans[slug] ?? null) as Record<string, unknown> | null
-    const seededSeo = seoPlan ? { ...seoPlan, status: 'written' } : null
+    // Map the flat plan onto the canonical WebPageSeo shape the Pages
+    // workspace SEO panel + Dev Handoff SEO export table read. See
+    // src/lib/webPageSeoFromPlan.ts. Prior versions wrote the raw
+    // plan and the UI showed em-dashes.
+    const seededSeo = seoPlan ? mapPlanToWebPageSeo(seoPlan, { status: 'written' }) : null
 
     // Upsert web_pages row
     let pageId: string

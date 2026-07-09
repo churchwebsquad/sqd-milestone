@@ -29,6 +29,7 @@ import { guardOrRefuse } from './_lib/stalenessGuard.js'
 import { BUNDLE_VERSION } from '../../../src/types/coworkBundle.js'
 import { renderStrategicGoalsForStep } from '../../../src/lib/cowork/strategicGoalsContext.js'
 import type { StrategicGoalsSnapshot } from '../../../src/lib/cowork/strategicGoals.js'
+import { mapPlanToWebPageSeo } from '../../../src/lib/webPageSeoFromPlan.js'
 
 export const maxDuration = 300
 
@@ -287,7 +288,13 @@ async function seedWebPageSeoFromPlan(
     const existingSeo = page.seo ?? null
     const existingEmpty = !existingSeo || Object.keys(existingSeo).length === 0
     if (!existingEmpty) { summary.skipped_nonempty.push(slug); continue }
-    const nextSeo = { ...plan, status: 'written' }
+    // Map the flat plan onto the canonical WebPageSeo shape the Pages
+    // workspace SEO panel + Dev Handoff SEO export table read. Without
+    // this the raw plan lands as web_pages.seo and the UI shows
+    // em-dashes because it looks for seo.title / seo.meta_description
+    // / seo.focus_keywords, not the plan's flat meta_title /
+    // meta_description / primary_keyword keys.
+    const nextSeo = mapPlanToWebPageSeo(plan, { status: 'written' })
     const { error: updErr } = await sb
       .from('web_pages')
       .update({ seo: nextSeo, updated_at: new Date().toISOString() })
