@@ -291,10 +291,10 @@ export default function SocialIntelProfileView({ profile, editMode, onProfileCha
           </div>
         ) : (
           <div className="mt-4 flex flex-wrap">
-            <LinkButton href={ov.website} label="Website" />
-            <LinkButton href={ov.instagram} label="Instagram" />
-            <LinkButton href={ov.facebook} label="Facebook" />
-            <LinkButton href={ov.youtube} label="YouTube" />
+            {ov.website && <LinkButton href={ov.website} label="Website" />}
+            {ov.instagram && <LinkButton href={ov.instagram} label="Instagram" />}
+            {ov.facebook && <LinkButton href={ov.facebook} label="Facebook" />}
+            {ov.youtube && <LinkButton href={ov.youtube} label="YouTube" />}
             {ov.tiktok && <LinkButton href={ov.tiktok} label="TikTok" />}
           </div>
         )}
