@@ -12,33 +12,21 @@
  * where state leaks between sessions cannot recur.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Loader2, Plus, RefreshCw, Search, X, Sparkles, ArrowRight, Settings2, Building2 } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { Loader2, RefreshCw, Sparkles, Settings2, Building2 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import {
-  createSession,
   listSessions,
   type SrpSessionListRow as SessionListRow,
   STEP_LABELS,
 } from '../lib/srpSessions'
 import { SrpHeroHeading } from '../components/srp/_shared/SrpHeading'
-import { SrpButton } from '../components/srp/_shared/SrpButton'
-
-interface AccountOption {
-  member: string
-  church_name: string
-  css_rep?: string | null
-}
-
 export default function SrpDashboardPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [sessions, setSessions]   = useState<SessionListRow[]>([])
   const [loading, setLoading]     = useState(true)
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [creating, setCreating]   = useState(false)
   const [error, setError]         = useState<string | null>(null)
   const [filter, setFilter]       = useState<'mine' | 'all'>('mine')
 
@@ -63,24 +51,6 @@ export default function SrpDashboardPage() {
 
   useEffect(() => { void refresh() }, [refresh])
 
-  const handleCreate = useCallback(async (account: AccountOption) => {
-    if (!userEmail) return
-    setCreating(true)
-    try {
-      const { session_id } = await createSession({
-        member: account.member,
-        churchName: account.church_name,
-        userEmail,
-      })
-      setPickerOpen(false)
-      navigate(`/social/srp/${encodeURIComponent(session_id)}`)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create session')
-    } finally {
-      setCreating(false)
-    }
-  }, [navigate, userEmail])
-
   return (
     <div className="min-h-full bg-[var(--color-cream)] py-8 px-4 md:px-8">
       <div className="max-w-5xl mx-auto space-y-6">
@@ -92,22 +62,12 @@ export default function SrpDashboardPage() {
             suffix="Pipeline."
             subtitle="Text deliverables for the weekly social run — captions, posts, carousels, photo recaps. Open a session per partner, generate, and ship."
           />
-          <div className="flex items-center gap-2">
-            <Link
-              to="/social/srp/prompts"
-              className="inline-flex items-center gap-1.5 text-[12px] text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] px-2 py-1 transition-colors"
-            >
-              <Settings2 size={12} /> Prompt settings
-            </Link>
-            <SrpButton
-              onClick={() => setPickerOpen(true)}
-              disabled={!userEmail}
-              leadingIcon={<Plus size={14} />}
-              trailingIcon={<ArrowRight size={14} />}
-            >
-              New SRP
-            </SrpButton>
-          </div>
+          <Link
+            to="/social/srp/prompts"
+            className="inline-flex items-center gap-1.5 text-[12px] text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] px-2 py-1 transition-colors"
+          >
+            <Settings2 size={12} /> Prompt settings
+          </Link>
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
@@ -204,13 +164,6 @@ export default function SrpDashboardPage() {
         </div>
       </div>
 
-      {pickerOpen && (
-        <AccountPickerModal
-          onCancel={() => setPickerOpen(false)}
-          onPick={handleCreate}
-          busy={creating}
-        />
-      )}
     </div>
   )
 }
@@ -227,117 +180,3 @@ function StatusPill({ status }: { status: string | null }) {
   )
 }
 
-function AccountPickerModal({ onCancel, onPick, busy }: {
-  onCancel: () => void
-  onPick: (a: AccountOption) => void
-  busy: boolean
-}) {
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<AccountOption[]>([])
-  const [searching, setSearching] = useState(false)
-
-  useEffect(() => {
-    const q = query.trim()
-    if (q.length < 2) { setResults([]); return }
-    setSearching(true)
-    const handle = setTimeout(async () => {
-      const isNumeric = /^\d+$/.test(q)
-      // Build a single chain rather than reassigning `req` — Supabase's
-      // PostgrestFilterBuilder generics collapse to `never` after the
-      // ternary-then-reassign pattern, hiding row column types.
-      type AccountRow = { member: number | null; church_name: string | null; css_rep: string | null }
-      const baseQuery = supabase
-        .from('strategy_account_progress')
-        .select('member, church_name, css_rep')
-        .limit(20)
-      const res = isNumeric
-        ? await baseQuery.eq('member', Number(q))
-        : await baseQuery.ilike('church_name', `%${q}%`)
-      // PostgrestFilterBuilder generics collapse to `never` under the
-      // .eq() / .ilike() union (different filter-applied generic args),
-      // erasing the column shape we selected. Cast to the concrete row
-      // shape we just selected for.
-      const data = res.data as AccountRow[] | null
-      const rows = (data ?? []).map(r => ({
-        member: String(r.member ?? ''),
-        church_name: String(r.church_name ?? ''),
-        css_rep: r.css_rep,
-      })).filter(r => r.member && r.church_name)
-      setResults(rows)
-      setSearching(false)
-    }, 250)
-    return () => clearTimeout(handle)
-  }, [query])
-
-  const hasResults = useMemo(() => results.length > 0, [results])
-
-  return (
-    <div className="fixed inset-0 z-50 bg-[var(--color-deep-plum)]/40 backdrop-blur-sm flex items-start justify-center pt-24 px-4" onClick={onCancel}>
-      <div
-        className="w-full max-w-lg rounded-xl bg-white border border-[var(--color-lavender)] shadow-2xl overflow-hidden"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="px-5 py-3.5 flex items-center justify-between border-b border-[var(--color-lavender)] bg-[var(--color-lavender-tint)]">
-          <h2 className="text-[14px] font-semibold text-[var(--color-deep-plum)]">Pick an account</h2>
-          <button
-            onClick={onCancel}
-            className="text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] transition-colors"
-            aria-label="Close"
-          ><X size={16} /></button>
-        </div>
-        <div className="p-5 space-y-3">
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-purple-gray)]" />
-            <input
-              type="text"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="Member number or church name"
-              autoFocus
-              className="w-full rounded-full border border-[var(--color-lavender)] bg-white pl-9 pr-3 py-2 text-[13px] text-[var(--color-deep-plum)] placeholder:text-[var(--color-purple-gray)] focus:outline-none focus:border-[var(--color-primary-purple)] focus:ring-2 focus:ring-[var(--color-lavender)]"
-            />
-          </div>
-          <div className="max-h-[300px] overflow-y-auto">
-            {searching && (
-              <p className="text-[12px] text-[var(--color-purple-gray)] py-2 px-1">
-                <Loader2 size={12} className="animate-spin inline mr-1.5" /> Searching…
-              </p>
-            )}
-            {!searching && query.trim().length >= 2 && !hasResults && (
-              <p className="text-[12px] text-[var(--color-purple-gray)] py-2 px-1">No matches.</p>
-            )}
-            {hasResults && (
-              <ul className="divide-y divide-[var(--color-lavender)] rounded-lg border border-[var(--color-lavender)] overflow-hidden">
-                {results.map(r => (
-                  <li key={r.member}>
-                    <button
-                      onClick={() => onPick(r)}
-                      disabled={busy}
-                      className="w-full text-left px-4 py-2.5 hover:bg-[var(--color-lavender-tint)] disabled:opacity-50 transition-colors flex items-center gap-3"
-                    >
-                      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-[var(--color-lavender-tint)] text-[var(--color-primary-purple)]">
-                        <Building2 size={12} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <p className="text-[13px] font-medium text-[var(--color-deep-plum)] truncate">{r.church_name}</p>
-                        <p className="text-[11px] text-[var(--color-purple-gray)] truncate">
-                          <span className="font-mono">{r.member}</span>
-                          {r.css_rep && <span> · {r.css_rep}</span>}
-                        </p>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          {busy && (
-            <p className="text-[11px] text-[var(--color-primary-purple)]">
-              <Loader2 size={12} className="animate-spin inline mr-1.5" /> Creating session…
-            </p>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}

@@ -230,9 +230,10 @@ Deno.serve(async (req) => {
   const anthropicKey  = Deno.env.get("ANTHROPIC_API_KEY");
   const firecrawlKey  = Deno.env.get("FIRECRAWL_API_KEY");
   const notionToken   = Deno.env.get("NOTION_TOKEN");
-  const squadApiKey   = Deno.env.get("SQUAD_API_KEY");
   const supabaseUrl   = Deno.env.get("SUPABASE_URL");
   const supabaseKey   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  // Squad API accepts either a dedicated API key or the user's Supabase JWT
+  const squadApiKey   = Deno.env.get("SQUAD_API_KEY") ?? req.headers.get("authorization")?.replace("Bearer ", "") ?? undefined;
 
   if (!anthropicKey) return json({ error: "ANTHROPIC_API_KEY secret not set" }, 500);
   if (!firecrawlKey) return json({ error: "FIRECRAWL_API_KEY secret not set" }, 500);
@@ -241,13 +242,93 @@ Deno.serve(async (req) => {
 
   let memberId: number;
   let amNotes: string | undefined;
+  let brandGuideUrlOverride: string | undefined;
+  let section: string | undefined;
   try {
     const body = await req.json();
     memberId = Number(body.memberId);
     amNotes  = body.amNotes;
+    brandGuideUrlOverride = body.brandGuideUrl || undefined;
+    section  = body.section || undefined; // e.g. 'whats_happening_now'
     if (!memberId) return json({ error: "memberId is required" }, 400);
   } catch {
     return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  // ── Targeted section refresh (fast path) ─────────────────────────────────
+  if (section === "whats_happening_now") {
+    const supabase = createClient(supabaseUrl!, supabaseKey!);
+    const { data: progressData } = await supabase
+      .from("strategy_account_progress")
+      .select("church_name, church_website")
+      .eq("member", memberId)
+      .maybeSingle();
+    if (!progressData) return json({ error: `No church found for member ${memberId}` }, 404);
+    const churchName = (progressData as Record<string, unknown>).church_name as string ?? "";
+    const websiteUrl = (progressData as Record<string, unknown>).church_website as string ?? "";
+
+    // Scrape website for current series/events
+    let crawlMarkdown = "";
+    if (websiteUrl && firecrawlKey) {
+      try {
+        const scrapeRes = await fetch(FIRECRAWL_SCRAPE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${firecrawlKey}` },
+          body: JSON.stringify({ url: websiteUrl, formats: ["markdown"], onlyMainContent: false }),
+        });
+        if (scrapeRes.ok) {
+          const d = await scrapeRes.json();
+          crawlMarkdown = ((d?.data ?? d)?.markdown ?? "") as string;
+        }
+      } catch { /* silent */ }
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const nowPrompt = `Research what is currently happening at ${churchName} (church website: ${websiteUrl || "unknown"}).
+
+Website content (scraped):
+${crawlMarkdown ? crawlMarkdown.slice(0, 5000) : "Not available."}
+
+Using the above AND web_search, find:
+- Current sermon series name and week number
+- Any upcoming events in the next 4–6 weeks (with dates if visible)
+- Any recent notable changes (new staff, rebrand, new campus, new service times, etc.)
+
+Return ONLY this JSON — no explanation, no markdown fences:
+{
+  "current_series": "",
+  "series_week": "",
+  "upcoming_events": [],
+  "recent_changes": "",
+  "am_notes": "",
+  "refreshed_at": "${today}"
+}`;
+
+    const anthropicRes = await fetch(ANTHROPIC_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 2000,
+        tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],
+        messages: [{ role: "user", content: nowPrompt }],
+      }),
+    });
+
+    if (!anthropicRes.ok) return json({ error: "AI request failed" }, 502);
+    const anthropicData = await anthropicRes.json();
+    let rawText = "";
+    for (const block of anthropicData.content ?? []) {
+      if (block.type === "text") rawText += block.text;
+    }
+    rawText = rawText.replace(/<cite[^>]*>.*?<\/cite>/gs, "").trim();
+    try {
+      const match = rawText.match(/\{[\s\S]*\}/);
+      const whatsHappeningNow = JSON.parse(match ? match[0] : rawText);
+      return json({ whats_happening_now: whatsHappeningNow });
+    } catch {
+      return json({ error: "AI returned malformed JSON", raw: rawText.slice(0, 300) }, 502);
+    }
   }
 
   // ── 1. Supabase — pull everything we have on this church ──────────────────
@@ -335,14 +416,14 @@ Deno.serve(async (req) => {
             const scrapeRes = await fetch(FIRECRAWL_SCRAPE_URL, {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${firecrawlKey}` },
-              body: JSON.stringify({ url: websiteUrl, formats: ["markdown", "links"], onlyMainContent: false }),
+              body: JSON.stringify({ url: websiteUrl, formats: ["markdown", "rawHtml", "links"], onlyMainContent: false }),
             });
-            if (!scrapeRes.ok) return { markdown: "", links: [] };
+            if (!scrapeRes.ok) return { markdown: "", rawHtml: "", links: [] };
             const d = await scrapeRes.json();
             const page = d?.data ?? d;
-            return { markdown: (page?.markdown ?? "") as string, links: (page?.links ?? []) as string[] };
+            return { markdown: (page?.markdown ?? "") as string, rawHtml: (page?.rawHtml ?? "") as string, links: (page?.links ?? []) as string[] };
           } catch {
-            return { markdown: "", links: [] };
+            return { markdown: "", rawHtml: "", links: [] };
           }
         })()
       : Promise.resolve({ markdown: "", links: [] }),
@@ -385,7 +466,9 @@ Deno.serve(async (req) => {
 
   if (needsFallback && firecrawlKey) {
     // Fallback 1: scrape the brand guide URL from prf_brand_guides if we have one
-    const brandGuideUrl = (brandGuideData as Record<string, unknown> | null)?.url as string | undefined
+    const brandGuideUrl = brandGuideUrlOverride
+      ?? (brandGuideData as Record<string, unknown> | null)?.brand_guide_link as string | undefined
+      ?? (brandGuideData as Record<string, unknown> | null)?.url as string | undefined
       ?? (brandGuideData as Record<string, unknown> | null)?.guide_url as string | undefined;
 
     if (brandGuideUrl) {
@@ -393,10 +476,10 @@ Deno.serve(async (req) => {
       brandGuideFallbackText = await scrapeBrandGuideUrl(brandGuideUrl, firecrawlKey);
     }
 
-    // Fallback 2: extract colors/fonts from website HTML
-    if (crawlResult.markdown) {
-      console.log("[social-intel] Brand fallback 2: extracting from website HTML");
-      websiteBrandFallback = extractBrandFromHtml(crawlResult.markdown);
+    // Fallback 2: extract colors/fonts from raw HTML (markdown loses CSS/meta tags)
+    if (crawlResult.rawHtml) {
+      console.log("[social-intel] Brand fallback 2: extracting from website rawHtml");
+      websiteBrandFallback = extractBrandFromHtml(crawlResult.rawHtml);
     }
   }
 
@@ -522,7 +605,8 @@ After researching, return ONLY this JSON:
     "series_week": "",
     "upcoming_events": [],
     "recent_changes": "",
-    "am_notes": ""
+    "am_notes": "",
+    "refreshed_at": "${today}"
   },
   "cms_history": {
     "milestones_completed": [],

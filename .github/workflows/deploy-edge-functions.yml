@@ -1,0 +1,53 @@
+name: Deploy Edge Functions
+
+# Runs on pushes to main (and amber/social-intel while that branch is active).
+# Deploys only the functions whose source files changed in the push.
+on:
+  push:
+    branches: [main, amber/social-intel]
+    paths:
+      - 'supabase/functions/**'
+
+jobs:
+  deploy:
+    name: Deploy changed edge functions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # need parent commit to diff against
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Find changed functions
+        id: changed
+        run: |
+          # List function dirs that changed between this commit and its parent
+          CHANGED=$(git diff --name-only HEAD^ HEAD -- supabase/functions/ \
+            | grep '^supabase/functions/' \
+            | cut -d/ -f3 \
+            | grep -v '^_' \
+            | sort -u)
+          echo "functions<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGED" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "Changed functions: $CHANGED"
+
+      - name: Deploy changed functions
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          FUNCTIONS="${{ steps.changed.outputs.functions }}"
+          if [ -z "$FUNCTIONS" ]; then
+            echo "No edge functions changed — skipping deploy."
+            exit 0
+          fi
+          for fn in $FUNCTIONS; do
+            if [ -f "supabase/functions/$fn/index.ts" ]; then
+              echo "Deploying $fn..."
+              supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF"
+            fi
+          done

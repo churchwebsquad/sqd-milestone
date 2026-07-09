@@ -39,7 +39,10 @@ export function SrpSidebarStepper({
         {items.map((it, i) => {
           const isActive = i === currentIx
           const isDone   = i < currentIx
-          const canJump  = i <= currentIx
+          // All steps are always jumpable — this is a session workspace,
+          // not a strict wizard. Coaches need to revisit any step after
+          // client revisions without clicking Continue through every step.
+          const canJump  = true
           const Icon     = it.icon
           return (
             <li key={it.step}>
@@ -53,7 +56,7 @@ export function SrpSidebarStepper({
                     ? 'bg-[var(--color-lavender-tint)] text-[var(--color-deep-plum)]'
                     : isDone
                       ? 'text-[var(--color-deep-plum)] hover:bg-[var(--color-lavender-tint)]/60 cursor-pointer'
-                      : 'text-[var(--color-purple-gray)] cursor-not-allowed opacity-70',
+                      : 'text-[var(--color-purple-gray)] hover:bg-[var(--color-lavender-tint)]/40 cursor-pointer opacity-60',
                 ].join(' ')}
               >
                 {/* Numbered / checked avatar. Active = filled Primary

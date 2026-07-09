@@ -20,7 +20,7 @@ import { useParams } from 'react-router-dom'
 import {
   Building2, ListChecks, FileVideo, Scissors, Film,
   LayoutGrid, MessageSquare, Mail, Camera,
-  Palette, Wand2, Sparkles,
+  Wand2, Sparkles, ClipboardList, Sliders,
   Loader2,
 } from 'lucide-react'
 import {
@@ -36,13 +36,14 @@ import { loadSquadAccount } from '../lib/squadAccount'
 import { AccountSelectionStep }     from '../components/srp/steps/AccountSelectionStep'
 import { DeliverableSelectionStep } from '../components/srp/steps/DeliverableSelectionStep'
 import { SermonInputStep }          from '../components/srp/steps/SermonInputStep'
+import { TranscriptOverviewStep }   from '../components/srp/steps/TranscriptOverviewStep'
 import { ClipSelectionStep }        from '../components/srp/steps/ClipSelectionStep'
+import { PreRenderEditStep }        from '../components/srp/steps/PreRenderEditStep'
 import { ReelCaptionsStep }         from '../components/srp/steps/ReelCaptionsStep'
 import { CarouselStep }             from '../components/srp/steps/CarouselStep'
 import { FacebookStep }             from '../components/srp/steps/FacebookStep'
 import { SundayInviteStep }         from '../components/srp/steps/SundayInviteStep'
 import { PhotoRecapStep }           from '../components/srp/steps/PhotoRecapStep'
-import { CreativeDirectionStep }    from '../components/srp/steps/CreativeDirectionStep'
 import { ClipProcessingStep }       from '../components/srp/steps/ClipProcessingStep'
 import { ApprovedContentStep }      from '../components/srp/steps/ApprovedContentStep'
 import type { SrpWorkflowStep } from '../types/database'
@@ -51,13 +52,14 @@ const STEP_ICONS: Record<SrpWorkflowStep, SrpSidebarStepperItem['icon']> = {
   account:           Building2,
   deliverables:      ListChecks,
   sermon:            FileVideo,
+  overview:          ClipboardList,
   clips:             Scissors,
+  preRenderEdit:     Sliders,
   reelCaptions:      Film,
   carousel:          LayoutGrid,
   facebook:          MessageSquare,
   sundayInvite:      Mail,
   photoRecap:        Camera,
-  creativeDirection: Palette,
   clipProcessing:    Wand2,
   approved:          Sparkles,
 }
@@ -66,13 +68,14 @@ const STEP_COMPONENTS: Record<SrpWorkflowStep, () => ReactElement> = {
   account:           AccountSelectionStep,
   deliverables:      DeliverableSelectionStep,
   sermon:            SermonInputStep,
+  overview:          TranscriptOverviewStep,
   clips:             ClipSelectionStep,
+  preRenderEdit:     PreRenderEditStep,
   reelCaptions:      ReelCaptionsStep,
   carousel:          CarouselStep,
   facebook:          FacebookStep,
   sundayInvite:      SundayInviteStep,
   photoRecap:        PhotoRecapStep,
-  creativeDirection: CreativeDirectionStep,
   clipProcessing:    ClipProcessingStep,
   approved:          ApprovedContentStep,
 }

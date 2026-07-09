@@ -20,6 +20,7 @@ import { useClipcutterJob } from '../../../lib/srpRealtime'
 import { SrpButton } from '../_shared/SrpButton'
 import { callSrpApi } from '../../../lib/srpApi'
 import { STEP_LABELS, STEP_DESCRIPTIONS } from '../../../lib/srpSessions'
+import { supabase } from '../../../lib/supabase'
 
 interface StartClipcutterResponse {
   job_id:         string
@@ -51,7 +52,6 @@ export function ClipProcessingStep() {
     clipSelections,
     clipcutterJobId, setClipcutterJobId,
     srpTemplate, backgroundMusic, designerNotes,
-    reel1Caption, reel2Caption,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
@@ -66,8 +66,7 @@ export function ClipProcessingStep() {
     if (clipSelections.length === 0) { setStartError('No clips picked.'); return }
     setStarting(true); setStartError(null)
     try {
-      const captions = [reel1Caption, reel2Caption]
-      const clipsPayload = clipSelections.slice(0, 2).map((c, i) => ({
+      const clipsPayload = clipSelections.map((c, i) => ({
         clip_id:       c.clip_id ?? `clip_${i + 1}`,
         clip_name:     c.clip_name ?? c.category ?? `Reel ${i + 1}`,
         in_point_ms:   timestampToMs(c.startTime),
@@ -75,8 +74,9 @@ export function ClipProcessingStep() {
         duration_ms:   Math.max(0, timestampToMs(c.endTime) - timestampToMs(c.startTime)),
         quote:         c.quote ?? null,
         category:      c.category ?? null,
-        caption_text:  captions[i] ?? null,
+        caption_text:  c.social_caption ?? null,
       }))
+      const { data: { session: authSession } } = await supabase.auth.getSession()
       const r = await callSrpApi<StartClipcutterResponse>('start-clipcutter', {
         session_id: sessionId,
         clips:      clipsPayload,
@@ -85,14 +85,14 @@ export function ClipProcessingStep() {
           background_music: backgroundMusic,
           designer_notes:   designerNotes || null,
         },
-      })
+      }, { authToken: authSession?.access_token })
       setClipcutterJobId(r.job_id)
     } catch (e) {
       setStartError(e instanceof Error ? e.message : 'failed to start clipcutter')
     } finally {
       setStarting(false)
     }
-  }, [sessionId, clipSelections, srpTemplate, backgroundMusic, designerNotes, reel1Caption, reel2Caption, setClipcutterJobId])
+  }, [sessionId, clipSelections, srpTemplate, backgroundMusic, designerNotes, setClipcutterJobId])
 
   const clipResults = useMemo<ClipResult[]>(
     () => Array.isArray(job?.clip_results) ? (job.clip_results as ClipResult[]) : [],

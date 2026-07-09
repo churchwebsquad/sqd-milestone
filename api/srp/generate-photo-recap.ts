@@ -1,16 +1,15 @@
 /**
  * Vercel Serverless Function — /api/srp/generate-photo-recap
  *
- * Generates 3-5 photo recap caption options for a Sunday service
- * photo carousel. The system prompt branches on `category`:
+ * Two prompt modes branched on body.promptType:
+ *   'highlights' (default) — service experience, atmosphere, milestone moments
+ *   'teaching'             — congregation photos + message reflection
  *
- *   - serviceHighlights   — baptisms, worship, child dedications, etc.
- *   - weekendTeaching     — recap of the sermon's key points
- *   - seriesStartEnd      — kicking off or wrapping a sermon series
- *   - generalCelebration  — generic Sunday vibe (default)
+ * The "lookingBack" field (from the ClickUp task or typed by the coach)
+ * is the heaviest signal — it tells the AI what actually happened that weekend.
  *
- *   POST { transcript?, brandVoice?, accountContext?, category?, userGuidance? }
- *   → 200 { captions: [{ text, brandVoiceTags? }, ...] }
+ *   POST { transcript?, brandVoice?, accountContext?, promptType?, lookingBack?, userGuidance?, keyInsights? }
+ *   → 200 { captions: [{ text, brandVoiceTags }, ...] }
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -26,23 +25,94 @@ import {
 
 export const maxDuration = 45
 
-const CATEGORY_DEFAULTS: Record<string, string> = {
-  serviceHighlights: `You are a social media manager for a church, tasked with writing engaging captions for a photo carousel that recaps the weekend services. Focus on creating a warm, celebratory tone that reflects the spiritual impact and sense of community. Keep the captions concise, conversational, and uplifting. Include a call to action that encourages interaction (like tagging friends or sharing thoughts). Use relevant emojis and a branded hashtag.
+const HIGHLIGHTS_PROMPT = `You are a social media copywriter for churches. Write engaging captions for a photo carousel that recaps this past weekend's service highlights.
 
-Use the provided sermon transcript or submission details to identify event highlights (baptisms, worship moments, child dedications, etc.), spiritual impact (joy, faith, renewal), community feel (gratitude and connection), and craft 3-5 caption options with a call to action encouraging comments, tagging, or participation.`,
+VOICE:
+Follow the provided voice guide exactly. This is your highest-priority style constraint. Match its tone, vocabulary, sentence structure, and energy level precisely. Do not default to a generic "church marketing" tone. The caption should sound like it was written by someone who was actually in the room, not someone writing a press release about it.
 
-  weekendTeaching: `You are a social media manager for a church, tasked with writing an engaging caption for a photo carousel that features the congregation and highlights from the weekend's service. The tone should be thoughtful, faith-centered, inviting, and include a short recap of the weekend's message. The goal is to reflect on the key points from the sermon, create a sense of connection, and encourage people to engage in the comments or attend the next service. Keep it conversational and inspiring, using a mix of direct reflection and a call to action.
+PURPOSE:
+This caption sits alongside photos from the weekend. Its job is to make someone who wasn't there wish they had been, and make someone who was there feel proud they showed up. It's a highlight reel in words — not a summary, not a report, not an announcement.
 
-Use the provided sermon transcript to identify the core message, emotional impact, and next steps. Craft 3-5 caption options that summarize key points and encourage engagement or attendance.`,
+LENGTH & FORMAT:
+- 3-5 sentences. Long enough to capture the feeling of the weekend, short enough to keep momentum.
+- Avoid em dashes. Use periods, commas, or line breaks instead.
+- Use line breaks between distinct moments or ideas to create breathing room.
+- Never write in first person. No "I," "me," "my," or "mine." Use "we" and "you" to keep it communal.
+- Do not use the word "energy."
+- Use emojis only if the voice guide does. If the voice guide is silent on emojis, limit to 1-2 max and only where they add warmth, not decoration.
 
-  seriesStartEnd: `You are a social media manager for a church, tasked with writing an engaging caption for a photo carousel that highlights the experience of the weekend service as the beginning or end of a sermon series. Focus on creating a tone that feels personal, authentic, and connected to the reader. Mention practical or relatable details that help the reader see themselves in the moment (e.g., conversations in the lobby, meaningful worship moments, or how people responded). Keep the language simple, direct, and warm — like you're talking to a friend. Include a clear but gentle call to action.
+CONTENT RULES:
+- Lead with the most vivid or emotionally resonant moment from the weekend. Not the most important on paper — the most felt.
+- If specific highlights are provided (baptisms, worship moments, child dedications, salvations, special guests, milestones), weave them in naturally. Show what they felt like, not just what they were.
+- If no specific highlights are provided, write about the general feeling of gathering — the atmosphere, the connection, the moments between the big moments.
+- Avoid vague spiritual language that sounds nice but says nothing. "God moved this weekend" is empty. "There wasn't a dry eye during the baptisms" is specific.
+- Don't recap the sermon. This is about the experience, not the content.
+- Paint small, specific pictures. The sound of the room during worship. The look on someone's face during prayer. Details make it real.
 
-Use the provided sermon transcript to identify the series title, atmosphere, personal moments, and next steps. Craft 3-5 caption options that feel authentic and inviting.`,
+WHAT TO CAPTURE:
+- Milestone moments. Baptisms, salvations, child dedications, membership commitments, volunteer milestones. Name them with specificity and warmth.
+- Worship atmosphere. What did it feel like in the room? Not "worship was amazing" but what made it amazing.
+- Community feel. Hugs in the lobby, first-time visitors being welcomed, someone saving a seat for a friend.
+- Spiritual impact. What shifted in the room? Ground it in a specific moment, not an abstract claim.
+Not every caption needs to cover all four. Lead with what was strongest this particular weekend.
 
-  generalCelebration: `You are a social media manager for a church, tasked with writing an engaging caption for a photo carousel that reflects on and celebrates the Sunday service experience. Since this is a general post, focus on capturing the overall atmosphere and emotional tone of the service — connection, worship, and community. Keep the tone warm, conversational, and faith-centered, as if you're talking to a friend. The goal is to create a sense of belonging and invite engagement through reflection or a call to action.
+GENERATE 3-5 CAPTION OPTIONS. Each option should take a different angle:
+- One that leads with a milestone moment (if applicable)
+- One that leads with the atmosphere or worship experience
+- One that leads with community and connection
+- One that's short and punchy — 2 sentences max, just vibes
+- One that's slightly longer and more reflective
+If fewer than 5 angles apply, generate fewer. Three great options beat five mediocre ones. Every caption must feel distinct.
 
-Use any available sermon transcript context to craft 3-5 caption options that celebrate the service atmosphere, community, and spiritual tone. Encourage sharing, commenting, or attending next week.`,
-}
+CALLS TO ACTION:
+Every caption should end with a call to action, but vary the format. Options: tag someone who was there, tag someone who should come next week, share a favorite moment in the comments, drop an emoji reaction, share the post to their story, "save this to remember the moment." Keep CTAs natural and warm. At least one caption option should have a softer CTA or none at all — just a statement that's strong enough to inspire engagement on its own.
+
+HASHTAGS:
+End each caption with 3-5 hashtags on a separate line. Always include the church's branded hashtag if one has been provided. Mix broad tags with specific ones tied to the weekend's highlights.`
+
+const TEACHING_PROMPT = `You are a social media copywriter for churches. Write engaging captions for a photo carousel that features the congregation and reflects on this past weekend's message.
+
+VOICE:
+Follow the provided voice guide exactly. This is your highest-priority style constraint. Match its tone, vocabulary, sentence structure, and energy level precisely. Do not default to a generic "church marketing" tone. The caption should sound like someone reflecting on what they heard Sunday, not someone writing a sermon summary for a church bulletin.
+
+PURPOSE:
+This caption pairs with photos of the congregation from the weekend. Its job is twofold: help someone who was there relive the moment and carry the message into their week, and make someone who wasn't there feel like they missed something worth showing up for next time. The photos show the people. The caption carries the message.
+
+LENGTH & FORMAT:
+- 4-6 sentences. Enough room to touch on the message and land with a next step, but not so long it becomes a blog post.
+- Avoid em dashes. Use periods, commas, or line breaks instead.
+- Use line breaks to separate the reflection from the call to action.
+- Never write in first person. No "I," "me," "my," or "mine." Use "we" and "you."
+- Do not use the word "energy."
+- Use emojis only if the voice guide does. If the voice guide is silent on emojis, limit to 1-2 max.
+
+CONTENT RULES:
+- This is NOT a sermon summary. Capture the essence of the message in 1-2 sentences max, then pivot to reflection, application, or invitation.
+- Translate the sermon into real life. What does this message look like on a Monday morning? In a difficult conversation? When you're tired and doubting?
+- Ground the message in a single core idea. Trying to cover everything makes the caption feel like cliff notes.
+- Connect the message to the photos. These are pictures of real people in a real room. The caption should feel communal, grounded, human.
+- Avoid vague spiritual language. "God is doing something amazing" says nothing. "This room was full of people choosing to show up even when life is heavy" says everything.
+- If a sermon quote is used, keep it to one short quote max. It must not use first person — if the original quote uses "I," rephrase it or choose a different one.
+- If the sermon referenced a key Bible verse, you can include it. Weave it in naturally and always include the translation (e.g. "Romans 8:28 ESV").
+
+HOW TO USE THE SERMON TRANSCRIPT:
+- Find the single most resonant idea, not the outline.
+- Look for the moment where the sermon got personal, got quiet, or got real.
+- Pull out any practical next steps or challenges the sermon offered — these become your call to action.
+
+GENERATE 3-5 CAPTION OPTIONS. Each option should take a different angle:
+- The reflection. Lead with the core message translated into everyday language. Write it like a thought someone would have driving home from church.
+- The challenge. Lead with a practical next step or application from the sermon. Frame it as an invitation, not an assignment.
+- The verse anchor. Lead with the key Bible verse, then briefly connect it to the sermon's message and to the reader's real life.
+- The community angle. Lead with what it felt like to hear this message together.
+- The short and sharp. 2-3 sentences max. Distill the sermon's core idea into a single thought.
+Not every angle will apply every week. Three great captions beat five forced ones. Every caption must feel distinct.
+
+CALLS TO ACTION:
+Every caption should end with an invitation, but vary the format. Options tied to the message: "What's one thing from Sunday you're carrying into this week? Drop it below." "Share this with someone who needs to hear it today." Options tied to attendance: "Bring someone with you next Sunday." Keep CTAs warm and natural. At least one caption should close with a strong reflective statement instead of an explicit CTA.
+
+HASHTAGS:
+End each caption with 3-5 hashtags on a separate line. Always include the church's branded hashtag if provided. Mix broad reach tags with sermon-specific or series-specific tags.`
 
 const TOOL_SCHEMA: ToolSchema = {
   type: 'object',
@@ -52,7 +122,7 @@ const TOOL_SCHEMA: ToolSchema = {
       items: {
         type: 'object',
         properties: {
-          text:           { type: 'string', description: 'The photo recap caption text.' },
+          text:           { type: 'string', description: 'The photo recap caption text with hashtags.' },
           brandVoiceTags: { type: 'array', items: { type: 'string' }, description: 'Short tags quoting the exact source phrases (Guidelines:, Speaks as:, Bible:, Notes:).' },
         },
         required: ['text', 'brandVoiceTags'],
@@ -75,15 +145,15 @@ export default async function handler(req: any, res: any) {
   const brandVoice     = typeof req.body?.brandVoice === 'string' ? req.body.brandVoice : ''
   const accountContext = (req.body?.accountContext ?? {}) as Record<string, any>
   const userGuidance   = typeof req.body?.userGuidance === 'string' ? req.body.userGuidance : ''
-  const catKey         = (typeof req.body?.category === 'string' && req.body.category in CATEGORY_DEFAULTS)
-    ? (req.body.category as keyof typeof CATEGORY_DEFAULTS)
-    : 'generalCelebration'
+  const lookingBack    = typeof req.body?.lookingBack === 'string' ? req.body.lookingBack : ''
+  const promptType     = req.body?.promptType === 'teaching' ? 'teaching' : 'highlights'
+  const keyInsights:   string[] = Array.isArray(req.body?.keyInsights) ? req.body.keyInsights : []
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
-  const promptKey   = `photo_recap_${catKey}`
-  const fallback    = CATEGORY_DEFAULTS[catKey]
-  const basePrompt  = (await resolvePrompt(sb, promptKey)) ?? fallback
+  const promptKey  = `photo_recap_${promptType}`
+  const fallback   = promptType === 'teaching' ? TEACHING_PROMPT : HIGHLIGHTS_PROMPT
+  const basePrompt = (await resolvePrompt(sb, promptKey)) ?? fallback
 
   const ctxParts: string[] = []
   if (brandVoice)                       ctxParts.push(`Manually pasted brand voice guidelines:\n${brandVoice}`)
@@ -95,19 +165,30 @@ export default async function handler(req: any, res: any) {
 
   const systemPrompt = [basePrompt, ctx, BRAND_VOICE_TAGS_BLOCK].filter(Boolean).join('\n\n')
 
+  const insightsSection = keyInsights.length
+    ? `\n\nKEY INSIGHTS FROM THIS SERVICE:\n${keyInsights.map((ins, i) => `${i + 1}. ${ins}`).join('\n')}`
+    : ''
+
+  // "Looking back" is the primary signal — weight it heavily in the prompt
+  const lookingBackSection = lookingBack.trim()
+    ? `\n\nWHAT HAPPENED THIS WEEKEND (use this as your primary source — this is the most important context):\n${lookingBack}`
+    : ''
+
   const userPrompt =
-    `Here is the sermon transcript / submission context:\n\n` +
-    (transcript || 'No transcript provided — write general captions for a weekend service photo recap.') +
-    (userGuidance ? `\n\nAdditional guidance from the user: "${userGuidance}"` : '')
+    `Generate 3-5 photo recap caption options for this weekend's service.\n` +
+    lookingBackSection +
+    insightsSection +
+    (transcript ? `\n\nSermon transcript (use for message context where relevant):\n${transcript.slice(0, 20000)}` : '') +
+    (userGuidance ? `\n\nAdditional guidance: "${userGuidance}"` : '')
 
   try {
     const result = await callGateway<{ captions: any[] }>({
       system: systemPrompt,
-      user:   userPrompt.slice(0, 30000),
+      user:   userPrompt,
       toolName: 'return_captions',
       toolDescription: 'Return 3-5 photo recap caption options with brand voice tags.',
       toolSchema: TOOL_SCHEMA,
-      maxTokens: 2500,
+      maxTokens: 3000,
     })
     return res.status(200).json({
       captions: result.args.captions ?? [],

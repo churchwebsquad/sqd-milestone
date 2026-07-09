@@ -9,7 +9,17 @@ interface ChurchOption {
   church_website: string | null
 }
 
-type Screen = 'form' | 'loading' | 'profile' | 'error'
+interface SavedProfile {
+  id: string
+  member: number
+  intel_profile: object
+  intel_version: number
+  intel_updated_at: string
+  intel_updated_by: string
+  status: string
+}
+
+type Screen = 'form' | 'loading' | 'profile' | 'error' | 'list'
 
 export default function SocialIntelPage() {
   const [searchParams] = useSearchParams()
@@ -24,6 +34,11 @@ export default function SocialIntelPage() {
   const [errorMsg, setErrorMsg] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [editMode, setEditMode] = useState(false)
+  const [wasEdited, setWasEdited] = useState(false)
+  const [savedProfiles, setSavedProfiles] = useState<SavedProfile[]>([])
+  const [listLoading, setListLoading] = useState(false)
+  const [currentProfileId, setCurrentProfileId] = useState<string | null>(null)
 
   useEffect(() => {
     supabase
@@ -58,12 +73,50 @@ export default function SocialIntelPage() {
 
   const selectedChurch = churches.find(c => c.member === selectedMember) ?? null
 
+  const loadSavedProfiles = useCallback(async () => {
+    setListLoading(true)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = supabase as any
+      const { data } = await db
+        .from('strategy_church_intel')
+        .select('id, member, intel_profile, intel_version, intel_updated_at, intel_updated_by, status')
+        .eq('status', 'live')
+        .order('intel_updated_at', { ascending: false })
+      setSavedProfiles((data ?? []) as SavedProfile[])
+    } finally {
+      setListLoading(false)
+    }
+  }, [])
+
+  const openList = useCallback(async () => {
+    setScreen('list')
+    await loadSavedProfiles()
+  }, [loadSavedProfiles])
+
+  const openSavedProfile = (saved: SavedProfile) => {
+    const church = churches.find(c => c.member === saved.member)
+    setSelectedMember(saved.member)
+    setProfile(saved.intel_profile)
+    setCurrentProfileId(saved.id)
+    setProfileMeta(null)
+    setSaved(true)
+    setEditMode(false)
+    setWasEdited(false)
+    setScreen('profile')
+    // Pre-fill search to match the church
+    if (church?.church_name) setSearch(church.church_name)
+  }
+
   const generate = useCallback(async () => {
     if (!selectedMember) return
     setScreen('loading')
     setProfile(null)
     setErrorMsg('')
     setSaved(false)
+    setEditMode(false)
+    setWasEdited(false)
+    setCurrentProfileId(null)
 
     try {
       const { data, error } = await supabase.functions.invoke('social-intel-generate', {
@@ -89,13 +142,28 @@ export default function SocialIntelPage() {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const db = supabase as any
-      const { data: existing } = await db
-        .from('strategy_church_intel')
-        .select('id, intel_version')
-        .eq('member', selectedMember)
-        .maybeSingle()
+
+      // Use currentProfileId if we loaded from saved, otherwise look up by member
+      let existing: { id: string; intel_version: number } | null = null
+      if (currentProfileId) {
+        existing = { id: currentProfileId, intel_version: 0 }
+        const { data } = await db.from('strategy_church_intel').select('id, intel_version').eq('id', currentProfileId).maybeSingle()
+        if (data) existing = data
+      } else {
+        const { data } = await db
+          .from('strategy_church_intel')
+          .select('id, intel_version')
+          .eq('member', selectedMember)
+          .maybeSingle()
+        existing = data ?? null
+      }
 
       const version = (existing?.intel_version ?? 0) + 1
+      const reason = wasEdited
+        ? 'Manual edit'
+        : existing
+        ? 'Social Intel Profile regenerated'
+        : 'Initial Social Intel Profile generated'
 
       if (existing) {
         await db.from('strategy_church_intel').update({
@@ -111,8 +179,9 @@ export default function SocialIntelPage() {
           version,
           intel_profile: profile,
           author_email: email,
-          reason: 'Social Intel Profile generated',
+          reason,
         })
+        setCurrentProfileId(existing.id)
       } else {
         const { data: inserted } = await db.from('strategy_church_intel').insert({
           member: selectedMember,
@@ -129,12 +198,14 @@ export default function SocialIntelPage() {
             version: 1,
             intel_profile: profile,
             author_email: email,
-            reason: 'Initial Social Intel Profile generated',
+            reason,
           })
+          setCurrentProfileId(inserted.id)
         }
       }
 
       setSaved(true)
+      setWasEdited(false)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Save failed'
       alert(`Save failed: ${msg}`)
@@ -143,16 +214,80 @@ export default function SocialIntelPage() {
     }
   }
 
+  const handleProfileChange = (updated: object) => {
+    setProfile(updated)
+    setSaved(false)
+    setWasEdited(true)
+  }
+
+  const churchNameForMember = (member: number) =>
+    churches.find(c => c.member === member)?.church_name ?? `Member ${member}`
+
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
 
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-[#341756]">Social Church Intel</h1>
-        <p className="text-gray-500 mt-1 text-sm">
-          Enter a church ID — the tool researches their website, social profiles, and current content, then builds a complete writing guide for your team.
-        </p>
+      <div className="mb-8 flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-3xl font-bold text-[#341756]">Social Church Intel</h1>
+          <p className="text-gray-500 mt-1 text-sm">
+            Enter a church ID — the tool researches their website, social profiles, and current content, then builds a complete writing guide for your team.
+          </p>
+        </div>
+        {screen !== 'list' && (
+          <button
+            onClick={openList}
+            className="border border-[#513DE5] text-[#513DE5] font-semibold px-4 py-2 rounded-xl hover:bg-[#F9F5F1] transition-colors text-sm whitespace-nowrap"
+          >
+            View Saved Profiles
+          </button>
+        )}
       </div>
+
+      {/* Saved Profiles List screen */}
+      {screen === 'list' && (
+        <div>
+          <div className="flex items-center gap-3 mb-6">
+            <button
+              onClick={() => setScreen('form')}
+              className="border border-gray-200 text-gray-600 font-semibold px-4 py-2 rounded-xl hover:bg-gray-50 transition-colors text-sm"
+            >
+              ← Back
+            </button>
+            <h2 className="text-lg font-bold text-[#341756]">Saved Profiles</h2>
+          </div>
+
+          {listLoading ? (
+            <div className="text-center py-12 text-gray-400 text-sm">Loading profiles…</div>
+          ) : savedProfiles.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-[#CFC9F8] p-12 text-center">
+              <p className="text-gray-400 text-sm">No saved profiles yet. Generate and save one first.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {savedProfiles.map(sp => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const churchName = (sp.intel_profile as any)?.church_overview?.church_name ?? churchNameForMember(sp.member)
+                const updatedDate = new Date(sp.intel_updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                return (
+                  <button
+                    key={sp.id}
+                    onClick={() => openSavedProfile(sp)}
+                    className="bg-white border border-[#CFC9F8] rounded-2xl p-5 text-left hover:border-[#513DE5] hover:shadow-sm transition-all group"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-semibold text-[#341756] group-hover:text-[#513DE5] transition-colors">{churchName}</p>
+                      <span className="text-xs bg-[#EDE9FC] text-[#513DE5] px-2 py-0.5 rounded-full whitespace-nowrap">v{sp.intel_version}</span>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">#{sp.member} · Updated {updatedDate}</p>
+                    <p className="text-xs text-gray-400">by {sp.intel_updated_by}</p>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Form screen */}
       {screen === 'form' && (
@@ -256,16 +391,28 @@ export default function SocialIntelPage() {
             </div>
           )}
 
-          <div className="flex gap-3 mb-6 flex-wrap">
+          <div className="flex gap-3 mb-6 flex-wrap items-center">
             <button
               onClick={saveProfile}
-              disabled={saving || saved}
+              disabled={saving || (saved && !wasEdited)}
               className="bg-[#513DE5] text-white font-semibold px-5 py-2.5 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-60 text-sm"
             >
-              {saved ? 'Saved ✓' : saving ? 'Saving…' : 'Save Profile'}
+              {saving ? 'Saving…' : saved && !wasEdited ? 'Saved ✓' : wasEdited ? 'Save Changes' : 'Save Profile'}
             </button>
             <button
-              onClick={() => { setScreen('form'); setProfile(null); setSaved(false) }}
+              onClick={() => {
+                setEditMode(e => !e)
+              }}
+              className={`font-semibold px-5 py-2.5 rounded-xl text-sm transition-colors ${
+                editMode
+                  ? 'bg-[#EDE9FC] text-[#513DE5] border border-[#513DE5]'
+                  : 'border border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {editMode ? 'Done Editing' : 'Edit Profile'}
+            </button>
+            <button
+              onClick={() => { setScreen('form'); setProfile(null); setSaved(false); setEditMode(false); setWasEdited(false); setCurrentProfileId(null) }}
               className="border border-gray-200 text-gray-600 font-semibold px-5 py-2.5 rounded-xl hover:bg-gray-50 transition-colors text-sm"
             >
               Start Over
@@ -276,10 +423,19 @@ export default function SocialIntelPage() {
             >
               Regenerate
             </button>
+            {editMode && (
+              <p className="text-xs text-[#513DE5] bg-[#EDE9FC] px-3 py-1.5 rounded-lg">
+                Editing — click any field to change it, then Save Changes
+              </p>
+            )}
           </div>
 
           <div className="bg-white rounded-2xl border border-[#CFC9F8] p-6 shadow-sm">
-            <SocialIntelProfileView profile={profile as Parameters<typeof SocialIntelProfileView>[0]['profile']} />
+            <SocialIntelProfileView
+              profile={profile as Parameters<typeof SocialIntelProfileView>[0]['profile']}
+              editMode={editMode}
+              onProfileChange={handleProfileChange}
+            />
           </div>
         </div>
       )}

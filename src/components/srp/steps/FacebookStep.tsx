@@ -26,7 +26,7 @@ interface OptionsResponse { posts: FacebookOption[] }
 export function FacebookStep() {
   const {
     account, sermonSubmission, brandVoice,
-    transcript,
+    transcript, keyInsights,
     facebookPost, setFacebookPost,
     facebookInput, setFacebookInput,
     visibleSteps,
@@ -51,6 +51,7 @@ export function FacebookStep() {
         brandVoice,
         accountContext: buildAccountContext(account, sermonSubmission),
         userGuidance:   guidance || undefined,
+        keyInsights:    keyInsights.length ? keyInsights : undefined,
       })
       setOptions(r.posts ?? [])
       setSelectedIdx(null)
@@ -104,7 +105,7 @@ export function FacebookStep() {
           disabled={generating || !transcript}
           leadingIcon={generating ? <Loader2 size={12} className="animate-spin" /> : (options.length ? <RefreshCw size={12} /> : <Sparkles size={12} />)}
         >
-          {generating ? 'Generating…' : options.length ? 'Regenerate 3 options' : 'Generate 3 options'}
+          {generating ? 'Generating…' : options.length ? 'Regenerate 4 options' : 'Generate 4 options'}
         </SrpButton>
       </section>
 

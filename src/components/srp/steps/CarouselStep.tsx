@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useState } from 'react'
-import { ArrowLeft, ArrowRight, Loader2, Sparkles, RefreshCw, Check, Quote } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Loader2, Sparkles, RefreshCw, Check, Quote, CheckCircle2 } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import { BrandVoiceTagsBadges } from '../_shared/BrandVoiceTagsBadges'
@@ -35,7 +35,7 @@ interface CaptionResponse { caption: string; brandVoiceTags: string[] }
 export function CarouselStep() {
   const {
     account, sermonSubmission, brandVoice,
-    transcript,
+    transcript, keyInsights,
     carouselSlides, setCarouselSlides,
     carouselCaption, setCarouselCaption,
     carouselInput, setCarouselInput,
@@ -53,6 +53,9 @@ export function CarouselStep() {
   const [tags, setTags] = useState<string[]>([])
   const [captionTags, setCaptionTags] = useState<string[]>([])
 
+  const [slidesApproved, setSlidesApproved] = useState(
+    !!(carouselInput?.slidesApproved),
+  )
   const [generatingSlides, setGeneratingSlides] = useState(false)
   const [generatingCaption, setGeneratingCaption] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -70,9 +73,11 @@ export function CarouselStep() {
         brandVoice,
         accountContext: buildAccountContext(account, sermonSubmission),
         userGuidance:   slidesGuidance || undefined,
+        keyInsights:    keyInsights.length ? keyInsights : undefined,
       })
       setOptions(r.options ?? [])
       setSelectedIdx(null)
+      setSlidesApproved(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'generation failed')
     } finally {
@@ -82,18 +87,23 @@ export function CarouselStep() {
 
   const pickOption = useCallback((idx: number) => {
     setSelectedIdx(idx)
-    setCarouselInput({ ...carouselInput, selectedIdx: idx })
+    setSlidesApproved(false)
+    setCarouselInput({ ...carouselInput, selectedIdx: idx, slidesApproved: false })
     const opt = options[idx]
     if (!opt) return
     setEditedSlides([...opt.slides])
     setTags(opt.brandVoiceTags)
-    // Persist slides immediately so coach can navigate away.
     const persisted: SrpCarouselSlide[] = opt.slides.map((text, i) => ({
       slide_number: i + 1,
       text,
     }))
     setCarouselSlides(persisted)
   }, [options, carouselInput, setCarouselInput, setCarouselSlides])
+
+  const approveSlides = () => {
+    setSlidesApproved(true)
+    setCarouselInput({ ...carouselInput, slidesApproved: true })
+  }
 
   const updateSlide = (i: number, v: string) => {
     const next = [...editedSlides]
@@ -135,7 +145,7 @@ export function CarouselStep() {
           {STEP_LABELS.carousel}
         </h2>
         <p className="text-[13px] text-[var(--color-purple-gray)] mt-1">
-          {STEP_DESCRIPTIONS.carousel} · Generate 3 options, pick one, edit slides, then caption.
+          {STEP_DESCRIPTIONS.carousel} · Generate 5 options (including a single-slide graphic), pick one, edit slides, then caption.
         </p>
       </header>
 
@@ -159,7 +169,7 @@ export function CarouselStep() {
           disabled={generatingSlides || !transcript}
           leadingIcon={generatingSlides ? <Loader2 size={12} className="animate-spin" /> : (options.length ? <RefreshCw size={12} /> : <Sparkles size={12} />)}
         >
-          {generatingSlides ? 'Generating…' : options.length ? 'Regenerate 3 options' : 'Generate 3 options'}
+          {generatingSlides ? 'Generating…' : options.length ? 'Regenerate 5 options' : 'Generate 5 options'}
         </SrpButton>
       </section>
 
@@ -218,8 +228,8 @@ export function CarouselStep() {
         </section>
       )}
 
-      {/* Edit picked option */}
-      {selectedOpt && (
+      {/* Edit picked option — show if slides are loaded from context OR from a fresh pick */}
+      {(editedSlides.length > 0) && (
         <section className="rounded-xl border border-[var(--color-lavender)] bg-white p-4 space-y-3">
           <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
             Slides (editable)
@@ -238,11 +248,31 @@ export function CarouselStep() {
             </div>
           ))}
           <BrandVoiceTagsBadges tags={tags} />
+          <div className="pt-2 flex items-center gap-3">
+            {slidesApproved ? (
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[var(--color-primary-purple)]">
+                <CheckCircle2 size={14} /> Slides approved
+              </span>
+            ) : (
+              <SrpButton size="sm" onClick={approveSlides} trailingIcon={<ArrowRight size={12} />}>
+                Approve slides &amp; continue to caption
+              </SrpButton>
+            )}
+            {slidesApproved && (
+              <button
+                type="button"
+                onClick={() => { setSlidesApproved(false); setCarouselInput({ ...carouselInput, slidesApproved: false }) }}
+                className="text-[11px] text-[var(--color-purple-gray)] hover:underline"
+              >
+                Edit slides
+              </button>
+            )}
+          </div>
         </section>
       )}
 
-      {/* Caption */}
-      {selectedOpt && (
+      {/* Caption — show if slides have been approved (persisted in context) */}
+      {slidesApproved && (
         <section className="rounded-xl border border-[var(--color-lavender)] bg-white p-4 space-y-3">
           <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] flex items-center gap-1.5">
             <Quote size={11} /> Carousel caption

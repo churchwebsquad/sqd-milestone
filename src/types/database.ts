@@ -191,6 +191,18 @@ export interface PrfBrandGuide {
   [key: string]: unknown
 }
 
+export interface StrategySocialProProfile {
+  member:      number
+  church_name: string | null
+  css_rep:     string | null
+  plan:        string | null
+  website:     string | null
+  notes:       string | null
+  created_by:  string | null
+  created_at:  string
+  updated_at:  string
+}
+
 // ============================================================================
 // EXISTING READ-ONLY TABLES — ClickUp / task pipeline
 // ============================================================================
@@ -2442,13 +2454,14 @@ export type SrpWorkflowStep =
   | 'account'
   | 'deliverables'
   | 'sermon'
+  | 'overview'
   | 'clips'
+  | 'preRenderEdit'
   | 'reelCaptions'
   | 'carousel'
   | 'facebook'
   | 'sundayInvite'
   | 'photoRecap'
-  | 'creativeDirection'
   | 'clipProcessing'
   | 'approved'
 
@@ -2459,11 +2472,8 @@ export type SrpDeliverable =
   | 'reel5' | 'reel6' | 'reel7' | 'reel8'
   | 'facebook' | 'carousel' | 'sundayInvite' | 'photoRecap'
 
-/** v1 caps at 2 reels because srp_pipeline.sessions only persists
- *  reel1_caption / reel2_caption columns. To raise the cap, add
- *  reel3..reelN columns (or a JSONB bag) and bump SRP_MAX_REELS here. */
-export const SRP_REEL_DELIVERABLES: SrpDeliverable[] = ['reel1', 'reel2']
-export const SRP_MAX_REELS = 2
+export const SRP_REEL_DELIVERABLES: SrpDeliverable[] = ['reel1', 'reel2', 'reel3', 'reel4', 'reel5']
+export const SRP_MAX_REELS = 5
 export const isSrpReelDeliverable = (d: string): d is SrpDeliverable => /^reel[1-8]$/.test(d)
 
 export interface SrpClipCut {
@@ -2481,10 +2491,58 @@ export interface SrpClipSelection {
   category?: string
   wordCount?: number
   estimatedSeconds?: number
+  /** Internal title (5-8 words) identifying the moment. */
+  clip_title?: string
+  /** Why this moment works as a standalone clip. */
+  why_this_clip?: string
+  /** 5-10 word text overlay suggestion for the first 2 seconds. */
+  suggested_hook?: string
+  /** One-sentence angle suggestion for the post caption writer. */
+  caption_angle?: string
+  /** Coach-editable transcript text for this clip's captions. Defaults to quote. */
+  caption_text?: string
+  /** Caption style slug from Duane's 23 styles (e.g. "cap01-hormozi-pill"). */
+  caption_slug?: string
+  /** Font name from the preset list (e.g. "Montserrat"). */
+  caption_font?: string
+  /** URL to a custom uploaded font file (.ttf / .otf / .woff2). */
+  caption_font_url?: string
+  /** Font size in pixels (e.g. 48). */
+  caption_font_size?: number
+  /** Vertical position of captions on screen. */
+  caption_position?: 'top' | 'center' | 'bottom'
+  /** Per-element color overrides (hex strings). */
+  caption_colors?: {
+    text?:        string   // main caption text color
+    background?:  string   // pill / box background color ('transparent' allowed)
+    outline?:     string   // text stroke / outline color
+    highlight?:   string   // active/karaoke word highlight color
+  }
+  /** Pinned clips are locked and excluded from regeneration. */
+  pinned?: boolean
+  /** Title screen shown at the start of the clip. */
+  title_screen?: {
+    enabled:    boolean
+    type:       'text' | 'image'
+    text?:      string
+    image_url?: string
+  }
+  /** Whether to include the church's outro logo animation on this clip. */
+  outro_enabled?: boolean
+  /** Background music track for this clip. null = no music. */
+  background_track?: {
+    id:     string
+    name:   string
+    artist?: string
+    genre:  string
+    url:    string    // Wasabi/S3 URL — used for preview and passed to clipcutter
+  } | null
   /** Optional regions to cut out of the middle of this clip. Times are
    *  clip-local ms (0 = clip start). The clipcutter joins kept segments
    *  on output; if absent, the clip cuts as a single range. */
   cuts?: SrpClipCut[]
+  /** Instagram/Facebook caption for this reel's social post. */
+  social_caption?: string | null
   /** Populated by the clipcutter callback. */
   video_url?: string | null
   srt_url?: string | null
@@ -2503,6 +2561,7 @@ export interface SrpCarouselSlide {
 export interface SrpReelGuidanceMap { [reelIdx: number]: string }
 export interface SrpSundayInviteInput {
   guidance?: string
+  lookingAhead?: string
   selectedIdx?: number | null
   selectedCitation?: string
   selectedTags?: string[]
@@ -2519,9 +2578,11 @@ export interface SrpCarouselInput {
   selectedIdx?: number | null
   selectedCitations?: string[]
   selectedTags?: string[]
+  slidesApproved?: boolean
 }
 export interface SrpPhotoRecapInput {
-  category?: 'serviceHighlights' | 'weekendTeaching' | 'seriesStartEnd' | 'generalCelebration'
+  promptType?: 'highlights' | 'teaching'
+  lookingBack?: string
   guidance?: string
   selectedIdx?: number | null
   selectedTags?: string[]

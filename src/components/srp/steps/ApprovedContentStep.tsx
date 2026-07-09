@@ -33,7 +33,7 @@ export function ApprovedContentStep() {
     clickupTaskId, setClickupTaskId,
     srpTaskIdOverride, setSrpTaskIdOverride,
     clipcutterJobId,
-    reel1Caption, reel2Caption,
+    clipSelections,
     facebookPost, sundayInvite, photoRecapCaption,
     carouselSlides, carouselCaption,
   } = useSrpWorkflow()
@@ -95,15 +95,13 @@ export function ApprovedContentStep() {
       sunday_invite:       sundayInvite,
       photo_recap_caption: photoRecapCaption,
       carousel_caption:    carouselCaption,
-      reel1_caption:       reel1Caption,
-      reel2_caption:       reel2Caption,
       church_name:         account?.church_name ?? null,
       session_id:          sessionId,
     }
-    const csv = buildVistaCsv({ session, renderedClips })
+    const csv = buildVistaCsv({ session, clipSelections, renderedClips })
     const slug = (account?.church_name ?? 'srp').replace(/[^A-Za-z0-9]/g, '_')
     downloadCsv(`vista_${slug}_${sessionId}.csv`, csv)
-  }, [account?.church_name, sessionId, facebookPost, sundayInvite, photoRecapCaption, carouselCaption, reel1Caption, reel2Caption, renderedClips])
+  }, [account?.church_name, sessionId, facebookPost, sundayInvite, photoRecapCaption, carouselCaption, clipSelections, renderedClips])
 
   // Vista direct push (best-effort; falls through to CSV if not configured).
   const handlePushVista = useCallback(async () => {
@@ -141,16 +139,17 @@ export function ApprovedContentStep() {
 
       {/* Deliverable review */}
       <section className="space-y-3">
-        <DeliverableCard
-          title="Reel 1"
-          body={reel1Caption}
-          subline={renderedClips[0]?.video_url ? <a href={renderedClips[0].video_url} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 text-[11px] text-[var(--color-primary-purple)]">video <ExternalLink size={9} /></a> : null}
-        />
-        <DeliverableCard
-          title="Reel 2"
-          body={reel2Caption}
-          subline={renderedClips[1]?.video_url ? <a href={renderedClips[1].video_url} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 text-[11px] text-[var(--color-primary-purple)]">video <ExternalLink size={9} /></a> : null}
-        />
+        {clipSelections.map((clip, i) => {
+          const rendered = renderedClips.find(r => r.clip_id === clip.clip_id) ?? renderedClips[i]
+          return (
+            <DeliverableCard
+              key={clip.clip_id ?? `reel-${i}`}
+              title={`Reel ${i + 1}${clip.clip_title ? ` — ${clip.clip_title}` : ''}`}
+              body={clip.social_caption ?? null}
+              subline={rendered?.video_url ? <a href={rendered.video_url} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 text-[11px] text-[var(--color-primary-purple)]">video <ExternalLink size={9} /></a> : null}
+            />
+          )
+        })}
         <DeliverableCard title="Facebook post" body={facebookPost} />
         <DeliverableCard title="Sunday invite" body={sundayInvite} />
         <DeliverableCard title="Photo recap"   body={photoRecapCaption} />

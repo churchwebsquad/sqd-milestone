@@ -28,17 +28,33 @@ export const maxDuration = 45
 
 const DEFAULT_SYSTEM_PROMPT = `You are an Instagram copywriter for churches. Write short, punchy Reel captions.
 
-STYLE RULES:
-- Keep it SHORT. 1-3 sentences max before hashtags. Think Instagram-native.
-- Avoid em dashes. Use periods, commas, or line breaks.
+VOICE:
+Follow the provided voice guide exactly. Match its tone, vocabulary, sentence structure, and energy level. If the voice is casual, be casual. If it's poetic, lean into that. The voice guide is your highest-priority style constraint. When in doubt, reread it and mirror what you see.
+
+LENGTH & FORMAT:
+- 1-3 sentences max before hashtags. Think Instagram-native.
+- Avoid em dashes. Use periods, commas, or line breaks instead.
+- Use emojis sparingly (1-2 max). Skip them entirely if the voice guide doesn't use them.
+- Front-load the hook. The first line must stop the scroll.
+
+CONTENT RULES:
 - Do NOT repeat the sermon quote verbatim. Capture the essence in your own words.
 - Be relatable, warm, and conversational. Connect to everyday life.
-- Vary your approach across captions:
-  • A thought-provoking question
-  • A call to action that inspires change
-  • A practical takeaway
-  • A short list of ways to live it out
-- Use emojis sparingly (1-2 max).`
+- Write to someone, not at them. Use "you" more than "we" when possible.
+- Avoid churchy jargon unless the voice guide specifically uses it. Say it the way someone would say it to a friend over coffee.
+
+VARIETY:
+Rotate your approach across captions so they don't all sound the same. Draw from:
+- A thought-provoking question
+- A bold, specific call to action
+- A practical takeaway someone can act on today
+- A short list (2-3 items) of ways to live it out
+- A "real talk" observation that names a common struggle
+
+HASHTAGS:
+- 3-5 relevant hashtags max, location-specific and SEO-driven.
+- Mix broad reach tags (e.g. #churchlife) with niche or sermon-specific tags.
+- Place hashtags on a separate line after the caption.`
 
 interface ReelCaptionArgs {
   caption: string
@@ -56,6 +72,8 @@ export default async function handler(req: any, res: any) {
   const brandVoice     = typeof req.body?.brandVoice === 'string' ? req.body.brandVoice : ''
   const accountContext = (req.body?.accountContext ?? {}) as Record<string, any>
   const userGuidance   = typeof req.body?.userGuidance === 'string' ? req.body.userGuidance : ''
+  const captionAngle   = typeof req.body?.captionAngle === 'string' ? req.body.captionAngle : ''
+  const keyInsights:   string[] = Array.isArray(req.body?.keyInsights) ? req.body.keyInsights : []
   if (!quote) return res.status(400).json({ error: 'quote required' })
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
@@ -70,10 +88,20 @@ export default async function handler(req: any, res: any) {
   const basePrompt = (await resolvePrompt(sb, 'reel_caption')) ?? DEFAULT_SYSTEM_PROMPT
   const systemPrompt = [basePrompt, ctx, BRAND_VOICE_TAGS_BLOCK].filter(Boolean).join('\n\n')
 
+  const insightsSection = keyInsights.length
+    ? `\n\nKEY INSIGHTS FROM THIS SERVICE (use to add context and depth to the caption):\n${keyInsights.map((ins, i) => `${i + 1}. ${ins}`).join('\n')}`
+    : ''
+
+  const angleSection = captionAngle
+    ? `\n\nCAPTION ANGLE (follow this editorial direction):\n${captionAngle}`
+    : ''
+
   const userPrompt =
     `Write a short Instagram Reel caption for a sermon clip about this teaching moment:\n\n"${quote}"\n\n` +
     `Keep it to 1-3 punchy sentences that connect to real life. End with 3-5 hashtags.` +
-    (userGuidance ? `\n\nAdditional guidance from the user: "${userGuidance}"` : '')
+    insightsSection +
+    angleSection +
+    (userGuidance ? `\n\nAdditional guidance from the coach: "${userGuidance}"` : '')
 
   try {
     const result = await callGateway<ReelCaptionArgs>({

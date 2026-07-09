@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import {
   Send, FileText, LayoutDashboard, User, LogOut, Menu, X,
   Building2, Sparkles, Search, CalendarDays, Palette,
-  ChevronDown, Target, Library, Globe,
+  ChevronDown, Target, Library, Globe, Film,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
@@ -56,12 +56,9 @@ const NAV_STRUCTURE: NavEntry[] = [
       // up Intake / Content / Design / Dev / Reviews — see /web/[id].
       { kind: 'item', to: '/web', label: 'Website Manager', icon: Globe, end: false },
       { kind: 'subheading', label: 'Social' },
-      // Prompt Settings used to be a sibling — it's now nested under the
-      // SRP Generator (the only tool that consumes it).
-      { kind: 'item', to: '/social/srp',     label: 'SRP Generator',      icon: Sparkles,     end: false },
-      { kind: 'item', to: '/social/intel',        label: 'Intel Audit Tool',   icon: Search,       end: false },
-      { kind: 'item', to: '/social/social-intel', label: 'Social Intel',        icon: Search,       end: false },
-      { kind: 'item', to: '/social/planner',      label: 'Planning Calendar',   icon: CalendarDays, end: false },
+      { kind: 'item', to: '/social',          label: 'Social Hub',       icon: Sparkles, end: true },
+      { kind: 'item', to: '/social/srp',      label: 'SRP Sessions',      icon: Film,     end: true },
+      { kind: 'item', to: '/social/intel',    label: 'Intel Audit Tool',  icon: Search,   end: false },
     ],
   },
   {

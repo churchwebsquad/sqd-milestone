@@ -26,36 +26,73 @@ import { createClient } from '@supabase/supabase-js'
 
 export const maxDuration = 90
 
-const DEFAULT_TIMECODED_PROMPT = `You are a sermon content analyst. Your job is to identify the most compelling teaching moments from sermon transcripts for short-form video clips (reels/shorts).
+const SYSTEM_PROMPT = `You are a sermon content analyst. Your job is to identify the most compelling, self-contained teaching moments from sermon transcripts and package them as short-form video clips (Reels/Shorts).
 
-CRITICAL RULES:
-- ONLY analyze content from the sermon speaker's teaching.
-- SKIP all worship lyrics, song lyrics, prayer interludes, announcements, and any non-teaching content.
-- Focus exclusively on the speaker's sermon/message.
-- The "quote" field MUST be a WORD-FOR-WORD excerpt copied directly from the transcript. Do NOT paraphrase, summarize, or reword. Copy the exact text.
-- HARD CONSTRAINT: Every clip MUST be between 30 and 70 seconds. No exceptions. Target 50-60 seconds.
-- Timestamps MUST correspond exactly to where the quoted text appears in the transcript.
-- Each clip must represent a COMPLETE, SELF-CONTAINED point that makes sense in isolation on social media. The speaker should start and finish a thought.`
+WHAT YOU ARE ANALYZING:
+ONLY the sermon speaker's teaching. Nothing else.
+SKIP all worship lyrics, song lyrics, prayer interludes, announcements, transitions, greetings, housekeeping, offering talks, and any content that is not the speaker delivering the sermon message.
+If you are unsure whether a section is part of the sermon teaching, skip it. When in doubt, leave it out.
 
-const DEFAULT_NO_TIMECODES_PROMPT = `You are a sermon content analyst. Your job is to identify the most compelling teaching moments from sermon transcripts for short-form video clips (reels/shorts).
+VOICE GUIDE:
+If a voice guide has been provided, use it to inform which types of moments you prioritize — not to rewrite anything. The voice guide shapes your editorial judgment (what feels on-brand, what the church would want to highlight), but it must never alter the transcript text itself.
 
-CRITICAL RULES:
-- ONLY analyze content from the sermon speaker's teaching.
-- SKIP all worship lyrics, song lyrics, prayer interludes, announcements, and any non-teaching content.
-- Focus exclusively on the speaker's sermon/message.
-- The "quote" field MUST be a WORD-FOR-WORD excerpt copied directly from the transcript. Do NOT paraphrase, summarize, or reword. Copy the exact text.
-- This transcript does NOT have timecodes. Use WORD COUNT to estimate clip length.
-- WORD COUNT RULES:
-  - IDEAL: 110–130 words per clip (≈55–65 seconds)
-  - ACCEPTABLE: 100–140 words (≈50–70 seconds)
-  - REJECT: under 85 words or over 150 words
-  - Estimation formula: 60 words ≈ 30 seconds, 90 words ≈ 45 seconds, 120 words ≈ 60 seconds, 150 words ≈ 75 seconds
-- Each clip must represent a COMPLETE, SELF-CONTAINED point that makes sense in isolation on social media. The speaker should start and finish a thought.`
+THE QUOTE — THIS IS NON-NEGOTIABLE:
+The "quote" field MUST be copied WORD FOR WORD directly from the transcript. Every word, every pause, every filler word exactly as it appears.
+Do NOT paraphrase. Do NOT summarize. Do NOT clean up grammar. Do NOT remove filler words. Do NOT reword for clarity.
+If the speaker said "um" or "you know" or repeated themselves, that stays in the quote. The video editor needs the exact words to match the audio.
+After selecting a quote, re-read it against the transcript character by character. If even one word is different, fix it.
+
+CLIP LENGTH — HARD CONSTRAINT:
+Every clip MUST be between 25 and 90 seconds long. No exceptions.
+Target the 35-50 second sweet spot.
+Calculate duration using the transcript timestamps. End timestamp minus start timestamp must fall within 25 and 90 seconds.
+If a compelling moment runs shorter than 30 seconds, look for a natural starting point earlier in the transcript where the speaker begins setting up that moment. Include the setup.
+If a compelling moment runs longer than 70 seconds, find a natural breaking point where one complete thought ends before the next begins. Trim to the strongest complete thought.
+Do NOT stretch a clip to meet the minimum by including unrelated content before or after. The entire clip must be one cohesive idea.
+
+TIMESTAMPS:
+Start and end timestamps MUST correspond exactly to where the quoted text begins and ends in the transcript.
+Double-check that the first word of your quote matches the word at your start timestamp.
+Double-check that the last word of your quote matches the word at your end timestamp.
+If the transcript uses a specific timestamp format, mirror it exactly.
+
+WHAT MAKES A GREAT CLIP:
+Each clip must be a COMPLETE, SELF-CONTAINED point that makes sense in isolation on social media. Someone with zero context should be able to watch the clip and get something meaningful from it.
+Look for:
+- The "quotable" moment: A bold, concise statement that could stand alone as a caption.
+- The reframe: A moment where the speaker takes a familiar idea and flips it.
+- The practical breakthrough: A clear, actionable insight someone can apply immediately.
+- The emotional peak: A moment where the speaker's delivery intensifies — voice drops, pace changes, passion rises.
+- The story payoff: The moment a story or illustration lands its point.
+- The tension and resolution: A moment that names a struggle then offers a path through it. Both halves must be present.
+
+WHAT TO AVOID:
+- Clips that start mid-thought.
+- Clips that end mid-thought.
+- Inside references (e.g. "like I mentioned last week").
+- Slow buildups with weak payoffs.
+- Repetitive selections — each clip must highlight a different idea.
+
+HOW MANY CLIPS:
+Identify 6-10 clips per sermon, ranked by social media potential.
+Rank 1 is the clip you'd post if you could only post one.
+If the sermon doesn't have 6 strong candidates, generate fewer. Four great clips beat eight mediocre ones.`
 
 const CATEGORY_ENUM = ['Profound Ideas', 'Practical Application', 'Challenges', 'Encouragement', 'Life of Jesus'] as const
 
-interface TimecodedClip { startTime: string; endTime: string; quote: string; category: typeof CATEGORY_ENUM[number] }
-interface WordcountClip { quote: string; wordCount: number; estimatedSeconds: number; category: typeof CATEGORY_ENUM[number] }
+interface ClipOutput {
+  clip_title:       string
+  startTime:        string
+  endTime:          string
+  duration:         number
+  quote:            string
+  category:         typeof CATEGORY_ENUM[number]
+  why_this_clip:    string
+  suggested_hook:   string
+  caption_angle:    string
+  wordCount?:       number
+  estimatedSeconds?: number
+}
 
 const TIMECODED_TOOL_SCHEMA: ToolSchema = {
   type: 'object',
@@ -65,12 +102,17 @@ const TIMECODED_TOOL_SCHEMA: ToolSchema = {
       items: {
         type: 'object',
         properties: {
-          startTime: { type: 'string', description: 'Start timestamp in MM:SS or HH:MM:SS format.' },
-          endTime:   { type: 'string', description: 'End timestamp in MM:SS or HH:MM:SS format.' },
-          quote:     { type: 'string', description: 'The EXACT word-for-word text from the transcript for this clip segment. Verbatim, not paraphrased.' },
-          category:  { type: 'string', enum: [...CATEGORY_ENUM], description: 'Which category this clip belongs to.' },
+          clip_title:     { type: 'string',  description: '5-8 word internal title identifying the moment.' },
+          startTime:      { type: 'string',  description: 'Start timestamp matching the transcript format exactly.' },
+          endTime:        { type: 'string',  description: 'End timestamp matching the transcript format exactly.' },
+          duration:       { type: 'number',  description: 'Duration in seconds (endTime minus startTime). Must be 25-90.' },
+          quote:          { type: 'string',  description: 'EXACT word-for-word text from the transcript. Verbatim — no edits.' },
+          category:       { type: 'string',  enum: [...CATEGORY_ENUM] },
+          why_this_clip:  { type: 'string',  description: '1-2 sentences: why this moment works as a standalone clip.' },
+          suggested_hook: { type: 'string',  description: '5-10 word text overlay for the first 2 seconds to stop the scroll.' },
+          caption_angle:  { type: 'string',  description: 'One sentence: angle the caption writer should take for the post.' },
         },
-        required: ['startTime', 'endTime', 'quote', 'category'],
+        required: ['clip_title', 'startTime', 'endTime', 'duration', 'quote', 'category', 'why_this_clip', 'suggested_hook', 'caption_angle'],
         additionalProperties: false,
       },
     },
@@ -87,12 +129,16 @@ const WORDCOUNT_TOOL_SCHEMA: ToolSchema = {
       items: {
         type: 'object',
         properties: {
-          quote:            { type: 'string', description: 'The EXACT word-for-word text from the transcript. Verbatim.' },
+          clip_title:       { type: 'string', description: '5-8 word internal title identifying the moment.' },
+          quote:            { type: 'string', description: 'EXACT word-for-word text from the transcript. Verbatim — no edits.' },
           wordCount:        { type: 'number', description: 'Exact number of words in the quote.' },
-          estimatedSeconds: { type: 'number', description: 'Estimated duration in seconds (wordCount / 2).' },
-          category:         { type: 'string', enum: [...CATEGORY_ENUM], description: 'Which category this clip belongs to.' },
+          estimatedSeconds: { type: 'number', description: 'Estimated duration in seconds.' },
+          category:         { type: 'string', enum: [...CATEGORY_ENUM] },
+          why_this_clip:    { type: 'string', description: '1-2 sentences: why this moment works as a standalone clip.' },
+          suggested_hook:   { type: 'string', description: '5-10 word text overlay for the first 2 seconds to stop the scroll.' },
+          caption_angle:    { type: 'string', description: 'One sentence: angle the caption writer should take for the post.' },
         },
-        required: ['quote', 'wordCount', 'estimatedSeconds', 'category'],
+        required: ['clip_title', 'quote', 'wordCount', 'estimatedSeconds', 'category', 'why_this_clip', 'suggested_hook', 'caption_angle'],
         additionalProperties: false,
       },
     },
@@ -115,10 +161,14 @@ export default async function handler(req: any, res: any) {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!supabaseUrl || !serviceRoleKey) return res.status(500).json({ error: 'Missing Supabase env vars' })
 
-  const transcript     = typeof req.body?.transcript === 'string' ? req.body.transcript : ''
-  const brandVoice     = typeof req.body?.brandVoice === 'string' ? req.body.brandVoice : ''
+  const transcript     = typeof req.body?.transcript    === 'string'   ? req.body.transcript    : ''
+  const brandVoice     = typeof req.body?.brandVoice     === 'string'   ? req.body.brandVoice     : ''
   const accountContext = (req.body?.accountContext ?? {}) as Record<string, any>
-  const hasTimecodes   = req.body?.hasTimecodes !== false  // default true
+  const hasTimecodes   = req.body?.hasTimecodes !== false
+  // Quotes of already-pinned clips so the AI knows to avoid them
+  const pinnedQuotes:  string[] = Array.isArray(req.body?.pinnedQuotes)  ? req.body.pinnedQuotes  : []
+  const keyInsights:   string[] = Array.isArray(req.body?.keyInsights)   ? req.body.keyInsights   : []
+
   if (!transcript || transcript.trim().length < 200) {
     return res.status(400).json({ error: 'transcript too short (minimum ~200 chars)' })
   }
@@ -126,94 +176,72 @@ export default async function handler(req: any, res: any) {
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
   const ctxParts: string[] = []
-  if (brandVoice)                       ctxParts.push(`Brand voice: ${brandVoice}`)
+  if (brandVoice)                       ctxParts.push(`Voice guide:\n${brandVoice}`)
   if (accountContext?.speakAs)          ctxParts.push(`Speak to the audience as: ${accountContext.speakAs}`)
   if (accountContext?.bibleTranslation) ctxParts.push(`Preferred Bible translation: ${accountContext.bibleTranslation}`)
   if (accountContext?.platforms)        ctxParts.push(`Target platforms: ${accountContext.platforms}`)
-  const ctx = ctxParts.join('\n')
+  const ctx = ctxParts.join('\n\n')
 
-  const promptKey = hasTimecodes ? 'clips_timecoded_system' : 'clips_no_timecodes_system'
-  const fallback  = hasTimecodes ? DEFAULT_TIMECODED_PROMPT : DEFAULT_NO_TIMECODES_PROMPT
-  const basePrompt = (await resolvePrompt(sb, promptKey)) ?? fallback
+  const basePrompt = (await resolvePrompt(sb, 'clips_system')) ?? SYSTEM_PROMPT
   const systemPrompt = [basePrompt, ctx].filter(Boolean).join('\n\n')
 
-  const userPrompt = hasTimecodes
-    ? `Analyze this sermon transcript and identify the 8 most compelling teaching moments for short-form video clips.
+  const insightsSection = keyInsights.length
+    ? `\n\nKEY INSIGHTS FROM THIS SERVICE (use these to guide clip prioritization — clips that illuminate these insights rank higher):\n${keyInsights.map((ins, i) => `${i + 1}. ${ins}`).join('\n')}`
+    : ''
 
-DURATION REQUIREMENTS (HARD CONSTRAINT):
-- MINIMUM 30 seconds, MAXIMUM 70 seconds. Target 50-60 seconds.
-- ANY clip outside the 30-70 second range will be REJECTED.
-- Each clip must be a complete thought — the speaker should start and finish a point that stands alone on social media.
+  const pinnedSection = pinnedQuotes.length
+    ? `\n\nIMPORTANT — ALREADY SELECTED (DO NOT REPEAT THESE):
+The following clips have already been selected and pinned by the coach. Your suggestions must come from DIFFERENT parts of the transcript. Do not suggest anything overlapping with these quotes:\n${pinnedQuotes.map((q, i) => `${i + 1}. "${q.slice(0, 120)}…"`).join('\n')}`
+    : ''
 
-QUOTE REQUIREMENTS:
-- Extract the EXACT VERBATIM text from the transcript for each clip's quote field.
-- Do NOT paraphrase, summarize, or reword. Copy the speaker's words exactly as they appear.
+  const durationRule = hasTimecodes
+    ? 'DURATION: Every clip MUST be between 25 and 90 seconds. Target 35-50 seconds. Calculate from timestamps.'
+    : 'WORD COUNT: IDEAL 110-130 words (≈55-65 sec). ACCEPTABLE 100-140 words. REJECT under 85 or over 150 words.'
 
-Organize clips across these categories:
-1. Profound Ideas
-2. Practical Application
-3. Challenges
-4. Encouragement
-5. Life of Jesus
+  const userPrompt = `Analyze this sermon transcript and identify 6-10 compelling teaching moments for short-form video clips, ranked by social media potential (rank 1 = best single clip).
 
-Transcript:
-${transcript.slice(0, 60000)}`
-    : `Analyze this sermon transcript and identify the 8 most compelling teaching moments for short-form video clips.
+${durationRule}
 
-WORD COUNT REQUIREMENTS (HARD CONSTRAINT):
-- IDEAL: 110–130 words per clip.
-- ACCEPTABLE: 100–140 words.
-- ANY clip under 85 words or over 150 words will be REJECTED.
-- Each clip must be a complete thought.
-
-For each clip, count the exact number of words in the quote and estimate duration at 2 words per second.
-
-QUOTE REQUIREMENTS:
-- Extract the EXACT VERBATIM text from the transcript. Verbatim, not paraphrased.
-
-Organize clips across these categories:
-1. Profound Ideas
-2. Practical Application
-3. Challenges
-4. Encouragement
-5. Life of Jesus
+THE QUOTE IS NON-NEGOTIABLE: Copy it WORD FOR WORD from the transcript. Every filler word, every pause, exactly as spoken. The video editor must match it to the audio.${insightsSection}${pinnedSection}
 
 Transcript:
 ${transcript.slice(0, 60000)}`
 
   try {
-    const result = await callGateway<{ clips: any[] }>({
+    const result = await callGateway<{ clips: ClipOutput[] }>({
       system: systemPrompt,
       user:   userPrompt,
       toolName: 'suggest_clips',
-      toolDescription: hasTimecodes
-        ? 'Return 8 suggested sermon clips with timestamps, verbatim quotes, and categories.'
-        : 'Return 8 suggested sermon clips with verbatim quotes, word counts, estimated durations, and categories.',
+      toolDescription: 'Return 6-10 ranked sermon clip suggestions with verbatim quotes, timestamps, hooks, and caption angles.',
       toolSchema: hasTimecodes ? TIMECODED_TOOL_SCHEMA : WORDCOUNT_TOOL_SCHEMA,
-      maxTokens: 8000,
+      maxTokens: 10000,
     })
 
     const rawClips = Array.isArray(result.args.clips) ? result.args.clips : []
-    let clips: any[]
-    if (hasTimecodes) {
-      clips = (rawClips as TimecodedClip[]).filter(c => {
-        const dur = parseTimestamp(c.endTime) - parseTimestamp(c.startTime)
-        return dur >= 30 && dur <= 70
-      })
-    } else {
-      clips = (rawClips as WordcountClip[])
-        .map(c => {
+
+    const clips = rawClips
+      .map(c => {
+        if (!hasTimecodes) {
           const actualWordCount = c.quote.split(/\s+/).filter(Boolean).length
           return {
             ...c,
-            startTime: '',
-            endTime: '',
-            wordCount: actualWordCount,
+            startTime:        '',
+            endTime:          '',
+            wordCount:        actualWordCount,
             estimatedSeconds: Math.round(actualWordCount / 2),
+            duration:         Math.round(actualWordCount / 2),
           }
-        })
-        .filter(c => c.wordCount >= 85 && c.wordCount <= 150)
-    }
+        }
+        return { ...c, duration: parseTimestamp(c.endTime) - parseTimestamp(c.startTime) }
+      })
+      .filter(c => {
+        if (hasTimecodes) return c.duration >= 25 && c.duration <= 90
+        return (c.wordCount ?? 0) >= 85 && (c.wordCount ?? 0) <= 150
+      })
+      // Drop any clips whose quote overlaps with pinned clips
+      .filter(c => !pinnedQuotes.some(pq =>
+        pq.length > 20 && c.quote.includes(pq.slice(0, 40)),
+      ))
 
     return res.status(200).json({
       clips,
@@ -221,8 +249,8 @@ ${transcript.slice(0, 60000)}`
       usage: { input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens },
     })
   } catch (e) {
-    if (e instanceof GatewayRateLimitError)  return res.status(429).json({ error: 'Rate limit exceeded. Please try again in a moment.' })
-    if (e instanceof GatewayTransientError)  return res.status(502).json({ error: e.message })
+    if (e instanceof GatewayRateLimitError) return res.status(429).json({ error: 'Rate limit exceeded. Please try again in a moment.' })
+    if (e instanceof GatewayTransientError) return res.status(502).json({ error: e.message })
     return res.status(502).json({ error: e instanceof Error ? e.message : 'Clip generation failed' })
   }
 }
