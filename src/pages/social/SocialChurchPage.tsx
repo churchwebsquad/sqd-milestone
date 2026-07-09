@@ -34,6 +34,8 @@ interface Church {
   vista_social_email_from_discovery: string | null
   notion_dashboard: string | null
   sermon_recap_form: string | null
+  strategy_brief: string | null
+  plan: string | null
 }
 
 interface SavedIntel {
@@ -133,7 +135,7 @@ export default function SocialChurchPage() {
 
   // ── Social links edit state ──────────────────────────────────────────────
   const [editingLinks, setEditingLinks] = useState(false)
-  const [linkDraft, setLinkDraft] = useState({ instagram: '', facebook: '', youtube: '', branded_carousel_task: '', branded_carousel_dropbox_file: '', brand_guide_link: '' })
+  const [linkDraft, setLinkDraft] = useState({ instagram: '', facebook: '', youtube: '', branded_carousel_task: '', branded_carousel_dropbox_file: '', brand_guide_link: '', notion_dashboard: '' })
   const [linkSaving, setLinkSaving] = useState(false)
 
   // ── Management fields edit state ─────────────────────────────────────────
@@ -179,7 +181,7 @@ export default function SocialChurchPage() {
     if (!member) return
     supabase
       .from('strategy_account_progress')
-      .select('member, church_name, css_rep, church_website, reel_submitted_this_week, last_reel_submission, recent_series_srp, instagram, facebook, youtube, custom_gpt, photos_link, legacy_photo_library, photos_from_all_in_discovery_form, bible_translation, preferred_bible_translation, which_social_media_platforms_do_you_want_us_to_post_to_from_all, sms_notes, social_coach, branded_carousel_task, branded_carousel_dropbox_file, vista_social_email_from_discovery, notion_dashboard, sermon_recap_form')
+      .select('member, church_name, css_rep, church_website, reel_submitted_this_week, last_reel_submission, recent_series_srp, instagram, facebook, youtube, custom_gpt, photos_link, legacy_photo_library, photos_from_all_in_discovery_form, bible_translation, preferred_bible_translation, which_social_media_platforms_do_you_want_us_to_post_to_from_all, sms_notes, social_coach, branded_carousel_task, branded_carousel_dropbox_file, vista_social_email_from_discovery, notion_dashboard, sermon_recap_form, strategy_brief, plan')
       .eq('member', member)
       .maybeSingle()
       .then(async ({ data }) => {
@@ -298,6 +300,7 @@ export default function SocialChurchPage() {
       branded_carousel_task: church?.branded_carousel_task ?? '',
       branded_carousel_dropbox_file: church?.branded_carousel_dropbox_file ?? '',
       brand_guide_link: brandGuideOnFile ?? '',
+      notion_dashboard: church?.notion_dashboard ?? '',
     })
     setEditingLinks(true)
   }
@@ -311,6 +314,7 @@ export default function SocialChurchPage() {
       youtube:   linkDraft.youtube.trim()   || null,
       branded_carousel_task: linkDraft.branded_carousel_task.trim() || null,
       branded_carousel_dropbox_file: linkDraft.branded_carousel_dropbox_file.trim() || null,
+      notion_dashboard: linkDraft.notion_dashboard.trim() || null,
     }
     const [{ error }, brandErr] = await Promise.all([
       supabase.from('strategy_account_progress').update(updates).eq('member', member),
@@ -492,10 +496,8 @@ export default function SocialChurchPage() {
             <h1 className="text-2xl font-bold text-[#341756]">{churchName}</h1>
             <div className="flex flex-wrap items-center gap-3 mt-1">
               {church?.css_rep && <span className="text-xs text-gray-400">AM: {church.css_rep}</span>}
-              {church?.church_website && (
-                <a href={church.church_website.startsWith('http') ? church.church_website : `https://${church.church_website}`} target="_blank" rel="noopener noreferrer" className="text-xs text-[#513DE5] inline-flex items-center gap-1 hover:underline">
-                  Website <ExternalLink size={11} />
-                </a>
+              {church?.plan && (
+                <span className="text-xs bg-[#EDE9FC] text-[#513DE5] font-medium px-2 py-0.5 rounded-full">{church.plan}</span>
               )}
             </div>
           </div>
@@ -622,11 +624,19 @@ export default function SocialChurchPage() {
                 <div className="border-t border-gray-100 pt-4 space-y-2">
                   <p className="text-xs font-semibold text-[#341756] mb-2">Quick Links</p>
                   {editingLinks && (
-                    <div className="mb-3">
-                      <p className="text-xs text-gray-400 mb-0.5">Brand Guide URL</p>
-                      <input value={linkDraft.brand_guide_link} onChange={e => setLinkDraft(d => ({ ...d, brand_guide_link: e.target.value }))}
-                        placeholder="https://..."
-                        className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#513DE5]" />
+                    <div className="space-y-2 mb-3 p-3 bg-[#EDE9FC] rounded-xl">
+                      <div>
+                        <p className="text-xs text-gray-500 mb-0.5">Brand Guide URL</p>
+                        <input value={linkDraft.brand_guide_link} onChange={e => setLinkDraft(d => ({ ...d, brand_guide_link: e.target.value }))}
+                          placeholder="https://..."
+                          className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#513DE5] bg-white" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-0.5">Notion Dashboard URL</p>
+                        <input value={linkDraft.notion_dashboard} onChange={e => setLinkDraft(d => ({ ...d, notion_dashboard: e.target.value }))}
+                          placeholder="https://notion.so/..."
+                          className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#513DE5] bg-white" />
+                      </div>
                     </div>
                   )}
                   <a href="https://app.vistasocial.com" target="_blank" rel="noopener noreferrer"
@@ -638,8 +648,24 @@ export default function SocialChurchPage() {
                     className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-[#341756] hover:border-[#513DE5] hover:text-[#513DE5] transition-colors">
                     ClickUp: View All SRPs <ExternalLink size={13} />
                   </a>
-                  {church?.notion_dashboard
-                    ? <a href={church.notion_dashboard} target="_blank" rel="noopener noreferrer"
+                  {church?.church_website
+                    ? <a href={church.church_website.startsWith('http') ? church.church_website : `https://${church.church_website}`} target="_blank" rel="noopener noreferrer"
+                        className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-[#341756] hover:border-[#513DE5] hover:text-[#513DE5] transition-colors">
+                        Website <ExternalLink size={13} />
+                      </a>
+                    : <div className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-100 rounded-xl text-sm text-gray-300">
+                        Website <ExternalLink size={13} />
+                      </div>}
+                  {church?.strategy_brief
+                    ? <a href={church.strategy_brief.startsWith('http') ? church.strategy_brief : `https://${church.strategy_brief}`} target="_blank" rel="noopener noreferrer"
+                        className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-[#341756] hover:border-[#513DE5] hover:text-[#513DE5] transition-colors">
+                        Strategy Brief <ExternalLink size={13} />
+                      </a>
+                    : <div className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-100 rounded-xl text-sm text-gray-300">
+                        Strategy Brief <ExternalLink size={13} />
+                      </div>}
+                  {(editingLinks ? linkDraft.notion_dashboard.trim() : church?.notion_dashboard)
+                    ? <a href={(editingLinks ? linkDraft.notion_dashboard.trim() : church?.notion_dashboard)!} target="_blank" rel="noopener noreferrer"
                         className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-[#341756] hover:border-[#513DE5] hover:text-[#513DE5] transition-colors">
                         Notion Dashboard <ExternalLink size={13} />
                       </a>
